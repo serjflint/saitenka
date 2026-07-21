@@ -859,19 +859,11 @@ def attach(
             f"subs: selection failed ({e}) — using mpv's current track", file=sys.stderr, flush=True
         )
 
-    # Build coloring/dict/mining collaborators from config — without these, attach is a bare
-    # subtitle renderer (no known/JLPT coloring, no freq pills, no tooltips, no mining). This is the
-    # slow step (first-run dict-cache build), so show a top-left loading spinner meanwhile — only the
-    # spinner thread touches IPC here, and it's stopped before the reader draws.
-    from overlay.app.loading import LoadingIndicator
-    from overlay.app.reader_deps import build_reader_deps
-
-    loading = LoadingIndicator(ipc)
-    loading.start("saitenka: loading dictionaries")
-    try:
-        scorer, anki, mine_conf, dict_set = build_reader_deps(cfg)
-    finally:
-        loading.stop()
+    # Progressive startup: build the reader with NO coloring/dict/mining collaborators so plain
+    # subtitles draw immediately, then load them in the BACKGROUND (dicts/scorer/anki — the slow
+    # first-run cache build). A top-left spinner runs in the reader's own poll loop meanwhile; when the
+    # load finishes, coloring + tooltips + mining light up in place. Dicts and Anki are both optional —
+    # with none configured, attach stays a working subtitle renderer (jamdict-fallback tooltips).
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
 
@@ -890,20 +882,11 @@ def attach(
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
-    reader = Reader(
-        ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
-    )
-    bits = []
-    if scorer:
-        bits.append("coloring+underlines")
-    if dict_set:
-        bits.append(f"{len(dict_set.dicts)} dicts")
-    if mine_conf:
-        bits.append("mining")
-    feats = ", ".join(bits) or "subs only"
-    log.info("attach features: %s", feats)  # detached plugin mode — the log is the only sink
+    reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+    reader.load_deps_async(cfg)
     print(
-        f"attached to mpv on {sock} [{feats}] — hover words; Ctrl+C to detach (mpv keeps running).",
+        f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "
+        "Ctrl+C to detach (mpv keeps running).",
         flush=True,
     )
     try:

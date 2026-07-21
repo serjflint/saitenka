@@ -34,8 +34,10 @@ hardening pass.
 - **`--version`** now reports the real version.
 - **Graceful shutdown** on POSIX `SIGTERM` and Windows `SIGBREAK` — the same cleanup as Ctrl+C (quit
   mpv, close the socket, remove temp dirs) instead of a hard exit.
-- A **top-left loading spinner** while dictionaries load (attach/plugin mode), so the first frames
-  aren't a blank screen.
+- **Progressive startup** (attach/plugin mode) — plain subtitles draw immediately with a top-left
+  loading spinner, then FSRS coloring, tooltips, and mining light up in place once dictionaries finish
+  loading in the background. Dictionaries are now **optional** (like Anki): with none configured,
+  attach is a working subtitle renderer with jamdict-fallback tooltips.
 
 ### Changed
 
