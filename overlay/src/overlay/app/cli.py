@@ -635,16 +635,26 @@ def set_jimaku_key(
     macOS: the login Keychain. Windows/Linux (no Keychain): ``[jimaku].key`` in overlay.toml. Either
     beats a shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
     (API docs: https://jimaku.cc/api/docs).
+
+    Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a
+    pasted key can silently truncate to a single character. Right-click to paste at the prompt, or pass
+    the key as an argument on the normal command line where Ctrl+V works: ``set-jimaku-key <key>``.
     """
     import getpass
 
     from overlay.app.config import config_path
     from overlay.app.init_wizard import store_jimaku_key
-    from overlay.app.jimaku import KEY_HELP
+    from overlay.app.jimaku import key_paste_warning, prompt_for_key
 
-    if key is None:  # interactive prompt — tell the user where to get the token
-        print(KEY_HELP)
-    k = (key or getpass.getpass("jimaku.cc API key (hidden): ")).strip()
+    if (
+        key is None
+    ):  # interactive: hidden prompt with a truncated-paste guard (the Windows Ctrl+V trap)
+        k = prompt_for_key(getpass.getpass)
+    else:  # key passed as an argument (paste-safe on the normal line) — still sanity-check its length
+        k = key.strip()
+        warn = key_paste_warning(k)
+        if warn:
+            print(warn, file=sys.stderr)
     if not k:
         print("no key entered", file=sys.stderr)
         return 2

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import sys
 import urllib.parse
 import urllib.error
 import urllib.request
@@ -31,6 +32,52 @@ KEY_HELP = (
     "Get a free jimaku.cc API key: sign in at https://jimaku.cc, then copy it from "
     "https://jimaku.cc/profile — API docs at https://jimaku.cc/api/docs."
 )
+
+# jimaku.cc keys are long tokens (~58 chars). A very short entered value almost always means a botched
+# paste — and the specific trap is Python's HIDDEN prompt (getpass) on Windows: it reads the console
+# char-by-char via msvcrt and does NOT accept Ctrl+V, which lands a single control character. (Ctrl+V
+# works fine OUTSIDE the hidden prompt — this is not a general PowerShell issue.) Right-click, or
+# Ctrl+Shift+V in Windows Terminal, pastes the whole key; or pass it as an argument on the normal line.
+KEY_MIN_LEN = 20
+PASTE_HINT = (
+    "Note: this HIDDEN prompt won't accept Ctrl+V (it captures one control char). Right-click to "
+    "paste, or use Ctrl+Shift+V in Windows Terminal. You can also cancel and pass the key on the "
+    "normal command line, where Ctrl+V works: saitenka-overlay set-jimaku-key <key>"
+)
+
+
+def key_paste_warning(k: str) -> str | None:
+    """A human warning when an entered key looks truncated (the classic hidden-prompt Ctrl+V that
+    lands a single char on Windows), else ``None``. An empty string is handled separately by callers
+    as "no key entered" — only a non-empty-but-short value trips this."""
+    if 0 < len(k) < KEY_MIN_LEN:
+        return f"Warning: that key is only {len(k)} character(s); jimaku keys are ~58. {PASTE_HINT}"
+    return None
+
+
+def prompt_for_key(getpass_fn, input_fn=input, out=print, tries=3) -> str:  # pragma: no cover — I/O
+    """Read a jimaku key at a hidden prompt with a truncated-paste guard: show where to get it (plus
+    the Windows paste caveat), read hidden input, and if it looks too short, warn and offer to
+    re-enter. Returns the final stripped key (``""`` if the user enters nothing)."""
+    out(KEY_HELP)
+    if sys.platform == "win32":
+        out(PASTE_HINT)
+    k = ""
+    for attempt in range(tries):
+        k = getpass_fn("jimaku.cc API key (hidden): ").strip()
+        warn = key_paste_warning(k)
+        if not warn:
+            return k
+        out(warn)
+        if attempt == tries - 1:
+            break
+        try:
+            if input_fn("Re-enter the key? [Y/n] ").strip().lower() in ("n", "no"):
+                break
+        except EOFError:
+            break
+    return k
+
 
 # OS secret-store coordinates for the jimaku key (keyring service/username).
 KEYCHAIN_SERVICE = "saitenka-overlay"

@@ -133,7 +133,7 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
     """Offer to store a jimaku.cc key if none resolves yet (skips if already set)."""
     import getpass
 
-    from overlay.app.jimaku import KEY_HELP, resolve_jimaku_key
+    from overlay.app.jimaku import prompt_for_key, resolve_jimaku_key
 
     key, src = resolve_jimaku_key()
     if key:
@@ -141,8 +141,9 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
         return
     if not _ask("\nStore a jimaku.cc API key now (for sub fetch in plugin mode)?"):
         return
-    print(KEY_HELP)
-    k = getpass.getpass("jimaku.cc API key (hidden): ").strip()
+    k = prompt_for_key(
+        getpass.getpass
+    )  # hidden prompt + truncated-paste guard (Windows Ctrl+V trap)
     if not k:
         return
     method, _ = store_jimaku_key(k)
