@@ -86,3 +86,30 @@ def test_import_from_dir_copies_and_configs(monkeypatch, tmp_path):
     assert added == [(str(data / "MyDict.zip"), "dicts")]
     assert (data / "MyDict.zip").exists()
     assert any("MyDict.zip" in str(p) for p in load_config().get("dicts", []))
+
+
+def test_import_from_dir_registers_data_dir_in_place(monkeypatch, tmp_path):
+    """`copy-dicts` (no source) sweeps the data dir itself: a zip already sitting there but missing
+    from the config gets registered, with NO re-copy (src == dest, same size — no SameFileError)."""
+    import json
+    import zipfile
+
+    from overlay.app import relocate
+    from overlay.app.config import load_config
+
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('slang = "ja"\n')  # a config with no dicts (the stranded-copy situation)
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    data = tmp_path / "data" / "dicts"
+    data.mkdir(parents=True)
+    monkeypatch.setattr("overlay.app.relocate.dicts_data_dir", lambda: data)
+    with zipfile.ZipFile(data / "Already.zip", "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": "Already", "format": 3}))
+        zf.writestr("term_bank_1.json", json.dumps([["猫", "ねこ", "", "", 0, ["cat"], 1, ""]]))
+
+    def _no_copy(*a, **k):  # copying onto itself must never be attempted
+        raise AssertionError("should not re-copy a zip already in the data dir")
+
+    added = relocate.import_from_dir(str(data), config=str(cfg), copy=_no_copy)
+    assert added == [(str(data / "Already.zip"), "dicts")]
+    assert any("Already.zip" in str(p) for p in load_config().get("dicts", []))

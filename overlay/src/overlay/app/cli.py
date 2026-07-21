@@ -601,13 +601,26 @@ def copy_dicts(
             print(f"  [{kind}] {dest}")
         return 0
 
+    # No source: (1) relocate configured dicts out of protected folders, and (2) sweep the data dir
+    # for .zip dicts that aren't in the config yet (e.g. an earlier `copy-dicts` whose config write
+    # was stranded on a different path) and register them. Both are idempotent — the sweep re-scans
+    # the data dir and skips any zip already listed / already the right size (no re-copy).
+    data = dicts_data_dir()
     mappings = relocate_dicts(config=config)
-    if not mappings:
-        print("all dictionary paths are already outside protected folders — nothing to copy")
+    swept = import_from_dir(data, config=config) if data.is_dir() else []
+    if not mappings and not swept:
+        print(
+            "all dictionaries are already registered and outside protected folders — nothing to do"
+        )
         return 0
-    print(f"copied {len(mappings)} dict(s) → {dicts_data_dir()} and repointed the config:")
-    for old, new in mappings:
-        print(f"  {old} → {new}")
+    if swept:
+        print(f"registered {len(swept)} dict(s) already in {data} into the config:")
+        for dest, kind in swept:
+            print(f"  [{kind}] {dest}")
+    if mappings:
+        print(f"copied {len(mappings)} dict(s) → {data} and repointed the config:")
+        for old, new in mappings:
+            print(f"  {old} → {new}")
     return 0
 
 

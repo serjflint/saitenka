@@ -190,7 +190,23 @@ def check_dict_files() -> list[Check]:
                 )
                 checks.append(Check(f"{kind}", "fail", f"{kind} not found: {path}{hint}"))
     if not checks:
-        if _jmdict_available():
+        # Nothing in the config — but the user may have run `copy-dicts` (which drops the .zip files
+        # into the data dir) while the config write landed elsewhere / got skipped. Point at those
+        # unregistered zips so "I copied my dicts but doctor sees none" has an obvious fix.
+        from overlay.app.config import dicts_data_dir
+
+        data = dicts_data_dir()
+        stray = sorted(data.glob("*.zip")) if data.exists() else []
+        if stray:
+            checks.append(
+                Check(
+                    "dicts",
+                    "warn",
+                    f"{len(stray)} dictionary .zip(s) sit in the data dir ({data}) but are NOT in "
+                    "overlay.toml — run `saitenka-overlay copy-dicts` (no args) to register them",
+                )
+            )
+        elif _jmdict_available():
             checks.append(
                 Check("dicts", "warn", "no dictionaries configured (JMdict fallback only)")
             )
@@ -258,12 +274,21 @@ def check_sub_auto() -> Check:
 
 
 def check_dict_cache() -> Check:
-    if not CACHE_DIR.exists():
-        return Check("dict-cache", "warn", f"no dict cache yet at {CACHE_DIR} (built on first run)")
-    n = len(list(CACHE_DIR.glob("*.sqlite")))
-    if n == 0:
-        return Check("dict-cache", "warn", f"dict cache dir empty ({CACHE_DIR})")
-    return Check("dict-cache", "ok", f"{n} cached dict index(es) in {CACHE_DIR}")
+    """The BUILT SQLite index cache (``cache_dir()/dicts``) — a DIFFERENT directory from the
+    dictionary ``.zip`` store (``dicts_data_dir()``). It's auto-managed: empty until the first
+    playback indexes your dicts, so an empty cache is never an error, just "not built yet"."""
+    built = list(CACHE_DIR.glob("*.sqlite")) if CACHE_DIR.exists() else []
+    if built:
+        return Check("dict-cache", "ok", f"{len(built)} built dict index(es) in {CACHE_DIR}")
+    # Empty is normal: the index cache builds lazily on first playback. Say so plainly and make the
+    # zip-store-vs-index-cache distinction explicit — an empty `Cache\dicts` while `dicts` is full of
+    # zips is expected, not a conflict.
+    return Check(
+        "dict-cache",
+        "ok",
+        f"no built indexes yet in {CACHE_DIR} — this SQLite index cache builds on first playback "
+        "(it's separate from your dictionary .zip files in the data dir)",
+    )
 
 
 def check_fonts() -> Check:
