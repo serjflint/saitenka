@@ -74,14 +74,25 @@ def clip_audio(
     return Path(path)
 
 
+def _play_cmd(path: str | Path) -> list[str]:
+    """The command to play a clip. macOS uses ``afplay``; elsewhere prefer **mpv** — it's a guaranteed
+    core dependency, whereas ``ffplay`` is absent from the common Windows ffmpeg "essentials" build
+    (gyan.dev), so the old ffplay-only path silently no-op'd there. ``ffplay`` is the last resort."""
+    if sys.platform == "darwin":
+        return ["afplay", str(path)]
+    else:  # explicit else so mypy treats this as the inactive platform branch, not unreachable code
+        from overlay.mpvio.discover import find_mpv
+
+        mpv = find_mpv(None)
+        if mpv:
+            return [mpv, "--no-video", "--no-terminal", "--really-quiet", str(path)]
+        return ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet", str(path)]
+
+
 def play_audio(path: str | Path) -> None:
     """Play a clip so the mined audio can be verified — non-blocking, no window."""
-    if sys.platform == "darwin":
-        cmd = ["afplay", str(path)]
-    else:
-        cmd = ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet", str(path)]
     try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(_play_cmd(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         pass
 
