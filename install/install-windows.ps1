@@ -83,7 +83,11 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 # plain `saitenka-overlay` has no jamdict-data at all — that upstream sdist is what failed here).
 if(Test-Path (Join-Path $Repo 'deinflect')){ $extra = 'full'; Log "including GPL-3.0 deinflect add-on (inflection chains)" }
 else { $extra = 'jmdict'; Warn "no deinflect\ in this checkout - installing [jmdict] only (no inflection chains)" }
-$installArgs = @('tool','install','--reinstall',"$Repo\overlay[$extra]")
+# Force REGULAR 3.14 (not the repo's free-threaded .python-version pin): fugashi (the MeCab tokenizer)
+# ships no free-threaded Windows wheels yet, so a 3.14t install builds it from source and fails
+# (needs a system MeCab). Regular 3.14 has a wheel and works; free-threading's ~3.8x render win isn't
+# reachable on Windows until fugashi publishes 3.14t wheels. (macOS/Linux keep the FT pin.)
+$installArgs = @('tool','install','--python','3.14','--reinstall',"$Repo\overlay[$extra]")
 if(Have uv){
   Log "Installing/updating saitenka-overlay[$extra] from $Repo\overlay"
   if($DryRun){ Write-Host "  DRY: uv $($installArgs -join ' ')" }

@@ -308,10 +308,21 @@ def check_free_threading() -> Check:
     ft_build = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
     gil_off = not getattr(sys, "_is_gil_enabled", lambda: True)()
     if not ft_build:
+        if sys.platform == "win32":
+            # fugashi (the MeCab tokenizer) ships NO free-threaded Windows wheels yet, so a 3.14t
+            # install builds it from source and fails (needs a system MeCab). Regular 3.14 is the
+            # working config here — not a problem the user should "fix". Green, with a note.
+            return Check(
+                "free-threading",
+                "ok",
+                "standard 3.14 build — free-threading isn't available on Windows yet (the tokenizer "
+                "has no 3.14t wheels); rendering is single-threaded but fine",
+            )
         return Check(
             "free-threading",
             "warn",
-            "not a free-threaded (3.14t) build — render won't parallelise (~3.8× lost)",
+            "not a free-threaded (3.14t) build — render won't parallelise (~3.8× lost). Reinstall on "
+            "3.14t: `uv tool install --python 3.14+freethreaded --reinstall 'saitenka-overlay[full]'`",
         )
     if not gil_off:
         return Check(
