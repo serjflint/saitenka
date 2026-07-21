@@ -27,9 +27,8 @@ from pathlib import Path
 MAX_SETTINGS_BYTES = 50 * 1024 * 1024  # a settings export is < 1 MB; refuse a collection export
 
 # Yomitan dictionary banks: definition dicts ship term_bank glossaries; frequency and pitch dicts
-# ship term_meta banks. We classify a zip by which banks it carries + the term_meta mode of its
-# entries — never by the dictionary's title (a name can't reliably tell you the type).
-_TERM_BANK = re.compile(r"term_bank_\d+\.json$")
+# ship term_meta banks (``[term, "freq"|"pitch", data]``). We classify by the term_meta MODE — never
+# by the title, and never by mere term_bank presence (pitch dicts carry headword term_banks too).
 _META_BANK = re.compile(r"term_meta_bank_\d+\.json$")
 
 
@@ -56,16 +55,17 @@ def classify_zip(zip_path: str | Path) -> str:
     ``"pitch"`` / ``"dict"``.
 
     Definition dictionaries carry ``term_bank_*.json`` glossaries; frequency and pitch dictionaries
-    carry ``term_meta_bank_*.json`` whose entries are ``[term, "freq"|"pitch", data]``. A zip with
-    glossary banks is a definition dict; otherwise the term-meta mode decides. Falls back to
+    carry ``term_meta_bank_*.json`` whose entries are ``[term, "freq"|"pitch", data]``. The term-meta
+    **mode wins**: a pitch (or freq) dict often ALSO ships headword ``term_bank`` files — the popular
+    NHK 2016 pitch dict does — so keying off "has a term_bank" would misfile it as a definition dict
+    (the exact bug: pitch accents never rendered because the dict landed in ``dicts``, not ``pitch``).
+    Only when there's no freq/pitch term-meta does a term_bank make it a definition dict. Falls back to
     ``"dict"`` when the zip can't be read or has no recognisable banks — the title is never consulted.
     """
     modes: set[str] = set()
     try:
         with zipfile.ZipFile(zip_path) as zf:
             names = zf.namelist()
-            if any(_TERM_BANK.match(n) for n in names):
-                return "dict"
             for n in sorted(n for n in names if _META_BANK.match(n))[:1]:
                 for entry in json.loads(zf.read(n)):
                     if len(entry) >= 2 and isinstance(entry[1], str):

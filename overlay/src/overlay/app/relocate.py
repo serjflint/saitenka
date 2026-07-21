@@ -108,10 +108,22 @@ def import_from_dir(
             copy(str(zp), str(dest))
         raw = _new_raw(zp.name, dest_dir)  # config value, ~-relative when under $HOME
         key = key_for[classify_zip(str(dest))]
+        # Reclassify across buckets, don't just append: a zip already listed under the WRONG kind
+        # (e.g. an NHK pitch dict mis-filed as `dicts` by an older classifier) is moved to its correct
+        # bucket, so re-running `copy-dicts` repairs the config instead of double-listing it.
+        for other in _KINDS:
+            if other != key and raw in lists[other]:
+                lists[other].remove(raw)
         if raw not in lists[key]:
             lists[key].append(raw)
         added.append((str(dest), key))
     if added:
-        merged = {**cfg, **{k: v for k, v in lists.items() if v}}
+        # Set each bucket that has content OR was already present (so a bucket emptied by a
+        # reclassification is overwritten to [] instead of keeping its stale, now-wrong entry). Don't
+        # introduce empty freq/pitch keys the config never had.
+        merged = {**cfg}
+        for k in _KINDS:
+            if lists[k] or k in cfg:
+                merged[k] = lists[k]
         write_config(merged, confirm=lambda _p: True, dest=config_path(config))
     return added

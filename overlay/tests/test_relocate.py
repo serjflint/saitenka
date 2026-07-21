@@ -113,3 +113,34 @@ def test_import_from_dir_registers_data_dir_in_place(monkeypatch, tmp_path):
     added = relocate.import_from_dir(str(data), config=str(cfg), copy=_no_copy)
     assert added == [(str(data / "Already.zip"), "dicts")]
     assert any("Already.zip" in str(p) for p in load_config().get("dicts", []))
+
+
+def test_import_from_dir_reclassifies_wrong_bucket(monkeypatch, tmp_path):
+    """Re-running copy-dicts MOVES a zip filed under the wrong kind (a pitch dict an older classifier
+    put in `dicts`) into its correct bucket, instead of double-listing it."""
+    import json
+    import zipfile
+
+    from overlay.app import relocate
+    from overlay.app.config import load_config
+
+    data = tmp_path / "data" / "dicts"
+    data.mkdir(parents=True)
+    monkeypatch.setattr("overlay.app.relocate.dicts_data_dir", lambda: data)
+    zp = data / "NHK.zip"  # a real pitch dict: pitch term_meta + headword term_bank (like NHK 2016)
+    with zipfile.ZipFile(zp, "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": "NHK", "format": 3}))
+        zf.writestr("term_bank_1.json", json.dumps([["猫", "ねこ", "", "", 0, [], 1, ""]]))
+        zf.writestr(
+            "term_meta_bank_1.json",
+            json.dumps([["猫", "pitch", {"reading": "ねこ", "pitches": [{"position": 0}]}]]),
+        )
+    raw = str(zp)  # tmp isn't under $HOME in tests → _new_raw yields this absolute path
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text(f'dicts = ["{raw}"]\n')  # mis-filed under dicts by an older classifier
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+
+    relocate.import_from_dir(str(data), config=str(cfg), copy=lambda *a, **k: None)
+    loaded = load_config()
+    assert loaded.get("pitch") == [raw]  # moved to its correct bucket
+    assert raw not in loaded.get("dicts", [])  # and removed from the wrong one

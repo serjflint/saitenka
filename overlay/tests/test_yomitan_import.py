@@ -59,6 +59,14 @@ def _make_dict_zip(path, kind, *, title=None):
                 "term_meta_bank_1.json",
                 json.dumps([["猫", "pitch", {"reading": "ねこ", "pitches": [{"position": 0}]}]]),
             )
+        elif (
+            kind == "pitch_with_headwords"
+        ):  # e.g. NHK 2016: pitch term_meta AND headword term_bank
+            zf.writestr("term_bank_1.json", json.dumps([["猫", "ねこ", "", "", 0, [], 1, ""]]))
+            zf.writestr(
+                "term_meta_bank_1.json",
+                json.dumps([["猫", "pitch", {"reading": "ねこ", "pitches": [{"position": 0}]}]]),
+            )
     return path
 
 
@@ -85,6 +93,10 @@ def test_classify_by_content(tmp_path):
     assert yi.classify_zip(_make_dict_zip(tmp_path / "a.zip", "dict")) == "dict"
     assert yi.classify_zip(_make_dict_zip(tmp_path / "b.zip", "freq")) == "freq"
     assert yi.classify_zip(_make_dict_zip(tmp_path / "c.zip", "pitch")) == "pitch"
+    # a pitch dict that ALSO ships headword term_banks (NHK 2016) is still pitch — the term_meta mode
+    # wins, so it lands in the `pitch` bucket and pitch accents render (regression: it was mis-filed as
+    # a definition dict because it had a term_bank).
+    assert yi.classify_zip(_make_dict_zip(tmp_path / "d.zip", "pitch_with_headwords")) == "pitch"
     # unreadable / missing / non-dictionary zip → safe default
     assert yi.classify_zip(tmp_path / "missing.zip") == "dict"
 
