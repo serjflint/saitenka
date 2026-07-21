@@ -311,9 +311,18 @@ def run(
                 f"loading {len(dict_paths)} dict(s) · {len(freq_paths)} freq · {len(pitch_paths)} "
                 "pitch… (first run builds a cache)"
             )
-            dict_set = DictionarySet.load(
-                dict_paths, freq_paths=freq_paths, pitch_paths=pitch_paths
-            )
+            from overlay.app.progress import BuildBar
+
+            bar = BuildBar()
+            try:
+                dict_set = DictionarySet.load(
+                    dict_paths,
+                    freq_paths=freq_paths,
+                    pitch_paths=pitch_paths,
+                    progress=bar.update,
+                )
+            finally:
+                bar.close()
             print("dictionaries:", [d.title for d in dict_set.dicts])
             if dict_set.freqs:
                 print("frequency:", [f.title for f in dict_set.freqs])

@@ -45,6 +45,17 @@ def _make_dict(path, title, entries):
     return str(path)
 
 
+def test_load_reports_build_progress(tmp_path):
+    """DictionarySet.load drives the progress callback: a per-source start, per-bank sub-ticks during
+    the first-run build, and a final (total, total) step."""
+    d = _make_dict(tmp_path / "D.zip", "D", [("猫", "ねこ", ["cat"])])
+    calls: list[tuple] = []
+    DictionarySet.load([d], progress=lambda *a: calls.append(a))
+    assert calls[0][:2] == (0, 1)  # starting source 0 of 1
+    assert calls[-1][:2] == (1, 1)  # all sources done
+    assert any(bank_done > 0 and bank_total > 0 for *_h, bank_done, bank_total in calls)  # built
+
+
 SC = {"type": "structured-content", "content": [{"tag": "div", "content": "定義文"}]}
 
 
