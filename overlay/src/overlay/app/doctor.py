@@ -190,8 +190,29 @@ def check_dict_files() -> list[Check]:
                 )
                 checks.append(Check(f"{kind}", "fail", f"{kind} not found: {path}{hint}"))
     if not checks:
-        checks.append(Check("dicts", "warn", "no dictionaries configured (JMdict fallback only)"))
+        if _jmdict_available():
+            checks.append(
+                Check("dicts", "warn", "no dictionaries configured (JMdict fallback only)")
+            )
+        else:
+            checks.append(
+                Check(
+                    "dicts",
+                    "warn",
+                    "no dictionaries configured and no JMdict fallback installed — tooltips and mined "
+                    "cards will have no glosses. Import Yomitan dicts (`import-yomitan`), or add the "
+                    "fallback: reinstall with the `jmdict` extra (e.g. `uv tool install "
+                    "'saitenka-overlay[jmdict]'`).",
+                )
+            )
     return checks
+
+
+def _jmdict_available() -> bool:
+    """True when the optional JMdict fallback (jamdict + its database) is importable."""
+    import importlib.util
+
+    return all(importlib.util.find_spec(m) is not None for m in ("jamdict", "jamdict_data"))
 
 
 def check_dict_locations() -> Check:

@@ -67,6 +67,10 @@ def furigana(surface: str, reading: str):
 
 @lru_cache(maxsize=1)
 def _jam():
+    # jamdict is the OPTIONAL `jmdict` extra (see pyproject) — this import raises ImportError when it
+    # isn't installed. Every caller goes through _lookup() inside a `try/except Exception`, so the
+    # overlay degrades to empty entries (no JMdict fallback) rather than crashing. Don't narrow that
+    # except: the missing-jamdict path depends on it.
     from jamdict import Jamdict
 
     return Jamdict()

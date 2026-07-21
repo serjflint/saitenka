@@ -91,6 +91,18 @@ class Miner:
         r = self.r
         return r.dict_set.frequency_field(tok) if r.dict_set else ("", "")
 
+    def _card_for(self, tok):
+        """Card fields for ``tok`` — the user's dictionaries first (dict-first mining), falling back
+        to the JMdict/jamdict source when no dictionary is configured or the word isn't in one. That
+        fallback itself degrades to an expression-only card if the optional ``jmdict`` extra (jamdict)
+        isn't installed, so mining never hard-depends on jamdict."""
+        ds = self.r.dict_set
+        if ds is not None:
+            card = ds.card_for(tok)
+            if card.glossary_html:
+                return card
+        return card_for(tok)
+
     # --- media capture --------------------------------------------------------------------------
     def capture_media(self, base: str, video) -> tuple[str, str]:
         """Screenshot the frame + clip the cue's audio, store both in Anki. Returns (pic, audio).
@@ -143,7 +155,7 @@ class Miner:
         if not r.anki or not r.mine_cfg:
             return
         try:
-            card = card_for(tok)
+            card = self._card_for(tok)
             existing = dedupe(r.anki, r.mine_cfg, card.expression)
             if existing:
                 r._mark_mined(card.expression)  # already in the deck → ✓
@@ -204,7 +216,7 @@ class Miner:
         try:
             for idx in targets:
                 tok = r.tokens[idx]
-                card = card_for(tok)
+                card = self._card_for(tok)
                 if not card.glossary_html:  # no dict entry (name/particle) — skip
                     continue
                 if dedupe(r.anki, r.mine_cfg, card.expression):

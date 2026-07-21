@@ -8,6 +8,7 @@ $SelfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
 # 1. uv — the only hard bootstrap (it then owns Python 3.14t + all deps).
+# Methods per uv's guide: https://docs.astral.sh/uv/getting-started/installation/
 if (-not (Have 'uv')) {
     Write-Host '[saitenka] installing uv...'
     if (-not $DryRun) {
@@ -21,16 +22,23 @@ if (-not (Have 'uv')) {
 # even when uv was already present — otherwise: "saitenka-overlay is not recognized".
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 
-# 2. install the overlay from the wheel shipped next to this stub.
+# 2. install the overlay from the wheel next to this stub, WITH the JMdict fallback extra ([jmdict],
+# resolved from PyPI). The GPL-3.0 deinflect add-on (inflection chains) isn't on PyPI, so it rides in
+# the bundle as an SDIST (source — GPLv3's Corresponding Source) and installs via --with. Together this
+# mirrors the checkout installers' [full].
 $wheel = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay-*.whl' |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $wheel) {
-    Write-Error '[saitenka] no wheel found next to this installer - is the bundle intact?'
+    Write-Error '[saitenka] no overlay wheel found next to this installer - is the bundle intact?'
     exit 1
 }
-Write-Host "[saitenka] installing $($wheel.Name)"
-if ($DryRun) { Write-Host "DRY: uv tool install --reinstall $($wheel.FullName)" }
-else { uv tool install --reinstall $wheel.FullName }
+$dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay_deinflect-*.tar.gz' |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$toolArgs = @('tool','install','--reinstall',"$($wheel.FullName)[jmdict]")
+if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $toolArgs += @('--with',$dein.FullName) }
+Write-Host "[saitenka] installing $($wheel.Name)[jmdict]"
+if ($DryRun) { Write-Host "DRY: uv $($toolArgs -join ' ')" }
+else { & uv @toolArgs }
 
 # 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin). Resolve the exe
 # explicitly — the freshly-installed tool may still not be on PATH in this session on some setups.

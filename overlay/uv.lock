@@ -493,6 +493,12 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/97/a5/075928aed2b3b70459fc1db396397dfa6714d266c143c51af9b648551a4e/jamdict_data-1.5.tar.gz", hash = "sha256:a4247dd9bb3148ab17c1b32fc56d7a7f1c35293b0d6ff2838c811f896d13f415", size = 53940912, upload-time = "2021-04-17T09:02:19.842Z" }
 
 [[package]]
+name = "jamdict-data-fix"
+version = "1.5.1a2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/ff/afd77047b08d122797d85a0f1da564c884cb3525f4a251c7367de91de7a2/jamdict_data_fix-1.5.1a2.tar.gz", hash = "sha256:f1c72a8f6c86be150cb068a0318973f5db62759fa6c31f21bee0ca21f27e5cd4", size = 53941858, upload-time = "2024-11-23T17:32:33.08Z" }
+
+[[package]]
 name = "jaraco-classes"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1107,8 +1113,6 @@ dependencies = [
     { name = "fonttools" },
     { name = "fugashi" },
     { name = "ijson" },
-    { name = "jamdict" },
-    { name = "jamdict-data" },
     { name = "keyring" },
     { name = "numpy" },
     { name = "pillow" },
@@ -1120,6 +1124,17 @@ dependencies = [
 [package.optional-dependencies]
 deinflect = [
     { name = "saitenka-overlay-deinflect" },
+]
+full = [
+    { name = "jamdict" },
+    { name = "jamdict-data", marker = "sys_platform != 'win32'" },
+    { name = "jamdict-data-fix", marker = "sys_platform == 'win32'" },
+    { name = "saitenka-overlay-deinflect" },
+]
+jmdict = [
+    { name = "jamdict" },
+    { name = "jamdict-data", marker = "sys_platform != 'win32'" },
+    { name = "jamdict-data-fix", marker = "sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -1135,7 +1150,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-randomly" },
     { name = "pytest-xdist" },
-    { name = "saitenka-overlay-deinflect" },
     { name = "ty" },
 ]
 
@@ -1147,17 +1161,20 @@ requires-dist = [
     { name = "fonttools", specifier = ">=4.55" },
     { name = "fugashi", specifier = ">=1.5.2" },
     { name = "ijson", specifier = ">=3.5.1" },
-    { name = "jamdict", specifier = ">=0.1a11.post2" },
-    { name = "jamdict-data", specifier = ">=1.5" },
+    { name = "jamdict", marker = "extra == 'jmdict'", specifier = ">=0.1a11.post2" },
+    { name = "jamdict-data", marker = "sys_platform != 'win32' and extra == 'jmdict'", specifier = ">=1.5" },
+    { name = "jamdict-data-fix", marker = "sys_platform == 'win32' and extra == 'jmdict'", specifier = ">=1.5.1a2" },
     { name = "keyring", specifier = ">=25.7.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
+    { name = "saitenka-overlay", extras = ["deinflect"], marker = "extra == 'full'" },
+    { name = "saitenka-overlay", extras = ["jmdict"], marker = "extra == 'full'" },
     { name = "saitenka-overlay-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect"]
+provides-extras = ["deinflect", "jmdict", "minimal", "full"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1172,7 +1189,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-randomly", specifier = ">=4.1.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "saitenka-overlay-deinflect", editable = "../deinflect" },
     { name = "ty", specifier = ">=0.0.61" },
 ]
 

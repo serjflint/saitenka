@@ -80,7 +80,7 @@ Saitenka solves three problems:
 ## Quick start
 
 **1. Install [uv](https://docs.astral.sh/uv/)** (it provides Python + all dependencies — no system
-Python needed):
+Python needed). These follow uv's [official install guide](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
 # macOS / Linux
@@ -88,8 +88,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ```powershell
-# Windows (PowerShell)
-winget install --id=astral-sh.uv -e
+# Windows (PowerShell) — upstream's standalone installer (self-updates via `uv self update`)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# …or via a package manager
+winget install --id=astral-sh.uv -e   # or: scoop install main/uv
 ```
 
 **2. Install Saitenka and let it set everything up.** The `setup` wizard installs mpv + ffmpeg, writes
@@ -109,16 +112,29 @@ cd saitenka
 powershell -ExecutionPolicy Bypass -File install\install-windows.ps1
 ```
 
-On **Linux**, install uv (above), then from the clone run `uv tool install ./overlay && saitenka-overlay
-setup` — `setup` prints your distro's `mpv`/`ffmpeg` install command (apt / dnf / pacman).
+On **Linux**, install uv (above), then from the clone run `uv tool install './overlay[full]' &&
+saitenka-overlay setup` — `setup` prints your distro's `mpv`/`ffmpeg` install command (apt / dnf / pacman).
 
-Prefer to drive it yourself? From the cloned checkout above, run `uv tool install ./overlay`, then:
+Prefer to drive it yourself? From the cloned checkout above, run `uv tool install './overlay[full]'`, then:
 
 ```bash
 saitenka-overlay setup          # full-auto: inventory → install mpv/ffmpeg → config → plugin
 saitenka-overlay doctor         # re-check the environment any time
 saitenka-overlay install-plugin # (re)install just the auto-start mpv plugin
 ```
+
+**Feature extras.** `saitenka-overlay` installs as a lean core; opt into optional features with extras
+(what the installers use is `[full]`):
+
+| Extra | Adds | License |
+|------|------|--------|
+| *(none)* / `[minimal]` | the bare overlay — bring your own Yomitan dictionaries | Apache-2.0 |
+| `[jmdict]` | the JMdict English fallback (hover + mined-card glosses when a word isn't in your dicts) | Apache-2.0 |
+| `[deinflect]` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
+| `[full]` | everything above | **GPL-3.0** |
+
+Mining prefers *your* dictionaries, so `[jmdict]` is only a fallback. `[deinflect]`/`[full]` pull the
+GPL-3.0 add-on — a `[full]` install is therefore GPL-3.0 (see [LICENSING.md](LICENSING.md)).
 
 **3. Watch.** With the plugin installed, open any video in mpv — the overlay attaches automatically.
 Or launch a file directly:

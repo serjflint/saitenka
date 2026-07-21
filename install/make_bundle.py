@@ -20,6 +20,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OVERLAY_DIR = REPO_ROOT / "overlay"
+DEINFLECT_DIR = REPO_ROOT / "deinflect"
 INSTALL_DIR = REPO_ROOT / "install"
 
 INSTALL_TXT = """Saitenka overlay — install
@@ -30,7 +31,9 @@ Unzip this archive, then run the installer for your OS:
   Windows:         powershell -ExecutionPolicy Bypass -File overlay-install.ps1
 
 The installer gets `uv` (and points you at mpv + ffmpeg if missing), installs the overlay from the
-wheel next to it, and launches the setup wizard. Then just:
+wheel next to it (with the JMdict English fallback, plus the GPL-3.0 deinflect add-on for inflection
+chains — shipped as source in this bundle, so the install is GPL-3.0), and launches the setup wizard.
+Then just:
 
   saitenka-overlay <video.mkv>
 
@@ -38,18 +41,23 @@ To preview without changing anything:  bash overlay-install.sh --dry-run
 """
 
 
-def build_wheel(out_dir: Path) -> Path:
-    """Build the overlay wheel into ``out_dir`` and return its path."""
+def _build(project_dir: Path, out_dir: Path, fmt: str, glob: str) -> Path:
+    """Run ``uv build <fmt>`` for ``project_dir`` into ``out_dir``; return the artifact it produced."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(out_dir)],
-        cwd=OVERLAY_DIR,
-        check=True,
-    )
-    wheels = sorted(out_dir.glob("*.whl"))
-    if not wheels:
-        raise RuntimeError("uv build produced no wheel")
-    return wheels[-1]
+    before = set(out_dir.glob(glob))
+    subprocess.run(["uv", "build", fmt, "--out-dir", str(out_dir)], cwd=project_dir, check=True)
+    built = sorted(set(out_dir.glob(glob)) - before)
+    if not built:
+        raise RuntimeError(f"uv build {fmt} produced no {glob} for {project_dir}")
+    return built[-1]
+
+
+def build_wheel(project_dir: Path, out_dir: Path) -> Path:
+    return _build(project_dir, out_dir, "--wheel", "*.whl")
+
+
+def build_sdist(project_dir: Path, out_dir: Path) -> Path:
+    return _build(project_dir, out_dir, "--sdist", "*.tar.gz")
 
 
 def _version() -> str:
@@ -68,7 +76,14 @@ def make_bundle(out_dir: Path | None = None) -> Path:
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
 
-    wheel = build_wheel(staging)
+    build_wheel(OVERLAY_DIR, staging)
+    # Ship the GPL-3.0 deinflect add-on as an SDIST (source), not a wheel: GPLv3 §6 requires the
+    # Corresponding Source when we convey the add-on, and the sdist IS that — every .py plus the
+    # pyproject build scripts and LICENSE/NOTICE. The stub installs it via --with; the JMdict fallback
+    # (jamdict) comes from PyPI via the stub's [jmdict] extra. Overlay stays a wheel (Apache-2.0 — no
+    # source-provision duty). Together the bundle install mirrors the checkout installers' [full].
+    if DEINFLECT_DIR.is_dir():
+        build_sdist(DEINFLECT_DIR, staging)
     for stub in ("overlay-install.sh", "overlay-install.ps1"):
         shutil.copy2(INSTALL_DIR / stub, staging / stub)
     (staging / "INSTALL.txt").write_text(INSTALL_TXT, encoding="utf-8")
