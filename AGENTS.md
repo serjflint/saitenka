@@ -10,14 +10,13 @@ curated for readers). Future direction lives in **`ROADMAP.md`**; granular, trac
 issues/milestones. Any local planning scratch belongs in `vibe/`, which is **git-ignored** — it is not
 a published artifact.
 
-**Commits + changelog.** Use [Conventional Commits](https://www.conventionalcommits.org)
-(`feat:`, `fix:`, `docs:`, `refactor:`, …). The changelog is *drafted* from history with
-[git-cliff](https://git-cliff.org/) (config: `cliff.toml`) and then **hand-reviewed** — never shipped
-raw. Draft the unreleased section with:
+**Commits.** Commit **frequently** — small, focused [Conventional Commits](https://www.conventionalcommits.org)
+(`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, …), one logical change each; don't batch unrelated work.
+No tool-attribution trailers.
 
-```
-uvx git-cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md   # then edit for readers
-```
+**Changelog.** Drafted from history with [git-cliff](https://git-cliff.org/) (config: `cliff.toml`;
+`uv run poe changelog` previews the unreleased section) and then **hand-reviewed** for readers — never
+shipped raw. `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## Python: always use `uv`
 

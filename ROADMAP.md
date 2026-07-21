@@ -20,7 +20,8 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
 ## Considering
 
 - **CI matrix** — Windows / macOS / Linux (plus a free-threaded job) once we want automated
-  cross-platform gating. The local gate is `uv run poe all`.
+  cross-platform gating. The local gate is `uv run poe all`. (A containerized Windows runner via
+  Podman is possible but high-setup-effort — deferred in favor of a real Windows run-through.)
 - **Deeper cross-platform hardening** — unified signal / clean-shutdown handling (Windows vs POSIX),
   filename sanitization applied at more write sites, `psutil`-based process-tree cleanup coverage.
 - **Test tooling** — `pytest-subprocess` for mpv/ffmpeg launch-argument coverage (currently the live
