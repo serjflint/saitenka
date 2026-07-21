@@ -1,0 +1,7 @@
+# build/test scratch
+out.png
+*.out.png
+.pytest_cache/
+dist/
+*.egg-info/
+.coverage

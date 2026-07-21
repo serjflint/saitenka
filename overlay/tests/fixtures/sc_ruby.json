@@ -1,0 +1,14 @@
+{
+  "type": "structured-content",
+  "content": [
+    {"tag": "ruby", "content": ["門前", {"tag": "rt", "content": "もんぜん"}]},
+    "の",
+    {"tag": "ruby", "content": ["小僧", {"tag": "rt", "content": "こぞう"}]},
+    {"tag": "ruby", "content": ["習", {"tag": "rt", "content": "なら"}]},
+    "わぬ",
+    {"tag": "ruby", "content": ["経", {"tag": "rt", "content": "きょう"}]},
+    "を",
+    {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]},
+    "む"
+  ]
+}

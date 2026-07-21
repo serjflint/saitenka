@@ -1,0 +1,25 @@
+{
+  "type": "structured-content",
+  "content": {
+    "tag": "ol",
+    "content": [
+      {"tag": "li", "content": [
+        {"tag": "span", "style": {"fontWeight": "bold"}, "content": "文字"},
+        "で書かれている文や文章を一字ずつ",
+        {"tag": "ruby", "content": ["声", {"tag": "rt", "content": "こえ"}]},
+        "に",
+        {"tag": "ruby", "content": ["出", {"tag": "rt", "content": "だ"}]},
+        "して",
+        {"tag": "a", "href": "?query=%E8%A8%80%E3%81%86", "content": "言う"},
+        "。"
+      ]},
+      {"tag": "li", "content": [
+        {"tag": "ruby", "content": ["経", {"tag": "rt", "content": "きょう"}]},
+        "などを声に出して",
+        {"tag": "ruby", "content": ["唱", {"tag": "rt", "content": "とな"}]},
+        "える。",
+        {"tag": "unknowntag", "content": "（未知タグは平坦化）"}
+      ]}
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+saitenka-overlay-deinflect
+==========================
+
+This package is a derivative work of **Yomitan** (https://github.com/yomidevs/yomitan),
+licensed under the GNU General Public License, version 3.0 or later.
+
+  Copyright (C) the Yomitan Authors and contributors.
+
+Derived components:
+
+  - src/saitenka_deinflect/engine.py
+        A port of Yomitan's `ext/js/language/ja/language-transformer.js`.
+
+  - src/saitenka_deinflect/data/japanese_transforms.json
+        Dumped verbatim from Yomitan's `ext/js/language/ja/japanese-transforms.js`
+        (regenerate with `overlay/compare/dump_transforms.mjs`).
+
+Because this package is licensed GPL-3.0-or-later, any distribution that combines it
+with the (Apache-2.0) saitenka-overlay core is, as a whole, governed by the GPL-3.0.
+See LICENSE for the full license text.

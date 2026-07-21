@@ -1,0 +1,63 @@
+{
+  "headword": [
+    {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]},
+    "む"
+  ],
+  "tags": [
+    {"text": "imperative"},
+    {"text": "potential « continuative"}
+  ],
+  "freqs": [
+    {"name": "FreqB", "value": "292, 375", "color": "#5b7aa0"},
+    {"name": "FreqA", "value": "312, 19896㋕", "color": "#3f9a5a"},
+    {"name": "FreqC", "value": "456, 21568㋕", "color": "#4a72c0"}
+  ],
+  "reading_label": {"dict": "MonoA", "text": "よむ [1]"},
+  "defs": [
+    {
+      "dict": "MonoB",
+      "content": [
+        {"tag": "span",
+         "style": {"borderColor": "#9aa0a6", "borderStyle": "solid", "borderWidth": "1px", "borderRadius": "3px"},
+         "content": "逆引き"},
+        "　よむ（読）",
+        {"tag": "br"},
+        {"tag": "span", "style": {"color": "#2a5ac8"}, "content": [
+          "↓ ",
+          {"tag": "ruby", "content": ["行間", {"tag": "rt", "content": "ぎょうかん"}]}, "を",
+          {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む・",
+          {"tag": "ruby", "content": ["空気", {"tag": "rt", "content": "くうき"}]}, "を",
+          {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む・",
+          "さばを", {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む・",
+          {"tag": "ruby", "content": ["鼻毛", {"tag": "rt", "content": "はなげ"}]}, "を",
+          {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む・",
+          {"tag": "ruby", "content": ["門前", {"tag": "rt", "content": "もんぜん"}]}, "の",
+          {"tag": "ruby", "content": ["小僧", {"tag": "rt", "content": "こぞう"}]},
+          {"tag": "ruby", "content": ["習", {"tag": "rt", "content": "なら"}]}, "わぬ",
+          {"tag": "ruby", "content": ["経", {"tag": "rt", "content": "きょう"}]}, "を",
+          {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む"
+        ]}
+      ]
+    },
+    {
+      "dict": "MonoB",
+      "content": [
+        {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "・む",
+        {"tag": "span", "style": {"fontWeight": "bold"}, "content": "【読む】"},
+        {"tag": "br"},
+        "［他五］",
+        {"tag": "br"},
+        "❶ 文字で書かれている文や文章を一字ずつ声に出して言う。",
+        {"tag": "ul", "content": [
+          {"tag": "li", "content": ["「", {"tag": "ruby", "content": ["祝詞", {"tag": "rt", "content": "のりと"}]}, "を", {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む」"]},
+          {"tag": "li", "content": ["「", {"tag": "ruby", "content": ["大声", {"tag": "rt", "content": "おおごえ"}]}, "で", {"tag": "ruby", "content": ["教科書", {"tag": "rt", "content": "きょうかしょ"}]}, "を", {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む」"]},
+          {"tag": "li", "content": ["「", {"tag": "ruby", "content": ["子供", {"tag": "rt", "content": "こども"}]}, "に", {"tag": "ruby", "content": ["本", {"tag": "rt", "content": "ほん"}]}, "を", {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "んで", {"tag": "ruby", "content": ["聞", {"tag": "rt", "content": "き"}]}, "かせる」"]}
+        ]},
+        "❷ ", {"tag": "ruby", "content": ["経", {"tag": "rt", "content": "きょう"}]}, "などを声に出して言う。唱える。",
+        {"tag": "ul", "content": [
+          {"tag": "li", "content": ["「", {"tag": "ruby", "content": ["門前", {"tag": "rt", "content": "もんぜん"}]}, "の", {"tag": "ruby", "content": ["小僧", {"tag": "rt", "content": "こぞう"}]}, {"tag": "ruby", "content": ["習", {"tag": "rt", "content": "なら"}]}, "わぬ", {"tag": "ruby", "content": ["経", {"tag": "rt", "content": "きょう"}]}, "を", {"tag": "ruby", "content": ["読", {"tag": "rt", "content": "よ"}]}, "む」"]}
+        ]}
+      ]
+    }
+  ]
+}

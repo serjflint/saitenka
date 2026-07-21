@@ -1,0 +1,107 @@
+[project]
+name = "saitenka-overlay"
+version = "0.1.0"
+description = "Rich-text + ruby renderer for the native in-mpv Yomitan overlay (Saitenka)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pillow>=11.0",
+    "fonttools>=4.55",
+    "numpy>=2.0",
+    "fugashi>=1.5.2",
+    "unidic-lite>=1.0.8",
+    "jamdict>=0.1a11.post2",
+    "jamdict-data>=1.5",
+    "cyclopts>=4.22.1",
+]
+
+[project.optional-dependencies]
+# GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
+# core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
+deinflect = ["saitenka-overlay-deinflect"]
+
+[project.scripts]
+saitenka-overlay = "overlay.app.cli:main"
+
+[tool.uv.sources]
+saitenka-overlay-deinflect = { path = "../deinflect", editable = true }
+
+[dependency-groups]
+dev = [
+    "saitenka-overlay-deinflect",   # local GPL add-on: tests exercise the inflection chain
+    "hypothesis>=6.157.2",
+    "mypy>=2.3.0",
+    "playwright>=1.61.0",
+    "poethepoet>=0.48.0",
+    "pyrefly>=1.1.1",
+    "pyright>=1.1.411",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "pytest-randomly>=4.1.0",
+    "pytest-xdist>=3.8.0",
+    "ty>=0.0.61",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/overlay"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Stage 8b tooling hardening: bugbear, simplify, tryceratops, perf, ruff-specific, pyupgrade,
+# comprehensions — on top of the default E/F. Every surviving hit is fixed or carries a reasoned
+# per-line noqa; the only config-level ignores are the style-only rules noted below.
+select = ["E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4"]
+ignore = [
+    "TRY003",  # long messages in raise — our error strings ARE the UX (toasts/CLI); a message-
+               # class hierarchy would be ceremony without benefit here
+    "TRY300",  # move return to else — the existing try/return shapes in the poll-loop/mining
+               # code read clearer as-is; rewriting is churn without behavior change
+    "SIM105",  # contextlib.suppress over try/except-pass — remaining pass bodies became
+               # log.debug(exc_info=True) in this stage; suppress would re-hide them
+    "E501",    # line length — the formatter governs; JP-heavy lines (double-width chars,
+               # ・/·/→ in comments) misreport badly and rewrapping them is pure churn
+    "RUF001", "RUF002", "RUF003",  # "ambiguous" unicode — this codebase renders Japanese;
+               # ・ ～ × … in strings/comments/docstrings are intentional typography
+]
+
+[tool.ruff.lint.per-file-ignores]
+# cyclopts binds flags via Parameter(...) calls in parameter defaults — that IS its API shape.
+"src/overlay/app/cli.py" = ["B008"]
+# Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
+# hoisting five one-use constants would only add indirection.
+"src/overlay/app/scoring.py" = ["RUF009"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src/overlay"]
+# Stage 8b tooling: good additional checks, NOT --strict (plan decision).
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
+
+[tool.pyright]
+include = ["src/overlay"]
+typeCheckingMode = "basic"
+reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
+
+# --- Stage 8b: local task runner (no CI — `poe all` is the pre-push gate) -------------------------
+[tool.poe.tasks]
+lint = { shell = "uv run ruff check --fix src tests examples && uv run ruff format src tests examples" }
+types = { shell = "uv run mypy && uv run pyright && (uv run pyrefly check src/overlay || true) && (uv run ty check src/overlay || true)" }
+test = "uv run pytest -q -n auto"
+test-ft = { shell = "PYTHON_GIL=0 uv run pytest -q" }
+cov = "uv run pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85"
+bench = "uv run python examples/bench_responsiveness.py --pathological --reps 8"
+all = ["lint", "types", "test", "test-ft", "cov"]

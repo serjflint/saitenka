@@ -1,0 +1,69 @@
+# Saitenka overlay settings — copy to ~/.config/saitenka/overlay.toml
+#
+# Lives in its own XDG dir (not mixed into mpv.conf or the animecards rig). Anything here is a
+# DEFAULT; an explicit CLI flag to mpv_reader.py overrides it. Point elsewhere with --config or
+# $SAITENKA_CONFIG. The built dictionary cache is separate and already persists between runs at
+# ~/.cache/saitenka-overlay/dicts/ (keyed by each zip's mtime+size — indexed once, reused after).
+
+slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
+tip_height = 0.6           # max tooltip height as a fraction of the video height
+translate_key = "t"        # toggle the official EN translation
+pause_on_tooltip = false   # auto-pause playback while a tooltip is shown (resumes when it hides)
+
+# Subtitle navigation keys (Stage 4 — crucial feature).
+sub_prev_key   = "Alt+LEFT"    # jump to the PREVIOUS subtitle line (sub-seek -1)
+sub_next_key   = "Alt+RIGHT"   # jump to the NEXT subtitle line (sub-seek  1)
+sub_replay_key = "Alt+DOWN"    # replay the CURRENT subtitle line from its start (sub-seek 0)
+# Sub-delay nudges z / Z / x (mpv defaults, kept working via our overlay keybind pass-through).
+
+# mpv coexistence (Stage 16). All optional.
+# mpv_path      = "/Applications/mpv.app/Contents/MacOS/mpv"  # override auto-discovery
+# mpv_socket    = "/tmp/mpv-socket"   # default socket for `saitenka-overlay attach` (share with
+#                                     # mpv_websocket/animecards — mpv allows many IPC clients)
+# overlay_id_base = 1  # shift our OSD overlay ids (we use 6 starting here) if another mpv script
+#                      # already owns ids 1..6; 1 = default, no shift.
+
+# Definition dictionaries, in tooltip order (first = top). The tooltip scrolls, so include as many as
+# you like — the SQLite cache keeps RAM low regardless of size. This is your full SOTA definition set
+# (bilingual → monolingual). Trim if you prefer a shorter tooltip.
+dicts = [
+  "~/yomitan-dicts/bilingual.zip",
+  "~/yomitan-dicts/monolingual-a.zip",
+  "~/yomitan-dicts/monolingual-b.zip",
+  # add as many definition dictionaries as you like — the tooltip scrolls.
+  # grammar / name / kanji dictionaries can go here too.
+]
+
+# Frequency dictionaries → green pills (order preserved; harmonic-blended).
+freq = [
+  "~/yomitan-dicts/freq-general.zip",
+  "~/yomitan-dicts/freq-media.zip",
+  "~/yomitan-dicts/freq-novels.zip",
+]
+
+# Pitch-accent dictionaries → purple pills.
+pitch = [
+  "~/yomitan-dicts/pitch-accent.zip",
+]
+
+# Known-word source for FSRS-aware coloring: Anki decks -> fields (read via AnkiConnect).
+[known]
+"Saitenka::Known" = ["Expression"]
+
+# One-key mining target.
+[mine]
+deck = "Saitenka::Mining"
+model = "Lapis"
+key = "Ctrl+m"
+all_key = "Shift+m"
+preview_key = "p"
+
+# jimaku.cc subtitle fetch for attach/plugin mode. `attach` first selects an embedded JP track;
+# only when the file has NO Japanese subs does it fetch from jimaku (so this is safe to leave on).
+# API key resolution: this `key` > $JIMAKU_API_KEY > macOS Keychain. Prefer the Keychain —
+# `saitenka-overlay set-jimaku-key` — because a GUI-launched (plugin-mode) mpv can read it, while a
+# shell env var (and, less securely, a key written here in plaintext) it can only read from a terminal.
+[jimaku]
+enabled = true
+# key = "..."       # last resort — plaintext; Keychain (set-jimaku-key) is preferred
+resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) — recommended
