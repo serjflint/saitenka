@@ -4,14 +4,15 @@
 # missing. Non-destructive: never upgrades or reinstalls what's already present, and never touches
 # your Anki collection or mpv config (the steps that write user files — config, the mpv plugin —
 # back up their own target right before changing it). Safe to re-run any time.
-#   Usage:  bash install/install-macos.sh [--dry-run] [--dev]
+#   Usage:  bash install/install-macos.sh [--dry-run] [--dev] [--yes]
 set -uo pipefail
 
-DRY_RUN=false; DEV=false
+DRY_RUN=false; DEV=false; YES=false
 for a in "$@"; do case "$a" in
   --dry-run) DRY_RUN=true ;;
   --dev)     DEV=true ;;
-  -h|--help) echo "usage: install-macos.sh [--dry-run] [--dev]"; exit 0 ;;
+  --yes|-y)  YES=true ;;
+  -h|--help) echo "usage: install-macos.sh [--dry-run] [--dev] [--yes]"; exit 0 ;;
   *) echo "unknown arg: $a (see --help)"; exit 2 ;;
 esac; done
 
@@ -20,6 +21,9 @@ log()  { printf '%s[saitenka]%s %s\n' "$(c '1;36')" "$(c 0)" "$*"; }
 warn() { printf '%s[warn]%s %s\n'     "$(c '1;33')" "$(c 0)" "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 run()  { if $DRY_RUN; then printf '  DRY:'; printf ' %q' "$@"; echo; else "$@"; fi; }
+# Y/n prompt (default yes). --yes answers yes to all (CI/non-interactive); --dry-run assumes yes so
+# the preview shows the full plan.
+confirm() { if $YES || $DRY_RUN; then return 0; fi; read -r -p "$1 [Y/n] " _a; [[ ! "$_a" =~ ^[Nn] ]]; }
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo .)"
 REPO="$(cd "$SELF_DIR/.." && pwd)"
@@ -59,18 +63,29 @@ if have brew; then
 fi
 # Anki: only offer the cask if the app isn't already installed (avoids a needless multi-GB download).
 if [ ! -d /Applications/Anki.app ]; then
-  if have brew && ! brew list --cask anki &>/dev/null; then log "+ anki (cask)"; run brew install --cask anki
+  if have brew && ! brew list --cask anki &>/dev/null; then
+    if confirm "Install Anki now (needed for mining + FSRS coloring)?"; then log "+ anki (cask)"; run brew install --cask anki
+    else log "skipped Anki — install later from https://apps.ankiweb.net, then re-run"; fi
   else warn "Anki not found — install it from https://apps.ankiweb.net"; fi
 fi
 
-# uv is the one hard requirement for the overlay itself.
+# uv is the one hard requirement for the overlay itself. Standalone-installer fallback per uv's guide:
+# https://docs.astral.sh/uv/getting-started/installation/
 if ! have uv; then
   log "Installing uv…"; $DRY_RUN || { curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; }
 fi
 
 # ── 2. Install / update the overlay from THIS checkout ──────────────────────
-log "Installing/updating saitenka-overlay from $REPO/overlay"
-run uv tool install --reinstall "$REPO/overlay"
+# uv puts tool binaries (saitenka-overlay) in ~/.local/bin; ensure THIS session sees it so the setup
+# handoff below resolves even when uv was already on PATH (e.g. brew-installed) and didn't add it.
+export PATH="$HOME/.local/bin:$PATH"
+# FULL experience via the `[full]` extra (JMdict fallback + GPL-3.0 deinflect inflection chains) when
+# the deinflect source is present in this checkout; else `[jmdict]` (full minus the GPL add-on).
+# `[full]` is GPL-3.0 (see ../LICENSING.md); a wheel/bundle install without deinflect/ stays Apache-2.0.
+if [ -d "$REPO/deinflect" ]; then extra=full; log "including GPL-3.0 deinflect add-on (inflection chains)"
+else extra=jmdict; warn "no deinflect/ in this checkout — installing [jmdict] only (no inflection chains)"; fi
+log "Installing/updating saitenka-overlay[$extra] from $REPO/overlay"
+run uv tool install --reinstall "$REPO/overlay[$extra]"
 
 # ── 3. Dev/authoring extras (--dev only): repo + vault tooling ──────────────
 if $DEV && have brew; then
@@ -86,6 +101,18 @@ if [ -f "$SELF_DIR/doctor-macos.sh" ]; then
   bash "$SELF_DIR/doctor-macos.sh" || warn "doctor reported issues — see ✗/! above."
 else
   warn "doctor-macos.sh not found next to the installer — skipping healthcheck."
+fi
+
+# ── 5. Guided setup: the overlay's own confirm-first wizard ─────────────────
+# Hand off to `setup` (prompts to install the mpv plugin, store the jimaku key, import Yomitan dicts,
+# relocate protected dicts) instead of leaving them as manual chores. Confirm-first and resumable;
+# --yes passes --yes. The summary below then reflects whatever setup configured.
+if have saitenka-overlay; then
+  log "Guided setup (mpv plugin / jimaku key / dictionaries)…"
+  setup_args=(setup); $YES && setup_args+=(--yes); $DRY_RUN && setup_args+=(--dry-run)
+  saitenka-overlay "${setup_args[@]}" || warn "setup reported issues — re-run any time: saitenka-overlay setup"
+else
+  warn "saitenka-overlay isn't on PATH this session — open a NEW terminal and run: saitenka-overlay setup"
 fi
 
 log "Done."
@@ -120,8 +147,7 @@ echo "Next steps:"
 if [ -f "$HOME/.config/mpv/scripts/saitenka.lua" ]; then
   printf '  1. mpv plugin:  \033[32m✓\033[0m installed (auto-starts the overlay on any mpv launch)\n'
 else
-  echo "  1. Install the mpv plugin (auto-starts on any mpv launch):  saitenka-overlay install-plugin"
-  echo "     — or the full wizard (config, dict relocation, plugin):  saitenka-overlay setup"
+  echo "  1. mpv plugin not installed — re-run  saitenka-overlay setup  (or:  saitenka-overlay install-plugin)"
 fi
 echo "  2. Anki add-ons (Tools → Add-ons → Get Add-ons):"
 addon 2055492159 AnkiConnect    "mining + FSRS coloring"
@@ -130,8 +156,11 @@ addon 1771074083 "Review Heatmap" "streak view"
 if dcnt=$(dicts_present); then
   printf '  3. Dictionaries:  \033[32m✓\033[0m %s configured and present on disk\n' "$dcnt"
 else
-  echo "  3. Import your Yomitan dictionaries in the browser, then point overlay.toml at them"
-  echo "     (or run \`saitenka-overlay import-yomitan\`)."
+  echo "  3. Dictionaries: run  saitenka-overlay import-yomitan --scan-dir <folder of your .zip dicts>"
+  echo "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
+  echo "     or add the .zip paths by hand under [dictionaries] in:"
+  echo "       $CONFIG"
+  echo "     Have a full Yomitan backup? saitenka-overlay import-dictionaries <export> converts it to .zip dicts."
 fi
 if jimaku_present; then
   printf '  4. jimaku key for auto-subs:  \033[32m✓\033[0m already set\n'
