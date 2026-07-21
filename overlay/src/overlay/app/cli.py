@@ -860,10 +860,18 @@ def attach(
         )
 
     # Build coloring/dict/mining collaborators from config — without these, attach is a bare
-    # subtitle renderer (no known/JLPT coloring, no freq pills, no tooltips, no mining).
+    # subtitle renderer (no known/JLPT coloring, no freq pills, no tooltips, no mining). This is the
+    # slow step (first-run dict-cache build), so show a top-left loading spinner meanwhile — only the
+    # spinner thread touches IPC here, and it's stopped before the reader draws.
+    from overlay.app.loading import LoadingIndicator
     from overlay.app.reader_deps import build_reader_deps
 
-    scorer, anki, mine_conf, dict_set = build_reader_deps(cfg)
+    loading = LoadingIndicator(ipc)
+    loading.start("saitenka: loading dictionaries")
+    try:
+        scorer, anki, mine_conf, dict_set = build_reader_deps(cfg)
+    finally:
+        loading.stop()
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
 

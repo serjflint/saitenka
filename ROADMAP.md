@@ -7,6 +7,9 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
 
 ## Now / next
 
+- **Progressive subtitles** — draw plain (uncolored) subtitles immediately and swap in FSRS coloring +
+  tooltips once dictionaries finish loading. The top-left loading spinner already covers the
+  blank-frame gap; this would make the first-run wait feel instant.
 - **Runtime jimaku keybind** — re-fetch subtitles mid-playback from a key. The option already exists
   (`--jimaku-force` / `[jimaku].force`); the reusable primitive (`fetch_jimaku`) is in place, so this
   is wiring a controller keybind.
