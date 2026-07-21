@@ -19,6 +19,14 @@ _dictionary.CACHE_DIR = _TEST_CACHE
 
 
 @pytest.fixture(autouse=True)
+def _anki_reachable(monkeypatch):
+    """Default: AnkiConnect answers, so the ⊕ button shows when mining is configured (existing tests
+    assume it) and _anki_ok() stays hermetic — no real localhost:8765 ping. Tests for the Anki-closed
+    case patch ``overlay.app.anki.anki_reachable`` to return False."""
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: True)
+
+
+@pytest.fixture(autouse=True)
 def _tts_present(monkeypatch):
     """Default: pretend a Japanese TTS voice exists so the 🔊 button is drawn — existing geometry tests
     assume it, and this keeps them hermetic (no real `say`/PowerShell subprocess). Tests for the

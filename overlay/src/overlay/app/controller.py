@@ -18,6 +18,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from PIL import Image
@@ -99,6 +100,25 @@ TIP_KEYBINDS: tuple[tuple[str, str], ...] = (
     ("DOWN", TIP_DOWN_MSG),
     ("ESC", TIP_CLOSE_MSG),
 )
+
+
+class PanelKey(NamedTuple):
+    """Identity of a rendered tooltip panel — the ``_panel_cache`` key. Named (not a bare tuple) so
+    callers read ``.mined`` / ``.anki_ok`` instead of brittle positions, and adding a field can't
+    silently shift another. Still a tuple, so hashing, dict-key use, and equality with a plain tuple
+    of the same values are all unchanged."""
+
+    lemma: str
+    surface: str
+    reading: str
+    inflected: str
+    width: int
+    anki_ok: bool  # is Anki reachable now → is the ⊕ button drawn (rechecked per show, ~3s TTL)
+    mined: (
+        bool  # is the word already in the deck → ⊕ shows ✓ (kept LAST: some tests read key.mined)
+    )
+
+
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
@@ -228,6 +248,10 @@ class Reader:
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
         self._mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
+        self._anki_cache: tuple[float, bool] = (
+            0.0,
+            False,
+        )  # (checked_at, reachable) — see _anki_ok
         # card-preview interaction (clickable regions in screen coords; None when hidden)
         self._preview_rect: tuple | None = None
         self._preview_close_rect: tuple | None = None
@@ -250,7 +274,7 @@ class Reader:
         self._tip_state: TipPanel | None = (
             None  # _TipPanel currently shown (viewport-first render may still be filling)
         )
-        self._tip_key: tuple | None = (
+        self._tip_key: PanelKey | None = (
             None  # its cache key — the finisher only refreshes the panel still on screen
         )
         self._tip_dirty = (
@@ -582,7 +606,7 @@ class Reader:
         return self._tip_state.lazy.top_reserve if self._tip_state is not None else 0
 
     def _hit_header_add(self, x: float, y: float) -> bool:
-        if self.anki is None or self._tip_state is None:  # ⊕ only exists when mining is available
+        if self._tip_state is None or not self._anki_ok():  # ⊕ only when Anki is reachable now
             return False
         return self._hit_header_region(
             x,
@@ -608,7 +632,7 @@ class Reader:
         )
 
     def _hit_nested_add(self, x: float, y: float) -> bool:
-        if self.anki is None or self._nest.state is None:
+        if self._nest.state is None or not self._anki_ok():
             return False
         return self._hit_header_region(
             x,
@@ -678,8 +702,11 @@ class Reader:
             j += 1
         return s
 
-    def _panel_key(self, tok, inflected, mined: bool = False):
-        return (tok.lemma, tok.surface, tok.reading, inflected, self.tip_width, mined)
+    def _panel_key(self, tok, inflected, mined: bool = False) -> PanelKey:
+        # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
+        return PanelKey(
+            tok.lemma, tok.surface, tok.reading, inflected, self.tip_width, self._anki_ok(), mined
+        )
 
     def _is_mined(self, tok) -> bool:
         """Is this token's word already in the deck? (its ⊕ shows ✓ instead). Cheap short-circuit
@@ -690,6 +717,23 @@ class Reader:
             return card_for(tok).expression in self._mined
         except Exception:
             return False
+
+    def _anki_ok(self) -> bool:
+        """Is AnkiConnect reachable RIGHT NOW? Gates the ⊕ button per card show, so it appears/hides as
+        the user opens/closes Anki mid-session (not frozen at startup). Kept fast: a short timeout with
+        0 retries fails immediately when Anki is closed, and the result is cached ~3s so rapid hovers
+        don't ping repeatedly. False when mining isn't configured at all."""
+        if self.anki is None:
+            return False
+        now = time.monotonic()
+        ts, ok = self._anki_cache
+        if now - ts < 3.0:
+            return ok
+        from overlay.app.anki import anki_reachable
+
+        ok = anki_reachable(timeout=0.4)  # resolves host/key from config; short timeout, 0 retries
+        self._anki_cache = (now, ok)
+        return ok
 
     @staticmethod
     def _darken(rgba, f: float = JLPT_DARKEN):
@@ -766,7 +810,7 @@ class Reader:
                 panel_rows(
                     entry,
                     self.tip_width,
-                    add_button=self.anki is not None,
+                    add_button=self._anki_ok(),
                     mined=mined,
                     speak_button=self._tts_ok,
                 ),

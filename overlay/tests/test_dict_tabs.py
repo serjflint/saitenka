@@ -124,6 +124,22 @@ def test_tab_strip_wraps_many_dicts_onto_multiple_rows():
     assert img.height == tab_strip_height(names, width) > tab_row_height()  # taller than one row
 
 
+def test_add_button_gated_on_live_anki(monkeypatch):
+    r = _reader()
+    r.anki = object()  # mining configured
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    # Anki closed → ⊕ not shown / not hittable
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: False)
+    r._anki_cache = (0.0, False)
+    assert r._anki_ok() is False
+    r.set_hover(0)
+    assert r._hit_header_add(999, 999) is False
+    # Anki reopened → the live check flips (past the TTL) so the ⊕ comes back
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: True)
+    r._anki_cache = (0.0, False)  # force a re-check rather than wait out the ~3s TTL
+    assert r._anki_ok() is True
+
+
 def test_header_add_rect_takes_speaker_slot_when_tts_hidden():
     from overlay.panel import header_add_rect
 

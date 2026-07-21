@@ -319,7 +319,9 @@ def test_prefetch_worker_warms_cache_then_close_joins():
     r.start_prefetch()
     try:
         r._update_prefetch()  # queue 本命 for the worker
-        key = ("本命", "本命", "ほんめい", "本命", r.tip_width, False)  # (…inflected, w, mined)
+        # PanelKey(lemma, surface, reading, inflected, width, anki_ok, mined); no anki → anki_ok False.
+        # A plain tuple of the same values matches the PanelKey dict key (NamedTuple compares as a tuple).
+        key = ("本命", "本命", "ほんめい", "本命", r.tip_width, False, False)
         for _ in range(300):
             if key in r._panel_cache:
                 break
@@ -1007,9 +1009,9 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     r.anki = object()
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
-    assert r._tip_key[-1] is False  # not mined yet → ⊕
+    assert r._tip_key.mined is False  # not mined yet → ⊕
     r._mark_mined(card_for(r.tokens[0]).expression)
-    assert r._tip_key[-1] is True  # tooltip rebuilt with ✓
+    assert r._tip_key.mined is True  # tooltip rebuilt with ✓
 
 
 def test_seed_mined_preloads_deck_expressions():
