@@ -17,6 +17,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import stamina
+
 from overlay.app.lookup import CardData
 
 log = logging.getLogger(__name__)
@@ -93,6 +95,13 @@ class AnkiError(RuntimeError):
     pass
 
 
+class _AnkiRetryable(AnkiError):
+    """A transient AnkiConnect failure (connection refused / timeout while Anki is briefly busy).
+    ``stamina`` retries these ONCE, quickly — Anki being *not running* is a common steady state, so we
+    keep the added latency tiny (a down call adds ~0.3s, not seconds). App errors (deck not found, …)
+    are plain ``AnkiError`` and never retried."""
+
+
 @dataclass
 class MineConfig:
     deck: str = "Saitenka::Mining"
@@ -129,14 +138,19 @@ class Anki:
             payload["key"] = self.api_key  # AnkiConnect apiKey → request body
         body = json.dumps(payload).encode()
         req = urllib.request.Request(self.host, body, {"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                res = json.loads(r.read())
-        except OSError as e:
-            raise AnkiError(f"AnkiConnect unreachable at {self.host}: {e}") from e
-        if res.get("error"):
-            raise AnkiError(res["error"])
-        return res.get("result")
+        for attempt in stamina.retry_context(
+            on=_AnkiRetryable, attempts=2, wait_initial=0.3, wait_max=1.0
+        ):
+            with attempt:
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as r:
+                        res = json.loads(r.read())
+                except OSError as e:  # connection refused / timeout — transient, retry once
+                    raise _AnkiRetryable(f"AnkiConnect unreachable at {self.host}: {e}") from e
+                if res.get("error"):
+                    raise AnkiError(res["error"])  # app error (deck/model not found) — do NOT retry
+                return res.get("result")
+        raise AnkiError(f"AnkiConnect call {action!r} failed after retries")  # unreachable
 
     def store_media(self, filename: str, path: str | Path) -> str:
         return self._call("storeMediaFile", filename=filename, path=str(Path(path).resolve()))

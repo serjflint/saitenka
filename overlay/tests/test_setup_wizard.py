@@ -115,3 +115,16 @@ def test_full_wizard_resumable_skips_satisfied(monkeypatch, tmp_path):
     assert rc == 0
     assert installs == []  # nothing to install
     assert ran["doctor"] and ran["init"]
+
+
+def test_anki_config_fragment():
+    """The wizard's Anki choices → config: [known] deck→field (coloring), [mine] merged over existing."""
+    from overlay.app.setup_wizard import anki_config_fragment as f
+
+    frag = f("Known", "Entry", "My::Mine", "Lapis", existing_mine={"key": "Ctrl+m"})
+    assert frag == {
+        "known": {"Known": ["Entry"]},
+        "mine": {"key": "Ctrl+m", "deck": "My::Mine", "model": "Lapis"},  # existing key preserved
+    }
+    assert f("", "", "D", "M") == {"mine": {"deck": "D", "model": "M"}}  # no deck → no [known]
+    assert f("K", "", "D", "M")["known"] == {"K": ["Expression"]}  # blank field → default

@@ -193,30 +193,44 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
         print(f"    {i:2}. {d}")
 
     cfg = load_config()
-    new: dict = {}
+    cur = dict(cfg.get("mine") or {})
     known_deck = _prompt(
         "  Deck of words you already KNOW (name/number → coloring; blank to skip)?", decks
     )
+    known_field = ""
     if known_deck:
         fields = _deck_fields(anki, known_deck)
         default_field = fields[0] if fields else "Expression"
-        field = (
+        known_field = (
             _prompt(f"    Field with the word {fields or '(none read)'} [{default_field}]?", fields)
             or default_field
         )
-        new["known"] = {known_deck: [field]}
+    mine_deck = _prompt(
+        f"  Mining deck [{cur.get('deck', 'Saitenka::Mining')}]?", decks
+    ) or cur.get("deck", "Saitenka::Mining")
+    mine_model = _prompt(f"  Mining note type [{cur.get('model', 'Lapis')}]?", models) or cur.get(
+        "model", "Lapis"
+    )
 
-    mine = dict(cfg.get("mine") or {})
-    mine["deck"] = _prompt(
-        f"  Mining deck [{mine.get('deck', 'Saitenka::Mining')}]?", decks
-    ) or mine.get("deck", "Saitenka::Mining")
-    mine["model"] = _prompt(
-        f"  Mining note type [{mine.get('model', 'Lapis')}]?", models
-    ) or mine.get("model", "Lapis")
-    new["mine"] = mine
-
-    write_config({**cfg, **new}, confirm=lambda _p: True)
+    frag = anki_config_fragment(known_deck, known_field, mine_deck, mine_model, existing_mine=cur)
+    write_config({**cfg, **frag}, confirm=lambda _p: True)
     print("  Anki config written.")
+
+
+def anki_config_fragment(
+    known_deck: str,
+    known_field: str,
+    mine_deck: str,
+    mine_model: str,
+    existing_mine: dict | None = None,
+) -> dict:
+    """Build the config fragment from the wizard's Anki choices: ``[known]`` deck→[field] (drives
+    coloring; empty deck → omitted) + ``[mine]`` deck/model (merged over any existing [mine] keys, so
+    a custom key/all_key survives). Pure — unit-tested."""
+    frag: dict = {"mine": {**(existing_mine or {}), "deck": mine_deck, "model": mine_model}}
+    if known_deck:
+        frag["known"] = {known_deck: [known_field or "Expression"]}
+    return frag
 
 
 def _offer_import(confirm: Confirm) -> None:  # pragma: no cover — thin glue over yomitan_import
