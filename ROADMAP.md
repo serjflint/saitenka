@@ -26,6 +26,10 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   filename sanitization applied at more write sites, `psutil`-based process-tree cleanup coverage.
 - **Test tooling** — `pytest-subprocess` for mpv/ffmpeg launch-argument coverage (currently the live
   launch path is only smoke-tested).
+- **Structured logging (`structlog`)** — key-value event logs for the rotating log + `report` bundle,
+  so diagnostics are grepable/parseable (e.g. `event=jimaku.fetch title=… status=400`) instead of
+  free-text. Keep the human console renderer; JSON to the file. Low-risk, incremental over the current
+  stdlib `logging`; do it when the diagnostics story needs it.
 
 ## Explicitly not planned
 
