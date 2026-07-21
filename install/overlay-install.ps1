@@ -5,6 +5,14 @@ param([switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $SelfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Render the Python child processes' UTF-8 output (the setup/doctor ✓ ✗ → …) correctly — without this,
+# Windows PowerShell decodes their stdout as the legacy OEM codepage and shows mojibake.
+try {
+  chcp 65001 > $null
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
 # 1. uv — the only hard bootstrap (it then owns Python 3.14t + all deps).

@@ -8,6 +8,14 @@
 param([switch]$DryRun,[switch]$Dev,[switch]$Yes)
 $ErrorActionPreference = 'Continue'
 
+# Render the Python child processes' UTF-8 output (the doctor/setup ✓ ✗ → · …) correctly. Without this,
+# Windows PowerShell decodes a child's stdout as the legacy OEM codepage and shows mojibake ("Ō£ō").
+try {
+  chcp 65001 > $null
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 function Log ($m){ Write-Host "[saitenka] $m" -ForegroundColor Cyan }
 function Warn($m){ Write-Host "[warn] $m"     -ForegroundColor Yellow }
 function Have($c){ [bool](Get-Command $c -ErrorAction SilentlyContinue) }
