@@ -193,11 +193,13 @@ else {
   Write-Host "       $Cfg"
   Write-Host "     Have a full Yomitan backup? saitenka-overlay import-dictionaries <export> converts it to .zip dicts."
 }
-if($env:JIMAKU_API_KEY){ Write-Host "  4. jimaku key for auto-subs:  [x] set (`$env:JIMAKU_API_KEY)" -ForegroundColor Green }
+# jimaku is "set up" if the env var is set OR the config has a [jimaku] table (set-jimaku-key writes
+# [jimaku].fetch=true even when the key itself lives in the Credential Locker, which a shell can't read).
+$jimakuSet = [bool]$env:JIMAKU_API_KEY -or ((Test-Path $Cfg) -and (Select-String -Path $Cfg -Pattern '^\s*\[jimaku\]' -Quiet))
+if($jimakuSet){ Write-Host "  4. jimaku auto-subs:  [x] configured" -ForegroundColor Green }
 else {
-  Write-Host "  4. jimaku key for auto-subs (optional): run  saitenka-overlay set-jimaku-key  (recommended;"
-  Write-Host "     a GUI-launched mpv can't read `$env:JIMAKU_API_KEY), or add [jimaku].key in:"
-  Write-Host "       $Cfg"
+  Write-Host "  4. jimaku auto-subs (optional): run  saitenka-overlay set-jimaku-key"
+  Write-Host "     (stores the key + enables fetch for files with no JP track; skip if done in setup above)"
 }
 if($Dev){ Write-Host "`nDev/authoring: open this folder in Obsidian (start at notes\), Anki MCP for Claude Code via /mcp." }
 if($LogPath){ try { Stop-Transcript | Out-Null } catch {} }

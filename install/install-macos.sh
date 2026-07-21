@@ -127,7 +127,9 @@ addon() { # code  name  note
 # jimaku key is "present" if it resolves from the env or the Keychain (the recommended stores).
 jimaku_present() {
   [ -n "${JIMAKU_API_KEY:-}" ] && return 0
-  security find-generic-password -s saitenka-overlay -a jimaku -w >/dev/null 2>&1
+  security find-generic-password -s saitenka-overlay -a jimaku -w >/dev/null 2>&1 && return 0
+  # set-jimaku-key writes [jimaku] to the config (fetch=true) even when the key lives in the Keychain.
+  [ -f "$CONFIG" ] && grep -qE '^[[:space:]]*\[jimaku\]' "$CONFIG"
 }
 # How many dictionary/freq/pitch zips the config points at actually exist on disk (echoes the count,
 # non-zero exit when none) — so we can tick step 3 instead of nudging an import that's already done.
