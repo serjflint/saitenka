@@ -49,7 +49,7 @@ from overlay.panel import (
     header_speaker_rect,
     panel_rows,
     render_tab_row,
-    tab_row_height,
+    tab_strip_height,
 )
 from overlay.render.flow import render_flow
 from overlay.render.layout import Block, inline_width
@@ -748,8 +748,14 @@ class Reader:
         if st is None:
             entry = self._entry_for(tok, inflected)
             # Reserve space for the sticky dict-tab strip (shown for ≥2 dicts) so it clears the
-            # header (reading + ⊕/🔊) instead of overlapping it.
-            reserve = tab_row_height() if len(entry.defs) >= 2 else 0
+            # header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for this
+            # word's dict names at this width, so a many-dict strip that wraps onto several rows
+            # reserves enough (a fixed one-row reserve would let a 2nd tab row cover the reading).
+            reserve = (
+                tab_strip_height([d.dict_name for d in entry.defs], self.tip_width)
+                if len(entry.defs) >= 2
+                else 0
+            )
             lazy = LazyPanel(
                 panel_rows(entry, self.tip_width, add_button=self.anki is not None, mined=mined),
                 self.tip_width,

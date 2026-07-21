@@ -94,17 +94,34 @@ def test_single_dict_entry_has_no_tabs(monkeypatch):
 
 def test_multi_dict_reserves_space_so_header_clears_the_tab_strip(monkeypatch):
     # Regression: the sticky tab strip must NOT cover the reading / ⊕ / 🔊. Multi-dict entries
-    # reserve the strip's height above the header so those sit below it.
-    from overlay.panel import header_add_rect, header_speaker_rect, tab_row_height
+    # reserve EXACTLY the (possibly wrapped) strip's height above the header so those sit below it.
+    from overlay.panel import header_add_rect, header_speaker_rect, tab_strip_height
 
     r = _shown(monkeypatch, _reader())  # 3 dicts → tabs
     reserve = r._tip_reserve()
-    assert reserve >= tab_row_height()  # space reserved for the strip
+    assert reserve == tab_strip_height(
+        ["MonoC", "MonoB", "MonoD"], r.tip_width
+    )  # matches real strip
     for rect in (
         header_add_rect(r.tip_width, top_reserve=reserve),
         header_speaker_rect(r.tip_width, top_reserve=reserve),
     ):
-        assert rect[1] >= tab_row_height()  # icon's panel-y is below the strip → not covered
+        assert rect[1] >= reserve  # icon's panel-y is below the reserved strip → not covered
+
+
+def test_tab_strip_wraps_many_dicts_onto_multiple_rows():
+    # A many-dict word must show ALL tabs — the strip wraps instead of clipping past the width
+    # (regression: only ~4 of 10 tabs were visible).
+    from overlay.panel import render_tab_row, tab_row_height, tab_strip_height
+
+    names = [f"Dict{i:02d}" for i in range(10)]
+    width = 384
+    img, rects = render_tab_row(names, active=0, width=width)
+    assert len(rects) == len(names)  # every tab is laid out (none dropped)
+    ys = {y for _x, y, _w, _h in rects}
+    assert len(ys) >= 2  # wrapped onto multiple rows
+    assert all(x + w <= width for x, _y, w, _h in rects)  # nothing clipped past the right edge
+    assert img.height == tab_strip_height(names, width) > tab_row_height()  # taller than one row
 
 
 def test_single_dict_reserves_nothing(monkeypatch):

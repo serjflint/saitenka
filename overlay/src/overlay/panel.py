@@ -351,49 +351,86 @@ def compose_panel(
     return canvas
 
 
+# Sticky dict-tab strip geometry. The strip WRAPS onto multiple rows so every dictionary tab stays
+# visible — a many-dict word (10+ monolingual dicts) overflowed a single row and hid all but ~4 tabs.
+_TAB_PAD_Y, _TAB_GAP, _TAB_ROW_GAP, _TAB_BOTTOM = 9, 11, 7, 7
+
+
+def _tab_chip_styles(theme: Theme):
+    from overlay.draw.chip import ChipStyle
+
+    active_cs = ChipStyle(size=20, weight=600, bg=theme.purple, pad_h=11, pad_v=6, radius=9)
+    idle_cs = ChipStyle(
+        size=20,
+        weight=500,
+        fg=theme.muted,
+        bg=(0, 0, 0, 0),
+        border=(170, 170, 170, 255),
+        pad_h=11,
+        pad_v=6,
+        radius=9,
+    )
+    return active_cs, idle_cs
+
+
+def _tab_label(name: str) -> str:
+    return name if len(name) <= 10 else name[:9] + "…"
+
+
+def _tab_layout(
+    names: list[str], width: int, theme: Theme
+) -> tuple[list[tuple[int, int]], int, int]:
+    """Wrapped ``(x, y)`` per tab + total strip height + chip height. Chip widths are measured with the
+    IDLE style so the layout is STABLE regardless of which tab is active: the panel reserves this
+    height once at build time, and the active-highlight (drawn later) must not shift wrap points, or the
+    reserve would desync from the rendered strip (covering content / leaving a gap)."""
+    from overlay.draw.chip import render_chip
+
+    _, idle_cs = _tab_chip_styles(theme)
+    sprites = [render_chip(_tab_label(n), idle_cs) for n in names]
+    chip_h = max((sp.image.height for sp in sprites), default=0)
+    pad_x = theme.margin
+    x, y = pad_x, _TAB_PAD_Y
+    pos: list[tuple[int, int]] = []
+    for sp in sprites:
+        w = sp.image.width
+        if x > pad_x and x + w > width - pad_x:  # doesn't fit on this row → wrap to the next
+            x, y = pad_x, y + chip_h + _TAB_ROW_GAP
+        pos.append((x, y))
+        x += w + _TAB_GAP
+    total_h = (y + chip_h + _TAB_BOTTOM) if names else (_TAB_PAD_Y + _TAB_BOTTOM)
+    return pos, total_h, chip_h
+
+
+def tab_strip_height(names: list[str], width: int, theme: Theme = _DEFAULT_THEME) -> int:
+    """Total height of the (possibly multi-row) sticky tab strip for these names at this width — the
+    exact space the panel reserves above its header so the wrapped strip never covers content."""
+    return _tab_layout(names, width, theme)[1]
+
+
 def tab_row_height(theme: Theme = _DEFAULT_THEME) -> int:
-    """Pixel height of the sticky dict-tab strip — the space to reserve above the panel header so the
-    strip clears the reading/⊕/🔊 instead of covering them. Independent of the dictionary names, but
-    a kanji sample so JP font metrics (taller than Latin) are reflected in the height."""
-    return render_tab_row(["三"], 0, 64, theme)[0].height
+    """Height of a SINGLE-row strip — the one-row baseline / minimum reserve. A kanji sample so JP
+    font metrics (taller than Latin) are reflected."""
+    return _tab_layout(["三"], 64, theme)[1]
 
 
 def render_tab_row(
     names: list[str], active: int, width: int, theme: Theme = _DEFAULT_THEME
 ) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
-    """The sticky dict-tab row: one chip per dictionary, the active one highlighted.
-    Opaque background (theme.bg) so it occludes scrolled content when composited onto the
-    viewport. Returns (image, per-chip rects in row coords)."""
-    from overlay.draw.chip import ChipStyle, render_chip
+    """The sticky dict-tab strip: one chip per dictionary, the active one highlighted, WRAPPING onto
+    multiple rows so all tabs stay visible for many-dict words. Opaque background (theme.bg) so it
+    occludes scrolled content when composited onto the viewport. Returns (image, per-chip rects)."""
+    from overlay.draw.chip import render_chip
 
-    # Roomier than the freq pills below were making it look: bigger tap targets, real gaps, and a
-    # bottom margin + separator so the sticky row doesn't crowd the content tucked under it.
-    pad_x, pad_y, gap, bottom_pad = theme.margin, 9, 11, 7
-    sprites = []
-    for i, name in enumerate(names):
-        label = name if len(name) <= 10 else name[:9] + "…"
-        active_cs = ChipStyle(size=20, weight=600, bg=theme.purple, pad_h=11, pad_v=6, radius=9)
-        idle_cs = ChipStyle(
-            size=20,
-            weight=500,
-            fg=theme.muted,
-            bg=(0, 0, 0, 0),
-            border=(170, 170, 170, 255),
-            pad_h=11,
-            pad_v=6,
-            radius=9,
-        )
-        sprites.append(render_chip(label, active_cs if i == active else idle_cs))
-    chip_h = max((sp.image.height for sp in sprites), default=0)
-    h = pad_y + chip_h + bottom_pad
-    img = Image.new("RGBA", (width, max(h, 1)), theme.bg)
-    img.alpha_composite(Image.new("RGBA", (width, 1), (90, 90, 90, 120)), (0, h - 1))  # separator
+    active_cs, idle_cs = _tab_chip_styles(theme)
+    pos, total_h, _chip_h = _tab_layout(names, width, theme)
+    img = Image.new("RGBA", (width, max(total_h, 1)), theme.bg)
+    img.alpha_composite(Image.new("RGBA", (width, 1), (90, 90, 90, 120)), (0, total_h - 1))  # sep
     rects: list[tuple[int, int, int, int]] = []
-    x = pad_x
-    for sp in sprites:
-        img.alpha_composite(sp.image, (x, pad_y))
-        rects.append((x, pad_y, sp.image.width, sp.image.height))
-        x += sp.image.width + gap
+    for i, (name, (x, y)) in enumerate(zip(names, pos, strict=True)):
+        sp = render_chip(_tab_label(name), active_cs if i == active else idle_cs)
+        img.alpha_composite(sp.image, (x, y))
+        rects.append((x, y, sp.image.width, sp.image.height))
     return img, rects
 
 
