@@ -34,11 +34,12 @@ if (-not $wheel) {
 }
 $dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay_deinflect-*.tar.gz' |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$toolArgs = @('tool','install','--reinstall',"$($wheel.FullName)[jmdict]")
-if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $toolArgs += @('--with',$dein.FullName) }
+$withArgs = @()
+if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $withArgs = @('--with', $dein.FullName) }
+$spec = "$($wheel.FullName)[jmdict]"
 Write-Host "[saitenka] installing $($wheel.Name)[jmdict]"
-if ($DryRun) { Write-Host "DRY: uv $($toolArgs -join ' ')" }
-else { & uv @toolArgs }
+if ($DryRun) { Write-Host "DRY: uv tool install --reinstall $spec $($withArgs -join ' ')" }
+else { uv tool install --reinstall $spec @withArgs }
 
 # 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin). Resolve the exe
 # explicitly — the freshly-installed tool may still not be on PATH in this session on some setups.
