@@ -44,10 +44,12 @@ $dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay_deinflect-*.tar.g
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $withArgs = @()
 if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $withArgs = @('--with', $dein.FullName) }
-# fugashi (the MeCab tokenizer) has no free-threaded Windows wheel, so 3.14t needs a source build,
-# which needs a system MeCab (C:\mecab\libmecab.dll). Use 3.14t when MeCab is present (render speedup),
-# else regular 3.14 (fugashi from a wheel).
-$pyVer = if ((Test-Path 'C:\mecab\libmecab.dll') -or (Have 'mecab')) { '3.14+freethreaded' } else { '3.14' }
+# fugashi has no free-threaded Windows wheel, so 3.14t needs a source build of it, which needs BOTH the
+# MSVC++ Build Tools (14+) AND MeCab at C:\mecab. Only pick 3.14t when both are present; else 3.14 (wheel).
+$mecab = (Test-Path 'C:\mecab\libmecab.dll') -or (Have 'mecab')
+$msvc  = (Have 'cl') -or (Test-Path "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Tools\MSVC") `
+                     -or (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Tools\MSVC")
+$pyVer = if ($mecab -and $msvc) { '3.14+freethreaded' } else { '3.14' }
 $spec = "$($wheel.FullName)[jmdict]"
 Write-Host "[saitenka] installing $($wheel.Name)[jmdict] (python $pyVer)"
 if ($DryRun) { Write-Host "DRY: uv tool install --python $pyVer --reinstall $spec $($withArgs -join ' ')" }

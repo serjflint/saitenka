@@ -92,13 +92,19 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 if(Test-Path (Join-Path $Repo 'deinflect')){ $extra = 'full'; Log "including GPL-3.0 deinflect add-on (inflection chains)" }
 else { $extra = 'jmdict'; Warn "no deinflect\ in this checkout - installing [jmdict] only (no inflection chains)" }
 # Pick the Python: fugashi (the MeCab tokenizer) has no free-threaded Windows wheel, so 3.14t needs a
-# SOURCE build, which needs a system MeCab (C:\mecab\libmecab.dll). If MeCab is installed, use 3.14t
-# for the ~3.8x render win; otherwise regular 3.14 (fugashi from a wheel). Overriding the repo's
-# free-threaded .python-version pin so the default install never fails. (macOS/Linux keep the FT pin.)
+# SOURCE build of it, which needs BOTH the MSVC++ Build Tools (14.0+) AND MeCab extracted at C:\mecab.
+# Use 3.14t (the ~3.8x render win) only when both are present — else the build fails; otherwise regular
+# 3.14 (fugashi from a wheel). Overrides the repo's free-threaded .python-version pin so a default
+# install never fails. (macOS/Linux keep the FT pin — they have free-threaded fugashi wheels.)
 $mecab = (Test-Path 'C:\mecab\libmecab.dll') -or (Have mecab)
-$pyVer = if($mecab){ '3.14+freethreaded' } else { '3.14' }
-if($mecab){ Log "MeCab found - using free-threaded 3.14t (fugashi builds from source)" }
-else { Log "no system MeCab - using standard 3.14 (install MeCab to C:\mecab for the 3.14t render speedup)" }
+$msvc  = (Have cl) -or (Test-Path "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Tools\MSVC") `
+                   -or (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Tools\MSVC")
+if($mecab -and $msvc){ $pyVer = '3.14+freethreaded'; Log "MeCab + MSVC++ found - using free-threaded 3.14t (fugashi builds from source)" }
+else {
+  $pyVer = '3.14'
+  $need = @(); if(-not $msvc){ $need += 'MSVC++ Build Tools 14+' }; if(-not $mecab){ $need += 'MeCab at C:\mecab' }
+  Log ("standard 3.14 - for the 3.14t render speedup, install " + ($need -join ' + ') + ", then re-run")
+}
 $installArgs = @('tool','install','--python',$pyVer,'--reinstall',"$Repo\overlay[$extra]")
 if(Have uv){
   Log "Installing/updating saitenka-overlay[$extra] from $Repo\overlay"
