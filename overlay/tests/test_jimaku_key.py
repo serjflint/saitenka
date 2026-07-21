@@ -102,3 +102,15 @@ def test_store_key_uses_keyring_when_available(monkeypatch, tmp_path):
     loaded = load_config()
     assert loaded["jimaku"]["fetch"] is True
     assert "key" not in loaded["jimaku"]  # the secret stays in the keyring, not the config
+
+
+def test_resolve_strips_whitespace_and_newlines(monkeypatch):
+    """A stray trailing newline/space (paste artifact) must be stripped — else urllib rejects the
+    Authorization header (ValueError: Invalid header value)."""
+    monkeypatch.delenv("JIMAKU_API_KEY", raising=False)
+    monkeypatch.setattr(jimaku, "keychain_get", lambda: "  kc-key\n")
+    assert jimaku.resolve_jimaku_key() == ("kc-key", "keychain")
+    assert jimaku.resolve_jimaku_key("  cfg-key \n") == ("cfg-key", "config")
+    monkeypatch.setenv("JIMAKU_API_KEY", "env-key\n")
+    monkeypatch.setattr(jimaku, "keychain_get", lambda: None)
+    assert jimaku.resolve_jimaku_key() == ("env-key", "env")

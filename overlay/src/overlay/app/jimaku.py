@@ -96,15 +96,19 @@ def keychain_set(key: str) -> bool:
 
 def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
     """Return ``(key, source)`` with precedence explicit (config/CLI) > ``$JIMAKU_API_KEY`` > macOS
-    Keychain. ``source`` is ``config``/``env``/``keychain``/``none`` — reported by doctor."""
-    if explicit:
-        return explicit, "config"
-    env = os.environ.get("JIMAKU_API_KEY")
-    if env:
-        return env, "env"
-    kc = keychain_get()
-    if kc:
-        return kc, "keychain"
+    Keychain. ``source`` is ``config``/``env``/``keychain``/``none`` — reported by doctor.
+
+    Every source is ``.strip()``-ed: a stray trailing newline/space (easy to introduce when pasting a
+    key, or reading it back from a store) would otherwise make urllib reject the ``Authorization``
+    header outright (``ValueError: Invalid header value``)."""
+    for value, source in (
+        (explicit, "config"),
+        (os.environ.get("JIMAKU_API_KEY"), "env"),
+        (keychain_get(), "keychain"),
+    ):
+        cleaned = (value or "").strip()
+        if cleaned:
+            return cleaned, source
     return None, "none"
 
 
@@ -173,6 +177,11 @@ class JimakuClient:
                     ) from e
                 except urllib.error.URLError as e:  # DNS / timeout / connection reset — transient
                     raise _JimakuRetryable(f"jimaku network error for {path}: {e.reason}") from e
+                except ValueError as e:  # illegal Authorization header — a stray char in the key
+                    raise JimakuError(
+                        f"jimaku request build failed for {path}: {e} — re-set the key with "
+                        "`saitenka-overlay set-jimaku-key`"
+                    ) from e
         raise JimakuError(f"jimaku request to {path} failed after retries")  # unreachable
 
     def search(self, query: str, anime: bool = True) -> list[dict]:
