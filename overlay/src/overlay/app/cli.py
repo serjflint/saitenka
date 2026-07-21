@@ -307,6 +307,9 @@ def run(
             f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
             f"→ {mine_deck} ({mine_model})"
         )
+        log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
+    else:
+        log.info("mining disabled (no [mine] config / --no-mine)")
 
     dict_set = None
     if dict_paths or freq_paths or pitch_paths:
@@ -345,6 +348,12 @@ def run(
                 print("frequency:", [f.title for f in dict_set.freqs])
             if dict_set.pitches:
                 print("pitch:", [p.title for p in dict_set.pitches])
+            log.info(
+                "dictionaries loaded: %d defn, %d freq, %d pitch",
+                len(dict_set.dicts),
+                len(dict_set.freqs),
+                len(dict_set.pitches),
+            )
 
     scorer = None
     if color or known or known_cfg or freq_paths:
@@ -380,6 +389,9 @@ def run(
     jimaku_cfg = _jm if isinstance(_jm, dict) else {}
     jimaku_on = jimaku_should_fetch(
         jimaku, bool(jimaku_cfg.get("fetch")), str(video_path) if video else None, slang
+    )
+    log.info(
+        "jimaku fetch: %s (flag=%s cfg_fetch=%s)", jimaku_on, jimaku, bool(jimaku_cfg.get("fetch"))
     )
     sub_path = en_sub_path = None
     if sub_file:
@@ -421,9 +433,13 @@ def run(
         return 2
     # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
     sock = default_ipc_path(tmp.name)
+    # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
+    # track select failures) is otherwise invisible in a bug report. Overwritten each run.
+    mpv_log = cache_dir() / "mpv.log"
     cmd = [
         mpv_bin,
         f"--input-ipc-server={sock}",
+        f"--log-file={mpv_log}",
         "--force-window=yes",
         "--keep-open=yes",
         f"--slang={slang}",

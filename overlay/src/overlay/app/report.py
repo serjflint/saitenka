@@ -150,6 +150,23 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     if include_log and log_path.exists():
         members["overlay.log"] = redact(log_path.read_text(encoding="utf-8", errors="replace"))
 
+    # mpv's own log (run launches mpv with --log-file) — the codec / sub-load / track-select side that
+    # the overlay log can't see. Redacted + gated like the overlay log (it holds the video path).
+    mpv_log = cache_dir() / "mpv.log"
+    if include_log and mpv_log.exists():
+        members["mpv.log"] = redact(mpv_log.read_text(encoding="utf-8", errors="replace"))
+
+    # Dict inventory: what's actually on disk (data-dir zips + built index cache) — makes "copied but
+    # not registered" and "mis-classified into the wrong bucket" visible without the user's machine.
+    from overlay.app.config import dicts_data_dir
+
+    data, idx = dicts_data_dir(), cache_dir() / "dicts"
+    inv = [f"[data zips] {data}"]
+    inv += [f"  {p.name}" for p in sorted(data.glob("*.zip"))] if data.exists() else ["  (none)"]
+    inv += [f"[index cache] {idx}"]
+    inv += [f"  {p.name}" for p in sorted(idx.glob("*.sqlite"))] if idx.exists() else ["  (none)"]
+    members["dicts.listing.txt"] = _scrub_home("\n".join(inv) + "\n")
+
     # Recent crash reports (already redacted at write time; the whole point of capturing them).
     from overlay.app.crashlog import crash_dir
 
@@ -170,8 +187,8 @@ def _manifest(members: dict[str, str], *, include_log: bool) -> str:
         "PRIVACY — read before sharing:",
         "  • API keys / tokens have been redacted from the config and log.",
         "  • This bundle is created locally and is NEVER uploaded anywhere by saitenka.",
-        "  • It DOES include your config, mpv.conf, and (unless --no-log) the overlay log, which",
-        "    may contain video filenames and mined sentences. Home paths contain your OS username.",
+        "  • It DOES include your config, mpv.conf, and (unless --no-log) the overlay + mpv logs,",
+        "    which may contain video filenames and mined sentences. Home paths contain your username.",
         "  • It does NOT include dictionaries, your Anki collection, videos, or other scripts' code.",
         "",
         f"log included: {'yes' if include_log else 'no (--no-log)'}",
