@@ -116,6 +116,24 @@ def test_resolve_strips_whitespace_and_newlines(monkeypatch):
     assert jimaku.resolve_jimaku_key() == ("env-key", "env")
 
 
+def test_subs_cache_roundtrip(monkeypatch, tmp_path):
+    """A synced sub is cached per (video, title, episode)+size and reused on a rewatch; a different
+    episode or a re-encoded (resized) video misses so it re-fetches."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "[Erai] Show - 01.mkv"
+    video.write_bytes(b"x" * 100)
+    src = tmp_path / "dl.srt"
+    src.write_text("1\n00:00:01,000 --> 00:00:02,000\nねこ\n")
+
+    assert jimaku.cached_subs(video, "Show", 1) is None  # miss before store
+    dest = jimaku.store_subs(video, "Show", 1, src)
+    assert dest.exists() and dest.read_text() == src.read_text()
+    assert jimaku.cached_subs(video, "Show", 1) == dest  # rewatch → hit
+    assert jimaku.cached_subs(video, "Show", 2) is None  # different episode misses
+    video.write_bytes(b"x" * 200)  # re-encode changes the size
+    assert jimaku.cached_subs(video, "Show", 1) is None  # → miss, re-fetch
+
+
 def test_key_paste_warning_flags_short_key():
     """A key far shorter than a real ~58-char token → warning (the hidden-prompt Ctrl+V trap that
     lands a single char on Windows). A full-length key → None; empty → None (callers handle empty as

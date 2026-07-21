@@ -397,23 +397,37 @@ def run(
     if sub_file:
         sub_path = Path(sub_file).expanduser()
     elif jimaku_on:
-        from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
+        from overlay.app.jimaku import (
+            JimakuClient,
+            JimakuError,
+            cached_subs,
+            parse_filename,
+            store_subs,
+        )
 
         title, ep = parse_filename(video_path)
         title = jimaku_title or title
         ep = episode if episode is not None else ep
-        print(f"jimaku: fetching subs for {title!r} ep {ep}…")
-        try:
-            sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
-            print("jimaku: got", sub_path.name)
-            if resync and video_path.exists():
-                from overlay.app.resync import maybe_resync
+        hit = cached_subs(video_path, title, ep) if video_path.exists() else None
+        if hit:
+            print("jimaku: using cached subs", hit.name)
+            sub_path = hit
+            log.info("jimaku cache hit: %s", hit)
+        else:
+            print(f"jimaku: fetching subs for {title!r} ep {ep}…")
+            try:
+                sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
+                print("jimaku: got", sub_path.name)
+                if resync and video_path.exists():
+                    from overlay.app.resync import maybe_resync
 
-                print("jimaku: resyncing…")
-                sub_path = maybe_resync(video_path, sub_path, enabled=True)
-                print("jimaku: resync →", sub_path.name)
-        except JimakuError as e:
-            print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
+                    print("jimaku: resyncing…")
+                    sub_path = maybe_resync(video_path, sub_path, enabled=True)
+                    print("jimaku: resync →", sub_path.name)
+                if video_path.exists():  # cache the finished (synced) sub for the next rewatch
+                    sub_path = store_subs(video_path, title, ep, sub_path)
+            except JimakuError as e:
+                print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
     elif not video:
         sub_path = tmp / "line.srt"
         _make_srt(sub_path, dur, DEMO_LINE)
