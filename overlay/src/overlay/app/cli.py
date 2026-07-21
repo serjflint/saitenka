@@ -58,6 +58,24 @@ def _resolve_paths(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
     return expand_paths(list(flag_vals or []) or cfg.get(key) or [])
 
 
+def jimaku_should_fetch(
+    explicit_flag: bool, cfg_fetch: bool, video: str | None, slang: str = "ja,jpn,jp", probe=None
+) -> bool:
+    """Decide whether ``run`` fetches jimaku. Explicit ``--jimaku`` always wins. Config-driven fetch
+    (``[jimaku].fetch``) fires ONLY when the file has no embedded JP subtitle track — so a global
+    fetch=true doesn't override good embedded subs (matching what ``attach`` does over IPC). Unknown
+    (can't probe) → fetch, since the point of a configured key is to provide subs."""
+    if not video:  # no real file (demo/test clip) — nothing to fetch for
+        return False
+    if explicit_flag:
+        return True
+    if not cfg_fetch:
+        return False
+    if probe is None:
+        from overlay.app.media import has_sub_lang as probe
+    return probe(video, slang) is not True  # fetch unless a JP track is definitely present
+
+
 def _argv_config_override(argv: list[str]) -> str | None:
     """Pre-scan argv for ``--config PATH`` (phase 1 of the legacy two-phase parse)."""
     for i, tok in enumerate(argv):
@@ -317,11 +335,13 @@ def run(
         _make_clip(video_path, dur, width, height)
 
     # subtitle source: explicit file > jimaku fetch > embedded track (--slang) > generated demo line.
-    # jimaku fires on --jimaku OR when the config enables it (`[jimaku].fetch = true`, written by
-    # `set-jimaku-key`/`setup`) — so a configured key auto-fetches JP subs for JP-less files.
+    # jimaku fires on --jimaku OR when the config enables it (`[jimaku].fetch = true`); the config path
+    # only fetches when the file has NO embedded JP track, so it doesn't override good embedded subs.
     _jm = cfg.get("jimaku")
     jimaku_cfg = _jm if isinstance(_jm, dict) else {}
-    jimaku_on = jimaku or bool(jimaku_cfg.get("fetch"))
+    jimaku_on = jimaku_should_fetch(
+        jimaku, bool(jimaku_cfg.get("fetch")), str(video_path) if video else None, slang
+    )
     sub_path = en_sub_path = None
     if sub_file:
         sub_path = Path(sub_file).expanduser()
@@ -617,6 +637,29 @@ def set_jimaku_key(
         if backup:
             print(f"backed up existing config → {backup}")
     return 0
+
+
+@app.command(name="jimaku-check")
+def jimaku_check(
+    query: Annotated[str, cyclopts.Parameter(help="anime title to test-search")] = "Spy x Family",
+) -> int:  # pragma: no cover — thin CLI wrapper; JimakuClient is tested
+    """Diagnose jimaku without launching a video: resolve the key and run a test search, printing the
+    exact outcome (key found? 200 OK / 401 bad key / 400 + server message / network error)."""
+    from overlay.app.jimaku import JimakuClient, JimakuError, resolve_jimaku_key
+
+    key, src = resolve_jimaku_key()
+    if not key:
+        print("jimaku key: NOT configured — run `saitenka-overlay set-jimaku-key`", file=sys.stderr)
+        return 1
+    print(f"jimaku key: found (from {src}), {len(key)} chars")
+    try:
+        entries = JimakuClient().search(query)
+        head = f" — first: {entries[0].get('name')!r}" if entries else ""
+        print(f"search {query!r}: OK — {len(entries)} entrie(s){head}")
+        return 0
+    except JimakuError as e:
+        print(f"search {query!r}: {e}", file=sys.stderr)
+        return 1
 
 
 @app.command(name="import-settings", alias="import-yomitan")

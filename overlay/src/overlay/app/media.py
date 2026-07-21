@@ -152,6 +152,39 @@ def audio_duration(path: str | Path) -> float | None:
         return None
 
 
+def has_sub_lang(path: str | Path, langs: str = "ja,jpn,jp") -> bool | None:
+    """True if the file carries a SUBTITLE stream tagged with one of ``langs`` (comma-sep), False if
+    not, ``None`` if we couldn't probe (ffprobe missing / unreadable). ``run`` uses this to auto-fetch
+    jimaku ONLY when a file has no embedded JP subs (matching what ``attach`` does over IPC)."""
+    from overlay.mpvio.discover import find_tool
+
+    wanted = {s.strip().lower() for s in langs.split(",") if s.strip()}
+    try:
+        out = subprocess.run(
+            [
+                find_tool("ffprobe") or "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "s",
+                "-show_entries",
+                "stream_tags=language",
+                "-of",
+                "default=nw=1:nk=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    found = {line.strip().lower() for line in out.stdout.splitlines() if line.strip()}
+    return bool(found & wanted)
+
+
 def current_timespan(ipc) -> Timespan | None:
     """The current subtitle's [start, end] in file-timeline seconds, or None."""
     start = ipc.command("get_property", "sub-start").get("data")

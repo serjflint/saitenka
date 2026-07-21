@@ -211,3 +211,18 @@ def test_version_is_wired_to_package_metadata():
 
     assert overlay.__version__ == version("saitenka-overlay")
     assert app.version not in (None, "", "0.0.0")
+
+
+def test_jimaku_should_fetch_decision():
+    """run fetches jimaku on an explicit flag always; config-driven fetch only when there's no
+    embedded JP track (so it never overrides good embedded subs)."""
+    from overlay.app.cli import jimaku_should_fetch as f
+
+    assert (
+        f(True, False, "v.mkv", probe=lambda v, s: True) is True
+    )  # --jimaku wins over embedded JP
+    assert f(True, True, None) is False  # no video → never
+    assert f(False, True, "v.mkv", probe=lambda v, s: False) is True  # config + no JP track → fetch
+    assert f(False, True, "v.mkv", probe=lambda v, s: True) is False  # config + JP track → skip
+    assert f(False, True, "v.mkv", probe=lambda v, s: None) is True  # config + can't probe → fetch
+    assert f(False, False, "v.mkv", probe=lambda v, s: False) is False  # neither → never
