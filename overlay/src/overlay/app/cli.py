@@ -316,11 +316,16 @@ def run(
         print(f"no video — generating a {width}x{height} test clip…")
         _make_clip(video_path, dur, width, height)
 
-    # subtitle source: explicit file > jimaku fetch > embedded track (--slang) > generated demo line
+    # subtitle source: explicit file > jimaku fetch > embedded track (--slang) > generated demo line.
+    # jimaku fires on --jimaku OR when the config enables it (`[jimaku].fetch = true`, written by
+    # `set-jimaku-key`/`setup`) — so a configured key auto-fetches JP subs for JP-less files.
+    _jm = cfg.get("jimaku")
+    jimaku_cfg = _jm if isinstance(_jm, dict) else {}
+    jimaku_on = jimaku or bool(jimaku_cfg.get("fetch"))
     sub_path = en_sub_path = None
     if sub_file:
         sub_path = Path(sub_file).expanduser()
-    elif jimaku:
+    elif jimaku_on:
         from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
 
         title, ep = parse_filename(video_path)
@@ -328,7 +333,7 @@ def run(
         ep = episode if episode is not None else ep
         print(f"jimaku: fetching subs for {title!r} ep {ep}…")
         try:
-            sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
+            sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
             print("jimaku: got", sub_path.name)
             if resync and video_path.exists():
                 from overlay.app.resync import maybe_resync

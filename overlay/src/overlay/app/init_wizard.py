@@ -94,18 +94,22 @@ def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, P
     """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
     via ``keyring`` (macOS Keychain / Windows Credential Locker / Linux Secret Service), else
     ``[jimaku].key`` in the config when no keyring backend exists (headless Linux). Returns
-    ``(method, backup)`` where method is ``"keyring"`` or ``"config"``."""
+    ``(method, backup)`` where method is ``"keyring"`` or ``"config"``.
+
+    Either way it writes ``[jimaku].fetch = true``: setting a key MEANS "fetch JP subs from jimaku when
+    a file has no JP track", so ``run``/``attach`` act on it without a flag. It also gives the installer
+    a plain-text config marker that jimaku is set up (the keyring isn't cheaply readable from a shell)."""
+    from overlay.app.config import load_config
     from overlay.app.jimaku import keychain_set
 
-    if keychain_set(k):
-        return "keyring", None
-    from overlay.app.config import load_config
-
+    method = "keyring" if keychain_set(k) else "config"
     cfg = load_config()
     jm = dict(cfg.get("jimaku") or {})
-    jm["key"] = k
+    jm["fetch"] = True
+    if method == "config":
+        jm["key"] = k  # no OS secret store available — persist the key in the config (plaintext)
     backup = write_config({**cfg, "jimaku": jm}, confirm=confirm)
-    return "config", backup
+    return method, backup
 
 
 def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secret I/O

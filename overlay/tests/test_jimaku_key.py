@@ -70,8 +70,8 @@ def test_client_error_names_the_keychain_command(monkeypatch):
 
 
 def test_store_key_falls_back_to_config_without_keyring(monkeypatch, tmp_path):
-    """No keyring backend → the key is written into [jimaku].key, resolves from config, and preserves
-    pre-existing tables."""
+    """No keyring backend → the key is written into [jimaku].key, resolves from config, enables fetch,
+    and preserves pre-existing tables."""
     from overlay.app import init_wizard
     from overlay.app.config import load_config
 
@@ -84,12 +84,21 @@ def test_store_key_falls_back_to_config_without_keyring(monkeypatch, tmp_path):
     assert method == "config"
     loaded = load_config()
     assert loaded["jimaku"]["key"] == "MYKEY123"
+    assert loaded["jimaku"]["fetch"] is True  # setting a key enables jimaku fetch
     assert loaded["mine"]["key"] == "Ctrl+m"  # dumps_toml preserved the other table
 
 
-def test_store_key_uses_keyring_when_available(monkeypatch):
+def test_store_key_uses_keyring_when_available(monkeypatch, tmp_path):
+    """Keyring stores the secret; the config still records [jimaku].fetch=true (so run/attach act on
+    it and the installer can see jimaku is set up) but NOT the key itself."""
     from overlay.app import init_wizard
+    from overlay.app.config import load_config
 
+    cfg = tmp_path / "overlay.toml"
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda k: True)
-    method, backup = init_wizard.store_jimaku_key("K")
-    assert method == "keyring" and backup is None
+    method, _ = init_wizard.store_jimaku_key("K")
+    assert method == "keyring"
+    loaded = load_config()
+    assert loaded["jimaku"]["fetch"] is True
+    assert "key" not in loaded["jimaku"]  # the secret stays in the keyring, not the config

@@ -19,6 +19,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import stamina
+
 log = logging.getLogger(__name__)
 
 BASE = "https://jimaku.cc/api"
@@ -37,6 +39,28 @@ KEYCHAIN_ACCOUNT = "jimaku"
 
 class JimakuError(RuntimeError):
     pass
+
+
+class _JimakuRetryable(JimakuError):
+    """A TRANSIENT jimaku failure — HTTP 429 (rate limit), 5xx, or a network error. ``stamina`` retries
+    these with backoff; a client error (400/401/404) raises plain ``JimakuError`` and is NOT retried."""
+
+
+def _http_error_detail(e: urllib.error.HTTPError) -> str:
+    """jimaku's own error body (it returns JSON like ``{"error": "..."}``) as a short suffix — a bare
+    "Bad Request" is useless for debugging."""
+    try:
+        body = (e.read() or b"").decode("utf-8", "replace").strip()
+    except Exception:  # pragma: no cover — best-effort; never mask the original error
+        log.debug("reading jimaku error body failed", exc_info=True)
+        return ""
+    if not body:
+        return ""
+    try:
+        body = json.loads(body).get("error", body)
+    except (ValueError, AttributeError):
+        pass
+    return f" — {str(body)[:300]}"
 
 
 def keychain_get() -> str | None:
@@ -124,27 +148,32 @@ class JimakuClient:
         if q:
             url += "?" + q
         req = urllib.request.Request(url, headers={"Authorization": self.api_key})
-        try:
-            with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
-                return json.loads(r.read())
-        except urllib.error.HTTPError as e:  # 401 (bad/absent key), 400 (bad query), 404, …
-            # Surface jimaku's own error body (it returns JSON like {"error": "..."}) — a bare
-            # "Bad Request" is useless for debugging. 401 almost always means the API key.
-            detail = ""
-            try:
-                body = (e.read() or b"").decode("utf-8", "replace").strip()
-                if body:
-                    try:
-                        body = json.loads(body).get("error", body)
-                    except (ValueError, AttributeError):
-                        pass
-                    detail = f" — {str(body)[:300]}"
-            except Exception:
-                log.debug("reading jimaku error body failed", exc_info=True)
-            hint = (
-                "  (check your API key: `saitenka-overlay set-jimaku-key`)" if e.code == 401 else ""
-            )
-            raise JimakuError(f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}") from e
+        # Retry transient failures (429 / 5xx / network) with backoff; client errors (400/401/404) are
+        # raised immediately with jimaku's error body (retrying them can't help).
+        for attempt in stamina.retry_context(
+            on=_JimakuRetryable, attempts=4, wait_initial=1.0, wait_max=8.0
+        ):
+            with attempt:
+                try:
+                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
+                        return json.loads(r.read())
+                except urllib.error.HTTPError as e:  # 400/401/404 client · 429/5xx transient
+                    detail = _http_error_detail(e)
+                    if e.code == 429 or e.code >= 500:
+                        raise _JimakuRetryable(
+                            f"jimaku {e.code} for {path}: {e.reason}{detail}"
+                        ) from e
+                    hint = (
+                        "  (check your API key: `saitenka-overlay set-jimaku-key`)"
+                        if e.code == 401
+                        else ""
+                    )
+                    raise JimakuError(
+                        f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}"
+                    ) from e
+                except urllib.error.URLError as e:  # DNS / timeout / connection reset — transient
+                    raise _JimakuRetryable(f"jimaku network error for {path}: {e.reason}") from e
+        raise JimakuError(f"jimaku request to {path} failed after retries")  # unreachable
 
     def search(self, query: str, anime: bool = True) -> list[dict]:
         return self._get("/entries/search", query=query, anime=str(anime).lower())
