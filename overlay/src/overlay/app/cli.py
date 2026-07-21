@@ -284,6 +284,19 @@ def run(
             "       --mine  (see RUNNING.md §3)."
         )
 
+    # Anki-backed features — mining, and known-word coloring from a deck — need Anki running. Start
+    # it for the user (like `attach` does) instead of crashing on a refused connection; warn and
+    # degrade (coloring → freq+JLPT, mining unavailable) if it can't be reached. Fast when Anki's up.
+    if mine or known_cfg:
+        from overlay.app.anki import ensure_anki_running
+
+        if not ensure_anki_running():
+            print(
+                "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect add-on). "
+                "Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
+                file=sys.stderr,
+            )
+
     anki = mine_conf = None
     if mine:
         from overlay.app.anki import Anki, MineConfig
@@ -339,7 +352,14 @@ def run(
         from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
 
         if known_cfg:
-            kw = KnownWords.from_ankiconnect(known_cfg)
+            try:
+                kw = KnownWords.from_ankiconnect(known_cfg)
+            except Exception as e:  # Anki still closed / AnkiConnect down — don't crash the run
+                print(
+                    f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only",
+                    file=sys.stderr,
+                )
+                kw = KnownWords.from_set([w for w in known.split(",") if w])
         else:
             kw = KnownWords.from_set([w for w in known.split(",") if w])
         fd = FreqDict.load(freq_paths[0]) if freq_paths else None
