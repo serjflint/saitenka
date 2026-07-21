@@ -315,8 +315,8 @@ def check_free_threading() -> Check:
             return Check(
                 "free-threading",
                 "ok",
-                "standard 3.14 build — free-threading isn't available on Windows yet (the tokenizer "
-                "has no 3.14t wheels); rendering is single-threaded but fine",
+                "standard 3.14 build — fine. For the ~3.8x render win on Windows install MeCab (to "
+                "C:\\mecab), then reinstall on 3.14t so fugashi builds from source (no 3.14t wheels yet)",
             )
         return Check(
             "free-threading",

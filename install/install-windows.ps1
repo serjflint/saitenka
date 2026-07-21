@@ -91,11 +91,15 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 # plain `saitenka-overlay` has no jamdict-data at all — that upstream sdist is what failed here).
 if(Test-Path (Join-Path $Repo 'deinflect')){ $extra = 'full'; Log "including GPL-3.0 deinflect add-on (inflection chains)" }
 else { $extra = 'jmdict'; Warn "no deinflect\ in this checkout - installing [jmdict] only (no inflection chains)" }
-# Force REGULAR 3.14 (not the repo's free-threaded .python-version pin): fugashi (the MeCab tokenizer)
-# ships no free-threaded Windows wheels yet, so a 3.14t install builds it from source and fails
-# (needs a system MeCab). Regular 3.14 has a wheel and works; free-threading's ~3.8x render win isn't
-# reachable on Windows until fugashi publishes 3.14t wheels. (macOS/Linux keep the FT pin.)
-$installArgs = @('tool','install','--python','3.14','--reinstall',"$Repo\overlay[$extra]")
+# Pick the Python: fugashi (the MeCab tokenizer) has no free-threaded Windows wheel, so 3.14t needs a
+# SOURCE build, which needs a system MeCab (C:\mecab\libmecab.dll). If MeCab is installed, use 3.14t
+# for the ~3.8x render win; otherwise regular 3.14 (fugashi from a wheel). Overriding the repo's
+# free-threaded .python-version pin so the default install never fails. (macOS/Linux keep the FT pin.)
+$mecab = (Test-Path 'C:\mecab\libmecab.dll') -or (Have mecab)
+$pyVer = if($mecab){ '3.14+freethreaded' } else { '3.14' }
+if($mecab){ Log "MeCab found - using free-threaded 3.14t (fugashi builds from source)" }
+else { Log "no system MeCab - using standard 3.14 (install MeCab to C:\mecab for the 3.14t render speedup)" }
+$installArgs = @('tool','install','--python',$pyVer,'--reinstall',"$Repo\overlay[$extra]")
 if(Have uv){
   Log "Installing/updating saitenka-overlay[$extra] from $Repo\overlay"
   if($DryRun){ Write-Host "  DRY: uv $($installArgs -join ' ')" }

@@ -44,12 +44,14 @@ $dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay_deinflect-*.tar.g
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $withArgs = @()
 if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $withArgs = @('--with', $dein.FullName) }
-# Force REGULAR 3.14: fugashi (the MeCab tokenizer) has no free-threaded Windows wheels yet, so a
-# 3.14t interpreter would build it from source and fail. Regular 3.14 has a wheel and works.
+# fugashi (the MeCab tokenizer) has no free-threaded Windows wheel, so 3.14t needs a source build,
+# which needs a system MeCab (C:\mecab\libmecab.dll). Use 3.14t when MeCab is present (render speedup),
+# else regular 3.14 (fugashi from a wheel).
+$pyVer = if ((Test-Path 'C:\mecab\libmecab.dll') -or (Have 'mecab')) { '3.14+freethreaded' } else { '3.14' }
 $spec = "$($wheel.FullName)[jmdict]"
-Write-Host "[saitenka] installing $($wheel.Name)[jmdict]"
-if ($DryRun) { Write-Host "DRY: uv tool install --python 3.14 --reinstall $spec $($withArgs -join ' ')" }
-else { uv tool install --python 3.14 --reinstall $spec @withArgs }
+Write-Host "[saitenka] installing $($wheel.Name)[jmdict] (python $pyVer)"
+if ($DryRun) { Write-Host "DRY: uv tool install --python $pyVer --reinstall $spec $($withArgs -join ' ')" }
+else { uv tool install --python $pyVer --reinstall $spec @withArgs }
 
 # 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin). Resolve the exe
 # explicitly — the freshly-installed tool may still not be on PATH in this session on some setups.
