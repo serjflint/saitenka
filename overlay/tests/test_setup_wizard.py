@@ -128,3 +128,24 @@ def test_anki_config_fragment():
     }
     assert f("", "", "D", "M") == {"mine": {"deck": "D", "model": "M"}}  # no deck → no [known]
     assert f("K", "", "D", "M")["known"] == {"K": ["Expression"]}  # blank field → default
+
+
+def test_rank_decks_biggest_first():
+    from overlay.app.setup_wizard import rank_decks
+
+    assert rank_decks(["A", "B", "C"], {"A": 10, "B": 500, "C": 0}) == ["B", "A", "C"]
+    assert rank_decks(["z", "a"], {}) == ["a", "z"]  # unknown sizes → alphabetical
+
+
+def test_default_known_deck_prefers_saitenka_known_then_largest():
+    from overlay.app.setup_wizard import default_known_deck as d
+
+    # Saitenka::Known wins even when empty (it's the config convention)
+    assert d(["Big", "Saitenka::Known"], {"Big": 999, "Saitenka::Known": 0}) == "Saitenka::Known"
+    # any ::Known leaf is next
+    assert d(["Big", "JP::Known"], {"Big": 999, "JP::Known": 3}) == "JP::Known"
+    # else the largest non-empty, non-Default deck
+    assert d(["Default", "Vocab", "Small"], {"Default": 5, "Vocab": 800, "Small": 10}) == "Vocab"
+    # nothing qualifies → '' so the caller offers skip
+    assert d(["Default"], {"Default": 5}) == ""
+    assert d(["Empty"], {"Empty": 0}) == ""

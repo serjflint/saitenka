@@ -171,6 +171,38 @@ def _deck_fields(anki, deck: str) -> list[str]:  # pragma: no cover — needs a 
     return []
 
 
+def _deck_sizes(anki) -> dict[str, int]:  # pragma: no cover — needs a live AnkiConnect
+    """Deck name → total card count, in ONE ``getDeckStats`` call, for ranking + a sensible default."""
+    try:
+        ids = anki._call("deckNamesAndIds") or {}
+        stats = anki._call("getDeckStats", decks=list(ids.keys())) or {}
+        return {s.get("name", ""): int(s.get("total_in_deck", 0)) for s in stats.values()}
+    except Exception:
+        log.debug("reading deck stats failed", exc_info=True)
+        return {}
+
+
+def rank_decks(decks: list[str], sizes: dict[str, int]) -> list[str]:
+    """Decks biggest-first (ties alphabetical) — the most likely known-word decks float to the top so
+    a 50-deck collection doesn't need scrolling."""
+    return sorted(decks, key=lambda d: (-sizes.get(d, 0), d))
+
+
+def default_known_deck(decks: list[str], sizes: dict[str, int]) -> str:
+    """A sensible default 'words I already know' deck: prefer Saitenka's own ``Saitenka::Known`` (or any
+    ``…::Known`` leaf) if present — that's the config convention — else the largest deck that isn't
+    empty or the built-in ``Default``. ``''`` when nothing qualifies, so the caller offers skip."""
+    if "Saitenka::Known" in decks:
+        return "Saitenka::Known"
+    known_leaf = next((d for d in rank_decks(decks, sizes) if d.rsplit("::", 1)[-1] == "Known"), "")
+    if known_leaf:
+        return known_leaf
+    for d in rank_decks(decks, sizes):
+        if sizes.get(d, 0) > 0 and d.lower() != "default":
+            return d
+    return ""
+
+
 def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, needs live AnkiConnect
     """Configure the Anki KNOWN-words deck (drives coloring) + the MINING deck/model over AnkiConnect.
     Skips cleanly when Anki isn't reachable — the config's ``[known]``/``[mine]`` can be set later."""
@@ -193,15 +225,26 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
         print("  couldn't query AnkiConnect (decks/models) — skipping")
         return
 
-    print("\n  Decks:")
-    for i, d in enumerate(decks, 1):
-        print(f"    {i:2}. {d}")
+    sizes = _deck_sizes(anki)
+    ranked = rank_decks(decks, sizes)
+    default_known = default_known_deck(decks, sizes)
+    top = ranked[:12]  # don't dump 50+ decks; show the biggest, accept any typed name below
+    print("\n  Decks (largest first):")
+    for i, d in enumerate(top, 1):
+        n = sizes.get(d, 0)
+        print(f"    {i:2}. {d}" + (f"  ({n} cards)" if n else ""))
+    if len(ranked) > len(top):
+        print(f"    … +{len(ranked) - len(top)} more — type a deck name to match one not listed")
 
     cfg = load_config()
     cur = dict(cfg.get("mine") or {})
-    known_deck = _prompt(
-        "  Deck of words you already KNOW (name/number → coloring; blank to skip)?", decks
+    raw_known = _prompt(
+        f"  Deck of words you already KNOW → coloring [{default_known or 'none'}]; 'n' to skip?",
+        top,
     )
+    # 'n'/skip → no known deck; blank → the default (Saitenka::Known or largest); else the typed name.
+    skip = raw_known.lower() in ("n", "no", "skip", "-")
+    known_deck = "" if skip else (raw_known or default_known)
     known_field = ""
     if known_deck:
         fields = _deck_fields(anki, known_deck)
