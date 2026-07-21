@@ -1,6 +1,6 @@
 """Fetch Japanese subtitles from jimaku.cc (the modern kitsunekko replacement).
 
-For files without an embedded Japanese track. Needs a free API key (jimaku.cc → account → API key).
+For files without an embedded Japanese track. Needs a free API key (https://jimaku.cc/profile).
 The key is resolved with precedence ``explicit (config/CLI) > $JIMAKU_API_KEY > macOS Keychain`` —
 the Keychain is the one that works under a GUI-launched (plugin-mode) mpv, which doesn't inherit the
 shell's env. Flow: search anime by title → pick the entry → list the episode's files → download the
@@ -22,6 +22,13 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 BASE = "https://jimaku.cc/api"
+
+# Shown at the interactive key prompt (CLI `set-jimaku-key` + the setup wizard) so the user knows where
+# to get the token. jimaku.cc accounts are free and require no personal data.
+KEY_HELP = (
+    "Get a free jimaku.cc API key: sign in at https://jimaku.cc, then copy it from "
+    "https://jimaku.cc/profile — API docs at https://jimaku.cc/api/docs."
+)
 
 # OS secret-store coordinates for the jimaku key (keyring service/username).
 KEYCHAIN_SERVICE = "saitenka-overlay"
@@ -108,7 +115,7 @@ class JimakuClient:
         if not self.api_key:
             raise JimakuError(
                 "no jimaku API key — run `saitenka-overlay set-jimaku-key` (stored in the OS secret "
-                "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: jimaku.cc → account"
+                "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
             )
 
     def _get(self, path: str, **params):
@@ -120,8 +127,24 @@ class JimakuClient:
         try:
             with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
                 return json.loads(r.read())
-        except urllib.error.HTTPError as e:  # 401 (bad key), 404, …
-            raise JimakuError(f"jimaku {e.code} for {path}: {e.reason}") from e
+        except urllib.error.HTTPError as e:  # 401 (bad/absent key), 400 (bad query), 404, …
+            # Surface jimaku's own error body (it returns JSON like {"error": "..."}) — a bare
+            # "Bad Request" is useless for debugging. 401 almost always means the API key.
+            detail = ""
+            try:
+                body = (e.read() or b"").decode("utf-8", "replace").strip()
+                if body:
+                    try:
+                        body = json.loads(body).get("error", body)
+                    except (ValueError, AttributeError):
+                        pass
+                    detail = f" — {str(body)[:300]}"
+            except Exception:
+                log.debug("reading jimaku error body failed", exc_info=True)
+            hint = (
+                "  (check your API key: `saitenka-overlay set-jimaku-key`)" if e.code == 401 else ""
+            )
+            raise JimakuError(f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}") from e
 
     def search(self, query: str, anime: bool = True) -> list[dict]:
         return self._get("/entries/search", query=query, anime=str(anime).lower())

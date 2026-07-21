@@ -1,4 +1,4 @@
-"""Stage 15: `saitenka-overlay import-yomitan` — settings export → our config.
+"""Stage 15: `saitenka-overlay import-settings` — settings export → our config.
 
 Reads a Yomitan SETTINGS export (a small file — NOT the multi-GB collection export): the enabled
 dictionary list IN ORDER + per-dict enabled/priority, the mouse scan modifier, popup scale. Maps

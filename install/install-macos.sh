@@ -156,7 +156,7 @@ addon 1771074083 "Review Heatmap" "streak view"
 if dcnt=$(dicts_present); then
   printf '  3. Dictionaries:  \033[32m✓\033[0m %s configured and present on disk\n' "$dcnt"
 else
-  echo "  3. Dictionaries: run  saitenka-overlay import-yomitan --scan-dir <folder of your .zip dicts>"
+  echo "  3. Dictionaries: run  saitenka-overlay import-settings --scan-dir <folder of your .zip dicts>"
   echo "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
   echo "     or add the .zip paths by hand under [dictionaries] in:"
   echo "       $CONFIG"

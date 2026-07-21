@@ -183,7 +183,7 @@ AddonLine '1771074083' 'Review Heatmap' 'streak view'
 $dc = DictsPresent
 if($dc -gt 0){ Write-Host ("  3. Dictionaries:  [x] {0} configured and present on disk" -f $dc) -ForegroundColor Green }
 else {
-  Write-Host "  3. Dictionaries: run  saitenka-overlay import-yomitan --scan-dir <folder of your .zip dicts>"
+  Write-Host "  3. Dictionaries: run  saitenka-overlay import-settings --scan-dir <folder of your .zip dicts>"
   Write-Host "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
   Write-Host "     or add the .zip paths by hand under [dictionaries] in:"
   Write-Host "       $Cfg"

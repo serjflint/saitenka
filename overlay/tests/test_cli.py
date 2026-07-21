@@ -55,7 +55,7 @@ SUBCOMMANDS = [
     "run",
     "doctor",
     "init",
-    "import-yomitan",
+    "import-settings",
     "install-plugin",
     "uninstall-plugin",
     "attach",

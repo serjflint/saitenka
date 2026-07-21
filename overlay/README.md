@@ -175,7 +175,7 @@ powershell -ExecutionPolicy Bypass -File overlay-install.ps1   # Windows
 The stub's only job is to get `uv`, `uv tool install ./<wheel>`, and hand off to
 `saitenka-overlay setup` — an interactive Python wizard that inventories the box, installs mpv +
 ffmpeg (macOS `brew`; Windows winget→choco→scoop; Linux prints copy-paste hints), runs `doctor`,
-writes the config (`init`), and offers `import-yomitan` + `install-plugin`. Every step is
+writes the config (`init`), and offers `import-settings` + `install-plugin`. Every step is
 confirm-first, `--yes`/`--dry-run` are honoured, and it is resumable (re-runs skip satisfied steps).
 Upgrade = re-run with a newer bundle (`uv tool install --reinstall ./<wheel>`).
 

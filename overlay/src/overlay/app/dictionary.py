@@ -49,8 +49,8 @@ class DictionaryError(RuntimeError):
 
 
 _MISSING_HINT = (
-    "If these are Yomitan dictionary TITLES (from `import-yomitan` without --scan-dir) rather than "
-    "file paths, re-run `saitenka-overlay import-yomitan <settings.json> --scan-dir <dir>` to map "
+    "If these are Yomitan dictionary TITLES (from `import-settings` without --scan-dir) rather than "
+    "file paths, re-run `saitenka-overlay import-settings <settings.json> --scan-dir <dir>` to map "
     "them to your .zip files, or set real paths in overlay.toml. Run `saitenka-overlay doctor`."
 )
 

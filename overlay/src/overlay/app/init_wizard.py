@@ -3,7 +3,7 @@
 Runs auto-discovery (Yomitan import + mpv discovery), proposes a config, and writes
 ``~/.config/saitenka/overlay.toml`` ONLY on confirm — backing up an existing file first,
 timestamped (non-destructive rule). The write path (:func:`write_config`) is the shared confirm+backup
-sink used by ``init``, ``import-yomitan``, and the setup wizard.
+sink used by ``init``, ``import-settings``, and the setup wizard.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
     """Offer to store a jimaku.cc key if none resolves yet (skips if already set)."""
     import getpass
 
-    from overlay.app.jimaku import resolve_jimaku_key
+    from overlay.app.jimaku import KEY_HELP, resolve_jimaku_key
 
     key, src = resolve_jimaku_key()
     if key:
@@ -120,6 +120,7 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
         return
     if not _ask("\nStore a jimaku.cc API key now (for sub fetch in plugin mode)?"):
         return
+    print(KEY_HELP)
     k = getpass.getpass("jimaku.cc API key (hidden): ").strip()
     if not k:
         return

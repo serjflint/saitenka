@@ -180,10 +180,10 @@ def check_dict_files() -> list[Check]:
                 checks.append(Check(f"{kind}", "ok", f"{kind}: {p.name}"))
             else:
                 # A "path" with no separator is almost always a bare Yomitan TITLE left in the config
-                # by `import-yomitan` without --scan-dir — the exact FileNotFoundError crash on Windows.
+                # by `import-settings` without --scan-dir — the exact FileNotFoundError crash on Windows.
                 looks_like_title = "/" not in str(path) and "\\" not in str(path)
                 hint = (
-                    " — looks like a Yomitan title, not a file; run `import-yomitan --scan-dir <dir>`"
+                    " — looks like a Yomitan title, not a file; run `import-settings --scan-dir <dir>`"
                     " or `import-dictionaries <export.json>`"
                     if looks_like_title
                     else ""
@@ -200,7 +200,7 @@ def check_dict_files() -> list[Check]:
                     "dicts",
                     "warn",
                     "no dictionaries configured and no JMdict fallback installed — tooltips and mined "
-                    "cards will have no glosses. Import Yomitan dicts (`import-yomitan`), or add the "
+                    "cards will have no glosses. Import Yomitan dicts (`import-settings`), or add the "
                     "fallback: reinstall with the `jmdict` extra (e.g. `uv tool install "
                     "'saitenka-overlay[jmdict]'`).",
                 )

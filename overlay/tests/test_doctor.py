@@ -330,4 +330,4 @@ def test_dict_check_flags_bare_title_specifically(tmp_path, monkeypatch):
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     fails = [c for c in doc.check_dict_files() if c.status == "fail"]
     assert fails and "looks like a Yomitan title" in fails[0].detail
-    assert "import-yomitan" in fails[0].detail
+    assert "import-settings" in fails[0].detail

@@ -1,4 +1,4 @@
-"""``saitenka-overlay import-yomitan`` — map a Yomitan settings export onto our config.
+"""``saitenka-overlay import-settings`` — map a Yomitan settings export onto our config.
 
 Reads a Yomitan **settings export** — the small file from Yomitan → Settings → Backup, NOT the
 multi-GB collection/dictionary export. We refuse anything over ``MAX_SETTINGS_BYTES`` (a settings
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -175,6 +176,17 @@ def to_config(settings: YomitanSettings, matches: dict[str, str]) -> dict:
     return cfg
 
 
+SETTINGS_GLOB = "yomitan-settings*.json"
+
+
+def find_settings_export() -> str | None:
+    """Newest Yomitan *settings* export in the usual spots — Downloads (where the browser drops it),
+    the repo's ``yomitan/`` dir, then home. Returns its path, or None if none is found."""
+    dirs = [Path.home() / "Downloads", Path.home() / "Documents/Japanese/yomitan", Path.home()]
+    found = [p for d in dirs for p in d.glob(SETTINGS_GLOB)]
+    return str(max(found, key=lambda p: p.stat().st_mtime)) if found else None
+
+
 def run_import(
     settings_path: str | None, scan_dirs: list[str] | None, confirm
 ) -> int:  # pragma: no cover — interactive glue; the pieces above are unit-tested
@@ -182,14 +194,28 @@ def run_import(
     from overlay.app.init_wizard import write_config
 
     if not settings_path:
-        candidates = sorted(
-            Path.home().glob("Documents/Japanese/yomitan/yomitan-settings*.json"), reverse=True
-        )
-        if not candidates:
+        settings_path = find_settings_export()
+        if settings_path:
+            print(f"using {settings_path}")
+        elif sys.stdin.isatty():
+            # Interactive: don't skip past silently — ask for the path and WAIT.
+            entered = (
+                input(
+                    "Yomitan settings export not found. Enter its path (Yomitan → Settings → Backup → "
+                    "Export Settings), or press Enter to skip: "
+                )
+                .strip()
+                .strip("\"'")
+            )
+            if not entered:
+                print(
+                    "import skipped — run `saitenka-overlay import-settings <settings.json>` later"
+                )
+                return 1
+            settings_path = str(Path(entered).expanduser())
+        else:
             print("no settings export given and none found — pass the path explicitly")
             return 1
-        settings_path = str(candidates[0])
-        print(f"using {settings_path}")
 
     settings = parse_settings(settings_path)
     enabled = [d.name for d in settings.dictionaries if d.enabled]

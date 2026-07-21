@@ -7,7 +7,7 @@ via ``cyclopts.config.Toml`` (precedence: defaults < file < explicit CLI flags);
 keys (``dicts``/``freq``/``pitch``/``known``/``[mine]``) are mapped explicitly, exactly as the old
 argparse two-phase parse did.
 
-Subcommands: ``doctor``, ``init``, ``import-yomitan``, ``install-plugin`` / ``uninstall-plugin``,
+Subcommands: ``doctor``, ``init``, ``import-settings``, ``install-plugin`` / ``uninstall-plugin``,
 ``attach`` (joins a running mpv and selects the JP sub track / fetches jimaku), and ``setup``.
 """
 
@@ -27,7 +27,7 @@ from typing import Annotated
 import cyclopts
 
 from overlay import __version__
-from overlay.app.config import config_path, load_config
+from overlay.app.config import config_path, dicts_data_dir, load_config
 from overlay.app.paths import cache_dir
 
 log = logging.getLogger(__name__)
@@ -226,6 +226,19 @@ def run(
     from overlay.app.controller import Reader
     from overlay.mpvio.ipc import MpvIPC
 
+    # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
+    # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka-overlay install`. Don't hand it to
+    # mpv as a filename (the cryptic "Failed to recognize file format"); show the commands instead.
+    if video and "://" not in video and not Path(video).expanduser().exists():
+        print(
+            f"no such file: {video!r}\n"
+            "If you meant a command, run `saitenka-overlay --help` — e.g. `setup`/`install` "
+            "(configure options), `doctor` (health check), `install-plugin`, `import-settings`, "
+            "`import-dictionaries`, `attach`.",
+            file=sys.stderr,
+        )
+        return 2
+
     cfg = load_config(config)
 
     # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file
@@ -236,9 +249,10 @@ def run(
 
     if not (color or known_cfg or known or dict_paths or mine):
         print(
-            "[hint] bare demo: no coloring, no monolingual dicts, no mining. Put your dicts in\n"
-            "       ~/.config/saitenka/overlay.toml once (see overlay.example.toml), or pass\n"
-            '       --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
+            "[hint] bare demo: no coloring, no monolingual dicts, no mining. Configure it once with\n"
+            "       `saitenka-overlay setup`, or edit your config (see overlay.example.toml):\n"
+            f"       {config_path()}\n"
+            '       …or pass --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
             "       --mine  (see RUNNING.md §3)."
         )
 
@@ -258,7 +272,7 @@ def run(
         from overlay.app.dictionary import _MISSING_HINT, DictionarySet, split_existing
 
         # Skip (with a warning) any path that doesn't exist — usually a bare Yomitan title left in the
-        # config by `import-yomitan` without --scan-dir — instead of crashing on FileNotFoundError.
+        # config by `import-settings` without --scan-dir — instead of crashing on FileNotFoundError.
         dict_paths, dmiss = split_existing(dict_paths)
         freq_paths, fmiss = split_existing(freq_paths)
         pitch_paths, pmiss = split_existing(pitch_paths)
@@ -527,9 +541,10 @@ def copy_dicts(
     *,
     config: str | None = None,
 ) -> int:  # pragma: no cover — thin CLI wrapper; relocate/repoint are unit-tested
-    """Copy dictionaries out of TCC-protected folders (Documents/Desktop/Downloads) into
-    ~/.local/share/saitenka/dicts and repoint the config, so plugin-mode mpv stops prompting for
-    Documents access."""
+    """Copy dictionaries out of TCC-protected folders (Documents/Desktop/Downloads) into the app's
+    data dir (platform-native: %LOCALAPPDATA%\\saitenka on Windows, ~/.local/share/saitenka on Linux,
+    ~/Library/Application Support/saitenka on macOS) and repoint the config, so plugin-mode mpv stops
+    prompting for Documents access. The resolved destination is printed when it runs."""
     from overlay.app.config import dicts_data_dir
     from overlay.app.relocate import relocate_dicts
 
@@ -552,13 +567,17 @@ def set_jimaku_key(
     """Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
     macOS: the login Keychain. Windows/Linux (no Keychain): ``[jimaku].key`` in overlay.toml. Either
-    beats a shell env var, which a GUI-launched mpv can't see. Free key: jimaku.cc → account → API key.
+    beats a shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
+    (API docs: https://jimaku.cc/api/docs).
     """
     import getpass
 
     from overlay.app.config import config_path
     from overlay.app.init_wizard import store_jimaku_key
+    from overlay.app.jimaku import KEY_HELP
 
+    if key is None:  # interactive prompt — tell the user where to get the token
+        print(KEY_HELP)
     k = (key or getpass.getpass("jimaku.cc API key (hidden): ")).strip()
     if not k:
         print("no key entered", file=sys.stderr)
@@ -573,8 +592,8 @@ def set_jimaku_key(
     return 0
 
 
-@app.command(name="import-yomitan")
-def import_yomitan(
+@app.command(name="import-settings", alias="import-yomitan")
+def import_settings(
     settings: str | None = None,
     *,
     scan_dir: Annotated[
@@ -589,7 +608,13 @@ def import_yomitan(
         bool, cyclopts.Parameter(negative=(), help="write the config without prompting")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; parse/map/match are unit-tested
-    """Import dictionary order + options from a Yomitan settings export."""
+    """Apply a Yomitan SETTINGS export (dictionary order + options) to your overlay config.
+
+    Reads the small Yomitan → Settings → Backup → Export Settings file and matches its dictionary
+    titles against the ``.zip`` files under ``--scan-dir``. For a full Yomitan DATABASE backup (the
+    multi-GB export), use ``import-dictionaries`` instead — it unpacks that into ``.zip`` dicts.
+    (Alias: ``import-settings``.)
+    """
     from overlay.app.init_wizard import _ask
     from overlay.app.yomitan_import import YomitanImportError, run_import
 
@@ -607,16 +632,17 @@ def import_dictionaries(
     *,
     out: Annotated[
         str | None,
-        cyclopts.Parameter(
-            help="output dir for the .zip dicts (default ~/.local/share/saitenka/dicts)"
-        ),
+        cyclopts.Parameter(help=f"output dir for the .zip dicts (default: {dicts_data_dir()})"),
     ] = None,
     yes: Annotated[
         bool, cyclopts.Parameter(negative=(), help="write the config without prompting")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; streaming import + converters are unit-tested
-    """Import a Yomitan DATABASE export (the multi-GB dexie JSON backup) into per-dictionary .zip files
-    the overlay can load, then classify them and update the config. Streamed — never full-loaded."""
+    """Unpack a Yomitan DATABASE backup (the multi-GB dexie JSON export) into per-dictionary .zip files
+    the overlay can load, then classify them and update the config. Streamed — never full-loaded.
+
+    This is for when you DON'T have the dictionary .zip files. If you already have them, use
+    ``import-settings`` (small settings export → config), which is faster and needs no unpacking."""
     from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
     from overlay.app.config import dicts_data_dir
@@ -733,7 +759,7 @@ def report(
     return 0
 
 
-@app.command
+@app.command(alias="install")
 def setup(
     *,
     yes: Annotated[
@@ -743,7 +769,8 @@ def setup(
         bool, cyclopts.Parameter(negative=(), help="show what would happen, change nothing")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; the wizard steps are unit-tested
-    """One-command setup: inventory → install mpv+ffmpeg → doctor → init → import → plugin."""
+    """One-command setup (alias: ``install``): inventory → install mpv+ffmpeg → doctor → init →
+    import → plugin. Re-run any time to reconfigure — it's resumable and confirm-first."""
     from overlay.app.setup_wizard import run_setup
 
     return run_setup(yes=yes, dry_run=dry_run)

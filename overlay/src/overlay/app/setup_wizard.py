@@ -2,7 +2,7 @@
 
 All installer logic lives HERE, in Python — the shell stubs only bootstrap uv and hand off. The
 wizard composes the setup pieces in order: inventory (✓/✗) → install mpv+ffmpeg → ``doctor`` →
-``init`` → offer ``import-yomitan`` → offer ``install-plugin``. Each step is confirm-first; ``--yes``
+``init`` → offer ``import-settings`` → offer ``install-plugin``. Each step is confirm-first; ``--yes``
 skips prompts, ``--dry-run`` runs nothing. It is resumable — a re-run skips already-satisfied steps
 (only missing tools are installed). Non-destructive rules apply throughout (config writes use the
 confirm+backup sink so existing files are never silently overwritten).
