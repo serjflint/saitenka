@@ -86,30 +86,43 @@ def play_audio(path: str | Path) -> None:
         pass
 
 
-def speak(text: str, voice: str = "Kyoko") -> None:
-    """Speak Japanese text via the OS TTS (macOS `say`, Windows SAPI) — non-blocking, no window."""
-    if not text:
-        return
-    if sys.platform == "darwin":
-        cmd = ["say", "-v", voice, text]
-    elif sys.platform == "win32":
+def _speak_cmd(text: str, voice: str = "Kyoko") -> list[str]:
+    """The OS TTS command for ``text`` (macOS ``say``, Windows SAPI via PowerShell, Linux ``espeak``).
+
+    Windows carries the text as **base64 UTF-8 embedded in the script** — NOT piped via stdin: PowerShell
+    decodes stdin with the console's OEM input codepage, so Japanese UTF-8 bytes arrived as mojibake and
+    SAPI spoke nothing. It also selects an installed **Japanese** SAPI voice (Haruka) when present — the
+    default voice is English and can't pronounce kana. (if/elif/else, not early-return, so mypy's
+    sys.platform narrowing doesn't flag the other branches as unreachable.)"""
+    if sys.platform == "win32":
+        import base64
+
+        b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
         ps = (
             "Add-Type -AssemblyName System.Speech;"
-            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([Console]::In.ReadToEnd())"
+            f"$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}'));"
+            "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+            "$v=$s.GetInstalledVoices()|"
+            "?{$_.Enabled -and $_.VoiceInfo.Culture.Name -eq 'ja-JP'}|select -First 1;"
+            "if($v){$s.SelectVoice($v.VoiceInfo.Name)};"
+            "$s.Speak($t)"
         )
-        try:
-            p = subprocess.Popen(
-                ["powershell", "-NoProfile", "-Command", ps], stdin=subprocess.PIPE
-            )
-            p.stdin.write(text.encode())
-            p.stdin.close()
-        except OSError:
-            pass
-        return
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]
+    elif sys.platform == "darwin":
+        return ["say", "-v", voice, text]
     else:
-        cmd = ["espeak", "-v", "ja", text]
+        return ["espeak", "-v", "ja", text]
+
+
+def speak(text: str, voice: str = "Kyoko") -> None:
+    """Speak Japanese text via the OS TTS — non-blocking, no window. No-op on empty text or when the
+    TTS binary is missing."""
+    if not text:
+        return
     try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            _speak_cmd(text, voice), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     except OSError:
         pass
 
