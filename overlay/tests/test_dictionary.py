@@ -111,6 +111,29 @@ def test_dictionary_set_miss_falls_back(tmp_path):
     assert entry.defs[0].dict_name == "—"  # not found placeholder
 
 
+def test_card_for_uses_user_dictionary(tmp_path):
+    """Dict-first mining: the mined card's expression / reading / glossary come from the user's dict."""
+    d = _make_dict(tmp_path / "cf.zip", "TestDict", [["読む", "よむ", ["to read", "to peruse"]]])
+    ds = DictionarySet.load([d])
+    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    card = ds.card_for(tok)
+    assert card.expression == "読む"
+    assert card.reading == "よむ"
+    assert card.glossary_html == "<ol><li>to read</li><li>to peruse</li></ol>"
+    assert card.glosses == ("to read", "to peruse")
+
+
+def test_card_for_miss_returns_empty_glossary(tmp_path):
+    """A word in no configured dict → expression-only card with empty glossary_html, so the miner
+    can fall back to the JMdict/jamdict source."""
+    d = _make_dict(tmp_path / "cf2.zip", "TestDict", [["猫", "ねこ", ["cat"]]])
+    ds = DictionarySet.load([d])
+    tok = Token(surface="犬", lemma="犬", reading="いぬ", pos="名詞", start=0, end=1)
+    card = ds.card_for(tok)
+    assert card.expression == "犬"  # from the token
+    assert card.glossary_html == ""
+
+
 def test_dictionary_dedupes_kanji_and_kana_duplicate_rows(tmp_path):
     # some monolingual dicts store one entry twice: keyed by kanji AND by kana, identical glossary.
     g = ["identical gloss"]

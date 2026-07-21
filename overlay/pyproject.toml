@@ -10,8 +10,6 @@ dependencies = [
     "numpy>=2.0",
     "fugashi>=1.5.2",
     "unidic-lite>=1.0.8",
-    "jamdict>=0.1a11.post2",
-    "jamdict-data>=1.5",
     "cyclopts>=4.22.1",
     "ijson>=3.5.1",
     "platformdirs>=4.11.0",
@@ -25,6 +23,24 @@ dependencies = [
 # GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
 # core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
 deinflect = ["saitenka-overlay-deinflect"]
+# JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
+# configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
+# default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
+# on Windows ([WinError 32] while it decompresses jamdict.db.xz). On Windows the extra pulls
+# jamdict-data-fix instead: a drop-in with the same CC BY-SA database that builds cleanly.
+# Mining prefers your own dictionaries, so a dict-first user never needs this. Opt in with e.g.
+# `uv tool install './overlay[jmdict]'`.
+jmdict = [
+    "jamdict>=0.1a11.post2",
+    "jamdict-data>=1.5; platform_system != 'Windows'",
+    "jamdict-data-fix>=1.5.1a2; platform_system == 'Windows'",
+]
+# Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
+# exists only so `saitenka-overlay[minimal]` reads as a deliberate choice. `full` pulls every optional
+# feature and is what the checkout installers install. Note `full` includes the GPL-3.0 `deinflect`
+# add-on, so a `full` install is GPL-3.0, not Apache-2.0 (see ../LICENSING.md).
+minimal = []
+full = ["saitenka-overlay[deinflect]", "saitenka-overlay[jmdict]"]
 
 [project.scripts]
 saitenka-overlay = "overlay.app.cli:main"
@@ -34,7 +50,6 @@ saitenka-overlay-deinflect = { path = "../deinflect", editable = true }
 
 [dependency-groups]
 dev = [
-    "saitenka-overlay-deinflect",   # local GPL add-on: tests exercise the inflection chain
     "hypothesis>=6.157.2",
     "mypy>=2.3.0",
     "playwright>=1.61.0",
@@ -104,13 +119,17 @@ typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
 
 # --- Stage 8b: local task runner (no CI — `poe all` is the pre-push gate) -------------------------
+# Every `uv run` carries `--extra full` so the optional features (deinflect inflection chain + JMdict
+# fallback) are present for tests without living in the dev group — they're optional EXTRAS, not dev
+# deps. Keeping the flag on every task avoids uv re-syncing (installing/removing the extras) between
+# steps of `poe all`.
 [tool.poe.tasks]
-lint = { shell = "uv run ruff check --fix src tests examples && uv run ruff format src tests examples" }
-types = { shell = "uv run mypy && uv run pyright && (uv run pyrefly check src/overlay || true) && (uv run ty check src/overlay || true)" }
-test = "uv run pytest -q -n auto"
-test-ft = { shell = "PYTHON_GIL=0 uv run pytest -q" }
-cov = "uv run pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85"
-bench = "uv run python examples/bench_responsiveness.py --pathological --reps 8"
+lint = { shell = "uv run --extra full ruff check --fix src tests examples && uv run --extra full ruff format src tests examples" }
+types = { shell = "uv run --extra full mypy && uv run --extra full pyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
+test = "uv run --extra full pytest -q -n auto"
+test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q" }
+cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85"
+bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }

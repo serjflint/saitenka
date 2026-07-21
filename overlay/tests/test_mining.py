@@ -233,3 +233,58 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     r.bulk_mine()
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
+
+
+def _make_dict(path, title, entries):
+    """Minimal Yomitan v3 dict zip (mirrors test_dictionary._make_dict)."""
+    import json
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
+        bank = [[t, r, "", "", 0, g, i + 1, ""] for i, (t, r, g) in enumerate(entries)]
+        zf.writestr("term_bank_1.json", json.dumps(bank, ensure_ascii=False))
+    return str(path)
+
+
+def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
+    """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
+    that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+    from overlay.app.dictionary import DictionarySet
+
+    d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
+    ds = DictionarySet.load([d])
+    ipc = FakeIPC()
+    ipc.props["path"] = "/x/Show - 01.mkv"
+    anki = _FakeAnki()
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda base, video: ("", ""))
+    monkeypatch.setattr(r, "_preview_mined", lambda card, tok, video: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert len(anki.added) == 1
+    f = anki.added[0]["fields"]
+    assert f["Expression"] == "読む"
+    assert f["Glossary"] == "<ol><li>DICTGLOSS-read</li></ol>"  # from the user dict
+
+
+def test_card_for_degrades_without_jamdict(monkeypatch):
+    """When the optional jmdict extra (jamdict) isn't installed, card_for degrades to an
+    expression-only card instead of crashing — the broad except in lookup is load-bearing."""
+    import overlay.app.lookup as lookup
+
+    lookup.card_data.cache_clear()
+
+    def _no_jam():
+        raise ImportError("No module named 'jamdict'")
+
+    monkeypatch.setattr(lookup, "_jam", _no_jam)
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    card = lookup.card_for(tok)
+    assert card.expression == "読む"
+    assert card.glossary_html == ""
+    lookup.card_data.cache_clear()  # don't leave the poisoned (jamdict-less) entry cached

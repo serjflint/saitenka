@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 
 
 from overlay.app import paths
-from overlay.app.lookup import furigana
+from overlay.app.lookup import CardData, furigana
 from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqSource, PitchSource, read_json_bank
 from overlay.panel import Definition, Entry, Freq
@@ -85,10 +85,11 @@ def _to_glob(pattern: str) -> str:
     return pattern.replace("＊", "*").replace("？", "?")
 
 
-def _first_gloss(glossary: list, limit: int = 40) -> str:
-    """A short plain-text first-gloss preview for a search-result row (strips SC/HTML, truncates)."""
+def _glosses_of(glossary: list) -> list[str]:
+    """Every glossary item flattened to plain text (SC/HTML stripped, whitespace collapsed)."""
     from overlay.sc.walk import _text_of
 
+    out: list[str] = []
     for it in glossary:
         text = (
             it
@@ -103,8 +104,16 @@ def _first_gloss(glossary: list, limit: int = 40) -> str:
         )
         text = re.sub(r"\s+", " ", text or "").strip()
         if text:
-            return text[:limit] + ("…" if len(text) > limit else "")
-    return ""
+            out.append(text)
+    return out
+
+
+def _first_gloss(glossary: list, limit: int = 40) -> str:
+    """A short plain-text first-gloss preview for a search-result row (strips SC/HTML, truncates)."""
+    glosses = _glosses_of(glossary)
+    if not glosses:
+        return ""
+    return glosses[0][:limit] + ("…" if len(glosses[0]) > limit else "")
 
 
 def _glossary_to_nodes(glossary: list) -> list:
@@ -439,6 +448,30 @@ class DictionarySet:
         html = f'<ul style="text-align:left;margin:0;padding-left:1.1em;">{items}</ul>'
         nums = [int(n) for _, value in rows for n in re.findall(r"\d+", value)]
         return html, (str(min(nums)) if nums else "")
+
+    def card_for(self, token: Token) -> CardData:
+        """Mined-card fields (expression / reading / glossary) from the USER's dictionaries — the
+        dict-first mining path. Returns the first dictionary that has the word with a non-empty
+        glossary; otherwise an expression-only CardData (empty ``glossary_html``) so the caller can
+        fall back to the JMdict/jamdict source. No JMdict sequence id — Yomitan terms carry none."""
+        forms = (token.lemma, token.surface, token.reading)
+        for d in self.dicts:
+            hits = d.lookup(*forms)
+            if not hits:
+                continue
+            glosses = _glosses_of(hits[0].glossary)
+            if not glosses:
+                continue
+            glossary_html = "<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>"
+            return CardData(
+                expression=hits[0].term or token.lemma or token.surface,
+                reading=hits[0].reading or token.reading,
+                glossary_html=glossary_html,
+                glosses=tuple(glosses),
+            )
+        return CardData(
+            expression=token.lemma or token.surface, reading=token.reading, glossary_html=""
+        )
 
     def search(self, pattern: str, limit: int = 30) -> Entry:
         """Wildcard/prefix/suffix search across the dictionaries → a results :class:`Entry` that
