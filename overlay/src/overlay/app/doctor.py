@@ -27,11 +27,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from overlay.app.config import config_path, expand_paths, is_protected, load_config
+from overlay.app.paths import cache_dir
 
 Status = str  # "ok" | "warn" | "fail"
 
-LOG_PATH = Path.home() / ".cache" / "saitenka-overlay" / "overlay.log"
-CACHE_DIR = Path.home() / ".cache" / "saitenka-overlay" / "dicts"
+LOG_PATH = cache_dir() / "overlay.log"
+CACHE_DIR = cache_dir() / "dicts"
 ANKI_HOST = "http://127.0.0.1:8765"
 MPV_MIN = (0, 37)  # overlay-add BGRA landed in 0.37
 
@@ -88,8 +89,15 @@ def _run(*args: str) -> str:
 
 
 def _anki_call(action: str, **params):
-    body = json.dumps({"action": action, "version": 6, "params": params}).encode()
-    req = urllib.request.Request(ANKI_HOST, body, {"Content-Type": "application/json"})
+    from overlay.app.anki import resolve_anki
+
+    host, api_key = resolve_anki()  # honors [anki].url / host / port / api_key
+    payload: dict = {"action": action, "version": 6, "params": params}
+    if api_key:
+        payload["key"] = api_key
+    req = urllib.request.Request(
+        host, json.dumps(payload).encode(), {"Content-Type": "application/json"}
+    )
     with urllib.request.urlopen(req, timeout=5) as r:
         res = json.loads(r.read())
     if res.get("error"):
@@ -98,26 +106,44 @@ def _anki_call(action: str, **params):
 
 
 def _mpv_conf_path() -> Path:
-    return Path.home() / ".config" / "mpv" / "mpv.conf"
+    """The mpv.conf that exists (checking mpv's own dir then mpv.net's), else mpv's default. Mirrors
+    mpv's own resolution so the Windows checks look at %APPDATA%\\mpv, not ~/.config/mpv."""
+    from overlay.app.paths import mpv_conf_paths
+
+    candidates = mpv_conf_paths()
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
 
 
 # --- individual checks -----------------------------------------------------------------------
 
 
 def check_mpv() -> Check:
-    if not shutil.which("mpv"):
+    from overlay.mpvio.discover import find_mpv
+
+    # Resolve like `run` does (config mpv_path → $SAITENKA_MPV_PATH → PATH → known dirs / mpv.net), so
+    # doctor doesn't cry "not found" for a perfectly usable off-PATH mpv (the Windows norm).
+    mpv = find_mpv(load_config().get("mpv_path"))
+    if not mpv:
         return Check(
-            "mpv", "fail", "mpv not found on PATH (needed to play + composite the overlay)"
+            "mpv",
+            "fail",
+            "mpv not found (needed to play + composite the overlay) — install it, or set `mpv_path` "
+            "in overlay.toml / $SAITENKA_MPV_PATH",
         )
-    out = _run("mpv", "--version")
+    out = _run(mpv, "--version")
     m = re.search(r"mpv\s+v?(\d+)\.(\d+)", out)
     if not m:
-        return Check("mpv", "warn", "mpv present but version unparseable")
+        # mpv.net reports its own version string; if it responded at all, treat as present.
+        detail = f"mpv.net ({mpv})" if "mpvnet" in Path(mpv).name.lower() else f"present ({mpv})"
+        return Check("mpv", "warn", f"mpv version unparseable — {detail}")
     ver = (int(m.group(1)), int(m.group(2)))
     vs = f"{ver[0]}.{ver[1]}"
     if ver < MPV_MIN:
         return Check("mpv", "fail", f"mpv {vs} too old — need ≥ 0.37 for overlay-add BGRA")
-    return Check("mpv", "ok", f"mpv {vs}")
+    return Check("mpv", "ok", f"mpv {vs} ({mpv})")
 
 
 def check_ffmpeg() -> Check:
@@ -153,7 +179,16 @@ def check_dict_files() -> list[Check]:
             if p.exists():
                 checks.append(Check(f"{kind}", "ok", f"{kind}: {p.name}"))
             else:
-                checks.append(Check(f"{kind}", "fail", f"{kind} zip missing: {path}"))
+                # A "path" with no separator is almost always a bare Yomitan TITLE left in the config
+                # by `import-yomitan` without --scan-dir — the exact FileNotFoundError crash on Windows.
+                looks_like_title = "/" not in str(path) and "\\" not in str(path)
+                hint = (
+                    " — looks like a Yomitan title, not a file; run `import-yomitan --scan-dir <dir>`"
+                    " or `import-dictionaries <export.json>`"
+                    if looks_like_title
+                    else ""
+                )
+                checks.append(Check(f"{kind}", "fail", f"{kind} not found: {path}{hint}"))
     if not checks:
         checks.append(Check("dicts", "warn", "no dictionaries configured (JMdict fallback only)"))
     return checks
@@ -223,13 +258,17 @@ def check_fonts() -> Check:
 
 
 def check_anki(deck: str, model: str) -> Check:
+    from overlay.app.anki import resolve_anki
+
+    host, _ = resolve_anki()
     try:
         ver = _anki_call("version")
     except Exception:
         return Check(
             "anki",
             "warn",
-            "AnkiConnect unreachable at :8765 (optional — needed for mining/coloring)",
+            f"AnkiConnect unreachable at {host} (optional — needed for mining/coloring; set "
+            "[anki].url if you changed AnkiConnect's port)",
         )
     detail = f"AnkiConnect v{ver}"
     try:
@@ -288,10 +327,11 @@ def check_plugin() -> Check:
     * the ``--attach`` form (a stale build called a flag the CLI rejects), and
     * a **bare** ``SAITENKA_BIN`` that a Finder/Dock-launched mpv can't resolve on its minimal PATH,
       or a baked path that no longer exists — both fixed by re-running ``install-plugin``."""
-    from overlay.app.plugin import LUA_NAME, default_scripts_dir
+    from overlay.app.plugin import LUA_NAME, all_scripts_dirs
 
-    dest = default_scripts_dir() / LUA_NAME
-    if not dest.exists():
+    # Check every scripts dir (mpv + mpv.net on Windows); report on the first installed copy.
+    dest = next((d / LUA_NAME for d in all_scripts_dirs() if (d / LUA_NAME).exists()), None)
+    if dest is None:
         return Check(
             "plugin", "ok", "mpv plugin not installed (optional — `install-plugin` for auto-start)"
         )
@@ -308,7 +348,7 @@ def check_plugin() -> Check:
         )
     m = re.search(r"SAITENKA_BIN\s*=\s*(?:\[\[(.*?)\]\]|'([^']*)')", installed)
     binp = (m.group(1) or m.group(2)) if m else None
-    if not binp or "/" not in binp:
+    if not binp or ("/" not in binp and "\\" not in binp):  # bare name (no separator, either OS)
         return Check(
             "plugin",
             "fail",
@@ -328,7 +368,8 @@ def check_jimaku() -> Check:
     """When ``[jimaku].enabled``, confirm an API key resolves (config > env > Keychain). A key in
     the Keychain is the one plugin-mode mpv can read; a shell env var it cannot."""
     cfg = load_config()
-    jm = cfg.get("jimaku") if isinstance(cfg.get("jimaku"), dict) else {}
+    _jm = cfg.get("jimaku")
+    jm = _jm if isinstance(_jm, dict) else {}
     if not jm.get("enabled"):
         return Check("jimaku", "ok", "jimaku disabled (embedded JP subs only)")
     from overlay.app.jimaku import resolve_jimaku_key
@@ -368,6 +409,22 @@ def check_subminer_conflict() -> Check:
     return Check("subminer", "ok", "no SubMiner (no overlay conflict)")
 
 
+def check_crashes() -> Check:
+    """Surface captured crash reports (from crashlog's excepthooks) so the user knows to send them."""
+    from overlay.app.crashlog import crash_dir
+
+    d = crash_dir()
+    reports = sorted(d.glob("crash-*.log")) if d.exists() else []
+    if not reports:
+        return Check("crashes", "ok", "no crash reports")
+    return Check(
+        "crashes",
+        "warn",
+        f"{len(reports)} crash report(s) captured; latest {reports[-1].name} — run "
+        "`saitenka-overlay report` to bundle them",
+    )
+
+
 def check_recent_errors(n: int = 5) -> Check:
     if not LOG_PATH.exists():
         return Check("recent-errors", "ok", "no log yet (nothing has failed)")
@@ -400,6 +457,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_plugin(),
         check_subminer_conflict(),
         check_jimaku(),
+        check_crashes(),
         check_recent_errors(),
     ]
     return Report(checks)
@@ -418,3 +476,5 @@ def print_report(report: Report) -> None:  # pragma: no cover — pure formattin
         f"\033[33m{s['warn']} warn\033[0m · \033[31m{s['fail']} fail\033[0m"
     )
     print("Healthy ✅" if report.exit_code == 0 else "Problems found — see ✗ above ❌")
+    if report.exit_code != 0:
+        print("Tip: `saitenka-overlay report` bundles this + logs into a zip for a bug report.")

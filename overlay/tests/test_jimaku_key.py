@@ -33,34 +33,29 @@ def test_resolve_none_when_nothing_set(monkeypatch):
     assert jimaku.resolve_jimaku_key() == (None, "none")
 
 
-def test_keychain_get_parses_security_output(monkeypatch):
-    import subprocess
+def test_keychain_roundtrip_via_keyring(monkeypatch):
+    """keychain_get/set delegate to the keyring library (cross-platform secret store)."""
+    import keyring
 
-    monkeypatch.setattr(jimaku.sys, "platform", "darwin")
-
-    class R:
-        stdout = "secret-key\n"
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
-    assert jimaku.keychain_get() == "secret-key"
-
-
-def test_keychain_noop_off_macos(monkeypatch):
-    monkeypatch.setattr(jimaku.sys, "platform", "linux")
-    assert jimaku.keychain_get() is None
-    assert jimaku.keychain_set("x") is False
-
-
-def test_keychain_set_invokes_security_with_update_flag(monkeypatch):
-    import subprocess
-
-    calls = {}
-    monkeypatch.setattr(jimaku.sys, "platform", "darwin")
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: calls.setdefault("cmd", cmd))
+    store: dict = {}
+    monkeypatch.setattr(keyring, "set_password", lambda s, u, p: store.__setitem__((s, u), p))
+    monkeypatch.setattr(keyring, "get_password", lambda s, u: store.get((s, u)))
     assert jimaku.keychain_set("mykey") is True
-    cmd = calls["cmd"]
-    assert cmd[:2] == ["security", "add-generic-password"] and "-U" in cmd
-    assert "saitenka-overlay" in cmd and "mykey" in cmd
+    assert store[("saitenka-overlay", "jimaku")] == "mykey"
+    assert jimaku.keychain_get() == "mykey"
+
+
+def test_keychain_returns_false_none_when_no_backend(monkeypatch):
+    """No keyring backend (headless Linux) → set() is False, get() is None → caller falls back."""
+    import keyring
+
+    def _boom(*a, **k):
+        raise keyring.errors.NoKeyringError("no backend")
+
+    monkeypatch.setattr(keyring, "set_password", _boom)
+    monkeypatch.setattr(keyring, "get_password", _boom)
+    assert jimaku.keychain_set("x") is False
+    assert jimaku.keychain_get() is None
 
 
 def test_client_error_names_the_keychain_command(monkeypatch):
@@ -72,3 +67,29 @@ def test_client_error_names_the_keychain_command(monkeypatch):
         assert "set-jimaku-key" in str(e)
     else:
         raise AssertionError("expected JimakuError")
+
+
+def test_store_key_falls_back_to_config_without_keyring(monkeypatch, tmp_path):
+    """No keyring backend → the key is written into [jimaku].key, resolves from config, and preserves
+    pre-existing tables."""
+    from overlay.app import init_wizard
+    from overlay.app.config import load_config
+
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('slang = "ja"\n\n[mine]\nkey = "Ctrl+m"\n')  # a pre-existing table must survive
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda k: False)  # no backend
+
+    method, _ = init_wizard.store_jimaku_key("MYKEY123")
+    assert method == "config"
+    loaded = load_config()
+    assert loaded["jimaku"]["key"] == "MYKEY123"
+    assert loaded["mine"]["key"] == "Ctrl+m"  # dumps_toml preserved the other table
+
+
+def test_store_key_uses_keyring_when_available(monkeypatch):
+    from overlay.app import init_wizard
+
+    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda k: True)
+    method, backup = init_wizard.store_jimaku_key("K")
+    assert method == "keyring" and backup is None

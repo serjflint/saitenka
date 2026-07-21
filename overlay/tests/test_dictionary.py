@@ -3,15 +3,37 @@
 import json
 import zipfile
 
+import pytest
+
 from overlay.app.dictionary import (
     FREQ_COLOR,
     PITCH_COLOR,
     Dictionary,
+    DictionaryError,
     DictionarySet,
     _glossary_to_nodes,
+    split_existing,
 )
 from overlay.app.tokenize import Token, tokenize
 from overlay.app.wordlists import FreqSource, PitchSource
+
+
+def test_dictionary_set_load_missing_path_raises_friendly_error(tmp_path):
+    """A bare Yomitan title in the config (import-yomitan without --scan-dir) must raise ONE
+    actionable DictionaryError, not a raw FileNotFoundError traceback (the WinError 2 crash)."""
+    with pytest.raises(DictionaryError) as ei:
+        DictionarySet.load(["JMdict [2026-06-27]", str(tmp_path / "nope.zip")])
+    msg = str(ei.value)
+    assert "JMdict [2026-06-27]" in msg
+    assert "import-yomitan" in msg and "doctor" in msg
+
+
+def test_split_existing_partitions(tmp_path):
+    real = tmp_path / "d.zip"
+    real.write_text("x")
+    existing, missing = split_existing([str(real), "Some Dict Title", str(tmp_path / "gone.zip")])
+    assert existing == [str(real)]
+    assert missing == ["Some Dict Title", str(tmp_path / "gone.zip")]
 
 
 def _make_dict(path, title, entries):

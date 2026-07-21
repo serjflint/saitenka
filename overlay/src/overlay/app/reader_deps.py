@@ -24,7 +24,8 @@ def build_reader_deps(cfg: dict, *, color: bool = True, mine: bool = True):
     pitch_paths = expand_paths(cfg.get("pitch") or [])
     known_cfg = cfg.get("known")
 
-    mc = cfg.get("mine") if isinstance(cfg.get("mine"), dict) else {}
+    _mc = cfg.get("mine")
+    mc = _mc if isinstance(_mc, dict) else {}
     # If mining or Anki-backed coloring is configured, try to start Anki for the user (warn, never
     # block) so they don't have to remember to launch it before playing.
     if (mine and mc) or known_cfg:
@@ -34,10 +35,25 @@ def build_reader_deps(cfg: dict, *, color: bool = True, mine: bool = True):
             log.warning("Anki not reachable — coloring falls back to freq+JLPT, mining disabled")
 
     dict_set = None
-    if dict_paths:
-        from overlay.app.dictionary import DictionarySet
+    if dict_paths or freq_paths or pitch_paths:
+        from overlay.app.dictionary import DictionarySet, split_existing
 
-        dict_set = DictionarySet.load(dict_paths, freq_paths=freq_paths, pitch_paths=pitch_paths)
+        # Keep the user's working dicts even if one config entry is a bare title / stale path: filter
+        # to what exists and warn, rather than crashing the whole attach on a raw FileNotFoundError.
+        dict_ok, dict_miss = split_existing(dict_paths)
+        freq_ok, freq_miss = split_existing(freq_paths)
+        pitch_ok, pitch_miss = split_existing(pitch_paths)
+        for kind, miss in (("dict", dict_miss), ("freq", freq_miss), ("pitch", pitch_miss)):
+            if miss:
+                import sys
+
+                from overlay.app.dictionary import _MISSING_HINT
+
+                msg = f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. {_MISSING_HINT}"
+                log.warning(msg)
+                print(msg, file=sys.stderr, flush=True)
+        if dict_ok or freq_ok or pitch_ok:
+            dict_set = DictionarySet.load(dict_ok, freq_paths=freq_ok, pitch_paths=pitch_ok)
 
     scorer = None
     if color or known_cfg or freq_paths:

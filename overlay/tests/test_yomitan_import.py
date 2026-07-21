@@ -106,7 +106,10 @@ def test_map_to_config_splits_lists_by_content(tmp_path):
         "PitchA": str(_make_dict_zip(tmp_path / "pitch.zip", "pitch")),
     }
     cfg = yi.to_config(settings, matches)
-    assert cfg["dicts"] == [matches["Bilingual"], matches["MonoA"]]  # order preserved among defn dicts
+    assert cfg["dicts"] == [
+        matches["Bilingual"],
+        matches["MonoA"],
+    ]  # order preserved among defn dicts
     assert cfg["freq"] == [matches["FreqA"]]
     assert cfg["pitch"] == [matches["PitchA"]]
 

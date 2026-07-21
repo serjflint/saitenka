@@ -21,13 +21,38 @@ from overlay.app.lookup import CardData
 
 log = logging.getLogger(__name__)
 
-ANKI_HOST = "http://127.0.0.1:8765"
+ANKI_HOST = "http://127.0.0.1:8765"  # AnkiConnect stock default (webBindAddress:webBindPort)
 
 
-def anki_reachable(host: str = ANKI_HOST, timeout: float = 2.0) -> bool:
-    """True if AnkiConnect answers a version ping."""
-    body = json.dumps({"action": "version", "version": 6}).encode()
-    req = urllib.request.Request(host, body, {"Content-Type": "application/json"})
+def resolve_anki(cfg: dict | None = None) -> tuple[str, str | None]:
+    """``(url, api_key)`` for AnkiConnect from the ``[anki]`` config table, defaulting to the stock
+    ``http://127.0.0.1:8765`` with no key. Set ``[anki].url`` (or ``host``/``port``) if you changed
+    AnkiConnect's ``webBindPort``/``webBindAddress``, and ``[anki].api_key`` if you set an ``apiKey``.
+    Always 127.0.0.1 by default (not ``localhost``) to dodge IPv6/DNS resolution delays."""
+    if cfg is None:
+        from overlay.app.config import load_config
+
+        cfg = load_config()
+    raw = cfg.get("anki")
+    a: dict = raw if isinstance(raw, dict) else {}
+    url = a.get("url") or f"http://{a.get('host', '127.0.0.1')}:{a.get('port', 8765)}"
+    return url, a.get("api_key")
+
+
+def _ping_body(api_key: str | None) -> bytes:
+    payload: dict = {"action": "version", "version": 6}
+    if api_key:
+        payload["key"] = api_key  # AnkiConnect's apiKey travels in the request body, not a header
+    return json.dumps(payload).encode()
+
+
+def anki_reachable(
+    host: str | None = None, api_key: str | None = None, timeout: float = 2.0
+) -> bool:
+    """True if AnkiConnect answers a version ping. Host/key resolve from config when not given."""
+    if host is None:
+        host, api_key = resolve_anki()
+    req = urllib.request.Request(host, _ping_body(api_key), {"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return b'"result"' in r.read()
@@ -35,7 +60,7 @@ def anki_reachable(host: str = ANKI_HOST, timeout: float = 2.0) -> bool:
         return False
 
 
-def ensure_anki_running(host: str = ANKI_HOST, wait: float = 20.0) -> bool:
+def ensure_anki_running(host: str | None = None, wait: float = 20.0) -> bool:
     """If AnkiConnect isn't answering, launch Anki and poll until it does (up to ``wait`` seconds).
 
     Returns True once reachable, False if it couldn't be started — the caller WARNS and degrades
@@ -93,11 +118,16 @@ class MineConfig:
 
 
 class Anki:
-    def __init__(self, host: str = "http://127.0.0.1:8765"):
-        self.host = host
+    def __init__(self, host: str | None = None, api_key: str | None = None):
+        rh, rk = resolve_anki()
+        self.host = host or rh
+        self.api_key = api_key if api_key is not None else rk
 
     def _call(self, action: str, **params):
-        body = json.dumps({"action": action, "version": 6, "params": params}).encode()
+        payload: dict = {"action": action, "version": 6, "params": params}
+        if self.api_key:
+            payload["key"] = self.api_key  # AnkiConnect apiKey → request body
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(self.host, body, {"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:

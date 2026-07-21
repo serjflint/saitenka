@@ -199,3 +199,15 @@ def test_resolve_paths_expands_tilde_from_flags_and_config(monkeypatch, tmp_path
     assert got == [str(tmp_path / "dicts/a.zip")]  # flag wins, expanded
     got = _resolve_paths([], {"dicts": ["~/dicts/b.zip"]}, "dicts")
     assert got == [str(tmp_path / "dicts/b.zip")]  # cfg fallback, expanded
+
+
+def test_version_is_wired_to_package_metadata():
+    """`--version` printed 0.0.0 because cyclopts couldn't resolve the `overlay` import package to the
+    `saitenka-overlay` distribution — now pinned via overlay.__version__."""
+    from importlib.metadata import version
+
+    import overlay
+    from overlay.app.cli import app
+
+    assert overlay.__version__ == version("saitenka-overlay")
+    assert app.version not in (None, "", "0.0.0")

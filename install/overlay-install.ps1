@@ -14,8 +14,12 @@ if (-not (Have 'uv')) {
         if (Have 'winget') { winget install --id=astral-sh.uv -e }
         else { irm https://astral.sh/uv/install.ps1 | iex }
     }
-    $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 }
+
+# uv installs tools into %USERPROFILE%\.local\bin, which is NOT on PATH in this session. Prepend it
+# ALWAYS (not only when we just installed uv) so the `saitenka-overlay setup` handoff below resolves
+# even when uv was already present — otherwise: "saitenka-overlay is not recognized".
+$env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 
 # 2. install the overlay from the wheel shipped next to this stub.
 $wheel = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay-*.whl' |
@@ -28,6 +32,10 @@ Write-Host "[saitenka] installing $($wheel.Name)"
 if ($DryRun) { Write-Host "DRY: uv tool install --reinstall $($wheel.FullName)" }
 else { uv tool install --reinstall $wheel.FullName }
 
-# 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin).
-if ($DryRun) { Write-Host 'DRY: saitenka-overlay setup --dry-run' }
-else { saitenka-overlay setup }
+# 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin). Resolve the exe
+# explicitly — the freshly-installed tool may still not be on PATH in this session on some setups.
+$exe = (Get-Command saitenka-overlay -ErrorAction SilentlyContinue).Source
+if (-not $exe) { $exe = "$env:USERPROFILE\.local\bin\saitenka-overlay.exe" }
+if ($DryRun) { Write-Host "DRY: $exe setup --dry-run" }
+elseif (Test-Path $exe) { & $exe setup }
+else { uv tool run --from saitenka-overlay saitenka-overlay setup }

@@ -8,6 +8,7 @@ sink used by ``init``, ``import-yomitan``, and the setup wizard.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -31,15 +32,30 @@ def _toml_value(v) -> str:
     raise TypeError(f"can't serialise {type(v).__name__} to TOML")
 
 
+def _toml_key(k: str) -> str:
+    """A bare TOML key when possible, else a quoted key (e.g. a deck name ``Saitenka::Known``)."""
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else _toml_value(k)
+
+
 def dumps_toml(proposal: dict) -> str:
-    """A minimal deterministic TOML writer for the flat config we produce (no nested tables here)."""
+    """A minimal deterministic TOML writer. Scalars/lists first, then nested ``dict`` values as
+    ``[table]`` sections — so merging onto a config with ``[mine]``/``[jimaku]``/``[known]`` tables
+    round-trips instead of raising ``TypeError`` (or silently dropping the tables)."""
     lines = ["# Saitenka overlay settings — written by `saitenka-overlay init`.", ""]
+    tables: list[tuple[str, dict]] = []
     for k, v in proposal.items():
-        if isinstance(v, (list, tuple)) and len(v) > 1:
+        if isinstance(v, dict):
+            tables.append((k, v))
+        elif isinstance(v, (list, tuple)) and len(v) > 1:
             body = ",\n  ".join(_toml_value(x) for x in v)
             lines.append(f"{k} = [\n  {body},\n]")
         else:
             lines.append(f"{k} = {_toml_value(v)}")
+    for name, table in tables:
+        lines.append("")
+        lines.append(f"[{_toml_key(name)}]")
+        for k, v in table.items():
+            lines.append(f"{_toml_key(k)} = {_toml_value(v)}")
     return "\n".join(lines) + "\n"
 
 
@@ -62,8 +78,11 @@ def write_config(proposal: dict, confirm: Confirm, dest: Path | None = None) -> 
     if not confirm(f"Write config to {dest}?"):
         return None
     backup = backup_existing(dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(dumps_toml(proposal), encoding="utf-8")
+    from overlay.app.paths import atomic_write_text
+
+    atomic_write_text(
+        dest, dumps_toml(proposal)
+    )  # temp + fsync + os.replace (no half-written config)
     return backup
 
 
@@ -71,23 +90,44 @@ def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
     return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
 
 
+def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, Path | None]:
+    """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
+    via ``keyring`` (macOS Keychain / Windows Credential Locker / Linux Secret Service), else
+    ``[jimaku].key`` in the config when no keyring backend exists (headless Linux). Returns
+    ``(method, backup)`` where method is ``"keyring"`` or ``"config"``."""
+    from overlay.app.jimaku import keychain_set
+
+    if keychain_set(k):
+        return "keyring", None
+    from overlay.app.config import load_config
+
+    cfg = load_config()
+    jm = dict(cfg.get("jimaku") or {})
+    jm["key"] = k
+    backup = write_config({**cfg, "jimaku": jm}, confirm=confirm)
+    return "config", backup
+
+
 def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secret I/O
-    """Offer to store a jimaku.cc key in the Keychain if none resolves yet (skips if already set)."""
+    """Offer to store a jimaku.cc key if none resolves yet (skips if already set)."""
     import getpass
 
-    from overlay.app.jimaku import keychain_set, resolve_jimaku_key
+    from overlay.app.jimaku import resolve_jimaku_key
 
     key, src = resolve_jimaku_key()
     if key:
         print(f"jimaku API key: found (from {src})")
         return
-    if not _ask("\nStore a jimaku.cc API key in the Keychain now (for sub fetch in plugin mode)?"):
+    if not _ask("\nStore a jimaku.cc API key now (for sub fetch in plugin mode)?"):
         return
     k = getpass.getpass("jimaku.cc API key (hidden): ").strip()
-    if k and keychain_set(k):
-        print("stored in the macOS Keychain")
-    elif k:
-        print("could not store in the Keychain — set $JIMAKU_API_KEY or [jimaku].key instead")
+    if not k:
+        return
+    method, _ = store_jimaku_key(k)
+    if method == "keyring":
+        print("stored in the OS secret store (Keychain / Credential Locker / Secret Service)")
+    else:
+        print(f"stored in {config_path()} as [jimaku].key (plaintext — keep it private)")
 
 
 def run_init() -> int:  # pragma: no cover — interactive wizard, exercised live

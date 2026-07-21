@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
         return []
 
 
+from overlay.app import paths
 from overlay.app.lookup import furigana
 from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqSource, PitchSource, read_json_bank
@@ -42,7 +43,30 @@ from overlay.panel import Definition, Entry, Freq
 
 log = logging.getLogger(__name__)
 
-CACHE_DIR = Path.home() / ".cache" / "saitenka-overlay" / "dicts"
+
+class DictionaryError(RuntimeError):
+    """A configured dictionary path can't be loaded (missing file / not a real zip)."""
+
+
+_MISSING_HINT = (
+    "If these are Yomitan dictionary TITLES (from `import-yomitan` without --scan-dir) rather than "
+    "file paths, re-run `saitenka-overlay import-yomitan <settings.json> --scan-dir <dir>` to map "
+    "them to your .zip files, or set real paths in overlay.toml. Run `saitenka-overlay doctor`."
+)
+
+
+def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
+    """Partition ``paths`` into (existing, missing). A missing entry is usually a bare Yomitan title
+    written into the config — loading it would raise a raw ``FileNotFoundError``. Callers filter to
+    the existing subset (keeping the user's working dicts) and warn about the rest."""
+    existing: list[str] = []
+    missing: list[str] = []
+    for p in paths:
+        (existing if Path(str(p)).expanduser().exists() else missing).append(str(p))
+    return existing, missing
+
+
+CACHE_DIR = paths.cache_dir() / "dicts"
 _SCHEMA = 2  # v2: + kanji table. Bumping forces a one-time index rebuild.
 FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
@@ -233,7 +257,13 @@ class Dictionary:
                 stale.unlink(missing_ok=True)
                 _tags_sidecar(stale).unlink(missing_ok=True)
         if not db.exists():
-            _build_db(zp, db)
+            # Serialise the (expensive, 25–66s) build across processes: two mpv instances opening the
+            # same dict in plugin mode must not both build it. Re-check under the lock.
+            from filelock import FileLock
+
+            with FileLock(str(db) + ".lock"):
+                if not db.exists():
+                    _build_db(zp, db)
         c0 = sqlite3.connect(f"file:{db}?mode=ro", uri=True)  # transient, just to read the title
         title = c0.execute("SELECT v FROM meta WHERE k='title'").fetchone()[0]
         c0.close()
@@ -341,6 +371,18 @@ class DictionarySet:
         freq_paths: Sequence[str | Path] = (),
         pitch_paths: Sequence[str | Path] = (),
     ) -> DictionarySet:
+        # Validate every path up front so a bad entry raises ONE actionable DictionaryError instead
+        # of a raw FileNotFoundError traceback from Path.stat() deep in Dictionary.load (the WinError 2
+        # crash on a name-only config). Callers that want to keep working dicts pre-filter with
+        # split_existing(); this is the strict path (explicit CLI --dict, doctor, tests).
+        _, missing = split_existing([*paths, *freq_paths, *pitch_paths])
+        if missing:
+            raise DictionaryError(
+                "dictionary file(s) not found: "
+                + ", ".join(repr(m) for m in missing)
+                + ". "
+                + _MISSING_HINT
+            )
         return cls(
             [Dictionary.load(p) for p in paths],
             [FreqSource.load(p) for p in freq_paths],

@@ -113,7 +113,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 ```bash
 # embedded JP subs (most anime rips): the file path is the positional arg
 uv run python examples/mpv_reader.py /path/to/anime.mkv --color --mine \
-  --dict "/path/to/jitendex-yomitan.zip"
+  --dict "/path/to/your-dictionary.zip"
 
 # external subs
 uv run python examples/mpv_reader.py video.mkv --sub-file jp.srt --color --mine

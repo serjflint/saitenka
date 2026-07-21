@@ -16,24 +16,29 @@ from pathlib import Path
 _SUBMINER_PROC = "SubMiner.app/Contents/MacOS/SubMiner"
 
 
+# A local alias so mypy (warn_unreachable) doesn't literal-narrow sys.platform to the build host and
+# flag the other platforms' branches as unreachable — this code runs on all three.
+_PLATFORM = sys.platform
+
+
 def subminer_installed() -> bool:
     """True if SubMiner is present on this machine (app bundle on macOS, else a CLI on PATH)."""
-    if sys.platform == "darwin":
+    if _PLATFORM == "darwin":
         return Path("/Applications/SubMiner.app").exists()
     return shutil.which("subminer") is not None
 
 
 def subminer_running() -> bool:
     """True if a SubMiner process is live — it will attach its own overlay to mpv, so we must not."""
-    if sys.platform == "darwin":
+    if _PLATFORM == "darwin":
         try:
             r = subprocess.run(["pgrep", "-f", _SUBMINER_PROC], capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return False
         return r.returncode == 0
-    if sys.platform.startswith("win"):
+    if _PLATFORM.startswith("win"):
         try:
-            r = subprocess.run(
+            out = subprocess.run(
                 ["tasklist", "/FI", "IMAGENAME eq SubMiner.exe"],
                 capture_output=True,
                 text=True,
@@ -41,5 +46,5 @@ def subminer_running() -> bool:
             )
         except (OSError, subprocess.SubprocessError):
             return False
-        return "SubMiner.exe" in (r.stdout or "")
+        return "SubMiner.exe" in (out.stdout or "")
     return False

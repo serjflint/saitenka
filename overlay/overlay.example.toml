@@ -58,6 +58,12 @@ key = "Ctrl+m"
 all_key = "Shift+m"
 preview_key = "p"
 
+# AnkiConnect endpoint — only needed if you changed AnkiConnect's defaults (Anki → Tools → Add-ons →
+# AnkiConnect → Config: webBindPort / webBindAddress / apiKey). Stock default is 127.0.0.1:8765, no key.
+# [anki]
+# url = "http://127.0.0.1:8765"   # or set host/port separately: host = "127.0.0.1", port = 8765
+# api_key = "..."                 # only if you set an AnkiConnect apiKey
+
 # jimaku.cc subtitle fetch for attach/plugin mode. `attach` first selects an embedded JP track;
 # only when the file has NO Japanese subs does it fetch from jimaku (so this is safe to leave on).
 # API key resolution: this `key` > $JIMAKU_API_KEY > macOS Keychain. Prefer the Keychain —
@@ -67,3 +73,5 @@ preview_key = "p"
 enabled = true
 # key = "..."       # last resort — plaintext; Keychain (set-jimaku-key) is preferred
 resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) — recommended
+# force = true      # prefer jimaku OVER the embedded JP track (mistimed/wrong baked-in subs);
+#                   # falls back to the embedded track if the fetch fails. Same as --jimaku-force.

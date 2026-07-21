@@ -17,9 +17,15 @@ local utils = require 'mp.utils'
 local function ensure_socket()
     local sock = mp.get_property('input-ipc-server')
     if sock == nil or sock == '' then
-        -- create a per-instance socket so we have something to attach to
-        local tmp = os.getenv('TMPDIR') or '/tmp/'
-        sock = tmp .. 'saitenka-mpv-' .. utils.getpid() .. '.sock'
+        -- create a per-instance socket/pipe so we have something to attach to
+        if package.config:sub(1, 1) == '\\' then
+            -- Windows: mpv IPC is a NAMED PIPE, not a filesystem socket (a /tmp/*.sock path is
+            -- never connectable there). Use the \\.\pipe\ form the overlay's client expects.
+            sock = '\\\\.\\pipe\\saitenka-mpv-' .. utils.getpid()
+        else
+            local tmp = os.getenv('TMPDIR') or '/tmp/'
+            sock = tmp .. 'saitenka-mpv-' .. utils.getpid() .. '.sock'
+        end
         mp.set_property('input-ipc-server', sock)
     end
     return sock

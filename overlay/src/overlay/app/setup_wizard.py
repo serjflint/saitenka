@@ -209,5 +209,18 @@ def run_setup(yes: bool, dry_run: bool) -> int:
     _offer_copy_dicts(confirm)
     _offer_plugin(confirm)
 
-    print("\nSetup complete. Run `saitenka-overlay <video>` to start.")
+    # Final self-verify: re-run the full health check now that config + plugin exist, so the user sees
+    # the real end state (the first doctor ran before any of that) and a clear pass/fail summary.
+    print("\nFinal check:")
+    from overlay.app.doctor import print_report, run_checks
+
+    report = run_checks()
+    print_report(report)
+    if report.exit_code == 0:
+        print("\nSetup complete ✅ — run `saitenka-overlay <video>`, or just open a video in mpv.")
+    else:
+        print(
+            "\nSetup finished with problems (see ✗ above). Fix them, re-run `saitenka-overlay doctor`,"
+            " or send `saitenka-overlay report` if you need help."
+        )
     return 0

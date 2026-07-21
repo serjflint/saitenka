@@ -29,3 +29,6 @@ saitenka-dicts/
 
 # frequency dictionaries — user-supplied, never committed (see tools/freq/README.md)
 tools/freq/*.zip
+
+# local planning scratch — the published artifacts are CHANGELOG.md + ROADMAP.md (+ issues)
+vibe/
