@@ -93,3 +93,40 @@ def test_ensure_jimaku_fetches_when_no_jp_track(tmp_path, monkeypatch):
     msg = subselect.ensure_jp_subs(ipc, jimaku=True, resync=False)
     assert "jimaku: added fetched.ja.srt" in msg and "ep 9" in msg
     assert ("sub-add", str(fetched)) in ipc.calls
+
+
+def _stub_jimaku(monkeypatch, tmp_path, *, ok=True):
+    fetched = tmp_path / "fetched.ja.srt"
+    fetched.write_text("x")
+    monkeypatch.setattr(subselect, "_add_and_select", lambda ipc, p: ipc.command("sub-add", str(p)))
+    import overlay.app.jimaku as jm
+
+    class FakeClient:
+        def __init__(self, key=None):
+            pass
+
+        def fetch(self, title, ep, dest):
+            if not ok:
+                raise jm.JimakuError("not found")
+            return fetched
+
+    monkeypatch.setattr(jm, "JimakuClient", FakeClient)
+    monkeypatch.setattr(jm, "parse_filename", lambda p: ("Nippon Sangoku", 9))
+    return fetched
+
+
+def test_jimaku_force_prefers_jimaku_over_embedded_jp_track(tmp_path, monkeypatch):
+    fetched = _stub_jimaku(monkeypatch, tmp_path)
+    ipc = FakeIPC(tracks=[EN, JP], path="/v/Nippon Sangoku - 09.mkv")
+    msg = subselect.ensure_jp_subs(ipc, jimaku=True, jimaku_force=True, resync=False)
+    assert "jimaku: added fetched.ja.srt" in msg
+    assert ("sub-add", str(fetched)) in ipc.calls
+    assert ipc.sets("sid") == []  # embedded JP track was NOT selected — jimaku won
+
+
+def test_jimaku_force_falls_back_to_embedded_on_fetch_failure(tmp_path, monkeypatch):
+    _stub_jimaku(monkeypatch, tmp_path, ok=False)
+    ipc = FakeIPC(tracks=[EN, JP], path="/v/Nippon Sangoku - 09.mkv")
+    msg = subselect.ensure_jp_subs(ipc, jimaku=True, jimaku_force=True, resync=False)
+    assert "sid=2" in msg  # jimaku failed → embedded JP track selected as fallback
+    assert ipc.sets("sid") == [2]

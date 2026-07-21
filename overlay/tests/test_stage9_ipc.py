@@ -195,29 +195,48 @@ def _pair():
     a, b = _s.socketpair()
     ipc = MpvIPC("unused")
     ipc._sock = a
+    ipc._start_reader()  # background reader consumes the injected socket (as connect() would)
     return ipc, b
 
 
-def test_pump_reads_unsolicited_events_without_blocking():
-    """Steady state sends no commands, so events must be pumped off the socket
-    independently — otherwise observed properties never update (live-mpv regression)."""
+def test_reader_thread_collects_unsolicited_events():
+    """Steady state sends no commands, so the reader thread must collect events off the socket
+    independently — otherwise observed properties never update (live-mpv regression). The reader
+    replaces the old single-threaded pump(), which was a NO-OP on the Windows pipe."""
     ipc, server = _pair()
     server.sendall(b'{"event":"property-change","id":1,"name":"sub-text","data":"x"}\n')
     import time as _t
 
-    _t.sleep(0.05)
-    ipc.pump()
+    _t.sleep(0.1)  # let the reader thread consume it
+    ipc.pump()  # not disconnected → must not raise
     evs = ipc.drain_events()
     assert [e["name"] for e in evs if e.get("event") == "property-change"] == ["sub-text"]
-    ipc.pump()  # nothing pending → must return immediately, not block
     server.close()
+    ipc.close()
+
+
+def test_reader_delivers_reply_while_buffering_events():
+    """A command reply must return even when async events are interleaved on the stream."""
+    ipc, server = _pair()
+    server.sendall(
+        b'{"event":"property-change","id":1,"name":"mouse-pos","data":{"x":1}}\n'
+        b'{"data":0.0,"request_id":0,"error":"success"}\n'
+    )
+    reply = ipc.command("get_property", "time-pos")
+    assert reply.get("error") == "success"
+    assert any(e.get("name") == "mouse-pos" for e in ipc.drain_events())
+    server.close()
+    ipc.close()
 
 
 def test_pump_raises_on_disconnect():
     ipc, server = _pair()
-    server.close()
+    server.close()  # reader thread sees EOF → sets closed
+    import time as _t
+
     import pytest as _p
 
+    _t.sleep(0.1)
     with _p.raises(OSError):
-        for _ in range(3):
-            ipc.pump()
+        ipc.pump()
+    ipc.close()

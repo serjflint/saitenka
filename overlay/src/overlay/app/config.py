@@ -17,9 +17,11 @@ import tomllib
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
-CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "saitenka"
+from overlay.app import paths
+
+CONFIG_HOME = paths.config_dir()
 DEFAULT_PATH = CONFIG_HOME / "overlay.toml"
-DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "saitenka"
+DATA_HOME = paths.data_dir()
 
 
 def config_path(override: str | os.PathLike | None = None) -> Path:

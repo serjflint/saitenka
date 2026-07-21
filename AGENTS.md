@@ -3,6 +3,21 @@
 Guidance for AI agents and developers working in this repo. Feature docs: `overlay/README.md` (renderer
 + reader tour) and `overlay/RUNNING.md` (run/test walkthrough).
 
+## Planning artifacts
+
+Shipped changes go in **`CHANGELOG.md`** ([Keep a Changelog](https://keepachangelog.com/) format,
+curated for readers). Future direction lives in **`ROADMAP.md`**; granular, trackable work goes in
+issues/milestones. Any local planning scratch belongs in `vibe/`, which is **git-ignored** — it is not
+a published artifact.
+
+**Commits.** Commit **frequently** — small, focused [Conventional Commits](https://www.conventionalcommits.org)
+(`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, …), one logical change each; don't batch unrelated work.
+No tool-attribution trailers.
+
+**Changelog.** Drafted from history with [git-cliff](https://git-cliff.org/) (config: `cliff.toml`;
+`uv run poe changelog` previews the unreleased section) and then **hand-reviewed** for readers — never
+shipped raw. `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/).
+
 ## Python: always use `uv`
 
 This repo standardizes on **[uv](https://docs.astral.sh/uv/)** for everything Python. Do **not** use bare

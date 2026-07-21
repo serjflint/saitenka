@@ -73,7 +73,10 @@ function AddonLine($code,$nm,$note){
   if(Test-Path (Join-Path $Addons $code)){ Write-Host ("       [x] {0,-14} installed" -f $nm) -ForegroundColor Green }
   else { Write-Host ("       [ ] {0,-14} paste {1} ({2})" -f $nm,$code,$note) -ForegroundColor Yellow }
 }
-$Cfg = if($env:SAITENKA_CONFIG){ $env:SAITENKA_CONFIG } else { Join-Path $HOME '.config\saitenka\overlay.toml' }
+# Config resolves platform-native (%APPDATA%\saitenka) with a legacy ~/.config fallback — mirror it.
+$Cfg = if($env:SAITENKA_CONFIG){ $env:SAITENKA_CONFIG }
+       elseif(Test-Path (Join-Path $env:APPDATA 'saitenka\overlay.toml')){ Join-Path $env:APPDATA 'saitenka\overlay.toml' }
+       else { Join-Path $HOME '.config\saitenka\overlay.toml' }
 function DictsPresent(){
   if(-not (Test-Path $Cfg)){ return 0 }
   $n = 0
@@ -85,8 +88,9 @@ function DictsPresent(){
 
 Write-Host ""
 Write-Host "Next steps:"
-$Plugin = Join-Path $HOME '.config\mpv\scripts\saitenka.lua'
-if(Test-Path $Plugin){ Write-Host "  1. mpv plugin:  [x] installed (auto-starts the overlay on any mpv launch)" -ForegroundColor Green }
+# mpv reads scripts from %APPDATA%\mpv\scripts on Windows (mpv.net: %APPDATA%\mpv.net\scripts).
+$PluginDirs = @((Join-Path $env:APPDATA 'mpv\scripts\saitenka.lua'), (Join-Path $env:APPDATA 'mpv.net\scripts\saitenka.lua'))
+if($PluginDirs | Where-Object { Test-Path $_ }){ Write-Host "  1. mpv plugin:  [x] installed (auto-starts the overlay on any mpv launch)" -ForegroundColor Green }
 else {
   Write-Host "  1. Install the mpv plugin (auto-starts on any mpv launch):  saitenka-overlay install-plugin"
   Write-Host "     - or the full wizard (config, dict relocation, plugin):  saitenka-overlay setup"

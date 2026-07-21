@@ -91,6 +91,8 @@ def test_clip_audio_builds_ffmpeg(monkeypatch):
         return None
 
     monkeypatch.setattr("overlay.app.media.subprocess.run", fake_run)
+    # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
+    monkeypatch.setattr("overlay.mpvio.discover.find_tool", lambda name: name)
     clip_audio("/v.mkv", Timespan(10, 12), "/out.m4a", pad=0.5, track=0)
     cmd = calls["cmd"]
     assert cmd[0] == "ffmpeg" and "aac" in cmd

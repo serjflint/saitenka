@@ -62,6 +62,7 @@ TOAST_ID = 3
 TRANS_ID = 4
 PREVIEW_ID = 5
 NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
+LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
 SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
@@ -179,6 +180,12 @@ class Reader:
         self.anki = anki  # app.anki.Anki | None — enables one-key mining
         self.mine_cfg = mine_cfg
         self.dict_set = dict_set  # app.dictionary.DictionarySet | None — multi-dict tooltip
+        # Progressive startup: deps loaded on a background thread, injected on the main thread by the
+        # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
+        self._pending_deps: dict | None = None
+        self._loading = False
+        self._load_frame = 0
+        self._load_next = 0.0
         self._miner = Miner(self)  # mining flow (app/miner.py)
         self.mine_key = o.keys.mine_key
         self.mine_all_key = o.keys.mine_all_key
@@ -1639,6 +1646,12 @@ class Reader:
             text = self._prop("sub-text") or ""
             if text != self.sub_text:
                 self.set_subtitle(text)
+            # progressive startup: inject background-loaded deps (once), else animate the spinner
+            if self._pending_deps is not None:
+                deps, self._pending_deps = self._pending_deps, None
+                self._apply_deps(deps)
+            elif self._loading:
+                self._draw_loading()
             self._update_hover()
             if self._tip_dirty:  # a worker finished the shown panel's deferred tail
                 self._tip_dirty = False
@@ -1655,6 +1668,59 @@ class Reader:
 
     def _seed_mined(self) -> None:
         self._miner.seed_mined()
+
+    # --- progressive dep loading --------------------------------------------------------------
+    def load_deps_async(self, cfg: dict) -> None:
+        """Load coloring/dict/mining collaborators on a BACKGROUND thread (dicts/scorer/anki — none
+        touch the mpv IPC), then hand them to the poll loop, which injects them on the main thread.
+        Plain subs draw meanwhile; a spinner shows until the deps land."""
+        self._loading = True
+
+        def _load() -> None:
+            from overlay.app.reader_deps import build_reader_deps
+
+            try:
+                scorer, anki, mine_cfg, dict_set = build_reader_deps(cfg)
+                self._pending_deps = {
+                    "scorer": scorer,
+                    "anki": anki,
+                    "mine_cfg": mine_cfg,
+                    "dict_set": dict_set,
+                }
+            except Exception:
+                log.warning("background dep load failed — staying subs-only", exc_info=True)
+                self._pending_deps = {}  # signal "done" so the spinner stops
+
+        threading.Thread(target=_load, name="saitenka-deps", daemon=True).start()
+
+    def _apply_deps(self, deps: dict) -> None:
+        """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
+        self._loading = False
+        self.ov.hide(LOADING_ID)
+        self.scorer = deps.get("scorer")
+        self.anki = deps.get("anki")
+        self.mine_cfg = deps.get("mine_cfg")
+        self.dict_set = deps.get("dict_set")
+        if self.sub_text:  # re-tokenise + re-score the CURRENT cue so coloring appears now
+            self.set_subtitle(self.sub_text)
+        if self.anki:
+            self._seed_mined()  # ⊕→✓ from past mining
+        self.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
+
+    def _draw_loading(self) -> None:
+        """Draw the throttled top-left spinner while deps load (main thread, from the poll loop)."""
+        now = time.monotonic()
+        if now < self._load_next:
+            return
+        self._load_next = now + 0.08
+        from overlay.app.loading import loading_image
+
+        img = loading_image("saitenka loading dictionaries", self._load_frame)
+        self._load_frame += 1
+        try:
+            self.ov.show(img, x=24, y=24, oid=LOADING_ID)
+        except Exception:
+            log.debug("loading spinner draw failed", exc_info=True)
 
     def run(self, interval: float = 0.025) -> None:
         self.refresh_osd()

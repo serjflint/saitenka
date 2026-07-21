@@ -48,7 +48,9 @@ def test_color_builds_scorer_even_without_known(monkeypatch):
     import overlay.app.scoring as scoring_mod
     import overlay.app.wordlists as wl
 
-    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda words: f"known:{len(words)}"))
+    monkeypatch.setattr(
+        wl.KnownWords, "from_set", staticmethod(lambda words: f"known:{len(words)}")
+    )
     monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda: "JLPT"))
     monkeypatch.setattr(
         scoring_mod, "Scorer", lambda known, freq, jlpt: {"known": known, "jlpt": jlpt}
@@ -68,7 +70,5 @@ def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
     monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda words: "empty-known"))
     monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda: "JLPT"))
     monkeypatch.setattr(scoring_mod, "Scorer", lambda known, freq, jlpt: {"known": known})
-    scorer, _, _, _ = reader_deps.build_reader_deps(
-        {"known": {"Deck": ["Expression"]}}, color=True
-    )
+    scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
     assert scorer == {"known": "empty-known"}  # degraded, not crashed

@@ -47,8 +47,10 @@ def clip_audio(
     p = span.padded(pad)
     dur = p.duration
     af = f"afade=t=in:st=0:d={fade},afade=t=out:st={max(0.0, dur - fade):.3f}:d={fade}"
+    from overlay.mpvio.discover import find_tool
+
     cmd = [
-        "ffmpeg",
+        find_tool("ffmpeg") or "ffmpeg",  # GUI-launched mpv has a minimal PATH without Homebrew
         "-y",
         "-ss",
         f"{p.start:.3f}",
@@ -127,10 +129,12 @@ def copy_clipboard(text: str) -> None:
 
 
 def audio_duration(path: str | Path) -> float | None:
+    from overlay.mpvio.discover import find_tool
+
     try:
         out = subprocess.run(
             [
-                "ffprobe",
+                find_tool("ffprobe") or "ffprobe",
                 "-v",
                 "error",
                 "-show_entries",

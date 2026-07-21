@@ -1,63 +1,189 @@
-# 再点火 (Saitenka) — immersion tooling for Japanese
+# 再点火 (Saitenka) — learn Japanese from the video you're already watching
 
-Open-source tooling for sentence-mining Japanese from video with **mpv + Anki + Yomitan**:
-an in-mpv dictionary/mining overlay plus an Anki/FSRS deck engine. Extracted from a personal
-post-JLPT-N2 study project; the personal notes/vault live in a separate private repo.
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
+![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)
+![Built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)
 
-## What's here
+Saitenka turns **mpv** into an immersion workstation: Japanese subtitles get **FSRS-aware word
+coloring**, hovering a word opens a **Yomitan-style multi-dictionary tooltip**, and one key **mines**
+the sentence — audio, screenshot, reading, pitch, frequency — straight into **Anki**. Everything is
+drawn into mpv's *own* video surface, so there's no second window and none of the Windows
+overlay/fullscreen breakage that plagues external overlays.
 
-- **`overlay/`** — the in-mpv **Yomitan-style overlay** (`saitenka-overlay`). Japanese subtitles with
-  FSRS-aware word coloring, hover → multi-dictionary tooltip, **one-key + bulk mining** to Anki
-  (Lapis cards with sentence audio + screenshot), on-demand English reveal, and jimaku subtitle
-  fetch — all composited into mpv's *own* OSD surface (one surface, no second window → no Windows
-  airspace/fullscreen bugs). Python + Pillow renderer; see `overlay/README.md`.
-- **`tools/`** — the **Anki / FSRS engine**: FSRS-based dictionary ranking, field normalization,
-  provenance annotation, deck building, refile-by-review-state, and an anime chooser. Frequency dicts
-  are user-supplied — drop them in `tools/freq/` or point `--freq-dir` / `$SAITENKA_FREQ_DIR` at them.
-- **`install/`** — cross-platform installers (macOS / Windows / Linux) + a `doctor` health check and
-  `make_bundle.py`, which builds a single self-contained zip you can hand to a friend.
-- **`deinflect/`** — *optional* **GPL-3.0** add-on (`saitenka-overlay-deinflect`): the Yomitan-derived
-  inflection-chain display (🧩 `-て « -いる « -た`). Kept separate so the core stays Apache-2.0; the
-  overlay runs fine without it. See [LICENSING.md](LICENSING.md).
+- **再点火 = "re-ignition"** — built to make picking study back up frictionless after a long break.
+- Local-first and grounded: readings and pitch always come from dictionaries, never a language model.
+
+> **New here?** Jump to [Quick start](#quick-start) — one command installs everything and wires the
+> overlay into every future mpv launch.
+
+## Table of contents
+
+- [Why](#why)
+- [How it works](#how-it-works)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [What's in the repo](#whats-in-the-repo)
+- [Requirements](#requirements)
+- [Conventions](#conventions)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
+## Why
+
+Sentence-mining from native video is the highest-leverage way to grow vocabulary, but the usual rig is
+a fragile chain of a browser texthooker, a clipboard bridge, a separate overlay window, and manual card
+assembly. The overlay-window approach in particular fights the OS: on Windows it flickers, loses hover
+focus, and breaks in fullscreen because a second window can never share the video's airspace.
+
+Saitenka solves three problems:
+
+- **No second window.** The dictionary tooltip, colored subtitles, and mining UI are composited into
+  mpv's own OSD surface over its JSON-IPC connection — one surface, airspace-safe, fullscreen-safe.
+- **No busywork loop.** Watch → colored subs → hover → dictionary → one-key mine (sentence audio +
+  clean screenshot + reading/pitch/frequency, deduped, FSRS-tagged) happens without leaving the video.
+- **Study you already forgot resurfaces.** Word coloring is sourced from your Anki/**FSRS** (Anki's
+  spaced-repetition scheduler) review state, so "known" means *actually remembered right now*, and
+  **N+1** sentences — those with exactly one unknown word, the ideal thing to mine — are highlighted.
+
+## How it works
+
+- **Renderer:** Python + [Pillow](https://python-pillow.org/) rasterizes the rich tooltip (structured
+  content, ruby furigana, pitch/frequency pills, inflection chain) to a BGRA bitmap and bolts it into
+  mpv via `overlay-add` over JSON IPC — no GL, no FFI, no second process drawing on screen.
+- **Cross-platform IPC:** a background reader thread speaks mpv's JSON-IPC over a Unix socket
+  (macOS/Linux) or a Windows **named pipe**, and *joins* a shared socket so it coexists with other mpv
+  scripts.
+- **Plugin mode (full-auto):** an installed `saitenka.lua` user-script makes **every** mpv launch
+  auto-start the overlay in attach mode — open any video in mpv and the overlay is just there.
+- **Language pipeline:** [fugashi](https://github.com/polm/fugashi) + UniDic tokenize; a Yomitan-derived
+  deinflector recovers dictionary forms; lookups hit an on-disk **SQLite** index built once from your
+  Yomitan dictionaries (low, near-constant RAM even for large monolingual dictionaries).
+- **Free-threaded (optional):** on a free-threaded Python **3.14t** build the renderer parallelizes
+  across cores; it also runs fine on a standard build (single-threaded rendering). The minimum is 3.13,
+  and `uv` fetches the right interpreter for you.
+
+## Features
+
+- FSRS-aware subtitle **word coloring** + JLPT underlines + N+1 targeting (sourced from your Anki decks
+  via AnkiConnect).
+- Hover → **multi-dictionary tooltip**: ordered definitions, ruby, frequency pills, pitch-accent,
+  clickable cross-references, in-tooltip word scanning, wildcard search.
+- **One-key + bulk mining** to Anki (Lapis-style cards — a popular community Anki note type): sentence
+  audio, clean screenshot, reading, glossary, frequency, structured provenance tags — with dedup and a
+  post-mine card preview.
+- On-demand **English reveal** (anti-crutch: only while you're actively looking a word up) and
+  **jimaku.cc** subtitle fetch when a file has no Japanese track.
+- Import dictionaries from **Yomitan** — both standard dictionary `.zip`s and a full Yomitan database
+  export (streamed, so a multi-GB export never loads into memory).
+- A `doctor` command that checks the whole environment and a one-command `setup` wizard.
 
 ## Quick start
 
-The overlay installs as a `uv` tool with its own Python and dependencies:
+**1. Install [uv](https://docs.astral.sh/uv/)** (it provides Python + all dependencies — no system
+Python needed):
 
 ```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+winget install --id=astral-sh.uv -e
+```
+
+**2. Install Saitenka and let it set everything up.** The `setup` wizard installs mpv + ffmpeg, writes
+your config, and installs the mpv plugin so **every future mpv launch auto-starts the overlay**:
+
+```bash
+# macOS / Linux
 git clone https://github.com/serjflint/saitenka.git
 cd saitenka
-bash install/install-macos.sh        # macOS  (Windows: install/install-windows.ps1)
+bash install/install-macos.sh          # bootstraps uv, installs the tool, runs `setup`
 ```
 
-Or run it straight from the checkout while hacking on it:
+```powershell
+# Windows (PowerShell) — clone, then run the bundled installer
+git clone https://github.com/serjflint/saitenka.git
+cd saitenka
+powershell -ExecutionPolicy Bypass -File install\install-windows.ps1
+```
+
+On **Linux**, install uv (above), then from the clone run `uv tool install ./overlay && saitenka-overlay
+setup` — `setup` prints your distro's `mpv`/`ffmpeg` install command (apt / dnf / pacman).
+
+Prefer to drive it yourself? From the cloned checkout above, run `uv tool install ./overlay`, then:
 
 ```bash
-cd overlay
-uv sync
-uv run python examples/mpv_reader.py            # smoke run: generated clip + hover tooltip
-uv run python examples/mpv_reader.py video.mkv --color --mine   # real episode
+saitenka-overlay setup          # full-auto: inventory → install mpv/ffmpeg → config → plugin
+saitenka-overlay doctor         # re-check the environment any time
+saitenka-overlay install-plugin # (re)install just the auto-start mpv plugin
 ```
 
-Full run/test walkthrough: **`overlay/RUNNING.md`**. Feature tour: **`overlay/README.md`**.
+**3. Watch.** With the plugin installed, open any video in mpv — the overlay attaches automatically.
+Or launch a file directly:
+
+```bash
+saitenka-overlay run video.mkv          # hover a word → tooltip; Ctrl+m → mine
+```
+
+Full run/test walkthrough: **[`overlay/RUNNING.md`](overlay/RUNNING.md)**. Feature tour:
+**[`overlay/README.md`](overlay/README.md)**.
+
+## What's in the repo
+
+- **[`overlay/`](overlay/)** — the in-mpv overlay (`saitenka-overlay`): colored subtitles, hover
+  tooltip, mining, English reveal, jimaku fetch, dictionary import, `doctor`/`setup`.
+- **[`tools/`](tools/)** — the Anki/FSRS deck engine: FSRS-based dictionary ranking, field
+  normalization, provenance annotation, deck building, refile-by-review-state, anime chooser.
+  Frequency dictionaries are user-supplied (`tools/freq/` or `--freq-dir` / `$SAITENKA_FREQ_DIR`).
+- **[`install/`](install/)** — cross-platform installers (macOS / Windows / Linux), the `doctor` health
+  check, and `make_bundle.py`, which builds a single self-contained zip you can hand to a friend.
+- **[`deinflect/`](deinflect/)** — *optional* **GPL-3.0** add-on (`saitenka-overlay-deinflect`): the
+  Yomitan-derived inflection-chain display (🧩 `-て « -いる « -た`). Kept separate so the core stays
+  Apache-2.0; the overlay runs fine without it. See [LICENSING.md](LICENSING.md).
 
 ## Requirements
 
-- **mpv** and **ffmpeg** on `PATH`
-- **[uv](https://docs.astral.sh/uv/)** (provides the Python interpreter + deps — no system Python needed)
-- Optional: **Anki** with the **AnkiConnect** add-on (for FSRS-aware coloring and mining)
-- Optional: **Yomitan** term-bank dictionaries (import in your browser; point `overlay.toml` at the zips)
+- **mpv** ≥ 0.37 and **ffmpeg** — `setup` installs these for you (Homebrew / winget); they don't need to
+  be on `PATH` beforehand.
+- **[uv](https://docs.astral.sh/uv/)** — provides the Python interpreter and dependencies.
+- Optional: **[Anki](https://apps.ankiweb.net/)** + the **[AnkiConnect](https://ankiweb.net/shared/info/2055492159)**
+  add-on — for FSRS-aware coloring and mining.
+- Optional: **[Yomitan](https://github.com/yomidevs/yomitan)** dictionaries — import your `.zip`s (or a
+  full database export) and point `overlay.toml` at them.
 
-## Project conventions
+Every path (config, data, cache, dictionaries, the mpv binary and socket) is overridable in
+`overlay.toml` or via environment variables, and resolves to platform-native locations by default.
+
+## Conventions
 
 Python is standardized on **`uv`** (never bare `python`/`pip`/`venv`). LLM use is optional, local-first,
-and grounded (readings/pitch always come from dictionaries, never a model). See **`AGENTS.md`** for the
-full guidance for contributors and AI agents. No CI — `uv run poe all` in `overlay/` is the pre-push gate
-(lint, types, 400+ tests, coverage floor 85%).
+and grounded — readings and pitch always come from dictionaries, never a model. There's no CI; the
+pre-push gate is `uv run poe all` in `overlay/` (lint, types, tests, coverage floor 85%). See
+**[AGENTS.md](AGENTS.md)** for full contributor / AI-agent guidance.
 
 ## License
 
 **[Apache-2.0](LICENSE)** for the core (`overlay/`, `tools/`, `install/`). The optional `deinflect/`
 add-on is **GPL-3.0** (derived from Yomitan) — installing it makes the *combined* work GPL-3.0. Full
-map: **[LICENSING.md](LICENSING.md)**. Vendored fonts are SIL OFL; frequency dicts are user-supplied
-(not shipped).
+map: **[LICENSING.md](LICENSING.md)**. Vendored fonts are SIL OFL; frequency and definition
+dictionaries are user-supplied (not shipped).
+
+## Acknowledgments
+
+Saitenka stands on a lot of excellent open-source work:
+
+- **[mpv](https://mpv.io/)** — the player, its JSON-IPC protocol, and `overlay-add`, which make the
+  single-surface overlay possible.
+- **[Yomitan](https://github.com/yomidevs/yomitan)** — the dictionary format, the popup UX this overlay
+  reproduces, and the inflection-transform rules the optional deinflector derives from.
+- **[Anki](https://apps.ankiweb.net/)** + **[AnkiConnect](https://ankiweb.net/shared/info/2055492159)**,
+  and **[FSRS](https://github.com/open-spaced-repetition/fsrs4anki)** by the open-spaced-repetition
+  project — the spaced-repetition backbone behind the review-state coloring.
+- **[jimaku.cc](https://jimaku.cc/)** — community Japanese subtitles.
+- **[fugashi](https://github.com/polm/fugashi)** + **[UniDic](https://clrd.ninjal.ac.jp/unidic/)** for
+  tokenization, **[Pillow](https://python-pillow.org/)** for rendering, and
+  **[JMdict/KANJIDIC](https://www.edrdg.org/)** (EDRDG) as the built-in fallback dictionary.
+- Prior art that shaped the design: **[SubMiner](https://github.com/ksyasuda/SubMiner)** and the
+  **[Animecards](https://animecards.site/)** workflow with **[mpv_websocket](https://github.com/kuroahna/mpv_websocket)**.

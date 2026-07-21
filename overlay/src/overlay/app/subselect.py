@@ -46,24 +46,72 @@ def _add_and_select(ipc, sub_path: str | Path) -> None:
     ipc.command("sub-add", str(sub_path), "select")
 
 
+def fetch_jimaku(
+    ipc,
+    *,
+    jimaku_key: str | None = None,
+    jimaku_title: str | None = None,
+    episode: int | None = None,
+    resync: bool = True,
+) -> tuple[bool, str]:
+    """Fetch JP subs from jimaku.cc for the attached mpv's current file, add + select them, and hide
+    mpv's native rendering. Returns ``(ok, status)`` so callers can fall back on failure. Usable
+    standalone as the runtime "force jimaku" action (a keybind can call this mid-playback)."""
+    from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
+
+    video = ipc.command("get_property", "path").get("data")
+    if not video:
+        return False, "jimaku: mpv reports no file path — cannot fetch"
+    title, ep = parse_filename(video)
+    title = jimaku_title or title
+    ep = episode if episode is not None else ep
+    tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
+    try:
+        sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
+    except JimakuError as e:
+        return False, f"jimaku failed: {e}"
+    if resync and Path(video).exists():
+        from overlay.app.resync import maybe_resync
+
+        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
+    _add_and_select(ipc, sub_path)
+    ipc.command("set_property", "sub-visibility", False)
+    return True, f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
+
+
 def ensure_jp_subs(
     ipc,
     *,
     slang: str = "ja,jpn,jp",
     sub_file: str | None = None,
     jimaku: bool = False,
+    jimaku_force: bool = False,
     jimaku_key: str | None = None,
     jimaku_title: str | None = None,
     episode: int | None = None,
     resync: bool = True,
 ) -> str:
     """Make Japanese subtitles active on an attached mpv, mirroring ``run``'s precedence:
-    explicit file > existing JP track > jimaku fetch. Hides mpv's native sub rendering whenever it
-    takes control. Returns a human-readable status line for the CLI to print."""
+    explicit file > existing JP track > jimaku fetch. ``jimaku_force`` flips jimaku AHEAD of the
+    embedded track (for files whose baked-in JP subs are mistimed/wrong), falling back to the embedded
+    track only if the fetch fails. Hides mpv's native sub rendering whenever it takes control. Returns
+    a human-readable status line for the CLI to print."""
     if sub_file:
         _add_and_select(ipc, Path(sub_file).expanduser())
         ipc.command("set_property", "sub-visibility", False)
         return f"using sub file {Path(sub_file).name}"
+
+    if jimaku and jimaku_force:
+        ok, status = fetch_jimaku(
+            ipc,
+            jimaku_key=jimaku_key,
+            jimaku_title=jimaku_title,
+            episode=episode,
+            resync=resync,
+        )
+        if ok:
+            return status
+        log.warning("jimaku force fetch failed (%s) — falling back to the embedded track", status)
 
     sid = select_sub_track(ipc, slang)
     if sid is not None:
@@ -73,23 +121,7 @@ def ensure_jp_subs(
     if not jimaku:
         return "no Japanese subtitle track found (pass --jimaku to fetch, or --sub-file)"
 
-    from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
-
-    video = ipc.command("get_property", "path").get("data")
-    if not video:
-        return "jimaku: mpv reports no file path — cannot fetch"
-    title, ep = parse_filename(video)
-    title = jimaku_title or title
-    ep = episode if episode is not None else ep
-    tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
-    try:
-        sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
-    except JimakuError as e:
-        return f"jimaku failed: {e}"
-    if resync and Path(video).exists():
-        from overlay.app.resync import maybe_resync
-
-        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
-    _add_and_select(ipc, sub_path)
-    ipc.command("set_property", "sub-visibility", False)
-    return f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
+    _, status = fetch_jimaku(
+        ipc, jimaku_key=jimaku_key, jimaku_title=jimaku_title, episode=episode, resync=resync
+    )
+    return status

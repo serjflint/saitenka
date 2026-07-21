@@ -37,8 +37,12 @@ def resolve_overlay_bin() -> str:
 
 def _bake_bin(text: str, bin_path: str) -> str:
     """Replace the SAITENKA_BIN declaration with the resolved absolute path (lua ``[[...]]`` literal
-    so spaces survive)."""
-    return _BIN_LINE_RE.sub(f"local SAITENKA_BIN = [[{bin_path}]]", text, count=1)
+    so spaces survive).
+
+    The replacement is a FUNCTION, not a string: a Windows path (``C:\\Users\\…``) used as an
+    ``re.sub`` replacement string would have its backslash escapes interpreted (``\\U`` → "bad escape
+    \\U"), crashing install-plugin/setup. A callable inserts the value verbatim."""
+    return _BIN_LINE_RE.sub(lambda _m: f"local SAITENKA_BIN = [[{bin_path}]]", text, count=1)
 
 
 def _lua_source() -> Path:
@@ -49,10 +53,18 @@ def _lua_source() -> Path:
 
 
 def default_scripts_dir() -> Path:
-    import os
+    """The primary mpv scripts dir, mirroring mpv's own resolution ($MPV_HOME > %APPDATA%\\mpv on
+    Windows > ~/.config/mpv). mpv.net's separate dir is added by ``all_scripts_dirs``."""
+    from overlay.app.paths import mpv_config_dir
 
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return config_home / "mpv" / "scripts"
+    return mpv_config_dir() / "scripts"
+
+
+def all_scripts_dirs() -> list[Path]:
+    """Every scripts dir to install into so the plugin loads from any launcher: mpv's + mpv.net's."""
+    from overlay.app.paths import mpv_scripts_dirs
+
+    return mpv_scripts_dirs()
 
 
 def _backup(dest: Path) -> Path | None:
@@ -69,24 +81,35 @@ def _backup(dest: Path) -> Path | None:
 
 
 def install_plugin(scripts_dir: Path | None = None) -> Path:
-    """Copy ``saitenka.lua`` into ``scripts_dir`` (default ~/.config/mpv/scripts), backing up any
-    existing copy first. Returns the installed path."""
-    scripts_dir = scripts_dir or default_scripts_dir()
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    dest = scripts_dir / LUA_NAME
-    _backup(dest)
+    """Copy ``saitenka.lua`` into the mpv scripts dir(s), backing up any existing copy first. With no
+    explicit ``scripts_dir`` it installs into EVERY dir from ``all_scripts_dirs`` (mpv + mpv.net on
+    Windows) so the plugin loads whichever player the user launches. Returns the primary path."""
+    targets = [scripts_dir] if scripts_dir is not None else all_scripts_dirs()
+    from overlay.app.paths import atomic_write_text
+
     lua = _bake_bin(_lua_source().read_text(encoding="utf-8"), resolve_overlay_bin())
-    dest.write_text(lua, encoding="utf-8")
-    return dest
+    installed: list[Path] = []
+    for d in targets:
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / LUA_NAME
+        _backup(dest)
+        # newline="\n": keep the Lua LF-only even on Windows (text-mode write would emit CRLF).
+        atomic_write_text(dest, lua, newline="\n")
+        installed.append(dest)
+    return installed[0]
 
 
 def uninstall_plugin(scripts_dir: Path | None = None) -> Path | None:
-    """Remove ``saitenka.lua`` from ``scripts_dir``, backing it up first. Returns the backup path,
-    or None if nothing was installed."""
-    scripts_dir = scripts_dir or default_scripts_dir()
-    dest = scripts_dir / LUA_NAME
-    if not dest.exists():
-        return None
-    backup = _backup(dest)
-    dest.unlink()
-    return backup
+    """Remove ``saitenka.lua`` from the mpv scripts dir(s), backing each up first. Returns the first
+    backup path, or None if nothing was installed anywhere."""
+    targets = [scripts_dir] if scripts_dir is not None else all_scripts_dirs()
+    first_backup: Path | None = None
+    for d in targets:
+        dest = d / LUA_NAME
+        if not dest.exists():
+            continue
+        backup = _backup(dest)
+        dest.unlink()
+        if first_backup is None:
+            first_backup = backup
+    return first_backup

@@ -19,9 +19,17 @@ from overlay.app import init_wizard as wiz
 # --- individual checks -----------------------------------------------------------------------
 
 
+def _patch_find_mpv(monkeypatch, result):
+    # check_mpv resolves via find_mpv (config → env → PATH → known dirs / mpv.net), so patch that,
+    # not shutil.which — otherwise the host's real Homebrew mpv leaks in via the candidate list.
+    import overlay.mpvio.discover as disc
+
+    monkeypatch.setattr(disc, "find_mpv", lambda *a, **k: result)
+
+
 def test_mpv_check_pass(monkeypatch):
     monkeypatch.setattr(doc, "_run", lambda *a, **k: "mpv 0.38.0\n")
-    monkeypatch.setattr(doc.shutil, "which", lambda name: "/usr/bin/mpv")
+    _patch_find_mpv(monkeypatch, "/usr/bin/mpv")
     c = doc.check_mpv()
     assert c.status == "ok"
     assert "0.38" in c.detail
@@ -29,22 +37,34 @@ def test_mpv_check_pass(monkeypatch):
 
 def test_mpv_check_too_old(monkeypatch):
     monkeypatch.setattr(doc, "_run", lambda *a, **k: "mpv 0.35.0\n")
-    monkeypatch.setattr(doc.shutil, "which", lambda name: "/usr/bin/mpv")
+    _patch_find_mpv(monkeypatch, "/usr/bin/mpv")
     c = doc.check_mpv()
     assert c.status == "fail"
     assert "0.37" in c.detail  # explains the minimum for overlay-add BGRA
 
 
 def test_mpv_check_missing(monkeypatch):
-    monkeypatch.setattr(doc.shutil, "which", lambda name: None)
+    _patch_find_mpv(monkeypatch, None)
     c = doc.check_mpv()
     assert c.status == "fail"
     assert "mpv" in c.detail.lower()
 
 
+def test_mpv_check_mpvnet_unparseable_version(monkeypatch):
+    # mpv.net's --version string doesn't match the `mpv vX.Y` regex; treat a responding binary as
+    # present (warn), not missing.
+    monkeypatch.setattr(doc, "_run", lambda *a, **k: "mpv.net v7.1.2.0\n")
+    _patch_find_mpv(monkeypatch, r"C:\\Users\\x\\mpv.net\\mpvnet.exe")
+    c = doc.check_mpv()
+    assert c.status == "warn"
+    assert "mpv.net" in c.detail
+
+
 def test_ffmpeg_check_needs_aac(monkeypatch):
     monkeypatch.setattr(doc.shutil, "which", lambda name: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(doc, "_run", lambda *a, **k: " A....D libmp3lame  MP3\n V....D libx264  H.264\n")
+    monkeypatch.setattr(
+        doc, "_run", lambda *a, **k: " A....D libmp3lame  MP3\n V....D libx264  H.264\n"
+    )
     c = doc.check_ffmpeg()
     assert c.status == "warn"  # no aac encoder → mining audio won't encode
     assert "aac" in c.detail
@@ -117,7 +137,7 @@ def test_mpv_ipc_coexistence_reports_known_sockets(tmp_path, monkeypatch):
 def test_plugin_not_installed_is_ok(tmp_path, monkeypatch):
     from overlay.app import plugin
 
-    monkeypatch.setattr(plugin, "default_scripts_dir", lambda: tmp_path / "scripts")
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [tmp_path / "scripts"])
     c = doc.check_plugin()
     assert c.status == "ok" and "not installed" in c.detail
 
@@ -128,7 +148,7 @@ def test_plugin_broken_attach_flag_fails(tmp_path, monkeypatch):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "saitenka.lua").write_text("args = { 'saitenka-overlay', '--attach', sock }\n")
-    monkeypatch.setattr(plugin, "default_scripts_dir", lambda: scripts)
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
     assert c.status == "fail" and "install-plugin" in c.detail
 
@@ -143,7 +163,7 @@ def test_plugin_installed_with_baked_path_is_ok(tmp_path, monkeypatch):
     bin_path.write_text("#!/bin/sh\n")
     monkeypatch.setattr(plugin, "resolve_overlay_bin", lambda: str(bin_path))
     plugin.install_plugin(scripts_dir=scripts)
-    monkeypatch.setattr(plugin, "default_scripts_dir", lambda: scripts)
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
     assert c.status == "ok" and str(bin_path) in c.detail
 
@@ -157,7 +177,7 @@ def test_plugin_bare_bin_fails(tmp_path, monkeypatch):
     (scripts / "saitenka.lua").write_text(
         "local SAITENKA_BIN = 'saitenka-overlay'\nargs = { SAITENKA_BIN, 'attach', sock }\n"
     )
-    monkeypatch.setattr(plugin, "default_scripts_dir", lambda: scripts)
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
     assert c.status == "fail" and "bare" in c.detail
 
@@ -170,7 +190,7 @@ def test_plugin_baked_path_gone_warns(tmp_path, monkeypatch):
     (scripts / "saitenka.lua").write_text(
         "local SAITENKA_BIN = [[/nope/saitenka-overlay]]\nargs = { SAITENKA_BIN, 'attach', sock }\n"
     )
-    monkeypatch.setattr(plugin, "default_scripts_dir", lambda: scripts)
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
     assert c.status == "warn" and "no longer exists" in c.detail
 
@@ -211,7 +231,7 @@ def test_dict_location_ok_when_outside(tmp_path, monkeypatch):
 
 def test_jimaku_disabled_is_ok(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
-    cfg.write_text('[jimaku]\nenabled = false\n')
+    cfg.write_text("[jimaku]\nenabled = false\n")
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     c = doc.check_jimaku()
     assert c.status == "ok" and "disabled" in c.detail
@@ -302,3 +322,12 @@ def test_wizard_backs_up_existing_config(tmp_path, monkeypatch):
     assert backup is not None and backup.exists()
     assert 'slang = "OLD"' in backup.read_text()  # timestamped backup preserved the old file
     assert tomllib.loads(dest.read_text())["slang"] == "NEW"
+
+
+def test_dict_check_flags_bare_title_specifically(tmp_path, monkeypatch):
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["JMdict [2026-06-27]"]\n')  # a bare Yomitan TITLE, not a file path
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    fails = [c for c in doc.check_dict_files() if c.status == "fail"]
+    assert fails and "looks like a Yomitan title" in fails[0].detail
+    assert "import-yomitan" in fails[0].detail

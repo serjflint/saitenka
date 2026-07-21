@@ -13,8 +13,6 @@ import json
 import logging
 import os
 import re
-import subprocess
-import sys
 import urllib.parse
 import urllib.error
 import urllib.request
@@ -25,7 +23,7 @@ log = logging.getLogger(__name__)
 
 BASE = "https://jimaku.cc/api"
 
-# macOS Keychain generic-password coordinates for the jimaku key.
+# OS secret-store coordinates for the jimaku key (keyring service/username).
 KEYCHAIN_SERVICE = "saitenka-overlay"
 KEYCHAIN_ACCOUNT = "jimaku"
 
@@ -35,55 +33,34 @@ class JimakuError(RuntimeError):
 
 
 def keychain_get() -> str | None:
-    """Read the jimaku key from the macOS login Keychain (None if unset or not on macOS)."""
-    if sys.platform != "darwin":
-        return None
+    """Read the jimaku key from the OS secret store via ``keyring`` (macOS Keychain / Windows
+    Credential Locker / Linux Secret Service). None if unset or no backend is available (headless
+    Linux) — the caller then falls back to config/env."""
     try:
-        out = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-s",
-                KEYCHAIN_SERVICE,
-                "-a",
-                KEYCHAIN_ACCOUNT,
-                "-w",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
+        import keyring
+        import keyring.errors
+
+        return keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) or None
+    except keyring.errors.KeyringError:
         return None
-    key = (out.stdout or "").strip()
-    return key or None
+    except Exception:  # pragma: no cover — keyring import/backend selection edge cases
+        return None
 
 
 def keychain_set(key: str) -> bool:
-    """Store the jimaku key in the macOS login Keychain (``-U`` updates any existing item)."""
-    if sys.platform != "darwin":
-        return False
+    """Store the jimaku key in the OS secret store via ``keyring``. False if no backend is available
+    (the caller then persists to the config file instead). The OS store is readable by a GUI-launched
+    (plugin-mode) mpv, unlike a shell env var."""
     try:
-        subprocess.run(
-            [
-                "security",
-                "add-generic-password",
-                "-U",
-                "-s",
-                KEYCHAIN_SERVICE,
-                "-a",
-                KEYCHAIN_ACCOUNT,
-                "-w",
-                key,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
+        import keyring
+        import keyring.errors
+
+        keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, key)
+        return True
+    except keyring.errors.KeyringError:
         return False
-    return True
+    except Exception:  # pragma: no cover
+        return False
 
 
 def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
@@ -111,14 +88,27 @@ class JimakuFile:
         return Path(self.name).suffix.lower()
 
 
+def _ssl_context():
+    """A TLS context backed by certifi's CA bundle — reliable HTTPS even where the OS/Python trust
+    store is missing or stale (frozen apps, older macOS Pythons)."""
+    import ssl
+
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # pragma: no cover — certifi is a declared dep
+        return ssl.create_default_context()
+
+
 class JimakuClient:
     def __init__(self, api_key: str | None = None, base: str = BASE):
         self.api_key = resolve_jimaku_key(api_key)[0] or ""
         self.base = base
         if not self.api_key:
             raise JimakuError(
-                "no jimaku API key — run `saitenka-overlay set-jimaku-key` (stored in the Keychain, "
-                "readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: jimaku.cc → account"
+                "no jimaku API key — run `saitenka-overlay set-jimaku-key` (stored in the OS secret "
+                "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: jimaku.cc → account"
             )
 
     def _get(self, path: str, **params):
@@ -128,7 +118,7 @@ class JimakuClient:
             url += "?" + q
         req = urllib.request.Request(url, headers={"Authorization": self.api_key})
         try:
-            with urllib.request.urlopen(req, timeout=20) as r:
+            with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:  # 401 (bad key), 404, …
             raise JimakuError(f"jimaku {e.code} for {path}: {e.reason}") from e
@@ -143,7 +133,7 @@ class JimakuClient:
     def download(self, jf: JimakuFile, dest_dir: str | Path) -> Path:
         dest = Path(dest_dir) / jf.name
         req = urllib.request.Request(jf.url, headers={"Authorization": self.api_key})
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:
             dest.write_bytes(r.read())
         return dest
 
