@@ -108,6 +108,7 @@ def test_full_wizard_resumable_skips_satisfied(monkeypatch, tmp_path):
     ran = {"doctor": False, "init": False}
     monkeypatch.setattr(sw, "_run_doctor", lambda: ran.__setitem__("doctor", True))
     monkeypatch.setattr(sw, "_run_init", lambda confirm: ran.__setitem__("init", True))
+    monkeypatch.setattr(sw, "_offer_anki", lambda confirm: None)
     monkeypatch.setattr(sw, "_offer_import", lambda confirm: None)
     monkeypatch.setattr(sw, "_offer_plugin", lambda confirm: None)
     rc = sw.run_setup(yes=True, dry_run=False)

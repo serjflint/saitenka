@@ -13,11 +13,15 @@ is not in shell.
 
 from __future__ import annotations
 
+import logging
 import platform
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+log = logging.getLogger(__name__)
 
 Confirm = Callable[[str], bool]
 
@@ -141,6 +145,80 @@ def _run_init(confirm: Confirm) -> None:  # pragma: no cover — thin glue over 
     _maybe_store_jimaku_key()
 
 
+def _prompt(msg: str, options: list[str]) -> str:  # pragma: no cover — interactive I/O
+    """Ask for a value; accept a NAME or its 1-based number from ``options``. Blank / non-tty → ''."""
+    if not sys.stdin.isatty():
+        return ""
+    ans = input(f"{msg} ").strip()
+    if ans.isdigit() and 1 <= int(ans) <= len(options):
+        return options[int(ans) - 1]
+    return ans
+
+
+def _deck_fields(anki, deck: str) -> list[str]:  # pragma: no cover — needs a live AnkiConnect
+    """Field names of the first note in ``deck`` — so we can pick the word/expression field."""
+    try:
+        ids = anki.find_notes(f'deck:"{deck}"')
+        if ids and (info := anki.notes_info(ids[:1])):
+            return list(info[0].get("fields", {}).keys())
+    except Exception:
+        log.debug("reading deck fields failed", exc_info=True)
+    return []
+
+
+def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, needs live AnkiConnect
+    """Configure the Anki KNOWN-words deck (drives coloring) + the MINING deck/model over AnkiConnect.
+    Skips cleanly when Anki isn't reachable — the config's ``[known]``/``[mine]`` can be set later."""
+    from overlay.app.anki import Anki, anki_reachable
+    from overlay.app.config import load_config
+    from overlay.app.init_wizard import write_config
+
+    if not anki_reachable():
+        print(
+            "  Anki/AnkiConnect not reachable — skipping (start Anki + AnkiConnect, then re-run setup)"
+        )
+        return
+    if not confirm("\nConfigure your Anki known-words deck + mining deck now?"):
+        return
+    anki = Anki()
+    try:
+        decks = sorted(anki._call("deckNames") or [])
+        models = sorted(anki._call("modelNames") or [])
+    except Exception:
+        print("  couldn't query AnkiConnect (decks/models) — skipping")
+        return
+
+    print("\n  Decks:")
+    for i, d in enumerate(decks, 1):
+        print(f"    {i:2}. {d}")
+
+    cfg = load_config()
+    new: dict = {}
+    known_deck = _prompt(
+        "  Deck of words you already KNOW (name/number → coloring; blank to skip)?", decks
+    )
+    if known_deck:
+        fields = _deck_fields(anki, known_deck)
+        default_field = fields[0] if fields else "Expression"
+        field = (
+            _prompt(f"    Field with the word {fields or '(none read)'} [{default_field}]?", fields)
+            or default_field
+        )
+        new["known"] = {known_deck: [field]}
+
+    mine = dict(cfg.get("mine") or {})
+    mine["deck"] = _prompt(
+        f"  Mining deck [{mine.get('deck', 'Saitenka::Mining')}]?", decks
+    ) or mine.get("deck", "Saitenka::Mining")
+    mine["model"] = _prompt(
+        f"  Mining note type [{mine.get('model', 'Lapis')}]?", models
+    ) or mine.get("model", "Lapis")
+    new["mine"] = mine
+
+    write_config({**cfg, **new}, confirm=lambda _p: True)
+    print("  Anki config written.")
+
+
 def _offer_import(confirm: Confirm) -> None:  # pragma: no cover — thin glue over yomitan_import
     if not confirm("Import your Yomitan settings now?"):
         return
@@ -205,6 +283,8 @@ def run_setup(yes: bool, dry_run: bool) -> int:
     print("\nConfig:")
     _run_init(confirm)
 
+    print("\nAnki:")
+    _offer_anki(confirm)
     _offer_import(confirm)
     _offer_copy_dicts(confirm)
     _offer_plugin(confirm)

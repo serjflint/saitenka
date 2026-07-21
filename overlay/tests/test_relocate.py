@@ -59,3 +59,30 @@ def test_relocate_noop_when_nothing_protected(tmp_path, monkeypatch):
     cfg_file.write_text('dicts = [\n  "~/.local/share/saitenka/dicts/a.zip",\n]\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg_file))
     assert relocate.relocate_dicts(dest_dir=home / "d") == []
+
+
+def test_import_from_dir_copies_and_configs(monkeypatch, tmp_path):
+    """`copy-dicts <dir>`: Yomitan zips in a folder are copied into the data dir, classified, and
+    added to the config; non-Yomitan zips are skipped."""
+    import json
+    import zipfile
+
+    from overlay.app import relocate
+    from overlay.app.config import load_config
+
+    cfg = tmp_path / "overlay.toml"
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    data = tmp_path / "data" / "dicts"
+    monkeypatch.setattr("overlay.app.relocate.dicts_data_dir", lambda: data)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    with zipfile.ZipFile(src / "MyDict.zip", "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": "MyDict", "format": 3}))
+        zf.writestr("term_bank_1.json", json.dumps([["猫", "ねこ", "", "", 0, ["cat"], 1, ""]]))
+    (src / "junk.zip").write_bytes(b"not a real zip")  # must be skipped
+
+    added = relocate.import_from_dir(str(src), config=str(cfg))
+    assert added == [(str(data / "MyDict.zip"), "dicts")]
+    assert (data / "MyDict.zip").exists()
+    assert any("MyDict.zip" in str(p) for p in load_config().get("dicts", []))

@@ -533,9 +533,11 @@ def doctor(
     return report.exit_code
 
 
-@app.command
+@app.command(
+    show=False
+)  # low-level primitive — end users run `setup` (which calls this); hidden from help
 def init() -> int:  # pragma: no cover — interactive wizard, exercised live
-    """Interactive first-run wizard: discover, propose, write the config."""
+    """Write a starter config (the config-file primitive `setup` builds on). Prefer `setup`/`install`."""
     from overlay.app.init_wizard import run_init
 
     return run_init()
@@ -543,15 +545,35 @@ def init() -> int:  # pragma: no cover — interactive wizard, exercised live
 
 @app.command(name="copy-dicts")
 def copy_dicts(
+    source: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="a folder of Yomitan dictionary .zip files to import into the app data dir"
+        ),
+    ] = None,
     *,
     config: str | None = None,
-) -> int:  # pragma: no cover — thin CLI wrapper; relocate/repoint are unit-tested
-    """Copy dictionaries out of TCC-protected folders (Documents/Desktop/Downloads) into the app's
-    data dir (platform-native: %LOCALAPPDATA%\\saitenka on Windows, ~/.local/share/saitenka on Linux,
-    ~/Library/Application Support/saitenka on macOS) and repoint the config, so plugin-mode mpv stops
-    prompting for Documents access. The resolved destination is printed when it runs."""
+) -> int:  # pragma: no cover — thin CLI wrapper; relocate/import are unit-tested
+    """Bring dictionaries into the app's data dir and configure them. The data dir is platform-native
+    (%LOCALAPPDATA%\\saitenka on Windows, ~/.local/share/saitenka on Linux, ~/Library/Application
+    Support/saitenka on macOS); the resolved path is printed when it runs.
+
+    With a SOURCE folder: copy every Yomitan ``.zip`` from it into the data dir, classify each by
+    content (dict/freq/pitch), and add it to the config. Without one: relocate already-configured
+    dicts OUT of TCC-protected folders (Documents/Desktop/Downloads) so a plugin-mode mpv stops
+    prompting for access."""
     from overlay.app.config import dicts_data_dir
-    from overlay.app.relocate import relocate_dicts
+    from overlay.app.relocate import import_from_dir, relocate_dicts
+
+    if source:
+        added = import_from_dir(source, config=config)
+        if not added:
+            print(f"no Yomitan dictionaries found in {source}")
+            return 0
+        print(f"imported {len(added)} dict(s) → {dicts_data_dir()} and added them to the config:")
+        for dest, kind in added:
+            print(f"  [{kind}] {dest}")
+        return 0
 
     mappings = relocate_dicts(config=config)
     if not mappings:
