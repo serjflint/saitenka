@@ -957,8 +957,10 @@ def main() -> None:  # pragma: no cover — live-run entry point
     _setup_logging()
     _harden_runtime()
     from overlay.app.crashlog import install as install_crash_handlers
+    from overlay.app.signals import install as install_shutdown_signals
 
     install_crash_handlers()  # main-thread + worker-thread + faulthandler crash capture
+    install_shutdown_signals()  # SIGTERM / SIGBREAK → graceful cleanup (like Ctrl+C)
     override = _argv_config_override(sys.argv[1:])
     if override:  # --config PATH re-points the declarative TOML
         app.config = cyclopts.config.Toml(

@@ -32,6 +32,8 @@ hardening pass.
 - **`$SAITENKA_MPV_PATH`** and expanded mpv discovery (mpv.net, off-`PATH` installs), plus
   ffmpeg/ffprobe discovery so mining works from a GUI-launched (plugin-mode) mpv.
 - **`--version`** now reports the real version.
+- **Graceful shutdown** on POSIX `SIGTERM` and Windows `SIGBREAK` — the same cleanup as Ctrl+C (quit
+  mpv, close the socket, remove temp dirs) instead of a hard exit.
 
 ### Changed
 
