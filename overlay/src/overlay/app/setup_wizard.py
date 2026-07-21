@@ -25,6 +25,11 @@ log = logging.getLogger(__name__)
 
 Confirm = Callable[[str], bool]
 
+# Plain-ASCII status markers on Windows (the classic console mangles ✓/✗ and forcing UTF-8 breaks typing).
+_WIN = sys.platform == "win32"
+_OK = "[ok]" if _WIN else "✓"
+_FAIL = "[x]" if _WIN else "✗"
+
 REQUIRED_TOOLS = ("uv", "mpv", "ffmpeg")
 INSTALL_TOOLS = ("mpv", "ffmpeg")  # uv is bootstrapped by the shell stub, not here
 
@@ -104,7 +109,7 @@ def do_install(tools: list[str], dry_run: bool, confirm: Confirm) -> int:
     """Install the MISSING subset of ``tools``. Returns the count that was (or would be) installed."""
     todo = missing_tools(tools)
     if not todo:
-        print("  ✓ all toolchain deps already present")
+        print(f"  {_OK} all toolchain deps already present")
         return 0
     plan = install_plan(todo)
     if plan.manager is None:
@@ -286,7 +291,7 @@ def run_setup(yes: bool, dry_run: bool) -> int:
 
     print("Inventory:")
     for tool, present in inventory().items():
-        print(f"  {'✓' if present else '✗'} {tool}")
+        print(f"  {_OK if present else _FAIL} {tool}")
 
     print("\nToolchain:")
     do_install(list(INSTALL_TOOLS), dry_run=dry_run, confirm=confirm)
@@ -311,10 +316,12 @@ def run_setup(yes: bool, dry_run: bool) -> int:
     report = run_checks()
     print_report(report)
     if report.exit_code == 0:
-        print("\nSetup complete ✅ — run `saitenka-overlay <video>`, or just open a video in mpv.")
+        print(
+            f"\nSetup complete {_OK} - run `saitenka-overlay <video>`, or just open a video in mpv."
+        )
     else:
         print(
-            "\nSetup finished with problems (see ✗ above). Fix them, re-run `saitenka-overlay doctor`,"
+            "\nSetup finished with problems (see [x]/! above). Fix them, re-run `saitenka-overlay doctor`,"
             " or send `saitenka-overlay report` if you need help."
         )
     return 0

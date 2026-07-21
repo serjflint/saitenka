@@ -496,18 +496,32 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
     return Report(checks)
 
 
-_GLYPH = {"ok": "\033[32m✓\033[0m", "warn": "\033[33m!\033[0m", "fail": "\033[31m✗\033[0m"}
+# On Windows keep it PLAIN ASCII — no ANSI colours, no ✓/✗ glyphs. The classic console mangles both,
+# and forcing a UTF-8 codepage to render them breaks interactive typing. POSIX terminals get the
+# coloured version.
+_WIN = sys.platform == "win32"
+_GLYPH = (
+    {"ok": "[ok] ", "warn": "[!]  ", "fail": "[x]  "}
+    if _WIN
+    else {"ok": "\033[32m✓\033[0m", "warn": "\033[33m!\033[0m", "fail": "\033[31m✗\033[0m"}
+)
 
 
 def print_report(report: Report) -> None:  # pragma: no cover — pure formatting/IO
-    print("\033[1;36m[saitenka doctor]\033[0m")
+    print("[saitenka doctor]" if _WIN else "\033[1;36m[saitenka doctor]\033[0m")
     for c in report.checks:
         print(f"  {_GLYPH.get(c.status, '?')} {c.detail}")
     s = report.counts
-    print(
-        f"\nSummary: \033[32m{s['ok']} ok\033[0m · "
-        f"\033[33m{s['warn']} warn\033[0m · \033[31m{s['fail']} fail\033[0m"
-    )
-    print("Healthy ✅" if report.exit_code == 0 else "Problems found — see ✗ above ❌")
+    if _WIN:
+        print(f"\nSummary: {s['ok']} ok / {s['warn']} warn / {s['fail']} fail")
+    else:
+        print(
+            f"\nSummary: \033[32m{s['ok']} ok\033[0m · "
+            f"\033[33m{s['warn']} warn\033[0m · \033[31m{s['fail']} fail\033[0m"
+        )
+    if report.exit_code == 0:
+        print("Healthy" if _WIN else "Healthy ✅")
+    else:
+        print("Problems found - see [x] above" if _WIN else "Problems found — see ✗ above ❌")
     if report.exit_code != 0:
         print("Tip: `saitenka-overlay report` bundles this + logs into a zip for a bug report.")

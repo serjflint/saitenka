@@ -5,10 +5,9 @@ param([switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $SelfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Render the Python child processes' UTF-8 output (the setup/doctor ✓ ✗ → …) correctly — without this,
-# Windows PowerShell decodes their stdout as the legacy OEM codepage and shows mojibake.
+# Decode the Python child processes' UTF-8 output correctly. Set ONLY [Console]::OutputEncoding — NOT
+# `chcp 65001`: changing the console codepage breaks interactive typing in the classic console.
 try {
-  chcp 65001 > $null
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch { }

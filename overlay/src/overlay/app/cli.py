@@ -38,15 +38,21 @@ DEMO_LINE_EN = "A shop-boy at the temple gate recites sutras he was never taught
 
 def _ensure_free_threaded() -> None:
     """Adopt the free-threaded runtime: on a 3.14t build force the GIL OFF before fugashi's
-    C extension loads (it hasn't declared FT-safety and would re-enable the GIL). Re-exec once so
+    C extension loads (it hasn't declared FT-safety and would re-enable the GIL). Re-launch once so
     PYTHON_GIL=0 is set before the interpreter finishes starting. No-op on a standard build.
 
-    Always re-exec via ``-m overlay.app.cli`` — NEVER via ``sys.argv[0]``: under ``python -m``,
+    Always re-launch via ``-m overlay.app.cli`` — NEVER via ``sys.argv[0]``: under ``python -m``,
     argv[0] is this file's path, and running it script-style would put ``src/overlay/app/`` first
     on sys.path, where our ``tokenize.py`` shadows the stdlib module and breaks the interpreter."""
     if sysconfig.get_config_var("Py_GIL_DISABLED") and os.environ.get("PYTHON_GIL") != "0":
         os.environ["PYTHON_GIL"] = "0"
-        os.execv(sys.executable, [sys.executable, "-m", "overlay.app.cli", *sys.argv[1:]])
+        argv = [sys.executable, "-m", "overlay.app.cli", *sys.argv[1:]]
+        if sys.platform == "win32":
+            # os.execv on Windows does NOT truly replace the process — it duplicates execution and
+            # corrupts the console (double output, and interactive prompts that can't take input).
+            # Spawn a child that shares our console, wait, and exit with its status instead.
+            sys.exit(subprocess.run(argv).returncode)
+        os.execv(sys.executable, argv)
 
 
 def _resolve_paths(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:

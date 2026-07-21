@@ -8,10 +8,11 @@
 param([switch]$DryRun,[switch]$Dev,[switch]$Yes)
 $ErrorActionPreference = 'Continue'
 
-# Render the Python child processes' UTF-8 output (the doctor/setup ✓ ✗ → · …) correctly. Without this,
-# Windows PowerShell decodes a child's stdout as the legacy OEM codepage and shows mojibake ("Ō£ō").
+# Decode the Python child processes' UTF-8 output correctly (else PowerShell uses the OEM codepage and
+# shows mojibake). Set ONLY [Console]::OutputEncoding — NOT `chcp 65001`: changing the console codepage
+# breaks interactive TYPING in the classic console (the y/N prompts go dead). OutputEncoding only
+# affects how we DECODE child output, not input.
 try {
-  chcp 65001 > $null
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
   $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch { }
