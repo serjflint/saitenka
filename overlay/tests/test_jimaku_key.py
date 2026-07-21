@@ -114,3 +114,19 @@ def test_resolve_strips_whitespace_and_newlines(monkeypatch):
     monkeypatch.setenv("JIMAKU_API_KEY", "env-key\n")
     monkeypatch.setattr(jimaku, "keychain_get", lambda: None)
     assert jimaku.resolve_jimaku_key() == ("env-key", "env")
+
+
+def test_write_config_preserves_comments(tmp_path):
+    """B: write_config round-trips via tomlkit — an existing file's comments + untouched keys survive,
+    only changed/new keys are written (was: dumps_toml dropped every comment)."""
+    from overlay.app.init_wizard import write_config
+
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('# header comment\nslang = "ja"\n\n[mine]\n# which key mines\nkey = "Ctrl+m"\n')
+    write_config(
+        {"slang": "ja", "mine": {"key": "Ctrl+m", "deck": "D"}}, confirm=lambda _p: True, dest=cfg
+    )
+    text = cfg.read_text()
+    assert "# header comment" in text and "# which key mines" in text  # comments survive
+    assert 'key = "Ctrl+m"' in text  # unchanged key kept
+    assert 'deck = "D"' in text  # new key added under [mine]

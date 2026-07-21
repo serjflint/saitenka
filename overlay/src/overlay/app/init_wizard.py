@@ -69,19 +69,36 @@ def backup_existing(dest: Path) -> Path | None:
     return backup
 
 
+def _merge_into(doc, data: dict) -> None:
+    """Recursively set ``data`` into a tomlkit document/table: recurse into existing tables and update
+    only CHANGED keys in place (so their comments + position survive), add new keys."""
+    for k, v in data.items():
+        existing = doc.get(k)
+        if isinstance(v, dict) and isinstance(existing, dict):
+            _merge_into(existing, v)
+        elif existing != v:  # unchanged keys are left untouched (keeps any inline comment)
+            doc[k] = v
+
+
 def write_config(proposal: dict, confirm: Confirm, dest: Path | None = None) -> Path | None:
     """Write the proposed config on confirm; back up an existing file first.
 
-    Returns the backup path (or None if there was nothing to back up). Writes nothing if declined.
+    Round-trips through **tomlkit** so an existing file's COMMENTS + formatting survive — we only set
+    the keys that actually changed. Returns the backup path (None if there was nothing to back up);
+    writes nothing if declined.
     """
+    import tomlkit
+
     dest = dest or config_path()
     if not confirm(f"Write config to {dest}?"):
         return None
     backup = backup_existing(dest)
+    doc = tomlkit.parse(dest.read_text(encoding="utf-8")) if dest.exists() else tomlkit.document()
+    _merge_into(doc, proposal)
     from overlay.app.paths import atomic_write_text
 
     atomic_write_text(
-        dest, dumps_toml(proposal)
+        dest, tomlkit.dumps(doc)
     )  # temp + fsync + os.replace (no half-written config)
     return backup
 
