@@ -864,7 +864,10 @@ def uninstall_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin 
 def report(
     *,
     out: Annotated[
-        str | None, cyclopts.Parameter(help="directory to write the zip into (default: home)")
+        str | None,
+        cyclopts.Parameter(
+            help="directory to write the zip into (default: the data dir's reports/)"
+        ),
     ] = None,
     no_log: Annotated[
         bool,

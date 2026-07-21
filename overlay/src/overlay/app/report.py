@@ -188,10 +188,13 @@ def build_report_bundle(
     include_log: bool = True,
     timestamp: str | None = None,
 ) -> Path:
-    """Write the diagnostics zip and return its path. ``dest_dir`` defaults to the home dir; a
-    ``timestamp`` (``YYYYMMDD-HHMMSS``) can be injected for deterministic tests."""
+    """Write the diagnostics zip and return its path. ``dest_dir`` defaults to a dedicated reports dir
+    under the platform data dir (``%LOCALAPPDATA%\\saitenka\\reports`` on Windows) instead of cluttering
+    the home root; a ``timestamp`` (``YYYYMMDD-HHMMSS``) can be injected for deterministic tests."""
+    from overlay.app.paths import data_dir
+
     ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
-    base = Path(dest_dir).expanduser() if dest_dir else Path.home()
+    base = Path(dest_dir).expanduser() if dest_dir else data_dir() / "reports"
     base.mkdir(parents=True, exist_ok=True)
     dest = base / f"saitenka-report-{ts}.zip"
     members = collect(include_log=include_log)
