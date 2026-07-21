@@ -194,8 +194,12 @@ def run(
         ),
     ] = None,
     mine: Annotated[
-        bool, cyclopts.Parameter(negative=(), help="enable one-key mining to Anki")
-    ] = False,
+        bool,
+        cyclopts.Parameter(
+            negative="--no-mine",
+            help="one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)",
+        ),
+    ] = bool(_mine_cfg.get("enabled", bool(_mine_cfg))),
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
     mine_model: str = _mine_cfg.get("model", "Lapis"),
     mine_key: Annotated[
