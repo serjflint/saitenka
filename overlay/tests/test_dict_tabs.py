@@ -124,6 +124,29 @@ def test_tab_strip_wraps_many_dicts_onto_multiple_rows():
     assert img.height == tab_strip_height(names, width) > tab_row_height()  # taller than one row
 
 
+def test_header_add_rect_takes_speaker_slot_when_tts_hidden():
+    from overlay.panel import header_add_rect
+
+    with_spk = header_add_rect(400)
+    without = header_add_rect(400, speak_button=False)
+    assert without[0] > with_spk[0]  # ⊕ moves right into the 🔊 slot when the speaker is hidden
+
+
+def test_speaker_gated_off_without_tts(monkeypatch):
+    import overlay.app.controller as ctrl
+
+    monkeypatch.setattr(ctrl, "tts_available", lambda: False)  # no JA voice → 🔊 hidden
+    ipc = FakeIPC()
+    r = _reader()
+    r.ipc = ipc
+    assert r._tts_ok is False
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    r.set_hover(0)
+    assert r._hit_header_speaker(999, 999) is False  # never hittable
+    a_binds = [c for c in ipc.commands if c and c[0] == "keybind" and c[1] == "a"]
+    assert a_binds == []  # the 'a' TTS key is not even bound
+
+
 def test_single_dict_reserves_nothing(monkeypatch):
     class _OneDS:
         def entry_for(self, tok, inflected=None):

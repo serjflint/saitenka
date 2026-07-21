@@ -30,6 +30,28 @@ def test_speak_cmd_linux(monkeypatch):
     assert media._speak_cmd("猫") == ["espeak", "-v", "ja", "猫"]
 
 
+def test_tts_available_windows_needs_ja_voice(monkeypatch):
+    media.tts_available.cache_clear()
+    monkeypatch.setattr(media.sys, "platform", "win32")
+    monkeypatch.setattr(media, "_voices_out", lambda: "en-US\nja-JP\n")
+    assert media.tts_available() is True
+    media.tts_available.cache_clear()
+    monkeypatch.setattr(media, "_voices_out", lambda: "en-US\nen-GB\n")
+    assert media.tts_available() is False
+    media.tts_available.cache_clear()
+
+
+def test_tts_available_linux_needs_espeak(monkeypatch):
+    media.tts_available.cache_clear()
+    monkeypatch.setattr(media.sys, "platform", "linux")
+    monkeypatch.setattr(media.shutil, "which", lambda n: "/usr/bin/espeak")
+    assert media.tts_available() is True
+    media.tts_available.cache_clear()
+    monkeypatch.setattr(media.shutil, "which", lambda n: None)
+    assert media.tts_available() is False
+    media.tts_available.cache_clear()
+
+
 def test_speak_empty_is_noop(monkeypatch):
     calls: list = []
     monkeypatch.setattr(media.subprocess, "Popen", lambda *a, **k: calls.append(a))

@@ -119,6 +119,17 @@ def test_anki_check_unreachable(monkeypatch):
     assert "AnkiConnect" in c.detail
 
 
+def test_check_tts_reports_availability_with_platform_hint(monkeypatch):
+    monkeypatch.setattr("overlay.app.media.tts_available", lambda: True)
+    assert doc.check_tts().status == "ok"
+    monkeypatch.setattr("overlay.app.media.tts_available", lambda: False)
+    monkeypatch.setattr(doc.sys, "platform", "win32")
+    c = doc.check_tts()
+    assert c.status == "warn" and "language pack" in c.detail  # Windows-specific fix
+    monkeypatch.setattr(doc.sys, "platform", "linux")
+    assert "espeak" in doc.check_tts().detail
+
+
 def test_free_threading_check(monkeypatch):
     # On any interpreter the check must classify itself without error.
     c = doc.check_free_threading()

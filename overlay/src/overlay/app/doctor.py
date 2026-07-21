@@ -303,6 +303,25 @@ def check_fonts() -> Check:
     return Check("fonts", "ok", f"vendored fonts present ({len(fonts.FONT_FILES)})")
 
 
+_TTS_HINTS = {
+    "win32": "Install the Japanese language pack: Settings → Time & Language → Language → add 日本語 "
+    "→ Language options → Speech.",
+    "darwin": "Add a Japanese voice: System Settings → Accessibility → Spoken Content → System Voice "
+    "→ Manage Voices (e.g. Kyoko).",
+}
+
+
+def check_tts() -> Check:
+    """The OS TTS the tooltip 🔊 button uses to pronounce a scanned word. When no JAPANESE voice is
+    available the button is hidden (it would silently do nothing) — surface why so it's not a mystery."""
+    from overlay.app.media import tts_available
+
+    if tts_available():
+        return Check("tts", "ok", "Japanese TTS voice available — 🔊 speaks scanned words")
+    hint = _TTS_HINTS.get(sys.platform, "Install espeak (e.g. `apt install espeak`).")
+    return Check("tts", "warn", f"no Japanese TTS voice — the 🔊 button is hidden. {hint}")
+
+
 def check_anki(deck: str, model: str) -> Check:
     from overlay.app.anki import resolve_anki
 
@@ -510,6 +529,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_dict_cache(),
         check_sub_auto(),
         check_fonts(),
+        check_tts(),
         check_anki(deck, model),
         check_mpv_ipc(),
         check_plugin(),

@@ -107,12 +107,14 @@ _ICON_GAP = 10
 
 
 def header_add_rect(
-    width: int, theme: Theme = _DEFAULT_THEME, top_reserve: int = 0
+    width: int, theme: Theme = _DEFAULT_THEME, top_reserve: int = 0, speak_button: bool = True
 ) -> tuple[int, int, int, int]:
-    """Panel-space (x, y, w, h) of the header ⊕ add-to-Anki button (just left of the speaker).
+    """Panel-space (x, y, w, h) of the header ⊕ add-to-Anki button. Sits just left of the 🔊 speaker
+    when it's shown, else takes the speaker's rightmost slot (so hiding TTS doesn't leave a gap).
     ``top_reserve`` must match the panel's tab-strip reserve so the hit-box tracks the drawn icon."""
     content_w = width - 2 * theme.margin
-    x = theme.margin + content_w - _SPK_SIZE - _ICON_GAP - _ADD_SIZE
+    right = content_w - (_SPK_SIZE + _ICON_GAP if speak_button else 0)
+    x = theme.margin + right - _ADD_SIZE
     y = theme.margin + top_reserve + _ICON_TOP + 2
     return (x, y, _ADD_SIZE, _ADD_SIZE)
 
@@ -162,12 +164,14 @@ def panel_rows(
     theme: Theme = _DEFAULT_THEME,
     add_button: bool = False,
     mined: bool = False,
+    speak_button: bool = True,
 ) -> list[Row]:
     """Build the panel's rows as deferred thunks (same order/content as ``render_panel``).
 
     ``add_button`` draws the header add-to-Anki button (only when mining is available); ``mined`` makes
-    it a ✓ instead of ⊕ for a word already in the deck. Both off by default so ``render_panel`` and its
-    golden stay unchanged."""
+    it a ✓ instead of ⊕ for a word already in the deck. ``speak_button`` draws the 🔊 TTS button — set
+    False to hide it when no Japanese TTS voice is installed (it would silently do nothing). Defaults
+    keep ``render_panel`` and its golden unchanged."""
     m = theme.margin
     content_w = width - 2 * m
     rows: list[Row] = []
@@ -177,11 +181,14 @@ def panel_rows(
         hw = [Span("▶", Style(size=28, color=theme.accent)), Span(" ", Style(size=46))]
         hw += inline_flow(entry.headword, Style(size=46, weight=700, color=theme.text))
         hdr = _flow_row(hw, content_w)
-        spk = speaker(_SPK_SIZE)
-        hdr.alpha_composite(spk, (content_w - spk.width, _ICON_TOP))
+        right = content_w
+        if speak_button:
+            spk = speaker(_SPK_SIZE)
+            hdr.alpha_composite(spk, (right - spk.width, _ICON_TOP))
+            right -= _SPK_SIZE + _ICON_GAP
         if add_button:
             btn = check(_ADD_SIZE) if mined else plus(_ADD_SIZE)
-            hdr.alpha_composite(btn, (content_w - _SPK_SIZE - _ICON_GAP - _ADD_SIZE, _ICON_TOP + 2))
+            hdr.alpha_composite(btn, (right - _ADD_SIZE, _ICON_TOP + 2))
         return hdr, [], []
 
     rows.append(Row(m, _header))

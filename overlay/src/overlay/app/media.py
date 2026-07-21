@@ -7,9 +7,12 @@ OSD overlay. Audio is cut from the source file over the current subtitle's times
 
 from __future__ import annotations
 
+import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -136,6 +139,45 @@ def speak(text: str, voice: str = "Kyoko") -> None:
         )
     except OSError:
         pass
+
+
+def _voices_out() -> str:
+    """Raw list of installed TTS voices (best-effort ''): SAPI cultures on Windows, ``say -v ?`` on
+    macOS. Its own function so tests can stub it without a real TTS engine."""
+    if sys.platform == "win32":
+        return _run_out(
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Speech;"
+            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices()|"
+            "%{$_.VoiceInfo.Culture.Name}",
+        )
+    elif sys.platform == "darwin":
+        return _run_out("say", "-v", "?")
+    else:
+        return ""
+
+
+def _run_out(*args: str) -> str:
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
+        return (r.stdout or "") + (r.stderr or "")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+@lru_cache(maxsize=1)
+def tts_available() -> bool:
+    """True if the OS has a voice the 🔊 button can use to read **Japanese** — a Japanese SAPI voice on
+    Windows, a ``ja_JP`` ``say`` voice on macOS, or ``espeak`` on Linux. Cached (voices don't change
+    mid-session). Used both by doctor and to HIDE the 🔊 button when it would silently do nothing."""
+    if sys.platform == "win32":
+        return "ja-JP" in _voices_out()
+    elif sys.platform == "darwin":
+        return bool(re.search(r"ja_JP", _voices_out()))
+    else:
+        return shutil.which("espeak") is not None
 
 
 def copy_clipboard(text: str) -> None:

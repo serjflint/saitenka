@@ -34,6 +34,7 @@ from overlay.app.media import (
     copy_clipboard,
     play_audio,
     speak,
+    tts_available,
 )
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
@@ -192,6 +193,9 @@ class Reader:
         self.translate_key = o.keys.translate_key
         self.preview_key = o.keys.preview_key
         self.play_audio = o.mining.play_audio
+        # 🔊 TTS button is drawn only when the OS has a Japanese voice — else it silently does nothing.
+        # Computed once (voices don't change mid-session; tts_available is itself cached).
+        self._tts_ok = tts_available()
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
         self.sub_prev_key = o.keys.sub_prev_key  # Alt+LEFT  → sub-seek -1 (previous line)
         self.sub_next_key = o.keys.sub_next_key  # Alt+RIGHT → sub-seek  1 (next line)
@@ -583,14 +587,16 @@ class Reader:
         return self._hit_header_region(
             x,
             y,
-            header_add_rect(self.tip_width, top_reserve=self._tip_reserve()),
+            header_add_rect(
+                self.tip_width, top_reserve=self._tip_reserve(), speak_button=self._tts_ok
+            ),
             self._tip_xy,
             self._tip_scroll,
             self._tip_view_h,
         )
 
     def _hit_header_speaker(self, x: float, y: float) -> bool:
-        if self._tip_state is None:
+        if self._tip_state is None or not self._tts_ok:  # 🔊 hidden when no JA TTS voice
             return False
         return self._hit_header_region(
             x,
@@ -607,14 +613,14 @@ class Reader:
         return self._hit_header_region(
             x,
             y,
-            header_add_rect(self.tip_width),
+            header_add_rect(self.tip_width, speak_button=self._tts_ok),
             self._nest.xy,
             self._nest.scroll,
             self._nest.view_h,
         )
 
     def _hit_nested_speaker(self, x: float, y: float) -> bool:
-        if self._nest.state is None:
+        if self._nest.state is None or not self._tts_ok:  # 🔊 hidden when no JA TTS voice
             return False
         return self._hit_header_region(
             x,
@@ -757,7 +763,13 @@ class Reader:
                 else 0
             )
             lazy = LazyPanel(
-                panel_rows(entry, self.tip_width, add_button=self.anki is not None, mined=mined),
+                panel_rows(
+                    entry,
+                    self.tip_width,
+                    add_button=self.anki is not None,
+                    mined=mined,
+                    speak_button=self._tts_ok,
+                ),
                 self.tip_width,
                 top_reserve=reserve,
             )
@@ -1194,7 +1206,10 @@ class Reader:
         st = self._panel_cache.get(key)
         if st is None:
             entry = self.dict_set.search(pattern)
-            lazy = LazyPanel(panel_rows(entry, self.tip_width, add_button=False), self.tip_width)
+            lazy = LazyPanel(
+                panel_rows(entry, self.tip_width, add_button=False, speak_button=self._tts_ok),
+                self.tip_width,
+            )
             st = _TipPanel(lazy, "")
             with self._cache_lock:
                 st = self._panel_cache_setdefault(key, st)
@@ -1241,7 +1256,9 @@ class Reader:
         key = ("kanji", ch, self.tip_width)
         st = self._panel_cache.get(key)
         if st is None:
-            lazy = LazyPanel(panel_rows(entry, self.tip_width), self.tip_width)
+            lazy = LazyPanel(
+                panel_rows(entry, self.tip_width, speak_button=self._tts_ok), self.tip_width
+            )
             st = _TipPanel(lazy, entry.reading)
             st.finish()  # kanji entries are small — render whole
             with self._cache_lock:
@@ -1551,7 +1568,8 @@ class Reader:
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
         bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
-        bind("a", SPEAK_MSG)
+        if self._tts_ok:
+            bind("a", SPEAK_MSG)  # only bind TTS when a Japanese voice exists (else 'a' is a no-op)
         bind("c", COPY_MSG)  # copy the hovered word
         bind("k", KANJI_MSG)  # open / cycle the hovered word's kanji entry
         bind("Shift+c", COPY_LINE_MSG)  # copy the whole subtitle line
