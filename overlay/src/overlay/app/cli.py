@@ -115,7 +115,7 @@ def run(
     *,
     config: Annotated[
         str | None,
-        cyclopts.Parameter(help="settings TOML (default ~/.config/saitenka/overlay.toml)"),
+        cyclopts.Parameter(help="settings TOML (default: platform config dir, see `doctor`)"),
     ] = None,
     sub_file: str | None = None,
     slang: Annotated[

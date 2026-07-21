@@ -178,10 +178,11 @@ function AddonLine($code,$nm,$note){
   if(Test-Path (Join-Path $Addons $code)){ Write-Host ("       [x] {0,-14} installed" -f $nm) -ForegroundColor Green }
   else { Write-Host ("       [ ] {0,-14} paste {1} ({2})" -f $nm,$code,$note) -ForegroundColor Yellow }
 }
-# Config resolves platform-native (%APPDATA%\saitenka) with a legacy ~/.config fallback — mirror it.
+# Config resolves platform-native via platformdirs: %LOCALAPPDATA%\saitenka\overlay.toml on Windows
+# (same root as the dict cache, AppData\Local\saitenka). No ~/.config fallback — that XDG path is
+# POSIX-only and the tool never writes it on Windows.
 $Cfg = if($env:SAITENKA_CONFIG){ $env:SAITENKA_CONFIG }
-       elseif(Test-Path (Join-Path $env:APPDATA 'saitenka\overlay.toml')){ Join-Path $env:APPDATA 'saitenka\overlay.toml' }
-       else { Join-Path $HOME '.config\saitenka\overlay.toml' }
+       else { Join-Path $env:LOCALAPPDATA 'saitenka\overlay.toml' }
 function DictsPresent(){
   if(-not (Test-Path $Cfg)){ return 0 }
   $n = 0

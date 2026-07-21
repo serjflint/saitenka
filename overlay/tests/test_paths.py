@@ -19,6 +19,7 @@ def test_pick_env_override_wins(monkeypatch, tmp_path):
 
 
 def test_pick_legacy_used_when_it_exists_and_native_does_not(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "linux")  # legacy fallback is POSIX-only
     native = tmp_path / "native"
     legacy = tmp_path / "legacy"
     legacy.mkdir()
@@ -28,6 +29,15 @@ def test_pick_legacy_used_when_it_exists_and_native_does_not(monkeypatch, tmp_pa
 def test_pick_native_used_for_fresh_install(monkeypatch, tmp_path):
     native = tmp_path / "native"  # neither exists → idiomatic native
     legacy = tmp_path / "legacy"
+    assert paths._pick("SAITENKA_UNSET_XYZ", native, legacy) == native
+
+
+def test_pick_windows_ignores_legacy_config(monkeypatch, tmp_path):
+    # A stray ~/.config/saitenka from an earlier build must NOT win on Windows — %LOCALAPPDATA% only.
+    monkeypatch.setattr(sys, "platform", "win32")
+    native = tmp_path / "native"
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
     assert paths._pick("SAITENKA_UNSET_XYZ", native, legacy) == native
 
 

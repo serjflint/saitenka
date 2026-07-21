@@ -1,7 +1,7 @@
 """``saitenka-overlay init`` — first-run wizard.
 
-Runs auto-discovery (Yomitan import + mpv discovery), proposes a config, and writes
-``~/.config/saitenka/overlay.toml`` ONLY on confirm — backing up an existing file first,
+Runs auto-discovery (Yomitan import + mpv discovery), proposes a config, and writes the
+platform-native ``overlay.toml`` (see :func:`config.config_path`) ONLY on confirm — backing up an existing file first,
 timestamped (non-destructive rule). The write path (:func:`write_config`) is the shared confirm+backup
 sink used by ``init``, ``import-settings``, and the setup wizard.
 """
