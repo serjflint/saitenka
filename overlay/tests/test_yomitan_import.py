@@ -101,6 +101,22 @@ def test_classify_by_content(tmp_path):
     assert yi.classify_zip(tmp_path / "missing.zip") == "dict"
 
 
+def test_classify_tolerates_wrong_crc_pitch(tmp_path, monkeypatch):
+    """A pitch dict with a WRONG stored CRC-32 but intact deflate data — exactly what NHK 2016 ships —
+    must still classify as ``pitch``. A CRC-strict read raises BadZipFile, which would mis-file it as a
+    definition dict, so pitch accents never render (regression: NHK landed in ``dicts`` after import)."""
+    import binascii
+
+    real = binascii.crc32
+    with monkeypatch.context() as m:  # force a bogus stored CRC on every entry as it's written
+        m.setattr(zipfile, "crc32", lambda *a: (real(a[0]) ^ 0xFFFFFFFF) & 0xFFFFFFFF)
+        z = _make_dict_zip(tmp_path / "nhk.zip", "pitch")
+    # sanity: a strict read really does reject this zip (so the tolerant path is what saves it)
+    with zipfile.ZipFile(z) as zf, pytest.raises(zipfile.BadZipFile):
+        zf.read("term_meta_bank_1.json")
+    assert yi.classify_zip(z) == "pitch"
+
+
 def test_map_to_config_splits_lists_by_content(tmp_path):
     obj = _make_settings(
         [

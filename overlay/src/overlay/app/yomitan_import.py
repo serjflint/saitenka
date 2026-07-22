@@ -62,14 +62,21 @@ def classify_zip(zip_path: str | Path) -> str:
     Only when there's no freq/pitch term-meta does a term_bank make it a definition dict. Falls back to
     ``"dict"`` when the zip can't be read or has no recognisable banks — the title is never consulted.
     """
+    # Read the term_meta bank CRC-tolerantly: some Yomitan pitch/freq exports (notably NHK 2016
+    # pitch) ship a WRONG stored CRC-32 on intact deflate data, and a strict read would raise
+    # BadZipFile → the dict would silently fall back to "dict" and its pitch/freq never render.
+    from overlay.app.wordlists import read_json_bank
+
     modes: set[str] = set()
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            names = zf.namelist()
-            for n in sorted(n for n in names if _META_BANK.match(n))[:1]:
-                for entry in json.loads(zf.read(n)):
+            metas = sorted(n for n in zf.namelist() if _META_BANK.match(n))
+            for n in metas[:2]:  # first bank suffices; try a 2nd only if the 1st yields nothing
+                for entry in read_json_bank(zf, n) or []:
                     if len(entry) >= 2 and isinstance(entry[1], str):
                         modes.add(entry[1])
+                if modes:
+                    break
     except (OSError, KeyError, zipfile.BadZipFile, json.JSONDecodeError, ValueError, TypeError):
         return "dict"
     if "pitch" in modes:
