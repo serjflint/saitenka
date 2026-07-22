@@ -89,7 +89,9 @@ class Overlay:
         data, w, h, stride = to_bgra(img)
         path = self._tempfile(oid)
         path.write_bytes(data)
-        res = self.ipc.command("overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride)
+        res = self.ipc.command(
+            "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride
+        )
         _warn_overlay_add(oid, w, h, res)
         return res
 
@@ -100,7 +102,9 @@ class Overlay:
         h, w = buf.shape[:2]
         path = self._tempfile(oid)
         path.write_bytes(buf.tobytes())
-        res = self.ipc.command("overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
+        res = self.ipc.command(
+            "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4
+        )
         _warn_overlay_add(oid, w, h, res)
         return res
 

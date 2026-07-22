@@ -462,7 +462,9 @@ class Reader:
         self.sub_origin = (ox, oy)
         if not getattr(self, "_first_sub_logged", False):
             self._first_sub_logged = True
-            log.info("first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy)
+            log.info(
+                "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
+            )
         self.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
     # --- hover --------------------------------------------------------------------------------

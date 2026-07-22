@@ -53,7 +53,9 @@ class MpvIPC:
         self.path = path
         self._transport: Transport | None = None  # set by connect() (or injected in tests)
         self._buf = b""  # reader-thread-only accumulation buffer
-        self._bytes_read = 0  # total bytes the reader thread got from mpv (0 = never read → pipe dead)
+        self._bytes_read = (
+            0  # total bytes the reader thread got from mpv (0 = never read → pipe dead)
+        )
         self._events: list[dict] = []  # async events (property-change, client-message, …)
         self._events_lock = threading.Lock()
         self._replies: queue.Queue = queue.Queue(maxsize=1)  # single-flight command replies
