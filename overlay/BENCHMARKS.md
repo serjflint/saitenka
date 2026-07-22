@@ -152,3 +152,42 @@ CPU-bound and page-cache-warm, so levers 2–3 don't show here), first-hover-aft
 scroll 0.5 — all within noise of the post-Stage-6 numbers. The mmap + observe_property wins are in
 disk-cold first hovers and live-mpv tick latency, both outside this harness's measurement envelope;
 targets remain met with margin (cold p95 < 150 ms ✅ all words · first-hover < 300 ms ✅).
+
+## Harness upgrades — tail latency, GIL guardrail, upload isolation, stress (2026-07-22, v0.2.0)
+
+Since this is a **real-time overlay** (it must not stall the poll loop or drop a video frame), the
+harness now reports the jank tail and the runtime that produced it, not just means:
+
+- **p99 + CV** on every metric. p99 is the jank tail (a p99 over the 16.7/33 ms frame budget drops a
+  frame even when p50 looks fine); CV (stdev/mean) is the run-to-run stability that decides whether a
+  metric is safe to regression-gate at all.
+- **Runtime line + GIL guardrail.** Every run records `Py_GIL_DISABLED` and the *live* `sys._is_gil_enabled()`
+  read **after** the workload (fugashi re-enables the GIL on first use, not at import). `--require-ft`
+  fails the run if the GIL came back — catching the silent worker-scaling collapse.
+- **Layer-isolated timing.** The cold path is split into `dict lookup` / `head render` / `BGRA convert`
+  / **`upload write` (warm reuse vs cold fresh+fsync)**. This settled the suspected ~55 ms temp-file
+  "floor": the write is **~1 ms** (warm and cold alike) — the number in older notes was the whole cold
+  first-paint, which is **render + lookup bound**, not IO. So mmap/shared-memory upload is not worth it.
+- **`--json`** emits a diffable baseline (metrics + runtime).
+
+### `--stress` — sustained chained session
+
+`bench_responsiveness.py --stress` chains cold hover → scroll → nested popup → scroll → dismiss over
+60+ distinct heavy entries for N rounds, surfacing what the isolated micro-benchmarks can't: panel-cache
+eviction thrash (the 48-entry LRU cap), nested-state churn, and memory growth across a session. It
+reports the per-op frame-latency tail (**MAX** = the jank signal) + peak RSS + growth, and can gate on
+`--max-frame-ms` / `--max-rss-mb`. The robustness half is always-on in the gate (`tests/test_stress.py`:
+no crash, cache stays ≤ 48, tooltip/nested overlays torn down with no ghost).
+
+First run on the full 19-dict rig flagged **MAX ~950 ms / p99 ~920 ms** per op — cold pathological
+monolingual entries blowing the frame budget under load (the known cold-p95 weakness, now visible in a
+sustained scenario). Confirms the open lever: **clip/stream the first def body**, not just defer later ones.
+
+### Profiling & continuous benchmarking (verified 2026-07)
+
+To *explain* a regression (not just report it): **Scalene** is the one profiler verified to work on
+free-threaded 3.13t/3.14t (full CPU+memory, with a GIL-activity timeline) — use it for "is this
+GIL/native/alloc bound". `py-spy --native` and `viztracer` are great for GIL-on runs but their
+free-threaded support is **unconfirmed** (both read/monitor interpreter internals that no-GIL changes) —
+check their trackers before relying. `pytest-benchmark` auto-disables under `pytest-xdist`, so any
+micro-suite must run serially, separate from the `-n auto` gate — the custom harness stays primary.

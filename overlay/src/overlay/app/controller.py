@@ -18,6 +18,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from PIL import Image
@@ -29,11 +30,13 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem, PrefetchItem
 from overlay.app.lookup import card_for, entry_for
+from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.media import (
     audio_duration,
     copy_clipboard,
     play_audio,
     speak,
+    tts_available,
 )
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
@@ -49,7 +52,7 @@ from overlay.panel import (
     header_speaker_rect,
     panel_rows,
     render_tab_row,
-    tab_row_height,
+    tab_strip_height,
 )
 from overlay.render.flow import render_flow
 from overlay.render.layout import Block, inline_width
@@ -63,6 +66,9 @@ TRANS_ID = 4
 PREVIEW_ID = 5
 NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
 LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
+# The nested popup gets its own (roomier) height cap so shrinking the base tooltip (tip_max_frac)
+# doesn't cramp the deep-dive; the nested popup also carries no dict-tab strip / reserve (space-saving).
+_NESTED_MAX_FRAC = 0.6
 SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
@@ -98,6 +104,26 @@ TIP_KEYBINDS: tuple[tuple[str, str], ...] = (
     ("DOWN", TIP_DOWN_MSG),
     ("ESC", TIP_CLOSE_MSG),
 )
+
+
+class PanelKey(NamedTuple):
+    """Identity of a rendered tooltip panel — the ``_panel_cache`` key. Named (not a bare tuple) so
+    callers read ``.mined`` / ``.anki_ok`` instead of brittle positions, and adding a field can't
+    silently shift another. Still a tuple, so hashing, dict-key use, and equality with a plain tuple
+    of the same values are all unchanged."""
+
+    lemma: str
+    surface: str
+    reading: str
+    inflected: str
+    width: int
+    anki_ok: bool  # is Anki reachable now → is the ⊕ button drawn (rechecked per show, ~3s TTL)
+    mined: bool  # is the word already in the deck → its ⊕ shows ✓ (tests read this by name)
+    tabs: bool = (
+        True  # dict-tab strip reserved/drawn (base tooltip); a nested popup builds with tabs=False
+    )
+
+
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
@@ -192,11 +218,15 @@ class Reader:
         self.translate_key = o.keys.translate_key
         self.preview_key = o.keys.preview_key
         self.play_audio = o.mining.play_audio
+        # 🔊 TTS button is drawn only when the OS has a Japanese voice — else it silently does nothing.
+        # Computed once (voices don't change mid-session; tts_available is itself cached).
+        self._tts_ok = tts_available()
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
         self.sub_prev_key = o.keys.sub_prev_key  # Alt+LEFT  → sub-seek -1 (previous line)
         self.sub_next_key = o.keys.sub_next_key  # Alt+RIGHT → sub-seek  1 (next line)
         self.sub_replay_key = o.keys.sub_replay_key  # Alt+DOWN  → sub-seek  0 (replay current)
-        self.tip_max_frac = o.tooltip.tip_max_frac  # tooltip viewport ≤ this fraction of the video
+        self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
+        self.show_dict_tabs = o.tooltip.show_dict_tabs  # draw the sticky dict-tab strip (base only)
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
         self._paused_by_tip = False
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
@@ -224,6 +254,10 @@ class Reader:
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
         self._mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
+        self._anki_cache: tuple[float, bool] = (
+            0.0,
+            False,
+        )  # (checked_at, reachable) — see _anki_ok
         # card-preview interaction (clickable regions in screen coords; None when hidden)
         self._preview_rect: tuple | None = None
         self._preview_close_rect: tuple | None = None
@@ -246,7 +280,7 @@ class Reader:
         self._tip_state: TipPanel | None = (
             None  # _TipPanel currently shown (viewport-first render may still be filling)
         )
-        self._tip_key: tuple | None = (
+        self._tip_key: PanelKey | None = (
             None  # its cache key — the finisher only refreshes the panel still on screen
         )
         self._tip_dirty = (
@@ -303,6 +337,12 @@ class Reader:
         self.boxes: list = []
         self.sub_origin = (0, 0)
         self.hover = -1
+        # subtitle navigation: an index of the external sub file's cues (when known) lets Alt+←/→/↓
+        # render the target line in the overlay INSTANTLY, decoupled from mpv's slow video seek. The
+        # real sub-seek still fires behind it and reconciles once it settles (see _sub_nav).
+        self._sub_index: SubIndex | None = None
+        self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
+        self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
@@ -385,6 +425,7 @@ class Reader:
         self._teardown_tip()
         self.hover = -1
         self.sub_text = text
+        self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
         self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
             self.lines, self.tokens, self.boxes = [], [], []
@@ -578,19 +619,21 @@ class Reader:
         return self._tip_state.lazy.top_reserve if self._tip_state is not None else 0
 
     def _hit_header_add(self, x: float, y: float) -> bool:
-        if self.anki is None or self._tip_state is None:  # ⊕ only exists when mining is available
+        if self._tip_state is None or not self._anki_ok():  # ⊕ only when Anki is reachable now
             return False
         return self._hit_header_region(
             x,
             y,
-            header_add_rect(self.tip_width, top_reserve=self._tip_reserve()),
+            header_add_rect(
+                self.tip_width, top_reserve=self._tip_reserve(), speak_button=self._tts_ok
+            ),
             self._tip_xy,
             self._tip_scroll,
             self._tip_view_h,
         )
 
     def _hit_header_speaker(self, x: float, y: float) -> bool:
-        if self._tip_state is None:
+        if self._tip_state is None or not self._tts_ok:  # 🔊 hidden when no JA TTS voice
             return False
         return self._hit_header_region(
             x,
@@ -602,19 +645,19 @@ class Reader:
         )
 
     def _hit_nested_add(self, x: float, y: float) -> bool:
-        if self.anki is None or self._nest.state is None:
+        if self._nest.state is None or not self._anki_ok():
             return False
         return self._hit_header_region(
             x,
             y,
-            header_add_rect(self.tip_width),
+            header_add_rect(self.tip_width, speak_button=self._tts_ok),
             self._nest.xy,
             self._nest.scroll,
             self._nest.view_h,
         )
 
     def _hit_nested_speaker(self, x: float, y: float) -> bool:
-        if self._nest.state is None:
+        if self._nest.state is None or not self._tts_ok:  # 🔊 hidden when no JA TTS voice
             return False
         return self._hit_header_region(
             x,
@@ -672,8 +715,20 @@ class Reader:
             j += 1
         return s
 
-    def _panel_key(self, tok, inflected, mined: bool = False):
-        return (tok.lemma, tok.surface, tok.reading, inflected, self.tip_width, mined)
+    def _panel_key(self, tok, inflected, mined: bool = False, tabs: bool = True) -> PanelKey:
+        # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
+        # ``tabs`` distinguishes the base build (with the dict-tab reserve) from a nested build (none),
+        # so the same word shown in both places doesn't share the wrong reserve.
+        return PanelKey(
+            tok.lemma,
+            tok.surface,
+            tok.reading,
+            inflected,
+            self.tip_width,
+            self._anki_ok(),
+            mined,
+            tabs,
+        )
 
     def _is_mined(self, tok) -> bool:
         """Is this token's word already in the deck? (its ⊕ shows ✓ instead). Cheap short-circuit
@@ -684,6 +739,23 @@ class Reader:
             return card_for(tok).expression in self._mined
         except Exception:
             return False
+
+    def _anki_ok(self) -> bool:
+        """Is AnkiConnect reachable RIGHT NOW? Gates the ⊕ button per card show, so it appears/hides as
+        the user opens/closes Anki mid-session (not frozen at startup). Kept fast: a short timeout with
+        0 retries fails immediately when Anki is closed, and the result is cached ~3s so rapid hovers
+        don't ping repeatedly. False when mining isn't configured at all."""
+        if self.anki is None:
+            return False
+        now = time.monotonic()
+        ts, ok = self._anki_cache
+        if now - ts < 3.0:
+            return ok
+        from overlay.app.anki import anki_reachable
+
+        ok = anki_reachable(timeout=0.4)  # resolves host/key from config; short timeout, 0 retries
+        self._anki_cache = (now, ok)
+        return ok
 
     @staticmethod
     def _darken(rgba, f: float = JLPT_DARKEN):
@@ -731,11 +803,14 @@ class Reader:
         min_h: int | None = None,
         finish: bool = False,
         mined: bool | None = None,
+        tabs: bool | None = None,
     ):
         """The memoised :class:`_TipPanel` for a token. ``finish`` renders the whole entry (prefetch /
         no-worker path); otherwise only the head that fills ``min_h`` px is rendered now (viewport-first)
         and the tail is deferred. Re-hovering is instant and scrolling is cheap. ``mined`` (default: look
-        it up) selects the ⊕ vs ✓ header variant and is part of the cache key.
+        it up) selects the ⊕ vs ✓ header variant and is part of the cache key. ``tabs`` (default: the
+        ``show_dict_tabs`` config) reserves + will draw the sticky dict-tab strip; a nested popup passes
+        ``tabs=False`` so it carries no strip and no reserved band.
 
         Thread-safe: the panel is *built* lock-free (thread-local DB conns + fonts, each render owns its
         images), and only the tiny cache write/LRU update is locked.  On a free-threaded (no-GIL) build,
@@ -743,15 +818,29 @@ class Reader:
         Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
         if mined is None:
             mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined)
+        if tabs is None:
+            tabs = self.show_dict_tabs
+        key = self._panel_key(tok, inflected, mined, tabs)
         st = self._panel_cache.get(key)
         if st is None:
             entry = self._entry_for(tok, inflected)
-            # Reserve space for the sticky dict-tab strip (shown for ≥2 dicts) so it clears the
-            # header (reading + ⊕/🔊) instead of overlapping it.
-            reserve = tab_row_height() if len(entry.defs) >= 2 else 0
+            # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it
+            # clears the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for
+            # this word's dict names at this width, so a many-dict strip that wraps onto several rows
+            # reserves enough. Nested popups (tabs=False) reserve nothing — no strip, no blank band.
+            reserve = (
+                tab_strip_height([d.dict_name for d in entry.defs], self.tip_width)
+                if (tabs and len(entry.defs) >= 2)
+                else 0
+            )
             lazy = LazyPanel(
-                panel_rows(entry, self.tip_width, add_button=self.anki is not None, mined=mined),
+                panel_rows(
+                    entry,
+                    self.tip_width,
+                    add_button=self._anki_ok(),
+                    mined=mined,
+                    speak_button=self._tts_ok,
+                ),
                 self.tip_width,
                 top_reserve=reserve,
             )
@@ -861,10 +950,15 @@ class Reader:
                     PrefetchItem(gen, t, self._inflected_surface(i), self._is_mined(t))
                 )
 
-    def _tip_cap(self) -> int:
-        """Max tooltip viewport height: ≤ ``tip_max_frac`` of the video, clear of the header/footer."""
+    def _cap_for(self, frac: float) -> int:
+        """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
         margin = max(16, round(self.osd[1] * 0.05))
-        return min(round(self.osd[1] * self.tip_max_frac), self.osd[1] - 2 * margin)
+        return min(round(self.osd[1] * frac), self.osd[1] - 2 * margin)
+
+    def _tip_cap(self) -> int:
+        """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
+        own, deliberately roomier cap (``_NESTED_MAX_FRAC``) so shrinking the base doesn't cramp it."""
+        return self._cap_for(self.tip_max_frac)
 
     def _show_tooltip(self, index: int) -> None:
         self._hide_nested()  # switching the base word drops any stale scan popup
@@ -930,7 +1024,7 @@ class Reader:
         is decent) so the popup stays above it and the text below the cursor — the definition and the
         subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
         margin = max(16, round(self.osd[1] * 0.05))
-        view_h = min(full_h, self._tip_cap())
+        view_h = min(full_h, self._cap_for(_NESTED_MAX_FRAC))
         above_room = int(wy) - TIP_GAP - margin
         if view_h > above_room >= self._NEST_MIN_ABOVE:
             view_h = above_room  # shrink to fit above rather than drop below
@@ -973,9 +1067,11 @@ class Reader:
 
     # --- per-dictionary tabs + tooltip keys -------------------------------------------------------
     def _update_tabs(self) -> None:
-        """Recompute the dict-tab sections from the shown panel (≥2 sections → tabs)."""
+        """Recompute the dict-tab sections from the shown panel (≥2 sections → tabs). Off entirely when
+        ``show_dict_tabs`` is disabled — the panel is then built without the reserve too, so drawing a
+        strip would overlap content."""
         st = self._tip_state
-        offs = st.lazy.section_offsets() if st is not None else []
+        offs = st.lazy.section_offsets() if (st is not None and self.show_dict_tabs) else []
         if len(offs) >= 2:
             self._tab_names = [name for name, _ in offs]
             self._tab_offsets = [y for _, y in offs]
@@ -1052,6 +1148,8 @@ class Reader:
         )
 
     def _render_nested_view(self) -> None:
+        # No dict-tab strip on the nested popup — it's built tabs=False (no reserve), so it stays
+        # compact and gives the deep-dive its full height (a depth-1 quick look, scrolled with the wheel).
         if self._nest.bgra is None:
             return
         self._nest.rect = self._blit_panel(
@@ -1128,9 +1226,14 @@ class Reader:
         """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
         Shared by scan-hover and a clicked cross-reference link."""
         mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined)
+        key = self._panel_key(tok, inflected, mined, tabs=False)  # nested: no tab strip / reserve
         st = self._panel_for(
-            tok, inflected, min_h=self._tip_cap(), finish=not self._finish_available(), mined=mined
+            tok,
+            inflected,
+            min_h=self._tip_cap(),
+            finish=not self._finish_available(),
+            mined=mined,
+            tabs=False,
         )
         self._place_nested(st, key, tok, tok.surface, wx, wy, wh, tail)
 
@@ -1188,7 +1291,10 @@ class Reader:
         st = self._panel_cache.get(key)
         if st is None:
             entry = self.dict_set.search(pattern)
-            lazy = LazyPanel(panel_rows(entry, self.tip_width, add_button=False), self.tip_width)
+            lazy = LazyPanel(
+                panel_rows(entry, self.tip_width, add_button=False, speak_button=self._tts_ok),
+                self.tip_width,
+            )
             st = _TipPanel(lazy, "")
             with self._cache_lock:
                 st = self._panel_cache_setdefault(key, st)
@@ -1235,7 +1341,9 @@ class Reader:
         key = ("kanji", ch, self.tip_width)
         st = self._panel_cache.get(key)
         if st is None:
-            lazy = LazyPanel(panel_rows(entry, self.tip_width), self.tip_width)
+            lazy = LazyPanel(
+                panel_rows(entry, self.tip_width, speak_button=self._tts_ok), self.tip_width
+            )
             st = _TipPanel(lazy, entry.reading)
             st.finish()  # kanji entries are small — render whole
             with self._cache_lock:
@@ -1545,7 +1653,8 @@ class Reader:
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
         bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
-        bind("a", SPEAK_MSG)
+        if self._tts_ok:
+            bind("a", SPEAK_MSG)  # only bind TTS when a Japanese voice exists (else 'a' is a no-op)
         bind("c", COPY_MSG)  # copy the hovered word
         bind("k", KANJI_MSG)  # open / cycle the hovered word's kanji entry
         bind("Shift+c", COPY_LINE_MSG)  # copy the whole subtitle line
@@ -1586,12 +1695,17 @@ class Reader:
             self.copy_click()
         elif msg == CLICK_MSG:
             self.on_click()
-        # subtitle navigation
+        # subtitle navigation — render the target cue from the index INSTANTLY (if we have one),
+        # then issue the real sub-seek so the video catches up behind it (read the position first:
+        # _sub_nav samples sub-start/time-pos before the seek moves them).
         elif msg == SUB_PREV_MSG:
+            self._sub_nav(-1)
             self.ipc.command("sub-seek", "-1")
         elif msg == SUB_NEXT_MSG:
+            self._sub_nav(1)
             self.ipc.command("sub-seek", "1")
         elif msg == SUB_REPLAY_MSG:
+            self._sub_nav(0)
             self.ipc.command("sub-seek", "0")
         elif msg == SUB_DELAY_MINUS_MSG:
             self.ipc.command("add", "sub-delay", "-0.1")
@@ -1643,9 +1757,7 @@ class Reader:
                     self._render_tip_view()
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
-            text = self._prop("sub-text") or ""
-            if text != self.sub_text:
-                self.set_subtitle(text)
+            self._reconcile_sub_text(self._prop("sub-text") or "")
             # progressive startup: inject background-loaded deps (once), else animate the spinner
             if self._pending_deps is not None:
                 deps, self._pending_deps = self._pending_deps, None
@@ -1669,18 +1781,95 @@ class Reader:
     def _seed_mined(self) -> None:
         self._miner.seed_mined()
 
+    # --- subtitle navigation (instant render, then seek) --------------------------------------
+    def load_sub_index(self, path) -> None:
+        """Parse the external subtitle file at ``path`` into a cue index so Alt+←/→/↓ can render the
+        target line instantly. Fail-soft: an unreadable/empty/unsupported file just leaves the index
+        None → navigation falls back to a plain mpv sub-seek."""
+        self._sub_index = load_index(path)
+
+    def _get_float(self, prop: str) -> float | None:
+        v = self._get(prop)  # a direct get_property is fine: nav keys are rare, not per-tick
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _sub_nav(self, delta: int) -> bool:
+        """Render the cue ``delta`` steps away (-1 prev / 0 replay / +1 next) in the overlay right
+        now, from the parsed index — the perceived-instant half of subtitle navigation. Returns True
+        if it drew a target line. The caller still issues the real ``sub-seek`` so the video catches
+        up; the poll loop reconciles to mpv's ``sub-text`` once the seek settles.
+
+        Chaining works while the video seek is still in flight (time-pos/sub-start are stale): after
+        a nav render ``sub_text`` is the line we drew, so ``locate`` finds it by text and ``_nav_idx``
+        disambiguates duplicates — next/next/next steps forward predictably."""
+        idx = self._sub_index
+        if idx is None or len(idx) == 0:
+            return False
+        sub_start = self._get_float("sub-start")
+        time_pos = self._get_float("time-pos")
+        current = idx.locate(
+            text=self.sub_text, sub_start=sub_start, time_pos=time_pos, preferred=self._nav_idx
+        )
+        if current < 0:
+            return False
+        # Is a cue actually on screen now, or is `current` just the upcoming one in a gap? A sub is
+        # showing (non-empty text), or the position falls inside current's span. This decides whether
+        # prev/next straddle the cue or step onto the upcoming one (see SubIndex.target).
+        c = idx.cues[current]
+        inside = bool(self.sub_text.strip())
+        if not inside and sub_start is not None:
+            inside = c.start <= sub_start < c.end
+        if not inside and time_pos is not None:
+            inside = c.start <= time_pos < c.end
+        tgt = idx.target(current, delta, inside=inside)
+        if tgt < 0:
+            return False  # out of range / ambiguous → let mpv's sub-seek handle it
+        self.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
+        self._nav_idx = tgt
+        # Guard the reconcile: mpv's sub-text briefly reads empty mid-seek; ignoring that avoids a
+        # blank flicker before it settles on the real (matching) cue text. ~1s covers a slow seek.
+        self._sub_settle_until = time.monotonic() + 1.0
+        return True
+
+    def _reconcile_sub_text(self, text: str) -> None:
+        """Poll-loop hook: adopt mpv's current ``sub-text`` when it changed. mpv is the source of
+        truth (it corrects the line if our instant-nav index guessed wrong), EXCEPT for the empty
+        blip mpv emits mid-seek right after a manual sub-nav — swallow that within the settle window
+        so the overlay doesn't flash blank before the real cue text lands."""
+        if text == self.sub_text:
+            return
+        if text.strip() or time.monotonic() >= self._sub_settle_until:
+            self.set_subtitle(text)
+            self._sub_settle_until = 0.0
+
     # --- progressive dep loading --------------------------------------------------------------
-    def load_deps_async(self, cfg: dict) -> None:
+    def load_deps_async(self, cfg: dict, build=None) -> None:
         """Load coloring/dict/mining collaborators on a BACKGROUND thread (dicts/scorer/anki — none
         touch the mpv IPC), then hand them to the poll loop, which injects them on the main thread.
-        Plain subs draw meanwhile; a spinner shows until the deps land."""
+        Plain subs draw meanwhile; a spinner shows until the deps land.
+
+        ``build`` is a zero-arg callable returning ``(scorer, anki, mine_cfg, dict_set)``; it defaults
+        to ``build_reader_deps(cfg)`` (attach/plugin mode). ``run`` passes its own closure so it can
+        honour CLI flags (``--dict/--freq/--anki-decks/--mine`` …) while still loading progressively.
+        The one rule: the builder must NOT touch the mpv IPC (it runs off the main thread)."""
         self._loading = True
 
-        def _load() -> None:
-            from overlay.app.reader_deps import build_reader_deps
+        if build is None:
 
+            def _default_build():
+                from overlay.app.reader_deps import build_reader_deps
+
+                return build_reader_deps(cfg)
+
+            build = _default_build
+
+        def _load() -> None:
             try:
-                scorer, anki, mine_cfg, dict_set = build_reader_deps(cfg)
+                scorer, anki, mine_cfg, dict_set = build()
                 self._pending_deps = {
                     "scorer": scorer,
                     "anki": anki,

@@ -37,6 +37,7 @@ def test_atomic_write_round_trips_in_memory(fs):
     assert p.read_bytes() == b"a\nb\n"
 
 
+@pytest.mark.windows_sim
 def test_windows_fs_is_case_insensitive(fs):
     """Emulated Windows FS on this host: two dict paths differing only in case COLLIDE — the class of
     bug we'd otherwise only see on a Windows machine."""

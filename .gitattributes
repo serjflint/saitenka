@@ -1,0 +1,17 @@
+# Normalize line endings: text files are stored and checked out as LF. Stops the classic
+# "green on mac, broken on Linux/Windows" bug from stray CRLF — our atomic writer is already
+# LF-only (paths.atomic_write_text), and this enforces it across the whole repo.
+* text=auto eol=lf
+
+# Windows batch scripts must be CRLF to run correctly.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets — never touch line endings or attempt textual diffs.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
+*.ttf binary
+*.otf binary
+*.ico binary

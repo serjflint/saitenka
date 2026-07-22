@@ -1,13 +1,14 @@
 """Persistent overlay settings — a small TOML file so you don't re-type ``--dict``/``--freq`` etc.
 
-Lives in its **own** XDG dir (``~/.config/saitenka/overlay.toml``), separate from mpv's config and
-the animecards rig — the overlay is an independent tool and shouldn't have its settings parsed by
-mpv's own config loader. Precedence: built-in defaults < this file < explicit CLI flags. Point
-elsewhere with ``$SAITENKA_CONFIG`` or ``--config``.
+Lives in its **own** platform-native config dir (``paths.config_dir()`` →
+``%LOCALAPPDATA%\\saitenka\\overlay.toml`` on Windows, ``~/.config/saitenka/overlay.toml`` on
+macOS/Linux), separate from mpv's config and the animecards rig — the overlay is an independent tool
+and shouldn't have its settings parsed by mpv's own config loader. Precedence: built-in defaults <
+this file < explicit CLI flags. Point elsewhere with ``$SAITENKA_CONFIG`` or ``--config``.
 
-The dictionary **cache** (built SQLite indexes) is separate and already persists between runs at
-``~/.cache/saitenka-overlay/dicts/`` keyed by each zip's mtime+size — so dicts are indexed once and
-reused, and only re-built when the zip changes.
+The dictionary **cache** (built SQLite indexes) is separate and already persists between runs under
+``paths.cache_dir()/dicts/`` keyed by each zip's mtime+size — so dicts are indexed once and reused,
+and only re-built when the zip changes.
 """
 
 from __future__ import annotations
@@ -31,8 +32,9 @@ def config_path(override: str | os.PathLike | None = None) -> Path:
 
 
 def dicts_data_dir() -> Path:
-    """Where relocated dictionaries live: ``~/.local/share/saitenka/dicts`` — NOT a TCC-protected
-    folder, so a GUI-launched (plugin-mode) mpv can read them without a macOS consent prompt."""
+    """Where relocated dictionaries live: ``paths.data_dir()/dicts`` (``%LOCALAPPDATA%\\saitenka\\dicts``
+    on Windows, ``~/.local/share/saitenka/dicts`` on macOS/Linux) — NOT a TCC-protected folder, so a
+    GUI-launched (plugin-mode) mpv can read them without a macOS consent prompt."""
     return DATA_HOME / "dicts"
 
 
@@ -98,10 +100,11 @@ class TooltipOptions:
 
     sub_size: int | None = None  # subtitle font override (None = scale to video)
     bottom_margin_frac: float = 0.06
-    tip_max_frac: float = 0.6  # tooltip viewport ≤ this fraction of the video height
+    tip_max_frac: float = 0.5  # BASE tooltip viewport ≤ this fraction of the video height
     pause_on_tooltip: bool = False
     scan_delay: float = 0.25  # dwell before a nested scan popup opens
     hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
+    show_dict_tabs: bool = True  # draw the sticky per-dictionary tab strip on the BASE tooltip
 
 
 @dataclass(frozen=True)

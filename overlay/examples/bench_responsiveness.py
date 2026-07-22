@@ -17,14 +17,20 @@ one display frame (~16 ms). Time-to-complete matters less because the tail strea
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sqlite3
 import statistics
+import sys
+import sysconfig
 import time
+
+from pathlib import Path
 
 from overlay.app.config import expand_paths, load_config
 from overlay.app.controller import Reader
 from overlay.app.tokenize import Token, tokenize
-from overlay.mpvio.osd import to_bgra_array
+from overlay.mpvio.osd import to_bgra, to_bgra_array
 from overlay.panel import Definition, Entry, LazyPanel, panel_rows
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
@@ -63,6 +69,27 @@ class FakeIPC:
         return []
 
 
+def _stats(samples: list[float]) -> dict:
+    """Latency summary. p99 = the jank tail (a p99 over the 16.7/33 ms frame budget drops a frame);
+    cv (stdev/mean) = run-to-run stability — a metric with high cv can't be regression-gated because
+    the noise swamps the signal."""
+    s = sorted(samples)
+    p = lambda q: s[min(len(s) - 1, int(q * len(s)))]  # noqa: E731
+    mean = statistics.fmean(s)
+    stdev = statistics.stdev(s) if len(s) > 1 else 0.0
+    return {
+        "p50": p(0.50),
+        "p95": p(0.95),
+        "p99": p(0.99),
+        "mean": mean,
+        "min": s[0],
+        "max": s[-1],
+        "stdev": stdev,
+        "cv": (stdev / mean) if mean else 0.0,
+        "n": len(s),
+    }
+
+
 def measure(fn, reps: int, warmup: int = 2) -> dict:
     for _ in range(warmup):
         fn()
@@ -71,16 +98,54 @@ def measure(fn, reps: int, warmup: int = 2) -> dict:
         t0 = time.perf_counter()
         fn()
         samples.append((time.perf_counter() - t0) * 1000.0)
-    samples.sort()
-    p = lambda q: samples[min(len(samples) - 1, int(q * len(samples)))]  # noqa: E731
+    return _stats(samples)
+
+
+def runtime_info() -> dict:
+    """The runtime facts that make a benchmark number meaningful: whether this is a free-threaded
+    build and whether the GIL is actually OFF right now (a C-extension like fugashi silently
+    re-enables it on import — see AGENTS.md — which collapses worker scaling without any error), plus
+    the worker capacity that scaling depends on. Recorded in every run so a result is never ambiguous
+    about which runtime produced it."""
+    gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
     return {
-        "p50": p(0.50),
-        "p95": p(0.95),
-        "mean": statistics.fmean(samples),
-        "min": samples[0],
-        "max": samples[-1],
-        "n": len(samples),
+        "python": sys.version.split()[0],
+        "freethreaded_build": bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
+        "gil_enabled": bool(gil_enabled),
+        "cpu_count": os.cpu_count() or 1,
+        "prefetch_workers": min(8, (os.cpu_count() or 1) - 2) if not gil_enabled else 2,
     }
+
+
+def finalize_runtime(rt: dict, require_ft: bool) -> int:
+    """Re-read the LIVE GIL state after the workload (fugashi re-enables the GIL on first use, not at
+    import) and fold it back into ``rt``. Warn on a free-threaded build whose GIL got re-enabled — the
+    silent scaling-killer — and fail when ``--require-ft`` demanded it stay off. Returns an exit code
+    delta (2 to abort, 0 otherwise)."""
+    live = getattr(sys, "_is_gil_enabled", lambda: True)()
+    rt["gil_enabled"] = bool(live)
+    rt["prefetch_workers"] = 2 if live else min(8, (os.cpu_count() or 1) - 2)
+    if rt["freethreaded_build"] and live:
+        print(
+            "\nWARNING: free-threaded build but the GIL is RE-ENABLED (a C-extension like fugashi "
+            "re-enabled it) — worker scaling is collapsed. Run with PYTHON_GIL=0.",
+            file=sys.stderr,
+        )
+        if require_ft:
+            return 2
+    return 0
+
+
+def format_runtime(rt: dict) -> str:
+    mode = (
+        "free-threaded (GIL OFF)"
+        if rt["freethreaded_build"] and not rt["gil_enabled"]
+        else ("free-threaded BUILD but GIL RE-ENABLED" if rt["freethreaded_build"] else "GIL")
+    )
+    return (
+        f"runtime: Python {rt['python']} · {mode} · {rt['cpu_count']} cores · "
+        f"~{rt['prefetch_workers']} prefetch workers"
+    )
 
 
 def discover_pathological(db_path: str, n: int = 5) -> list[tuple[str, str, int]]:
@@ -191,7 +256,9 @@ def _bench_word(reader, term: str, reading: str, reps: int) -> dict:
     return measure(cold, reps, warmup=1)
 
 
-def run_pathological(reps: int) -> int:
+def run_pathological(
+    reps: int, rt: dict, require_ft: bool = False, json_path: str | None = None
+) -> int:
     ds, tag = _load_dict_set()
     if ds is None:
         print("pathological corpus needs the real dict set (overlay.toml) — nothing to measure")
@@ -219,33 +286,186 @@ def run_pathological(reps: int) -> int:
     fresh_reader._show_tooltip(0)
     first_hover_ms = (time.perf_counter() - t0) * 1000.0
 
+    gil_rc = finalize_runtime(rt, require_ft)
     print(f"\nSaitenka overlay — PATHOLOGICAL cold-first-paint benchmark   ({tag})")
+    print(format_runtime(rt))
     print(
         f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {reader._tip_cap()}px   "
         f"reps/word: {reps}"
     )
     print(f"first-hover-after-launch (fresh connections, {first_term}): {first_hover_ms:.1f} ms\n")
-    hdr = f"{'word':8} {'source':34} {'p50':>8} {'p95':>8} {'max':>8}   (ms)"
+    hdr = f"{'word':8} {'source':34} {'p50':>7} {'p95':>7} {'p99':>7} {'max':>7}   (ms)"
     print(hdr)
     print("-" * len(hdr))
-    all_p50, all_p95, all_max = [], [], []
+    all_p50, all_p95, all_p99, all_max = [], [], [], []
+    collected: dict[str, dict] = {}
     for source, term, reading in corpus:
         m = _bench_word(reader, term, reading, reps)
+        collected[f"{term} ({source})"] = m
         all_p50.append(m["p50"])
         all_p95.append(m["p95"])
+        all_p99.append(m["p99"])
         all_max.append(m["max"])
-        print(f"{term:8} {source[:34]:34} {m['p50']:8.1f} {m['p95']:8.1f} {m['max']:8.1f}")
+        print(
+            f"{term:8} {source[:34]:34} {m['p50']:7.1f} {m['p95']:7.1f} {m['p99']:7.1f} "
+            f"{m['max']:7.1f}"
+        )
     print("-" * len(hdr))
     print(
-        f"{'WORST':8} {'over all words':34} {max(all_p50):8.1f} {max(all_p95):8.1f} "
-        f"{max(all_max):8.1f}"
+        f"{'WORST':8} {'over all words':34} {max(all_p50):7.1f} {max(all_p95):7.1f} "
+        f"{max(all_p99):7.1f} {max(all_max):7.1f}"
     )
     print("\ntargets: cold p95 < 150 ms per word · first-hover-after-launch < 300 ms")
     print(
         "note: OS file cache may still be warm for first-hover (no sudo purge); "
         "fresh SQLite connections only."
     )
-    return 0
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {"runtime": rt, "osd": OSD, "first_hover_ms": first_hover_ms, "metrics": collected},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote metrics baseline → {json_path}")
+    return gil_rc
+
+
+def _rss_mb() -> float:
+    """Resident set size in MB (cross-platform via psutil, a runtime dep) — captures the numpy/Pillow
+    C buffers that tracemalloc, being Python-only, misses. The primary memory signal for the stress."""
+    import psutil
+
+    return psutil.Process().memory_info().rss / 1e6
+
+
+def run_stress(
+    reps: int,
+    rt: dict,
+    require_ft: bool = False,
+    json_path: str | None = None,
+    max_frame_ms: float | None = None,
+    max_rss_mb: float | None = None,
+) -> int:
+    """A sustained, DETERMINISTIC chained session — cold hover → scroll → nested popup → scroll →
+    dismiss — over a large corpus of distinct heavy entries, repeated ``reps`` rounds. Unlike the
+    isolated micro-benchmarks it exercises what only shows under load: panel-cache eviction thrash
+    (the cache is LRU-capped at 48, so >48 distinct entries force churn), nested-state churn, and
+    memory growth across a long session. Reports the per-op frame-latency tail (MAX is the jank
+    signal) + peak RSS + growth, and can gate on ``--max-frame-ms`` / ``--max-rss-mb``."""
+    import tracemalloc
+
+    from overlay.app.subtitles import WordBox
+
+    ds, tag = _load_dict_set()
+    if ds is None:
+        ds, tag = _SyntheticDS(), tag
+    # A corpus LARGER than the 48-entry cache cap is what forces eviction thrash — 10 biggest entries
+    # per dict (≈60 distinct) does it; without real dicts, repeat a small synthetic set (no eviction).
+    if hasattr(ds, "dicts"):
+        corpus = [(t, r) for _s, t, r in _pathological_corpus(ds, per_dict=10)]
+    else:
+        corpus = [(w, w) for w in ("手", "気", "出る", "見る", "行く", "上げる")]
+    reader = _cold_reader(ds)
+    step = round(OSD[1] * 0.12)
+    frames: list[float] = []
+
+    def timed(fn) -> None:
+        t0 = time.perf_counter()
+        fn()
+        frames.append((time.perf_counter() - t0) * 1000.0)
+
+    def one_word(term: str, reading: str) -> None:
+        tok = Token(term, term, reading, "名詞", 0, len(term))
+        reader.tokens = [tok]
+        reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+        reader.sub_origin = (0, 0)
+        reader.hover = 0
+        timed(lambda: reader._show_tooltip(0))
+        for _ in range(4):  # scroll toward the bottom of a tall entry
+            timed(lambda: reader._scroll_tip(step))
+        st = reader._tip_state
+        boxes = st.lazy.scan_boxes if st else []
+        if boxes:
+            sb = boxes[len(boxes) // 3]  # a deterministic cell well inside the body
+            timed(lambda: reader._show_nested(sb))
+            timed(lambda: reader._scroll_tip(step))  # scroll while the nested popup is up
+            timed(reader._hide_nested)
+        timed(lambda: reader.set_hover(-1))  # dismiss the whole stack
+        reader._finish_q.queue.clear()  # model the worker draining it (no worker in --prefetch off)
+
+    for term, reading in corpus:  # one warmup round before the memory baseline
+        one_word(term, reading)
+    frames.clear()
+    tracemalloc.start()
+    rss_base = _rss_mb()
+    rss_peak = rss_base
+    for _ in range(max(1, reps)):
+        for term, reading in corpus:
+            one_word(term, reading)
+        rss_peak = max(rss_peak, _rss_mb())
+    _cur, py_peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    m = _stats(frames)
+    cache_len = len(reader._panel_cache)
+    growth = rss_peak - rss_base
+    gil_rc = finalize_runtime(rt, require_ft)
+
+    print(
+        f"\nSaitenka overlay — STRESS: chained scan/scroll/nested over {len(corpus)} distinct heavy "
+        f"entries × {reps} rounds   ({tag})"
+    )
+    print(format_runtime(rt))
+    print(f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   ops timed: {m['n']}")
+    print(
+        f"\nper-op frame latency:  p50 {m['p50']:.1f}  p95 {m['p95']:.1f}  p99 {m['p99']:.1f}  "
+        f"MAX {m['max']:.1f} ms  (cv {m['cv']:.2f})"
+    )
+    print(
+        f"panel cache: {cache_len}/48 entries (LRU-capped — steady state means eviction is working)"
+    )
+    print(
+        f"memory: peak RSS {rss_peak:.0f} MB · growth over rounds {growth:+.1f} MB · "
+        f"python-obj peak {py_peak / 1e6:.1f} MB"
+    )
+    print(
+        "\nMAX frame is the jank signal (a single op over the 16.7/33 ms budget can drop a video "
+        "frame under load); growth ≫ 0 across rounds of fixed work ⇒ a leak."
+    )
+    rc = gil_rc
+    if max_frame_ms is not None and m["max"] > max_frame_ms:
+        print(
+            f"FAIL: MAX frame {m['max']:.1f} ms exceeds --max-frame-ms {max_frame_ms}",
+            file=sys.stderr,
+        )
+        rc = rc or 1
+    if max_rss_mb is not None and rss_peak > max_rss_mb:
+        print(
+            f"FAIL: peak RSS {rss_peak:.0f} MB exceeds --max-rss-mb {max_rss_mb}", file=sys.stderr
+        )
+        rc = rc or 1
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {
+                    "runtime": rt,
+                    "osd": OSD,
+                    "rounds": reps,
+                    "corpus_size": len(corpus),
+                    "frame_latency_ms": m,
+                    "panel_cache_len": cache_len,
+                    "rss_peak_mb": rss_peak,
+                    "rss_growth_mb": growth,
+                    "py_obj_peak_mb": py_peak / 1e6,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote stress baseline → {json_path}")
+    return rc
 
 
 def main() -> int:
@@ -257,10 +477,43 @@ def main() -> int:
         help="run the pathological cold-first-paint corpus (largest entries per dict "
         "+ hand-picked multi-sense words)",
     )
+    ap.add_argument(
+        "--json",
+        metavar="PATH",
+        help="also write the metrics (with runtime info) as JSON, for baseline diffing over time",
+    )
+    ap.add_argument(
+        "--require-ft",
+        action="store_true",
+        help="fail if the GIL is enabled (a C-extension re-enabled it) — for free-threaded runs",
+    )
+    ap.add_argument(
+        "--stress",
+        action="store_true",
+        help="sustained chained session (scan→scroll→nested→dismiss over many heavy entries) — "
+        "surfaces cache-eviction thrash, memory growth, and the frame-latency tail under load",
+    )
+    ap.add_argument(
+        "--max-frame-ms",
+        type=float,
+        help="stress: fail if any single op exceeds this frame budget (ms)",
+    )
+    ap.add_argument(
+        "--max-rss-mb", type=float, help="stress: fail if peak resident memory exceeds this (MB)"
+    )
     args = ap.parse_args()
 
+    # Snapshot the runtime; the GIL state is re-read AFTER the workload (finalize_runtime), because
+    # fugashi re-enables the GIL only when first USED, not at startup — a start-of-run check would
+    # miss exactly the regression --require-ft is meant to catch.
+    rt = runtime_info()
+
+    if args.stress:
+        return run_stress(
+            args.reps, rt, args.require_ft, args.json, args.max_frame_ms, args.max_rss_mb
+        )
     if args.pathological:
-        return run_pathological(args.reps)
+        return run_pathological(args.reps, rt, args.require_ft, args.json)
 
     ds, tag = _load_dict_set()
     if ds is None:
@@ -384,34 +637,85 @@ def main() -> int:
     def comp_bgra():
         to_bgra_array(_tall_head)  # isolate the RGBA→premultiplied-BGRA conversion
 
+    # Isolate the temp-file UPLOAD write (the last hop before mpv reads the bitmap) from the render.
+    # Two variants expose the OS page-cache trap that hides the suspected ~55 ms floor: reusing ONE
+    # path — mpv's real per-overlay-id behaviour, inode stays hot — vs a FRESH file each iteration
+    # with fsync, which forces inode creation + a real device write (the true cold cost). If warm≈cold
+    # the floor was a page-cache artifact; if cold ≫ warm, moving to mmap/shared memory is justified.
+    import shutil
+    import tempfile
+
+    _up_data, _up_w, _up_h, _up_stride = to_bgra(_tall_head)
+    _up_dir = Path(tempfile.mkdtemp(prefix="saitenka-bench-upload-"))
+    _up_path = _up_dir / "reuse.bgra"
+    _up_cold = {"i": 0}
+
+    def comp_upload_warm():
+        _up_path.write_bytes(_up_data)  # overwrite one inode (no fsync — matches osd.Overlay.show)
+
+    def comp_upload_cold():
+        p = _up_dir / f"cold-{_up_cold['i']}.bgra"  # a new inode each time → not page-cached
+        _up_cold["i"] += 1
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, _up_data)
+            os.fsync(fd)  # force to the device: measure real I/O, not just the write buffer
+        finally:
+            os.close(fd)
+
+    n = len(idxs)
+    collected: dict[str, dict] = {}
+
+    def prow(label: str, m: dict) -> None:
+        collected[label] = m
+        print(
+            f"{label:44} {m['p50']:7.1f} {m['p95']:7.1f} {m['p99']:7.1f} {m['mean']:7.1f} "
+            f"{m['cv']:6.2f}"
+        )
+
+    gil_rc = finalize_runtime(rt, args.require_ft)
     print(f"\nSaitenka overlay — responsiveness benchmark   ({tag})")
+    print(format_runtime(rt))
     print(f"line: {LINE}   osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {cap}px")
     print(f"content words: {' '.join(words)}\n")
-    hdr = f"{'metric':44} {'p50':>8} {'p95':>8} {'mean':>8} {'min':>8}   (ms)"
+    # p99 = the jank tail (a p99 over the 16.7/33 ms frame budget drops a frame); cv = run-to-run
+    # stability (a metric with high cv can't be regression-gated — the noise swamps the signal).
+    hdr = f"{'metric':44} {'p50':>7} {'p95':>7} {'p99':>7} {'mean':>7} {'cv':>6}   (ms)"
     print(hdr)
     print("-" * len(hdr))
     for label, m in rows:
-        print(f"{label:44} {m['p50']:8.1f} {m['p95']:8.1f} {m['mean']:8.1f} {m['min']:8.1f}")
+        prow(label, m)
     print("-" * len(hdr))
-    n = len(idxs)
     for label, m in [
         (f"horizontal sweep: cold, {n} words (total)", sweep_cold),
         (f"horizontal sweep: warm, {n} words (total)", sweep_warm),
     ]:
-        print(f"{label:44} {m['p50']:8.1f} {m['p95']:8.1f} {m['mean']:8.1f} {m['min']:8.1f}")
+        prow(label, m)
     print("-" * len(hdr))
     for label, fn in [
         (f"component: dict lookup, {n} words", comp_lookup),
         (f"component: head render, {n} words", comp_headrender),
         ("component: BGRA convert, tallest", comp_bgra),
+        ("component: upload write, warm (reuse inode)", comp_upload_warm),
+        ("component: upload write, cold (fresh+fsync)", comp_upload_cold),
     ]:
-        m = measure(fn, args.reps)
-        print(f"{label:44} {m['p50']:8.1f} {m['p95']:8.1f} {m['mean']:8.1f} {m['min']:8.1f}")
+        prow(label, measure(fn, args.reps))
+    shutil.rmtree(_up_dir, ignore_errors=True)
     print(
-        "\nnote: excludes mpv's own compositing + IPC round-trip (a small, ~constant add). "
+        f"\nupload payload: {_up_w}x{_up_h} BGRA ≈ {len(_up_data) / 1e6:.1f} MB. cold≈warm ⇒ the "
+        "~55 ms floor was a page-cache artifact; cold ≫ warm ⇒ mmap/shared-mem is worth it."
+    )
+    print(
+        "note: excludes mpv's own compositing + IPC round-trip (a small, ~constant add). "
         "cold = OS/SQLite page cache warm, our panel cache cleared (a fresh word mid-session)."
     )
-    return 0
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps({"runtime": rt, "osd": OSD, "metrics": collected}, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\nwrote metrics baseline → {args.json}")
+    return gil_rc
 
 
 if __name__ == "__main__":

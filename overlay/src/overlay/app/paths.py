@@ -2,10 +2,11 @@
 
 Three layers, following the best-practice split (platformdirs docs; mpv manual "Files"):
 
-1. **Our own dirs** (config / data / cache) → platform-native via ``platformdirs`` (``%APPDATA%`` on
-   Windows, ``~/Library/Application Support`` on macOS, ``$XDG_*`` on Linux), overridable by env, with
-   a **legacy ``~/.config``-style fallback** so existing installs never move (no cache rebuild, no
-   stranded config).
+1. **Our own dirs** (config / data / cache) → platform-native via ``platformdirs`` (``%LOCALAPPDATA%``
+   on Windows, ``~/Library/Application Support`` on macOS, ``$XDG_*`` on Linux), overridable by env,
+   with a **legacy ``~/.config``-style fallback on POSIX only** so existing macOS/Linux installs never
+   move (no cache rebuild, no stranded config). Windows always uses the native dir — ``~/.config`` was
+   never idiomatic there.
 2. **mpv / mpv.net dirs** (scripts, mpv.conf) → MIRROR mpv's OWN resolution (``$MPV_HOME`` on all OSes
    > ``portable_config`` next to the exe on Windows > ``%APPDATA%\\mpv`` on Windows / ``~/.config/mpv``
    on macOS+Linux). Never impose our convention on another app's dirs.
@@ -96,11 +97,17 @@ def atomic_write_text(
 
 def _pick(env_var: str, native: Path, legacy: Path) -> Path:
     """env override > (legacy if it already exists, else native). The legacy check keeps existing
-    installs in place; a fresh install (neither exists) gets the idiomatic native dir."""
+    installs in place; a fresh install (neither exists) gets the idiomatic native dir.
+
+    The legacy roots (``~/.config``, ``~/.local/share``, ``~/.cache``) are XDG — a POSIX-only
+    convention. On Windows they were NEVER idiomatic, so we skip the legacy branch there and always
+    use the platform-native ``%LOCALAPPDATA%\\saitenka`` dir (matching where the dict cache lives);
+    otherwise a stray ``C:\\Users\\…\\.config\\saitenka`` from an earlier build would keep winning and
+    the config would drift away from the data/cache dirs."""
     override = os.environ.get(env_var)
     if override:
         return expand(override)
-    if legacy.exists() and not native.exists():
+    if sys.platform != "win32" and legacy.exists() and not native.exists():
         return legacy
     return native
 

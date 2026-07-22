@@ -1,6 +1,6 @@
 """Fetch Japanese subtitles from jimaku.cc (the modern kitsunekko replacement).
 
-For files without an embedded Japanese track. Needs a free API key (jimaku.cc → account → API key).
+For files without an embedded Japanese track. Needs a free API key (https://jimaku.cc/profile).
 The key is resolved with precedence ``explicit (config/CLI) > $JIMAKU_API_KEY > macOS Keychain`` —
 the Keychain is the one that works under a GUI-launched (plugin-mode) mpv, which doesn't inherit the
 shell's env. Flow: search anime by title → pick the entry → list the episode's files → download the
@@ -13,15 +13,71 @@ import json
 import logging
 import os
 import re
+import sys
 import urllib.parse
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+import stamina
+
 log = logging.getLogger(__name__)
 
 BASE = "https://jimaku.cc/api"
+
+# Shown at the interactive key prompt (CLI `set-jimaku-key` + the setup wizard) so the user knows where
+# to get the token. jimaku.cc accounts are free and require no personal data.
+KEY_HELP = (
+    "Get a free jimaku.cc API key: sign in at https://jimaku.cc, then copy it from "
+    "https://jimaku.cc/profile — API docs at https://jimaku.cc/api/docs."
+)
+
+# jimaku.cc keys are long tokens (~58 chars). A very short entered value almost always means a botched
+# paste — and the specific trap is Python's HIDDEN prompt (getpass) on Windows: it reads the console
+# char-by-char via msvcrt and does NOT accept Ctrl+V, which lands a single control character. (Ctrl+V
+# works fine OUTSIDE the hidden prompt — this is not a general PowerShell issue.) Right-click, or
+# Ctrl+Shift+V in Windows Terminal, pastes the whole key; or pass it as an argument on the normal line.
+KEY_MIN_LEN = 20
+PASTE_HINT = (
+    "Note: this HIDDEN prompt won't accept Ctrl+V (it captures one control char). Right-click to "
+    "paste, or use Ctrl+Shift+V in Windows Terminal. You can also cancel and pass the key on the "
+    "normal command line, where Ctrl+V works: saitenka-overlay set-jimaku-key <key>"
+)
+
+
+def key_paste_warning(k: str) -> str | None:
+    """A human warning when an entered key looks truncated (the classic hidden-prompt Ctrl+V that
+    lands a single char on Windows), else ``None``. An empty string is handled separately by callers
+    as "no key entered" — only a non-empty-but-short value trips this."""
+    if 0 < len(k) < KEY_MIN_LEN:
+        return f"Warning: that key is only {len(k)} character(s); jimaku keys are ~58. {PASTE_HINT}"
+    return None
+
+
+def prompt_for_key(getpass_fn, input_fn=input, out=print, tries=3) -> str:  # pragma: no cover — I/O
+    """Read a jimaku key at a hidden prompt with a truncated-paste guard: show where to get it (plus
+    the Windows paste caveat), read hidden input, and if it looks too short, warn and offer to
+    re-enter. Returns the final stripped key (``""`` if the user enters nothing)."""
+    out(KEY_HELP)
+    if sys.platform == "win32":
+        out(PASTE_HINT)
+    k = ""
+    for attempt in range(tries):
+        k = getpass_fn("jimaku.cc API key (hidden): ").strip()
+        warn = key_paste_warning(k)
+        if not warn:
+            return k
+        out(warn)
+        if attempt == tries - 1:
+            break
+        try:
+            if input_fn("Re-enter the key? [Y/n] ").strip().lower() in ("n", "no"):
+                break
+        except EOFError:
+            break
+    return k
+
 
 # OS secret-store coordinates for the jimaku key (keyring service/username).
 KEYCHAIN_SERVICE = "saitenka-overlay"
@@ -30,6 +86,28 @@ KEYCHAIN_ACCOUNT = "jimaku"
 
 class JimakuError(RuntimeError):
     pass
+
+
+class _JimakuRetryable(JimakuError):
+    """A TRANSIENT jimaku failure — HTTP 429 (rate limit), 5xx, or a network error. ``stamina`` retries
+    these with backoff; a client error (400/401/404) raises plain ``JimakuError`` and is NOT retried."""
+
+
+def _http_error_detail(e: urllib.error.HTTPError) -> str:
+    """jimaku's own error body (it returns JSON like ``{"error": "..."}``) as a short suffix — a bare
+    "Bad Request" is useless for debugging."""
+    try:
+        body = (e.read() or b"").decode("utf-8", "replace").strip()
+    except Exception:  # pragma: no cover — best-effort; never mask the original error
+        log.debug("reading jimaku error body failed", exc_info=True)
+        return ""
+    if not body:
+        return ""
+    try:
+        body = json.loads(body).get("error", body)
+    except (ValueError, AttributeError):
+        pass
+    return f" — {str(body)[:300]}"
 
 
 def keychain_get() -> str | None:
@@ -65,16 +143,60 @@ def keychain_set(key: str) -> bool:
 
 def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
     """Return ``(key, source)`` with precedence explicit (config/CLI) > ``$JIMAKU_API_KEY`` > macOS
-    Keychain. ``source`` is ``config``/``env``/``keychain``/``none`` — reported by doctor."""
-    if explicit:
-        return explicit, "config"
-    env = os.environ.get("JIMAKU_API_KEY")
-    if env:
-        return env, "env"
-    kc = keychain_get()
-    if kc:
-        return kc, "keychain"
+    Keychain. ``source`` is ``config``/``env``/``keychain``/``none`` — reported by doctor.
+
+    Every source is ``.strip()``-ed: a stray trailing newline/space (easy to introduce when pasting a
+    key, or reading it back from a store) would otherwise make urllib reject the ``Authorization``
+    header outright (``ValueError: Invalid header value``)."""
+    for value, source in (
+        (explicit, "config"),
+        (os.environ.get("JIMAKU_API_KEY"), "env"),
+        (keychain_get(), "keychain"),
+    ):
+        cleaned = (value or "").strip()
+        if cleaned:
+            return cleaned, source
     return None, "none"
+
+
+# --- fetched-sub cache ---------------------------------------------------------------------------
+# jimaku subs (and their alass/ffsubsync resync, the slow part) are cached PER VIDEO so a rewatch of
+# the same file reuses the synced .srt instead of re-downloading + re-aligning every run. Keyed by the
+# video's name + byte size (a cheap change-detector: a re-encode/replace changes size → cache miss).
+
+
+def subs_cache_dir() -> Path:
+    from overlay.app.paths import cache_dir
+
+    return cache_dir() / "jimaku"
+
+
+def subs_cache_key(video: str | os.PathLike, title: str, episode) -> str:
+    from overlay.app.paths import sanitize_filename
+
+    v = Path(video)
+    try:
+        size = v.stat().st_size
+    except OSError:
+        size = 0
+    return sanitize_filename(f"{v.stem}-{title}-ep{episode}-{size}") + ".srt"
+
+
+def cached_subs(video: str | os.PathLike, title: str, episode) -> Path | None:
+    """The cached synced sub for this (video, title, episode), or ``None`` on a miss."""
+    p = subs_cache_dir() / subs_cache_key(video, title, episode)
+    return p if p.exists() else None
+
+
+def store_subs(video: str | os.PathLike, title: str, episode, sub_path: str | os.PathLike) -> Path:
+    """Copy the finished (synced) sub into the cache and return the cached path (used going forward)."""
+    import shutil
+
+    dest_dir = subs_cache_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / subs_cache_key(video, title, episode)
+    shutil.copy2(str(sub_path), str(dest))
+    return dest
 
 
 @dataclass
@@ -108,7 +230,7 @@ class JimakuClient:
         if not self.api_key:
             raise JimakuError(
                 "no jimaku API key — run `saitenka-overlay set-jimaku-key` (stored in the OS secret "
-                "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: jimaku.cc → account"
+                "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
             )
 
     def _get(self, path: str, **params):
@@ -117,11 +239,37 @@ class JimakuClient:
         if q:
             url += "?" + q
         req = urllib.request.Request(url, headers={"Authorization": self.api_key})
-        try:
-            with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
-                return json.loads(r.read())
-        except urllib.error.HTTPError as e:  # 401 (bad key), 404, …
-            raise JimakuError(f"jimaku {e.code} for {path}: {e.reason}") from e
+        # Retry transient failures (429 / 5xx / network) with backoff; client errors (400/401/404) are
+        # raised immediately with jimaku's error body (retrying them can't help).
+        for attempt in stamina.retry_context(
+            on=_JimakuRetryable, attempts=4, wait_initial=1.0, wait_max=8.0
+        ):
+            with attempt:
+                try:
+                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
+                        return json.loads(r.read())
+                except urllib.error.HTTPError as e:  # 400/401/404 client · 429/5xx transient
+                    detail = _http_error_detail(e)
+                    if e.code == 429 or e.code >= 500:
+                        raise _JimakuRetryable(
+                            f"jimaku {e.code} for {path}: {e.reason}{detail}"
+                        ) from e
+                    hint = (
+                        "  (check your API key: `saitenka-overlay set-jimaku-key`)"
+                        if e.code == 401
+                        else ""
+                    )
+                    raise JimakuError(
+                        f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}"
+                    ) from e
+                except urllib.error.URLError as e:  # DNS / timeout / connection reset — transient
+                    raise _JimakuRetryable(f"jimaku network error for {path}: {e.reason}") from e
+                except ValueError as e:  # illegal Authorization header — a stray char in the key
+                    raise JimakuError(
+                        f"jimaku request build failed for {path}: {e} — re-set the key with "
+                        "`saitenka-overlay set-jimaku-key`"
+                    ) from e
+        raise JimakuError(f"jimaku request to {path} failed after retries")  # unreachable
 
     def search(self, query: str, anime: bool = True) -> list[dict]:
         return self._get("/entries/search", query=query, anime=str(anime).lower())

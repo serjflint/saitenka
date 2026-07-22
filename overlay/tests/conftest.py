@@ -19,6 +19,24 @@ _dictionary.CACHE_DIR = _TEST_CACHE
 
 
 @pytest.fixture(autouse=True)
+def _anki_reachable(monkeypatch):
+    """Default: AnkiConnect answers, so the ⊕ button shows when mining is configured (existing tests
+    assume it) and _anki_ok() stays hermetic — no real localhost:8765 ping. Tests for the Anki-closed
+    case patch ``overlay.app.anki.anki_reachable`` to return False."""
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: True)
+
+
+@pytest.fixture(autouse=True)
+def _tts_present(monkeypatch):
+    """Default: pretend a Japanese TTS voice exists so the 🔊 button is drawn — existing geometry tests
+    assume it, and this keeps them hermetic (no real `say`/PowerShell subprocess). Tests for the
+    hidden-button case patch ``overlay.app.controller.tts_available`` to False explicitly."""
+    import overlay.app.controller as ctrl
+
+    monkeypatch.setattr(ctrl, "tts_available", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_keyring():
     """Never touch the real OS keyring in tests — force keyring's 'fail' backend so an un-mocked
     keychain_get/set can't read the developer's actual stored jimaku key from the login Keychain."""

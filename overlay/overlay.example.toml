@@ -52,6 +52,10 @@ pitch = [
 
 # One-key mining target.
 [mine]
+# Mining is ON whenever this [mine] table is present (Ctrl+m mines the hovered word). Set
+# enabled = false to keep the config but turn mining off; --no-mine does the same for one run.
+# When mining (or Anki-backed known-word coloring) is on, Saitenka starts Anki for you if it's closed.
+enabled = true
 deck = "Saitenka::Mining"
 model = "Lapis"
 key = "Ctrl+m"

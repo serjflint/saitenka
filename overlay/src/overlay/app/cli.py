@@ -7,7 +7,7 @@ via ``cyclopts.config.Toml`` (precedence: defaults < file < explicit CLI flags);
 keys (``dicts``/``freq``/``pitch``/``known``/``[mine]``) are mapped explicitly, exactly as the old
 argparse two-phase parse did.
 
-Subcommands: ``doctor``, ``init``, ``import-yomitan``, ``install-plugin`` / ``uninstall-plugin``,
+Subcommands: ``doctor``, ``init``, ``import-settings``, ``install-plugin`` / ``uninstall-plugin``,
 ``attach`` (joins a running mpv and selects the JP sub track / fetches jimaku), and ``setup``.
 """
 
@@ -27,7 +27,7 @@ from typing import Annotated
 import cyclopts
 
 from overlay import __version__
-from overlay.app.config import config_path, load_config
+from overlay.app.config import config_path, dicts_data_dir, load_config
 from overlay.app.paths import cache_dir
 
 log = logging.getLogger(__name__)
@@ -38,15 +38,21 @@ DEMO_LINE_EN = "A shop-boy at the temple gate recites sutras he was never taught
 
 def _ensure_free_threaded() -> None:
     """Adopt the free-threaded runtime: on a 3.14t build force the GIL OFF before fugashi's
-    C extension loads (it hasn't declared FT-safety and would re-enable the GIL). Re-exec once so
+    C extension loads (it hasn't declared FT-safety and would re-enable the GIL). Re-launch once so
     PYTHON_GIL=0 is set before the interpreter finishes starting. No-op on a standard build.
 
-    Always re-exec via ``-m overlay.app.cli`` — NEVER via ``sys.argv[0]``: under ``python -m``,
+    Always re-launch via ``-m overlay.app.cli`` — NEVER via ``sys.argv[0]``: under ``python -m``,
     argv[0] is this file's path, and running it script-style would put ``src/overlay/app/`` first
     on sys.path, where our ``tokenize.py`` shadows the stdlib module and breaks the interpreter."""
     if sysconfig.get_config_var("Py_GIL_DISABLED") and os.environ.get("PYTHON_GIL") != "0":
         os.environ["PYTHON_GIL"] = "0"
-        os.execv(sys.executable, [sys.executable, "-m", "overlay.app.cli", *sys.argv[1:]])
+        argv = [sys.executable, "-m", "overlay.app.cli", *sys.argv[1:]]
+        if sys.platform == "win32":
+            # os.execv on Windows does NOT truly replace the process — it duplicates execution and
+            # corrupts the console (double output, and interactive prompts that can't take input).
+            # Spawn a child that shares our console, wait, and exit with its status instead.
+            sys.exit(subprocess.run(argv).returncode)
+        os.execv(sys.executable, argv)
 
 
 def _resolve_paths(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:
@@ -56,6 +62,24 @@ def _resolve_paths(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
     from overlay.app.config import expand_paths
 
     return expand_paths(list(flag_vals or []) or cfg.get(key) or [])
+
+
+def jimaku_should_fetch(
+    explicit_flag: bool, cfg_fetch: bool, video: str | None, slang: str = "ja,jpn,jp", probe=None
+) -> bool:
+    """Decide whether ``run`` fetches jimaku. Explicit ``--jimaku`` always wins. Config-driven fetch
+    (``[jimaku].fetch``) fires ONLY when the file has no embedded JP subtitle track — so a global
+    fetch=true doesn't override good embedded subs (matching what ``attach`` does over IPC). Unknown
+    (can't probe) → fetch, since the point of a configured key is to provide subs."""
+    if not video:  # no real file (demo/test clip) — nothing to fetch for
+        return False
+    if explicit_flag:
+        return True
+    if not cfg_fetch:
+        return False
+    if probe is None:
+        from overlay.app.media import has_sub_lang as probe
+    return probe(video, slang) is not True  # fetch unless a JP track is definitely present
 
 
 def _argv_config_override(argv: list[str]) -> str | None:
@@ -91,7 +115,7 @@ def run(
     *,
     config: Annotated[
         str | None,
-        cyclopts.Parameter(help="settings TOML (default ~/.config/saitenka/overlay.toml)"),
+        cyclopts.Parameter(help="settings TOML (default: platform config dir, see `doctor`)"),
     ] = None,
     sub_file: str | None = None,
     slang: Annotated[
@@ -170,8 +194,12 @@ def run(
         ),
     ] = None,
     mine: Annotated[
-        bool, cyclopts.Parameter(negative=(), help="enable one-key mining to Anki")
-    ] = False,
+        bool,
+        cyclopts.Parameter(
+            negative="--no-mine",
+            help="one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)",
+        ),
+    ] = bool(_mine_cfg.get("enabled", bool(_mine_cfg))),
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
     mine_model: str = _mine_cfg.get("model", "Lapis"),
     mine_key: Annotated[
@@ -189,9 +217,16 @@ def run(
     tip_height: Annotated[
         float,
         cyclopts.Parameter(
-            help="max tooltip height as a fraction of the video height (default 0.6)"
+            help="max BASE tooltip height as a fraction of the video height (default 0.5)"
         ),
-    ] = 0.6,
+    ] = 0.5,
+    dict_tabs: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative="--no-dict-tabs",
+            help="draw the sticky per-dictionary tab strip on the tooltip (default: on)",
+        ),
+    ] = True,
     pause_on_tooltip: Annotated[
         bool,
         cyclopts.Parameter(
@@ -226,6 +261,19 @@ def run(
     from overlay.app.controller import Reader
     from overlay.mpvio.ipc import MpvIPC
 
+    # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
+    # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka-overlay install`. Don't hand it to
+    # mpv as a filename (the cryptic "Failed to recognize file format"); show the commands instead.
+    if video and "://" not in video and not Path(video).expanduser().exists():
+        print(
+            f"no such file: {video!r}\n"
+            "If you meant a command, run `saitenka-overlay --help` — e.g. `setup`/`install` "
+            "(configure options), `doctor` (health check), `install-plugin`, `import-settings`, "
+            "`import-dictionaries`, `attach`.",
+            file=sys.stderr,
+        )
+        return 2
+
     cfg = load_config(config)
 
     # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file
@@ -236,64 +284,116 @@ def run(
 
     if not (color or known_cfg or known or dict_paths or mine):
         print(
-            "[hint] bare demo: no coloring, no monolingual dicts, no mining. Put your dicts in\n"
-            "       ~/.config/saitenka/overlay.toml once (see overlay.example.toml), or pass\n"
-            '       --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
+            "[hint] bare demo: no coloring, no monolingual dicts, no mining. Configure it once with\n"
+            "       `saitenka-overlay setup`, or edit your config (see overlay.example.toml):\n"
+            f"       {config_path()}\n"
+            '       …or pass --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
             "       --mine  (see RUNNING.md §3)."
         )
 
-    anki = mine_conf = None
-    if mine:
-        from overlay.app.anki import Anki, MineConfig
+    # Building the coloring/dict/mining collaborators is the slow part (the first-run dictionary
+    # cache build is 25–66s per dict). Rather than block the mpv window on it, `run` defers this to a
+    # BACKGROUND thread (see reader.load_deps_async below) so plain subtitles draw immediately and
+    # coloring/tooltips/mining light up in place once loaded — exactly like `attach`. The closure
+    # captures the CLI-flag inputs (`--dict/--freq/--anki-decks/--mine` …) that config-only
+    # build_reader_deps can't see. It must NOT touch the mpv IPC (it runs off the main thread); its
+    # prints go to the terminal, the in-mpv spinner covers the on-screen feedback.
+    def _build_deps():
+        # Anki-backed features — mining, and known-word coloring from a deck — need Anki running.
+        # Start it for the user (like `attach` does) instead of crashing on a refused connection;
+        # warn and degrade (coloring → freq+JLPT, mining unavailable) if it can't be reached.
+        if mine or known_cfg:
+            from overlay.app.anki import ensure_anki_running
 
-        anki = Anki()
-        mine_conf = MineConfig(deck=mine_deck, model=mine_model)
-        print(
-            f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
-            f"→ {mine_deck} ({mine_model})"
-        )
-
-    dict_set = None
-    if dict_paths or freq_paths or pitch_paths:
-        from overlay.app.dictionary import _MISSING_HINT, DictionarySet, split_existing
-
-        # Skip (with a warning) any path that doesn't exist — usually a bare Yomitan title left in the
-        # config by `import-yomitan` without --scan-dir — instead of crashing on FileNotFoundError.
-        dict_paths, dmiss = split_existing(dict_paths)
-        freq_paths, fmiss = split_existing(freq_paths)
-        pitch_paths, pmiss = split_existing(pitch_paths)
-        for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
-            if miss:
+            if not ensure_anki_running():
                 print(
-                    f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. {_MISSING_HINT}",
+                    "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect "
+                    "add-on). Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
                     file=sys.stderr,
                 )
-        if dict_paths or freq_paths or pitch_paths:
+
+        anki = mine_conf = None
+        if mine:
+            from overlay.app.anki import Anki, MineConfig
+
+            anki = Anki()
+            mine_conf = MineConfig(deck=mine_deck, model=mine_model)
             print(
-                f"loading {len(dict_paths)} dict(s) · {len(freq_paths)} freq · {len(pitch_paths)} "
-                "pitch… (first run builds a cache)"
+                f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
+                f"→ {mine_deck} ({mine_model})"
             )
-            dict_set = DictionarySet.load(
-                dict_paths, freq_paths=freq_paths, pitch_paths=pitch_paths
-            )
-            print("dictionaries:", [d.title for d in dict_set.dicts])
-            if dict_set.freqs:
-                print("frequency:", [f.title for f in dict_set.freqs])
-            if dict_set.pitches:
-                print("pitch:", [p.title for p in dict_set.pitches])
-
-    scorer = None
-    if color or known or known_cfg or freq_paths:
-        from overlay.app.scoring import Scorer
-        from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
-
-        if known_cfg:
-            kw = KnownWords.from_ankiconnect(known_cfg)
+            log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
         else:
-            kw = KnownWords.from_set([w for w in known.split(",") if w])
-        fd = FreqDict.load(freq_paths[0]) if freq_paths else None
-        scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load())
-        print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
+            log.info("mining disabled (no [mine] config / --no-mine)")
+
+        # Skip (with a warning) any path that doesn't exist — usually a bare Yomitan title left in
+        # the config by `import-settings` without --scan-dir — instead of crashing on
+        # FileNotFoundError. Filtered lists (freq_ok) feed BOTH the dict set and the scorer below.
+        d_paths, freq_p, pitch_p = dict_paths, freq_paths, pitch_paths
+        dict_set = None
+        if d_paths or freq_p or pitch_p:
+            from overlay.app.dictionary import _MISSING_HINT, DictionarySet, split_existing
+
+            d_paths, dmiss = split_existing(d_paths)
+            freq_p, fmiss = split_existing(freq_p)
+            pitch_p, pmiss = split_existing(pitch_p)
+            for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
+                if miss:
+                    print(
+                        f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. "
+                        f"{_MISSING_HINT}",
+                        file=sys.stderr,
+                    )
+            if d_paths or freq_p or pitch_p:
+                print(
+                    f"loading {len(d_paths)} dict(s) · {len(freq_p)} freq · {len(pitch_p)} "
+                    "pitch… (first run builds a cache)"
+                )
+                from overlay.app.progress import BuildBar
+
+                bar = BuildBar()
+                try:
+                    dict_set = DictionarySet.load(
+                        d_paths,
+                        freq_paths=freq_p,
+                        pitch_paths=pitch_p,
+                        progress=bar.update,
+                    )
+                finally:
+                    bar.close()
+                print("dictionaries:", [d.title for d in dict_set.dicts])
+                if dict_set.freqs:
+                    print("frequency:", [f.title for f in dict_set.freqs])
+                if dict_set.pitches:
+                    print("pitch:", [p.title for p in dict_set.pitches])
+                log.info(
+                    "dictionaries loaded: %d defn, %d freq, %d pitch",
+                    len(dict_set.dicts),
+                    len(dict_set.freqs),
+                    len(dict_set.pitches),
+                )
+
+        scorer = None
+        if color or known or known_cfg or freq_p:
+            from overlay.app.scoring import Scorer
+            from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
+
+            if known_cfg:
+                try:
+                    kw = KnownWords.from_ankiconnect(known_cfg)
+                except Exception as e:  # Anki still closed / AnkiConnect down — don't crash the run
+                    print(
+                        f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only",
+                        file=sys.stderr,
+                    )
+                    kw = KnownWords.from_set([w for w in known.split(",") if w])
+            else:
+                kw = KnownWords.from_set([w for w in known.split(",") if w])
+            fd = FreqDict.load(freq_p[0]) if freq_p else None
+            scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load())
+            print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
+
+        return scorer, anki, mine_conf, dict_set
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-reader-"))
     dur = max(8, int(seconds))
@@ -302,28 +402,52 @@ def run(
         print(f"no video — generating a {width}x{height} test clip…")
         _make_clip(video_path, dur, width, height)
 
-    # subtitle source: explicit file > jimaku fetch > embedded track (--slang) > generated demo line
+    # subtitle source: explicit file > jimaku fetch > embedded track (--slang) > generated demo line.
+    # jimaku fires on --jimaku OR when the config enables it (`[jimaku].fetch = true`); the config path
+    # only fetches when the file has NO embedded JP track, so it doesn't override good embedded subs.
+    _jm = cfg.get("jimaku")
+    jimaku_cfg = _jm if isinstance(_jm, dict) else {}
+    jimaku_on = jimaku_should_fetch(
+        jimaku, bool(jimaku_cfg.get("fetch")), str(video_path) if video else None, slang
+    )
+    log.info(
+        "jimaku fetch: %s (flag=%s cfg_fetch=%s)", jimaku_on, jimaku, bool(jimaku_cfg.get("fetch"))
+    )
     sub_path = en_sub_path = None
     if sub_file:
         sub_path = Path(sub_file).expanduser()
-    elif jimaku:
-        from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
+    elif jimaku_on:
+        from overlay.app.jimaku import (
+            JimakuClient,
+            JimakuError,
+            cached_subs,
+            parse_filename,
+            store_subs,
+        )
 
         title, ep = parse_filename(video_path)
         title = jimaku_title or title
         ep = episode if episode is not None else ep
-        print(f"jimaku: fetching subs for {title!r} ep {ep}…")
-        try:
-            sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
-            print("jimaku: got", sub_path.name)
-            if resync and video_path.exists():
-                from overlay.app.resync import maybe_resync
+        hit = cached_subs(video_path, title, ep) if video_path.exists() else None
+        if hit:
+            print("jimaku: using cached subs", hit.name)
+            sub_path = hit
+            log.info("jimaku cache hit: %s", hit)
+        else:
+            print(f"jimaku: fetching subs for {title!r} ep {ep}…")
+            try:
+                sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
+                print("jimaku: got", sub_path.name)
+                if resync and video_path.exists():
+                    from overlay.app.resync import maybe_resync
 
-                print("jimaku: resyncing…")
-                sub_path = maybe_resync(video_path, sub_path, enabled=True)
-                print("jimaku: resync →", sub_path.name)
-        except JimakuError as e:
-            print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
+                    print("jimaku: resyncing…")
+                    sub_path = maybe_resync(video_path, sub_path, enabled=True)
+                    print("jimaku: resync →", sub_path.name)
+                if video_path.exists():  # cache the finished (synced) sub for the next rewatch
+                    sub_path = store_subs(video_path, title, ep, sub_path)
+            except JimakuError as e:
+                print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
     elif not video:
         sub_path = tmp / "line.srt"
         _make_srt(sub_path, dur, DEMO_LINE)
@@ -343,26 +467,24 @@ def run(
         return 2
     # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
     sock = default_ipc_path(tmp.name)
-    cmd = [
+    # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
+    # track select failures) is otherwise invisible in a bug report. Overwritten each run.
+    mpv_log = cache_dir() / "mpv.log"
+    from overlay.mpvio.launch import build_mpv_argv
+
+    cmd = build_mpv_argv(
         mpv_bin,
-        f"--input-ipc-server={sock}",
-        "--force-window=yes",
-        "--keep-open=yes",
-        f"--slang={slang}",
-        "--sub-visibility=no",
-        "--osd-level=0",
-        "--pause" if screenshot else "--loop-file=inf",
-        f"--start={start}",
-        str(video_path),
-    ]
-    if sub_path:
-        cmd.insert(-1, f"--sub-file={sub_path}")
-    if en_sub_path:
-        cmd.insert(-1, f"--sub-file={en_sub_path}")  # loaded as a 2nd track → secondary/translation
-    if not use_config:
-        cmd.insert(1, "--no-config")
-    if fullscreen:
-        cmd.insert(1, "--fullscreen")
+        sock,
+        mpv_log,
+        video_path,
+        slang=slang,
+        start=start,
+        screenshot=bool(screenshot),
+        sub_path=sub_path,
+        en_sub_path=en_sub_path,
+        use_config=use_config,
+        fullscreen=fullscreen,
+    )
     print("launching:", " ".join(cmd))
     proc = subprocess.Popen(cmd)
 
@@ -397,14 +519,27 @@ def run(
             tip_max_frac=tip_height,
             pause_on_tooltip=pause_on_tooltip,
             hover_switch_delay=hover_switch_delay,
+            # off if EITHER the config disables it or --no-dict-tabs is passed
+            show_dict_tabs=dict_tabs and bool(cfg.get("show_dict_tabs", True)),
         ),
         mining=MiningOptions(play_audio=not no_audio_play),
         translation=TranslationOptions(auto_translate=auto_translate),
         prefetch=prefetch,
     )
-    reader = Reader(
-        ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
-    )
+    # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
+    # scorer / mining collaborators PRESENT synchronously — build them inline. The interactive path
+    # builds them in the BACKGROUND (progressive startup): plain subs draw now, a spinner runs, and
+    # coloring/tooltips/mining land in place once loaded.
+    if demo_word or screenshot:
+        scorer, anki, mine_conf, dict_set = _build_deps()
+        reader = Reader(
+            ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
+        )
+    else:
+        reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+        if sub_path:  # index the external sub so Alt+←/→/↓ can render the target line instantly
+            reader.load_sub_index(sub_path)
+        reader.load_deps_async(cfg, build=_build_deps)
     try:
         if demo_word or screenshot:
             time.sleep(0.8)
@@ -514,9 +649,11 @@ def doctor(
     return report.exit_code
 
 
-@app.command
+@app.command(
+    show=False
+)  # low-level primitive — end users run `setup` (which calls this); hidden from help
 def init() -> int:  # pragma: no cover — interactive wizard, exercised live
-    """Interactive first-run wizard: discover, propose, write the config."""
+    """Write a starter config (the config-file primitive `setup` builds on). Prefer `setup`/`install`."""
     from overlay.app.init_wizard import run_init
 
     return run_init()
@@ -524,22 +661,56 @@ def init() -> int:  # pragma: no cover — interactive wizard, exercised live
 
 @app.command(name="copy-dicts")
 def copy_dicts(
+    source: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="a folder of Yomitan dictionary .zip files to import into the app data dir"
+        ),
+    ] = None,
     *,
     config: str | None = None,
-) -> int:  # pragma: no cover — thin CLI wrapper; relocate/repoint are unit-tested
-    """Copy dictionaries out of TCC-protected folders (Documents/Desktop/Downloads) into
-    ~/.local/share/saitenka/dicts and repoint the config, so plugin-mode mpv stops prompting for
-    Documents access."""
-    from overlay.app.config import dicts_data_dir
-    from overlay.app.relocate import relocate_dicts
+) -> int:  # pragma: no cover — thin CLI wrapper; relocate/import are unit-tested
+    """Bring dictionaries into the app's data dir and configure them. The data dir is platform-native
+    (%LOCALAPPDATA%\\saitenka on Windows, ~/.local/share/saitenka on Linux, ~/Library/Application
+    Support/saitenka on macOS); the resolved path is printed when it runs.
 
-    mappings = relocate_dicts(config=config)
-    if not mappings:
-        print("all dictionary paths are already outside protected folders — nothing to copy")
+    With a SOURCE folder: copy every Yomitan ``.zip`` from it into the data dir, classify each by
+    content (dict/freq/pitch), and add it to the config. Without one: relocate already-configured
+    dicts OUT of TCC-protected folders (Documents/Desktop/Downloads) so a plugin-mode mpv stops
+    prompting for access."""
+    from overlay.app.config import dicts_data_dir
+    from overlay.app.relocate import import_from_dir, relocate_dicts
+
+    if source:
+        added = import_from_dir(source, config=config)
+        if not added:
+            print(f"no Yomitan dictionaries found in {source}")
+            return 0
+        print(f"imported {len(added)} dict(s) → {dicts_data_dir()} and added them to the config:")
+        for dest, kind in added:
+            print(f"  [{kind}] {dest}")
         return 0
-    print(f"copied {len(mappings)} dict(s) → {dicts_data_dir()} and repointed the config:")
-    for old, new in mappings:
-        print(f"  {old} → {new}")
+
+    # No source: (1) relocate configured dicts out of protected folders, and (2) sweep the data dir
+    # for .zip dicts that aren't in the config yet (e.g. an earlier `copy-dicts` whose config write
+    # was stranded on a different path) and register them. Both are idempotent — the sweep re-scans
+    # the data dir and skips any zip already listed / already the right size (no re-copy).
+    data = dicts_data_dir()
+    mappings = relocate_dicts(config=config)
+    swept = import_from_dir(data, config=config) if data.is_dir() else []
+    if not mappings and not swept:
+        print(
+            "all dictionaries are already registered and outside protected folders — nothing to do"
+        )
+        return 0
+    if swept:
+        print(f"registered {len(swept)} dict(s) already in {data} into the config:")
+        for dest, kind in swept:
+            print(f"  [{kind}] {dest}")
+    if mappings:
+        print(f"copied {len(mappings)} dict(s) → {data} and repointed the config:")
+        for old, new in mappings:
+            print(f"  {old} → {new}")
     return 0
 
 
@@ -552,14 +723,28 @@ def set_jimaku_key(
     """Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
     macOS: the login Keychain. Windows/Linux (no Keychain): ``[jimaku].key`` in overlay.toml. Either
-    beats a shell env var, which a GUI-launched mpv can't see. Free key: jimaku.cc → account → API key.
+    beats a shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
+    (API docs: https://jimaku.cc/api/docs).
+
+    Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a
+    pasted key can silently truncate to a single character. Right-click to paste at the prompt, or pass
+    the key as an argument on the normal command line where Ctrl+V works: ``set-jimaku-key <key>``.
     """
     import getpass
 
     from overlay.app.config import config_path
     from overlay.app.init_wizard import store_jimaku_key
+    from overlay.app.jimaku import key_paste_warning, prompt_for_key
 
-    k = (key or getpass.getpass("jimaku.cc API key (hidden): ")).strip()
+    if (
+        key is None
+    ):  # interactive: hidden prompt with a truncated-paste guard (the Windows Ctrl+V trap)
+        k = prompt_for_key(getpass.getpass)
+    else:  # key passed as an argument (paste-safe on the normal line) — still sanity-check its length
+        k = key.strip()
+        warn = key_paste_warning(k)
+        if warn:
+            print(warn, file=sys.stderr)
     if not k:
         print("no key entered", file=sys.stderr)
         return 2
@@ -573,8 +758,31 @@ def set_jimaku_key(
     return 0
 
 
-@app.command(name="import-yomitan")
-def import_yomitan(
+@app.command(name="jimaku-check")
+def jimaku_check(
+    query: Annotated[str, cyclopts.Parameter(help="anime title to test-search")] = "Spy x Family",
+) -> int:  # pragma: no cover — thin CLI wrapper; JimakuClient is tested
+    """Diagnose jimaku without launching a video: resolve the key and run a test search, printing the
+    exact outcome (key found? 200 OK / 401 bad key / 400 + server message / network error)."""
+    from overlay.app.jimaku import JimakuClient, JimakuError, resolve_jimaku_key
+
+    key, src = resolve_jimaku_key()
+    if not key:
+        print("jimaku key: NOT configured — run `saitenka-overlay set-jimaku-key`", file=sys.stderr)
+        return 1
+    print(f"jimaku key: found (from {src}), {len(key)} chars")
+    try:
+        entries = JimakuClient().search(query)
+        head = f" — first: {entries[0].get('name')!r}" if entries else ""
+        print(f"search {query!r}: OK — {len(entries)} entrie(s){head}")
+        return 0
+    except JimakuError as e:
+        print(f"search {query!r}: {e}", file=sys.stderr)
+        return 1
+
+
+@app.command(name="import-settings", alias="import-yomitan")
+def import_settings(
     settings: str | None = None,
     *,
     scan_dir: Annotated[
@@ -589,7 +797,13 @@ def import_yomitan(
         bool, cyclopts.Parameter(negative=(), help="write the config without prompting")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; parse/map/match are unit-tested
-    """Import dictionary order + options from a Yomitan settings export."""
+    """Apply a Yomitan SETTINGS export (dictionary order + options) to your overlay config.
+
+    Reads the small Yomitan → Settings → Backup → Export Settings file and matches its dictionary
+    titles against the ``.zip`` files under ``--scan-dir``. For a full Yomitan DATABASE backup (the
+    multi-GB export), use ``import-dictionaries`` instead — it unpacks that into ``.zip`` dicts.
+    (Alias: ``import-settings``.)
+    """
     from overlay.app.init_wizard import _ask
     from overlay.app.yomitan_import import YomitanImportError, run_import
 
@@ -607,16 +821,17 @@ def import_dictionaries(
     *,
     out: Annotated[
         str | None,
-        cyclopts.Parameter(
-            help="output dir for the .zip dicts (default ~/.local/share/saitenka/dicts)"
-        ),
+        cyclopts.Parameter(help=f"output dir for the .zip dicts (default: {dicts_data_dir()})"),
     ] = None,
     yes: Annotated[
         bool, cyclopts.Parameter(negative=(), help="write the config without prompting")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; streaming import + converters are unit-tested
-    """Import a Yomitan DATABASE export (the multi-GB dexie JSON backup) into per-dictionary .zip files
-    the overlay can load, then classify them and update the config. Streamed — never full-loaded."""
+    """Unpack a Yomitan DATABASE backup (the multi-GB dexie JSON export) into per-dictionary .zip files
+    the overlay can load, then classify them and update the config. Streamed — never full-loaded.
+
+    This is for when you DON'T have the dictionary .zip files. If you already have them, use
+    ``import-settings`` (small settings export → config), which is faster and needs no unpacking."""
     from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
     from overlay.app.config import dicts_data_dir
@@ -706,7 +921,10 @@ def uninstall_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin 
 def report(
     *,
     out: Annotated[
-        str | None, cyclopts.Parameter(help="directory to write the zip into (default: home)")
+        str | None,
+        cyclopts.Parameter(
+            help="directory to write the zip into (default: the data dir's reports/)"
+        ),
     ] = None,
     no_log: Annotated[
         bool,
@@ -733,7 +951,7 @@ def report(
     return 0
 
 
-@app.command
+@app.command(alias="install")
 def setup(
     *,
     yes: Annotated[
@@ -743,7 +961,8 @@ def setup(
         bool, cyclopts.Parameter(negative=(), help="show what would happen, change nothing")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; the wizard steps are unit-tested
-    """One-command setup: inventory → install mpv+ffmpeg → doctor → init → import → plugin."""
+    """One-command setup (alias: ``install``): inventory → install mpv+ffmpeg → doctor → init →
+    import → plugin. Re-run any time to reconfigure — it's resumable and confirm-first."""
     from overlay.app.setup_wizard import run_setup
 
     return run_setup(yes=yes, dry_run=dry_run)
@@ -877,12 +1096,17 @@ def attach(
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
         ),
-        tooltip=TooltipOptions(tip_max_frac=cfg.get("tip_height", 0.6)),
+        tooltip=TooltipOptions(
+            tip_max_frac=cfg.get("tip_height", 0.5),
+            show_dict_tabs=bool(cfg.get("show_dict_tabs", True)),
+        ),
         mining=MiningOptions(play_audio=not bool(cfg.get("no_audio_play", False))),
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+    if sub_file:  # index an explicit external sub so Alt+←/→/↓ render the target line instantly
+        reader.load_sub_index(sub_file)  # (embedded/jimaku tracks: plain sub-seek for now)
     reader.load_deps_async(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "

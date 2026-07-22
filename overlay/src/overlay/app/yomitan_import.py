@@ -1,4 +1,4 @@
-"""``saitenka-overlay import-yomitan`` — map a Yomitan settings export onto our config.
+"""``saitenka-overlay import-settings`` — map a Yomitan settings export onto our config.
 
 Reads a Yomitan **settings export** — the small file from Yomitan → Settings → Backup, NOT the
 multi-GB collection/dictionary export. We refuse anything over ``MAX_SETTINGS_BYTES`` (a settings
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,9 +27,8 @@ from pathlib import Path
 MAX_SETTINGS_BYTES = 50 * 1024 * 1024  # a settings export is < 1 MB; refuse a collection export
 
 # Yomitan dictionary banks: definition dicts ship term_bank glossaries; frequency and pitch dicts
-# ship term_meta banks. We classify a zip by which banks it carries + the term_meta mode of its
-# entries — never by the dictionary's title (a name can't reliably tell you the type).
-_TERM_BANK = re.compile(r"term_bank_\d+\.json$")
+# ship term_meta banks (``[term, "freq"|"pitch", data]``). We classify by the term_meta MODE — never
+# by the title, and never by mere term_bank presence (pitch dicts carry headword term_banks too).
 _META_BANK = re.compile(r"term_meta_bank_\d+\.json$")
 
 
@@ -55,20 +55,28 @@ def classify_zip(zip_path: str | Path) -> str:
     ``"pitch"`` / ``"dict"``.
 
     Definition dictionaries carry ``term_bank_*.json`` glossaries; frequency and pitch dictionaries
-    carry ``term_meta_bank_*.json`` whose entries are ``[term, "freq"|"pitch", data]``. A zip with
-    glossary banks is a definition dict; otherwise the term-meta mode decides. Falls back to
+    carry ``term_meta_bank_*.json`` whose entries are ``[term, "freq"|"pitch", data]``. The term-meta
+    **mode wins**: a pitch (or freq) dict often ALSO ships headword ``term_bank`` files — the popular
+    NHK 2016 pitch dict does — so keying off "has a term_bank" would misfile it as a definition dict
+    (the exact bug: pitch accents never rendered because the dict landed in ``dicts``, not ``pitch``).
+    Only when there's no freq/pitch term-meta does a term_bank make it a definition dict. Falls back to
     ``"dict"`` when the zip can't be read or has no recognisable banks — the title is never consulted.
     """
+    # Read the term_meta bank CRC-tolerantly: some Yomitan pitch/freq exports (notably NHK 2016
+    # pitch) ship a WRONG stored CRC-32 on intact deflate data, and a strict read would raise
+    # BadZipFile → the dict would silently fall back to "dict" and its pitch/freq never render.
+    from overlay.app.wordlists import read_json_bank
+
     modes: set[str] = set()
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            names = zf.namelist()
-            if any(_TERM_BANK.match(n) for n in names):
-                return "dict"
-            for n in sorted(n for n in names if _META_BANK.match(n))[:1]:
-                for entry in json.loads(zf.read(n)):
+            metas = sorted(n for n in zf.namelist() if _META_BANK.match(n))
+            for n in metas[:2]:  # first bank suffices; try a 2nd only if the 1st yields nothing
+                for entry in read_json_bank(zf, n) or []:
                     if len(entry) >= 2 and isinstance(entry[1], str):
                         modes.add(entry[1])
+                if modes:
+                    break
     except (OSError, KeyError, zipfile.BadZipFile, json.JSONDecodeError, ValueError, TypeError):
         return "dict"
     if "pitch" in modes:
@@ -175,6 +183,17 @@ def to_config(settings: YomitanSettings, matches: dict[str, str]) -> dict:
     return cfg
 
 
+SETTINGS_GLOB = "yomitan-settings*.json"
+
+
+def find_settings_export() -> str | None:
+    """Newest Yomitan *settings* export in the usual spots — Downloads (where the browser drops it),
+    the repo's ``yomitan/`` dir, then home. Returns its path, or None if none is found."""
+    dirs = [Path.home() / "Downloads", Path.home() / "Documents/Japanese/yomitan", Path.home()]
+    found = [p for d in dirs for p in d.glob(SETTINGS_GLOB)]
+    return str(max(found, key=lambda p: p.stat().st_mtime)) if found else None
+
+
 def run_import(
     settings_path: str | None, scan_dirs: list[str] | None, confirm
 ) -> int:  # pragma: no cover — interactive glue; the pieces above are unit-tested
@@ -182,14 +201,28 @@ def run_import(
     from overlay.app.init_wizard import write_config
 
     if not settings_path:
-        candidates = sorted(
-            Path.home().glob("Documents/Japanese/yomitan/yomitan-settings*.json"), reverse=True
-        )
-        if not candidates:
+        settings_path = find_settings_export()
+        if settings_path:
+            print(f"using {settings_path}")
+        elif sys.stdin.isatty():
+            # Interactive: don't skip past silently — ask for the path and WAIT.
+            entered = (
+                input(
+                    "Yomitan settings export not found. Enter its path (Yomitan → Settings → Backup → "
+                    "Export Settings), or press Enter to skip: "
+                )
+                .strip()
+                .strip("\"'")
+            )
+            if not entered:
+                print(
+                    "import skipped — run `saitenka-overlay import-settings <settings.json>` later"
+                )
+                return 1
+            settings_path = str(Path(entered).expanduser())
+        else:
             print("no settings export given and none found — pass the path explicitly")
             return 1
-        settings_path = str(candidates[0])
-        print(f"using {settings_path}")
 
     settings = parse_settings(settings_path)
     enabled = [d.name for d in settings.dictionaries if d.enabled]

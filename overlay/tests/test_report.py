@@ -62,7 +62,27 @@ def test_collect_no_log_excludes_log(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
     members = report.collect(include_log=False)
     assert "overlay.log" not in members
+    assert "mpv.log" not in members  # mpv log gated by the same --no-log
     assert "no (--no-log)" in members["MANIFEST.txt"]
+
+
+def test_collect_includes_dict_listing_and_mpv_log(monkeypatch, tmp_path):
+    """Report surfaces the on-disk dict inventory (data zips + built indexes) and mpv's own log — the
+    diagnostics that would have made this session's dict-registration + mpv issues obvious."""
+    _hermetic(monkeypatch, tmp_path)
+    ddir = tmp_path / "data" / "dicts"
+    ddir.mkdir(parents=True)
+    (ddir / "MyDict.zip").write_bytes(b"PK\x03\x04")
+    monkeypatch.setattr("overlay.app.config.dicts_data_dir", lambda: ddir)  # DATA_HOME is frozen
+    idx = tmp_path / "cache" / "dicts"  # cache dir honors $SAITENKA_CACHE_DIR live
+    idx.mkdir(parents=True)
+    (idx / "MyDict-1-2-v2.sqlite").write_bytes(b"")
+    (tmp_path / "cache" / "mpv.log").write_text("[cplayer] mpv 0.40 started\n")
+
+    members = report.collect(include_log=True)
+    assert "MyDict.zip" in members["dicts.listing.txt"]  # data-dir zip listed
+    assert "MyDict-1-2-v2.sqlite" in members["dicts.listing.txt"]  # built index listed
+    assert "mpv.log" in members and "mpv 0.40 started" in members["mpv.log"]
 
 
 def test_build_report_bundle_writes_timestamped_zip(monkeypatch, tmp_path):

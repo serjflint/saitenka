@@ -20,7 +20,8 @@ import re
 import sqlite3
 import threading
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -49,8 +50,8 @@ class DictionaryError(RuntimeError):
 
 
 _MISSING_HINT = (
-    "If these are Yomitan dictionary TITLES (from `import-yomitan` without --scan-dir) rather than "
-    "file paths, re-run `saitenka-overlay import-yomitan <settings.json> --scan-dir <dir>` to map "
+    "If these are Yomitan dictionary TITLES (from `import-settings` without --scan-dir) rather than "
+    "file paths, re-run `saitenka-overlay import-settings <settings.json> --scan-dir <dir>` to map "
     "them to your .zip files, or set real paths in overlay.toml. Run `saitenka-overlay doctor`."
 )
 
@@ -68,6 +69,26 @@ def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
 
 CACHE_DIR = paths.cache_dir() / "dicts"
 _SCHEMA = 2  # v2: + kanji table. Bumping forces a one-time index rebuild.
+
+# Optional progress sink for the (slow, first-run) index build, called ``on_bank(done, total)`` per
+# term/kanji bank. It's a module global set by :func:`build_progress` rather than a ``Dictionary.load``
+# parameter, because ``load`` is ``@lru_cache``-d — a callback in its signature would pollute the cache
+# key. Only the build path (a cache miss) reads it; the batch loader sets it per source.
+_ON_BANK: Callable[[int, int], None] | None = None
+
+
+@contextmanager
+def build_progress(on_bank: Callable[[int, int], None] | None):
+    """Route index-build bank progress to ``on_bank`` for the duration of the block (restores after)."""
+    global _ON_BANK
+    prev = _ON_BANK
+    _ON_BANK = on_bank
+    try:
+        yield
+    finally:
+        _ON_BANK = prev
+
+
 FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
 
@@ -176,6 +197,12 @@ def _build_db_into(zip_path: Path, db_path: Path, tmp: Path) -> None:
         "tags TEXT, meanings TEXT, stats TEXT)"
     )
     with zipfile.ZipFile(zip_path) as zf:
+        names = sorted(zf.namelist())
+        term_banks = [n for n in names if n.startswith("term_bank") and n.endswith(".json")]
+        kanji_banks = [n for n in names if n.startswith("kanji_bank") and n.endswith(".json")]
+        total_banks = len(term_banks) + len(kanji_banks)
+        on_bank = _ON_BANK  # snapshot the sink for this build (set per-source by the batch loader)
+        done_banks = 0
         title = zip_path.stem
         try:
             title = json.loads(zf.read("index.json")).get("title", title)
@@ -183,10 +210,11 @@ def _build_db_into(zip_path: Path, db_path: Path, tmp: Path) -> None:
             log.debug("index.json title read failed", exc_info=True)
         conn.execute("INSERT INTO meta VALUES('title', ?)", (title,))
         rid = 0
-        for name in sorted(zf.namelist()):
-            if not (name.startswith("term_bank") and name.endswith(".json")):
-                continue
+        for name in term_banks:
             bank = read_json_bank(zf, name)  # tolerant of wrong-CRC Yomitan zips (data intact)
+            done_banks += 1
+            if on_bank:
+                on_bank(done_banks, total_banks)
             if bank is None:
                 continue
             rows, keys = [], []
@@ -200,10 +228,11 @@ def _build_db_into(zip_path: Path, db_path: Path, tmp: Path) -> None:
             conn.executemany("INSERT INTO entries VALUES(?,?,?,?,?)", rows)
             conn.executemany("INSERT INTO keys VALUES(?,?)", keys)
         # kanji_bank v3: [char, onyomi, kunyomi, tags, meanings[], stats{}]
-        for name in sorted(zf.namelist()):
-            if not (name.startswith("kanji_bank") and name.endswith(".json")):
-                continue
+        for name in kanji_banks:
             bank = read_json_bank(zf, name)
+            done_banks += 1
+            if on_bank:
+                on_bank(done_banks, total_banks)
             if bank is None:
                 continue
             krows = [
@@ -379,6 +408,7 @@ class DictionarySet:
         paths: Sequence[str | Path],
         freq_paths: Sequence[str | Path] = (),
         pitch_paths: Sequence[str | Path] = (),
+        progress: Callable[[int, int, str, int, int], None] | None = None,
     ) -> DictionarySet:
         # Validate every path up front so a bad entry raises ONE actionable DictionaryError instead
         # of a raw FileNotFoundError traceback from Path.stat() deep in Dictionary.load (the WinError 2
@@ -392,11 +422,37 @@ class DictionarySet:
                 + ". "
                 + _MISSING_HINT
             )
-        return cls(
-            [Dictionary.load(p) for p in paths],
-            [FreqSource.load(p) for p in freq_paths],
-            [PitchSource.load(p) for p in pitch_paths],
+        # ``progress(done_sources, total_sources, name, bank_done, bank_total)`` — a per-source step
+        # plus, for dict sources, per-bank sub-progress during the first-run build (so a long single
+        # dict still moves). Cached sources fly by (no build → no bank ticks). None = load silently.
+        items: list[tuple[str, str | Path]] = (
+            [("dict", p) for p in paths]
+            + [("freq", p) for p in freq_paths]
+            + [("pitch", p) for p in pitch_paths]
         )
+        total = len(items)
+        dicts: list[Dictionary] = []
+        freqs: list[FreqSource] = []
+        pitches: list[PitchSource] = []
+        for i, (kind, p) in enumerate(items):
+            name = Path(p).stem
+            if progress:
+                progress(i, total, name, 0, 0)
+            if kind == "dict":
+                sink = (
+                    (lambda d, t, i=i, name=name: progress(i, total, name, d, t))
+                    if progress
+                    else None
+                )
+                with build_progress(sink):
+                    dicts.append(Dictionary.load(p))
+            elif kind == "freq":
+                freqs.append(FreqSource.load(p))
+            else:
+                pitches.append(PitchSource.load(p))
+        if progress:
+            progress(total, total, "", 0, 0)
+        return cls(dicts, freqs, pitches)
 
     def has_term(self, *forms: str | None) -> bool:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""

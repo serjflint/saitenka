@@ -92,19 +92,124 @@ def test_single_dict_entry_has_no_tabs(monkeypatch):
     assert r._tab_rects == []
 
 
+# --- tabs are BASE-only: nested popups carry no strip/reserve; the strip is configurable -----------
+
+
+def test_nested_popup_has_no_tab_strip_or_reserve(monkeypatch):
+    """A nested scan popup deliberately carries NO dict-tab strip and NO reserved band even for a
+    multi-dict word — it stays compact so the deep-dive gets its full height. (The base tooltip keeps
+    its strip.)"""
+    from overlay.app.controller import NESTED_ID
+
+    r = _shown(monkeypatch, _reader())  # _MultiDS → 3 dict sections for every word
+    assert r._tab_rects, "base tooltip should still have its dict tabs"
+    boxes = r._tip_state.lazy.scan_boxes
+    assert boxes, "no scan boxes to open a nested popup on"
+
+    captured: dict = {}
+    orig = r._blit_panel
+
+    def spy(bgra, scroll, view_h, xy, oid, header=None):
+        if oid == NESTED_ID:
+            captured["header"] = header
+        return orig(bgra, scroll, view_h, xy, oid, header=header)
+
+    monkeypatch.setattr(r, "_blit_panel", spy)
+    r._show_nested(boxes[len(boxes) // 2])
+    assert r._nest.state is not None, "nested popup didn't open"
+    assert r._nest.state.lazy.top_reserve == 0  # no reserved band → no blank padding
+    assert "header" in captured and captured["header"] is None  # nested render passes no tab strip
+
+
+def test_show_dict_tabs_false_hides_base_strip_and_reserve(monkeypatch):
+    """show_dict_tabs=False turns the base tooltip's dict-tab strip off entirely — no clickable tabs
+    and no reserved band (so the pills can be disabled per the user's preference)."""
+    from overlay.app.config import ReaderOptions, TooltipOptions
+
+    r = Reader(
+        FakeIPC(),
+        dict_set=_MultiDS(),
+        options=ReaderOptions(tooltip=TooltipOptions(show_dict_tabs=False)),
+    )
+    r.osd = (1280, 720)
+    r.sub_origin = (0, 0)
+    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
+    r.boxes = [WordBox(0, 100, 300, 40, 40)]
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    r.set_hover(0)
+    assert r._tab_rects == []  # no clickable tabs
+    assert r._tip_reserve() == 0  # …and no reserved band above the header
+
+
 def test_multi_dict_reserves_space_so_header_clears_the_tab_strip(monkeypatch):
     # Regression: the sticky tab strip must NOT cover the reading / ⊕ / 🔊. Multi-dict entries
-    # reserve the strip's height above the header so those sit below it.
-    from overlay.panel import header_add_rect, header_speaker_rect, tab_row_height
+    # reserve EXACTLY the (possibly wrapped) strip's height above the header so those sit below it.
+    from overlay.panel import header_add_rect, header_speaker_rect, tab_strip_height
 
     r = _shown(monkeypatch, _reader())  # 3 dicts → tabs
     reserve = r._tip_reserve()
-    assert reserve >= tab_row_height()  # space reserved for the strip
+    assert reserve == tab_strip_height(
+        ["MonoC", "MonoB", "MonoD"], r.tip_width
+    )  # matches real strip
     for rect in (
         header_add_rect(r.tip_width, top_reserve=reserve),
         header_speaker_rect(r.tip_width, top_reserve=reserve),
     ):
-        assert rect[1] >= tab_row_height()  # icon's panel-y is below the strip → not covered
+        assert rect[1] >= reserve  # icon's panel-y is below the reserved strip → not covered
+
+
+def test_tab_strip_wraps_many_dicts_onto_multiple_rows():
+    # A many-dict word must show ALL tabs — the strip wraps instead of clipping past the width
+    # (regression: only ~4 of 10 tabs were visible).
+    from overlay.panel import render_tab_row, tab_row_height, tab_strip_height
+
+    names = [f"Dict{i:02d}" for i in range(10)]
+    width = 384
+    img, rects = render_tab_row(names, active=0, width=width)
+    assert len(rects) == len(names)  # every tab is laid out (none dropped)
+    ys = {y for _x, y, _w, _h in rects}
+    assert len(ys) >= 2  # wrapped onto multiple rows
+    assert all(x + w <= width for x, _y, w, _h in rects)  # nothing clipped past the right edge
+    assert img.height == tab_strip_height(names, width) > tab_row_height()  # taller than one row
+
+
+def test_add_button_gated_on_live_anki(monkeypatch):
+    r = _reader()
+    r.anki = object()  # mining configured
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    # Anki closed → ⊕ not shown / not hittable
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: False)
+    r._anki_cache = (0.0, False)
+    assert r._anki_ok() is False
+    r.set_hover(0)
+    assert r._hit_header_add(999, 999) is False
+    # Anki reopened → the live check flips (past the TTL) so the ⊕ comes back
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: True)
+    r._anki_cache = (0.0, False)  # force a re-check rather than wait out the ~3s TTL
+    assert r._anki_ok() is True
+
+
+def test_header_add_rect_takes_speaker_slot_when_tts_hidden():
+    from overlay.panel import header_add_rect
+
+    with_spk = header_add_rect(400)
+    without = header_add_rect(400, speak_button=False)
+    assert without[0] > with_spk[0]  # ⊕ moves right into the 🔊 slot when the speaker is hidden
+
+
+def test_speaker_gated_off_without_tts(monkeypatch):
+    import overlay.app.controller as ctrl
+
+    monkeypatch.setattr(ctrl, "tts_available", lambda: False)  # no JA voice → 🔊 hidden
+    ipc = FakeIPC()
+    r = _reader()
+    r.ipc = ipc
+    assert r._tts_ok is False
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    r.set_hover(0)
+    assert r._hit_header_speaker(999, 999) is False  # never hittable
+    a_binds = [c for c in ipc.commands if c and c[0] == "keybind" and c[1] == "a"]
+    assert a_binds == []  # the 'a' TTS key is not even bound
 
 
 def test_single_dict_reserves_nothing(monkeypatch):

@@ -5,6 +5,13 @@ param([switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $SelfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Decode the Python child processes' UTF-8 output correctly. Set ONLY [Console]::OutputEncoding — NOT
+# `chcp 65001`: changing the console codepage breaks interactive typing in the classic console.
+try {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
 # 1. uv — the only hard bootstrap (it then owns Python 3.14t + all deps).
@@ -34,11 +41,18 @@ if (-not $wheel) {
 }
 $dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay_deinflect-*.tar.gz' |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$toolArgs = @('tool','install','--reinstall',"$($wheel.FullName)[jmdict]")
-if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $toolArgs += @('--with',$dein.FullName) }
-Write-Host "[saitenka] installing $($wheel.Name)[jmdict]"
-if ($DryRun) { Write-Host "DRY: uv $($toolArgs -join ' ')" }
-else { & uv @toolArgs }
+$withArgs = @()
+if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $withArgs = @('--with', $dein.FullName) }
+# fugashi has no free-threaded Windows wheel, so 3.14t needs a source build of it, which needs BOTH the
+# MSVC++ Build Tools (14+) AND MeCab at C:\mecab. Only pick 3.14t when both are present; else 3.14 (wheel).
+$mecab = (Test-Path 'C:\mecab\libmecab.dll') -or (Have 'mecab')
+$msvc  = (Have 'cl') -or (Test-Path "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Tools\MSVC") `
+                     -or (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Tools\MSVC")
+$pyVer = if ($mecab -and $msvc) { '3.14+freethreaded' } else { '3.14' }
+$spec = "$($wheel.FullName)[jmdict]"
+Write-Host "[saitenka] installing $($wheel.Name)[jmdict] (python $pyVer)"
+if ($DryRun) { Write-Host "DRY: uv tool install --python $pyVer --reinstall $spec $($withArgs -join ' ')" }
+else { uv tool install --python $pyVer --reinstall $spec @withArgs }
 
 # 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin). Resolve the exe
 # explicitly — the freshly-installed tool may still not be on PATH in this session on some setups.

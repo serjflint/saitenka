@@ -8,6 +8,15 @@
 param([switch]$DryRun,[switch]$Dev,[switch]$Yes)
 $ErrorActionPreference = 'Continue'
 
+# Decode the Python child processes' UTF-8 output correctly (else PowerShell uses the OEM codepage and
+# shows mojibake). Set ONLY [Console]::OutputEncoding — NOT `chcp 65001`: changing the console codepage
+# breaks interactive TYPING in the classic console (the y/N prompts go dead). OutputEncoding only
+# affects how we DECODE child output, not input.
+try {
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 function Log ($m){ Write-Host "[saitenka] $m" -ForegroundColor Cyan }
 function Warn($m){ Write-Host "[warn] $m"     -ForegroundColor Yellow }
 function Have($c){ [bool](Get-Command $c -ErrorAction SilentlyContinue) }
@@ -83,7 +92,21 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 # plain `saitenka-overlay` has no jamdict-data at all — that upstream sdist is what failed here).
 if(Test-Path (Join-Path $Repo 'deinflect')){ $extra = 'full'; Log "including GPL-3.0 deinflect add-on (inflection chains)" }
 else { $extra = 'jmdict'; Warn "no deinflect\ in this checkout - installing [jmdict] only (no inflection chains)" }
-$installArgs = @('tool','install','--reinstall',"$Repo\overlay[$extra]")
+# Pick the Python: fugashi (the MeCab tokenizer) has no free-threaded Windows wheel, so 3.14t needs a
+# SOURCE build of it, which needs BOTH the MSVC++ Build Tools (14.0+) AND MeCab extracted at C:\mecab.
+# Use 3.14t (the ~3.8x render win) only when both are present — else the build fails; otherwise regular
+# 3.14 (fugashi from a wheel). Overrides the repo's free-threaded .python-version pin so a default
+# install never fails. (macOS/Linux keep the FT pin — they have free-threaded fugashi wheels.)
+$mecab = (Test-Path 'C:\mecab\libmecab.dll') -or (Have mecab)
+$msvc  = (Have cl) -or (Test-Path "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Tools\MSVC") `
+                   -or (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Tools\MSVC")
+if($mecab -and $msvc){ $pyVer = '3.14+freethreaded'; Log "MeCab + MSVC++ found - using free-threaded 3.14t (fugashi builds from source)" }
+else {
+  $pyVer = '3.14'
+  $need = @(); if(-not $msvc){ $need += 'MSVC++ Build Tools 14+' }; if(-not $mecab){ $need += 'MeCab at C:\mecab' }
+  Log ("standard 3.14 - for the 3.14t render speedup, install " + ($need -join ' + ') + ", then re-run")
+}
+$installArgs = @('tool','install','--python',$pyVer,'--reinstall',"$Repo\overlay[$extra]")
 if(Have uv){
   Log "Installing/updating saitenka-overlay[$extra] from $Repo\overlay"
   if($DryRun){ Write-Host "  DRY: uv $($installArgs -join ' ')" }
@@ -155,10 +178,11 @@ function AddonLine($code,$nm,$note){
   if(Test-Path (Join-Path $Addons $code)){ Write-Host ("       [x] {0,-14} installed" -f $nm) -ForegroundColor Green }
   else { Write-Host ("       [ ] {0,-14} paste {1} ({2})" -f $nm,$code,$note) -ForegroundColor Yellow }
 }
-# Config resolves platform-native (%APPDATA%\saitenka) with a legacy ~/.config fallback — mirror it.
+# Config resolves platform-native via platformdirs: %LOCALAPPDATA%\saitenka\overlay.toml on Windows
+# (same root as the dict cache, AppData\Local\saitenka). No ~/.config fallback — that XDG path is
+# POSIX-only and the tool never writes it on Windows.
 $Cfg = if($env:SAITENKA_CONFIG){ $env:SAITENKA_CONFIG }
-       elseif(Test-Path (Join-Path $env:APPDATA 'saitenka\overlay.toml')){ Join-Path $env:APPDATA 'saitenka\overlay.toml' }
-       else { Join-Path $HOME '.config\saitenka\overlay.toml' }
+       else { Join-Path $env:LOCALAPPDATA 'saitenka\overlay.toml' }
 function DictsPresent(){
   if(-not (Test-Path $Cfg)){ return 0 }
   $n = 0
@@ -183,17 +207,19 @@ AddonLine '1771074083' 'Review Heatmap' 'streak view'
 $dc = DictsPresent
 if($dc -gt 0){ Write-Host ("  3. Dictionaries:  [x] {0} configured and present on disk" -f $dc) -ForegroundColor Green }
 else {
-  Write-Host "  3. Dictionaries: run  saitenka-overlay import-yomitan --scan-dir <folder of your .zip dicts>"
+  Write-Host "  3. Dictionaries: run  saitenka-overlay import-settings --scan-dir <folder of your .zip dicts>"
   Write-Host "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
   Write-Host "     or add the .zip paths by hand under [dictionaries] in:"
   Write-Host "       $Cfg"
   Write-Host "     Have a full Yomitan backup? saitenka-overlay import-dictionaries <export> converts it to .zip dicts."
 }
-if($env:JIMAKU_API_KEY){ Write-Host "  4. jimaku key for auto-subs:  [x] set (`$env:JIMAKU_API_KEY)" -ForegroundColor Green }
+# jimaku is "set up" if the env var is set OR the config has a [jimaku] table (set-jimaku-key writes
+# [jimaku].fetch=true even when the key itself lives in the Credential Locker, which a shell can't read).
+$jimakuSet = [bool]$env:JIMAKU_API_KEY -or ((Test-Path $Cfg) -and (Select-String -Path $Cfg -Pattern '^\s*\[jimaku\]' -Quiet))
+if($jimakuSet){ Write-Host "  4. jimaku auto-subs:  [x] configured" -ForegroundColor Green }
 else {
-  Write-Host "  4. jimaku key for auto-subs (optional): run  saitenka-overlay set-jimaku-key  (recommended;"
-  Write-Host "     a GUI-launched mpv can't read `$env:JIMAKU_API_KEY), or add [jimaku].key in:"
-  Write-Host "       $Cfg"
+  Write-Host "  4. jimaku auto-subs (optional): run  saitenka-overlay set-jimaku-key"
+  Write-Host "     (stores the key + enables fetch for files with no JP track; skip if done in setup above)"
 }
 if($Dev){ Write-Host "`nDev/authoring: open this folder in Obsidian (start at notes\), Anki MCP for Claude Code via /mcp." }
 if($LogPath){ try { Stop-Transcript | Out-Null } catch {} }

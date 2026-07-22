@@ -127,7 +127,9 @@ addon() { # code  name  note
 # jimaku key is "present" if it resolves from the env or the Keychain (the recommended stores).
 jimaku_present() {
   [ -n "${JIMAKU_API_KEY:-}" ] && return 0
-  security find-generic-password -s saitenka-overlay -a jimaku -w >/dev/null 2>&1
+  security find-generic-password -s saitenka-overlay -a jimaku -w >/dev/null 2>&1 && return 0
+  # set-jimaku-key writes [jimaku] to the config (fetch=true) even when the key lives in the Keychain.
+  [ -f "$CONFIG" ] && grep -qE '^[[:space:]]*\[jimaku\]' "$CONFIG"
 }
 # How many dictionary/freq/pitch zips the config points at actually exist on disk (echoes the count,
 # non-zero exit when none) — so we can tick step 3 instead of nudging an import that's already done.
@@ -156,7 +158,7 @@ addon 1771074083 "Review Heatmap" "streak view"
 if dcnt=$(dicts_present); then
   printf '  3. Dictionaries:  \033[32m✓\033[0m %s configured and present on disk\n' "$dcnt"
 else
-  echo "  3. Dictionaries: run  saitenka-overlay import-yomitan --scan-dir <folder of your .zip dicts>"
+  echo "  3. Dictionaries: run  saitenka-overlay import-settings --scan-dir <folder of your .zip dicts>"
   echo "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
   echo "     or add the .zip paths by hand under [dictionaries] in:"
   echo "       $CONFIG"

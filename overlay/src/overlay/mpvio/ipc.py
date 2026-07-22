@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import json
 import queue
-import socket
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import BinaryIO
+
+from overlay.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTransport
 
 
 def default_ipc_path(unique: str) -> str:
@@ -48,10 +48,7 @@ class MpvIPC:
 
     def __init__(self, path: str):
         self.path = path
-        self._sock: socket.socket | None = None
-        self._pipe: BinaryIO | None = (
-            None  # Windows named-pipe file object (raw FileIO, buffering=0)
-        )
+        self._transport: Transport | None = None  # set by connect() (or injected in tests)
         self._buf = b""  # reader-thread-only accumulation buffer
         self._events: list[dict] = []  # async events (property-change, client-message, …)
         self._events_lock = threading.Lock()
@@ -63,16 +60,12 @@ class MpvIPC:
     def connect(self, timeout: float = 10.0, interval: float = 0.1) -> MpvIPC:
         deadline = time.monotonic() + timeout
         last: Exception | None = None
+        # Windows exposes IPC as a named pipe, Unix as a socket file — identical framing on top (see
+        # transport.py). Pick the adapter, then retry-dial until the server is up or the deadline.
+        dial = NamedPipeTransport.dial if sys.platform == "win32" else UnixSocketTransport.dial
         while time.monotonic() < deadline:
             try:
-                if sys.platform == "win32":
-                    self._pipe = open(self.path, "r+b", buffering=0)  # noqa: SIM115
-                else:
-                    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                    s.settimeout(timeout)
-                    s.connect(self.path)
-                    s.settimeout(None)  # blocking reads on the reader thread
-                    self._sock = s
+                self._transport = dial(self.path, timeout)
                 self._start_reader()
                 return self
             except (OSError, FileNotFoundError) as e:  # server not up yet
@@ -88,13 +81,15 @@ class MpvIPC:
     # --- reader thread ------------------------------------------------------------------------
     def _read_loop(self) -> None:
         try:
+            transport = self._transport
+            assert transport is not None  # connect()/injection set it before the reader ran
             while not self._closed.is_set():
-                chunk = self._sock.recv(65536) if self._sock is not None else self._pipe.read(65536)  # type: ignore[union-attr]
+                chunk = transport.read(65536)
                 if not chunk:
                     break  # EOF — mpv quit / pipe closed
                 self._feed(chunk)
         except OSError:
-            pass  # socket/pipe torn down under us → treat as disconnect
+            pass  # transport torn down under us → treat as disconnect
         finally:
             self._closed.set()
             try:  # unblock a command() waiting on a reply
@@ -129,12 +124,8 @@ class MpvIPC:
 
     # --- io -----------------------------------------------------------------------------------
     def _write(self, data: bytes) -> None:
-        if self._sock is not None:
-            self._sock.sendall(data)
-        else:
-            assert self._pipe is not None  # connect() set exactly one transport
-            self._pipe.write(data)
-            self._pipe.flush()
+        assert self._transport is not None  # connect()/injection set it
+        self._transport.write(data)
 
     def command(self, *args, timeout: float | None = None) -> dict:
         """Send a command array and return the first non-event reply (or an error dict)."""
@@ -172,18 +163,12 @@ class MpvIPC:
 
     def close(self) -> None:
         self._closed.set()
-        if self._sock is not None:
+        if self._transport is not None:
             try:
-                self._sock.close()  # unblocks the reader thread's recv → it exits
+                self._transport.close()  # unblocks the reader thread's blocking read → it exits
             except OSError:
                 pass
-            self._sock = None
-        if self._pipe is not None:
-            try:
-                self._pipe.close()
-            except OSError:
-                pass
-            self._pipe = None
+            self._transport = None
         # Join the reader so shutdown doesn't race a still-running thread (bounded — the closed
         # transport makes the blocking read return promptly).
         if self._reader is not None and self._reader.is_alive():

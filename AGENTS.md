@@ -41,5 +41,7 @@ Rationale: uv is fast, reproducible (lockfile), and isolates environments — no
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate (no CI):** `uv run poe all` in `overlay/` — lint (ruff), types (mypy + pyright blocking,
-  pyrefly + ty advisory), tests (incl. free-threaded), coverage floor 85%. Run it before pushing.
+- **Dev gate (no CI):** `uv run poe all` — lint (ruff), types (mypy + pyright blocking, pyrefly + ty
+  advisory), tests (incl. free-threaded), coverage floor 85%. Run it before pushing. The real tasks
+  live in `overlay/`; the repo-root `pyproject.toml` is a non-package poe shim that delegates there, so
+  `uv run poe <task>` (all, test, bench, smoke-live, …) works from **either the repo root or `overlay/`**.

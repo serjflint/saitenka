@@ -19,13 +19,13 @@ from overlay.app.wordlists import FreqSource, PitchSource
 
 
 def test_dictionary_set_load_missing_path_raises_friendly_error(tmp_path):
-    """A bare Yomitan title in the config (import-yomitan without --scan-dir) must raise ONE
+    """A bare Yomitan title in the config (import-settings without --scan-dir) must raise ONE
     actionable DictionaryError, not a raw FileNotFoundError traceback (the WinError 2 crash)."""
     with pytest.raises(DictionaryError) as ei:
         DictionarySet.load(["JMdict [2026-06-27]", str(tmp_path / "nope.zip")])
     msg = str(ei.value)
     assert "JMdict [2026-06-27]" in msg
-    assert "import-yomitan" in msg and "doctor" in msg
+    assert "import-settings" in msg and "doctor" in msg
 
 
 def test_split_existing_partitions(tmp_path):
@@ -43,6 +43,17 @@ def _make_dict(path, title, entries):
         bank = [[t, r, "", "", 0, g, i + 1, ""] for i, (t, r, g) in enumerate(entries)]
         zf.writestr("term_bank_1.json", json.dumps(bank, ensure_ascii=False))
     return str(path)
+
+
+def test_load_reports_build_progress(tmp_path):
+    """DictionarySet.load drives the progress callback: a per-source start, per-bank sub-ticks during
+    the first-run build, and a final (total, total) step."""
+    d = _make_dict(tmp_path / "D.zip", "D", [("猫", "ねこ", ["cat"])])
+    calls: list[tuple] = []
+    DictionarySet.load([d], progress=lambda *a: calls.append(a))
+    assert calls[0][:2] == (0, 1)  # starting source 0 of 1
+    assert calls[-1][:2] == (1, 1)  # all sources done
+    assert any(bank_done > 0 and bank_total > 0 for *_h, bank_done, bank_total in calls)  # built
 
 
 SC = {"type": "structured-content", "content": [{"tag": "div", "content": "定義文"}]}

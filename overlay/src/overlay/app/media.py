@@ -7,9 +7,12 @@ OSD overlay. Audio is cut from the source file over the current subtitle's times
 
 from __future__ import annotations
 
+import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -74,44 +77,107 @@ def clip_audio(
     return Path(path)
 
 
+def _play_cmd(path: str | Path) -> list[str]:
+    """The command to play a clip. macOS uses ``afplay``; elsewhere prefer **mpv** — it's a guaranteed
+    core dependency, whereas ``ffplay`` is absent from the common Windows ffmpeg "essentials" build
+    (gyan.dev), so the old ffplay-only path silently no-op'd there. ``ffplay`` is the last resort."""
+    if sys.platform == "darwin":
+        return ["afplay", str(path)]
+    else:  # explicit else so mypy treats this as the inactive platform branch, not unreachable code
+        from overlay.mpvio.discover import find_mpv
+
+        mpv = find_mpv(None)
+        if mpv:
+            return [mpv, "--no-video", "--no-terminal", "--really-quiet", str(path)]
+        return ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet", str(path)]
+
+
 def play_audio(path: str | Path) -> None:
     """Play a clip so the mined audio can be verified — non-blocking, no window."""
-    if sys.platform == "darwin":
-        cmd = ["afplay", str(path)]
-    else:
-        cmd = ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet", str(path)]
     try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(_play_cmd(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         pass
+
+
+def _speak_cmd(text: str, voice: str = "Kyoko") -> list[str]:
+    """The OS TTS command for ``text`` (macOS ``say``, Windows SAPI via PowerShell, Linux ``espeak``).
+
+    Windows carries the text as **base64 UTF-8 embedded in the script** — NOT piped via stdin: PowerShell
+    decodes stdin with the console's OEM input codepage, so Japanese UTF-8 bytes arrived as mojibake and
+    SAPI spoke nothing. It also selects an installed **Japanese** SAPI voice (Haruka) when present — the
+    default voice is English and can't pronounce kana. (if/elif/else, not early-return, so mypy's
+    sys.platform narrowing doesn't flag the other branches as unreachable.)"""
+    if sys.platform == "win32":
+        import base64
+
+        b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        ps = (
+            "Add-Type -AssemblyName System.Speech;"
+            f"$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}'));"
+            "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+            "$v=$s.GetInstalledVoices()|"
+            "?{$_.Enabled -and $_.VoiceInfo.Culture.Name -eq 'ja-JP'}|select -First 1;"
+            "if($v){$s.SelectVoice($v.VoiceInfo.Name)};"
+            "$s.Speak($t)"
+        )
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]
+    elif sys.platform == "darwin":
+        return ["say", "-v", voice, text]
+    else:
+        return ["espeak", "-v", "ja", text]
 
 
 def speak(text: str, voice: str = "Kyoko") -> None:
-    """Speak Japanese text via the OS TTS (macOS `say`, Windows SAPI) — non-blocking, no window."""
+    """Speak Japanese text via the OS TTS — non-blocking, no window. No-op on empty text or when the
+    TTS binary is missing."""
     if not text:
         return
-    if sys.platform == "darwin":
-        cmd = ["say", "-v", voice, text]
-    elif sys.platform == "win32":
-        ps = (
-            "Add-Type -AssemblyName System.Speech;"
-            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak([Console]::In.ReadToEnd())"
-        )
-        try:
-            p = subprocess.Popen(
-                ["powershell", "-NoProfile", "-Command", ps], stdin=subprocess.PIPE
-            )
-            p.stdin.write(text.encode())
-            p.stdin.close()
-        except OSError:
-            pass
-        return
-    else:
-        cmd = ["espeak", "-v", "ja", text]
     try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            _speak_cmd(text, voice), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     except OSError:
         pass
+
+
+def _voices_out() -> str:
+    """Raw list of installed TTS voices (best-effort ''): SAPI cultures on Windows, ``say -v ?`` on
+    macOS. Its own function so tests can stub it without a real TTS engine."""
+    if sys.platform == "win32":
+        return _run_out(
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Speech;"
+            "(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices()|"
+            "%{$_.VoiceInfo.Culture.Name}",
+        )
+    elif sys.platform == "darwin":
+        return _run_out("say", "-v", "?")
+    else:
+        return ""
+
+
+def _run_out(*args: str) -> str:
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
+        return (r.stdout or "") + (r.stderr or "")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+@lru_cache(maxsize=1)
+def tts_available() -> bool:
+    """True if the OS has a voice the 🔊 button can use to read **Japanese** — a Japanese SAPI voice on
+    Windows, a ``ja_JP`` ``say`` voice on macOS, or ``espeak`` on Linux. Cached (voices don't change
+    mid-session). Used both by doctor and to HIDE the 🔊 button when it would silently do nothing."""
+    if sys.platform == "win32":
+        return "ja-JP" in _voices_out()
+    elif sys.platform == "darwin":
+        return bool(re.search(r"ja_JP", _voices_out()))
+    else:
+        return shutil.which("espeak") is not None
 
 
 def copy_clipboard(text: str) -> None:
@@ -150,6 +216,39 @@ def audio_duration(path: str | Path) -> float | None:
         return float(out.stdout.strip())
     except (OSError, ValueError):
         return None
+
+
+def has_sub_lang(path: str | Path, langs: str = "ja,jpn,jp") -> bool | None:
+    """True if the file carries a SUBTITLE stream tagged with one of ``langs`` (comma-sep), False if
+    not, ``None`` if we couldn't probe (ffprobe missing / unreadable). ``run`` uses this to auto-fetch
+    jimaku ONLY when a file has no embedded JP subs (matching what ``attach`` does over IPC)."""
+    from overlay.mpvio.discover import find_tool
+
+    wanted = {s.strip().lower() for s in langs.split(",") if s.strip()}
+    try:
+        out = subprocess.run(
+            [
+                find_tool("ffprobe") or "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "s",
+                "-show_entries",
+                "stream_tags=language",
+                "-of",
+                "default=nw=1:nk=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    found = {line.strip().lower() for line in out.stdout.splitlines() if line.strip()}
+    return bool(found & wanted)
 
 
 def current_timespan(ipc) -> Timespan | None:

@@ -1,9 +1,9 @@
 """``saitenka-overlay init`` — first-run wizard.
 
-Runs auto-discovery (Yomitan import + mpv discovery), proposes a config, and writes
-``~/.config/saitenka/overlay.toml`` ONLY on confirm — backing up an existing file first,
+Runs auto-discovery (Yomitan import + mpv discovery), proposes a config, and writes the
+platform-native ``overlay.toml`` (see :func:`config.config_path`) ONLY on confirm — backing up an existing file first,
 timestamped (non-destructive rule). The write path (:func:`write_config`) is the shared confirm+backup
-sink used by ``init``, ``import-yomitan``, and the setup wizard.
+sink used by ``init``, ``import-settings``, and the setup wizard.
 """
 
 from __future__ import annotations
@@ -69,19 +69,36 @@ def backup_existing(dest: Path) -> Path | None:
     return backup
 
 
+def _merge_into(doc, data: dict) -> None:
+    """Recursively set ``data`` into a tomlkit document/table: recurse into existing tables and update
+    only CHANGED keys in place (so their comments + position survive), add new keys."""
+    for k, v in data.items():
+        existing = doc.get(k)
+        if isinstance(v, dict) and isinstance(existing, dict):
+            _merge_into(existing, v)
+        elif existing != v:  # unchanged keys are left untouched (keeps any inline comment)
+            doc[k] = v
+
+
 def write_config(proposal: dict, confirm: Confirm, dest: Path | None = None) -> Path | None:
     """Write the proposed config on confirm; back up an existing file first.
 
-    Returns the backup path (or None if there was nothing to back up). Writes nothing if declined.
+    Round-trips through **tomlkit** so an existing file's COMMENTS + formatting survive — we only set
+    the keys that actually changed. Returns the backup path (None if there was nothing to back up);
+    writes nothing if declined.
     """
+    import tomlkit
+
     dest = dest or config_path()
     if not confirm(f"Write config to {dest}?"):
         return None
     backup = backup_existing(dest)
+    doc = tomlkit.parse(dest.read_text(encoding="utf-8")) if dest.exists() else tomlkit.document()
+    _merge_into(doc, proposal)
     from overlay.app.paths import atomic_write_text
 
     atomic_write_text(
-        dest, dumps_toml(proposal)
+        dest, tomlkit.dumps(doc)
     )  # temp + fsync + os.replace (no half-written config)
     return backup
 
@@ -94,25 +111,29 @@ def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, P
     """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
     via ``keyring`` (macOS Keychain / Windows Credential Locker / Linux Secret Service), else
     ``[jimaku].key`` in the config when no keyring backend exists (headless Linux). Returns
-    ``(method, backup)`` where method is ``"keyring"`` or ``"config"``."""
+    ``(method, backup)`` where method is ``"keyring"`` or ``"config"``.
+
+    Either way it writes ``[jimaku].fetch = true``: setting a key MEANS "fetch JP subs from jimaku when
+    a file has no JP track", so ``run``/``attach`` act on it without a flag. It also gives the installer
+    a plain-text config marker that jimaku is set up (the keyring isn't cheaply readable from a shell)."""
+    from overlay.app.config import load_config
     from overlay.app.jimaku import keychain_set
 
-    if keychain_set(k):
-        return "keyring", None
-    from overlay.app.config import load_config
-
+    method = "keyring" if keychain_set(k) else "config"
     cfg = load_config()
     jm = dict(cfg.get("jimaku") or {})
-    jm["key"] = k
+    jm["fetch"] = True
+    if method == "config":
+        jm["key"] = k  # no OS secret store available — persist the key in the config (plaintext)
     backup = write_config({**cfg, "jimaku": jm}, confirm=confirm)
-    return "config", backup
+    return method, backup
 
 
 def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secret I/O
     """Offer to store a jimaku.cc key if none resolves yet (skips if already set)."""
     import getpass
 
-    from overlay.app.jimaku import resolve_jimaku_key
+    from overlay.app.jimaku import prompt_for_key, resolve_jimaku_key
 
     key, src = resolve_jimaku_key()
     if key:
@@ -120,7 +141,9 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
         return
     if not _ask("\nStore a jimaku.cc API key now (for sub fetch in plugin mode)?"):
         return
-    k = getpass.getpass("jimaku.cc API key (hidden): ").strip()
+    k = prompt_for_key(
+        getpass.getpass
+    )  # hidden prompt + truncated-paste guard (Windows Ctrl+V trap)
     if not k:
         return
     method, _ = store_jimaku_key(k)

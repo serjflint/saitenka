@@ -66,6 +66,11 @@ def test_play_audio_builds_command(monkeypatch):
     monkeypatch.setattr(media.sys, "platform", "darwin")
     media.play_audio("/x.mp3")
     assert calls["cmd"] == ["afplay", "/x.mp3"]
+    # non-mac prefers mpv (a guaranteed dep); ffplay is only the fallback when mpv isn't found
     monkeypatch.setattr(media.sys, "platform", "linux")
+    monkeypatch.setattr("overlay.mpvio.discover.find_mpv", lambda _c: "/usr/bin/mpv")
+    media.play_audio("/x.mp3")
+    assert calls["cmd"][0] == "/usr/bin/mpv" and "/x.mp3" in calls["cmd"]
+    monkeypatch.setattr("overlay.mpvio.discover.find_mpv", lambda _c: None)
     media.play_audio("/x.mp3")
     assert calls["cmd"][0] == "ffplay" and "/x.mp3" in calls["cmd"]

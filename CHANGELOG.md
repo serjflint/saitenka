@@ -7,11 +7,46 @@ logs.
 
 ## [Unreleased]
 
-Cross-platform support (especially Windows), a streaming dictionary importer, diagnostics, and a broad
-hardening pass.
+## [0.3.0] - 2026-07-22
+
+Tooltip and scan-popup refinements, plus a large cross-platform test and IPC-refactor pass following the
+Windows end-to-end lessons: the mpv IPC layer now sits behind a small transport port with one contract
+suite that runs on every OS, so portability is provable and the past Windows regressions are pinned.
 
 ### Added
 
+- **Configurable dictionary tabs** — `show_dict_tabs` toggles the per-dictionary tab strip in tooltips.
+
+### Changed
+
+- **Compact nested scan popups and a smaller base tooltip** — the base tooltip scale is decoupled from
+  nested popups, and the dictionary-tab strip now renders inside nested scan popups too.
+
+### Development
+
+- **mpv IPC behind a `Transport` port** (Unix socket / Windows named pipe / an in-memory fake) with a
+  single cross-platform contract suite, and a pure, tested `build_mpv_argv` for the mpv launch command —
+  no user-visible change, but the two historical Windows bugs (the inert named pipe; the run-vs-attach
+  divergence) are now named regression cases.
+- **Cross-platform test harness runnable entirely on macOS** — a `use_platform()` fixture that drives
+  real Windows path resolution off-Windows (`platformdirs` `WIN_PD_OVERRIDE_*`), test-tier markers
+  (`windows_sim`/`slow`/`integration`/…) under `--strict-markers`, a fake-mpv launch smoke, and repo-wide
+  LF enforcement (`.gitattributes`/`.editorconfig`). Automated Windows/macOS/Linux CI is deferred (see
+  `ROADMAP.md`); the local gate remains `uv run poe all`.
+
+## [0.2.0] - 2026-07-22
+
+Cross-platform support (especially Windows), a streaming dictionary importer, diagnostics, a broad
+hardening pass, instant/progressive subtitle UX, and dictionary-classification fixes.
+
+### Added
+
+- **Instant subtitle navigation.** `Alt+←/→/↓` now draw the previous/next/replayed line in the overlay
+  immediately from a parsed cue index, then let mpv's seek catch the picture up behind it — the text no
+  longer waits on the video seek. Applies to external subtitle files (`--sub-file` / jimaku).
+- **Progressive `run` startup.** `run` draws plain subtitles the instant mpv is up and loads
+  dictionaries / coloring / mining in the background (with the loading spinner), like `attach` —
+  instead of blocking the window on the first-run dictionary cache build.
 - **Windows support, end-to-end.** The overlay now installs, sets up, and runs on Windows without
   hand-patching: mpv IPC over a Windows **named pipe**, plugin install into `%APPDATA%\mpv\scripts`
   (and mpv.net's), and a runtime that copes with a GUI-launched mpv's minimal `PATH`.
@@ -58,6 +93,10 @@ hardening pass.
 
 ### Fixed
 
+- **Pitch/frequency dictionaries with a wrong stored CRC-32 (e.g. NHK 2016 pitch) were misclassified
+  as definition dictionaries** and silently filed under `dicts`, so their pitch accents never rendered
+  (and `doctor` showed no pitch category). Classification now reads the term-meta bank CRC-tolerantly,
+  matching the loader.
 - **The overlay was inert on Windows** — nothing read the named pipe in steady state, so
   hover/tooltip/mining/translation and mpv-quit detection all silently failed even though `attach`
   reported success.

@@ -1,4 +1,4 @@
-"""Stage 15: `saitenka-overlay import-yomitan` — settings export → our config.
+"""Stage 15: `saitenka-overlay import-settings` — settings export → our config.
 
 Reads a Yomitan SETTINGS export (a small file — NOT the multi-GB collection export): the enabled
 dictionary list IN ORDER + per-dict enabled/priority, the mouse scan modifier, popup scale. Maps
@@ -59,6 +59,14 @@ def _make_dict_zip(path, kind, *, title=None):
                 "term_meta_bank_1.json",
                 json.dumps([["猫", "pitch", {"reading": "ねこ", "pitches": [{"position": 0}]}]]),
             )
+        elif (
+            kind == "pitch_with_headwords"
+        ):  # e.g. NHK 2016: pitch term_meta AND headword term_bank
+            zf.writestr("term_bank_1.json", json.dumps([["猫", "ねこ", "", "", 0, [], 1, ""]]))
+            zf.writestr(
+                "term_meta_bank_1.json",
+                json.dumps([["猫", "pitch", {"reading": "ねこ", "pitches": [{"position": 0}]}]]),
+            )
     return path
 
 
@@ -85,8 +93,28 @@ def test_classify_by_content(tmp_path):
     assert yi.classify_zip(_make_dict_zip(tmp_path / "a.zip", "dict")) == "dict"
     assert yi.classify_zip(_make_dict_zip(tmp_path / "b.zip", "freq")) == "freq"
     assert yi.classify_zip(_make_dict_zip(tmp_path / "c.zip", "pitch")) == "pitch"
+    # a pitch dict that ALSO ships headword term_banks (NHK 2016) is still pitch — the term_meta mode
+    # wins, so it lands in the `pitch` bucket and pitch accents render (regression: it was mis-filed as
+    # a definition dict because it had a term_bank).
+    assert yi.classify_zip(_make_dict_zip(tmp_path / "d.zip", "pitch_with_headwords")) == "pitch"
     # unreadable / missing / non-dictionary zip → safe default
     assert yi.classify_zip(tmp_path / "missing.zip") == "dict"
+
+
+def test_classify_tolerates_wrong_crc_pitch(tmp_path, monkeypatch):
+    """A pitch dict with a WRONG stored CRC-32 but intact deflate data — exactly what NHK 2016 ships —
+    must still classify as ``pitch``. A CRC-strict read raises BadZipFile, which would mis-file it as a
+    definition dict, so pitch accents never render (regression: NHK landed in ``dicts`` after import)."""
+    import binascii
+
+    real = binascii.crc32
+    with monkeypatch.context() as m:  # force a bogus stored CRC on every entry as it's written
+        m.setattr(zipfile, "crc32", lambda *a: (real(a[0]) ^ 0xFFFFFFFF) & 0xFFFFFFFF)
+        z = _make_dict_zip(tmp_path / "nhk.zip", "pitch")
+    # sanity: a strict read really does reject this zip (so the tolerant path is what saves it)
+    with zipfile.ZipFile(z) as zf, pytest.raises(zipfile.BadZipFile):
+        zf.read("term_meta_bank_1.json")
+    assert yi.classify_zip(z) == "pitch"
 
 
 def test_map_to_config_splits_lists_by_content(tmp_path):

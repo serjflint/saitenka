@@ -80,3 +80,50 @@ def relocate_dicts(
         text = cfg_file.read_text(encoding="utf-8")
         cfg_file.write_text(repoint_text(text, mappings), encoding="utf-8")
     return mappings
+
+
+def import_from_dir(
+    source_dir: str | Path, *, config: str | None = None, copy=shutil.copy2
+) -> list[tuple[str, str]]:
+    """Copy every Yomitan dictionary ``.zip`` under ``source_dir`` into the data dir, classify each by
+    CONTENT (dict/freq/pitch), and ADD it to the config. Non-Yomitan zips are skipped. Returns
+    ``(dest_path, kind)`` for each imported zip (empty when the dir has no Yomitan dictionaries)."""
+    from overlay.app.init_wizard import write_config
+    from overlay.app.yomitan_import import _index_title, classify_zip
+
+    src = Path(source_dir).expanduser()
+    if not src.is_dir():
+        raise NotADirectoryError(f"not a directory: {src}")
+    dest_dir = dicts_data_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    cfg = load_config(config)
+    lists = {k: list(cfg.get(k) or []) for k in _KINDS}
+    key_for = {"dict": "dicts", "freq": "freq", "pitch": "pitch"}
+    added: list[tuple[str, str]] = []
+    for zp in sorted(src.rglob("*.zip")):
+        if _index_title(zp) is None:  # not a Yomitan dictionary — skip it
+            continue
+        dest = dest_dir / zp.name
+        if not (dest.exists() and dest.stat().st_size == zp.stat().st_size):
+            copy(str(zp), str(dest))
+        raw = _new_raw(zp.name, dest_dir)  # config value, ~-relative when under $HOME
+        key = key_for[classify_zip(str(dest))]
+        # Reclassify across buckets, don't just append: a zip already listed under the WRONG kind
+        # (e.g. an NHK pitch dict mis-filed as `dicts` by an older classifier) is moved to its correct
+        # bucket, so re-running `copy-dicts` repairs the config instead of double-listing it.
+        for other in _KINDS:
+            if other != key and raw in lists[other]:
+                lists[other].remove(raw)
+        if raw not in lists[key]:
+            lists[key].append(raw)
+        added.append((str(dest), key))
+    if added:
+        # Set each bucket that has content OR was already present (so a bucket emptied by a
+        # reclassification is overwritten to [] instead of keeping its stale, now-wrong entry). Don't
+        # introduce empty freq/pitch keys the config never had.
+        merged = {**cfg}
+        for k in _KINDS:
+            if lists[k] or k in cfg:
+                merged[k] = lists[k]
+        write_config(merged, confirm=lambda _p: True, dest=config_path(config))
+    return added

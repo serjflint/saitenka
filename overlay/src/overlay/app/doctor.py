@@ -180,17 +180,33 @@ def check_dict_files() -> list[Check]:
                 checks.append(Check(f"{kind}", "ok", f"{kind}: {p.name}"))
             else:
                 # A "path" with no separator is almost always a bare Yomitan TITLE left in the config
-                # by `import-yomitan` without --scan-dir — the exact FileNotFoundError crash on Windows.
+                # by `import-settings` without --scan-dir — the exact FileNotFoundError crash on Windows.
                 looks_like_title = "/" not in str(path) and "\\" not in str(path)
                 hint = (
-                    " — looks like a Yomitan title, not a file; run `import-yomitan --scan-dir <dir>`"
+                    " — looks like a Yomitan title, not a file; run `import-settings --scan-dir <dir>`"
                     " or `import-dictionaries <export.json>`"
                     if looks_like_title
                     else ""
                 )
                 checks.append(Check(f"{kind}", "fail", f"{kind} not found: {path}{hint}"))
     if not checks:
-        if _jmdict_available():
+        # Nothing in the config — but the user may have run `copy-dicts` (which drops the .zip files
+        # into the data dir) while the config write landed elsewhere / got skipped. Point at those
+        # unregistered zips so "I copied my dicts but doctor sees none" has an obvious fix.
+        from overlay.app.config import dicts_data_dir
+
+        data = dicts_data_dir()
+        stray = sorted(data.glob("*.zip")) if data.exists() else []
+        if stray:
+            checks.append(
+                Check(
+                    "dicts",
+                    "warn",
+                    f"{len(stray)} dictionary .zip(s) sit in the data dir ({data}) but are NOT in "
+                    "overlay.toml — run `saitenka-overlay copy-dicts` (no args) to register them",
+                )
+            )
+        elif _jmdict_available():
             checks.append(
                 Check("dicts", "warn", "no dictionaries configured (JMdict fallback only)")
             )
@@ -200,7 +216,7 @@ def check_dict_files() -> list[Check]:
                     "dicts",
                     "warn",
                     "no dictionaries configured and no JMdict fallback installed — tooltips and mined "
-                    "cards will have no glosses. Import Yomitan dicts (`import-yomitan`), or add the "
+                    "cards will have no glosses. Import Yomitan dicts (`import-settings`), or add the "
                     "fallback: reinstall with the `jmdict` extra (e.g. `uv tool install "
                     "'saitenka-overlay[jmdict]'`).",
                 )
@@ -258,12 +274,21 @@ def check_sub_auto() -> Check:
 
 
 def check_dict_cache() -> Check:
-    if not CACHE_DIR.exists():
-        return Check("dict-cache", "warn", f"no dict cache yet at {CACHE_DIR} (built on first run)")
-    n = len(list(CACHE_DIR.glob("*.sqlite")))
-    if n == 0:
-        return Check("dict-cache", "warn", f"dict cache dir empty ({CACHE_DIR})")
-    return Check("dict-cache", "ok", f"{n} cached dict index(es) in {CACHE_DIR}")
+    """The BUILT SQLite index cache (``cache_dir()/dicts``) — a DIFFERENT directory from the
+    dictionary ``.zip`` store (``dicts_data_dir()``). It's auto-managed: empty until the first
+    playback indexes your dicts, so an empty cache is never an error, just "not built yet"."""
+    built = list(CACHE_DIR.glob("*.sqlite")) if CACHE_DIR.exists() else []
+    if built:
+        return Check("dict-cache", "ok", f"{len(built)} built dict index(es) in {CACHE_DIR}")
+    # Empty is normal: the index cache builds lazily on first playback. Say so plainly and make the
+    # zip-store-vs-index-cache distinction explicit — an empty `Cache\dicts` while `dicts` is full of
+    # zips is expected, not a conflict.
+    return Check(
+        "dict-cache",
+        "ok",
+        f"no built indexes yet in {CACHE_DIR} — this SQLite index cache builds on first playback "
+        "(it's separate from your dictionary .zip files in the data dir)",
+    )
 
 
 def check_fonts() -> Check:
@@ -276,6 +301,25 @@ def check_fonts() -> Check:
     if missing:
         return Check("fonts", "fail", f"vendored fonts missing: {missing}")
     return Check("fonts", "ok", f"vendored fonts present ({len(fonts.FONT_FILES)})")
+
+
+_TTS_HINTS = {
+    "win32": "Install the Japanese language pack: Settings → Time & Language → Language → add 日本語 "
+    "→ Language options → Speech.",
+    "darwin": "Add a Japanese voice: System Settings → Accessibility → Spoken Content → System Voice "
+    "→ Manage Voices (e.g. Kyoko).",
+}
+
+
+def check_tts() -> Check:
+    """The OS TTS the tooltip 🔊 button uses to pronounce a scanned word. When no JAPANESE voice is
+    available the button is hidden (it would silently do nothing) — surface why so it's not a mystery."""
+    from overlay.app.media import tts_available
+
+    if tts_available():
+        return Check("tts", "ok", "Japanese TTS voice available — 🔊 speaks scanned words")
+    hint = _TTS_HINTS.get(sys.platform, "Install espeak (e.g. `apt install espeak`).")
+    return Check("tts", "warn", f"no Japanese TTS voice — the 🔊 button is hidden. {hint}")
 
 
 def check_anki(deck: str, model: str) -> Check:
@@ -308,10 +352,22 @@ def check_free_threading() -> Check:
     ft_build = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
     gil_off = not getattr(sys, "_is_gil_enabled", lambda: True)()
     if not ft_build:
+        if sys.platform == "win32":
+            # fugashi (the MeCab tokenizer) ships NO free-threaded Windows wheels yet, so a 3.14t
+            # install builds it from source and fails (needs a system MeCab). Regular 3.14 is the
+            # working config here — not a problem the user should "fix". Green, with a note.
+            return Check(
+                "free-threading",
+                "ok",
+                "standard 3.14 build — fine. For the ~3.8x render win on Windows, install the MSVC++ "
+                "Build Tools (14+) and MeCab at C:\\mecab, then reinstall on 3.14t (fugashi builds from "
+                "source; there are no 3.14t wheels yet)",
+            )
         return Check(
             "free-threading",
             "warn",
-            "not a free-threaded (3.14t) build — render won't parallelise (~3.8× lost)",
+            "not a free-threaded (3.14t) build — render won't parallelise (~3.8× lost). Reinstall on "
+            "3.14t: `uv tool install --python 3.14+freethreaded --reinstall 'saitenka-overlay[full]'`",
         )
     if not gil_off:
         return Check(
@@ -473,6 +529,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_dict_cache(),
         check_sub_auto(),
         check_fonts(),
+        check_tts(),
         check_anki(deck, model),
         check_mpv_ipc(),
         check_plugin(),
@@ -484,18 +541,32 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
     return Report(checks)
 
 
-_GLYPH = {"ok": "\033[32m✓\033[0m", "warn": "\033[33m!\033[0m", "fail": "\033[31m✗\033[0m"}
+# On Windows keep it PLAIN ASCII — no ANSI colours, no ✓/✗ glyphs. The classic console mangles both,
+# and forcing a UTF-8 codepage to render them breaks interactive typing. POSIX terminals get the
+# coloured version.
+_WIN = sys.platform == "win32"
+_GLYPH = (
+    {"ok": "[ok] ", "warn": "[!]  ", "fail": "[x]  "}
+    if _WIN
+    else {"ok": "\033[32m✓\033[0m", "warn": "\033[33m!\033[0m", "fail": "\033[31m✗\033[0m"}
+)
 
 
 def print_report(report: Report) -> None:  # pragma: no cover — pure formatting/IO
-    print("\033[1;36m[saitenka doctor]\033[0m")
+    print("[saitenka doctor]" if _WIN else "\033[1;36m[saitenka doctor]\033[0m")
     for c in report.checks:
         print(f"  {_GLYPH.get(c.status, '?')} {c.detail}")
     s = report.counts
-    print(
-        f"\nSummary: \033[32m{s['ok']} ok\033[0m · "
-        f"\033[33m{s['warn']} warn\033[0m · \033[31m{s['fail']} fail\033[0m"
-    )
-    print("Healthy ✅" if report.exit_code == 0 else "Problems found — see ✗ above ❌")
+    if _WIN:
+        print(f"\nSummary: {s['ok']} ok / {s['warn']} warn / {s['fail']} fail")
+    else:
+        print(
+            f"\nSummary: \033[32m{s['ok']} ok\033[0m · "
+            f"\033[33m{s['warn']} warn\033[0m · \033[31m{s['fail']} fail\033[0m"
+        )
+    if report.exit_code == 0:
+        print("Healthy" if _WIN else "Healthy ✅")
+    else:
+        print("Problems found - see [x] above" if _WIN else "Problems found — see ✗ above ❌")
     if report.exit_code != 0:
         print("Tip: `saitenka-overlay report` bundles this + logs into a zip for a bug report.")
