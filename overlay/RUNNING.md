@@ -40,6 +40,22 @@ With that in place the full run is just the video path — every `--dict/--freq/
 default comes from the config (an explicit CLI flag still overrides it). Nothing is rebuilt at play
 time; `run`/`attach` only open the DB. `saitenka-overlay doctor` lists what's imported.
 
+### Migrating from an older (zip-path) config
+
+Earlier versions listed dictionary **zip paths** in `dicts`/`freq`/`pitch` and rebuilt a per-zip cache
+on every launch (the `copy-dicts` era). To move to the consolidated DB, just run `import` once against
+the folder those zips already live in:
+
+```bash
+saitenka-overlay import ~/yomitan-dicts    # builds the DB and rewrites the config to titles
+```
+
+That's the whole migration — `import` overwrites the old path entries with the imported **titles**, so
+you don't edit the config by hand. Afterwards `doctor` flags the now-unused pre-consolidation files
+(the old per-zip cache and any copied zips) as safe to delete; nothing is removed automatically, and
+your original `~/yomitan-dicts` zips are never touched. The `copy-dicts` command is gone — runtime no
+longer reads the zips, so there's nothing to relocate out of a protected folder.
+
 ## 2. Quick smoke run (no Anki, generated clip)
 
 ```bash
