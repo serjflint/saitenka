@@ -7,11 +7,19 @@ logs.
 
 ## [Unreleased]
 
-Cross-platform support (especially Windows), a streaming dictionary importer, diagnostics, and a broad
-hardening pass.
+## [0.2.0] - 2026-07-22
+
+Cross-platform support (especially Windows), a streaming dictionary importer, diagnostics, a broad
+hardening pass, instant/progressive subtitle UX, and dictionary-classification fixes.
 
 ### Added
 
+- **Instant subtitle navigation.** `Alt+←/→/↓` now draw the previous/next/replayed line in the overlay
+  immediately from a parsed cue index, then let mpv's seek catch the picture up behind it — the text no
+  longer waits on the video seek. Applies to external subtitle files (`--sub-file` / jimaku).
+- **Progressive `run` startup.** `run` draws plain subtitles the instant mpv is up and loads
+  dictionaries / coloring / mining in the background (with the loading spinner), like `attach` —
+  instead of blocking the window on the first-run dictionary cache build.
 - **Windows support, end-to-end.** The overlay now installs, sets up, and runs on Windows without
   hand-patching: mpv IPC over a Windows **named pipe**, plugin install into `%APPDATA%\mpv\scripts`
   (and mpv.net's), and a runtime that copes with a GUI-launched mpv's minimal `PATH`.
@@ -58,6 +66,10 @@ hardening pass.
 
 ### Fixed
 
+- **Pitch/frequency dictionaries with a wrong stored CRC-32 (e.g. NHK 2016 pitch) were misclassified
+  as definition dictionaries** and silently filed under `dicts`, so their pitch accents never rendered
+  (and `doctor` showed no pitch category). Classification now reads the term-meta bank CRC-tolerantly,
+  matching the loader.
 - **The overlay was inert on Windows** — nothing read the named pipe in steady state, so
   hover/tooltip/mining/translation and mpv-quit detection all silently failed even though `attach`
   reported success.
