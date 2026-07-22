@@ -7,6 +7,33 @@ logs.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-22
+
+Tooltip and scan-popup refinements, plus a large cross-platform test and IPC-refactor pass following the
+Windows end-to-end lessons: the mpv IPC layer now sits behind a small transport port with one contract
+suite that runs on every OS, so portability is provable and the past Windows regressions are pinned.
+
+### Added
+
+- **Configurable dictionary tabs** — `show_dict_tabs` toggles the per-dictionary tab strip in tooltips.
+
+### Changed
+
+- **Compact nested scan popups and a smaller base tooltip** — the base tooltip scale is decoupled from
+  nested popups, and the dictionary-tab strip now renders inside nested scan popups too.
+
+### Development
+
+- **mpv IPC behind a `Transport` port** (Unix socket / Windows named pipe / an in-memory fake) with a
+  single cross-platform contract suite, and a pure, tested `build_mpv_argv` for the mpv launch command —
+  no user-visible change, but the two historical Windows bugs (the inert named pipe; the run-vs-attach
+  divergence) are now named regression cases.
+- **Cross-platform test harness runnable entirely on macOS** — a `use_platform()` fixture that drives
+  real Windows path resolution off-Windows (`platformdirs` `WIN_PD_OVERRIDE_*`), test-tier markers
+  (`windows_sim`/`slow`/`integration`/…) under `--strict-markers`, a fake-mpv launch smoke, and repo-wide
+  LF enforcement (`.gitattributes`/`.editorconfig`). Automated Windows/macOS/Linux CI is deferred (see
+  `ROADMAP.md`); the local gate remains `uv run poe all`.
+
 ## [0.2.0] - 2026-07-22
 
 Cross-platform support (especially Windows), a streaming dictionary importer, diagnostics, a broad
