@@ -75,8 +75,14 @@ packages = ["src/overlay"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers"
 markers = [
     "live: real-mpv smoke needing a display (opt-in via SAITENKA_LIVE=1; run `poe smoke-live`)",
+    "windows_sim: Windows behaviour SIMULATED on the host (use_platform / pyfakefs OSType.WINDOWS). Runs everywhere by default — a fast honesty label for what is faked vs. really executed; NOT a substitute for the real-Windows executor (R5).",
+    "slow: slower than the fast default loop; excluded from `poe test`, run explicitly or in CI.",
+    "integration: crosses a real boundary (subprocess / socket / filesystem); excluded from `poe test`.",
+    "requires_display: needs a real GUI/display; excluded from `poe test`.",
+    "e2e: full-stack end-to-end; excluded from `poe test`.",
 ]
 
 [tool.ruff]
@@ -131,7 +137,8 @@ reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers imp
 [tool.poe.tasks]
 lint = { shell = "uv run --extra full ruff check --fix src tests examples && uv run --extra full ruff format src tests examples" }
 types = { shell = "uv run --extra full mypy && uv run --extra full pyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
-test = "uv run --extra full pytest -q -n auto"
+# Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
+test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e)'" }
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q" }
 cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"

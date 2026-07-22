@@ -34,6 +34,7 @@ def test_bake_bin_rewrites_only_the_first_declaration():
     assert out.count("local SAITENKA_BIN = [[/abs/saitenka-overlay]]") == 1
 
 
+@pytest.mark.windows_sim
 def test_default_ipc_path_windows_is_a_named_pipe(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     assert default_ipc_path("reader-abc") == r"\\.\pipe\saitenka-reader-abc"

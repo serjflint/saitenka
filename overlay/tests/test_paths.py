@@ -4,7 +4,24 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+from util import use_platform
+
 from overlay.app import paths
+
+
+@pytest.mark.windows_sim
+def test_cache_dir_is_local_appdata_not_roaming_on_windows():
+    """The dict cache (multi-GB) must resolve under %LOCALAPPDATA% (Local), NEVER %APPDATA% (Roaming):
+    a Roaming cache makes Windows sync gigabytes of dictionaries into the roaming profile on every
+    login. ``use_platform`` drives the REAL platformdirs Windows resolver, so a stray ``roaming=True``
+    or a reroute through %APPDATA% (e.g. onto ``mpv_config_dir``, which IS Roaming) would fail here."""
+    with use_platform("win32", userprofile=r"C:\Users\Leo"):
+        cache = str(paths.cache_dir())
+        # asymmetry we rely on: our cache is Local; mpv's own config is Roaming — must not collapse.
+        assert paths.mpv_config_dir() != paths.cache_dir()
+    assert r"\AppData\Local" in cache
+    assert r"\AppData\Roaming" not in cache
 
 
 def test_expand_user_and_env(monkeypatch, tmp_path):
@@ -32,6 +49,7 @@ def test_pick_native_used_for_fresh_install(monkeypatch, tmp_path):
     assert paths._pick("SAITENKA_UNSET_XYZ", native, legacy) == native
 
 
+@pytest.mark.windows_sim
 def test_pick_windows_ignores_legacy_config(monkeypatch, tmp_path):
     # A stray ~/.config/saitenka from an earlier build must NOT win on Windows — %LOCALAPPDATA% only.
     monkeypatch.setattr(sys, "platform", "win32")
@@ -46,6 +64,7 @@ def test_mpv_config_dir_respects_mpv_home(monkeypatch, tmp_path):
     assert paths.mpv_config_dir() == tmp_path / "mpvhome"
 
 
+@pytest.mark.windows_sim
 def test_mpv_config_dir_windows_uses_appdata(monkeypatch, tmp_path):
     monkeypatch.delenv("MPV_HOME", raising=False)
     monkeypatch.setattr(sys, "platform", "win32")
@@ -60,6 +79,7 @@ def test_mpv_config_dir_posix_uses_xdg(monkeypatch, tmp_path):
     assert paths.mpv_config_dir() == tmp_path / "cfg" / "mpv"
 
 
+@pytest.mark.windows_sim
 def test_mpv_scripts_dirs_includes_mpvnet_on_windows(monkeypatch, tmp_path):
     monkeypatch.delenv("MPV_HOME", raising=False)
     monkeypatch.setattr(sys, "platform", "win32")
