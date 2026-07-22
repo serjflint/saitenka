@@ -370,6 +370,14 @@ class Reader:
             self.ipc.command("observe_property", i, name)
             self._observed[name] = self._get(name)  # initial state (pre-observe)
         self._observing = True
+        # Seed values are the first sign the mpv→client read path works: a None osd-dimensions here
+        # (with mpv clearly running) means get_property replies aren't coming back — the pipe read is
+        # dead, so nothing will ever draw. Logged so it lands in overlay.log / report.
+        log.info(
+            "observing mpv props; seed osd-dimensions=%r sub-text=%r",
+            self._observed.get("osd-dimensions"),
+            self._observed.get("sub-text"),
+        )
 
     def _prop(self, name: str):
         """Latest value of a property: the observed (event-driven) state when observing, else a
@@ -452,6 +460,9 @@ class Reader:
         ox = (self.osd[0] - sr.image.width) // 2
         oy = self.osd[1] - sr.image.height - self.bottom_margin
         self.sub_origin = (ox, oy)
+        if not getattr(self, "_first_sub_logged", False):
+            self._first_sub_logged = True
+            log.info("first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy)
         self.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
     # --- hover --------------------------------------------------------------------------------
@@ -1758,6 +1769,7 @@ class Reader:
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
             self._reconcile_sub_text(self._prop("sub-text") or "")
+            self._maybe_log_stall()
             # progressive startup: inject background-loaded deps (once), else animate the spinner
             if self._pending_deps is not None:
                 deps, self._pending_deps = self._pending_deps, None
@@ -1777,6 +1789,26 @@ class Reader:
             return True
         except (OSError, ValueError):
             return False
+
+    def _maybe_log_stall(self) -> None:
+        """One-time loud diagnostic for 'mpv plays but nothing draws': if several seconds pass with no
+        subtitle text ever observed, mpv's IPC replies/events aren't reaching us. The byte count from
+        the reader thread distinguishes the causes — 0 bytes means the pipe read direction is dead (the
+        classic Windows named-pipe failure); >0 bytes means reads work but the subtitle track/property
+        never produced text. Playback continues regardless, so this only lives in overlay.log / report."""
+        if getattr(self, "_stall_warned", False) or self.sub_text:
+            return
+        started = getattr(self, "_run_started", None)
+        if started is None or time.monotonic() - started < 4.0:
+            return
+        self._stall_warned = True
+        log.warning(
+            "no subtitle text %.0fs after start (bytes from mpv=%d). Nothing drawing usually means "
+            "mpv's IPC replies aren't reaching the overlay (bytes=0 → dead pipe read) or no JP "
+            "subtitle track/text was selected (bytes>0).",
+            time.monotonic() - started,
+            getattr(self.ipc, "_bytes_read", -1),
+        )
 
     def _seed_mined(self) -> None:
         self._miner.seed_mined()
@@ -1920,6 +1952,8 @@ class Reader:
         self.start_prefetch()
         mode = "free-threaded (GIL off)" if _gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
+        self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
+        self._stall_warned = False
         while self.poll_once():
             time.sleep(interval)
 

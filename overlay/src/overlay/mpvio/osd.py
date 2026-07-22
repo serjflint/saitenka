@@ -13,6 +13,20 @@ from overlay.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
 
+# Overlay ids we've already warned about, so a per-tick redraw (spinner/subtitle) can't flood the log.
+_warned_oids: set[int] = set()
+
+
+def _warn_overlay_add(oid: int, w: int, h: int, res: dict) -> None:
+    """Log (once per overlay id) when mpv rejects an ``overlay-add`` — a NON-empty ``error`` other than
+    ``success``. This separates 'mpv refused to draw' (bad format/size, unsupported on this build) from
+    the IPC-timeout case the transport layer logs; together they pinpoint a 'plays but nothing draws'."""
+    err = res.get("error")
+    if err in (None, "success") or oid in _warned_oids:
+        return
+    _warned_oids.add(oid)
+    log.warning("overlay-add rejected for oid=%d (%dx%d): %s", oid, w, h, res)
+
 
 # Precomputed premultiply table — _PREMUL_LUT[alpha, value] == value * alpha // 255.
 # One flat np.take replaces the uint16 widen+multiply+divide per pixel (~64 KB, fits in L2).
@@ -75,9 +89,9 @@ class Overlay:
         data, w, h, stride = to_bgra(img)
         path = self._tempfile(oid)
         path.write_bytes(data)
-        return self.ipc.command(
-            "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride
-        )
+        res = self.ipc.command("overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride)
+        _warn_overlay_add(oid, w, h, res)
+        return res
 
     def show_bgra(self, bgra: np.ndarray, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         """Upload an already-BGRA (H, W, 4) array — skips the RGBA→BGRA premultiply (fast scroll)."""
@@ -86,9 +100,9 @@ class Overlay:
         h, w = buf.shape[:2]
         path = self._tempfile(oid)
         path.write_bytes(buf.tobytes())
-        return self.ipc.command(
-            "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4
-        )
+        res = self.ipc.command("overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
+        _warn_overlay_add(oid, w, h, res)
+        return res
 
     def hide(self, oid: int = 0) -> dict:
         oid = self._oid(oid)
