@@ -470,27 +470,21 @@ def run(
     # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
     # track select failures) is otherwise invisible in a bug report. Overwritten each run.
     mpv_log = cache_dir() / "mpv.log"
-    cmd = [
+    from overlay.mpvio.launch import build_mpv_argv
+
+    cmd = build_mpv_argv(
         mpv_bin,
-        f"--input-ipc-server={sock}",
-        f"--log-file={mpv_log}",
-        "--force-window=yes",
-        "--keep-open=yes",
-        f"--slang={slang}",
-        "--sub-visibility=no",
-        "--osd-level=0",
-        "--pause" if screenshot else "--loop-file=inf",
-        f"--start={start}",
-        str(video_path),
-    ]
-    if sub_path:
-        cmd.insert(-1, f"--sub-file={sub_path}")
-    if en_sub_path:
-        cmd.insert(-1, f"--sub-file={en_sub_path}")  # loaded as a 2nd track → secondary/translation
-    if not use_config:
-        cmd.insert(1, "--no-config")
-    if fullscreen:
-        cmd.insert(1, "--fullscreen")
+        sock,
+        mpv_log,
+        video_path,
+        slang=slang,
+        start=start,
+        screenshot=bool(screenshot),
+        sub_path=sub_path,
+        en_sub_path=en_sub_path,
+        use_config=use_config,
+        fullscreen=fullscreen,
+    )
     print("launching:", " ".join(cmd))
     proc = subprocess.Popen(cmd)
 
