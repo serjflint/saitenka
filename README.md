@@ -10,9 +10,9 @@ the sentence — audio, screenshot, reading, pitch, frequency — straight into 
 drawn into mpv's *own* video surface, so there's no second window and none of the Windows
 overlay/fullscreen breakage that plagues external overlays.
 
-![Saitenka's in-mpv hover tooltip: the word 本 highlighted in the subtitle line, with its Yomitan-style multi-dictionary tooltip open above.](docs/screenshot-hover.png)
+![Saitenka's in-mpv overlay over a frame of the 1917 film Namakura Gatana: the word 読む highlighted in the subtitle line, with its multi-definition Yomitan-style dictionary tooltip open beside it.](docs/screenshot-hover.jpg)
 
-<sub>Saitenka's own overlay in demo mode — a synthetic clip and example sentence, no third-party video. The dictionary gloss is from [JMdict](https://www.edrdg.org/) © EDRDG, used under the [EDRDG licence](https://www.edrdg.org/edrdg/licence.html) (CC BY-SA).</sub>
+<sub>Saitenka running on a public-domain still — *[Namakura Gatana](https://archive.org/details/kouichi-junichi-namakura-gatana-1917-4-minute-restored-version)* (なまくら刀, 1917; dir. Kōuchi Jun'ichi), restored by the National Film Archive of Japan. Open-license dictionary only ([Jitendex](https://jitendex.org), CC BY-SA); the subtitle is a demo line.</sub>
 
 - **再点火 = "re-ignition"** — built to make picking study back up frictionless after a long break.
 - Local-first and grounded: readings and pitch always come from dictionaries, never a language model.
