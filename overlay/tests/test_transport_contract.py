@@ -1,42 +1,31 @@
 """Transport contract for ``MpvIPC`` — the invariants EVERY transport (unix socket, Windows named
 pipe, in-memory fake) must satisfy.
 
-This is **R1 step 1 (test-first)**: it pins today's behaviour BEFORE the port/adapter refactor, so the
-refactor is provably behaviour-preserving — after it, the same assertions get parametrised over the
-``Fake``/``Unix``/``NamedPipe`` adapters. It drives the framing logic directly (``_feed``) and the
-reader thread over ``socket.socketpair()`` — which is **cross-platform** (Windows emulates it over
-AF_INET), so unlike ``test_stage9_ipc`` (AF_UNIX server, POSIX-only) this suite also runs on the
-Windows executor and exercises the shared reader/framing code there.
+Post-R1-refactor this is **parametrised over the adapters**: a real ``socket.socketpair()`` wrapped in
+``UnixSocketTransport`` (cross-platform — Windows emulates socketpair over AF_INET, so this runs on the
+Windows executor too, unlike the AF_UNIX-bound ``test_stage9_ipc``) AND the in-memory ``FakeTransport``
+(deterministic, no OS handle). The reader-thread cases run against both; the pure framing cases drive
+``_feed`` directly.
 
 Two historical Windows bugs are encoded as named, non-regressable cases:
   * ``reader_thread_drains_events_without_manual_pump`` — the single-threaded ``pump()`` was a NO-OP on
     the Windows named pipe, so nothing ever read it in steady state.
   * ``second_attached_client_independently_sees_events`` — the run-vs-attach divergence, where the
     attach path's reader silently delivered nothing.
-
-(It reaches into ``_sock``/``_feed``/``_start_reader``/``_closed`` — the very seam R1 formalises into a
-``Transport`` protocol; the private access is temporary scaffolding the refactor replaces.)
 """
 
 from __future__ import annotations
 
+import json
 import socket
+import threading
 import time
 
 import pytest
+from util import FakeTransport
 
 from overlay.mpvio.ipc import MpvIPC
-
-
-def _client() -> tuple[MpvIPC, socket.socket]:
-    """An ``MpvIPC`` wired to one end of a socketpair with its reader running — what ``connect()`` does
-    minus the OS-specific dialling. Returns ``(ipc, server_end)`` where the caller writes mpv's side to
-    ``server_end``."""
-    a, b = socket.socketpair()
-    ipc = MpvIPC("unused")
-    ipc._sock = a
-    ipc._start_reader()
-    return ipc, b
+from overlay.mpvio.transport import UnixSocketTransport
 
 
 def _drain_until(ipc: MpvIPC, deadline: float = 1.0) -> list[dict]:
@@ -88,66 +77,163 @@ def test_feed_skips_garbled_line_without_killing_the_stream():
     assert [e["event"] for e in ipc.drain_events()] == ["ok"]
 
 
-# --- reader thread over a real (cross-platform) transport ----------------------------------------
+# --- a link over one transport, for the reader-thread contract -----------------------------------
 
 
-def test_reader_thread_drains_events_without_manual_pump():
+class _Link:
+    """One connected client for the contract: ``ipc`` is the ``MpvIPC`` under test; the test plays
+    mpv's server side via ``push`` (server→client bytes), ``next_command`` (read a line the client
+    wrote), and ``disconnect`` (EOF)."""
+
+    def __init__(self, ipc: MpvIPC, push, next_line, disconnect) -> None:
+        self.ipc = ipc
+        self._push = push
+        self._next_line = next_line
+        self._disconnect = disconnect
+
+    def push(self, data: bytes) -> None:
+        self._push(data)
+
+    def disconnect(self) -> None:
+        self._disconnect()
+
+    def next_command(self, deadline: float = 1.0) -> dict:
+        """Block until the client has written a full ``\\n``-terminated line; return it parsed."""
+        end = time.monotonic() + deadline
+        while time.monotonic() < end:
+            line = self._next_line()
+            if line:
+                return json.loads(line)
+            time.sleep(0.005)
+        raise AssertionError("client wrote no command line")
+
+
+@pytest.fixture(params=["socketpair", "fake"])
+def make_link(request):
+    """Factory (call once per client) building an independent ``_Link`` over the parametrised
+    transport, so the whole reader-thread contract runs against a real cross-platform socket AND the
+    in-memory fake. Tears down every client + server it created."""
+    made: list = []
+
+    def factory() -> _Link:
+        if request.param == "socketpair":
+            client, server = socket.socketpair()
+            server.setblocking(False)
+            transport = UnixSocketTransport(client)
+            buf = bytearray()
+
+            def push(data, _srv=server):
+                _srv.sendall(data)
+
+            def next_line(_srv=server, _buf=buf):
+                try:
+                    while True:
+                        chunk = _srv.recv(4096)
+                        if not chunk:
+                            break
+                        _buf.extend(chunk)
+                except BlockingIOError:
+                    pass
+                if b"\n" in _buf:
+                    line, _, rest = bytes(_buf).partition(b"\n")
+                    _buf.clear()
+                    _buf.extend(rest)
+                    return line
+                return None
+
+            def disconnect(_srv=server):
+                _srv.close()
+
+            extra = server
+        else:
+            fake = FakeTransport()
+            transport = fake
+            pos = [0]
+
+            def push(data, _f=fake):
+                _f.feed(data)
+
+            def next_line(_f=fake, _pos=pos):
+                data = bytes(_f.sent)
+                nl = data.find(b"\n", _pos[0])
+                if nl == -1:
+                    return None
+                line = data[_pos[0] : nl]
+                _pos[0] = nl + 1
+                return line
+
+            def disconnect(_f=fake):
+                _f.close()
+
+            extra = None
+
+        ipc = MpvIPC("unused")
+        ipc._transport = transport
+        ipc._start_reader()
+        made.append((ipc, extra))
+        return _Link(ipc, push, next_line, disconnect)
+
+    yield factory
+    for ipc, extra in made:
+        ipc.close()
+        if extra is not None:
+            extra.close()
+
+
+# --- reader thread over each transport -----------------------------------------------------------
+
+
+def test_reader_thread_drains_events_without_manual_pump(make_link):
     """REGRESSION: steady state sends no commands, so the reader thread must collect events off the
     transport on its own. The old single-threaded ``pump()`` was a NO-OP on the Windows pipe → hover /
-    mining / quit-detection were all dead even though attach 'succeeded'."""
-    ipc, server = _client()
-    try:
-        server.sendall(b'{"event":"property-change","name":"sub-text","data":"x"}\n')
-        evs = _drain_until(ipc)
-        assert [e["name"] for e in evs if e.get("event") == "property-change"] == ["sub-text"]
-        ipc.pump()  # not disconnected → must not raise
-    finally:
-        server.close()
-        ipc.close()
+    mining / quit-detection were dead even though attach 'succeeded'."""
+    link = make_link()
+    link.push(b'{"event":"property-change","name":"sub-text","data":"x"}\n')
+    evs = _drain_until(link.ipc)
+    assert [e["name"] for e in evs if e.get("event") == "property-change"] == ["sub-text"]
+    link.ipc.pump()  # not disconnected → must not raise
 
 
-def test_command_reply_returns_while_events_interleave():
-    """A command reply must come back even when async events are interleaved ahead of it on the
-    stream (single-flight reply channel vs. the event list)."""
-    ipc, server = _client()
-    try:
-        server.sendall(
-            b'{"event":"property-change","name":"mouse-pos","data":{"x":1}}\n'
-            b'{"data":0.0,"request_id":0,"error":"success"}\n'
-        )
-        reply = ipc.command("get_property", "time-pos")
-        assert reply.get("error") == "success"
-        assert any(e.get("name") == "mouse-pos" for e in _drain_until(ipc))
-    finally:
-        server.close()
-        ipc.close()
+def test_command_reply_returns_amid_interleaved_events(make_link):
+    """A command reply must come back even when async events precede it on the stream. mpv only replies
+    AFTER receiving the command, so the test drives that ordering (deterministic on both transports)."""
+    link = make_link()
+    link.push(
+        b'{"event":"property-change","name":"mouse-pos","data":{"x":1}}\n'
+    )  # event ahead of reply
+    out: dict = {}
+
+    def call():
+        out["reply"] = link.ipc.command("get_property", "time-pos", timeout=2.0)
+
+    t = threading.Thread(target=call)
+    t.start()
+    cmd = link.next_command()  # mpv receives the command...
+    assert cmd["command"] == ["get_property", "time-pos"]
+    link.push(b'{"data":0.0,"request_id":0,"error":"success"}\n')  # ...then replies
+    t.join(3)
+    assert out["reply"].get("error") == "success"
+    assert any(e.get("name") == "mouse-pos" for e in _drain_until(link.ipc))
 
 
-def test_second_attached_client_independently_sees_events():
+def test_second_attached_client_independently_sees_events(make_link):
     """REGRESSION (run-vs-attach): a second client attached to mpv must independently receive its own
     events. Two clients, each on its own transport, each drains what its server side pushed — neither
     silently delivers nothing."""
-    a_ipc, a_srv = _client()
-    b_ipc, b_srv = _client()
-    try:
-        a_srv.sendall(b'{"event":"property-change","name":"pause","data":true}\n')
-        b_srv.sendall(b'{"event":"property-change","name":"sub-text","data":"y"}\n')
-        assert any(e.get("name") == "pause" for e in _drain_until(a_ipc))
-        assert any(e.get("name") == "sub-text" for e in _drain_until(b_ipc))
-    finally:
-        a_srv.close()
-        b_srv.close()
-        a_ipc.close()
-        b_ipc.close()
+    a = make_link()
+    b = make_link()
+    a.push(b'{"event":"property-change","name":"pause","data":true}\n')
+    b.push(b'{"event":"property-change","name":"sub-text","data":"y"}\n')
+    assert any(e.get("name") == "pause" for e in _drain_until(a.ipc))
+    assert any(e.get("name") == "sub-text" for e in _drain_until(b.ipc))
 
 
-def test_close_unblocks_reader_and_command_reports_disconnect():
+def test_close_unblocks_reader_and_command_reports_disconnect(make_link):
     """EOF (mpv quit / pipe closed) must unblock the reader, make ``pump()`` raise, and make a
     subsequent ``command()`` return a disconnect result rather than hang."""
-    ipc, server = _client()
-    server.close()  # EOF on the client's transport
-    _wait_closed(ipc)
+    link = make_link()
+    link.disconnect()  # EOF on the client's transport
+    _wait_closed(link.ipc)
     with pytest.raises(OSError):
-        ipc.pump()
-    assert ipc.command("get_property", "anything").get("error") == "disconnected"
-    ipc.close()
+        link.ipc.pump()
+    assert link.ipc.command("get_property", "anything").get("error") == "disconnected"

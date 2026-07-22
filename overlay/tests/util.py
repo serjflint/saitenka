@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -44,7 +45,7 @@ def assert_golden(img: Image.Image, name: str, tol: float = 2.0) -> None:
 
 @contextlib.contextmanager
 def use_platform(platform: str, *, userprofile: str = r"C:\Users\Tester"):
-    """Make path-resolution code see ``platform`` — flipping ALL THREE layers that matter, because
+    r"""Make path-resolution code see ``platform`` — flipping ALL THREE layers that matter, because
     patching ``sys.platform`` alone lies: ``platformdirs`` binds its OS class at *import* time from
     the real ``sys.platform``, so ``config_dir``/``data_dir``/``cache_dir`` would keep returning the
     host's dirs no matter what ``sys.platform`` says.
@@ -125,3 +126,40 @@ class FakeIPC:
     def drain_events(self) -> list[dict]:
         evs, self.events = self.events, []
         return evs
+
+
+class FakeTransport:
+    """In-memory ``Transport`` double (see ``overlay.mpvio.transport.Transport``) for the transport
+    contract suite: the 'server' side pushes bytes to the client with :meth:`feed`; bytes the client
+    writes are captured in :attr:`sent`. Blocking :meth:`read` releases on ``feed``/``close``, so it
+    drives ``MpvIPC``'s reader thread exactly like a real socket — deterministically, with no OS handle
+    (identical behaviour on every platform, unlike a real named pipe)."""
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._inbox = bytearray()  # server → client (what the reader will read)
+        self.sent = bytearray()  # client → server (assert on this)
+        self._closed = False
+
+    def feed(self, data: bytes) -> None:
+        """Server side: make ``data`` available to the client's next ``read``(s)."""
+        with self._cond:
+            self._inbox.extend(data)
+            self._cond.notify_all()
+
+    def read(self, n: int) -> bytes:
+        with self._cond:
+            while not self._inbox and not self._closed:
+                self._cond.wait()
+            chunk = bytes(self._inbox[:n])
+            del self._inbox[:n]
+            return chunk  # b"" only once closed AND drained → EOF
+
+    def write(self, data: bytes) -> None:
+        with self._cond:
+            self.sent.extend(data)
+
+    def close(self) -> None:
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()

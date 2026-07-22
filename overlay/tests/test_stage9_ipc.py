@@ -192,10 +192,12 @@ def test_to_bgra_array_byte_identical_to_reference():
 def _pair():
     import socket as _s
 
+    from overlay.mpvio.transport import UnixSocketTransport
+
     a, b = _s.socketpair()
     ipc = MpvIPC("unused")
-    ipc._sock = a
-    ipc._start_reader()  # background reader consumes the injected socket (as connect() would)
+    ipc._transport = UnixSocketTransport(a)
+    ipc._start_reader()  # background reader consumes the injected transport (as connect() would)
     return ipc, b
 
 
