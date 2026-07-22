@@ -1,0 +1,16 @@
+# EditorConfig — https://editorconfig.org — keeps line endings / whitespace consistent across editors,
+# matching .gitattributes so a mac-authored file doesn't drift on another OS.
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+[*.{cmd,bat}]
+end_of_line = crlf
+
+[*.md]
+# Markdown hard line breaks are two trailing spaces — don't strip them.
+trim_trailing_whitespace = false
