@@ -132,19 +132,28 @@ def do_install(tools: list[str], dry_run: bool, confirm: Confirm) -> int:
 # --- step glue (mock points; the CLI subcommands do the real work) --------------------------
 
 
-def _run_doctor() -> None:  # pragma: no cover — thin glue over the unit-tested doctor
+def _run_doctor():  # pragma: no cover — thin glue over the unit-tested doctor
     from overlay.app.doctor import print_report, run_checks
 
-    print_report(run_checks())
+    # summary=True collapses the ✓ wall so the wizard stays readable; every warning/failure still
+    # prints in full. Returns the report so the caller can branch on the pass/fail outcome.
+    report = run_checks()
+    print_report(report, summary=True)
+    return report
 
 
 def _run_init(confirm: Confirm) -> None:  # pragma: no cover — thin glue over init_wizard
-    from overlay.app.init_wizard import _maybe_store_jimaku_key, dumps_toml, write_config
+    from overlay.app.init_wizard import (
+        DEFAULT_CONFIG,
+        _maybe_store_jimaku_key,
+        dumps_toml,
+        write_config,
+    )
     from overlay.mpvio.discover import find_mpv
 
     mpv = find_mpv()
     print(f"  mpv: {mpv or 'not found'}")
-    proposal = {"slang": "ja,jpn,jp", "tip_height": 0.6}
+    proposal = dict(DEFAULT_CONFIG)
     print(dumps_toml(proposal))
     write_config(proposal, confirm=confirm)
     _maybe_store_jimaku_key()
@@ -292,28 +301,6 @@ def _offer_import(confirm: Confirm) -> None:  # pragma: no cover — thin glue o
         print(f"  import skipped: {e}")
 
 
-def _offer_copy_dicts(confirm: Confirm) -> None:  # pragma: no cover — thin glue over relocate
-    """Offer to copy dicts out of TCC-protected folders so a GUI-launched plugin mpv doesn't prompt
-    for Documents access. No-op (silent) when nothing is under a protected folder."""
-    from overlay.app.config import dicts_data_dir, is_protected, load_config
-
-    cfg = load_config()
-    protected = [
-        p for kind in ("dicts", "freq", "pitch") for p in (cfg.get(kind) or []) if is_protected(p)
-    ]
-    if not protected:
-        return
-    if not confirm(
-        f"{len(protected)} dict(s) are under a protected folder (Documents/…), which makes GUI mpv "
-        f"prompt for access. Copy them to {dicts_data_dir()} and repoint the config?"
-    ):
-        return
-    from overlay.app.relocate import relocate_dicts
-
-    mappings = relocate_dicts()
-    print(f"  copied {len(mappings)} dict(s) → {dicts_data_dir()}, repointed the config")
-
-
 def _offer_plugin(confirm: Confirm) -> None:  # pragma: no cover — thin glue over plugin
     if not confirm("Install the mpv plugin (auto-launch overlay on any mpv start)?"):
         return
@@ -328,19 +315,20 @@ def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
 
 
 def run_setup(yes: bool, dry_run: bool) -> int:
-    """Full wizard: inventory → install → doctor → init → import → copy-dicts → plugin."""
+    """Full wizard: inventory → install → doctor → init → import → plugin."""
     confirm: Confirm = (lambda _p: True) if yes else _ask
-    print("saitenka-overlay setup\n")
+    print("saitenka-overlay setup")
 
-    print("Inventory:")
-    for tool, present in inventory().items():
-        print(f"  {_OK if present else _FAIL} {tool}")
-
-    print("\nToolchain:")
-    do_install(list(INSTALL_TOOLS), dry_run=dry_run, confirm=confirm)
-
-    print("\nDoctor:")
-    _run_doctor()
+    # Only surface the tooling inventory when something actually needs installing. When everything's
+    # present (the common re-run) the installer's own Discovery already listed these and the Doctor
+    # below re-confirms mpv/ffmpeg — so an itemised inventory here is pure duplication.
+    inv = inventory()
+    if not all(inv.values()):
+        print("\nInventory:")
+        for tool, present in inv.items():
+            print(f"  {_OK if present else _FAIL} {tool}")
+        print("\nToolchain:")
+        do_install(list(INSTALL_TOOLS), dry_run=dry_run, confirm=confirm)
 
     print("\nConfig:")
     _run_init(confirm)
@@ -348,16 +336,12 @@ def run_setup(yes: bool, dry_run: bool) -> int:
     print("\nAnki:")
     _offer_anki(confirm)
     _offer_import(confirm)
-    _offer_copy_dicts(confirm)
     _offer_plugin(confirm)
 
-    # Final self-verify: re-run the full health check now that config + plugin exist, so the user sees
-    # the real end state (the first doctor ran before any of that) and a clear pass/fail summary.
-    print("\nFinal check:")
-    from overlay.app.doctor import print_report, run_checks
-
-    report = run_checks()
-    print_report(report)
+    # One health check, AFTER config/import/plugin — it verifies the real end state (there's no point
+    # running doctor a second time before any of that; a pre-config run just duplicates this one).
+    print("\nDoctor:")
+    report = _run_doctor()
     if report.exit_code == 0:
         print(
             f"\nSetup complete {_OK} - run `saitenka-overlay <video>`, or just open a video in mpv."

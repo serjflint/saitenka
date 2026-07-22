@@ -5,14 +5,14 @@ multi-GB collection/dictionary export. We refuse anything over ``MAX_SETTINGS_BY
 export is well under a megabyte; a collection export is gigabytes) so the tool can never be pointed
 at the wrong file and eat memory.
 
-Mapping: the enabled dictionaries in Yomitan priority order → ``dicts``; when a dictionary's zip is
-found (via ``--scan-dir``) it is bucketed into ``dicts`` / ``freq`` / ``pitch`` by INSPECTING ITS
-CONTENT the way Yomitan does — definition dicts carry ``term_bank`` glossaries; frequency and pitch
-dicts carry ``term_meta`` banks whose entries declare a ``"freq"`` / ``"pitch"`` mode. Titles with no
-matching zip default to ``dicts`` (a name can't reliably tell you the type) and are reported for the
-user to supply / re-bucket. Zip locations are the user's to supply via ``--scan-dir DIR`` (opt-in,
-repeatable) — we never auto-scan personal folders; scan-dir zips are validated as Yomitan-format
-(``index.json`` with a ``format``/``title``).
+Flow: the enabled dictionaries in Yomitan priority order are matched to their ``.zip`` files under
+``--scan-dir DIR`` (opt-in, repeatable — we never auto-scan personal folders; scan-dir zips are
+validated as Yomitan-format via ``index.json``), then **imported into the consolidated database**
+(:func:`import_zips`) and recorded in the config as ordered **titles**, bucketed into ``dicts`` /
+``freq`` / ``pitch`` by INSPECTING EACH ZIP'S CONTENT the way Yomitan does — definition dicts carry
+``term_bank`` glossaries; frequency and pitch dicts carry ``term_meta`` banks whose entries declare a
+``"freq"`` / ``"pitch"`` mode. Titles with no matching zip can't be imported and are reported for the
+user to supply a ``--scan-dir`` that contains them.
 """
 
 from __future__ import annotations
@@ -21,8 +21,10 @@ import json
 import re
 import sys
 import zipfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import UTC
 
 MAX_SETTINGS_BYTES = 50 * 1024 * 1024  # a settings export is < 1 MB; refuse a collection export
 
@@ -159,28 +161,56 @@ def match_scan_dirs(
     return matches, missing
 
 
-def to_config(settings: YomitanSettings, matches: dict[str, str]) -> dict:
-    """Build the config fragment (``dicts``/``freq``/``pitch``) from parsed settings.
+def import_zips(
+    zip_paths: Sequence[str | Path],
+    *,
+    imported_at: str,
+    progress: Callable[[int, int, str, int, int], None] | None = None,
+) -> dict[str, list[str]]:
+    """Import each Yomitan dictionary zip into the consolidated DB (build once) and return the config
+    fragment (``dicts``/``freq``/``pitch``) as ordered **titles**, bucketed by the imported kind.
 
-    Each enabled dictionary maps to its matched zip path if one is known, else its bare title (so the
-    user can fill in the path afterwards). Order within each list preserves Yomitan's ordering.
-    """
-    buckets: dict[str, list[str]] = {"dict": [], "freq": [], "pitch": []}
-    for ref in settings.dictionaries:
-        if not ref.enabled:
-            continue
-        zip_path = matches.get(ref.name)
-        # classify by the matched zip's content; a title with no zip can't be typed → default dicts
-        kind = classify_zip(zip_path) if zip_path else "dict"
-        buckets[kind].append(zip_path or ref.name)
-    cfg: dict = {}
-    if buckets["dict"]:
-        cfg["dicts"] = buckets["dict"]
-    if buckets["freq"]:
-        cfg["freq"] = buckets["freq"]
-    if buckets["pitch"]:
-        cfg["pitch"] = buckets["pitch"]
-    return cfg
+    The source zip is read in place — no copy is kept. ``progress(done_sources, total_sources, name,
+    bank_done, bank_total)`` mirrors the old per-source + per-bank shape so a long single dict still
+    moves. ``imported_at`` is an ISO timestamp stamped by the caller."""
+    from overlay.app.dictdb import DictionaryDb
+
+    db = DictionaryDb.open()
+    buckets: dict[str, list[str]] = {"dicts": [], "freq": [], "pitch": []}
+    bucket_of = {"dict": "dicts", "freq": "freq", "pitch": "pitch"}
+    total = len(zip_paths)
+    for i, zp in enumerate(zip_paths):
+        name = Path(zp).stem
+        if progress:
+            progress(i, total, name, 0, 0)
+        sink = (lambda d, t, i=i, name=name: progress(i, total, name, d, t)) if progress else None
+        row = db.import_zip(zp, imported_at=imported_at, import_order=i, on_bank=sink)
+        buckets[bucket_of[row.kind]].append(row.title)
+    if progress:
+        progress(total, total, "", 0, 0)
+    return {k: v for k, v in buckets.items() if v}
+
+
+def gather_yomitan_zips(paths: Sequence[str | Path]) -> list[str]:
+    """Expand ``paths`` (files and/or directories) into a de-duplicated list of Yomitan dictionary
+    zip file paths, validated by ``index.json`` and preserving input order."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(zp: Path) -> None:
+        s = str(zp)
+        if s not in seen and _index_title(zp) is not None:
+            seen.add(s)
+            out.append(s)
+
+    for p in paths:
+        pp = Path(p).expanduser()
+        if pp.is_dir():
+            for zp in sorted(pp.rglob("*.zip")):
+                add(zp)
+        elif pp.suffix.lower() == ".zip":
+            add(pp)
+    return out
 
 
 SETTINGS_GLOB = "yomitan-settings*.json"
@@ -228,22 +258,32 @@ def run_import(
     enabled = [d.name for d in settings.dictionaries if d.enabled]
     print(f"{len(enabled)} enabled dictionaries in Yomitan order")
 
-    matches: dict[str, str] = {}
-    if scan_dirs:
-        matches, missing = match_scan_dirs(enabled, list(scan_dirs))
-        print(f"matched {len(matches)} zip(s) in {len(scan_dirs)} scan dir(s)")
-        if missing:
-            print("no zip found for (supply paths manually in the config):")
-            for t in missing:
-                print(f"  - {t}")
+    if not scan_dirs:
+        print(
+            "no --scan-dir given — pass the folder(s) holding your Yomitan dictionary .zip files so "
+            "they can be imported, e.g. `import-settings <settings.json> --scan-dir ~/yomitan`"
+        )
+        return 1
+    matches, missing = match_scan_dirs(enabled, list(scan_dirs))
+    print(f"matched {len(matches)} zip(s) in {len(scan_dirs)} scan dir(s)")
+    if missing:
+        print("no zip found for (supply a --scan-dir that contains them):")
+        for t in missing:
+            print(f"  - {t}")
+    if not matches:
+        return 1
 
-    cfg = to_config(settings, matches)
+    # Import the matched zips into the consolidated DB, in Yomitan (settings) order.
+    from datetime import datetime
+
+    ordered = [matches[name] for name in enabled if name in matches]
+    cfg = import_zips(ordered, imported_at=datetime.now(UTC).isoformat())
+
     from overlay.app.config import load_config
-
-    existing = load_config()
-    merged = {**existing, **cfg}  # overlay the imported dict/freq/pitch onto any existing config
     from overlay.app.init_wizard import dumps_toml
 
+    existing = load_config()
+    merged = {**existing, **cfg}  # overlay the imported dict/freq/pitch titles onto the config
     print("\nProposed config:")
     print(dumps_toml(merged))
     backup = write_config(merged, confirm=confirm)

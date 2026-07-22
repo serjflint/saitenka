@@ -7,6 +7,60 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`saitenka-overlay import <dir>`** — build your Yomitan dictionaries into the consolidated database in
+  one step and register them in the config by title. Accepts `.zip` files and/or folders; source zips are
+  read **in place** (no copy kept), so you can delete them afterwards.
+- **The tooltip and card preview scale with the window** (mpv's OSD model) — their contents (fonts,
+  chips, pitch graphs, icons, padding, width) are now defined on a reference-height canvas and multiplied
+  by `window_height / 1080`, so a small video shows the **same amount of content**, just smaller, and a
+  big screen shows it larger — crisp at both. Previously the container tracked the window but the content
+  was a fixed pixel size, so small windows cramped/clipped it. A 1080p window is unchanged.
+
+### Changed
+
+- **Dictionaries are now imported once into a single database**, the Yomitan way. Every dictionary —
+  definition, frequency, pitch, and the bundled JLPT levels — lives in one
+  `~/.local/share/saitenka/dictionaries.sqlite`, built only at `import` time. `dicts`/`freq`/`pitch` in
+  the config now hold dictionary **titles** (resolved against that DB), not file paths, and `run`/`attach`
+  only ever **open** the database — nothing is parsed or rebuilt at play time. Previously the definition
+  dicts were cached per-zip and the frequency/pitch/JLPT lists were re-parsed from their zips on **every**
+  launch (~3 s of startup work with a full set); that startup cost is gone. `doctor` now lists what's
+  imported and flags any configured title that hasn't been, and warns (informationally) about the old
+  per-zip caches and copied zips, which are now unused and safe to delete.
+- **Default tooltip height is now 0.4** (was 0.5) of the video height — a smaller default that covers
+  less of the frame. Override per-config with `tip_height` or per-run with `--tip-height`.
+- **Deinflection chain reads as chips** — each Yomitan transform (e.g. `causative › potential or passive
+  › negative › -た`) is now a green pill after a plain green dot marker, instead of a hard-to-read
+  puzzle-piece icon + coloured text. `doctor` gained a **deinflect** check (warns, with how to enable the
+  optional GPL add-on, when it's missing so no chain shows).
+
+### Removed
+
+- **`copy-dicts`** — the command that relocated dictionary zips out of macOS TCC-protected folders is
+  gone. Runtime no longer reads the zips at all (only the database), so a plugin-mode mpv never triggers a
+  Documents/Downloads consent prompt; import the dicts once with `import` and the zips can live anywhere.
+
+### Fixed
+
+- **`doctor` no longer false-warns about the jimaku key** when it's stored in the Keychain *and* also
+  present in `$JIMAKU_API_KEY` — it now checks the Keychain directly (what plugin-mode mpv reads) rather
+  than trusting the env-shadowed source.
+- **Furigana'd kanji in a definition are now scannable** — a kanji rendered with a reading (a ruby box)
+  used to be skipped by the hover-scan pass, so you couldn't open its nested popup. Its base kanji now
+  emit hitboxes (and keep the run contiguous, so a word spanning ruby + okurigana still scans whole).
+- **Nested popup tracks the scanned word again** — on a tall/HiDPI window the wider tooltip made every
+  nested popup snap to the same screen-right position; placement now flips to open leftward when it would
+  overflow, so it follows the word.
+- **Contrasting frame around popups** — a tooltip (and an overlapping nested popup) now has a border, so
+  the nested one reads as its own panel instead of a continuation of the base.
+
+- **Tooltip no longer strands itself on fullscreen or window resize** — toggling fullscreen (`f`) or
+  resizing the window moves every on-screen coordinate, which used to leave an open dictionary tooltip
+  floating, detached and mis-sized, in the corner. The tooltip (and any nested scan popup) is now
+  dismissed on a resize and reopens correctly placed on the next hover, once the size settles.
+
 ## [0.3.0] - 2026-07-22
 
 Tooltip and scan-popup refinements, plus a large cross-platform test and IPC-refactor pass following the

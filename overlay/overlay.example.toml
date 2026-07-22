@@ -2,11 +2,12 @@
 #
 # Lives in its own XDG dir (not mixed into mpv.conf or the animecards rig). Anything here is a
 # DEFAULT; an explicit CLI flag to mpv_reader.py overrides it. Point elsewhere with --config or
-# $SAITENKA_CONFIG. The built dictionary cache is separate and already persists between runs at
-# ~/.cache/saitenka-overlay/dicts/ (keyed by each zip's mtime+size — indexed once, reused after).
+# $SAITENKA_CONFIG. Dictionaries are imported ONCE into a consolidated database
+# (~/.local/share/saitenka/dictionaries.sqlite) by `saitenka-overlay import <dir-with-zips>`; the lists
+# below are dictionary TITLES resolved against that DB (not file paths). Import first, then reference.
 
 slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
-tip_height = 0.6           # max tooltip height as a fraction of the video height
+tip_height = 0.4           # max tooltip height as a fraction of the video height (default 0.4)
 translate_key = "t"        # toggle the official EN translation
 pause_on_tooltip = false   # auto-pause playback while a tooltip is shown (resumes when it hides)
 
@@ -23,27 +24,28 @@ sub_replay_key = "Alt+DOWN"    # replay the CURRENT subtitle line from its start
 # overlay_id_base = 1  # shift our OSD overlay ids (we use 6 starting here) if another mpv script
 #                      # already owns ids 1..6; 1 = default, no shift.
 
-# Definition dictionaries, in tooltip order (first = top). The tooltip scrolls, so include as many as
-# you like — the SQLite cache keeps RAM low regardless of size. This is your full SOTA definition set
-# (bilingual → monolingual). Trim if you prefer a shorter tooltip.
+# Definition dictionaries by TITLE, in tooltip order (first = top). The tooltip scrolls, so include as
+# many as you like — the DB keeps RAM low regardless of size. Titles are the Yomitan dictionary names
+# (see `saitenka-overlay doctor`, which lists what's imported). Import them first:
+#   saitenka-overlay import ~/yomitan-dicts    # builds them into the DB and fills these lists for you
 dicts = [
-  "~/yomitan-dicts/bilingual.zip",
-  "~/yomitan-dicts/monolingual-a.zip",
-  "~/yomitan-dicts/monolingual-b.zip",
+  "Bilingual Dict",
+  "Monolingual Dict A",
+  "Monolingual Dict B",
   # add as many definition dictionaries as you like — the tooltip scrolls.
   # grammar / name / kanji dictionaries can go here too.
 ]
 
-# Frequency dictionaries → green pills (order preserved; harmonic-blended).
+# Frequency dictionaries → green pills (order preserved; harmonic-blended). Titles, not paths.
 freq = [
-  "~/yomitan-dicts/freq-general.zip",
-  "~/yomitan-dicts/freq-media.zip",
-  "~/yomitan-dicts/freq-novels.zip",
+  "Frequency General",
+  "Frequency Media",
+  "Frequency Novels",
 ]
 
-# Pitch-accent dictionaries → purple pills.
+# Pitch-accent dictionaries → purple pills. Titles, not paths.
 pitch = [
-  "~/yomitan-dicts/pitch-accent.zip",
+  "Pitch Accent",
 ]
 
 # Known-word source for FSRS-aware coloring: Anki decks -> fields (read via AnkiConnect).

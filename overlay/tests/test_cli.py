@@ -150,7 +150,7 @@ def test_defaults_match_legacy(tmp_path, monkeypatch):
         assert kw["start"] == "1"
         assert kw["width"] == 1920 and kw["height"] == 1080
         assert kw["seconds"] == pytest.approx(60.0)
-        assert kw["tip_height"] == pytest.approx(0.5)
+        assert kw["tip_height"] == pytest.approx(0.4)
         assert kw["hover_switch_delay"] == pytest.approx(0.15)
         assert kw["mine_deck"] == "Saitenka::Mining" and kw["mine_model"] == "Lapis"
         assert kw["mine_key"] == "Ctrl+m" and kw["mine_all_key"] == "Shift+m"
@@ -200,16 +200,14 @@ def test_mpv_reader_is_thin_wrapper():
     assert "argparse" not in src
 
 
-def test_resolve_paths_expands_tilde_from_flags_and_config(monkeypatch, tmp_path):
-    """TOML-sourced values arrive through the CLI parameter (cyclopts config.Toml),
-    so ~-expansion must happen on the flag side too, not only on the cfg fallback."""
-    from overlay.app.cli import _resolve_paths
+def test_resolve_names_flag_wins_over_config():
+    """dict/freq/pitch are dictionary TITLES resolved against the DB: explicit flags win over the
+    config file, and both are passed through verbatim (titles, not paths — no ~-expansion)."""
+    from overlay.app.cli import _resolve_names
 
-    monkeypatch.setenv("HOME", str(tmp_path))
-    got = _resolve_paths(["~/dicts/a.zip"], {"dicts": ["~/dicts/b.zip"]}, "dicts")
-    assert got == [str(tmp_path / "dicts/a.zip")]  # flag wins, expanded
-    got = _resolve_paths([], {"dicts": ["~/dicts/b.zip"]}, "dicts")
-    assert got == [str(tmp_path / "dicts/b.zip")]  # cfg fallback, expanded
+    assert _resolve_names(["FlagDict"], {"dicts": ["ConfigDict"]}, "dicts") == ["FlagDict"]
+    assert _resolve_names([], {"dicts": ["ConfigDict"]}, "dicts") == ["ConfigDict"]
+    assert _resolve_names(None, {}, "dicts") == []
 
 
 def test_version_is_wired_to_package_metadata():

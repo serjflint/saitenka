@@ -156,15 +156,25 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     if include_log and mpv_log.exists():
         members["mpv.log"] = redact(mpv_log.read_text(encoding="utf-8", errors="replace"))
 
-    # Dict inventory: what's actually on disk (data-dir zips + built index cache) — makes "copied but
-    # not registered" and "mis-classified into the wrong bucket" visible without the user's machine.
-    from overlay.app.config import dicts_data_dir
+    # Dict inventory: what's imported into the consolidated DB, plus any pre-consolidation leftovers —
+    # makes "configured but not imported" and stale caches visible without the user's machine.
+    from overlay.app.dictdb import DictionaryDb, db_path
+    from overlay.app.paths import legacy_dict_artifacts
 
-    data, idx = dicts_data_dir(), cache_dir() / "dicts"
-    inv = [f"[data zips] {data}"]
-    inv += [f"  {p.name}" for p in sorted(data.glob("*.zip"))] if data.exists() else ["  (none)"]
-    inv += [f"[index cache] {idx}"]
-    inv += [f"  {p.name}" for p in sorted(idx.glob("*.sqlite"))] if idx.exists() else ["  (none)"]
+    db_file = db_path()
+    inv = [f"[database] {db_file}"]
+    if db_file.exists():
+        try:
+            rows = DictionaryDb.open().list_dictionaries()
+            inv += [f"  [{r.kind}] {r.title}" for r in rows] or ["  (empty)"]
+        except Exception:  # pragma: no cover — diagnostics must never raise
+            inv += ["  (unreadable)"]
+    else:
+        inv += ["  (none — run `saitenka-overlay import`)"]
+    arts = legacy_dict_artifacts()
+    if arts:
+        inv += ["[legacy — unused, safe to delete]"]
+        inv += [f"  {d} ({n} files, {b / 1e6:.0f} MB)" for d, n, b in arts]
     members["dicts.listing.txt"] = _scrub_home("\n".join(inv) + "\n")
 
     # Recent crash reports (already redacted at write time; the whole point of capturing them).

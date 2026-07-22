@@ -117,38 +117,32 @@ def test_classify_tolerates_wrong_crc_pitch(tmp_path, monkeypatch):
     assert yi.classify_zip(z) == "pitch"
 
 
-def test_map_to_config_splits_lists_by_content(tmp_path):
-    obj = _make_settings(
-        [
-            ("Bilingual", True, 30),
-            ("MonoA", True, 20),
-            ("FreqA", True, 10),
-            ("PitchA", True, 5),
-        ]
-    )
-    settings = yi.parse_settings(_write(tmp_path, obj))
-    matches = {
-        "Bilingual": str(_make_dict_zip(tmp_path / "bi.zip", "dict")),
-        "MonoA": str(_make_dict_zip(tmp_path / "mono.zip", "dict")),
-        "FreqA": str(_make_dict_zip(tmp_path / "freq.zip", "freq")),
-        "PitchA": str(_make_dict_zip(tmp_path / "pitch.zip", "pitch")),
-    }
-    cfg = yi.to_config(settings, matches)
-    assert cfg["dicts"] == [
-        matches["Bilingual"],
-        matches["MonoA"],
-    ]  # order preserved among defn dicts
-    assert cfg["freq"] == [matches["FreqA"]]
-    assert cfg["pitch"] == [matches["PitchA"]]
+def test_import_zips_buckets_titles_by_content_and_order(tmp_path):
+    # importing builds into the consolidated DB and returns config TITLES bucketed by content, in order
+    zips = [
+        str(_make_dict_zip(tmp_path / "bi.zip", "dict", title="Bilingual")),
+        str(_make_dict_zip(tmp_path / "mono.zip", "dict", title="MonoA")),
+        str(_make_dict_zip(tmp_path / "freq.zip", "freq", title="FreqA")),
+        str(_make_dict_zip(tmp_path / "pitch.zip", "pitch", title="PitchA")),
+    ]
+    cfg = yi.import_zips(zips, imported_at="2026-07-23T00:00:00")
+    assert cfg["dicts"] == ["Bilingual", "MonoA"]  # order preserved among defn dicts
+    assert cfg["freq"] == ["FreqA"]
+    assert cfg["pitch"] == ["PitchA"]
 
 
-def test_unmatched_titles_default_to_dicts(tmp_path):
-    # a name alone can't be typed → everything falls into ``dicts`` for the user to re-bucket
-    obj = _make_settings([("MonoA", True, 20), ("FreqA", True, 10)])
-    settings = yi.parse_settings(_write(tmp_path, obj))
-    cfg = yi.to_config(settings, matches={})
-    assert cfg["dicts"] == ["MonoA", "FreqA"]
-    assert "freq" not in cfg and "pitch" not in cfg
+def test_gather_yomitan_zips_expands_dirs_and_files(tmp_path):
+    scan = tmp_path / "zips"
+    scan.mkdir()
+    a = _make_dict_zip(scan / "a.zip", "dict", title="A")
+    _make_dict_zip(scan / "b.zip", "freq", title="B")
+    with zipfile.ZipFile(scan / "junk.zip", "w") as zf:  # not a Yomitan dict → ignored
+        zf.writestr("hello.txt", "x")
+    loose = _make_dict_zip(tmp_path / "loose.zip", "pitch", title="C")
+    found = yi.gather_yomitan_zips([str(scan), str(loose), str(a)])  # dir + file + dup
+    assert str(scan / "junk.zip") not in found
+    assert found.count(str(a)) == 1  # de-duplicated
+    assert str(loose) in found
 
 
 def test_scan_dir_matches_titles_and_reports_missing(tmp_path):
@@ -170,18 +164,6 @@ def test_scan_dir_ignores_non_yomitan_zip(tmp_path):
     matches, missing = yi.match_scan_dirs(["MonoB"], [scan])
     assert matches == {}
     assert missing == ["MonoB"]
-
-
-def test_to_config_uses_matched_paths_when_available(tmp_path):
-    obj = _make_settings([("MonoB", True, 20), ("FreqA", True, 10)])
-    settings = yi.parse_settings(_write(tmp_path, obj))
-    matches = {
-        "MonoB": str(_make_dict_zip(tmp_path / "mono.zip", "dict")),
-        "FreqA": str(_make_dict_zip(tmp_path / "freq.zip", "freq")),
-    }
-    cfg = yi.to_config(settings, matches)
-    assert cfg["dicts"] == [matches["MonoB"]]
-    assert cfg["freq"] == [matches["FreqA"]]
 
 
 def test_parse_rejects_oversized_file(tmp_path, monkeypatch):

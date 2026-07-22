@@ -15,6 +15,10 @@ from pathlib import Path
 
 from overlay.app.config import config_path
 
+# The default config a fresh install starts from (what `init`/`setup` propose writing). One template,
+# shared by both wizards — edit a starter value here, not in two places.
+DEFAULT_CONFIG = {"slang": "ja,jpn,jp", "tip_height": 0.4}
+
 Confirm = Callable[[str], bool]
 
 
@@ -160,7 +164,7 @@ def run_init() -> int:  # pragma: no cover — interactive wizard, exercised liv
     print("saitenka-overlay init — first-run setup")
     mpv = find_mpv()
     print(f"  mpv: {mpv or 'not found — install it (see doctor)'}")
-    proposal: dict = {"slang": "ja,jpn,jp", "tip_height": 0.6}
+    proposal = dict(DEFAULT_CONFIG)
     print("\nProposed config:")
     print(dumps_toml(proposal))
     backup = write_config(proposal, confirm=_ask)

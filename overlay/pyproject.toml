@@ -57,13 +57,14 @@ dev = [
     "playwright>=1.61.0",
     "poethepoet>=0.48.0",
     "pyrefly>=1.1.1",
-    "pyright>=1.1.411",
     "pytest>=8.0",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=4.1.0",
     "pytest-xdist>=3.8.0",
     "ty>=0.0.61",
     "pyfakefs>=6.2.0",
+    "libcst>=1.8.6",
+    "basedpyright>=1.39",
 ]
 
 [build-system]
@@ -124,7 +125,7 @@ warn_unused_ignores = true
 warn_unreachable = true
 ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 
-[tool.pyright]
+[tool.basedpyright]
 include = ["src/overlay"]
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
@@ -136,7 +137,7 @@ reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers imp
 # steps of `poe all`.
 [tool.poe.tasks]
 lint = { shell = "uv run --extra full ruff check --fix src tests examples && uv run --extra full ruff format src tests examples" }
-types = { shell = "uv run --extra full mypy && uv run --extra full pyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
 # Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
 test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e)'" }
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q" }

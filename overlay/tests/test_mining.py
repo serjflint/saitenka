@@ -250,13 +250,13 @@ def _make_dict(path, title, entries):
 def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
     that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
+    import dicthelp
     from util import FakeIPC
 
     from overlay.app.controller import Reader
-    from overlay.app.dictionary import DictionarySet
 
     d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
-    ds = DictionarySet.load([d])
+    ds = dicthelp.load_set([d])
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = _FakeAnki()

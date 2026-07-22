@@ -91,16 +91,31 @@ def test_config_check_missing(tmp_path, monkeypatch):
     assert c.status == "warn"  # no config yet → run `init`
 
 
-def test_dict_zips_check_reports_missing(tmp_path, monkeypatch):
-    present = tmp_path / "d1.zip"
-    present.write_bytes(b"PK\x03\x04")
+def test_dict_db_check_reports_unimported_title(tmp_path, monkeypatch):
+    import dicthelp
+
+    present = dicthelp.term_zip(tmp_path / "d1.zip", "Present", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(present, imported_at=dicthelp.AT)  # into the per-test hermetic DB
     cfg = tmp_path / "overlay.toml"
-    cfg.write_text(f'dicts = ["{present}", "{tmp_path / "missing.zip"}"]\n')
+    cfg.write_text('dicts = ["Present", "Absent"]\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
-    checks = doc.check_dict_files()
+    checks = doc.check_dict_db()
     fails = [c for c in checks if c.status == "fail"]
-    assert any("missing.zip" in c.detail for c in fails)
-    assert any(c.status == "ok" and "d1.zip" in c.detail for c in checks)
+    assert any("Absent" in c.detail for c in fails)
+    assert any(c.status == "ok" and "Present" in c.detail for c in checks)
+
+
+def test_legacy_files_check_ok_when_none(monkeypatch):
+    monkeypatch.setattr("overlay.app.paths.legacy_dict_artifacts", lambda: [])
+    assert doc.check_legacy_files().status == "ok"
+
+
+def test_legacy_files_check_warns_when_present(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "overlay.app.paths.legacy_dict_artifacts", lambda: [(tmp_path / "dicts", 3, 5_000_000)]
+    )
+    c = doc.check_legacy_files()
+    assert c.status == "warn" and "safe to delete" in c.detail
 
 
 def test_anki_check_reachable(monkeypatch):
@@ -222,22 +237,14 @@ def test_sub_auto_fuzzy_is_ok(tmp_path, monkeypatch):
     assert c.status == "ok" and "fuzzy" in c.detail
 
 
-def test_dict_location_warns_on_protected(tmp_path, monkeypatch):
+def test_dict_db_check_no_db_with_config_fails(tmp_path, monkeypatch):
+    # config lists dictionaries but the DB was never created → a clear "run import" failure
     cfg = tmp_path / "overlay.toml"
-    cfg.write_text('dicts = ["~/Documents/y/a.zip"]\n')
+    cfg.write_text('dicts = ["Something"]\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
-    monkeypatch.setattr(doc, "is_protected", lambda p: "Documents" in str(p))
-    c = doc.check_dict_locations()
-    assert c.status == "warn" and "copy-dicts" in c.detail
-
-
-def test_dict_location_ok_when_outside(tmp_path, monkeypatch):
-    cfg = tmp_path / "overlay.toml"
-    cfg.write_text('dicts = ["~/.local/share/saitenka/dicts/a.zip"]\n')
-    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
-    monkeypatch.setattr(doc, "is_protected", lambda p: False)
-    c = doc.check_dict_locations()
-    assert c.status == "ok"
+    monkeypatch.setattr("overlay.app.dictdb.db_path", lambda: tmp_path / "nope.sqlite")
+    checks = doc.check_dict_db()
+    assert checks[0].status == "fail" and "import" in checks[0].detail
 
 
 def test_jimaku_disabled_is_ok(tmp_path, monkeypatch):
@@ -265,8 +272,25 @@ def test_jimaku_env_only_warns_about_gui(tmp_path, monkeypatch):
     cfg.write_text("[jimaku]\nenabled = true\n")
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     monkeypatch.setenv("JIMAKU_API_KEY", "envkey")
+    from overlay.app import jimaku
+
+    monkeypatch.setattr(jimaku, "keychain_get", lambda: None)  # Keychain genuinely empty
     c = doc.check_jimaku()
     assert c.status == "warn" and "GUI-launched" in c.detail
+
+
+def test_jimaku_env_and_keychain_is_ok(tmp_path, monkeypatch):
+    # Key in BOTH $JIMAKU_API_KEY and the Keychain: the resolver reports src=env (env wins), but the
+    # Keychain HAS it, so plugin-mode mpv works → doctor must be OK, not a false GUI warning.
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text("[jimaku]\nenabled = true\n")
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    monkeypatch.setenv("JIMAKU_API_KEY", "envkey")
+    from overlay.app import jimaku
+
+    monkeypatch.setattr(jimaku, "keychain_get", lambda: "kckey")
+    c = doc.check_jimaku()
+    assert c.status == "ok" and "Keychain" in c.detail
 
 
 def test_jimaku_keychain_key_is_ok(tmp_path, monkeypatch):
@@ -335,10 +359,15 @@ def test_wizard_backs_up_existing_config(tmp_path, monkeypatch):
     assert tomllib.loads(dest.read_text())["slang"] == "NEW"
 
 
-def test_dict_check_flags_bare_title_specifically(tmp_path, monkeypatch):
-    cfg = tmp_path / "overlay.toml"
-    cfg.write_text('dicts = ["JMdict [2026-06-27]"]\n')  # a bare Yomitan TITLE, not a file path
-    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
-    fails = [c for c in doc.check_dict_files() if c.status == "fail"]
-    assert fails and "looks like a Yomitan title" in fails[0].detail
-    assert "import-settings" in fails[0].detail
+def test_deinflect_installed_is_ok():
+    # the [full] test env installs the deinflect add-on → chips enabled
+    c = doc.check_deinflect()
+    assert c.status == "ok" and "deinflect" in c.detail
+
+
+def test_deinflect_missing_warns(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "saitenka_deinflect", None)  # → import raises ImportError
+    c = doc.check_deinflect()
+    assert c.status == "warn" and "deinflect" in c.detail

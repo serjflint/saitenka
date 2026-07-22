@@ -14,34 +14,35 @@ COMPARE = Path(__file__).resolve().parent.parent / "compare"
 sys.path.insert(0, str(COMPARE))
 from cases import CASES  # noqa: E402
 
-from overlay.app.config import expand_paths, load_config  # noqa: E402
+from overlay.app import dictdb as _dictdb  # noqa: E402
+from overlay.app.config import load_config  # noqa: E402
 
 _cfg = load_config()
-_dicts = expand_paths(_cfg.get("dicts")) if _cfg else []
 pytestmark = pytest.mark.skipif(
-    not _dicts or not all(Path(p).exists() for p in _dicts),
-    reason="configured dictionaries not present (see overlay.example.toml)",
+    not _cfg.get("dicts") or not _dictdb.default_db_path().exists(),
+    reason="no imported dictionary DB (run `saitenka-overlay import` — see overlay.example.toml)",
 )
 
 
 @pytest.fixture(scope="module")
 def dict_set():
-    # This parity test deliberately runs against the USER'S real dict set — reuse the real cache
-    # dir (conftest hermetically redirects it for every other test), else it would rebuild
-    # gigabytes into a tmp dir on every session.
-    import overlay.app.dictionary as _dictionary
-    from overlay.app.dictionary import CACHE_DIR as _test_cache
+    # This parity test deliberately runs against the USER'S real, already-imported dictionary DB —
+    # opt out of conftest's per-test hermetic DB override so we read data_dir()/dictionaries.sqlite.
+    import overlay.app.dictdb as dictdb
     from overlay.app.dictionary import DictionarySet
 
-    _dictionary.CACHE_DIR = _dictionary._REAL_CACHE_DIR
+    saved = dictdb._DB_PATH_OVERRIDE
+    dictdb._DB_PATH_OVERRIDE = None
     try:
-        yield DictionarySet.load(
-            _dicts,
-            freq_paths=expand_paths(_cfg.get("freq")),
-            pitch_paths=expand_paths(_cfg.get("pitch")),
+        db = dictdb.DictionaryDb.open()
+        ds = DictionarySet.from_db(
+            db, _cfg.get("dicts") or [], _cfg.get("freq") or [], _cfg.get("pitch") or []
         )
+        if not ds.dicts:
+            pytest.skip("configured dictionary titles not imported into the DB yet")
+        yield ds
     finally:
-        _dictionary.CACHE_DIR = _test_cache
+        dictdb._DB_PATH_OVERRIDE = saved
 
 
 @pytest.mark.parametrize("case", CASES, ids=[c["word"] for c in CASES])

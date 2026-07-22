@@ -2,28 +2,34 @@
 
 from pathlib import Path
 
+import dicthelp
 import pytest
 
 from overlay.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
 from overlay.app.tokenize import tokenize
-from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
+from overlay.app.wordlists import FreqDict, KnownWords
 
-JLPT = JlptDict.load()
 PAL = Palette()
+
+
+@pytest.fixture
+def jlpt():
+    """The bundled JLPT dict loaded from a per-test hermetic DB (imported on first use)."""
+    return dicthelp.load_jlpt()
 
 
 # --- data loaders ---------------------------------------------------------------------------------
 
 
-def test_jlpt_levels():
-    assert JLPT.level("会う", None, "あう") == "N5"
-    assert JLPT.level("相", None, "あい") == "N1"
-    assert JLPT.level("完全に無い語", None, None) is None
+def test_jlpt_levels(jlpt):
+    assert jlpt.level("会う", None, "あう") == "N5"
+    assert jlpt.level("相", None, "あい") == "N1"
+    assert jlpt.level("完全に無い語", None, None) is None
 
 
-def test_jlpt_keeps_highest_level():
+def test_jlpt_keeps_highest_level(jlpt):
     # every mapped level is one of N1..N5
-    assert set(JLPT.by_key.values()) <= {"N1", "N2", "N3", "N4", "N5"}
+    assert set(jlpt.by_key.values()) <= {"N1", "N2", "N3", "N4", "N5"}
 
 
 def test_freq_banding_math():
@@ -67,14 +73,14 @@ def test_n_plus_one_not_fired_with_two_unknowns():
 # --- priority model -------------------------------------------------------------------------------
 
 
-def _scorer(known_words):
-    return Scorer(known=KnownWords.from_set(known_words), jlpt=JLPT, enable_freq=False)
+def _scorer(known_words, jlpt):
+    return Scorer(known=KnownWords.from_set(known_words), jlpt=jlpt, enable_freq=False)
 
 
-def test_priority_n_plus_one_over_known_and_base():
+def test_priority_n_plus_one_over_known_and_base(jlpt):
     line = "私は本を読む"
     toks = tokenize(line)
-    styles = _scorer(["私", "本"]).score_line(toks)
+    styles = _scorer(["私", "本"], jlpt).score_line(toks)
     by = {t.surface: s for t, s in zip(toks, styles, strict=True)}
     assert by["本"].color == PAL.known
     assert by["読む"].tag.startswith("n+1")
@@ -82,12 +88,12 @@ def test_priority_n_plus_one_over_known_and_base():
     assert by["は"].color == PAL.base  # function word stays base
 
 
-def test_function_words_never_colored_by_freq():
+def test_function_words_never_colored_by_freq(jlpt):
     zip_path = next(iter(sorted(Path("../tools/freq").glob("*.zip"))), None)
     if zip_path is None:
         pytest.skip("freq zips are user-supplied (not shipped in-repo) — none present")
-    fq = FreqDict.load(str(zip_path))
-    sc = Scorer(known=KnownWords.from_set([]), freq=fq, jlpt=JLPT)
+    fq = dicthelp.load_freqdict(str(zip_path))
+    sc = Scorer(known=KnownWords.from_set([]), freq=fq, jlpt=jlpt)
     toks = tokenize("私は本を読む")
     styles = sc.score_line(toks)
     for t, s in zip(toks, styles, strict=True):
@@ -95,10 +101,10 @@ def test_function_words_never_colored_by_freq():
             assert s.color == PAL.base
 
 
-def test_jlpt_underline_is_additive():
+def test_jlpt_underline_is_additive(jlpt):
     # a known word that also has a JLPT level → known text color + JLPT underline
     toks = tokenize("会う")
-    s = _scorer(["会う"]).score_line(toks)[0]
+    s = _scorer(["会う"], jlpt).score_line(toks)[0]
     assert s.color == PAL.known
     assert s.underline == PAL.jlpt["N5"]
 

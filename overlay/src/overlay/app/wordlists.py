@@ -1,26 +1,33 @@
-"""Data providers for subtitle coloring: JLPT level, frequency rank, and known-words.
+"""Data providers for subtitle coloring and tooltip pills: JLPT level, frequency rank, known-words.
 
-JLPT + frequency are Yomitan ``term_meta_bank`` dictionaries (the same format SubMiner reads). The
-freq-value shapes seen in the wild:
+Frequency and pitch dictionaries are imported into the consolidated :class:`~overlay.app.dictdb.DictionaryDb`
+(their ``term_meta`` rows), so these classes are thin **views** over that DB — nothing re-parses a zip at
+runtime. :class:`FreqSource` / :class:`PitchSource` query the DB per lookup (tooltip pills, on demand);
+:class:`FreqDict` / :class:`JlptDict` load a small in-RAM dict once (the per-token coloring hot path).
+
+The freq-value shapes seen in the wild (all handled at import time in ``dictdb``, and reflected in the
+``term_meta`` columns ``reading`` / ``rank`` / ``disp``):
   - value form:     ``[term, "freq", {"value": rank, "displayValue": "rank㋕"}]``       (term = kana)
   - frequency form: ``[term, "freq", {"reading": r, "frequency": rank}]``               (term = word)
   - JLPT:           ``[term, "freq", {"reading": r, "frequency": {"value": -1, "displayValue": "N5"}}]``
-We index by both term and reading so a lemma or its kana reading can match.
 """
 
 from __future__ import annotations
 
 import contextlib
-import logging
 import json
+import logging
 import math
 import re
 import zipfile
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from overlay.resources import asset
+from datetime import UTC
+
+if TYPE_CHECKING:
+    from overlay.app.dictdb import DictionaryDb, DictRow
 
 log = logging.getLogger(__name__)
 
@@ -59,47 +66,24 @@ JLPT_ZIP = ASSETS / "jlpt.zip"
 _LEVEL_RANK = {"N1": 1, "N2": 2, "N3": 3, "N4": 4, "N5": 5}
 
 
-def _iter_meta_banks(zip_path: str | Path):
-    """Yield decoded term_meta_bank_*.json lists, skipping banks that fail to read.
+def ensure_bundled_jlpt(db: DictionaryDb) -> int:
+    """Import the bundled JLPT-level dictionary into ``db`` once, returning its ``dict_id``.
 
-    Some Yomitan freq/pitch zips in the wild have Bad-CRC banks (notably some pitch dicts); we
-    skip those rather than let one corrupt bank break the whole overlay."""
-    with zipfile.ZipFile(zip_path) as zf:
-        for name in sorted(zf.namelist()):
-            if not (name.startswith("term_meta_bank") and name.endswith(".json")):
-                continue
-            bank = read_json_bank(zf, name)
-            if bank is not None:
-                yield bank
+    JLPT levels ship with the tool (a small bundled asset, not a user import), so — unlike every other
+    dictionary — the runtime imports it on first use. Idempotent: if a dictionary with the bundled
+    title already exists it is reused (no rebuild). This is the one build the runtime performs; every
+    other dictionary is built only by an explicit ``import`` command."""
+    from datetime import datetime
 
+    from overlay.app.dictdb import _title_of
 
-def _iter_term_meta(zip_path: str | Path):
-    """Yield (term, reading, rank, display) over every ``freq`` entry in a Yomitan zip."""
-    for bank in _iter_meta_banks(zip_path):
-        for entry in bank:
-            if len(entry) < 3 or entry[1] != "freq":
-                continue
-            term, data = entry[0], entry[2]
-            reading, rank, disp = None, None, None
-            if isinstance(data, (int, float)):
-                rank = int(data)
-            elif isinstance(data, dict):
-                reading = data.get("reading")
-                fval = data.get("frequency", data)
-                if isinstance(fval, dict):
-                    rank = fval.get("value")
-                    disp = fval.get("displayValue")
-                elif isinstance(fval, (int, float)):
-                    rank = int(fval)
-            yield term, reading, rank, disp
-
-
-def _zip_title(zip_path: str | Path, fallback: str = "") -> str:
-    try:
-        with zipfile.ZipFile(zip_path) as zf:
-            return json.loads(zf.read("index.json")).get("title", fallback)
-    except Exception:
-        return fallback
+    with zipfile.ZipFile(JLPT_ZIP) as zf:
+        title = _title_of(zf, "JLPT")
+    found, _missing = db.resolve([title])
+    if found:
+        return found[0].id
+    row = db.import_zip(JLPT_ZIP, imported_at=datetime.now(UTC).isoformat(), import_order=-1)
+    return row.id
 
 
 @dataclass
@@ -107,22 +91,25 @@ class JlptDict:
     by_key: dict[str, str]  # term|reading -> level ("N1".."N5"), highest (N1) wins
 
     @classmethod
-    @lru_cache(maxsize=4)
-    def load(cls, zip_path: str | Path = JLPT_ZIP) -> JlptDict:
+    def load(cls, db: DictionaryDb) -> JlptDict:
+        """Load JLPT levels from the bundled dictionary in ``db`` (importing it on first use)."""
+        dict_id = ensure_bundled_jlpt(db)
         by_key: dict[str, str] = {}
-
-        def put(key: str | None, level: str) -> None:
-            if not key:
-                return
-            cur = by_key.get(key)
-            if cur is None or _LEVEL_RANK[level] < _LEVEL_RANK[cur]:
-                by_key[key] = level
-
-        for term, reading, _rank, disp in _iter_term_meta(zip_path):
+        for term, reading, disp in db._conn().execute(
+            "SELECT term, reading, disp FROM term_meta WHERE dict_id=? AND mode='freq'", (dict_id,)
+        ):
             if disp in _LEVEL_RANK:
-                put(term, disp)
-                put(reading, disp)
+                cls._put(by_key, term, disp)
+                cls._put(by_key, reading, disp)
         return cls(by_key)
+
+    @staticmethod
+    def _put(by_key: dict[str, str], key: str | None, level: str) -> None:
+        if not key:
+            return
+        cur = by_key.get(key)
+        if cur is None or _LEVEL_RANK[level] < _LEVEL_RANK[cur]:
+            by_key[key] = level
 
     def level(self, *forms: str | None) -> str | None:
         for f in forms:
@@ -137,28 +124,23 @@ class FreqDict:
     title: str = ""
 
     @classmethod
-    @lru_cache(maxsize=4)
-    def load(cls, zip_path: str | Path) -> FreqDict:
+    def from_db(cls, db: DictionaryDb, row: DictRow) -> FreqDict:
+        """Load one frequency dictionary's ranks into an in-RAM dict for the coloring hot path."""
         by_key: dict[str, int] = {}
+        for term, reading, rank in db._conn().execute(
+            "SELECT term, reading, rank FROM term_meta WHERE dict_id=? AND mode='freq'", (row.id,)
+        ):
+            cls._put(by_key, term, rank)
+            cls._put(by_key, reading, rank)
+        return cls(by_key, row.title)
 
-        def put(key: str | None, rank: int) -> None:
-            if not key or rank <= 0:
-                return
-            cur = by_key.get(key)
-            if cur is None or rank < cur:
-                by_key[key] = rank
-
-        for term, reading, rank, _disp in _iter_term_meta(zip_path):
-            if isinstance(rank, int):
-                put(term, rank)
-                put(reading, rank)
-        title = ""
-        try:
-            with zipfile.ZipFile(zip_path) as zf:
-                title = json.loads(zf.read("index.json")).get("title", "")
-        except Exception:
-            log.debug("wordlist source failed to load", exc_info=True)
-        return cls(by_key, title)
+    @staticmethod
+    def _put(by_key: dict[str, int], key: str | None, rank: int | None) -> None:
+        if not key or rank is None or rank <= 0:
+            return
+        cur = by_key.get(key)
+        if cur is None or rank < cur:
+            by_key[key] = rank
 
     def rank(self, *forms: str | None) -> int | None:
         ranks = [self.by_key[f] for f in forms if f and f in self.by_key]
@@ -171,35 +153,38 @@ class FreqDict:
         return min(bands, max(1, math.ceil(rank / top_x * bands)))
 
 
-@dataclass
 class FreqSource:
-    """One frequency dictionary as the tooltip shows it: a title + per-term display string(s).
+    """One frequency dictionary as the tooltip shows it — a title + per-term display string(s), queried
+    from the consolidated DB on demand.
 
-    Unlike :class:`FreqDict` (which keeps only a min rank for coloring), this keeps the human display
-    value SubMiner shows in the pill row — the ``displayValue`` if present (``"8912, 143969㋕"``), else
-    the raw rank. A term can have several entries (some freq lists give SUW+LUW → ``12813, 14117``); we join them."""
+    Keeps the human display value SubMiner shows in the pill row — the ``displayValue`` if present
+    (``"8912, 143969㋕"``), else the raw rank. A term can have several entries (some freq lists give
+    SUW+LUW → ``12813, 14117``); we join them, preferring entries whose reading matches the token's."""
 
-    title: str
-    by_term: dict[str, list[tuple[str | None, str]]]  # term -> [(reading, display), ...]
-
-    @classmethod
-    @lru_cache(maxsize=16)
-    def load(cls, zip_path: str | Path) -> FreqSource:
-        by_term: dict[str, list[tuple[str | None, str]]] = {}
-        for term, reading, rank, disp in _iter_term_meta(zip_path):
-            display = disp if disp else (str(rank) if rank is not None else None)
-            if display is None:
-                continue
-            by_term.setdefault(term, []).append((reading, display))
-        return cls(_zip_title(zip_path, Path(zip_path).stem), by_term)
+    def __init__(self, db: DictionaryDb, row: DictRow):
+        self.db = db
+        self.dict_id = row.id
+        self.title = row.title
 
     def display(self, forms, reading: str | None = None) -> str | None:
         """Display string for the first matching form. Prefer entries whose reading matches the
         token's (disambiguates 本命/ほんめい), else fall back to all entries for that term."""
+        conn = self.db._conn()
         for f in forms:
-            if not f or f not in self.by_term:
+            if not f:
                 continue
-            ents = self.by_term[f]
+            rows = conn.execute(
+                "SELECT reading, disp, rank FROM term_meta WHERE dict_id=? AND mode='freq' "
+                "AND term=?",
+                (self.dict_id, f),
+            ).fetchall()
+            ents: list[tuple[str | None, str]] = []
+            for r, disp, rank in rows:
+                display = disp if disp is not None else (str(rank) if rank is not None else None)
+                if display is not None:
+                    ents.append((r, display))
+            if not ents:
+                continue
             matched = [d for (r, d) in ents if reading is None or r is None or r == reading]
             use = matched or [d for _, d in ents]
             seen: set[str] = set()
@@ -208,42 +193,28 @@ class FreqSource:
         return None
 
 
-@dataclass
 class PitchSource:
-    """A pitch-accent dictionary → the ``reading [positions]`` label the tooltip shows."""
+    """A pitch-accent dictionary → the ``reading [positions]`` label the tooltip shows, from the DB."""
 
-    title: str
-    by_key: dict[str, tuple[str, list[int]]]  # term|reading -> (reading, [positions])
-
-    @classmethod
-    @lru_cache(maxsize=16)
-    def load(cls, zip_path: str | Path) -> PitchSource:
-        by_key: dict[str, tuple[str, list[int]]] = {}
-        for bank in _iter_meta_banks(zip_path):
-            for entry in bank:
-                if len(entry) < 3 or entry[1] != "pitch":
-                    continue
-                term, data = entry[0], entry[2]
-                if not isinstance(data, dict):
-                    continue
-                reading = data.get("reading") or term
-                positions: list[int] = [
-                    pos
-                    for p in data.get("pitches", [])
-                    if isinstance(p, dict) and isinstance(pos := p.get("position"), int)
-                ]
-                if not positions:
-                    continue
-                val = (reading, positions)
-                by_key.setdefault(term, val)
-                by_key.setdefault(reading, val)
-        return cls(_zip_title(zip_path, Path(zip_path).stem), by_key)
+    def __init__(self, db: DictionaryDb, row: DictRow):
+        self.db = db
+        self.dict_id = row.id
+        self.title = row.title
 
     def accents(self, forms, reading: str | None = None) -> tuple[str, list[int]] | None:
-        """Raw (reading, positions) for the first matching form — the pitch-graph input."""
+        """Raw (reading, positions) for the first matching form — the pitch-graph input. Matches by
+        term OR reading (a pitch dict is keyed by both)."""
+        conn = self.db._conn()
         for f in forms:
-            if f and f in self.by_key:
-                return self.by_key[f]
+            if not f:
+                continue
+            row = conn.execute(
+                "SELECT reading, positions FROM term_meta WHERE dict_id=? AND mode='pitch' "
+                "AND (term=? OR reading=?) LIMIT 1",
+                (self.dict_id, f, f),
+            ).fetchone()
+            if row is not None:
+                return (row[0], json.loads(row[1]))
         return None
 
     def display(self, forms, reading: str | None = None) -> str | None:

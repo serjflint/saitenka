@@ -20,19 +20,25 @@ uv sync            # installs pillow, fugashi+unidic-lite, jamdict, numpy…
 uv run pytest -q   # sanity: should print "X passed"
 ```
 
-## 1a. Settings (persist your dictionaries — do this once)
+## 1a. Import your dictionaries (do this once)
 
-Your dictionary list, frequency/pitch dicts, known-decks, and mine target live in
-**`~/.config/saitenka/overlay.toml`** (its own dir — not mixed into mpv.conf). Copy the template once:
+Dictionaries are built **once** into a consolidated database
+(`~/.local/share/saitenka/dictionaries.sqlite`) — the Yomitan model. Point `import` at the folder(s)
+holding your Yomitan `.zip` dictionaries; it classifies each (definition / frequency / pitch), imports
+it, and fills `dicts`/`freq`/`pitch` in your config with their **titles**:
 
 ```bash
-mkdir -p ~/.config/saitenka
-cp overlay.example.toml ~/.config/saitenka/overlay.toml   # then edit it to point at your Yomitan dictionaries
+saitenka-overlay import ~/yomitan-dicts        # build the DB + register the titles in the config
 ```
 
+The source zips are read **in place** — no copy is kept, so you can delete or move them afterwards.
+(Have a Yomitan settings export instead? `import-settings <export.json> --scan-dir ~/yomitan-dicts`.
+Only a multi-GB dexie DB backup? `import-dictionaries <export.json>`.) Your known-decks and mine target
+live alongside the titles in **`~/.config/saitenka/overlay.toml`** (see `overlay.example.toml`).
+
 With that in place the full run is just the video path — every `--dict/--freq/--pitch/--anki-decks`
-default comes from the file (an explicit CLI flag still overrides it). Built dict indexes cache at
-`~/.cache/saitenka-overlay/dicts/` and persist between runs (rebuilt only when a zip changes).
+default comes from the config (an explicit CLI flag still overrides it). Nothing is rebuilt at play
+time; `run`/`attach` only open the DB. `saitenka-overlay doctor` lists what's imported.
 
 ## 2. Quick smoke run (no Anki, generated clip)
 
@@ -58,8 +64,8 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 
 - The embedded **Japanese** track is auto-selected and re-drawn by the overlay (mpv's own subs hidden);
   the embedded **English** track is loaded as the hidden secondary (for the `t` reveal).
-- Dictionaries are cached (`~/.cache/saitenka-overlay/dicts/`); already built here, so load is instant.
-  (A brand-new dict zip would take ~30–60 s to index on first use.)
+- Dictionaries are already imported into the DB (§1a), so `run`/`attach` open it instantly — no build
+  at play time. (Importing a brand-new dict is the only slow step, and it happens under `import`.)
 - `--start 600` jumps ~10 min in (past the OP, into dialogue). Press **space** to pause on a line with
   words to scan.
 
@@ -112,8 +118,9 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 
 ```bash
 # embedded JP subs (most anime rips): the file path is the positional arg
+# (--dict takes an imported dictionary TITLE; run `saitenka-overlay import <dir>` first)
 uv run python examples/mpv_reader.py /path/to/anime.mkv --color --mine \
-  --dict "/path/to/your-dictionary.zip"
+  --dict "Your Dictionary Title"
 
 # external subs
 uv run python examples/mpv_reader.py video.mkv --sub-file jp.srt --color --mine

@@ -6,9 +6,9 @@ macOS/Linux), separate from mpv's config and the animecards rig — the overlay 
 and shouldn't have its settings parsed by mpv's own config loader. Precedence: built-in defaults <
 this file < explicit CLI flags. Point elsewhere with ``$SAITENKA_CONFIG`` or ``--config``.
 
-The dictionary **cache** (built SQLite indexes) is separate and already persists between runs under
-``paths.cache_dir()/dicts/`` keyed by each zip's mtime+size — so dicts are indexed once and reused,
-and only re-built when the zip changes.
+``dicts`` / ``freq`` / ``pitch`` hold dictionary **titles**, resolved against the consolidated
+:class:`~overlay.app.dictdb.DictionaryDb` (``data_dir()/dictionaries.sqlite``) that ``saitenka-overlay
+import`` builds once — not file paths.
 """
 
 from __future__ import annotations
@@ -22,32 +22,12 @@ from overlay.app import paths
 
 CONFIG_HOME = paths.config_dir()
 DEFAULT_PATH = CONFIG_HOME / "overlay.toml"
-DATA_HOME = paths.data_dir()
 
 
 def config_path(override: str | os.PathLike | None = None) -> Path:
     """Resolved config path: explicit override > $SAITENKA_CONFIG > default."""
     p = override or os.environ.get("SAITENKA_CONFIG") or DEFAULT_PATH
     return Path(p).expanduser()
-
-
-def dicts_data_dir() -> Path:
-    """Where relocated dictionaries live: ``paths.data_dir()/dicts`` (``%LOCALAPPDATA%\\saitenka\\dicts``
-    on Windows, ``~/.local/share/saitenka/dicts`` on macOS/Linux) — NOT a TCC-protected folder, so a
-    GUI-launched (plugin-mode) mpv can read them without a macOS consent prompt."""
-    return DATA_HOME / "dicts"
-
-
-def protected_dirs() -> list[Path]:
-    """macOS TCC-protected user folders — access from a GUI app triggers a consent prompt."""
-    home = Path.home()
-    return [home / "Documents", home / "Desktop", home / "Downloads"]
-
-
-def is_protected(path: str | os.PathLike) -> bool:
-    """True if ``path`` is inside a TCC-protected folder (Documents/Desktop/Downloads)."""
-    p = Path(str(path)).expanduser()
-    return any(p == d or d in p.parents for d in protected_dirs())
 
 
 def load_config(override: str | os.PathLike | None = None) -> dict:
@@ -100,7 +80,7 @@ class TooltipOptions:
 
     sub_size: int | None = None  # subtitle font override (None = scale to video)
     bottom_margin_frac: float = 0.06
-    tip_max_frac: float = 0.5  # BASE tooltip viewport ≤ this fraction of the video height
+    tip_max_frac: float = 0.4  # BASE tooltip viewport ≤ this fraction of the video height
     pause_on_tooltip: bool = False
     scan_delay: float = 0.25  # dwell before a nested scan popup opens
     hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
