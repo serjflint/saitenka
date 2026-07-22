@@ -80,3 +80,8 @@ class PopupView:
         self.rect: tuple[int, int, int, int] | None = None  # screen rect, for hit-testing
         self.hide_at = 0.0
         self.dirty = False  # a background finish grew the popup → re-upload
+        # sticky dict-tab strip (≥2 dict sections), composited over the viewport top like the base
+        # tooltip's — cached by (names, active) so a scroll notch doesn't re-render it every time.
+        self.tab_bgra: np.ndarray | None = None
+        self.tab_h = 0
+        self.tab_key: tuple | None = None

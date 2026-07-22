@@ -92,6 +92,49 @@ def test_single_dict_entry_has_no_tabs(monkeypatch):
     assert r._tab_rects == []
 
 
+# --- tabs on the NESTED popup (regression: reserved but never drawn) --------------------------------
+
+
+def test_nested_popup_draws_the_dict_tab_strip(monkeypatch):
+    """A nested scan popup for a multi-dict word reserves top_reserve for the dict-tab strip (like the
+    base tooltip) but used to leave that band BLANK — the dictionary pills seemed to vanish inside a
+    scan popup. It must now build the strip AND composite it into the nested render."""
+    from overlay.app.controller import NESTED_ID
+
+    r = _shown(monkeypatch, _reader())  # _MultiDS → 3 dict sections for every word
+    boxes = r._tip_state.lazy.scan_boxes
+    assert boxes, "no scan boxes to open a nested popup on"
+
+    captured: dict = {}
+    orig = r._blit_panel
+
+    def spy(bgra, scroll, view_h, xy, oid, header=None):
+        if oid == NESTED_ID:
+            captured["header"] = header
+        return orig(bgra, scroll, view_h, xy, oid, header=header)
+
+    monkeypatch.setattr(r, "_blit_panel", spy)
+    r._show_nested(boxes[len(boxes) // 2])
+    assert r._nest.state is not None, "nested popup didn't open"
+    assert r._nested_tab_header() is not None  # strip built for the ≥2-section nested word
+    assert captured.get("header") is not None  # …and actually composited into the nested render
+
+
+def test_nested_popup_single_dict_has_no_strip(monkeypatch):
+    class _OneDS:
+        def entry_for(self, tok, inflected=None):
+            return Entry(
+                headword=[tok.surface], defs=[Definition("MonoC", ["とても長い定義。" * 6])]
+            )
+
+    r = _shown(monkeypatch, _reader(_OneDS()))
+    boxes = r._tip_state.lazy.scan_boxes
+    assert boxes
+    r._show_nested(boxes[len(boxes) // 2])
+    assert r._nest.state is not None
+    assert r._nested_tab_header() is None  # single dict → no tab strip, nothing to draw
+
+
 def test_multi_dict_reserves_space_so_header_clears_the_tab_strip(monkeypatch):
     # Regression: the sticky tab strip must NOT cover the reading / ⊕ / 🔊. Multi-dict entries
     # reserve EXACTLY the (possibly wrapped) strip's height above the header so those sit below it.

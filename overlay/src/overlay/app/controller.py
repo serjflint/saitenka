@@ -1121,11 +1121,41 @@ class Reader:
             header=header,
         )
 
+    def _nested_tab_header(self):
+        """The sticky dict-tab strip for the nested popup, or None. The nested panel reserves
+        ``top_reserve`` space for it (≥2 dict sections) exactly like the base tooltip — nested
+        rendering used to skip drawing it, leaving that reserved band blank so the dictionary pills
+        seemed to vanish inside a scan popup. Cached by (names, active) so scrolling is cheap. (Nested
+        tabs are drawn but not click-to-jump — a depth-1 popup is scrolled with the wheel.)"""
+        st = self._nest.state
+        if st is None or self._nest.bgra is None:
+            return None
+        offs = st.lazy.section_offsets()
+        if len(offs) < 2:
+            return None
+        names = [name for name, _ in offs]
+        active = 0  # section currently under the viewport top (mirrors _active_section for the tip)
+        for i, (_name, off) in enumerate(offs):
+            if off <= self._nest.scroll + self._nest.tab_h + 1:
+                active = i
+        tab_key = (tuple(names), active)
+        if tab_key != self._nest.tab_key or self._nest.tab_bgra is None:
+            img, _rects = render_tab_row(names, active, int(self._nest.bgra.shape[1]))
+            self._nest.tab_bgra = to_bgra_array(img)
+            self._nest.tab_h = img.height
+            self._nest.tab_key = tab_key
+        return self._nest.tab_bgra
+
     def _render_nested_view(self) -> None:
         if self._nest.bgra is None:
             return
         self._nest.rect = self._blit_panel(
-            self._nest.bgra, self._nest.scroll, self._nest.view_h, self._nest.xy, NESTED_ID
+            self._nest.bgra,
+            self._nest.scroll,
+            self._nest.view_h,
+            self._nest.xy,
+            NESTED_ID,
+            header=self._nested_tab_header(),
         )
 
     def _refresh_nested_full(self) -> None:
