@@ -7,9 +7,6 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
 
 ## Now / next
 
-- **Progressive subtitles** — draw plain (uncolored) subtitles immediately and swap in FSRS coloring +
-  tooltips once dictionaries finish loading. The top-left loading spinner already covers the
-  blank-frame gap; this would make the first-run wait feel instant.
 - **Runtime jimaku keybind** — re-fetch subtitles mid-playback from a key. The option already exists
   (`--jimaku-force` / `[jimaku].force`); the reusable primitive (`fetch_jimaku`) is in place, so this
   is wiring a controller keybind.
@@ -26,6 +23,15 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   filename sanitization applied at more write sites, `psutil`-based process-tree cleanup coverage.
 - **Test tooling** — `pytest-subprocess` for mpv/ffmpeg launch-argument coverage (currently the live
   launch path is only smoke-tested).
+- **Benchmarking depth** — the headless harness (`examples/bench_responsiveness.py`, incl. `--stress`)
+  now reports p50/p95/**p99** + CV, records the GIL state, and isolates raster/BGRA/upload timing. Not
+  yet built, in rough priority: a **live-mpv jank harness** that polls mpv's own `frame-drop-count`
+  while driving the overlay (the only true real-time signal — the fake-IPC harness can't see mpv's
+  compositor); a **noise-aware regression gate** for CI (fail on a >X% p95 delta only once run-to-run
+  variance is characterized); and continuous benchmarking (`asv`) once there's CI history. **Not**
+  CodSpeed (its CPU-instruction model is blind to our IO + free-threaded contention). The suspected
+  ~55 ms temp-file **upload floor turned out to be a page-cache artifact** (the write is ~1 ms), so an
+  mmap/shared-memory upload backend is **de-prioritised** — cold first-paint is render + lookup bound.
 - **Structured logging (`structlog`)** — key-value event logs for the rotating log + `report` bundle,
   so diagnostics are grepable/parseable (e.g. `event=jimaku.fetch title=… status=400`) instead of
   free-text. Keep the human console renderer; JSON to the file. Low-risk, incremental over the current
