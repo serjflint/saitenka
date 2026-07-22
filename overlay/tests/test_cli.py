@@ -133,22 +133,33 @@ def test_negation_flags_keep_argparse_semantics():
     assert kw2["prefetch"] is True
 
 
-def test_defaults_match_legacy():
-    app = _cli_app()
-    _, bound, *_ = app.parse_args(["run"])
-    bound.apply_defaults()
-    kw = bound.arguments
-    assert kw["slang"] == "ja,jpn,jp"
-    assert kw["start"] == "1"
-    assert kw["width"] == 1920 and kw["height"] == 1080
-    assert kw["seconds"] == pytest.approx(60.0)
-    assert kw["tip_height"] == pytest.approx(0.6)
-    assert kw["hover_switch_delay"] == pytest.approx(0.15)
-    assert kw["mine_deck"] == "Saitenka::Mining" and kw["mine_model"] == "Lapis"
-    assert kw["mine_key"] == "Ctrl+m" and kw["mine_all_key"] == "Shift+m"
-    assert kw["translate_key"] == "t" and kw["preview_key"] == "p"
-    assert kw["video"] is None
-    assert kw["demo_scroll"] == 0
+def test_defaults_match_legacy(tmp_path, monkeypatch):
+    # Isolate from the developer's real overlay.toml (cyclopts config.Toml feeds it as defaults) by
+    # pointing at an absent file and reloading — this tests the PARAMETER defaults, deterministically.
+    import importlib
+
+    import overlay.app.cli as cli
+
+    monkeypatch.setenv("SAITENKA_CONFIG", str(tmp_path / "absent.toml"))
+    importlib.reload(cli)
+    try:
+        _, bound, *_ = cli.app.parse_args(["run"])
+        bound.apply_defaults()
+        kw = bound.arguments
+        assert kw["slang"] == "ja,jpn,jp"
+        assert kw["start"] == "1"
+        assert kw["width"] == 1920 and kw["height"] == 1080
+        assert kw["seconds"] == pytest.approx(60.0)
+        assert kw["tip_height"] == pytest.approx(0.5)
+        assert kw["hover_switch_delay"] == pytest.approx(0.15)
+        assert kw["mine_deck"] == "Saitenka::Mining" and kw["mine_model"] == "Lapis"
+        assert kw["mine_key"] == "Ctrl+m" and kw["mine_all_key"] == "Shift+m"
+        assert kw["translate_key"] == "t" and kw["preview_key"] == "p"
+        assert kw["video"] is None
+        assert kw["demo_scroll"] == 0
+    finally:
+        monkeypatch.undo()  # restore the env, then rebind cli to the default config for later tests
+        importlib.reload(cli)
 
 
 def test_video_positional():

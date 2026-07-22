@@ -66,6 +66,9 @@ TRANS_ID = 4
 PREVIEW_ID = 5
 NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
 LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
+# The nested popup gets its own (roomier) height cap so shrinking the base tooltip (tip_max_frac)
+# doesn't cramp the deep-dive; the nested popup also carries no dict-tab strip / reserve (space-saving).
+_NESTED_MAX_FRAC = 0.6
 SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
@@ -115,8 +118,9 @@ class PanelKey(NamedTuple):
     inflected: str
     width: int
     anki_ok: bool  # is Anki reachable now → is the ⊕ button drawn (rechecked per show, ~3s TTL)
-    mined: (
-        bool  # is the word already in the deck → ⊕ shows ✓ (kept LAST: some tests read key.mined)
+    mined: bool  # is the word already in the deck → its ⊕ shows ✓ (tests read this by name)
+    tabs: bool = (
+        True  # dict-tab strip reserved/drawn (base tooltip); a nested popup builds with tabs=False
     )
 
 
@@ -221,7 +225,8 @@ class Reader:
         self.sub_prev_key = o.keys.sub_prev_key  # Alt+LEFT  → sub-seek -1 (previous line)
         self.sub_next_key = o.keys.sub_next_key  # Alt+RIGHT → sub-seek  1 (next line)
         self.sub_replay_key = o.keys.sub_replay_key  # Alt+DOWN  → sub-seek  0 (replay current)
-        self.tip_max_frac = o.tooltip.tip_max_frac  # tooltip viewport ≤ this fraction of the video
+        self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
+        self.show_dict_tabs = o.tooltip.show_dict_tabs  # draw the sticky dict-tab strip (base only)
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
         self._paused_by_tip = False
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
@@ -710,10 +715,19 @@ class Reader:
             j += 1
         return s
 
-    def _panel_key(self, tok, inflected, mined: bool = False) -> PanelKey:
+    def _panel_key(self, tok, inflected, mined: bool = False, tabs: bool = True) -> PanelKey:
         # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
+        # ``tabs`` distinguishes the base build (with the dict-tab reserve) from a nested build (none),
+        # so the same word shown in both places doesn't share the wrong reserve.
         return PanelKey(
-            tok.lemma, tok.surface, tok.reading, inflected, self.tip_width, self._anki_ok(), mined
+            tok.lemma,
+            tok.surface,
+            tok.reading,
+            inflected,
+            self.tip_width,
+            self._anki_ok(),
+            mined,
+            tabs,
         )
 
     def _is_mined(self, tok) -> bool:
@@ -789,11 +803,14 @@ class Reader:
         min_h: int | None = None,
         finish: bool = False,
         mined: bool | None = None,
+        tabs: bool | None = None,
     ):
         """The memoised :class:`_TipPanel` for a token. ``finish`` renders the whole entry (prefetch /
         no-worker path); otherwise only the head that fills ``min_h`` px is rendered now (viewport-first)
         and the tail is deferred. Re-hovering is instant and scrolling is cheap. ``mined`` (default: look
-        it up) selects the ⊕ vs ✓ header variant and is part of the cache key.
+        it up) selects the ⊕ vs ✓ header variant and is part of the cache key. ``tabs`` (default: the
+        ``show_dict_tabs`` config) reserves + will draw the sticky dict-tab strip; a nested popup passes
+        ``tabs=False`` so it carries no strip and no reserved band.
 
         Thread-safe: the panel is *built* lock-free (thread-local DB conns + fonts, each render owns its
         images), and only the tiny cache write/LRU update is locked.  On a free-threaded (no-GIL) build,
@@ -801,17 +818,19 @@ class Reader:
         Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
         if mined is None:
             mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined)
+        if tabs is None:
+            tabs = self.show_dict_tabs
+        key = self._panel_key(tok, inflected, mined, tabs)
         st = self._panel_cache.get(key)
         if st is None:
             entry = self._entry_for(tok, inflected)
-            # Reserve space for the sticky dict-tab strip (shown for ≥2 dicts) so it clears the
-            # header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for this
-            # word's dict names at this width, so a many-dict strip that wraps onto several rows
-            # reserves enough (a fixed one-row reserve would let a 2nd tab row cover the reading).
+            # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it
+            # clears the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for
+            # this word's dict names at this width, so a many-dict strip that wraps onto several rows
+            # reserves enough. Nested popups (tabs=False) reserve nothing — no strip, no blank band.
             reserve = (
                 tab_strip_height([d.dict_name for d in entry.defs], self.tip_width)
-                if len(entry.defs) >= 2
+                if (tabs and len(entry.defs) >= 2)
                 else 0
             )
             lazy = LazyPanel(
@@ -931,10 +950,15 @@ class Reader:
                     PrefetchItem(gen, t, self._inflected_surface(i), self._is_mined(t))
                 )
 
-    def _tip_cap(self) -> int:
-        """Max tooltip viewport height: ≤ ``tip_max_frac`` of the video, clear of the header/footer."""
+    def _cap_for(self, frac: float) -> int:
+        """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
         margin = max(16, round(self.osd[1] * 0.05))
-        return min(round(self.osd[1] * self.tip_max_frac), self.osd[1] - 2 * margin)
+        return min(round(self.osd[1] * frac), self.osd[1] - 2 * margin)
+
+    def _tip_cap(self) -> int:
+        """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
+        own, deliberately roomier cap (``_NESTED_MAX_FRAC``) so shrinking the base doesn't cramp it."""
+        return self._cap_for(self.tip_max_frac)
 
     def _show_tooltip(self, index: int) -> None:
         self._hide_nested()  # switching the base word drops any stale scan popup
@@ -1000,7 +1024,7 @@ class Reader:
         is decent) so the popup stays above it and the text below the cursor — the definition and the
         subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
         margin = max(16, round(self.osd[1] * 0.05))
-        view_h = min(full_h, self._tip_cap())
+        view_h = min(full_h, self._cap_for(_NESTED_MAX_FRAC))
         above_room = int(wy) - TIP_GAP - margin
         if view_h > above_room >= self._NEST_MIN_ABOVE:
             view_h = above_room  # shrink to fit above rather than drop below
@@ -1043,9 +1067,11 @@ class Reader:
 
     # --- per-dictionary tabs + tooltip keys -------------------------------------------------------
     def _update_tabs(self) -> None:
-        """Recompute the dict-tab sections from the shown panel (≥2 sections → tabs)."""
+        """Recompute the dict-tab sections from the shown panel (≥2 sections → tabs). Off entirely when
+        ``show_dict_tabs`` is disabled — the panel is then built without the reserve too, so drawing a
+        strip would overlap content."""
         st = self._tip_state
-        offs = st.lazy.section_offsets() if st is not None else []
+        offs = st.lazy.section_offsets() if (st is not None and self.show_dict_tabs) else []
         if len(offs) >= 2:
             self._tab_names = [name for name, _ in offs]
             self._tab_offsets = [y for _, y in offs]
@@ -1121,41 +1147,13 @@ class Reader:
             header=header,
         )
 
-    def _nested_tab_header(self):
-        """The sticky dict-tab strip for the nested popup, or None. The nested panel reserves
-        ``top_reserve`` space for it (≥2 dict sections) exactly like the base tooltip — nested
-        rendering used to skip drawing it, leaving that reserved band blank so the dictionary pills
-        seemed to vanish inside a scan popup. Cached by (names, active) so scrolling is cheap. (Nested
-        tabs are drawn but not click-to-jump — a depth-1 popup is scrolled with the wheel.)"""
-        st = self._nest.state
-        if st is None or self._nest.bgra is None:
-            return None
-        offs = st.lazy.section_offsets()
-        if len(offs) < 2:
-            return None
-        names = [name for name, _ in offs]
-        active = 0  # section currently under the viewport top (mirrors _active_section for the tip)
-        for i, (_name, off) in enumerate(offs):
-            if off <= self._nest.scroll + self._nest.tab_h + 1:
-                active = i
-        tab_key = (tuple(names), active)
-        if tab_key != self._nest.tab_key or self._nest.tab_bgra is None:
-            img, _rects = render_tab_row(names, active, int(self._nest.bgra.shape[1]))
-            self._nest.tab_bgra = to_bgra_array(img)
-            self._nest.tab_h = img.height
-            self._nest.tab_key = tab_key
-        return self._nest.tab_bgra
-
     def _render_nested_view(self) -> None:
+        # No dict-tab strip on the nested popup — it's built tabs=False (no reserve), so it stays
+        # compact and gives the deep-dive its full height (a depth-1 quick look, scrolled with the wheel).
         if self._nest.bgra is None:
             return
         self._nest.rect = self._blit_panel(
-            self._nest.bgra,
-            self._nest.scroll,
-            self._nest.view_h,
-            self._nest.xy,
-            NESTED_ID,
-            header=self._nested_tab_header(),
+            self._nest.bgra, self._nest.scroll, self._nest.view_h, self._nest.xy, NESTED_ID
         )
 
     def _refresh_nested_full(self) -> None:
@@ -1228,9 +1226,14 @@ class Reader:
         """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
         Shared by scan-hover and a clicked cross-reference link."""
         mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined)
+        key = self._panel_key(tok, inflected, mined, tabs=False)  # nested: no tab strip / reserve
         st = self._panel_for(
-            tok, inflected, min_h=self._tip_cap(), finish=not self._finish_available(), mined=mined
+            tok,
+            inflected,
+            min_h=self._tip_cap(),
+            finish=not self._finish_available(),
+            mined=mined,
+            tabs=False,
         )
         self._place_nested(st, key, tok, tok.surface, wx, wy, wh, tail)
 

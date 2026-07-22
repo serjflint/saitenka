@@ -100,10 +100,11 @@ class TooltipOptions:
 
     sub_size: int | None = None  # subtitle font override (None = scale to video)
     bottom_margin_frac: float = 0.06
-    tip_max_frac: float = 0.6  # tooltip viewport ≤ this fraction of the video height
+    tip_max_frac: float = 0.5  # BASE tooltip viewport ≤ this fraction of the video height
     pause_on_tooltip: bool = False
     scan_delay: float = 0.25  # dwell before a nested scan popup opens
     hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
+    show_dict_tabs: bool = True  # draw the sticky per-dictionary tab strip on the BASE tooltip
 
 
 @dataclass(frozen=True)

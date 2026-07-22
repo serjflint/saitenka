@@ -217,9 +217,16 @@ def run(
     tip_height: Annotated[
         float,
         cyclopts.Parameter(
-            help="max tooltip height as a fraction of the video height (default 0.6)"
+            help="max BASE tooltip height as a fraction of the video height (default 0.5)"
         ),
-    ] = 0.6,
+    ] = 0.5,
+    dict_tabs: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative="--no-dict-tabs",
+            help="draw the sticky per-dictionary tab strip on the tooltip (default: on)",
+        ),
+    ] = True,
     pause_on_tooltip: Annotated[
         bool,
         cyclopts.Parameter(
@@ -518,6 +525,8 @@ def run(
             tip_max_frac=tip_height,
             pause_on_tooltip=pause_on_tooltip,
             hover_switch_delay=hover_switch_delay,
+            # off if EITHER the config disables it or --no-dict-tabs is passed
+            show_dict_tabs=dict_tabs and bool(cfg.get("show_dict_tabs", True)),
         ),
         mining=MiningOptions(play_audio=not no_audio_play),
         translation=TranslationOptions(auto_translate=auto_translate),
@@ -1093,7 +1102,10 @@ def attach(
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
         ),
-        tooltip=TooltipOptions(tip_max_frac=cfg.get("tip_height", 0.6)),
+        tooltip=TooltipOptions(
+            tip_max_frac=cfg.get("tip_height", 0.5),
+            show_dict_tabs=bool(cfg.get("show_dict_tabs", True)),
+        ),
         mining=MiningOptions(play_audio=not bool(cfg.get("no_audio_play", False))),
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),

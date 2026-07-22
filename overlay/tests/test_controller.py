@@ -430,8 +430,9 @@ def test_prefetch_worker_warms_cache_then_close_joins():
     try:
         r._update_prefetch()  # queue 本命 for the worker
         # PanelKey(lemma, surface, reading, inflected, width, anki_ok, mined); no anki → anki_ok False.
-        # A plain tuple of the same values matches the PanelKey dict key (NamedTuple compares as a tuple).
-        key = ("本命", "本命", "ほんめい", "本命", r.tip_width, False, False)
+        # A plain tuple of the same values matches the PanelKey dict key (NamedTuple compares as a
+        # tuple). Trailing True = tabs (base tooltip / prefetch build; a nested build would be False).
+        key = ("本命", "本命", "ほんめい", "本命", r.tip_width, False, False, True)
         for _ in range(300):
             if key in r._panel_cache:
                 break
@@ -467,6 +468,9 @@ class _TallDS:
             reading="ほんめい",
             defs=[Definition(f"辞書{i}", [para]) for i in range(6)],
         )
+
+    def has_term(self, *forms):
+        return True  # the def body is all dictionary words → a body click doesn't fall to kanji
 
 
 def _tall_reader(ipc):

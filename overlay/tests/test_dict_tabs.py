@@ -92,16 +92,17 @@ def test_single_dict_entry_has_no_tabs(monkeypatch):
     assert r._tab_rects == []
 
 
-# --- tabs on the NESTED popup (regression: reserved but never drawn) --------------------------------
+# --- tabs are BASE-only: nested popups carry no strip/reserve; the strip is configurable -----------
 
 
-def test_nested_popup_draws_the_dict_tab_strip(monkeypatch):
-    """A nested scan popup for a multi-dict word reserves top_reserve for the dict-tab strip (like the
-    base tooltip) but used to leave that band BLANK — the dictionary pills seemed to vanish inside a
-    scan popup. It must now build the strip AND composite it into the nested render."""
+def test_nested_popup_has_no_tab_strip_or_reserve(monkeypatch):
+    """A nested scan popup deliberately carries NO dict-tab strip and NO reserved band even for a
+    multi-dict word — it stays compact so the deep-dive gets its full height. (The base tooltip keeps
+    its strip.)"""
     from overlay.app.controller import NESTED_ID
 
     r = _shown(monkeypatch, _reader())  # _MultiDS → 3 dict sections for every word
+    assert r._tab_rects, "base tooltip should still have its dict tabs"
     boxes = r._tip_state.lazy.scan_boxes
     assert boxes, "no scan boxes to open a nested popup on"
 
@@ -116,23 +117,28 @@ def test_nested_popup_draws_the_dict_tab_strip(monkeypatch):
     monkeypatch.setattr(r, "_blit_panel", spy)
     r._show_nested(boxes[len(boxes) // 2])
     assert r._nest.state is not None, "nested popup didn't open"
-    assert r._nested_tab_header() is not None  # strip built for the ≥2-section nested word
-    assert captured.get("header") is not None  # …and actually composited into the nested render
+    assert r._nest.state.lazy.top_reserve == 0  # no reserved band → no blank padding
+    assert "header" in captured and captured["header"] is None  # nested render passes no tab strip
 
 
-def test_nested_popup_single_dict_has_no_strip(monkeypatch):
-    class _OneDS:
-        def entry_for(self, tok, inflected=None):
-            return Entry(
-                headword=[tok.surface], defs=[Definition("MonoC", ["とても長い定義。" * 6])]
-            )
+def test_show_dict_tabs_false_hides_base_strip_and_reserve(monkeypatch):
+    """show_dict_tabs=False turns the base tooltip's dict-tab strip off entirely — no clickable tabs
+    and no reserved band (so the pills can be disabled per the user's preference)."""
+    from overlay.app.config import ReaderOptions, TooltipOptions
 
-    r = _shown(monkeypatch, _reader(_OneDS()))
-    boxes = r._tip_state.lazy.scan_boxes
-    assert boxes
-    r._show_nested(boxes[len(boxes) // 2])
-    assert r._nest.state is not None
-    assert r._nested_tab_header() is None  # single dict → no tab strip, nothing to draw
+    r = Reader(
+        FakeIPC(),
+        dict_set=_MultiDS(),
+        options=ReaderOptions(tooltip=TooltipOptions(show_dict_tabs=False)),
+    )
+    r.osd = (1280, 720)
+    r.sub_origin = (0, 0)
+    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
+    r.boxes = [WordBox(0, 100, 300, 40, 40)]
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    r.set_hover(0)
+    assert r._tab_rects == []  # no clickable tabs
+    assert r._tip_reserve() == 0  # …and no reserved band above the header
 
 
 def test_multi_dict_reserves_space_so_header_clears_the_tab_strip(monkeypatch):
