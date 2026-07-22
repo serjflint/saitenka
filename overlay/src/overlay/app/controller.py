@@ -30,6 +30,7 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem, PrefetchItem
 from overlay.app.lookup import card_for, entry_for
+from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.media import (
     audio_duration,
     copy_clipboard,
@@ -331,6 +332,12 @@ class Reader:
         self.boxes: list = []
         self.sub_origin = (0, 0)
         self.hover = -1
+        # subtitle navigation: an index of the external sub file's cues (when known) lets Alt+←/→/↓
+        # render the target line in the overlay INSTANTLY, decoupled from mpv's slow video seek. The
+        # real sub-seek still fires behind it and reconciles once it settles (see _sub_nav).
+        self._sub_index: SubIndex | None = None
+        self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
+        self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
@@ -413,6 +420,7 @@ class Reader:
         self._teardown_tip()
         self.hover = -1
         self.sub_text = text
+        self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
         self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
             self.lines, self.tokens, self.boxes = [], [], []
@@ -1654,12 +1662,17 @@ class Reader:
             self.copy_click()
         elif msg == CLICK_MSG:
             self.on_click()
-        # subtitle navigation
+        # subtitle navigation — render the target cue from the index INSTANTLY (if we have one),
+        # then issue the real sub-seek so the video catches up behind it (read the position first:
+        # _sub_nav samples sub-start/time-pos before the seek moves them).
         elif msg == SUB_PREV_MSG:
+            self._sub_nav(-1)
             self.ipc.command("sub-seek", "-1")
         elif msg == SUB_NEXT_MSG:
+            self._sub_nav(1)
             self.ipc.command("sub-seek", "1")
         elif msg == SUB_REPLAY_MSG:
+            self._sub_nav(0)
             self.ipc.command("sub-seek", "0")
         elif msg == SUB_DELAY_MINUS_MSG:
             self.ipc.command("add", "sub-delay", "-0.1")
@@ -1711,9 +1724,7 @@ class Reader:
                     self._render_tip_view()
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
-            text = self._prop("sub-text") or ""
-            if text != self.sub_text:
-                self.set_subtitle(text)
+            self._reconcile_sub_text(self._prop("sub-text") or "")
             # progressive startup: inject background-loaded deps (once), else animate the spinner
             if self._pending_deps is not None:
                 deps, self._pending_deps = self._pending_deps, None
@@ -1737,18 +1748,95 @@ class Reader:
     def _seed_mined(self) -> None:
         self._miner.seed_mined()
 
+    # --- subtitle navigation (instant render, then seek) --------------------------------------
+    def load_sub_index(self, path) -> None:
+        """Parse the external subtitle file at ``path`` into a cue index so Alt+←/→/↓ can render the
+        target line instantly. Fail-soft: an unreadable/empty/unsupported file just leaves the index
+        None → navigation falls back to a plain mpv sub-seek."""
+        self._sub_index = load_index(path)
+
+    def _get_float(self, prop: str) -> float | None:
+        v = self._get(prop)  # a direct get_property is fine: nav keys are rare, not per-tick
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _sub_nav(self, delta: int) -> bool:
+        """Render the cue ``delta`` steps away (-1 prev / 0 replay / +1 next) in the overlay right
+        now, from the parsed index — the perceived-instant half of subtitle navigation. Returns True
+        if it drew a target line. The caller still issues the real ``sub-seek`` so the video catches
+        up; the poll loop reconciles to mpv's ``sub-text`` once the seek settles.
+
+        Chaining works while the video seek is still in flight (time-pos/sub-start are stale): after
+        a nav render ``sub_text`` is the line we drew, so ``locate`` finds it by text and ``_nav_idx``
+        disambiguates duplicates — next/next/next steps forward predictably."""
+        idx = self._sub_index
+        if idx is None or len(idx) == 0:
+            return False
+        sub_start = self._get_float("sub-start")
+        time_pos = self._get_float("time-pos")
+        current = idx.locate(
+            text=self.sub_text, sub_start=sub_start, time_pos=time_pos, preferred=self._nav_idx
+        )
+        if current < 0:
+            return False
+        # Is a cue actually on screen now, or is `current` just the upcoming one in a gap? A sub is
+        # showing (non-empty text), or the position falls inside current's span. This decides whether
+        # prev/next straddle the cue or step onto the upcoming one (see SubIndex.target).
+        c = idx.cues[current]
+        inside = bool(self.sub_text.strip())
+        if not inside and sub_start is not None:
+            inside = c.start <= sub_start < c.end
+        if not inside and time_pos is not None:
+            inside = c.start <= time_pos < c.end
+        tgt = idx.target(current, delta, inside=inside)
+        if tgt < 0:
+            return False  # out of range / ambiguous → let mpv's sub-seek handle it
+        self.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
+        self._nav_idx = tgt
+        # Guard the reconcile: mpv's sub-text briefly reads empty mid-seek; ignoring that avoids a
+        # blank flicker before it settles on the real (matching) cue text. ~1s covers a slow seek.
+        self._sub_settle_until = time.monotonic() + 1.0
+        return True
+
+    def _reconcile_sub_text(self, text: str) -> None:
+        """Poll-loop hook: adopt mpv's current ``sub-text`` when it changed. mpv is the source of
+        truth (it corrects the line if our instant-nav index guessed wrong), EXCEPT for the empty
+        blip mpv emits mid-seek right after a manual sub-nav — swallow that within the settle window
+        so the overlay doesn't flash blank before the real cue text lands."""
+        if text == self.sub_text:
+            return
+        if text.strip() or time.monotonic() >= self._sub_settle_until:
+            self.set_subtitle(text)
+            self._sub_settle_until = 0.0
+
     # --- progressive dep loading --------------------------------------------------------------
-    def load_deps_async(self, cfg: dict) -> None:
+    def load_deps_async(self, cfg: dict, build=None) -> None:
         """Load coloring/dict/mining collaborators on a BACKGROUND thread (dicts/scorer/anki — none
         touch the mpv IPC), then hand them to the poll loop, which injects them on the main thread.
-        Plain subs draw meanwhile; a spinner shows until the deps land."""
+        Plain subs draw meanwhile; a spinner shows until the deps land.
+
+        ``build`` is a zero-arg callable returning ``(scorer, anki, mine_cfg, dict_set)``; it defaults
+        to ``build_reader_deps(cfg)`` (attach/plugin mode). ``run`` passes its own closure so it can
+        honour CLI flags (``--dict/--freq/--anki-decks/--mine`` …) while still loading progressively.
+        The one rule: the builder must NOT touch the mpv IPC (it runs off the main thread)."""
         self._loading = True
 
-        def _load() -> None:
-            from overlay.app.reader_deps import build_reader_deps
+        if build is None:
 
+            def _default_build():
+                from overlay.app.reader_deps import build_reader_deps
+
+                return build_reader_deps(cfg)
+
+            build = _default_build
+
+        def _load() -> None:
             try:
-                scorer, anki, mine_cfg, dict_set = build_reader_deps(cfg)
+                scorer, anki, mine_cfg, dict_set = build()
                 self._pending_deps = {
                     "scorer": scorer,
                     "anki": anki,

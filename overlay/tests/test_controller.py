@@ -117,6 +117,116 @@ def test_sub_nav_config_knobs_respected():
     assert "Alt+s" in binds
 
 
+# --- #5: instant subtitle navigation via the parsed cue index -----------------------------------
+
+_NAV_SRT = (
+    "1\n00:00:01,000 --> 00:00:03,000\nいち\n\n"
+    "2\n00:00:04,000 --> 00:00:06,000\nに\n\n"
+    "3\n00:00:10,000 --> 00:00:12,000\nさん\n"
+)
+
+
+def _reader_with_index(monkeypatch):
+    from overlay.app.sub_index import SubIndex, parse_srt
+
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    r.osd = (1280, 720)
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)  # skip the raster; assert state only
+    r._sub_index = SubIndex(parse_srt(_NAV_SRT))
+    r._register_keybinds()
+    return r, ipc
+
+
+def _msg_for(ipc, key):
+    binds = {
+        c[1]: c[2].split("script-message ", 1)[1] for c in ipc.commands if c and c[0] == "keybind"
+    }
+    return binds[key]
+
+
+def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
+    """Next must render the following cue's text in the overlay right away AND still issue the real
+    sub-seek so the video catches up behind it."""
+    r, ipc = _reader_with_index(monkeypatch)
+    ipc.props["sub-text"] = "いち"
+    r.set_subtitle("いち")  # currently on cue 1
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "に"  # cue 2 rendered instantly, before any seek settles
+    assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]  # video seek still fired
+
+
+def test_sub_nav_prev_and_replay(monkeypatch):
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("に")  # cue 2
+    ipc.props["sub-start"] = 4.0
+    r._handle(_msg_for(ipc, "Alt+LEFT"))
+    assert r.sub_text == "いち" and ("sub-seek", "-1") in [(c[0], c[1]) for c in ipc.commands]
+    r.set_subtitle("に")
+    ipc.props["sub-start"] = 4.0
+    r._handle(_msg_for(ipc, "Alt+DOWN"))  # replay → same cue
+    assert r.sub_text == "に"
+
+
+def test_sub_nav_chains_forward_with_stale_position(monkeypatch):
+    """Rapid next/next while the seek is still in flight (sub-start/time-pos stale) must keep
+    stepping forward, resolved by the rendered text + the _nav_idx hint."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0  # stale for the whole burst (video hasn't caught up)
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "に"
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "さん"  # advanced past cue 2 despite the stale sub-start
+
+
+def test_sub_nav_from_a_gap_opens_the_upcoming_cue(monkeypatch):
+    """Navigating NEXT while no sub is on screen (a gap) must land ON the upcoming cue — matching
+    mpv's sub-seek 1 — not skip past it."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("")  # nothing showing (between cues)
+    ipc.props["time-pos"] = 8.5  # gap before cue 3 (starts at 10.0)
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "さん"  # cue 3, the upcoming one — not skipped
+
+
+def test_sub_nav_without_index_only_seeks(monkeypatch):
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    r.set_subtitle("いち")
+    r._register_keybinds()
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "いち"  # no index → overlay unchanged; mpv drives it via the seek
+    assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
+
+
+def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
+    """After a nav render, an empty sub-text within the settle window is ignored (no blank flash);
+    a non-empty mpv value (source of truth) reconciles and disarms the guard."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "に"  # rendered target
+    r._reconcile_sub_text("")  # mpv's mid-seek blank
+    assert r.sub_text == "に"  # swallowed — overlay didn't flash to nothing
+    r._reconcile_sub_text("に")  # mpv settled on the matching cue
+    assert r.sub_text == "に"
+    r._reconcile_sub_text("さん")  # a genuine later change still adopts mpv's truth
+    assert r.sub_text == "さん"
+
+
+def test_settle_guard_expires_and_adopts_empty(monkeypatch):
+    """Outside the settle window an empty sub-text is honoured (a real gap between cues clears it)."""
+    r, _ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("に")
+    r._sub_settle_until = 0.0  # window already expired
+    r._reconcile_sub_text("")
+    assert r.sub_text == ""
+
+
 def test_reader_has_subtitle_state_before_any_cue():
     r = Reader(FakeIPC())
     assert r.sub_text == "" and r.tokens == [] and r.hover == -1

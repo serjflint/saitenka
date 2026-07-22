@@ -284,96 +284,109 @@ def run(
             "       --mine  (see RUNNING.md §3)."
         )
 
-    # Anki-backed features — mining, and known-word coloring from a deck — need Anki running. Start
-    # it for the user (like `attach` does) instead of crashing on a refused connection; warn and
-    # degrade (coloring → freq+JLPT, mining unavailable) if it can't be reached. Fast when Anki's up.
-    if mine or known_cfg:
-        from overlay.app.anki import ensure_anki_running
+    # Building the coloring/dict/mining collaborators is the slow part (the first-run dictionary
+    # cache build is 25–66s per dict). Rather than block the mpv window on it, `run` defers this to a
+    # BACKGROUND thread (see reader.load_deps_async below) so plain subtitles draw immediately and
+    # coloring/tooltips/mining light up in place once loaded — exactly like `attach`. The closure
+    # captures the CLI-flag inputs (`--dict/--freq/--anki-decks/--mine` …) that config-only
+    # build_reader_deps can't see. It must NOT touch the mpv IPC (it runs off the main thread); its
+    # prints go to the terminal, the in-mpv spinner covers the on-screen feedback.
+    def _build_deps():
+        # Anki-backed features — mining, and known-word coloring from a deck — need Anki running.
+        # Start it for the user (like `attach` does) instead of crashing on a refused connection;
+        # warn and degrade (coloring → freq+JLPT, mining unavailable) if it can't be reached.
+        if mine or known_cfg:
+            from overlay.app.anki import ensure_anki_running
 
-        if not ensure_anki_running():
-            print(
-                "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect add-on). "
-                "Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
-                file=sys.stderr,
-            )
-
-    anki = mine_conf = None
-    if mine:
-        from overlay.app.anki import Anki, MineConfig
-
-        anki = Anki()
-        mine_conf = MineConfig(deck=mine_deck, model=mine_model)
-        print(
-            f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
-            f"→ {mine_deck} ({mine_model})"
-        )
-        log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
-    else:
-        log.info("mining disabled (no [mine] config / --no-mine)")
-
-    dict_set = None
-    if dict_paths or freq_paths or pitch_paths:
-        from overlay.app.dictionary import _MISSING_HINT, DictionarySet, split_existing
-
-        # Skip (with a warning) any path that doesn't exist — usually a bare Yomitan title left in the
-        # config by `import-settings` without --scan-dir — instead of crashing on FileNotFoundError.
-        dict_paths, dmiss = split_existing(dict_paths)
-        freq_paths, fmiss = split_existing(freq_paths)
-        pitch_paths, pmiss = split_existing(pitch_paths)
-        for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
-            if miss:
+            if not ensure_anki_running():
                 print(
-                    f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. {_MISSING_HINT}",
+                    "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect "
+                    "add-on). Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
                     file=sys.stderr,
                 )
-        if dict_paths or freq_paths or pitch_paths:
+
+        anki = mine_conf = None
+        if mine:
+            from overlay.app.anki import Anki, MineConfig
+
+            anki = Anki()
+            mine_conf = MineConfig(deck=mine_deck, model=mine_model)
             print(
-                f"loading {len(dict_paths)} dict(s) · {len(freq_paths)} freq · {len(pitch_paths)} "
-                "pitch… (first run builds a cache)"
+                f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
+                f"→ {mine_deck} ({mine_model})"
             )
-            from overlay.app.progress import BuildBar
-
-            bar = BuildBar()
-            try:
-                dict_set = DictionarySet.load(
-                    dict_paths,
-                    freq_paths=freq_paths,
-                    pitch_paths=pitch_paths,
-                    progress=bar.update,
-                )
-            finally:
-                bar.close()
-            print("dictionaries:", [d.title for d in dict_set.dicts])
-            if dict_set.freqs:
-                print("frequency:", [f.title for f in dict_set.freqs])
-            if dict_set.pitches:
-                print("pitch:", [p.title for p in dict_set.pitches])
-            log.info(
-                "dictionaries loaded: %d defn, %d freq, %d pitch",
-                len(dict_set.dicts),
-                len(dict_set.freqs),
-                len(dict_set.pitches),
-            )
-
-    scorer = None
-    if color or known or known_cfg or freq_paths:
-        from overlay.app.scoring import Scorer
-        from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
-
-        if known_cfg:
-            try:
-                kw = KnownWords.from_ankiconnect(known_cfg)
-            except Exception as e:  # Anki still closed / AnkiConnect down — don't crash the run
-                print(
-                    f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only",
-                    file=sys.stderr,
-                )
-                kw = KnownWords.from_set([w for w in known.split(",") if w])
+            log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
         else:
-            kw = KnownWords.from_set([w for w in known.split(",") if w])
-        fd = FreqDict.load(freq_paths[0]) if freq_paths else None
-        scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load())
-        print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
+            log.info("mining disabled (no [mine] config / --no-mine)")
+
+        # Skip (with a warning) any path that doesn't exist — usually a bare Yomitan title left in
+        # the config by `import-settings` without --scan-dir — instead of crashing on
+        # FileNotFoundError. Filtered lists (freq_ok) feed BOTH the dict set and the scorer below.
+        d_paths, freq_p, pitch_p = dict_paths, freq_paths, pitch_paths
+        dict_set = None
+        if d_paths or freq_p or pitch_p:
+            from overlay.app.dictionary import _MISSING_HINT, DictionarySet, split_existing
+
+            d_paths, dmiss = split_existing(d_paths)
+            freq_p, fmiss = split_existing(freq_p)
+            pitch_p, pmiss = split_existing(pitch_p)
+            for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
+                if miss:
+                    print(
+                        f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. "
+                        f"{_MISSING_HINT}",
+                        file=sys.stderr,
+                    )
+            if d_paths or freq_p or pitch_p:
+                print(
+                    f"loading {len(d_paths)} dict(s) · {len(freq_p)} freq · {len(pitch_p)} "
+                    "pitch… (first run builds a cache)"
+                )
+                from overlay.app.progress import BuildBar
+
+                bar = BuildBar()
+                try:
+                    dict_set = DictionarySet.load(
+                        d_paths,
+                        freq_paths=freq_p,
+                        pitch_paths=pitch_p,
+                        progress=bar.update,
+                    )
+                finally:
+                    bar.close()
+                print("dictionaries:", [d.title for d in dict_set.dicts])
+                if dict_set.freqs:
+                    print("frequency:", [f.title for f in dict_set.freqs])
+                if dict_set.pitches:
+                    print("pitch:", [p.title for p in dict_set.pitches])
+                log.info(
+                    "dictionaries loaded: %d defn, %d freq, %d pitch",
+                    len(dict_set.dicts),
+                    len(dict_set.freqs),
+                    len(dict_set.pitches),
+                )
+
+        scorer = None
+        if color or known or known_cfg or freq_p:
+            from overlay.app.scoring import Scorer
+            from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
+
+            if known_cfg:
+                try:
+                    kw = KnownWords.from_ankiconnect(known_cfg)
+                except Exception as e:  # Anki still closed / AnkiConnect down — don't crash the run
+                    print(
+                        f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only",
+                        file=sys.stderr,
+                    )
+                    kw = KnownWords.from_set([w for w in known.split(",") if w])
+            else:
+                kw = KnownWords.from_set([w for w in known.split(",") if w])
+            fd = FreqDict.load(freq_p[0]) if freq_p else None
+            scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load())
+            print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
+
+        return scorer, anki, mine_conf, dict_set
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-reader-"))
     dur = max(8, int(seconds))
@@ -510,9 +523,20 @@ def run(
         translation=TranslationOptions(auto_translate=auto_translate),
         prefetch=prefetch,
     )
-    reader = Reader(
-        ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
-    )
+    # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
+    # scorer / mining collaborators PRESENT synchronously — build them inline. The interactive path
+    # builds them in the BACKGROUND (progressive startup): plain subs draw now, a spinner runs, and
+    # coloring/tooltips/mining land in place once loaded.
+    if demo_word or screenshot:
+        scorer, anki, mine_conf, dict_set = _build_deps()
+        reader = Reader(
+            ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
+        )
+    else:
+        reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+        if sub_path:  # index the external sub so Alt+←/→/↓ can render the target line instantly
+            reader.load_sub_index(sub_path)
+        reader.load_deps_async(cfg, build=_build_deps)
     try:
         if demo_word or screenshot:
             time.sleep(0.8)
@@ -1075,6 +1099,8 @@ def attach(
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+    if sub_file:  # index an explicit external sub so Alt+←/→/↓ render the target line instantly
+        reader.load_sub_index(sub_file)  # (embedded/jimaku tracks: plain sub-seek for now)
     reader.load_deps_async(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "
