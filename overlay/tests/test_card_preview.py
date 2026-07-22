@@ -33,6 +33,24 @@ def test_preview_without_media():
     assert pr.image_rect is None  # no screenshot → nothing to enlarge
 
 
+def test_preview_scales_with_window():
+    # Matches the tooltip: the card preview's contents scale with the window (mpv model), so its
+    # height and its clickable ✕ button scale together — same layout, just smaller on a small video.
+    from overlay.panel import Theme
+
+    frame = Image.new("RGBA", (320, 180), (40, 70, 90, 255))
+    pv = PreviewData(
+        "mined", "門前", "もんぜん", ["門前の小僧"], "門前", ["temple gate"], frame, 1.2, "Deck"
+    )
+    full = render_card_preview(pv, width=640, theme=Theme(scale=1.0))
+    half = render_card_preview(pv, width=320, theme=Theme(scale=0.5))
+    assert (
+        abs(full.image.height - 2 * half.image.height) <= 8
+    )  # height scales ~linearly (px rounding)
+    assert full.close_rect and half.close_rect
+    assert abs(full.close_rect[3] - 2 * half.close_rect[3]) <= 1  # ✕ button size scales too
+
+
 def test_preview_zoom_enlarges_the_screenshot():
     frame = Image.new("RGBA", (320, 180), (40, 70, 90, 255))
     pv = PreviewData("mined", "本", "ほん", ["本を読む"], "本", ["book"], frame, 2.0, "")

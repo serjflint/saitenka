@@ -1,4 +1,4 @@
-"""Tiny vector icons (the colour-emoji ones the fonts lack): puzzle tag, speaker, arrow.
+"""Tiny vector icons (the colour-emoji ones the fonts lack): dot marker, add/check, close, speaker.
 
 Deliberately simple — recognisable placeholders, not artwork. Each returns an RGBA sprite.
 """
@@ -13,17 +13,17 @@ GREEN: RGBA = (91, 191, 106, 255)
 SPEAKER: RGBA = (90, 90, 90, 255)
 
 
-def puzzle(size: int, color: RGBA = GREEN) -> Image.Image:
-    """A rounded square with two knobs — a puzzle-piece stand-in for grammar-tag bullets."""
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+def dot(size: int, color: RGBA = GREEN) -> Image.Image:
+    """A medium green dot — the marker for grammar tags and the deinflection chain. (A tiny vector
+    puzzle piece was unrecognisable at tooltip sizes.) Supersampled 4× → a crisp circle at any size."""
+    ss = 4
+    s = size * ss
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    m = round(size * 0.14)
-    d.rounded_rectangle([m, m, size - m, size - m], radius=round(size * 0.18), fill=color)
-    r = round(size * 0.16)
-    cx = size // 2
-    d.ellipse([cx - r, 0, cx + r, 2 * r], fill=color)  # top knob
-    d.ellipse([size - 2 * r, cx - r, size, cx + r], fill=color)  # right knob
-    return img
+    r = round(s * 0.33)  # medium — ~2/3 of the icon box, centred
+    c = s // 2
+    d.ellipse([c - r, c - r, c + r, c + r], fill=color)
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def plus(size: int, color: RGBA = GREEN) -> Image.Image:

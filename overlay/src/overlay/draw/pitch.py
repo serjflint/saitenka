@@ -46,25 +46,32 @@ def render_pitch_graph(
     step: int = 14,
     height: int = 22,
     color: tuple[int, int, int, int] = PURPLE,
+    scale: float = 1.0,
 ) -> Image.Image:
-    """Draw the compact graph for ``reading`` with accent ``downstep`` (premultiplied RGBA)."""
+    """Draw the compact graph for ``reading`` with accent ``downstep`` (premultiplied RGBA). ``scale``
+    multiplies every metric so the graph tracks the tooltip's window-relative UI scale (mpv-style)."""
+    dot = max(1, round(dot * scale))
+    step = max(1, round(step * scale))
+    height = max(1, round(height * scale))
+    lw = max(1, round(2 * scale))  # dot outline + contour line width
+    edge = max(1, round(4 * scale))  # left inset + trailing-dot allowance
     ms = morae(reading)
     n = max(1, len(ms))
     highs, particle_high = _levels(n, downstep)
     y_hi, y_lo = dot + 2, height - dot - 2
-    w = step * n + dot * 2 + 4  # morae dots + the trailing particle dot
+    w = step * n + dot * 2 + edge  # morae dots + the trailing particle dot
     img = Image.new("RGBA", (w, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     def xy(i: int, high: bool) -> tuple[int, int]:
-        return 4 + i * step, y_hi if high else y_lo
+        return edge + i * step, y_hi if high else y_lo
 
     pts = [xy(i, h) for i, h in enumerate(highs)]
     pts.append(xy(n, particle_high))  # the following-particle dot
     for a, b in itertools.pairwise(pts):  # adjacent dots connected by the H/L contour
-        draw.line([a, b], fill=color, width=2)
+        draw.line([a, b], fill=color, width=lw)
     for p in pts[:-1]:
         draw.ellipse([p[0] - dot, p[1] - dot, p[0] + dot, p[1] + dot], fill=color)
     px, py = pts[-1]  # particle: open dot
-    draw.ellipse([px - dot, py - dot, px + dot, py + dot], outline=color, width=2)
+    draw.ellipse([px - dot, py - dot, px + dot, py + dot], outline=color, width=lw)
     return img

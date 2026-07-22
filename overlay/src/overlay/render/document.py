@@ -36,6 +36,8 @@ def render_document(
     link_out: list[LinkBox] | None = None,
     max_height: int | None = None,
     clipped_out: list | None = None,
+    indent_px: int = INDENT_PX,
+    gutter_px: int = GUTTER_PX,
 ) -> Image.Image:
     """Render blocks stacked top-to-bottom at a fixed panel width.
 
@@ -54,8 +56,8 @@ def render_document(
             if clipped_out is not None:
                 clipped_out.append(True)
             break
-        indent = padding + b.indent * INDENT_PX
-        gutter = GUTTER_PX if b.kind == "list-item" else 0
+        indent = padding + b.indent * indent_px
+        gutter = gutter_px if b.kind == "list-item" else 0
         content_w = max(10, width - indent - gutter - padding)
         fb = FlowBlock(width=content_w, padding=0, background=(0, 0, 0, 0))
         local: list[ScanBox] | None = [] if scan_out is not None else None
@@ -87,7 +89,7 @@ def render_document(
     for x, img, marker, baseline, local, llocal in rendered:
         canvas.alpha_composite(img, (x, y))
         if marker:
-            draw_inline(canvas, draw, x - GUTTER_PX, y + baseline, [Span(marker, base)])
+            draw_inline(canvas, draw, x - gutter_px, y + baseline, [Span(marker, base)])
         if scan_out is not None:
             for sb in local:
                 scan_out.append(ScanBox(sb.text, sb.x + x, sb.y + y, sb.w, sb.h))

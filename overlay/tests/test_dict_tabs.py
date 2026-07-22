@@ -28,7 +28,10 @@ class _MultiDS:
 
 def _reader(ds=None):
     r = Reader(FakeIPC(), dict_set=ds or _MultiDS())
-    r.osd = (1280, 720)
+    r.osd = (
+        1920,
+        1080,
+    )  # REF_H → UI scale 1.0, so tab geometry matches the default-theme panel calls
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -224,7 +227,7 @@ def test_single_dict_reserves_nothing(monkeypatch):
 def test_tab_click_scrolls_to_section(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc, dict_set=_MultiDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REF_H → UI scale 1.0 (reference tab geometry)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -235,7 +238,10 @@ def test_tab_click_scrolls_to_section(monkeypatch):
     r.on_click()
     assert r._tip_scroll > 0  # viewport jumped…
     third = r._tab_offsets[2]
-    assert abs(r._tip_scroll - max(0, third - r._tab_h)) <= 1  # …to the third section
+    maxs = max(0, r._tip_bgra.shape[0] - r._tip_view_h)
+    assert r._tip_scroll == min(
+        maxs, max(0, third - r._tab_h)
+    )  # …to the third section (clamped to bottom)
 
 
 def test_active_tab_tracks_scroll(monkeypatch):

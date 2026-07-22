@@ -28,8 +28,11 @@ class _FakeDS:
 
 
 def _reader(monkeypatch):
-    r = Reader(FakeIPC(), dict_set=_FakeDS())
-    r.osd = (1280, 720)
+    # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product
+    # default: a change to the default tooltip height must not silently move these interaction goldens.
+    # osd = 1080p so the UI scale is 1.0 (REF_H) — the goldens capture the reference (unscaled) layout.
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    r.osd = (1920, 1080)
     r._finish_available = lambda: True  # render full panels (scan cells present)
     monkeypatch.setattr(r, "_draw_subtitle", r._draw_subtitle)  # keep real subtitle boxes
     r.set_subtitle("本命を読む")  # → 本命 / を / 読む, with real per-word boxes
