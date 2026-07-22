@@ -10,6 +10,10 @@ the sentence — audio, screenshot, reading, pitch, frequency — straight into 
 drawn into mpv's *own* video surface, so there's no second window and none of the Windows
 overlay/fullscreen breakage that plagues external overlays.
 
+![Saitenka's in-mpv hover tooltip: the word 本 highlighted in the subtitle line, with its Yomitan-style multi-dictionary tooltip open above.](docs/screenshot-hover.png)
+
+<sub>Saitenka's own overlay in demo mode — a synthetic clip and example sentence, no third-party video. The dictionary gloss is from [JMdict](https://www.edrdg.org/) © EDRDG, used under the [EDRDG licence](https://www.edrdg.org/edrdg/licence.html) (CC BY-SA).</sub>
+
 - **再点火 = "re-ignition"** — built to make picking study back up frictionless after a long break.
 - Local-first and grounded: readings and pitch always come from dictionaries, never a language model.
 
