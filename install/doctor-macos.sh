@@ -22,12 +22,16 @@ done
 
 printf '\n\033[1mSummary (toolchain):\033[0m \033[32m%d ok\033[0m · \033[33m%d warn\033[0m · \033[31m%d fail\033[0m\n' "$pass" "$warn" "$fail"
 
-# Hand off to the overlay's own doctor (the authoritative, unit-tested checks).
+# Hand off to the overlay's own doctor (the authoritative, unit-tested checks). --summary collapses
+# its passing checks to a count; warnings/failures still print in full.
 if have saitenka-overlay; then
   hdr "Overlay (saitenka-overlay doctor)"
-  saitenka-overlay doctor; ov=$?
+  saitenka-overlay doctor --summary; ov=$?
 else
   er "saitenka-overlay not installed — run install/install-macos.sh"; ov=1
 fi
 
-if [ "$fail" -eq 0 ] && [ "${ov:-0}" -eq 0 ]; then echo "Healthy ✅"; exit 0; else echo "Problems found — see ✗ above ❌"; exit 1; fi
+# The overlay doctor already prints its own Healthy/Problems verdict; only add one here when the
+# shell-level toolchain check found something it couldn't see (so we don't echo "Healthy" twice).
+if [ "$fail" -ne 0 ]; then echo "Toolchain problems above — see ✗ ❌"; fi
+if [ "$fail" -eq 0 ] && [ "${ov:-0}" -eq 0 ]; then exit 0; else exit 1; fi

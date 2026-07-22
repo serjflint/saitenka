@@ -57,7 +57,7 @@ function Pkg($name, $choco, $winget){
 # falls back to uv's standalone installer - parity with install-macos.sh. Methods per uv's guide:
 # https://docs.astral.sh/uv/getting-started/installation/
 function EnsureUv {
-  if(Have uv){ Log "[x] uv present (left as-is)"; return }
+  if(Have uv){ return }  # already listed in Discovery above; stay silent unless we install
   if(Have choco){ Log "choco: uv"; Run "choco install uv -y --no-progress --limit-output" }
   elseif(Have winget){ Log "winget: astral-sh.uv"; Run "winget install --id astral-sh.uv --exact --source winget --silent --accept-source-agreements --accept-package-agreements --disable-interactivity" }
   else { Log "no package manager - using uv's standalone installer"; Run "irm https://astral.sh/uv/install.ps1 | iex" }
@@ -71,10 +71,11 @@ if(-not ((Have choco) -or (Have winget))){
   Warn "  Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))"
 }
 # The overlay runtime needs mpv + ffmpeg; uv provides Python 3.14t + all deps (incl. the tokenizer).
-if(-not (Have mpv))   { Pkg 'mpv'    'mpvio.install' $null } else { Log "[x] mpv present (left as-is)" }
-if(-not (Have ffmpeg)){ Pkg 'ffmpeg' 'ffmpeg' 'Gyan.FFmpeg' } else { Log "[x] ffmpeg present (left as-is)" }
+# Present tools are already listed in Discovery above — only announce an actual install.
+if(-not (Have mpv))   { Pkg 'mpv'    'mpvio.install' $null }
+if(-not (Have ffmpeg)){ Pkg 'ffmpeg' 'ffmpeg' 'Gyan.FFmpeg' }
 EnsureUv   # uv: choco/winget if present, else uv's standalone installer (no package manager needed)
-if($AnkiPresent){ Log "[x] Anki present (left as-is)" }
+if($AnkiPresent){ }
 elseif(Confirm 'Install Anki now (needed for mining + FSRS coloring)?'){ Pkg 'Anki' 'anki' 'Anki.Anki' }
 else { Log "skipped Anki - install later from https://apps.ankiweb.net, then re-run" }
 
@@ -106,7 +107,9 @@ else {
   $need = @(); if(-not $msvc){ $need += 'MSVC++ Build Tools 14+' }; if(-not $mecab){ $need += 'MeCab at C:\mecab' }
   Log ("standard 3.14 - for the 3.14t render speedup, install " + ($need -join ' + ') + ", then re-run")
 }
-$installArgs = @('tool','install','--python',$pyVer,'--reinstall',"$Repo\overlay[$extra]")
+# --quiet suppresses the ~30-line reinstalled-package list; build FAILURES still print (they go to
+# stderr), so the "Failed to build ..." block the outcome section points at is unaffected.
+$installArgs = @('tool','install','--python',$pyVer,'--reinstall','--quiet',"$Repo\overlay[$extra]")
 if(Have uv){
   Log "Installing/updating saitenka-overlay[$extra] from $Repo\overlay"
   if($DryRun){ Write-Host "  DRY: uv $($installArgs -join ' ')" }
@@ -136,12 +139,10 @@ if($Dev){
   if((Have uv) -and (-not (Have apy))){ Log "+ apy (apyanki)"; Run "uv tool install apyanki" }
 }
 
-# --- 4. Health check (the overlay's own doctor) ------------------------------
-$doctor = Join-Path $PSScriptRoot 'doctor-windows.ps1'
-if(Test-Path $doctor){ Log "Running healthcheck (doctor-windows.ps1)..."; & powershell -ExecutionPolicy Bypass -File $doctor }
-else { Warn "doctor-windows.ps1 not found next to the installer - skipping healthcheck." }
-
-# --- 5. Outcome: don't cheerfully say "Done." if the overlay didn't install --
+# --- 4. Outcome: don't cheerfully say "Done." if the overlay didn't install --
+# (The guided setup in §6 runs the overlay's own doctor twice - an initial read and a final
+# self-verify - so there's no separate doctor-windows.ps1 pass here. Run it standalone any time:
+# powershell -ExecutionPolicy Bypass -File install\doctor-windows.ps1)
 if($OverlayFailed){
   Write-Host ""
   Write-Host "[saitenka] INSTALL DID NOT COMPLETE - saitenka-overlay is not installed." -ForegroundColor Red
@@ -183,13 +184,13 @@ function AddonLine($code,$nm,$note){
 # POSIX-only and the tool never writes it on Windows.
 $Cfg = if($env:SAITENKA_CONFIG){ $env:SAITENKA_CONFIG }
        else { Join-Path $env:LOCALAPPDATA 'saitenka\overlay.toml' }
+# Dictionaries are imported ONCE into the consolidated database (dictionaries.sqlite); the config then
+# lists their TITLES (not zip paths). Present = that DB exists AND the config references a dict title.
+$DictDb = if($env:SAITENKA_DATA_DIR){ Join-Path $env:SAITENKA_DATA_DIR 'dictionaries.sqlite' }
+          else { Join-Path $env:LOCALAPPDATA 'saitenka\dictionaries.sqlite' }
 function DictsPresent(){
-  if(-not (Test-Path $Cfg)){ return 0 }
-  $n = 0
-  Get-Content $Cfg | Where-Object { $_ -notmatch '^\s*#' } | Select-String -Pattern '"([^"]*\.zip)"' -AllMatches | ForEach-Object {
-    foreach($m in $_.Matches){ $p = $m.Groups[1].Value -replace '^~', $HOME; if(Test-Path $p){ $n++ } }
-  }
-  return $n
+  if(-not ((Test-Path $DictDb) -and (Test-Path $Cfg))){ return $false }
+  [bool]((Get-Content $Cfg | Where-Object { $_ -notmatch '^\s*#' }) -match '^\s*(dicts|freq|pitch)\s*=\s*\[')
 }
 
 Write-Host ""
@@ -204,14 +205,12 @@ Write-Host "  2. Anki add-ons (Tools -> Add-ons -> Get Add-ons):"
 AddonLine '2055492159' 'AnkiConnect'    'mining + FSRS coloring'
 AddonLine '759844606'  'FSRS Helper'    'better scheduling'
 AddonLine '1771074083' 'Review Heatmap' 'streak view'
-$dc = DictsPresent
-if($dc -gt 0){ Write-Host ("  3. Dictionaries:  [x] {0} configured and present on disk" -f $dc) -ForegroundColor Green }
+if(DictsPresent){ Write-Host "  3. Dictionaries:  [x] imported into the database (see saitenka-overlay doctor)" -ForegroundColor Green }
 else {
-  Write-Host "  3. Dictionaries: run  saitenka-overlay import-settings --scan-dir <folder of your .zip dicts>"
-  Write-Host "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
-  Write-Host "     or add the .zip paths by hand under [dictionaries] in:"
-  Write-Host "       $Cfg"
-  Write-Host "     Have a full Yomitan backup? saitenka-overlay import-dictionaries <export> converts it to .zip dicts."
+  Write-Host "  3. Dictionaries: run  saitenka-overlay import <folder of your Yomitan .zip dicts>"
+  Write-Host "     (imports them once into the consolidated database and fills the config with their titles)."
+  Write-Host "       config: $Cfg"
+  Write-Host "     Have a Yomitan settings export? saitenka-overlay import-settings <export.json> --scan-dir <folder>"
 }
 # jimaku is "set up" if the env var is set OR the config has a [jimaku] table (set-jimaku-key writes
 # [jimaku].fetch=true even when the key itself lives in the Credential Locker, which a shell can't read).
