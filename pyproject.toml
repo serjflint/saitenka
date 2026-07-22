@@ -1,0 +1,29 @@
+# Repo-root task runner. This is NOT a package (`package = false`) — it ships nothing. Its only job is
+# to let `uv run poe <task>` work from the repo root by delegating into `overlay/`, where the real poe
+# tasks (lint, types, tests, bench, …) live. The dev gate itself is unchanged; this just removes the
+# "cd overlay first" papercut. Everything stays in poe — no second task runner.
+#
+#   uv run poe all          # full dev gate (lint + types + tests + free-threaded + coverage)
+#   uv run poe test         # tests only
+#   uv run poe smoke-live   # L3 real-mpv smoke (needs a display)
+[project]
+name = "saitenka-tasks"
+version = "0"
+requires-python = ">=3.13"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["poethepoet>=0.30"]
+
+[tool.poe.tasks]
+all = { cmd = "uv run poe all", cwd = "overlay" }
+lint = { cmd = "uv run poe lint", cwd = "overlay" }
+types = { cmd = "uv run poe types", cwd = "overlay" }
+test = { cmd = "uv run poe test", cwd = "overlay" }
+test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
+cov = { cmd = "uv run poe cov", cwd = "overlay" }
+bench = { cmd = "uv run poe bench", cwd = "overlay" }
+smoke-live = { cmd = "uv run poe smoke-live", cwd = "overlay" }
+changelog = { cmd = "uv run poe changelog", cwd = "overlay" }
