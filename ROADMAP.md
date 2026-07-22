@@ -7,6 +7,14 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
 
 ## Now / next
 
+- **Cold first-paint jank — clip/stream the first def body.** The `--stress` benchmark quantifies it:
+  memory is clean (no leak, cache LRU-bounded), but the frame-latency tail is severe under load —
+  **p99 ~990 ms / MAX ~1.1 s** on a cold pathological entry (a huge monolingual first definition). The
+  cause: viewport-first rendering fills the viewport by rasterising whole SC blocks, so a giant first
+  block overshoots. Fix = clip/stream that first def body block-by-block (the head only rasterises the
+  covering strip; the rest streams behind it), the way later def bodies already defer. Target: cold
+  first-paint p99 back under ~250 ms. This is the one real jank lever left (warm hover / scroll / nested
+  are all well inside the frame budget).
 - **Runtime jimaku keybind** — re-fetch subtitles mid-playback from a key. The option already exists
   (`--jimaku-force` / `[jimaku].force`); the reusable primitive (`fetch_jimaku`) is in place, so this
   is wiring a controller keybind.
