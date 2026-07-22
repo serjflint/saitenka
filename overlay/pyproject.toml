@@ -75,6 +75,9 @@ packages = ["src/overlay"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: real-mpv smoke needing a display (opt-in via SAITENKA_LIVE=1; run `poe smoke-live`)",
+]
 
 [tool.ruff]
 line-length = 100
@@ -132,6 +135,8 @@ test = "uv run --extra full pytest -q -n auto"
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q" }
 cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
+# L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
+smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
