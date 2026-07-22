@@ -487,6 +487,20 @@ def main() -> int:
         action="store_true",
         help="fail if the GIL is enabled (a C-extension re-enabled it) — for free-threaded runs",
     )
+    ap.add_argument(
+        "--stress",
+        action="store_true",
+        help="sustained chained session (scan→scroll→nested→dismiss over many heavy entries) — "
+        "surfaces cache-eviction thrash, memory growth, and the frame-latency tail under load",
+    )
+    ap.add_argument(
+        "--max-frame-ms",
+        type=float,
+        help="stress: fail if any single op exceeds this frame budget (ms)",
+    )
+    ap.add_argument(
+        "--max-rss-mb", type=float, help="stress: fail if peak resident memory exceeds this (MB)"
+    )
     args = ap.parse_args()
 
     # Snapshot the runtime; the GIL state is re-read AFTER the workload (finalize_runtime), because
@@ -494,6 +508,10 @@ def main() -> int:
     # miss exactly the regression --require-ft is meant to catch.
     rt = runtime_info()
 
+    if args.stress:
+        return run_stress(
+            args.reps, rt, args.require_ft, args.json, args.max_frame_ms, args.max_rss_mb
+        )
     if args.pathological:
         return run_pathological(args.reps, rt, args.require_ft, args.json)
 
