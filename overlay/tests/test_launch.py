@@ -55,6 +55,15 @@ def test_no_config_and_fullscreen_go_after_the_binary_not_at_slot_0():
     assert "--no-config" in argv[:4] and "--fullscreen" in argv[:4]
 
 
+def test_d3d11_flip_disabled_only_on_windows(monkeypatch):
+    # The flip-model swapchain doesn't re-present while paused → overlay updates only show on a
+    # window event. We force the blit model on Windows; other platforms must not get the flag.
+    monkeypatch.setattr("overlay.mpvio.launch.sys.platform", "win32")
+    assert "--d3d11-flip=no" in _argv()
+    monkeypatch.setattr("overlay.mpvio.launch.sys.platform", "darwin")
+    assert "--d3d11-flip=no" not in _argv()
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(
     sys.platform == "win32", reason="fake mpv uses AF_UNIX; named-pipe variant is R5"
