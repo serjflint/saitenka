@@ -167,7 +167,7 @@ def test_lookup_records_otel_dict_sql_and_cache_metrics(tmp_path):
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-    from overlay.app import otel_metrics
+    from overlay import otel_metrics
 
     d = _make_dict(tmp_path / "otel.zip", "OtelDict", [["猫", "ねこ", ["cat"]]])
     dic = dicthelp.load_dict(d)

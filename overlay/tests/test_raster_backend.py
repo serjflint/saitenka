@@ -1,58 +1,17 @@
-"""Stage 8c: the cosmic-text seam — layering enforcement + the RasterBackend protocol.
+"""Stage 8c: the cosmic-text seam — the RasterBackend protocol.
 
-Layering rule (import-linter style, DIRECT imports only): the pure-data core (``sc/``, ``model.py``)
-must never import PIL; ``app/`` must not import PIL directly except via ``raster/`` and the
-subtitle-side renderers (subtitles/toast/card_preview — they migrate to the protocol
-opportunistically, later; controller's PIL use is preview-media only and rides along until then).
-Hit geometry (ScanBox/LinkBox) is produced by LAYOUT, not by the raster backend.
+Layering enforcement (PIL-agnostic core, GPL chokepoint, import cycles) moved to the
+``.importlinter`` dependency-contract engine (``uv run poe arch``) — see
+``overlay/.importlinter`` and ``AGENTS.md``. This file keeps the behavioral tests: hit geometry
+(ScanBox/LinkBox) is produced by LAYOUT, not by the raster backend, and the raster backends must
+reproduce identical bytes.
 """
 
-import re
 from pathlib import Path
 
 import numpy as np
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "overlay"
-
-# app/ modules still allowed to import PIL directly (migrate opportunistically, NOT this stage):
-APP_PIL_ALLOWLIST = {"subtitles.py", "toast.py", "card_preview.py", "controller.py"}
-
-_PIL_IMPORT = re.compile(r"^\s*(from PIL\b|import PIL\b)", re.M)
-
-
-def _imports_pil(path: Path) -> bool:
-    """True if the module imports PIL at RUNTIME. Imports inside `if TYPE_CHECKING:` blocks are
-    type-only (no runtime dependency) and don't count against the layering rule."""
-    lines = path.read_text().split("\n")
-    in_tc = False
-    for ln in lines:
-        if ln.startswith("if TYPE_CHECKING:"):
-            in_tc = True
-            continue
-        if in_tc:
-            if ln.strip() and not ln.startswith((" ", "\t")):
-                in_tc = False  # dedented — TYPE_CHECKING block ended
-            else:
-                continue
-        if _PIL_IMPORT.match(ln):
-            return True
-    return False
-
-
-def test_core_never_imports_pil():
-    """sc/, model.py (the pure row/block/hit-geometry model) must stay raster-agnostic."""
-    core = [SRC / "model.py", *sorted((SRC / "sc").glob("*.py"))]
-    offenders = [str(p.relative_to(SRC)) for p in core if _imports_pil(p)]
-    assert offenders == [], f"core modules import PIL: {offenders}"
-
-
-def test_app_imports_pil_only_via_raster_or_allowlist():
-    offenders = [
-        p.name
-        for p in sorted((SRC / "app").glob("*.py"))
-        if _imports_pil(p) and p.name not in APP_PIL_ALLOWLIST
-    ]
-    assert offenders == [], f"app modules import PIL outside the allowlist: {offenders}"
 
 
 def test_raster_backend_protocol_shape():
@@ -95,7 +54,6 @@ def test_hit_geometry_is_produced_by_layout_not_raster():
     from overlay.panel import Definition, Entry, LazyPanel, panel_rows
     from overlay.raster.pillow_backend import PillowBackend
 
-    assert not _imports_pil(SRC / "model.py")  # the geometry types are raster-agnostic
     body = ["同義語は", {"tag": "a", "href": "?query=見る", "content": "見る"}, "。"]
     e = Entry(headword=["観る"], defs=[Definition("MonoA", body)])
     width = 384

@@ -1,7 +1,7 @@
 """OpenTelemetry tracer/meter provider lifecycle — fully opt-in, fully no-op when disabled.
 
-See ``vibe/observability-plan.md``. The ``opentelemetry`` package (the ``observability`` extra) is
-imported lazily, only inside :func:`configure`, and only once ``TelemetryOptions.enabled`` is true —
+The ``opentelemetry`` package (the ``observability`` extra) is imported lazily, only inside
+:func:`configure`, and only once ``TelemetryOptions.enabled`` is true —
 a default install pays zero import cost, and a config with telemetry off never touches the SDK at
 all: no providers, no threads, no export directory created.
 """
@@ -89,7 +89,7 @@ def _sample_counters() -> dict[str, float]:
     ``otel_metrics.snapshot()``, plus the span queue's live dropped-count (not itself an OTel
     instrument — reading straight from the processor avoids double-bookkeeping a Counter that would
     need incrementing from two different places)."""
-    from overlay.app import otel_metrics
+    from overlay import otel_metrics
 
     snap = otel_metrics.snapshot()
     out: dict[str, float] = {}
@@ -122,7 +122,7 @@ def configure(options: TelemetryOptions) -> None:
             return
 
         from overlay.app.otel_export import CounterSampler, CTFSpanExporter, GatedSpanProcessor
-        from overlay.app.otel_metrics import register as register_metrics
+        from overlay.otel_metrics import register as register_metrics
 
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -168,7 +168,7 @@ def shutdown() -> None:
             except Exception:
                 log.debug("meter provider shutdown failed", exc_info=True)
 
-            from overlay.app.otel_metrics import unregister as unregister_metrics
+            from overlay.otel_metrics import unregister as unregister_metrics
 
             unregister_metrics()
         _tracer_provider = None

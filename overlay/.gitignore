@@ -5,3 +5,5 @@ out.png
 dist/
 *.egg-info/
 .coverage
+.pyscn/
+.complexipy_cache/

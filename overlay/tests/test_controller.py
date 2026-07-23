@@ -195,7 +195,7 @@ def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-    from overlay.app import otel_metrics
+    from overlay import otel_metrics
 
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
@@ -388,7 +388,7 @@ def test_panel_cache_records_otel_render_and_cache_metrics():
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-    from overlay.app import otel_metrics
+    from overlay import otel_metrics
     from overlay.app.subtitles import WordBox
     from overlay.app.tokenize import Token
     from overlay.panel import Definition, Entry

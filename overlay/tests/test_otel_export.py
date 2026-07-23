@@ -223,8 +223,8 @@ def test_sample_trace_fixture_is_valid_ctf():
     """tests/golden/sample_trace.json is a REAL trace captured from a live session (real mpv, real
     mouse-driven hovers, telemetry enabled) — not a byte-for-byte golden (ts/span_id/trace_id/tid
     are inherently non-deterministic), just a checked-in reference example, validated for shape.
-    Regenerate by running the driver described in vibe/observability-plan.md if the export format
-    changes on purpose."""
+    Regenerate by running a live session with telemetry enabled if the export format changes on
+    purpose."""
     data = json.loads(GOLDEN_TRACE.read_text(encoding="utf-8"))
     validate_ctf_document(data)
     names = {e["name"] for e in data["traceEvents"] if e["ph"] == "X"}

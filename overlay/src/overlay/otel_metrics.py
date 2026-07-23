@@ -1,10 +1,10 @@
-"""Pull-based metric instruments (Stage 7 of ``vibe/observability-plan.md``): registered once when
-telemetry is configured, read on demand via :func:`snapshot` — no periodic push, so metrics cost
-nothing until something actually inspects them (``doctor``, a test, a future ``report`` bundle).
+"""Pull-based metric instruments: registered once when telemetry is configured, read on demand via
+:func:`snapshot` — no periodic push, so metrics cost nothing until something actually inspects them
+(``doctor``, a test, a future ``report`` bundle).
 
 Instrument handles are module globals, ``None`` until :func:`register` runs (i.e. until telemetry is
-enabled) — call sites (Stage 8) must null-check before recording, the same pattern the rest of the
-codebase already uses for optional collaborators. Low-cardinality labels only: dict *name* is fine,
+enabled) — call sites must null-check before recording, the same pattern the rest of the codebase
+already uses for optional collaborators. Low-cardinality labels only: dict *name* is fine,
 per-word/per-entry is not (unbounded label cardinality is an OTel/Prometheus anti-pattern).
 """
 
@@ -124,8 +124,7 @@ def instrumented(histogram: Histogram | None, span_name: str, **attributes: str)
     for anchors where both a live percentile and a visible Perfetto timeline entry are useful.
     Deliberately NOT used at every anchor: a very-high-frequency call site (e.g. the mpv IPC
     round-trip, called on effectively every poll tick) would flood trace.json with spans — it stays
-    on :func:`timed` alone. See the anchor list in ``vibe/observability-plan.md`` Stage 8 for which
-    is which."""
+    on :func:`timed` alone."""
     with traced(span_name, **attributes), timed(histogram, **attributes):
         yield
 

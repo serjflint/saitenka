@@ -94,7 +94,7 @@ def test_command_and_overlay_show_record_otel_metrics():
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-    from overlay.app import otel_metrics
+    from overlay import otel_metrics
 
     ipc, server = _client_with_server()
     received: list = []

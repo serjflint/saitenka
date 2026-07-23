@@ -27,7 +27,7 @@ from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
 from overlay.app.miner import Miner, tag_slug
-from overlay.app import otel_metrics
+from overlay import otel_metrics
 from overlay.app.perf import timed
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem, PrefetchItem

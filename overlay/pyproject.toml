@@ -39,7 +39,7 @@ jmdict = [
     "jamdict-data>=1.5; platform_system != 'Windows'",
     "jamdict-data-fix>=1.5.1a2; platform_system == 'Windows'",
 ]
-# Runtime tracing/metrics (see vibe/observability-plan.md). OFF by default even when installed —
+# Runtime tracing/metrics. OFF by default even when installed —
 # `[telemetry] enabled = true` is the actual opt-in. Kept out of core deps so a default install never
 # pulls the OTel SDK: `app/telemetry.py` imports it lazily, only once `enabled=true` is read from
 # config. Both packages are pure-Python (py3-none-any), so no free-threading risk either way.
@@ -78,6 +78,8 @@ dev = [
     "py-spy>=0.4.2",
     "memray>=1.19.3",
     "pytest-memray>=1.9.0",
+    "import-linter>=2.13",
+    "complexipy>=6.2.0",
 ]
 
 [build-system]
@@ -99,6 +101,15 @@ markers = [
     "e2e: full-stack end-to-end; excluded from `poe test`.",
 ]
 
+[tool.complexipy]
+# Cognitive-complexity gate (uv run poe complexity, folded into poe all). Ratcheted via a checked-in
+# baseline snapshot (complexipy-snapshot.json, `poe complexity-baseline` to regenerate after a
+# deliberate refactor): today's ~40 pre-existing high-complexity functions (up to render_flow's 74,
+# cli.py's run() at 147) are grandfathered, so the gate only fails on NEW complexity growth, not on
+# adoption. max-complexity-allowed=15 is complexipy's own default — set explicitly so it's visible.
+paths = ["src/overlay"]
+max-complexity-allowed = 15
+
 [tool.ruff]
 line-length = 100
 
@@ -106,7 +117,7 @@ line-length = 100
 # Stage 8b tooling hardening: bugbear, simplify, tryceratops, perf, ruff-specific, pyupgrade,
 # comprehensions — on top of the default E/F. Every surviving hit is fixed or carries a reasoned
 # per-line noqa; the only config-level ignores are the style-only rules noted below.
-select = ["E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4"]
+select = ["E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4", "TID"]
 ignore = [
     "TRY003",  # long messages in raise — our error strings ARE the UX (toasts/CLI); a message-
                # class hierarchy would be ceremony without benefit here
@@ -126,6 +137,15 @@ ignore = [
 # Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
 # hoisting five one-use constants would only add indirection.
 "src/overlay/app/scoring.py" = ["RUF009"]
+# GPL-3.0 chokepoint: only these two modules may import the optional saitenka_deinflect add-on.
+# Defense-in-depth alongside the .importlinter gpl-chokepoint contract.
+"src/overlay/app/dictionary.py" = ["TID251"]
+"src/overlay/app/doctor.py" = ["TID251"]
+# Property tests exercise the deinflect chain directly (hypothesis), not through the app chokepoint.
+"tests/test_properties.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"saitenka_deinflect".msg = "GPL-3.0 add-on — only overlay/app/dictionary.py and overlay/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
 
 [tool.mypy]
 python_version = "3.13"
@@ -151,6 +171,16 @@ reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers imp
 [tool.poe.tasks]
 lint = { shell = "uv run --extra full ruff check --fix src tests examples && uv run --extra full ruff format src tests examples" }
 types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
+# Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
+# PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
+# + app/doctor.py chokepoint. Config: .importlinter.
+arch = { shell = "uv run --extra full lint-imports" }
+# Cognitive-complexity gate, ratcheted against complexipy-snapshot.json (config: [tool.complexipy]).
+# Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
+complexity = { shell = "uv run --extra full complexipy" }
+# Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,
+# review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
+complexity-baseline = { shell = "uv run --extra full complexipy --snapshot-create" }
 # Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
 test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e)'" }
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -m 'not slow'" }
@@ -161,7 +191,12 @@ smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest 
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
+# Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
+# controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
+# out-of-process on the standard interpreter (a separate Go binary), never imported into the
+# free-threaded runtime. Install once: `uv tool install pyscn`.
+arch-report = { shell = "uvx pyscn analyze --select complexity,cbo --no-open src/overlay" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
-all = ["lint", "types", "test", "test-ft", "cov"]
+all = ["lint", "types", "arch", "complexity", "test", "test-ft", "cov"]

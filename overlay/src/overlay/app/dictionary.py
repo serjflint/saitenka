@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 import msgspec.json as msgspec_json
 
-from overlay.app import otel_metrics
+from overlay import otel_metrics
 
 try:
     # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the
