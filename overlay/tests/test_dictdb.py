@@ -189,9 +189,10 @@ def test_import_reports_bank_progress(tmp_path):
 
 
 def test_readonly_conn_has_mmap_and_cache_pragmas(tmp_path):
-    """DictionaryDb._conn() sets PRAGMA mmap_size and a larger cache_size on the read-only per-thread
-    connections, so cold first lookups avoid pread round-trips."""
+    """DictionaryDb._conn() sets a MODEST PRAGMA mmap_size + cache_size on the read-only per-thread
+    connections — small enough that N worker connections don't inflate the Windows working set by GiB,
+    but still page-cache-backed so cold lookups avoid pread round-trips."""
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     c = db._conn()
-    assert c.execute("PRAGMA mmap_size").fetchone()[0] == 1073741824
-    assert c.execute("PRAGMA cache_size").fetchone()[0] == -65536  # 64 MiB (negative = KiB units)
+    assert c.execute("PRAGMA mmap_size").fetchone()[0] == 268435456  # 256 MiB per connection
+    assert c.execute("PRAGMA cache_size").fetchone()[0] == -32768  # 32 MiB (negative = KiB units)

@@ -193,10 +193,14 @@ class DictionaryDb:
         c = getattr(self._local, "conn", None)
         if c is None:
             c = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, check_same_thread=False)
-            # mmap the DB (1 GiB — under SQLITE_MAX_MMAP_SIZE on every platform) so cold lookups hit
-            # page-cache-backed memory instead of pread syscalls; 64 MiB page cache (negative = KiB).
-            c.execute("PRAGMA mmap_size=1073741824")
-            c.execute("PRAGMA cache_size=-65536")
+            # mmap a MODEST window of the DB so cold lookups hit page-cache-backed memory instead of
+            # pread syscalls. Kept small (256 MiB, was 1 GiB) because the DB is multi-GB and this is
+            # set on EACH per-thread connection (main + prefetch workers); on Windows the mapped view
+            # counts toward the process working set, so a 1 GiB window × N threads was inflating RAM by
+            # gigabytes. A benchmark showed the mmap win over pread was mostly a page-cache artifact, so
+            # shrinking the window costs ~nothing. 32 MiB page cache per connection (negative = KiB).
+            c.execute("PRAGMA mmap_size=268435456")
+            c.execute("PRAGMA cache_size=-32768")
             self._local.conn = c
         return c
 
