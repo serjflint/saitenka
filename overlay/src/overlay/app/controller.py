@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import logging
 import io
-import os
 import queue
 import re
-import sys
 import tempfile
 import threading
 import time
@@ -26,11 +24,12 @@ from PIL import Image
 from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
+from overlay.app import prefetch
 from overlay.app.miner import Miner, tag_slug
 from overlay import otel_metrics
-from overlay.app.perf import timed
+from overlay.app.perf import gil_disabled, timed
 from overlay.app.popups import PopupView, TipPanel
-from overlay.app.prefetch import FinishItem, PrefetchItem
+from overlay.app.prefetch import FinishItem
 from overlay.app.lookup import card_for, entry_for
 from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.media import (
@@ -42,7 +41,7 @@ from overlay.app.media import (
 )
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
-from overlay.app.tokenize import Token, tokenize
+from overlay.app.tokenize import SKIP_POS, Token, tokenize
 from overlay.model import Span, Style
 from overlay.mpvio.ipc import MpvIPC
 from overlay.mpvio.osd import Overlay
@@ -71,7 +70,6 @@ LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive sta
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
 # dict-tab strip / reserve (space-saving).
-SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed
@@ -132,11 +130,6 @@ class PanelKey(NamedTuple):
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
-
-
-def _gil_disabled() -> bool:
-    """True on a free-threaded build running GIL-free — rendering then scales across workers."""
-    return not getattr(sys, "_is_gil_enabled", lambda: True)()
 
 
 FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RGB 255,214,90)
@@ -921,103 +914,15 @@ class Reader:
         self._panel_cache[key] = st
         return st
 
-    def _prefetch_worker_count(self) -> int:
-        # GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
-        # ~3.8× on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
-        if _gil_disabled():
-            return min(8, max(2, (os.cpu_count() or 4) - 2))
-        return self.prefetch_workers
-
-    # --- background prefetch (warm the paused line's tooltips) --------------------------------
+    # --- background prefetch (warm the paused line's tooltips) — logic in app/prefetch.py --------
     def start_prefetch(self) -> None:
-        if not self.prefetch or self.dict_set is None or self._prefetch_threads:
-            return
-        for k in range(self._prefetch_worker_count()):
-            th = threading.Thread(
-                target=self._prefetch_worker, name=f"saitenka-prefetch-{k}", daemon=True
-            )
-            th.start()
-            self._prefetch_threads.append(th)
-
-    def _prefetch_worker(self) -> None:
-        while not self._stop.is_set():
-            # Priority: finish the deferred tail of the tooltip the user is looking at RIGHT NOW,
-            # ahead of speculatively warming the rest of the line.
-            try:
-                fin: FinishItem | None = self._finish_q.get_nowait()
-            except queue.Empty:
-                fin = None
-            if fin is not None:
-                try:
-                    fin.panel.finish()
-                except Exception:
-                    log.debug("finish job failed", exc_info=True)
-                else:
-                    if fin.key == self._tip_key and fin.panel is self._tip_state:
-                        self._tip_dirty = True  # main loop re-uploads the now-complete panel
-                    elif fin.key == self._nest.key and fin.panel is self._nest.state:
-                        self._nest.dirty = True
-                continue
-            try:
-                item: PrefetchItem = self._prefetch_q.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if otel_metrics.prefetch_queue_depth is not None:
-                otel_metrics.prefetch_queue_depth.add(-1)
-            if self._stop.is_set() or item.gen != self._prefetch_gen:
-                continue  # cancelled (line changed / resumed / seek / closing)
-            try:
-                # item.mined came from the main thread — never call _is_mined/card_for from a
-                # worker (jamdict is not thread-safe on free-threaded builds).
-                self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
-            except Exception:
-                log.debug(
-                    "prefetch render failed for %r", item.token.surface, exc_info=True
-                )  # a bad word must never kill the worker
+        prefetch.start_prefetch(self)
 
     def _update_prefetch(self) -> None:
-        """Queue the current line's content words for background rendering when the user is *engaged*
-        — paused OR the cursor is over the video (you rarely move the mouse without intent to hover).
-        N+1 words go first (likeliest hover / mine target). On any change (resume, mouse-out, seek,
-        new line) bump the generation so in-flight renders are dropped. Tokens are passed by value
-        (frozen), so a line change can't make a worker read stale state."""
-        if not self.prefetch or self.dict_set is None:
-            return
-        engaged = bool(self._prop("pause")) or self._mouse_in
-        key = (self.sub_text, engaged)
-        if key == self._prefetch_key:
-            return
-        self._prefetch_key = key
-        self._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
-        if engaged and self.tokens:
-            gen, seen, items = self._prefetch_gen, set(), []
-            for i, t in enumerate(self.tokens):
-                if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
-                    continue
-                seen.add(t.lemma)
-                np1 = bool(
-                    self.styles and i < len(self.styles) and self.styles[i].tag.startswith("n+1")
-                )
-                items.append((0 if np1 else 1, i, t))
-            items.sort(key=lambda x: x[0])  # N+1 first
-            for _, i, t in items:
-                # Evaluate _is_mined on the main thread (card_for → jamdict must not be called
-                # from a worker thread — jamdict is not thread-safe on free-threaded builds).
-                self._prefetch_q.put(
-                    PrefetchItem(gen, t, self._inflected_surface(i), self._is_mined(t))
-                )
-                if otel_metrics.prefetch_queue_depth is not None:
-                    otel_metrics.prefetch_queue_depth.add(1)
-
-    def _cap_for(self, frac: float) -> int:
-        """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
-        margin = max(16, round(self.osd[1] * 0.05))
-        return min(round(self.osd[1] * frac), self.osd[1] - 2 * margin)
+        prefetch.update_prefetch(self)
 
     def _tip_cap(self) -> int:
-        """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
-        own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
-        return self._cap_for(self.tip_max_frac)
+        return prefetch.tip_cap(self)
 
     def _show_tooltip(self, index: int) -> None:
         with timed("show_tooltip"):
@@ -1086,7 +991,7 @@ class Reader:
         is decent) so the popup stays above it and the text below the cursor — the definition and the
         subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
         margin = max(16, round(self.osd[1] * 0.05))
-        view_h = min(full_h, self._cap_for(self.nested_max_frac))
+        view_h = min(full_h, prefetch.cap_for(self, self.nested_max_frac))
         above_room = int(wy) - TIP_GAP - margin
         if view_h > above_room >= self._NEST_MIN_ABOVE:
             view_h = above_room  # shrink to fit above rather than drop below
@@ -2007,7 +1912,7 @@ class Reader:
         self._register_keybinds()
         self._seed_mined()
         self.start_prefetch()
-        mode = "free-threaded (GIL off)" if _gil_disabled() else "GIL"
+        mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
         self._stall_warned = False

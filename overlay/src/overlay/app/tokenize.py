@@ -17,6 +17,8 @@ from functools import lru_cache
 _TAG_LOCK = threading.Lock()
 
 CONTENT_POS = {"名詞", "動詞", "形容詞", "副詞", "形状詞", "連体詞", "感動詞"}
+# 補助記号/記号/空白 (auxiliary symbol / symbol / whitespace) — never worth a tooltip.
+SKIP_POS = {"補助記号", "記号", "空白"}
 
 
 @dataclass(frozen=True, slots=True)

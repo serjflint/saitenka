@@ -38,15 +38,7 @@
         "complexity": 21
       },
       {
-        "name": "Reader::_update_prefetch",
-        "complexity": 21
-      },
-      {
         "name": "Reader::_handle",
-        "complexity": 23
-      },
-      {
-        "name": "Reader::_prefetch_worker",
         "complexity": 23
       },
       {
@@ -150,6 +142,20 @@
       {
         "name": "Miner::bulk_mine",
         "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/prefetch.py",
+    "file_name": "prefetch.py",
+    "functions": [
+      {
+        "name": "update_prefetch",
+        "complexity": 21
+      },
+      {
+        "name": "prefetch_worker",
+        "complexity": 23
       }
     ]
   },
