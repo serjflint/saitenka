@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-23
+
 ### Added
 
 - **`saitenka-overlay import <dir>`** — build your Yomitan dictionaries into the consolidated database in
@@ -17,6 +19,12 @@ logs.
   by `window_height / 1080`, so a small video shows the **same amount of content**, just smaller, and a
   big screen shows it larger — crisp at both. Previously the container tracked the window but the content
   was a fixed pixel size, so small windows cramped/clipped it. A 1080p window is unchanged.
+- **`doctor` reports live session health** — real latency percentiles and current RSS from the actual
+  running session (previously only available from the offline `--stress` benchmark), plus the
+  interpreter's Python version and GIL/free-threaded build state (useful since the free-threading advice
+  differs between a `3.14` and a `3.14t` build and a user can swap installs).
+- **Pause-on-tooltip is on by default** (the mining default), and the per-dictionary tab strip is off by
+  default.
 
 ### Changed
 
@@ -35,6 +43,20 @@ logs.
   › negative › -た`) is now a green pill after a plain green dot marker, instead of a hard-to-read
   puzzle-piece icon + coloured text. `doctor` gained a **deinflect** check (warns, with how to enable the
   optional GPL add-on, when it's missing so no chain shows).
+- **Own frequency lists show a short pill name** — `Saitenka Known` etc. now renders as `Known`, freeing
+  up pill width; other dictionaries pass through unchanged.
+- **Cold dictionary lookups are dramatically faster** (p99 ~1012ms → ~214ms, max ~1073ms → ~299ms on the
+  `--stress` repro, a ~72-79% reduction) — a profile found lookup/JSON overhead, not rendering, was the
+  real cost behind the ROADMAP's "cold first-paint jank": a dedup key was needlessly re-serializing an
+  already-decoded glossary to JSON, and a pitch-lookup query (`term=? OR reading=?`) had no usable index
+  for its `reading` branch and fell back to a full table scan. Both are fixed (plus a bounded LRU cache of
+  decoded dictionary entries), and the hot JSON decode path moved from stdlib `json` to `msgspec.json`.
+- **Tooltip panels are cached compressed** (zlib-compressed BGRA, ~44x smaller per entry) instead of as
+  raw image arrays, decompressed only when a panel becomes active; the panel cache cap rose 48 → 128.
+- **SQLite's per-connection mmap window shrunk 1 GiB → 256 MiB** (page cache 64 → 32 MiB) — the mmap view
+  counts toward the process working set on Windows, inflating RAM by gigabytes across the per-thread
+  connections; a benchmark showed the mmap win over `pread` was mostly a page-cache artifact, so this
+  costs next to nothing.
 
 ### Removed
 
@@ -60,6 +82,25 @@ logs.
   resizing the window moves every on-screen coordinate, which used to leave an open dictionary tooltip
   floating, detached and mis-sized, in the corner. The tooltip (and any nested scan popup) is now
   dismissed on a resize and reopens correctly placed on the next hover, once the size settles.
+- **Windows: paused overlays repaint again** — Windows' default d3d11 GPU context uses flip-model
+  presentation, which doesn't re-present the window while paused, so a new/updated subtitle or tooltip
+  only became visible on the next real window event ("the subtitle doesn't update until I move the
+  mouse"). mpv now launches with `--d3d11-flip=no`; a no-op on other contexts.
+- **No more JLPT pill on function words** — a particle whose bare-kana reading collided with an N1 word
+  (e.g. は, ね) was mislabelled N1; the check now gates on content part-of-speech, like the underline
+  already does.
+- **Tooltip keys release cleanly** — releasing a tooltip's key bindings now sends mpv's `ignore` command
+  instead of an empty one it rejects (which was spamming `Invalid command for key binding` and leaving
+  the arrow keys grabbed since the unbind never took).
+- **Ctrl+C exits cleanly** — the CLI now exits `130` instead of dumping a `KeyboardInterrupt` traceback
+  from the free-threaded re-exec.
+
+### Development
+
+- **Bounded the per-thread font cache** (same LRU pattern as the panel/entry caches) — sizes aren't drawn
+  from a small fixed set (ruby text scales to its base, structured-content nodes carry their own sizes),
+  so a long session touching varied dict content could grow it unbounded. Added a memray-based memory
+  regression test (`tests/test_stress_memory.py`, `poe stress-memory`, `slow`-marked).
 
 ## [0.3.0] - 2026-07-22
 
