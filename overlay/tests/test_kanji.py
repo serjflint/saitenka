@@ -4,10 +4,10 @@ single-ideograph scan-cell fallback."""
 import json
 import zipfile
 
+import dicthelp
 from util import FakeIPC, assert_golden
 
 from overlay.app.controller import Reader
-from overlay.app.dictionary import Dictionary, DictionarySet
 from overlay.app.subtitles import WordBox
 from overlay.app.tokenize import Token
 
@@ -40,15 +40,15 @@ KANJI_HON = ["本", "ホン", "もと", "jouyou", ["book", "origin", "main"], {"
 
 def _fixture_ds(tmp_path, terms=(("読む", "よむ", ["to read"]),)):
     p = _make_dict_zip(tmp_path / "kd.zip", "KanjiDict", terms=terms, kanji=[KANJI_READ, KANJI_HON])
-    return DictionarySet.load([p])
+    return dicthelp.load_set([p])
 
 
 # --- ingestion -------------------------------------------------------------------------------------
 
 
-def test_kanji_bank_ingested_into_sqlite(tmp_path):
+def test_kanji_bank_ingested_into_db(tmp_path):
     p = _make_dict_zip(tmp_path / "k.zip", "K", kanji=[KANJI_READ])
-    d = Dictionary.load(p)
+    d = dicthelp.load_dict(p)
     k = d.kanji_lookup("読")
     assert k is not None
     assert k["onyomi"] == "ドク トク"
@@ -56,13 +56,6 @@ def test_kanji_bank_ingested_into_sqlite(tmp_path):
     assert k["meanings"] == ["reading", "to read"]
     assert k["stats"]["strokes"] == "14"
     assert d.kanji_lookup("犬") is None
-
-
-def test_cache_schema_version_bumped(tmp_path):
-    # the kanji table needs a one-time index rebuild → the cache filename carries the schema version
-    p = _make_dict_zip(tmp_path / "k2.zip", "K2", kanji=[KANJI_HON])
-    d = Dictionary.load(p)
-    assert "-v2.sqlite" in d._db_path
 
 
 # --- kanji_for -------------------------------------------------------------------------------------

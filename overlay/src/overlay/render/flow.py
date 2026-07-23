@@ -241,6 +241,17 @@ def _flush_scan_run(
         scan_out.append(ScanBox(tail, round(cx), round(y_top), round(cw), round(h)))
 
 
+def _ruby_base_tokens(box: RubyBox):
+    """Shaped tokens of a ruby box's BASE run, so a furigana'd word's kanji become scannable — a ruby
+    box used to END the scan run, leaving any kanji that carried a reading un-hoverable."""
+    from overlay.render.layout import _tokenize_span
+
+    toks = []
+    for span in box.base:
+        toks.extend(_tokenize_span(span.text, span.style, getattr(span, "href", None)))
+    return toks
+
+
 def render_flow(
     flow: list[Inline],
     block: Block,
@@ -302,6 +313,17 @@ def render_flow(
             if scan_out is not None:
                 if it.kind == "text" and it.tok is not None and it.tok.kind == "cjk":
                     run.append((it.tok.text, x, it.width))
+                elif it.kind == "ruby" and it.box is not None:
+                    # Make the ruby's BASE kanji scannable at their (centred) positions inside the box;
+                    # they continue the contiguous CJK run so a word spanning ruby + okurigana scans whole.
+                    bx = it.box.base_x(x)
+                    for btok in _ruby_base_tokens(it.box):
+                        if btok.kind == "cjk":
+                            run.append((btok.text, bx, btok.width))
+                        elif run:  # kana/latin inside the base breaks the run
+                            _flush_scan_run(run, scan_out, y, box)
+                            run = []
+                        bx += btok.width
                 elif run:
                     _flush_scan_run(run, scan_out, y, box)
                     run = []

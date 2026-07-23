@@ -154,10 +154,11 @@ def test_import_reconstructs_zips_that_the_loader_reads(tmp_path):
     assert names == {"TestDict.zip", "TestFreq.zip"}
     assert seen[-1] == (5, 5)  # progress reached the header total
 
-    from overlay.app.dictionary import Dictionary
+    import dicthelp
+
     from overlay.app.yomitan_import import classify_zip
 
-    d = Dictionary.load(out / "TestDict.zip")
+    d = dicthelp.load_dict(out / "TestDict.zip")
     assert d.title == "TestDict"
     ents = d.lookup("猫")
     assert ents and ents[0].reading == "ねこ"

@@ -11,17 +11,19 @@ from __future__ import annotations
 
 import logging
 
-from overlay.app.config import expand_paths
-
 log = logging.getLogger(__name__)
 
 
 def build_reader_deps(cfg: dict, *, color: bool = True, mine: bool = True):
     """Return ``(scorer, anki, mine_conf, dict_set)`` from ``cfg``. ``scorer`` + ``dict_set`` power
-    coloring/underlines/pills/tooltips; ``anki`` + ``mine_conf`` power mining."""
-    dict_paths = expand_paths(cfg.get("dicts") or [])
-    freq_paths = expand_paths(cfg.get("freq") or [])
-    pitch_paths = expand_paths(cfg.get("pitch") or [])
+    coloring/underlines/pills/tooltips; ``anki`` + ``mine_conf`` power mining.
+
+    ``cfg``'s ``dicts``/``freq``/``pitch`` are dictionary **titles** resolved against the consolidated
+    :class:`~overlay.app.dictdb.DictionaryDb` — imported once by ``saitenka-overlay import``, never built
+    here. A configured title with no imported dictionary is warned and skipped."""
+    dict_titles = list(cfg.get("dicts") or [])
+    freq_titles = list(cfg.get("freq") or [])
+    pitch_titles = list(cfg.get("pitch") or [])
     known_cfg = cfg.get("known")
 
     _mc = cfg.get("mine")
@@ -34,29 +36,35 @@ def build_reader_deps(cfg: dict, *, color: bool = True, mine: bool = True):
         if not ensure_anki_running():
             log.warning("Anki not reachable — coloring falls back to freq+JLPT, mining disabled")
 
-    dict_set = None
-    if dict_paths or freq_paths or pitch_paths:
-        from overlay.app.dictionary import DictionarySet, split_existing
+    from overlay.app.dictdb import DictionaryDb
 
-        # Keep the user's working dicts even if one config entry is a bare title / stale path: filter
-        # to what exists and warn, rather than crashing the whole attach on a raw FileNotFoundError.
-        dict_ok, dict_miss = split_existing(dict_paths)
-        freq_ok, freq_miss = split_existing(freq_paths)
-        pitch_ok, pitch_miss = split_existing(pitch_paths)
-        for kind, miss in (("dict", dict_miss), ("freq", freq_miss), ("pitch", pitch_miss)):
+    db = DictionaryDb.open()
+
+    dict_set = None
+    freq_rows = None
+    if dict_titles or freq_titles or pitch_titles:
+        from overlay.app.dictionary import DictionarySet
+
+        d_rows, d_miss = db.resolve(dict_titles)
+        freq_rows, f_miss = db.resolve(freq_titles)
+        p_rows, p_miss = db.resolve(pitch_titles)
+        for kind, miss in (("dict", d_miss), ("freq", f_miss), ("pitch", p_miss)):
             if miss:
                 import sys
 
                 from overlay.app.dictionary import _MISSING_HINT
 
-                msg = f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. {_MISSING_HINT}"
+                msg = (
+                    f"{kind}(s) not imported, skipped: {', '.join(repr(m) for m in miss)}. "
+                    f"{_MISSING_HINT}"
+                )
                 log.warning(msg)
                 print(msg, file=sys.stderr, flush=True)
-        if dict_ok or freq_ok or pitch_ok:
-            dict_set = DictionarySet.load(dict_ok, freq_paths=freq_ok, pitch_paths=pitch_ok)
+        if d_rows or freq_rows or p_rows:
+            dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows)
 
     scorer = None
-    if color or known_cfg or freq_paths:
+    if color or known_cfg or freq_titles:
         from overlay.app.scoring import Scorer
         from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
 
@@ -68,8 +76,11 @@ def build_reader_deps(cfg: dict, *, color: bool = True, mine: bool = True):
                 log.warning("known-word load from Anki failed; coloring without a known set")
         if kw is None:
             kw = KnownWords.from_set([])
-        fd = FreqDict.load(freq_paths[0]) if freq_paths else None
-        scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load())
+        # freq_rows is set iff we resolved dict sources above; the coloring band uses the first freq.
+        if freq_rows is None:
+            freq_rows, _ = db.resolve(freq_titles)
+        fd = FreqDict.from_db(db, freq_rows[0]) if freq_rows else None
+        scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load(db))
 
     anki = mine_conf = None
     if mine and mc:

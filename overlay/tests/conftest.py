@@ -1,8 +1,7 @@
-"""Make ``tests/util.py`` importable as ``util``, put ``src/`` on the path, and keep the dict
-cache HERMETIC: tests must never write into the user's real ~/.cache/saitenka-overlay/dicts."""
+"""Make ``tests/util.py`` importable as ``util``, put ``src/`` on the path, and keep the consolidated
+dictionary DB HERMETIC: tests must never write into the user's real ``data_dir()/dictionaries.sqlite``."""
 
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -11,11 +10,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402
 
-import overlay.app.dictionary as _dictionary  # noqa: E402
+import overlay.app.dictdb as _dictdb  # noqa: E402
 
-_dictionary._REAL_CACHE_DIR = _dictionary.CACHE_DIR  # test_compare opts back into the real one
-_TEST_CACHE = Path(tempfile.mkdtemp(prefix="saitenka-test-dicts-"))
-_dictionary.CACHE_DIR = _TEST_CACHE
+
+@pytest.fixture(autouse=True)
+def _hermetic_dict_db(tmp_path, monkeypatch):
+    """Point the consolidated dictionary DB at a fresh per-test file so nothing touches the user's real
+    ``data_dir()/dictionaries.sqlite``. Tests that build their own ``DictionaryDb.open(path)`` are
+    unaffected; code that opens the default path (reader_deps, doctor, dicthelp) gets this tmp DB.
+    ``test_compare`` opts back into the real DB by resetting the override."""
+    monkeypatch.setattr(_dictdb, "_DB_PATH_OVERRIDE", tmp_path / "dictionaries.sqlite")
 
 
 @pytest.fixture(autouse=True)

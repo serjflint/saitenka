@@ -27,6 +27,7 @@ from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
 from overlay.app.miner import Miner, tag_slug
+from overlay.app.perf import timed
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem, PrefetchItem
 from overlay.app.lookup import card_for, entry_for
@@ -66,9 +67,9 @@ TRANS_ID = 4
 PREVIEW_ID = 5
 NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
 LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
-# The nested popup gets its own (roomier) height cap so shrinking the base tooltip (tip_max_frac)
-# doesn't cramp the deep-dive; the nested popup also carries no dict-tab strip / reserve (space-saving).
-_NESTED_MAX_FRAC = 0.6
+# The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
+# the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
+# dict-tab strip / reserve (space-saving).
 SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
@@ -128,11 +129,6 @@ class PanelKey(NamedTuple):
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
-MAX_BULK = 12
-HIDE_DELAY = 0.6  # seconds the tooltip lingers after the cursor leaves the word (Yomitan-style)
-PREFETCH_WORKERS = (
-    2  # constrained parallel (GIL build): warm the line's tooltips without oversubscribing
-)
 
 
 def _gil_disabled() -> bool:
@@ -140,15 +136,6 @@ def _gil_disabled() -> bool:
     return not getattr(sys, "_is_gil_enabled", lambda: True)()
 
 
-def _prefetch_worker_count() -> int:
-    # GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured ~3.8×
-    # on 4 cores). Standard GIL build: extra workers just contend, so keep the constrained count.
-    if _gil_disabled():
-        return min(8, max(2, (os.cpu_count() or 4) - 2))
-    return PREFETCH_WORKERS
-
-
-FLASH_SECS = 0.22  # how long the "copied" highlight border pulses on a popup
 FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RGB 255,214,90)
 JLPT_DARKEN = (
     0.62  # darken the pastel underline hue for the pill name-segment so white text is legible
@@ -226,12 +213,27 @@ class Reader:
         self.sub_next_key = o.keys.sub_next_key  # Alt+RIGHT → sub-seek  1 (next line)
         self.sub_replay_key = o.keys.sub_replay_key  # Alt+DOWN  → sub-seek  0 (replay current)
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
+        self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
         self.show_dict_tabs = o.tooltip.show_dict_tabs  # draw the sticky dict-tab strip (base only)
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
+        self.hide_delay = o.tooltip.hide_delay  # tooltip linger after the cursor leaves the word
+        self.flash_secs = o.tooltip.flash_secs  # "copied" highlight border pulse duration
+        self.panel_cache_max = (
+            o.tooltip.panel_cache_max
+        )  # LRU cap on cached rendered tooltip panels
+        self.max_bulk = o.mining.max_bulk  # cap on words mined in one "mine all" bulk action
+        self.anki_ok_ttl = (
+            o.mining.anki_ok_ttl
+        )  # seconds an AnkiConnect reachability check is cached
+        self.anki_ping_timeout = o.mining.anki_ping_timeout  # reachability ping timeout
         self._paused_by_tip = False
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
         # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
         self.prefetch = o.prefetch
+        self.poll_interval = o.perf.poll_interval  # main loop tick
+        self.prefetch_workers = (
+            o.perf.prefetch_workers
+        )  # constrained-parallel (GIL build) worker count
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -268,11 +270,8 @@ class Reader:
             None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
         )
         self._hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
-        self._tip_full: object | None = (
-            None  # full (unclipped) tooltip image; the view is a scrolled crop
-        )
         self._tip_bgra: np.ndarray | None = (
-            None  # full panel as a premultiplied BGRA array — scroll slices this
+            None  # active panel decompressed to a premultiplied BGRA array — scroll slices this
         )
         self._tip_scroll = 0
         self._tip_view_h = 0
@@ -317,11 +316,12 @@ class Reader:
         self._tab_h = 0
         self._tab_active = -1
         self._tip_keys_bound = False
-        # LRU cache: OrderedDict keyed by panel_key, bounded at 48 entries (≈one paused episode scene).
-        # Each _TipPanel holds BGRA arrays (≈1–4 MB each), so ~100–200 MB at 48 panels — well within
-        # the OS's reclaimable page budget.  On overflow we evict the LEAST-recently-used entry (the
-        # OrderedDict move_to_end protocol) rather than clearing everything (which would lose the
-        # already-rendered panels the user is likely to re-hover).
+        # LRU cache: OrderedDict keyed by panel_key, bounded at panel_cache_max entries. Each _TipPanel
+        # now holds only a zlib-compressed BGRA blob (~16x on mostly-transparent panels → sub-MB even
+        # for a tall multi-dict entry), so the whole cache is tens of MB — we raised the cap from 48 to
+        # 128 accordingly. On overflow we evict the LEAST-recently-used entry (the OrderedDict
+        # move_to_end protocol) rather than clearing everything (which would lose already-rendered
+        # panels the user is likely to re-hover).
         self._panel_cache: OrderedDict = OrderedDict()  # key -> _TipPanel
         self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         self._toast_until = 0.0
@@ -370,6 +370,14 @@ class Reader:
             self.ipc.command("observe_property", i, name)
             self._observed[name] = self._get(name)  # initial state (pre-observe)
         self._observing = True
+        # Seed values are the first sign the mpv→client read path works: a None osd-dimensions here
+        # (with mpv clearly running) means get_property replies aren't coming back — the pipe read is
+        # dead, so nothing will ever draw. Logged so it lands in overlay.log / report.
+        log.info(
+            "observing mpv props; seed osd-dimensions=%r sub-text=%r",
+            self._observed.get("osd-dimensions"),
+            self._observed.get("sub-text"),
+        )
 
     def _prop(self, name: str):
         """Latest value of a property: the observed (event-driven) state when observing, else a
@@ -381,6 +389,11 @@ class Reader:
     def _on_property_change(self, ev: dict) -> None:
         name = ev.get("name")
         if name:
+            if name == "pause" and ev.get("data") != self._observed.get(name):
+                # Breadcrumb for the "overlay only updates on mouse move" report: while paused, mpv's
+                # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
+                # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
+                log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
 
     def refresh_osd(self) -> bool:
@@ -401,7 +414,6 @@ class Reader:
         self.ov.hide(TIP_ID)
         self._hide_nested()
         self._tip_rect = None
-        self._tip_full = None
         self._tip_bgra = None
         self._tip_state = None
         self._tip_key = None
@@ -452,6 +464,11 @@ class Reader:
         ox = (self.osd[0] - sr.image.width) // 2
         oy = self.osd[1] - sr.image.height - self.bottom_margin
         self.sub_origin = (ox, oy)
+        if not getattr(self, "_first_sub_logged", False):
+            self._first_sub_logged = True
+            log.info(
+                "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
+            )
         self.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
     # --- hover --------------------------------------------------------------------------------
@@ -472,8 +489,12 @@ class Reader:
 
     def _update_hover(self) -> None:
         """Hover with hysteresis across the popup stack: keep each level alive while the cursor is on
-        its trigger OR on the popup itself, lingering HIDE_DELAY after leaving both. Hovering a word
-        *inside* the tooltip opens a nested scan popup."""
+        its trigger OR on the popup itself, lingering ``hide_delay`` after leaving both. Hovering a
+        word *inside* the tooltip opens a nested scan popup."""
+        with timed("hover_hit_test"):
+            self._update_hover_impl()
+
+    def _update_hover_impl(self) -> None:
         mp = self._prop("mouse-pos") or {}
         inside = bool(mp.get("hover"))
         self._mouse_in = inside  # engagement signal for prefetch
@@ -508,7 +529,7 @@ class Reader:
             self._scan_target = None
             now = time.monotonic()
             if self._nest.hide_at == 0.0:
-                self._nest.hide_at = now + HIDE_DELAY
+                self._nest.hide_at = now + self.hide_delay
             elif now >= self._nest.hide_at:
                 self._hide_nested()
         else:
@@ -536,7 +557,7 @@ class Reader:
             self._word_target = None
             now = time.monotonic()
             if self._hide_at == 0.0:
-                self._hide_at = now + HIDE_DELAY
+                self._hide_at = now + self.hide_delay
             elif now >= self._hide_at:
                 self.set_hover(-1)
                 self._hide_at = 0.0
@@ -581,9 +602,9 @@ class Reader:
 
     def _flash(self, oid: int) -> None:
         """Pulse a "copied" highlight border on a popup as copy feedback, then let the poll loop
-        restore it after FLASH_SECS."""
+        restore it after ``flash_secs``."""
         self._flash_oid = oid
-        self._flash_until = time.monotonic() + FLASH_SECS
+        self._flash_until = time.monotonic() + self.flash_secs
         self._render_nested_view() if oid == NESTED_ID else self._render_tip_view()
 
     def copy_click(self) -> None:
@@ -743,17 +764,19 @@ class Reader:
     def _anki_ok(self) -> bool:
         """Is AnkiConnect reachable RIGHT NOW? Gates the ⊕ button per card show, so it appears/hides as
         the user opens/closes Anki mid-session (not frozen at startup). Kept fast: a short timeout with
-        0 retries fails immediately when Anki is closed, and the result is cached ~3s so rapid hovers
-        don't ping repeatedly. False when mining isn't configured at all."""
+        0 retries fails immediately when Anki is closed, and the result is cached ``anki_ok_ttl``
+        seconds so rapid hovers don't ping repeatedly. False when mining isn't configured at all."""
         if self.anki is None:
             return False
         now = time.monotonic()
         ts, ok = self._anki_cache
-        if now - ts < 3.0:
+        if now - ts < self.anki_ok_ttl:
             return ok
         from overlay.app.anki import anki_reachable
 
-        ok = anki_reachable(timeout=0.4)  # resolves host/key from config; short timeout, 0 retries
+        ok = anki_reachable(
+            timeout=self.anki_ping_timeout
+        )  # resolves host/key from config; 0 retries
         self._anki_cache = (now, ok)
         return ok
 
@@ -767,8 +790,15 @@ class Reader:
         level — the same signal the subtitle draws as an underline (``Scorer._style``). The pill's hue
         is the level's underline color (darkened for legible white text), so the tooltip and the
         underline read as the same thing."""
+        from overlay.app.scoring import _is_content
+
         sc = self.scorer
         if sc is None or not getattr(sc, "enable_jlpt", False) or sc.jlpt is None:
+            return None
+        # Gate on content POS exactly like the subtitle underline (Scorer._style). Without this a
+        # particle/aux (は, ね) whose bare-kana READING collides with an N1 word's reading in the JLPT
+        # map gets mislabelled — usually N1, since _put keeps the highest level. Better no pill.
+        if not _is_content(tok):
             return None
         level = sc.jlpt.level(tok.lemma, tok.surface, tok.reading)
         if not level:
@@ -861,23 +891,30 @@ class Reader:
         return st
 
     def _panel_cache_setdefault(self, key, st) -> _TipPanel:
-        """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over 48.
+        """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over the cap.
         Must be called under ``self._cache_lock``.  First-writer-wins: if two workers race to build
         the same panel, the winner's result is kept and the loser is discarded (both are equivalent)."""
         if key in self._panel_cache:
             self._panel_cache.move_to_end(key)
             return self._panel_cache[key]
         # Evict least-recently-used entries until we are at the limit.
-        while len(self._panel_cache) >= 48:
+        while len(self._panel_cache) >= self.panel_cache_max:
             self._panel_cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
         self._panel_cache[key] = st
         return st
+
+    def _prefetch_worker_count(self) -> int:
+        # GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
+        # ~3.8× on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
+        if _gil_disabled():
+            return min(8, max(2, (os.cpu_count() or 4) - 2))
+        return self.prefetch_workers
 
     # --- background prefetch (warm the paused line's tooltips) --------------------------------
     def start_prefetch(self) -> None:
         if not self.prefetch or self.dict_set is None or self._prefetch_threads:
             return
-        for k in range(_prefetch_worker_count()):
+        for k in range(self._prefetch_worker_count()):
             th = threading.Thread(
                 target=self._prefetch_worker, name=f"saitenka-prefetch-{k}", daemon=True
             )
@@ -957,10 +994,14 @@ class Reader:
 
     def _tip_cap(self) -> int:
         """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
-        own, deliberately roomier cap (``_NESTED_MAX_FRAC``) so shrinking the base doesn't cramp it."""
+        own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
         return self._cap_for(self.tip_max_frac)
 
     def _show_tooltip(self, index: int) -> None:
+        with timed("show_tooltip"):
+            self._show_tooltip_impl(index)
+
+    def _show_tooltip_impl(self, index: int) -> None:
         self._hide_nested()  # switching the base word drops any stale scan popup
         self._kanji_index = 0  # a new word restarts the `k` kanji cycle
         tok = self.tokens[index]
@@ -974,11 +1015,9 @@ class Reader:
             tok, inflected, min_h=cap, finish=not self._finish_available(), mined=mined
         )
         self._tip_state, self._tip_key, self._tip_dirty = st, key, False
-        self._tip_full = st.image
-        self._tip_bgra = st.bgra
+        self._tip_bgra = st.bgra()  # decompress the cached panel into the active scroll buffer
         self._hover_reading = st.reading
         self._tip_scroll = 0
-        full = st.image
 
         ox, oy = self.sub_origin
         b = self.boxes[index]
@@ -986,9 +1025,10 @@ class Reader:
         # Safe area: keep clear of the OSC/window header at the top and the controls/edge at the
         # bottom, so the tooltip never spills under the window chrome. It scrolls, so we cap the
         # height rather than trying to fit the whole (very tall) entry.
-        assert full is not None  # head render above guarantees the image
-        self._tip_view_h = min(full.height, cap)
-        self._tip_xy = self._place_panel(full.width, wx, wy, b.h, self._tip_view_h)
+        assert st.ready  # head render above guarantees the panel is stored
+        ph, pw = st.shape[0], st.shape[1]
+        self._tip_view_h = min(ph, cap)
+        self._tip_xy = self._place_panel(pw, wx, wy, b.h, self._tip_view_h)
         self._update_tabs()
         self._render_tip_view()
         self._bind_tip_keys()  # LEFT/RIGHT/UP/DOWN/ESC live only while the tip shows
@@ -1024,7 +1064,7 @@ class Reader:
         is decent) so the popup stays above it and the text below the cursor — the definition and the
         subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
         margin = max(16, round(self.osd[1] * 0.05))
-        view_h = min(full_h, self._cap_for(_NESTED_MAX_FRAC))
+        view_h = min(full_h, self._cap_for(self.nested_max_frac))
         above_room = int(wy) - TIP_GAP - margin
         if view_h > above_room >= self._NEST_MIN_ABOVE:
             view_h = above_room  # shrink to fit above rather than drop below
@@ -1034,10 +1074,9 @@ class Reader:
         """A background finish grew the shown panel (deferred bodies rendered) → re-upload the view so
         the scrollbar reflects the true height and the below-the-fold content is scrollable."""
         st = self._tip_state
-        if st is None or st.bgra is None:
+        if st is None or not st.ready:
             return
-        self._tip_full = st.image
-        self._tip_bgra = st.bgra
+        self._tip_bgra = st.bgra()  # re-decompress the grown panel into the active scroll buffer
         self._update_tabs()  # the streamed tail may add sections / move offsets
         self._render_tip_view()
 
@@ -1117,11 +1156,15 @@ class Reader:
         self._tip_keys_bound = True
 
     def _unbind_tip_keys(self) -> None:
-        """Release the tooltip keys back to mpv — a leaked bind would steal its arrows."""
+        """Neutralise the tooltip keys so a leaked bind can't fire ``tab-prev``/etc. when no tooltip is
+        up. mpv has no unbind verb over IPC, and ``keybind KEY ""`` is REJECTED — it logs the noisy
+        ``[input] Command name missing`` / ``Invalid command for key binding 'LEFT': ''`` triple (visible
+        on the Windows console; silently on the mac log). Rebind to the valid no-op ``ignore`` instead:
+        no error, and the key stops doing tooltip work while the popup is gone."""
         if not self._tip_keys_bound:
             return
         for key, _msg in TIP_KEYBINDS:
-            self.ipc.command("keybind", key, "")  # empty command = unbind
+            self.ipc.command("keybind", key, "ignore")  # valid no-op; "" would be rejected by mpv
         self._tip_keys_bound = False
 
     def _render_tip_view(self) -> None:
@@ -1158,9 +1201,9 @@ class Reader:
 
     def _refresh_nested_full(self) -> None:
         st = self._nest.state
-        if st is None or st.bgra is None:
+        if st is None or not st.ready:
             return
-        self._nest.bgra = st.bgra
+        self._nest.bgra = st.bgra()  # re-decompress the grown nested panel into its scroll buffer
         self._render_nested_view()
 
     def _scroll_tip(self, delta: int) -> None:
@@ -1246,10 +1289,10 @@ class Reader:
         self._nest.token, self._nest.word = token, word
         self._nest.tail = tail
         self._nest.dirty, self._nest.scroll = False, 0
-        self._nest.bgra = st.bgra
-        full = st.image
-        self._nest.view_h = self._nested_view_h(full.height, wy)
-        self._nest.xy = self._place_panel(full.width, wx, wy, wh, self._nest.view_h)
+        self._nest.bgra = st.bgra()  # decompress the cached nested panel into its scroll buffer
+        ph, pw = st.shape[0], st.shape[1]
+        self._nest.view_h = self._nested_view_h(ph, wy)
+        self._nest.xy = self._place_panel(pw, wx, wy, wh, self._nest.view_h)
         self._render_nested_view()
         if not st.complete:
             self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _nest.dirty → refresh
@@ -1433,7 +1476,7 @@ class Reader:
         st = self._panel_for(tok, tok.surface, min_h=self._tip_cap(), finish=True, mined=mined)
         self._nest.state = st
         self._nest.key = self._panel_key(tok, tok.surface, mined)
-        self._nest.bgra = st.bgra
+        self._nest.bgra = st.bgra()  # decompress the cached panel into the nested scroll buffer
         self._render_nested_view()
 
     # --- card preview (verify correctness / image / sound, one surface) -----------------------
@@ -1758,6 +1801,7 @@ class Reader:
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
             self._reconcile_sub_text(self._prop("sub-text") or "")
+            self._maybe_log_stall()
             # progressive startup: inject background-loaded deps (once), else animate the spinner
             if self._pending_deps is not None:
                 deps, self._pending_deps = self._pending_deps, None
@@ -1777,6 +1821,26 @@ class Reader:
             return True
         except (OSError, ValueError):
             return False
+
+    def _maybe_log_stall(self) -> None:
+        """One-time loud diagnostic for 'mpv plays but nothing draws': if several seconds pass with no
+        subtitle text ever observed, mpv's IPC replies/events aren't reaching us. The byte count from
+        the reader thread distinguishes the causes — 0 bytes means the pipe read direction is dead (the
+        classic Windows named-pipe failure); >0 bytes means reads work but the subtitle track/property
+        never produced text. Playback continues regardless, so this only lives in overlay.log / report."""
+        if getattr(self, "_stall_warned", False) or self.sub_text:
+            return
+        started = getattr(self, "_run_started", None)
+        if started is None or time.monotonic() - started < 4.0:
+            return
+        self._stall_warned = True
+        log.warning(
+            "no subtitle text %.0fs after start (bytes from mpv=%d). Nothing drawing usually means "
+            "mpv's IPC replies aren't reaching the overlay (bytes=0 → dead pipe read) or no JP "
+            "subtitle track/text was selected (bytes>0).",
+            time.monotonic() - started,
+            getattr(self.ipc, "_bytes_read", -1),
+        )
 
     def _seed_mined(self) -> None:
         self._miner.seed_mined()
@@ -1911,7 +1975,8 @@ class Reader:
         except Exception:
             log.debug("loading spinner draw failed", exc_info=True)
 
-    def run(self, interval: float = 0.025) -> None:
+    def run(self, interval: float | None = None) -> None:
+        interval = interval if interval is not None else self.poll_interval
         self.refresh_osd()
         self.start_observing()  # event-driven property reads from here on
         self._setup_secondary()
@@ -1920,6 +1985,8 @@ class Reader:
         self.start_prefetch()
         mode = "free-threaded (GIL off)" if _gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
+        self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
+        self._stall_warned = False
         while self.poll_once():
             time.sleep(interval)
 

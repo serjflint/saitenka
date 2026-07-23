@@ -20,15 +20,18 @@ foreach($t in 'mpv','ffmpeg','uv'){
 }
 Write-Host ("`nSummary (toolchain): {0} ok / {1} warn / {2} fail" -f $pass,$warn,$fail)
 
-# Hand off to the overlay's own doctor (the authoritative, unit-tested checks).
+# Hand off to the overlay's own doctor (the authoritative, unit-tested checks). --summary collapses
+# its passing checks to a count; warnings/failures still print in full.
 $ov = 1
 if(Have saitenka-overlay){
   HDR "Overlay (saitenka-overlay doctor)"
-  & saitenka-overlay doctor
+  & saitenka-overlay doctor --summary
   $ov = $LASTEXITCODE
 } else {
   ER "saitenka-overlay not installed - run install\install-windows.ps1"
 }
 
-if(($fail -eq 0) -and ($ov -eq 0)){ Write-Host "Healthy" -ForegroundColor Green; exit 0 }
-else { Write-Host "Problems found - see [X] above" -ForegroundColor Red; exit 1 }
+# The overlay doctor already prints its own Healthy/Problems verdict; only add one here when the
+# shell-level toolchain check found something it couldn't see (so we don't echo the verdict twice).
+if($fail -ne 0){ Write-Host "Toolchain problems above - see [X]" -ForegroundColor Red }
+if(($fail -eq 0) -and ($ov -eq 0)){ exit 0 } else { exit 1 }

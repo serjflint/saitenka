@@ -25,7 +25,7 @@ from typing import Any
 
 import ijson
 
-CHUNK = 10_000  # entries per bank file (Yomitan dictionaries chunk their banks similarly)
+from overlay.app.config import resolve_dictdb
 
 
 class YomitanDbImportError(RuntimeError):
@@ -123,9 +123,9 @@ def _index_json(meta: dict) -> str:
 class _DictWriter:
     """Accumulates a dictionary's bank entries and flushes chunked ``*_bank_N.json`` into its zip."""
 
-    def __init__(self, out_dir: Path, meta: dict, chunk: int = CHUNK):
+    def __init__(self, out_dir: Path, meta: dict, chunk: int | None = None):
         self.title = meta.get("title", "")
-        self.chunk = chunk
+        self.chunk = chunk if chunk is not None else resolve_dictdb().dexie_chunk_size
         self.path = out_dir / f"{_slug(self.title)}.zip"
         self._zf = zipfile.ZipFile(self.path, "w", zipfile.ZIP_DEFLATED)
         self._zf.writestr("index.json", _index_json(meta))
@@ -181,7 +181,7 @@ def import_database(
     src: str | Path,
     out_dir: str | Path,
     *,
-    chunk: int = CHUNK,
+    chunk: int | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> list[Path]:
     """Stream ``src`` (a dexie export) → per-dictionary ``.zip``s in ``out_dir``. Returns the written

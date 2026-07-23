@@ -73,20 +73,22 @@ def _bold_sentence(lines: list[str], surface: str, size: int, color: RGBA) -> li
     return spans
 
 
-def _audio_chip(pv: PreviewData) -> Image.Image:
+def _audio_chip(pv: PreviewData, size: int = 20) -> Image.Image:
     txt = (
         (f"▶ {pv.audio_seconds:.1f}s" if pv.audio_seconds else "▶ audio")
         if pv.audio_seconds is not None
         else "no audio"
     )
     bg = (70, 90, 120, 255) if pv.audio_seconds is not None else (150, 90, 90, 255)
-    return render_chip(txt, ChipStyle(size=20, bg=bg)).image
+    return render_chip(txt, ChipStyle(size=size, bg=bg)).image
 
 
 def render_card_preview(
     pv: PreviewData, width: int = 460, theme: Theme = _DEFAULT_THEME, zoom: bool = False
 ) -> PreviewRender:
     m, cw = theme.margin, width - 2 * theme.margin
+    close = theme.px(CLOSE)  # ✕ button, scaled with the window like the tooltip
+    gap = theme.px(8)
     rows: list[Image.Image] = []
     image_rect_local: Rect | None = None  # within the media row
     audio_rect_local: Rect | None = None
@@ -98,24 +100,26 @@ def render_card_preview(
 
     # header: status chip + big ruby headword + ✕ close (top-right)
     label, color = STATUS.get(pv.status, STATUS["mined"])
-    chip = render_chip(label, ChipStyle(size=18, bg=color)).image
+    chip = render_chip(label, ChipStyle(size=theme.px(18), bg=color)).image
     hw = inline_flow(
-        furigana(pv.expression, pv.reading), Style(size=34, weight=700, color=theme.text)
+        furigana(pv.expression, pv.reading), Style(size=theme.px(34), weight=700, color=theme.text)
     )
     hw_img = flow_row(hw)
-    header = Image.new("RGBA", (cw, max(chip.height, hw_img.height) + 6), (0, 0, 0, 0))
+    header = Image.new("RGBA", (cw, max(chip.height, hw_img.height) + theme.px(6)), (0, 0, 0, 0))
     header.alpha_composite(chip, (0, (header.height - chip.height) // 2))
-    header.alpha_composite(hw_img, (chip.width + 12, (header.height - hw_img.height) // 2))
-    header.alpha_composite(cross(CLOSE), (cw - CLOSE, 0))
-    close_rect = (m + cw - CLOSE, m, CLOSE, CLOSE)  # header sits at (m, m)
+    header.alpha_composite(
+        hw_img, (chip.width + theme.px(12), (header.height - hw_img.height) // 2)
+    )
+    header.alpha_composite(cross(close), (cw - close, 0))
+    close_rect = (m + cw - close, m, close, close)  # header sits at (m, m)
     rows.append(header)
 
     # sentence (mined word bolded red)
     rows.append(
         flow_row(
             [
-                Span("文  ", Style(size=18, color=theme.muted)),
-                *_bold_sentence(pv.sentence_lines, pv.mined_surface, 23, theme.text),
+                Span("文  ", Style(size=theme.px(18), color=theme.muted)),
+                *_bold_sentence(pv.sentence_lines, pv.mined_surface, theme.px(23), theme.text),
             ]
         )
     )
@@ -125,48 +129,48 @@ def render_card_preview(
         gspans = []
         for i, g in enumerate(pv.glosses[:4]):
             if i:
-                gspans.append(Span("\n", Style(size=21)))
-            gspans.append(Span(f"・{g}", Style(size=21, color=theme.text)))
+                gspans.append(Span("\n", Style(size=theme.px(21))))
+            gspans.append(Span(f"・{g}", Style(size=theme.px(21), color=theme.text)))
         rows.append(flow_row(gspans))
 
     # media row: screenshot (thumbnail, or enlarged when zoomed) + audio chip
-    a_chip = _audio_chip(pv)
+    a_chip = _audio_chip(pv, theme.px(20))
     if zoom and pv.image is not None:  # enlarged screenshot stacked over the audio chip
         big = pv.image.convert("RGBA").copy()
-        big.thumbnail(ZOOM_MAX)
-        media = Image.new("RGBA", (cw, big.height + 8 + a_chip.height), (0, 0, 0, 0))
+        big.thumbnail((theme.px(ZOOM_MAX[0]), theme.px(ZOOM_MAX[1])))
+        media = Image.new("RGBA", (cw, big.height + theme.px(8) + a_chip.height), (0, 0, 0, 0))
         media.alpha_composite(big, (0, 0))
         ImageDraw.Draw(media).rounded_rectangle(
-            [0, 0, big.width - 1, big.height - 1], radius=4, outline=(200, 200, 200, 255)
+            [0, 0, big.width - 1, big.height - 1], radius=theme.px(4), outline=(200, 200, 200, 255)
         )
         image_rect_local = (0, 0, big.width, big.height)
-        ay = big.height + 8
+        ay = big.height + theme.px(8)
         media.alpha_composite(a_chip, (0, ay))
         audio_rect_local = (0, ay, a_chip.width, a_chip.height)
     else:
-        media = Image.new("RGBA", (cw, 118), (0, 0, 0, 0))
+        media_h, top = theme.px(118), theme.px(4)
+        media = Image.new("RGBA", (cw, media_h), (0, 0, 0, 0))
         x = 0
         if pv.image is not None:
             thumb = pv.image.convert("RGBA").copy()
-            thumb.thumbnail((196, 110))
-            media.alpha_composite(thumb, (0, 4))
+            thumb.thumbnail((theme.px(196), theme.px(110)))
+            media.alpha_composite(thumb, (0, top))
             ImageDraw.Draw(media).rounded_rectangle(
-                [0, 4, thumb.width - 1, 4 + thumb.height - 1],
-                radius=4,
+                [0, top, thumb.width - 1, top + thumb.height - 1],
+                radius=theme.px(4),
                 outline=(200, 200, 200, 255),
             )
-            image_rect_local = (0, 4, thumb.width, thumb.height)
-            x = thumb.width + 14
-        ay = (118 - a_chip.height) // 2
+            image_rect_local = (0, top, thumb.width, thumb.height)
+            x = thumb.width + theme.px(14)
+        ay = (media_h - a_chip.height) // 2
         media.alpha_composite(a_chip, (x, ay))
         audio_rect_local = (x, ay, a_chip.width, a_chip.height)
     media_idx = len(rows)
     rows.append(media)
 
     if pv.footer:
-        rows.append(flow_row([Span(pv.footer, Style(size=15, color=theme.muted))]))
+        rows.append(flow_row([Span(pv.footer, Style(size=theme.px(15), color=theme.muted))]))
 
-    gap = 8
     total_h = 2 * m + sum(r.height for r in rows) + gap * (len(rows) - 1)
     canvas = Image.new("RGBA", (width, total_h), theme.bg)
     draw = ImageDraw.Draw(canvas)

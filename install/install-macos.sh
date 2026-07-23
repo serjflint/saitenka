@@ -50,8 +50,9 @@ if ! have brew; then
   [ -x /opt/homebrew/bin/brew ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-brew_need() { # formula — install only if absent; leave present ones untouched
-  if brew list --formula "$1" &>/dev/null || have "$1"; then log "✓ $1 present (left as-is)"
+brew_need() { # formula — install only if absent. Present ones are already listed in Discovery above,
+  # so stay silent (only announce an actual install) instead of repeating "✓ present" per formula.
+  if brew list --formula "$1" &>/dev/null || have "$1"; then :
   else log "+ $1"; run brew install "$1"; fi
 }
 
@@ -85,7 +86,7 @@ export PATH="$HOME/.local/bin:$PATH"
 if [ -d "$REPO/deinflect" ]; then extra=full; log "including GPL-3.0 deinflect add-on (inflection chains)"
 else extra=jmdict; warn "no deinflect/ in this checkout — installing [jmdict] only (no inflection chains)"; fi
 log "Installing/updating saitenka-overlay[$extra] from $REPO/overlay"
-run uv tool install --reinstall "$REPO/overlay[$extra]"
+run uv tool install --reinstall --quiet "$REPO/overlay[$extra]"
 
 # ── 3. Dev/authoring extras (--dev only): repo + vault tooling ──────────────
 if $DEV && have brew; then
@@ -95,15 +96,10 @@ if $DEV && have brew; then
   have apy || { log "+ apy (apyanki)"; run uv tool install apyanki; }
 fi
 
-# ── 4. Health check (the overlay's own doctor) ──────────────────────────────
-log "Running healthcheck (doctor-macos.sh)…"
-if [ -f "$SELF_DIR/doctor-macos.sh" ]; then
-  bash "$SELF_DIR/doctor-macos.sh" || warn "doctor reported issues — see ✗/! above."
-else
-  warn "doctor-macos.sh not found next to the installer — skipping healthcheck."
-fi
-
-# ── 5. Guided setup: the overlay's own confirm-first wizard ─────────────────
+# ── 4. Guided setup: the overlay's own confirm-first wizard ─────────────────
+# The wizard below runs its own health check (twice: an initial read and a final self-verify), so
+# there's no separate doctor-macos.sh pass here — that would just print the same report a third time.
+# Run `bash install/doctor-macos.sh` any time for a standalone check.
 # Hand off to `setup` (prompts to install the mpv plugin, store the jimaku key, import Yomitan dicts,
 # relocate protected dicts) instead of leaving them as manual chores. Confirm-first and resumable;
 # --yes passes --yes. The summary below then reflects whatever setup configured.
@@ -131,17 +127,14 @@ jimaku_present() {
   # set-jimaku-key writes [jimaku] to the config (fetch=true) even when the key lives in the Keychain.
   [ -f "$CONFIG" ] && grep -qE '^[[:space:]]*\[jimaku\]' "$CONFIG"
 }
-# How many dictionary/freq/pitch zips the config points at actually exist on disk (echoes the count,
-# non-zero exit when none) — so we can tick step 3 instead of nudging an import that's already done.
+# Dictionaries are imported ONCE into the consolidated database (dictionaries.sqlite); the config then
+# lists their TITLES (not zip paths). "Present" = that DB exists AND the config references at least one
+# dict/freq/pitch title — so we can tick step 3 instead of nudging an import that's already done.
 CONFIG="${SAITENKA_CONFIG:-$HOME/.config/saitenka/overlay.toml}"
+DICT_DB="${SAITENKA_DATA_DIR:-$HOME/.local/share/saitenka}/dictionaries.sqlite"
 dicts_present() {
-  [ -f "$CONFIG" ] || return 1
-  local n=0 p
-  while IFS= read -r p; do
-    p="${p/#\~/$HOME}"
-    [ -f "$p" ] && n=$((n+1))
-  done < <(grep -vE '^[[:space:]]*#' "$CONFIG" | grep -oE '"[^"]*\.zip"' | tr -d '"')
-  [ "$n" -gt 0 ] && { echo "$n"; return 0; } || return 1
+  [ -f "$DICT_DB" ] && [ -f "$CONFIG" ] || return 1
+  grep -vE '^[[:space:]]*#' "$CONFIG" | grep -qE '^[[:space:]]*(dicts|freq|pitch)[[:space:]]*=[[:space:]]*\['
 }
 
 echo
@@ -155,14 +148,13 @@ echo "  2. Anki add-ons (Tools → Add-ons → Get Add-ons):"
 addon 2055492159 AnkiConnect    "mining + FSRS coloring"
 addon 759844606  "FSRS Helper"  "better scheduling"
 addon 1771074083 "Review Heatmap" "streak view"
-if dcnt=$(dicts_present); then
-  printf '  3. Dictionaries:  \033[32m✓\033[0m %s configured and present on disk\n' "$dcnt"
+if dicts_present; then
+  printf '  3. Dictionaries:  \033[32m✓\033[0m imported into the database (see `saitenka-overlay doctor`)\n'
 else
-  echo "  3. Dictionaries: run  saitenka-overlay import-settings --scan-dir <folder of your .zip dicts>"
-  echo "     (matches a Yomitan settings export against those .zip files and writes the config for you),"
-  echo "     or add the .zip paths by hand under [dictionaries] in:"
-  echo "       $CONFIG"
-  echo "     Have a full Yomitan backup? saitenka-overlay import-dictionaries <export> converts it to .zip dicts."
+  echo "  3. Dictionaries: run  saitenka-overlay import <folder of your Yomitan .zip dicts>"
+  echo "     (imports them once into the consolidated database and fills the config with their titles)."
+  echo "       config: $CONFIG"
+  echo "     Have a Yomitan settings export? saitenka-overlay import-settings <export.json> --scan-dir <folder>"
 fi
 if jimaku_present; then
   printf '  4. jimaku key for auto-subs:  \033[32m✓\033[0m already set\n'

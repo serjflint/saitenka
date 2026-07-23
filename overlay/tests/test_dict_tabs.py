@@ -27,8 +27,18 @@ class _MultiDS:
 
 
 def _reader(ds=None):
-    r = Reader(FakeIPC(), dict_set=ds or _MultiDS())
-    r.osd = (1280, 720)
+    # dict tabs are OFF by default now; these tests exercise the tab feature, so turn it on here.
+    from overlay.app.config import ReaderOptions, TooltipOptions
+
+    r = Reader(
+        FakeIPC(),
+        dict_set=ds or _MultiDS(),
+        options=ReaderOptions(tooltip=TooltipOptions(show_dict_tabs=True)),
+    )
+    r.osd = (
+        1920,
+        1080,
+    )  # REF_H → UI scale 1.0, so tab geometry matches the default-theme panel calls
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -222,9 +232,15 @@ def test_single_dict_reserves_nothing(monkeypatch):
 
 
 def test_tab_click_scrolls_to_section(monkeypatch):
+    from overlay.app.config import ReaderOptions, TooltipOptions
+
     ipc = FakeIPC()
-    r = Reader(ipc, dict_set=_MultiDS())
-    r.osd = (1280, 720)
+    r = Reader(
+        ipc,
+        dict_set=_MultiDS(),
+        options=ReaderOptions(tooltip=TooltipOptions(show_dict_tabs=True)),
+    )
+    r.osd = (1920, 1080)  # REF_H → UI scale 1.0 (reference tab geometry)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -235,7 +251,10 @@ def test_tab_click_scrolls_to_section(monkeypatch):
     r.on_click()
     assert r._tip_scroll > 0  # viewport jumped…
     third = r._tab_offsets[2]
-    assert abs(r._tip_scroll - max(0, third - r._tab_h)) <= 1  # …to the third section
+    maxs = max(0, r._tip_bgra.shape[0] - r._tip_view_h)
+    assert r._tip_scroll == min(
+        maxs, max(0, third - r._tab_h)
+    )  # …to the third section (clamped to bottom)
 
 
 def test_active_tab_tracks_scroll(monkeypatch):
@@ -251,12 +270,28 @@ def test_active_tab_tracks_scroll(monkeypatch):
 
 
 def _tip_binds(ipc):
-    """(bound, unbound) key sets from the recorded keybind commands for the tooltip keys."""
+    """(bound, unbound) key sets from the recorded keybind commands for the tooltip keys.
+
+    Unbind rebinds to the no-op ``ignore`` (mpv rejects an empty command string), so that — not
+    ``""`` — is the release marker."""
     bound, unbound = [], []
     for c in ipc.commands:
         if c and c[0] == "keybind" and c[1] in TIP_KEYS:
-            (unbound if c[2] == "" else bound).append(c[1])
+            (unbound if c[2] == "ignore" else bound).append(c[1])
     return bound, unbound
+
+
+def test_tip_keys_release_never_sends_empty_command(monkeypatch):
+    """Regression: releasing tooltip keys must NOT send ``keybind KEY ""`` — mpv rejects it and logs
+    the noisy ``Command name missing`` / ``Invalid command for key binding 'LEFT': ''`` triple."""
+    ipc = FakeIPC()
+    r = _reader()
+    r.ipc = ipc
+    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    r.set_hover(0)
+    r.set_hover(-1)
+    empties = [c for c in ipc.commands if c and c[0] == "keybind" and c[2] == ""]
+    assert empties == []
 
 
 def test_tip_keys_bind_on_show_and_unbind_on_hide(monkeypatch):

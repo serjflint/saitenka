@@ -9,6 +9,7 @@ split any string into runs by the first font that actually has each glyph (no to
 from __future__ import annotations
 
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import cache
 
@@ -18,6 +19,13 @@ from PIL import ImageFont
 from overlay.resources import asset
 
 ASSETS = asset("fonts")  # importlib.resources so the wheel path works too
+
+# Cap on distinct (file, size, weight) FreeTypeFont objects cached per thread. Sizes aren't from a
+# small fixed set — ruby text is sized proportionally to its base (render/ruby.py), and structured-
+# content nodes carry their own font sizes — so a long session touching varied dict content can
+# otherwise accumulate an unbounded number of one-off FreeType faces (a memray leak-flamegraph found
+# 308 distinct cached fonts / 172.7 MB retained from a single --stress run touching 33 entries).
+_FONT_CACHE_MAX = 64
 
 # Fallback order: JP first (it also carries Latin, so mixed strings stay in one font and look
 # consistent), Latin Noto as a secondary. Add more (emoji, symbols) here later.
@@ -49,18 +57,23 @@ _tls = threading.local()  # FreeType faces aren't thread-safe → one font cache
 def load(spec: FontSpec) -> ImageFont.FreeTypeFont:
     """A PIL font for the given spec, with the variable weight axis applied. Cached **per thread** so
     the background prefetch workers can render concurrently with the main loop (a shared FreeType face
-    used from two threads corrupts/crashes)."""
-    cache = getattr(_tls, "fonts", None)
+    used from two threads corrupts/crashes). LRU-bounded (``_FONT_CACHE_MAX``) — a long session touching
+    varied structured-content font sizes must not grow this cache without limit."""
+    cache: OrderedDict[FontSpec, ImageFont.FreeTypeFont] | None = getattr(_tls, "fonts", None)
     if cache is None:
-        cache = _tls.fonts = {}
+        cache = _tls.fonts = OrderedDict()
     font = cache.get(spec)
-    if font is None:
-        font = ImageFont.truetype(str(ASSETS / spec.file), spec.size)
-        try:
-            font.set_variation_by_axes([spec.weight])
-        except (OSError, AttributeError):
-            pass  # not a variable font / no wght axis — use as-is
-        cache[spec] = font
+    if font is not None:
+        cache.move_to_end(spec)
+        return font
+    font = ImageFont.truetype(str(ASSETS / spec.file), spec.size)
+    try:
+        font.set_variation_by_axes([spec.weight])
+    except (OSError, AttributeError):
+        pass  # not a variable font / no wght axis — use as-is
+    cache[spec] = font
+    if len(cache) > _FONT_CACHE_MAX:
+        cache.popitem(last=False)
     return font
 
 

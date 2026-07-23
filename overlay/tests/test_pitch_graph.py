@@ -79,9 +79,9 @@ def _pitch_zip(path):
 
 
 def test_pitch_source_exposes_raw_positions(tmp_path):
-    from overlay.app.wordlists import PitchSource
+    import dicthelp
 
-    ps = PitchSource.load(_pitch_zip(tmp_path / "p.zip"))
+    ps = dicthelp.load_pitchsource(_pitch_zip(tmp_path / "p.zip"))
     got = ps.accents(("本命", "ほんめい"), "ほんめい")
     assert got == ("ほんめい", [0])
     assert ps.accents(("犬",), "いぬ") is None
@@ -90,7 +90,8 @@ def test_pitch_source_exposes_raw_positions(tmp_path):
 def test_entry_carries_pitch_accents(tmp_path):
     import zipfile as _zf
 
-    from overlay.app.dictionary import DictionarySet
+    import dicthelp
+
     from overlay.app.tokenize import Token
 
     dz = tmp_path / "d.zip"
@@ -99,7 +100,7 @@ def test_entry_carries_pitch_accents(tmp_path):
         zf.writestr(
             "term_bank_1.json", json.dumps([["本命", "ほんめい", "", "", 0, ["favourite"], 1, ""]])
         )
-    ds = DictionarySet.load([str(dz)], pitch_paths=[_pitch_zip(tmp_path / "p.zip")])
+    ds = dicthelp.load_set([str(dz)], pitch_zips=[_pitch_zip(tmp_path / "p.zip")])
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     e = ds.entry_for(tok)
     assert e.pitches == [("ほんめい", (0,))]

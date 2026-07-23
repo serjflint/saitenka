@@ -28,8 +28,12 @@ class _FakeDS:
 
 
 def _reader(monkeypatch):
-    r = Reader(FakeIPC(), dict_set=_FakeDS())
-    r.osd = (1280, 720)
+    # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product
+    # default: a change to the default tooltip height must not silently move these interaction goldens.
+    # osd = 1080p so the UI scale is 1.0 (REF_H) — the goldens capture the reference (unscaled) layout.
+    # dict tabs default OFF now; force ON so the base-vs-nested reserve/band goldens still exercise it.
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5, show_dict_tabs=True)
+    r.osd = (1920, 1080)
     r._finish_available = lambda: True  # render full panels (scan cells present)
     monkeypatch.setattr(r, "_draw_subtitle", r._draw_subtitle)  # keep real subtitle boxes
     r.set_subtitle("本命を読む")  # → 本命 / を / 読む, with real per-word boxes
@@ -101,16 +105,16 @@ def test_golden_base_vs_nested_layout(monkeypatch):
     """L2: pin the panels an interaction produces — the BASE tooltip (with the reserved dict-tab band)
     vs the NESTED popup (compact, no band). A geometry regression (e.g. the reserve leaking into the
     nested popup, or the band vanishing from the base) shows up as a golden diff."""
-    from util import assert_golden
+    from util import assert_golden, bgra_to_image
 
     r = _reader(monkeypatch)
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert r._tip_state is not None and r._tip_state.image is not None
+    assert r._tip_state is not None and r._tip_state.ready
     assert r._tip_state.lazy.top_reserve > 0  # base reserves the dict-tab band
-    assert_golden(r._tip_state.image, "interaction_base_tooltip.png", tol=3.0)
+    assert_golden(bgra_to_image(r._tip_state.bgra()), "interaction_base_tooltip.png", tol=3.0)
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
-    assert r._nest.state is not None and r._nest.state.image is not None
+    assert r._nest.state is not None and r._nest.state.ready
     assert r._nest.state.lazy.top_reserve == 0  # nested is compact — no reserved band
-    assert_golden(r._nest.state.image, "interaction_nested_popup.png", tol=3.0)
+    assert_golden(bgra_to_image(r._nest.state.bgra()), "interaction_nested_popup.png", tol=3.0)

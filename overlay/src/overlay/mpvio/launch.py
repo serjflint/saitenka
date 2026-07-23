@@ -5,6 +5,7 @@ subprocess + IPC handshake is smoke-tested with a fake mpv in ``tests/test_launc
 from __future__ import annotations
 
 import os
+import sys
 
 
 def build_mpv_argv(
@@ -41,6 +42,13 @@ def build_mpv_argv(
         cmd.insert(-1, f"--sub-file={sub_path}")
     if en_sub_path:
         cmd.insert(-1, f"--sub-file={en_sub_path}")
+    if sys.platform == "win32":
+        # Windows d3d11 (the default GPU context) uses FLIP-MODEL presentation, which does NOT
+        # re-present the window while paused — so an `overlay-add` (a new/updated subtitle or tooltip)
+        # only becomes visible on the next real window event (a mouse move, a resize). That is the
+        # "subtitle doesn't update until I move the mouse" bug. Forcing the blit model makes mpv honor
+        # redraw requests while paused. Harmless no-op if a non-d3d11 context is selected.
+        cmd.insert(1, "--d3d11-flip=no")
     if not use_config:
         cmd.insert(1, "--no-config")
     if fullscreen:

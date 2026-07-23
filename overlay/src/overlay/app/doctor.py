@@ -26,13 +26,12 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from overlay.app.config import config_path, expand_paths, is_protected, load_config
+from overlay.app.config import config_path, load_config
 from overlay.app.paths import cache_dir
 
 Status = str  # "ok" | "warn" | "fail"
 
 LOG_PATH = cache_dir() / "overlay.log"
-CACHE_DIR = cache_dir() / "dicts"
 ANKI_HOST = "http://127.0.0.1:8765"
 MPV_MIN = (0, 37)  # overlay-add BGRA landed in 0.37
 
@@ -170,57 +169,57 @@ def check_config() -> Check:
     return Check("config", "ok", f"config parses ({p})")
 
 
-def check_dict_files() -> list[Check]:
-    cfg = load_config()
-    checks: list[Check] = []
-    for kind in ("dicts", "freq", "pitch"):
-        for path in expand_paths(cfg.get(kind)):
-            p = Path(path)
-            if p.exists():
-                checks.append(Check(f"{kind}", "ok", f"{kind}: {p.name}"))
-            else:
-                # A "path" with no separator is almost always a bare Yomitan TITLE left in the config
-                # by `import-settings` without --scan-dir — the exact FileNotFoundError crash on Windows.
-                looks_like_title = "/" not in str(path) and "\\" not in str(path)
-                hint = (
-                    " — looks like a Yomitan title, not a file; run `import-settings --scan-dir <dir>`"
-                    " or `import-dictionaries <export.json>`"
-                    if looks_like_title
-                    else ""
-                )
-                checks.append(Check(f"{kind}", "fail", f"{kind} not found: {path}{hint}"))
-    if not checks:
-        # Nothing in the config — but the user may have run `copy-dicts` (which drops the .zip files
-        # into the data dir) while the config write landed elsewhere / got skipped. Point at those
-        # unregistered zips so "I copied my dicts but doctor sees none" has an obvious fix.
-        from overlay.app.config import dicts_data_dir
+def check_dict_db() -> list[Check]:
+    """Report the consolidated dictionary DB: which dictionaries are imported, and whether every title
+    the config references actually resolves (dictionaries are imported once by ``saitenka-overlay
+    import`` — a configured-but-unimported title is a clear failure, not a silent empty lookup)."""
+    from overlay.app.dictdb import DictionaryDb, db_path
 
-        data = dicts_data_dir()
-        stray = sorted(data.glob("*.zip")) if data.exists() else []
-        if stray:
-            checks.append(
+    cfg = load_config()
+    configured = {kind: list(cfg.get(kind) or []) for kind in ("dicts", "freq", "pitch")}
+    any_configured = any(configured.values())
+    db_file = db_path()
+    checks: list[Check] = []
+
+    if not db_file.exists():
+        if any_configured:
+            return [
                 Check(
-                    "dicts",
-                    "warn",
-                    f"{len(stray)} dictionary .zip(s) sit in the data dir ({data}) but are NOT in "
-                    "overlay.toml — run `saitenka-overlay copy-dicts` (no args) to register them",
+                    "dict-db",
+                    "fail",
+                    "config lists dictionaries but none are imported yet — run "
+                    f"`saitenka-overlay import <dir-with-zips>` (no DB at {db_file})",
                 )
+            ]
+        if _jmdict_available():
+            return [Check("dict-db", "warn", "no dictionaries imported (JMdict fallback only)")]
+        return [
+            Check(
+                "dict-db",
+                "warn",
+                "no dictionaries imported and no JMdict fallback installed — tooltips and mined cards "
+                "will have no glosses. Import Yomitan dicts (`saitenka-overlay import <dir>`), or add "
+                "the fallback: reinstall with the `jmdict` extra.",
             )
-        elif _jmdict_available():
-            checks.append(
-                Check("dicts", "warn", "no dictionaries configured (JMdict fallback only)")
-            )
-        else:
-            checks.append(
-                Check(
-                    "dicts",
-                    "warn",
-                    "no dictionaries configured and no JMdict fallback installed — tooltips and mined "
-                    "cards will have no glosses. Import Yomitan dicts (`import-settings`), or add the "
-                    "fallback: reinstall with the `jmdict` extra (e.g. `uv tool install "
-                    "'saitenka-overlay[jmdict]'`).",
+        ]
+
+    db = DictionaryDb.open()
+    imported = {
+        r.title: r for r in db.list_dictionaries() if r.import_order >= 0
+    }  # hide system dicts
+    checks.append(Check("dict-db", "ok", f"{len(imported)} dictionary/ies imported in {db_file}"))
+    for kind, titles in configured.items():
+        for title in titles:
+            if title in imported:
+                checks.append(Check(kind, "ok", f"{kind}: {title}"))
+            else:
+                checks.append(
+                    Check(
+                        kind,
+                        "fail",
+                        f"{kind} not imported: {title!r} — run `saitenka-overlay import <dir>`",
+                    )
                 )
-            )
     return checks
 
 
@@ -231,24 +230,22 @@ def _jmdict_available() -> bool:
     return all(importlib.util.find_spec(m) is not None for m in ("jamdict", "jamdict_data"))
 
 
-def check_dict_locations() -> Check:
-    """Warn when any configured dict/freq/pitch zip lives in a TCC-protected folder — a GUI-launched
-    (plugin-mode) mpv trips a macOS consent prompt reading them each run. ``copy-dicts`` fixes it."""
-    cfg = load_config()
-    prot = [
-        p
-        for kind in ("dicts", "freq", "pitch")
-        for p in expand_paths(cfg.get(kind))
-        if is_protected(p)
-    ]
-    if prot:
-        return Check(
-            "dict-location",
-            "warn",
-            f"{len(prot)} dict(s) under a protected folder (Documents/Desktop/Downloads) — GUI mpv "
-            "prompts for access each run; run `saitenka-overlay copy-dicts` to relocate + repoint",
-        )
-    return Check("dict-location", "ok", "dictionaries outside protected folders (no GUI prompt)")
+def check_legacy_files() -> Check:
+    """Warn (informational) when pre-consolidation leftovers exist: the old per-zip SQLite cache and the
+    copied dictionary zips. The single ``dictionaries.sqlite`` no longer needs them, so they're safe to
+    delete — but nothing is removed automatically."""
+    from overlay.app.paths import legacy_dict_artifacts
+
+    arts = legacy_dict_artifacts()
+    if not arts:
+        return Check("legacy-files", "ok", "no pre-consolidation dictionary files to clean up")
+    total = sum(b for _, _, b in arts)
+    where = "; ".join(f"{d} ({n} files, {b / 1e6:.0f} MB)" for d, n, b in arts)
+    return Check(
+        "legacy-files",
+        "warn",
+        f"{total / 1e6:.0f} MB of pre-consolidation files are unused and safe to delete: {where}",
+    )
 
 
 def check_sub_auto() -> Check:
@@ -271,24 +268,6 @@ def check_sub_auto() -> Check:
             "sub-auto=fuzzy (or exact) so the overlay doesn't pick up junk externals",
         )
     return Check("sub-auto", "ok", f"mpv.conf sub-auto={val}")
-
-
-def check_dict_cache() -> Check:
-    """The BUILT SQLite index cache (``cache_dir()/dicts``) — a DIFFERENT directory from the
-    dictionary ``.zip`` store (``dicts_data_dir()``). It's auto-managed: empty until the first
-    playback indexes your dicts, so an empty cache is never an error, just "not built yet"."""
-    built = list(CACHE_DIR.glob("*.sqlite")) if CACHE_DIR.exists() else []
-    if built:
-        return Check("dict-cache", "ok", f"{len(built)} built dict index(es) in {CACHE_DIR}")
-    # Empty is normal: the index cache builds lazily on first playback. Say so plainly and make the
-    # zip-store-vs-index-cache distinction explicit — an empty `Cache\dicts` while `dicts` is full of
-    # zips is expected, not a conflict.
-    return Check(
-        "dict-cache",
-        "ok",
-        f"no built indexes yet in {CACHE_DIR} — this SQLite index cache builds on first playback "
-        "(it's separate from your dictionary .zip files in the data dir)",
-    )
 
 
 def check_fonts() -> Check:
@@ -346,6 +325,25 @@ def check_anki(deck: str, model: str) -> Check:
     except Exception:
         return Check("anki", "warn", f"{detail}, but couldn't list decks/models")
     return Check("anki", "ok", f"{detail}; deck+model present")
+
+
+def check_python() -> Check:
+    """Report the exact interpreter — version, implementation, and GIL/free-threaded build. Always
+    green (informational): it exists so a bug report shows *which* Python is really running, since the
+    free-threading advice below reads very differently on a 3.14 vs a 3.14t build, and a user can swap
+    builds between installs. ``platform.python_version()`` has no 't' suffix, so the build string
+    carries the free-threaded/GIL fact."""
+    import platform
+
+    ft_build = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+    if ft_build:
+        gil_off = not getattr(sys, "_is_gil_enabled", lambda: True)()
+        build = "free-threaded, GIL off" if gil_off else "free-threaded, GIL ON"
+    else:
+        build = "standard (GIL)"
+    return Check(
+        "python", "ok", f"{platform.python_implementation()} {platform.python_version()} ({build})"
+    )
 
 
 def check_free_threading() -> Check:
@@ -460,10 +458,19 @@ def check_jimaku() -> Check:
             "readable by plugin-mode mpv)",
         )
     if src == "env":
+        # The resolver prefers env over the Keychain, so a key present in BOTH reports src=env. What
+        # actually matters for plugin-mode mpv is whether the Keychain has it (it can't read the shell
+        # env) — so only warn when the Keychain is genuinely empty, not just shadowed by $JIMAKU_API_KEY.
+        from overlay.app.jimaku import keychain_get
+
+        if keychain_get():
+            return Check(
+                "jimaku", "ok", "jimaku enabled; API key in Keychain (also set in $JIMAKU_API_KEY)"
+            )
         return Check(
             "jimaku",
             "warn",
-            "jimaku key from $JIMAKU_API_KEY — works in a terminal but NOT under a GUI-launched "
+            "jimaku key from $JIMAKU_API_KEY only — works in a terminal but NOT under a GUI-launched "
             "(plugin) mpv; run `set-jimaku-key` to store it in the Keychain",
         )
     return Check("jimaku", "ok", f"jimaku enabled; API key from {src}")
@@ -502,6 +509,25 @@ def check_crashes() -> Check:
     )
 
 
+def check_perf() -> Check:
+    """Live latency + memory snapshot (render, hover hit-test, RSS) from :mod:`overlay.app.perf` — the
+    same percentiles the ``--stress`` benchmark reports, but from the actual running session.
+    Informational: latency is empty until a tooltip has been shown; RSS is always available."""
+    from overlay.app.perf import rss_mb, snapshot
+
+    snap = snapshot()
+    rss = rss_mb()
+    parts = [
+        f"{op} p50={s['p50']:.1f}ms p95={s['p95']:.1f}ms max={s['max']:.1f}ms (n={s['n']:.0f})"
+        for op, s in snap.items()
+    ]
+    if not parts:
+        parts.append("no ops recorded yet (nothing shown this session)")
+    if rss is not None:
+        parts.append(f"rss={rss:.0f}MB")
+    return Check("perf", "ok", "; ".join(parts))
+
+
 def check_recent_errors(n: int = 5) -> Check:
     if not LOG_PATH.exists():
         return Check("recent-errors", "ok", "no log yet (nothing has failed)")
@@ -515,21 +541,38 @@ def check_recent_errors(n: int = 5) -> Check:
     return Check("recent-errors", "warn", "recent log errors:\n    " + "\n    ".join(errs))
 
 
+def check_deinflect() -> Check:
+    """The optional GPL-3.0 deinflect add-on supplies the tooltip's inflection-chain chips
+    (🧩 -て « -いる « -た). The Apache-2.0 core runs without it (no chips shown), so this WARNS with
+    how to enable it rather than failing."""
+    try:
+        import saitenka_deinflect  # noqa: F401
+    except ImportError:
+        return Check(
+            "deinflect",
+            "warn",
+            "deinflect add-on not installed → no inflection chips. Enable it with "
+            "`uv tool install 'saitenka-overlay[deinflect]'` (GPL-3.0) or `[full]`",
+        )
+    return Check("deinflect", "ok", "deinflect add-on installed → inflection chips enabled")
+
+
 # --- driver ----------------------------------------------------------------------------------
 
 
 def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
     checks: list[Check] = [
+        check_python(),
         check_mpv(),
         check_ffmpeg(),
         check_free_threading(),
         check_config(),
-        *check_dict_files(),
-        check_dict_locations(),
-        check_dict_cache(),
+        *check_dict_db(),
+        check_legacy_files(),
         check_sub_auto(),
         check_fonts(),
         check_tts(),
+        check_deinflect(),
         check_anki(deck, model),
         check_mpv_ipc(),
         check_plugin(),
@@ -537,6 +580,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_jimaku(),
         check_crashes(),
         check_recent_errors(),
+        check_perf(),
     ]
     return Report(checks)
 
@@ -552,11 +596,20 @@ _GLYPH = (
 )
 
 
-def print_report(report: Report) -> None:  # pragma: no cover — pure formatting/IO
+def print_report(
+    report: Report, *, summary: bool = False
+) -> None:  # pragma: no cover — formatting/IO
+    """Print the report. ``summary`` collapses the wall of ✓ lines to one count and prints only the
+    ``!``/``✗`` checks in full — same diagnostic power (every problem shown verbatim), a fraction of the
+    lines. Used by the installer / setup wizard, which run doctor repeatedly; plain ``doctor`` stays
+    verbose (the authoritative, itemised source of truth)."""
     print("[saitenka doctor]" if _WIN else "\033[1;36m[saitenka doctor]\033[0m")
-    for c in report.checks:
-        print(f"  {_GLYPH.get(c.status, '?')} {c.detail}")
     s = report.counts
+    shown = [c for c in report.checks if c.status != "ok"] if summary else report.checks
+    for c in shown:
+        print(f"  {_GLYPH.get(c.status, '?')} {c.detail}")
+    if summary and not shown:  # nothing but ✓ — one reassuring line instead of the full list
+        print(f"  {_GLYPH['ok']} all {s['ok']} checks passed")
     if _WIN:
         print(f"\nSummary: {s['ok']} ok / {s['warn']} warn / {s['fail']} fail")
     else:

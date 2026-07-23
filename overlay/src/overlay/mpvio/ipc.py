@@ -12,6 +12,7 @@ read it in steady state and hover/mining/quit-detection were all dead even thoug
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import sys
 import threading
@@ -19,6 +20,8 @@ import time
 from pathlib import Path
 
 from overlay.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTransport
+
+log = logging.getLogger(__name__)
 
 
 def default_ipc_path(unique: str) -> str:
@@ -50,6 +53,9 @@ class MpvIPC:
         self.path = path
         self._transport: Transport | None = None  # set by connect() (or injected in tests)
         self._buf = b""  # reader-thread-only accumulation buffer
+        self._bytes_read = (
+            0  # total bytes the reader thread got from mpv (0 = never read → pipe dead)
+        )
         self._events: list[dict] = []  # async events (property-change, client-message, …)
         self._events_lock = threading.Lock()
         self._replies: queue.Queue = queue.Queue(maxsize=1)  # single-flight command replies
@@ -67,6 +73,11 @@ class MpvIPC:
             try:
                 self._transport = dial(self.path, timeout)
                 self._start_reader()
+                log.info(
+                    "mpv IPC connected via %s at %s",
+                    type(self._transport).__name__,
+                    self.path,
+                )
                 return self
             except (OSError, FileNotFoundError) as e:  # server not up yet
                 last = e
@@ -80,16 +91,25 @@ class MpvIPC:
 
     # --- reader thread ------------------------------------------------------------------------
     def _read_loop(self) -> None:
+        first = True
         try:
             transport = self._transport
             assert transport is not None  # connect()/injection set it before the reader ran
             while not self._closed.is_set():
                 chunk = transport.read(65536)
                 if not chunk:
+                    log.info(
+                        "mpv IPC reader: EOF after %d byte(s) — mpv closed the pipe",
+                        self._bytes_read,
+                    )
                     break  # EOF — mpv quit / pipe closed
+                if first:  # decisive Windows diagnostic: did mpv's replies EVER reach us?
+                    log.info("mpv IPC reader: first data from mpv (%d byte(s))", len(chunk))
+                    first = False
+                self._bytes_read += len(chunk)
                 self._feed(chunk)
-        except OSError:
-            pass  # transport torn down under us → treat as disconnect
+        except OSError as e:
+            log.warning("mpv IPC reader: read failed (%s) — treating as disconnect", e)
         finally:
             self._closed.set()
             try:  # unblock a command() waiting on a reply
@@ -137,14 +157,25 @@ class MpvIPC:
                 self._replies.get_nowait()
         except queue.Empty:
             pass
+        cmd = args[0] if args else "?"
         try:
             self._write(json.dumps({"command": list(args)}).encode() + b"\n")
-        except OSError:
+        except OSError as e:
+            log.warning("mpv IPC: write failed for %r (%s) — disconnected", cmd, e)
             self._closed.set()
             return {"error": "disconnected"}
+        wait = timeout if timeout is not None else 10.0
         try:
-            msg = self._replies.get(timeout=timeout if timeout is not None else 10.0)
+            msg = self._replies.get(timeout=wait)
         except queue.Empty:
+            # No reply in `wait`s — on Windows this is the tell-tale of a dead pipe read direction:
+            # writes land but mpv's replies/events never come back (bytes_read stays 0).
+            log.warning(
+                "mpv IPC: %r got no reply in %.0fs (bytes from mpv=%d) — replies not reaching us",
+                cmd,
+                wait,
+                self._bytes_read,
+            )
             return {"error": "timeout"}
         return {"error": "disconnected"} if msg is _DISCONNECT else msg
 

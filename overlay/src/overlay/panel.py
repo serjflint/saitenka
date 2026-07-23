@@ -12,13 +12,14 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 from PIL import Image
 
 from overlay.draw.chip import ChipStyle
-from overlay.draw.icons import check, plus, puzzle, speaker
+from overlay.draw.icons import check, dot, plus, speaker
 from overlay.model import RGBA, LinkBox, ScanBox, Span, Style
-from overlay.render.document import render_document
+from overlay.render.document import GUTTER_PX, INDENT_PX, render_document
 from overlay.render.flow import ChipBox, ImgBox, render_flow
 from overlay.render.layout import Block as FlowBlock
 from overlay.sc.walk import inline_flow, walk
@@ -32,9 +33,30 @@ class Theme:
     accent: RGBA = (60, 110, 210, 255)  # ▶ triangle / links
     purple: RGBA = (126, 96, 168, 255)  # dictionary-name pills
     tag: RGBA = (96, 125, 175, 255)  # defTag pills (★ / priority form)
-    margin: int = 16
-    gap: int = 7
-    body_indent: int = 20
+    # Every size in this module is defined at the REFERENCE window (scale 1.0) and multiplied by this,
+    # so the whole tooltip renders at window_height / REF_H — mpv's OSD model, giving the same amount of
+    # content at any window size (just scaled). A plain ``Theme()`` (scale 1.0) is byte-identical to before.
+    scale: float = 1.0
+    # Reference-size structural paddings (at scale 1.0); the scaled values are the properties below.
+    _MARGIN: ClassVar[int] = 16
+    _GAP: ClassVar[int] = 7
+    _BODY_INDENT: ClassVar[int] = 20
+
+    def px(self, v: float) -> int:
+        """Scale a reference-canvas pixel size to the current window (floor 1px so nothing vanishes)."""
+        return max(1, round(v * self.scale))
+
+    @property
+    def margin(self) -> int:
+        return self.px(self._MARGIN)
+
+    @property
+    def gap(self) -> int:
+        return self.px(self._GAP)
+
+    @property
+    def body_indent(self) -> int:
+        return self.px(self._BODY_INDENT)
 
 
 @dataclass
@@ -98,6 +120,9 @@ def _flow_row(flow, content_w: int, scale: float = 1.35) -> Image.Image:
     )
 
 
+# Inflection-chain chips: same green as the dot marker, so the marker and its chips read as one unit.
+INFLECTION_BG: RGBA = (91, 191, 106, 255)
+
 # Header top-right icon strip: [ ⊕ add ][gap][ 🔊 speaker ]. Kept as constants so the drawing and the
 # click hit-test (controller._hit_header_add) agree on one geometry.
 _SPK_SIZE = 30
@@ -112,11 +137,17 @@ def header_add_rect(
     """Panel-space (x, y, w, h) of the header ⊕ add-to-Anki button. Sits just left of the 🔊 speaker
     when it's shown, else takes the speaker's rightmost slot (so hiding TTS doesn't leave a gap).
     ``top_reserve`` must match the panel's tab-strip reserve so the hit-box tracks the drawn icon."""
+    spk, add, gap, top = (
+        theme.px(_SPK_SIZE),
+        theme.px(_ADD_SIZE),
+        theme.px(_ICON_GAP),
+        theme.px(_ICON_TOP),
+    )
     content_w = width - 2 * theme.margin
-    right = content_w - (_SPK_SIZE + _ICON_GAP if speak_button else 0)
-    x = theme.margin + right - _ADD_SIZE
-    y = theme.margin + top_reserve + _ICON_TOP + 2
-    return (x, y, _ADD_SIZE, _ADD_SIZE)
+    right = content_w - (spk + gap if speak_button else 0)
+    x = theme.margin + right - add
+    y = theme.margin + top_reserve + top + theme.px(2)
+    return (x, y, add, add)
 
 
 def header_speaker_rect(
@@ -124,10 +155,11 @@ def header_speaker_rect(
 ) -> tuple[int, int, int, int]:
     """Panel-space (x, y, w, h) of the header 🔊 speaker button — the only click target that plays audio.
     ``top_reserve`` must match the panel's tab-strip reserve so the hit-box tracks the drawn icon."""
+    spk, top = theme.px(_SPK_SIZE), theme.px(_ICON_TOP)
     content_w = width - 2 * theme.margin
-    x = theme.margin + content_w - _SPK_SIZE
-    y = theme.margin + top_reserve + _ICON_TOP
-    return (x, y, _SPK_SIZE, _SPK_SIZE)
+    x = theme.margin + content_w - spk
+    y = theme.margin + top_reserve + top
+    return (x, y, spk, spk)
 
 
 @dataclass
@@ -178,17 +210,22 @@ def panel_rows(
 
     # --- header: ▶ + big ruby headword, ⊕/✓ add + 🔊 speaker top-right ---
     def _header() -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
-        hw = [Span("▶", Style(size=28, color=theme.accent)), Span(" ", Style(size=46))]
-        hw += inline_flow(entry.headword, Style(size=46, weight=700, color=theme.text))
+        hw = [
+            Span("▶", Style(size=theme.px(28), color=theme.accent)),
+            Span(" ", Style(size=theme.px(46))),
+        ]
+        hw += inline_flow(entry.headword, Style(size=theme.px(46), weight=700, color=theme.text))
         hdr = _flow_row(hw, content_w)
         right = content_w
+        top = theme.px(_ICON_TOP)
         if speak_button:
-            spk = speaker(_SPK_SIZE)
-            hdr.alpha_composite(spk, (right - spk.width, _ICON_TOP))
-            right -= _SPK_SIZE + _ICON_GAP
+            spk = speaker(theme.px(_SPK_SIZE))
+            hdr.alpha_composite(spk, (right - spk.width, top))
+            right -= theme.px(_SPK_SIZE) + theme.px(_ICON_GAP)
         if add_button:
-            btn = check(_ADD_SIZE) if mined else plus(_ADD_SIZE)
-            hdr.alpha_composite(btn, (right - _ADD_SIZE, _ICON_TOP + 2))
+            add = theme.px(_ADD_SIZE)
+            btn = check(add) if mined else plus(add)
+            hdr.alpha_composite(btn, (right - add, top + theme.px(2)))
         return hdr, [], []
 
     rows.append(Row(m, _header))
@@ -203,37 +240,43 @@ def panel_rows(
             flow: list = []
             for reading, positions in pitches:
                 for pos in positions:
-                    g = render_pitch_graph(reading, pos)
+                    g = render_pitch_graph(reading, pos, scale=theme.scale)
                     if flow:
-                        flow.append(Span("  ", Style(size=20)))
-                    flow.append(ImgBox(width=g.width, height=g.height, sprite=g, baseline_drop=4))
+                        flow.append(Span("  ", Style(size=theme.px(20))))
+                    flow.append(
+                        ImgBox(width=g.width, height=g.height, sprite=g, baseline_drop=theme.px(4))
+                    )
             return _flow_row(flow, content_w, scale=1.5), [], []
 
         rows.append(Row(m, _pitch_row))
 
-    # --- inflection chain: puzzle icon + names (Yomitan 🧩 -て « -いる « -た) ---
+    # --- inflection chain: dot marker + one chip per Yomitan transform name (● [-て][-いる][-た]) ---
     if entry.inflection_chain:
 
         def _chain(chain=tuple(entry.inflection_chain)):
-            cflow = [
-                ImgBox(width=18, height=18, sprite=puzzle(18), baseline_drop=3),
-                Span("  ", Style(size=20)),
+            pz = theme.px(18)
+            cflow: list = [
+                ImgBox(width=pz, height=pz, sprite=dot(pz), baseline_drop=theme.px(3)),
+                Span("  ", Style(size=theme.px(20))),
             ]
             for i, name in enumerate(chain):
                 if i:
-                    cflow.append(Span(" « ", Style(size=20, color=theme.muted)))
-                cflow.append(Span(name, Style(size=20, weight=600, color=theme.accent)))
-            return _flow_row(cflow, content_w), [], []
+                    cflow.append(Span("›", Style(size=theme.px(18), color=theme.muted)))
+                cflow.append(
+                    ChipBox(name, ChipStyle(size=theme.px(18), weight=600, bg=INFLECTION_BG))
+                )
+            return _flow_row(cflow, content_w, scale=1.7), [], []
 
         rows.append(Row(m, _chain))
 
-    # --- grammar tags: puzzle icon + muted text ---
+    # --- grammar tags: dot marker + muted text ---
     for tag in entry.tags:
 
         def _tag(tag=tag):
+            pz = theme.px(18)
             tflow = [
-                ImgBox(width=18, height=18, sprite=puzzle(18), baseline_drop=3),
-                Span("  " + tag, Style(size=20, color=theme.muted)),
+                ImgBox(width=pz, height=pz, sprite=dot(pz), baseline_drop=theme.px(3)),
+                Span("  " + tag, Style(size=theme.px(20), color=theme.muted)),
             ]
             return _flow_row(tflow, content_w), [], []
 
@@ -245,10 +288,14 @@ def panel_rows(
         def _freqs(freqs=tuple(entry.freqs)):
             fflow: list = []
             for f in freqs:
+                # freq pills are secondary signal → render a notch smaller than the def pills (px19)
+                # and body (px23), so more fit on the row and they don't compete with the readings.
                 fflow.append(
-                    ChipBox(f.name, ChipStyle(size=20, weight=600, bg=f.color, value=f.value))
+                    ChipBox(
+                        f.name, ChipStyle(size=theme.px(16), weight=600, bg=f.color, value=f.value)
+                    )
                 )
-                fflow.append(Span("  ", Style(size=20)))
+                fflow.append(Span("  ", Style(size=theme.px(16))))
             return _flow_row(fflow, content_w, scale=1.7), [], []
 
         rows.append(Row(m, _freqs))
@@ -259,23 +306,23 @@ def panel_rows(
         def _reading(rl=entry.reading_label):
             dn, txt = rl
             flow = [
-                ChipBox(dn, ChipStyle(size=19, bg=theme.purple)),
-                Span("  " + txt, Style(size=20, color=theme.text)),
+                ChipBox(dn, ChipStyle(size=theme.px(19), bg=theme.purple)),
+                Span("  " + txt, Style(size=theme.px(20), color=theme.text)),
             ]
             return _flow_row(flow, content_w, scale=1.7), [], []
 
         rows.append(Row(m, _reading))
 
     # --- numbered definitions --- (def-name chip row is cheap; the body row is the expensive one)
-    body_style = Style(size=23, color=theme.text)
+    body_style = Style(size=theme.px(23), color=theme.text)
     for i, d in enumerate(entry.defs, 1):
 
         def _def_head(i=i, d=d):
-            dh: list = [Span(f"{i}. ", Style(size=20, weight=700, color=theme.text))]
+            dh: list = [Span(f"{i}. ", Style(size=theme.px(20), weight=700, color=theme.text))]
             for tag in d.tags:  # defTag pills: ★ / priority form
-                dh.append(ChipBox(tag, ChipStyle(size=18, weight=600, bg=theme.tag)))
-                dh.append(Span(" ", Style(size=19)))
-            dh.append(ChipBox(d.dict_name, ChipStyle(size=19, bg=theme.purple)))
+                dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
+                dh.append(Span(" ", Style(size=theme.px(19))))
+            dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
             return _flow_row(dh, content_w, scale=1.7), [], []
 
         rows.append(Row(m, _def_head, section=d.dict_name))
@@ -299,7 +346,9 @@ def panel_rows(
                     width=body_w,
                     base=body_style,
                     padding=0,
-                    gap=3,
+                    gap=theme.px(3),
+                    indent_px=theme.px(INDENT_PX),
+                    gutter_px=theme.px(GUTTER_PX),
                     background=(0, 0, 0, 0),
                     scan_out=scan,
                     link_out=links,
@@ -315,7 +364,9 @@ def panel_rows(
                     width=body_w,
                     base=body_style,
                     padding=0,
-                    gap=3,
+                    gap=theme.px(3),
+                    indent_px=theme.px(INDENT_PX),
+                    gutter_px=theme.px(GUTTER_PX),
                     background=(0, 0, 0, 0),
                     scan_out=scan,
                     link_out=links,
@@ -366,16 +417,17 @@ _TAB_PAD_Y, _TAB_GAP, _TAB_ROW_GAP, _TAB_BOTTOM = 9, 11, 7, 7
 def _tab_chip_styles(theme: Theme):
     from overlay.draw.chip import ChipStyle
 
-    active_cs = ChipStyle(size=20, weight=600, bg=theme.purple, pad_h=11, pad_v=6, radius=9)
+    sz, ph, pv, rad = theme.px(20), theme.px(11), theme.px(6), theme.px(9)
+    active_cs = ChipStyle(size=sz, weight=600, bg=theme.purple, pad_h=ph, pad_v=pv, radius=rad)
     idle_cs = ChipStyle(
-        size=20,
+        size=sz,
         weight=500,
         fg=theme.muted,
         bg=(0, 0, 0, 0),
         border=(170, 170, 170, 255),
-        pad_h=11,
-        pad_v=6,
-        radius=9,
+        pad_h=ph,
+        pad_v=pv,
+        radius=rad,
     )
     return active_cs, idle_cs
 
@@ -396,16 +448,22 @@ def _tab_layout(
     _, idle_cs = _tab_chip_styles(theme)
     sprites = [render_chip(_tab_label(n), idle_cs) for n in names]
     chip_h = max((sp.image.height for sp in sprites), default=0)
+    pad_y, gap, row_gap, bottom = (
+        theme.px(_TAB_PAD_Y),
+        theme.px(_TAB_GAP),
+        theme.px(_TAB_ROW_GAP),
+        theme.px(_TAB_BOTTOM),
+    )
     pad_x = theme.margin
-    x, y = pad_x, _TAB_PAD_Y
+    x, y = pad_x, pad_y
     pos: list[tuple[int, int]] = []
     for sp in sprites:
         w = sp.image.width
         if x > pad_x and x + w > width - pad_x:  # doesn't fit on this row → wrap to the next
-            x, y = pad_x, y + chip_h + _TAB_ROW_GAP
+            x, y = pad_x, y + chip_h + row_gap
         pos.append((x, y))
-        x += w + _TAB_GAP
-    total_h = (y + chip_h + _TAB_BOTTOM) if names else (_TAB_PAD_Y + _TAB_BOTTOM)
+        x += w + gap
+    total_h = (y + chip_h + bottom) if names else (pad_y + bottom)
     return pos, total_h, chip_h
 
 
@@ -460,6 +518,7 @@ class LazyPanel:
         self._row_sections: list[str | None] = []  # parallel to _rendered (dict-tab sections)
         self.scan_boxes: list[ScanBox] = []  # panel-space hitboxes for the rendered rows
         self.link_boxes: list[LinkBox] = []  # panel-space clickable link regions
+        self._offsets_frozen: list[tuple[str, int]] | None = None  # cached at release_rows()
 
     @property
     def complete(self) -> bool:
@@ -497,9 +556,24 @@ class LazyPanel:
         self.link_boxes = links
         return canvas
 
+    def release_rows(self) -> None:
+        """Drop the per-row rendered sub-images once the panel is complete and its BGRA has been
+        captured elsewhere — they are the single largest retained buffer (a full second copy of the
+        panel) and are never needed again: scrolling slices the BGRA, hit-testing uses ``scan_boxes`` /
+        ``link_boxes`` (already composed onto ``self``), and the only other reader — ``section_offsets``
+        — is frozen here first. Idempotent."""
+        if self._offsets_frozen is None:
+            self._offsets_frozen = self.section_offsets()
+        self._rendered = []
+        self._row_sections = []
+        self._partial = None
+
     def section_offsets(self) -> list[tuple[str, int]]:
         """(dict_name, y) for each rendered section-start row, in panel coords — the scroll targets
-        for the tab row and LEFT/RIGHT keyboard nav. Grows as finish() streams."""
+        for the tab row and LEFT/RIGHT keyboard nav. Grows as finish() streams, then frozen by
+        release_rows() so it survives dropping the row images."""
+        if self._offsets_frozen is not None:
+            return self._offsets_frozen
         m = self.theme.margin
         y = m + self.top_reserve
         out: list[tuple[str, int]] = []

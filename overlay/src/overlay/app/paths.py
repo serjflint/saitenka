@@ -141,6 +141,20 @@ def cache_dir() -> Path:
     )
 
 
+def legacy_dict_artifacts() -> list[tuple[Path, int, int]]:
+    """Pre-consolidation leftovers now unused by the single ``dictionaries.sqlite`` and safe to delete:
+    the old per-zip SQLite cache (``cache_dir()/dicts``) and the copied dictionary zips
+    (``data_dir()/dicts``). Returns ``[(dir, file_count, total_bytes)]`` for each that exists and is
+    non-empty — purely informational; nothing is deleted."""
+    out: list[tuple[Path, int, int]] = []
+    for d in (cache_dir() / "dicts", data_dir() / "dicts"):
+        if d.is_dir():
+            files = [f for f in d.rglob("*") if f.is_file()]
+            if files:
+                out.append((d, len(files), sum(f.stat().st_size for f in files)))
+    return out
+
+
 # --- mpv / mpv.net dirs (mirror mpv's own resolution) ------------------------------------------
 
 

@@ -7,6 +7,7 @@ resumable (re-run skips satisfied steps). No real installs, no network.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 
 from overlay.app import setup_wizard as sw
 
@@ -99,14 +100,19 @@ def test_run_install_confirmed_invokes_manager(monkeypatch):
     assert calls == [["brew", "install", "mpv"]]
 
 
-def test_full_wizard_resumable_skips_satisfied(monkeypatch, tmp_path):
+def test_full_wizard_resumable_skips_satisfied(monkeypatch):
     """Everything already present → the wizard installs nothing and still reaches doctor/init."""
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: f"/bin/{n}")  # all tools present
     installs = []
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: installs.append(cmd))
     ran = {"doctor": False, "init": False}
-    monkeypatch.setattr(sw, "_run_doctor", lambda: ran.__setitem__("doctor", True))
+
+    def _fake_doctor():  # the wizard branches on the returned report's exit_code
+        ran["doctor"] = True
+        return SimpleNamespace(exit_code=0)
+
+    monkeypatch.setattr(sw, "_run_doctor", _fake_doctor)
     monkeypatch.setattr(sw, "_run_init", lambda confirm: ran.__setitem__("init", True))
     monkeypatch.setattr(sw, "_offer_anki", lambda confirm: None)
     monkeypatch.setattr(sw, "_offer_import", lambda confirm: None)

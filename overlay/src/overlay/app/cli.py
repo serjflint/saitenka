@@ -7,8 +7,9 @@ via ``cyclopts.config.Toml`` (precedence: defaults < file < explicit CLI flags);
 keys (``dicts``/``freq``/``pitch``/``known``/``[mine]``) are mapped explicitly, exactly as the old
 argparse two-phase parse did.
 
-Subcommands: ``doctor``, ``init``, ``import-settings``, ``install-plugin`` / ``uninstall-plugin``,
-``attach`` (joins a running mpv and selects the JP sub track / fetches jimaku), and ``setup``.
+Subcommands: ``doctor``, ``init``, ``import`` / ``import-settings`` / ``import-dictionaries`` (build the
+consolidated dictionary DB), ``install-plugin`` / ``uninstall-plugin``, ``attach`` (joins a running mpv
+and selects the JP sub track / fetches jimaku), and ``setup``.
 """
 
 from __future__ import annotations
@@ -27,8 +28,9 @@ from typing import Annotated
 import cyclopts
 
 from overlay import __version__
-from overlay.app.config import config_path, dicts_data_dir, load_config
+from overlay.app.config import TooltipOptions, config_path, load_config
 from overlay.app.paths import cache_dir
+from datetime import UTC
 
 log = logging.getLogger(__name__)
 
@@ -51,17 +53,37 @@ def _ensure_free_threaded() -> None:
             # os.execv on Windows does NOT truly replace the process — it duplicates execution and
             # corrupts the console (double output, and interactive prompts that can't take input).
             # Spawn a child that shares our console, wait, and exit with its status instead.
-            sys.exit(subprocess.run(argv).returncode)
+            try:
+                sys.exit(subprocess.run(argv).returncode)
+            except KeyboardInterrupt:
+                # Ctrl+C on the shared console reaches BOTH processes: the child cleans up and exits
+                # on its own SIGINT; the parent must not dump a KeyboardInterrupt traceback from
+                # subprocess.wait(). Exit quietly with the conventional 130 (128 + SIGINT).
+                sys.exit(130)
         os.execv(sys.executable, argv)
 
 
-def _resolve_paths(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:
-    """Flag values win over the config file, and BOTH sides get ~/$VAR expansion — TOML values
-    reach the flag parameter via cyclopts config.Toml, so expanding only the cfg fallback would
-    leave literal '~' paths to fail at zip-open time."""
-    from overlay.app.config import expand_paths
+def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:
+    """Flag values win over the config file. Values are dictionary **titles** resolved against the
+    consolidated DB (imported once) — not paths, so no ~/$VAR expansion is needed."""
+    return list(flag_vals or []) or list(cfg.get(key) or [])
 
-    return expand_paths(list(flag_vals or []) or cfg.get(key) or [])
+
+def _print_legacy_note() -> None:  # pragma: no cover — cosmetic, filesystem-dependent
+    """After a successful import, point out pre-consolidation files that are now unused (the old per-zip
+    caches and the copied dictionary zips) — informational only, nothing is deleted."""
+    from overlay.app.paths import legacy_dict_artifacts
+
+    arts = legacy_dict_artifacts()
+    if not arts:
+        return
+    total = sum(b for _, _, b in arts)
+    print(
+        f"\nnote: {total / 1e6:.0f} MB of pre-consolidation files are now unused and safe to delete "
+        "(the DB no longer needs them):"
+    )
+    for d, n, b in arts:
+        print(f"  {d}  ({n} files, {b / 1e6:.0f} MB)")
 
 
 def jimaku_should_fetch(
@@ -126,7 +148,7 @@ def run(
         cyclopts.Parameter(
             name="--dict",
             negative=(),
-            help="Yomitan dictionary .zip (repeatable; ordered — first = top of the tooltip)",
+            help="imported dictionary TITLE (repeatable; ordered — first = top of the tooltip)",
         ),
     ] = None,
     translate_key: Annotated[
@@ -184,13 +206,13 @@ def run(
         list[str] | None,
         cyclopts.Parameter(
             negative=(),
-            help="Yomitan frequency dict .zip (repeatable; green pills + coloring bands)",
+            help="imported frequency-dict TITLE (repeatable; green pills + coloring bands)",
         ),
     ] = None,
     pitch: Annotated[
         list[str] | None,
         cyclopts.Parameter(
-            negative=(), help="Yomitan pitch-accent dict .zip (repeatable; purple pills)"
+            negative=(), help="imported pitch-accent-dict TITLE (repeatable; purple pills)"
         ),
     ] = None,
     mine: Annotated[
@@ -217,22 +239,26 @@ def run(
     tip_height: Annotated[
         float,
         cyclopts.Parameter(
-            help="max BASE tooltip height as a fraction of the video height (default 0.5)"
+            help=f"max BASE tooltip height as a fraction of the video height "
+            f"(default {TooltipOptions().tip_max_frac})"
         ),
-    ] = 0.5,
+        # The default lives once, on TooltipOptions.tip_max_frac. cyclopts still layers
+        # defaults < config < CLI (token-based), so sourcing the floor here changes nothing but DRY.
+    ] = TooltipOptions().tip_max_frac,
     dict_tabs: Annotated[
         bool,
         cyclopts.Parameter(
             negative="--no-dict-tabs",
-            help="draw the sticky per-dictionary tab strip on the tooltip (default: on)",
+            help="draw the sticky per-dictionary tab strip on the tooltip (default: off)",
         ),
-    ] = True,
+    ] = False,
     pause_on_tooltip: Annotated[
         bool,
         cyclopts.Parameter(
-            negative=(), help="auto-pause playback while a tooltip is shown (resumes when it hides)"
+            negative="--no-pause-on-tooltip",  # on by default now → give an explicit off switch
+            help="auto-pause playback while a tooltip is shown (resumes when it hides)",
         ),
-    ] = False,
+    ] = True,
     prefetch: Annotated[
         bool,
         cyclopts.Parameter(
@@ -276,13 +302,14 @@ def run(
 
     cfg = load_config(config)
 
-    # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file
-    dict_paths = _resolve_paths(dicts, cfg, "dicts")
-    freq_paths = _resolve_paths(freq, cfg, "freq")
-    pitch_paths = _resolve_paths(pitch, cfg, "pitch")
+    # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file.
+    # These are dictionary TITLES resolved against the consolidated DB — never built here.
+    dict_titles = _resolve_names(dicts, cfg, "dicts")
+    freq_titles = _resolve_names(freq, cfg, "freq")
+    pitch_titles = _resolve_names(pitch, cfg, "pitch")
     known_cfg = json.loads(anki_decks) if anki_decks else cfg.get("known")
 
-    if not (color or known_cfg or known or dict_paths or mine):
+    if not (color or known_cfg or known or dict_titles or mine):
         print(
             "[hint] bare demo: no coloring, no monolingual dicts, no mining. Configure it once with\n"
             "       `saitenka-overlay setup`, or edit your config (see overlay.example.toml):\n"
@@ -326,41 +353,28 @@ def run(
         else:
             log.info("mining disabled (no [mine] config / --no-mine)")
 
-        # Skip (with a warning) any path that doesn't exist — usually a bare Yomitan title left in
-        # the config by `import-settings` without --scan-dir — instead of crashing on
-        # FileNotFoundError. Filtered lists (freq_ok) feed BOTH the dict set and the scorer below.
-        d_paths, freq_p, pitch_p = dict_paths, freq_paths, pitch_paths
-        dict_set = None
-        if d_paths or freq_p or pitch_p:
-            from overlay.app.dictionary import _MISSING_HINT, DictionarySet, split_existing
+        # Resolve dict/freq/pitch TITLES against the consolidated DB (imported once by `import`);
+        # a title with no imported dictionary is warned and skipped — nothing is built here.
+        from overlay.app.dictdb import DictionaryDb
 
-            d_paths, dmiss = split_existing(d_paths)
-            freq_p, fmiss = split_existing(freq_p)
-            pitch_p, pmiss = split_existing(pitch_p)
+        db = DictionaryDb.open()
+        dict_set = None
+        freq_rows: list = []
+        if dict_titles or freq_titles or pitch_titles:
+            from overlay.app.dictionary import _MISSING_HINT, DictionarySet
+
+            d_rows, dmiss = db.resolve(dict_titles)
+            freq_rows, fmiss = db.resolve(freq_titles)
+            p_rows, pmiss = db.resolve(pitch_titles)
             for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
                 if miss:
                     print(
-                        f"{kind}(s) not found, skipped: {', '.join(repr(m) for m in miss)}. "
+                        f"{kind}(s) not imported, skipped: {', '.join(repr(m) for m in miss)}. "
                         f"{_MISSING_HINT}",
                         file=sys.stderr,
                     )
-            if d_paths or freq_p or pitch_p:
-                print(
-                    f"loading {len(d_paths)} dict(s) · {len(freq_p)} freq · {len(pitch_p)} "
-                    "pitch… (first run builds a cache)"
-                )
-                from overlay.app.progress import BuildBar
-
-                bar = BuildBar()
-                try:
-                    dict_set = DictionarySet.load(
-                        d_paths,
-                        freq_paths=freq_p,
-                        pitch_paths=pitch_p,
-                        progress=bar.update,
-                    )
-                finally:
-                    bar.close()
+            if d_rows or freq_rows or p_rows:
+                dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows)
                 print("dictionaries:", [d.title for d in dict_set.dicts])
                 if dict_set.freqs:
                     print("frequency:", [f.title for f in dict_set.freqs])
@@ -374,7 +388,7 @@ def run(
                 )
 
         scorer = None
-        if color or known or known_cfg or freq_p:
+        if color or known or known_cfg or freq_titles:
             from overlay.app.scoring import Scorer
             from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
 
@@ -389,8 +403,10 @@ def run(
                     kw = KnownWords.from_set([w for w in known.split(",") if w])
             else:
                 kw = KnownWords.from_set([w for w in known.split(",") if w])
-            fd = FreqDict.load(freq_p[0]) if freq_p else None
-            scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load())
+            if not freq_rows:  # scorer may be on without a dict set (coloring-only run)
+                freq_rows, _ = db.resolve(freq_titles)
+            fd = FreqDict.from_db(db, freq_rows[0]) if freq_rows else None
+            scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load(db))
             print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
 
         return scorer, anki, mine_conf, dict_set
@@ -486,6 +502,7 @@ def run(
         fullscreen=fullscreen,
     )
     print("launching:", " ".join(cmd))
+    log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
     proc = subprocess.Popen(cmd)
 
     try:
@@ -500,11 +517,13 @@ def run(
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PerfOptions,
         ReaderOptions,
         TooltipOptions,
         TranslationOptions,
     )
 
+    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
     opts = ReaderOptions(
         keys=KeyOptions(
             mine_key=mine_key,
@@ -517,13 +536,26 @@ def run(
         ),
         tooltip=TooltipOptions(
             tip_max_frac=tip_height,
+            nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
             pause_on_tooltip=pause_on_tooltip,
             hover_switch_delay=hover_switch_delay,
-            # off if EITHER the config disables it or --no-dict-tabs is passed
-            show_dict_tabs=dict_tabs and bool(cfg.get("show_dict_tabs", True)),
+            hide_delay=cfg.get("hide_delay", _tt.hide_delay),
+            flash_secs=cfg.get("flash_secs", _tt.flash_secs),
+            # off by default; on if EITHER --dict-tabs is passed or the config enables it
+            show_dict_tabs=dict_tabs or bool(cfg.get("show_dict_tabs", False)),
+            panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
         ),
-        mining=MiningOptions(play_audio=not no_audio_play),
+        mining=MiningOptions(
+            play_audio=not no_audio_play,
+            max_bulk=cfg.get("max_bulk", _mo.max_bulk),
+            anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
+            anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
+        ),
         translation=TranslationOptions(auto_translate=auto_translate),
+        perf=PerfOptions(
+            poll_interval=cfg.get("poll_interval", _po.poll_interval),
+            prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+        ),
         prefetch=prefetch,
     )
     # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
@@ -635,6 +667,14 @@ def doctor(
     json_out: Annotated[
         bool, cyclopts.Parameter(name="--json", negative=(), help="emit the report as JSON")
     ] = False,
+    summary: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=("--summary", "--quiet"),
+            negative=(),
+            help="collapse passing checks to a count; show only warnings/failures in full",
+        ),
+    ] = False,
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
     mine_model: str = _mine_cfg.get("model", "Lapis"),
 ) -> int:  # pragma: no cover — thin CLI wrapper; run_checks/print_report are unit-tested
@@ -645,7 +685,7 @@ def doctor(
     if json_out:
         print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
     else:
-        print_report(report)
+        print_report(report, summary=summary)
     return report.exit_code
 
 
@@ -659,58 +699,52 @@ def init() -> int:  # pragma: no cover — interactive wizard, exercised live
     return run_init()
 
 
-@app.command(name="copy-dicts")
-def copy_dicts(
-    source: Annotated[
-        str | None,
-        cyclopts.Parameter(
-            help="a folder of Yomitan dictionary .zip files to import into the app data dir"
-        ),
-    ] = None,
+@app.command(name="import")
+def import_dicts(
+    paths: Annotated[
+        list[str],
+        cyclopts.Parameter(help="Yomitan dictionary .zip files and/or folders of them"),
+    ],
     *,
-    config: str | None = None,
-) -> int:  # pragma: no cover — thin CLI wrapper; relocate/import are unit-tested
-    """Bring dictionaries into the app's data dir and configure them. The data dir is platform-native
-    (%LOCALAPPDATA%\\saitenka on Windows, ~/.local/share/saitenka on Linux, ~/Library/Application
-    Support/saitenka on macOS); the resolved path is printed when it runs.
+    yes: Annotated[
+        bool, cyclopts.Parameter(negative=(), help="write the config without prompting")
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; gather_yomitan_zips/import_zips are unit-tested
+    """Import Yomitan dictionary .zip files into the consolidated database (built once) and register
+    them in the config by title.
 
-    With a SOURCE folder: copy every Yomitan ``.zip`` from it into the data dir, classify each by
-    content (dict/freq/pitch), and add it to the config. Without one: relocate already-configured
-    dicts OUT of TCC-protected folders (Documents/Desktop/Downloads) so a plugin-mode mpv stops
-    prompting for access."""
-    from overlay.app.config import dicts_data_dir
-    from overlay.app.relocate import import_from_dir, relocate_dicts
+    Accepts individual ``.zip`` files and/or directories to scan for them. Each is classified by content
+    (definition / frequency / pitch) and imported into ``data_dir()/dictionaries.sqlite``. The source
+    zips are read **in place** — no copy is kept — so you can delete or move them afterwards."""
+    from datetime import datetime
 
-    if source:
-        added = import_from_dir(source, config=config)
-        if not added:
-            print(f"no Yomitan dictionaries found in {source}")
-            return 0
-        print(f"imported {len(added)} dict(s) → {dicts_data_dir()} and added them to the config:")
-        for dest, kind in added:
-            print(f"  [{kind}] {dest}")
-        return 0
+    from overlay.app.init_wizard import _ask, dumps_toml, write_config
+    from overlay.app.progress import BuildBar
+    from overlay.app.yomitan_import import gather_yomitan_zips, import_zips
 
-    # No source: (1) relocate configured dicts out of protected folders, and (2) sweep the data dir
-    # for .zip dicts that aren't in the config yet (e.g. an earlier `copy-dicts` whose config write
-    # was stranded on a different path) and register them. Both are idempotent — the sweep re-scans
-    # the data dir and skips any zip already listed / already the right size (no re-copy).
-    data = dicts_data_dir()
-    mappings = relocate_dicts(config=config)
-    swept = import_from_dir(data, config=config) if data.is_dir() else []
-    if not mappings and not swept:
+    zips = gather_yomitan_zips(list(paths))
+    if not zips:
         print(
-            "all dictionaries are already registered and outside protected folders — nothing to do"
+            "no Yomitan dictionaries found (looked for .zip files carrying an index.json)",
+            file=sys.stderr,
         )
-        return 0
-    if swept:
-        print(f"registered {len(swept)} dict(s) already in {data} into the config:")
-        for dest, kind in swept:
-            print(f"  [{kind}] {dest}")
-    if mappings:
-        print(f"copied {len(mappings)} dict(s) → {data} and repointed the config:")
-        for old, new in mappings:
-            print(f"  {old} → {new}")
+        return 1
+    print(f"importing {len(zips)} dictionary/ies into the database…")
+    bar = BuildBar()
+    try:
+        cfg = import_zips(zips, imported_at=datetime.now(UTC).isoformat(), progress=bar.update)
+    finally:
+        bar.close()
+    for kind in ("dicts", "freq", "pitch"):
+        if cfg.get(kind):
+            print(f"  {kind}: {cfg[kind]}")
+    merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
+    print("\nProposed config:")
+    print(dumps_toml(merged))
+    backup = write_config(merged, confirm=(lambda _p: True) if yes else _ask)
+    if backup:
+        print(f"backed up existing config → {backup}")
+    _print_legacy_note()
     return 0
 
 
@@ -819,70 +853,76 @@ def import_settings(
 def import_dictionaries(
     export: str,
     *,
-    out: Annotated[
-        str | None,
-        cyclopts.Parameter(help=f"output dir for the .zip dicts (default: {dicts_data_dir()})"),
-    ] = None,
     yes: Annotated[
         bool, cyclopts.Parameter(negative=(), help="write the config without prompting")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; streaming import + converters are unit-tested
-    """Unpack a Yomitan DATABASE backup (the multi-GB dexie JSON export) into per-dictionary .zip files
-    the overlay can load, then classify them and update the config. Streamed — never full-loaded.
+    """Import a Yomitan DATABASE backup (the multi-GB dexie JSON export) directly into the consolidated
+    database. Streamed — never full-loaded. The per-dictionary zips are reconstructed into a TEMP dir,
+    imported, then discarded (no persistent zip copies are kept).
 
     This is for when you DON'T have the dictionary .zip files. If you already have them, use
-    ``import-settings`` (small settings export → config), which is faster and needs no unpacking."""
+    ``import`` / ``import-settings`` (faster, no unpacking)."""
+    import tempfile
+    from datetime import datetime
+
     from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
-    from overlay.app.config import dicts_data_dir
     from overlay.app.init_wizard import _ask, dumps_toml, write_config
+    from overlay.app.progress import BuildBar
     from overlay.app.yomitan_db_import import YomitanDbImportError, import_database, read_header
-    from overlay.app.yomitan_import import classify_zip
+    from overlay.app.yomitan_import import import_zips
 
-    out_dir = Path(out).expanduser() if out else dicts_data_dir()
     try:
         _, total = read_header(export)
     except YomitanDbImportError as e:
         print(f"import failed: {e}", file=sys.stderr)
         return 1
-    print(f"streaming {total:,} rows from {export}\n  → {out_dir}")
 
-    paths: list[Path] = []
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed:,}/{task.total:,} rows"),
-        TimeRemainingColumn(),
-    ) as prog:
-        task = prog.add_task("importing", total=total or None)
-        last = 0
+    with tempfile.TemporaryDirectory(prefix="saitenka-dbimport-") as tmp:
+        print(f"streaming {total:,} rows from {export} → temp staging → database")
+        paths: list[Path] = []
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed:,}/{task.total:,} rows"),
+            TimeRemainingColumn(),
+        ) as prog:
+            task = prog.add_task("unpacking", total=total or None)
+            last = 0
 
-        def _cb(done: int, tot: int) -> None:
-            nonlocal last
-            if done - last >= 20_000 or done == tot:  # throttle: millions of rows
-                prog.update(task, completed=done)
-                last = done
+            def _cb(done: int, tot: int) -> None:
+                nonlocal last
+                if done - last >= 20_000 or done == tot:  # throttle: millions of rows
+                    prog.update(task, completed=done)
+                    last = done
 
-        try:
-            paths = import_database(export, out_dir, progress=_cb)
-        except YomitanDbImportError as e:
-            print(f"import failed: {e}", file=sys.stderr)
+            try:
+                paths = import_database(export, Path(tmp), progress=_cb)
+            except YomitanDbImportError as e:
+                print(f"import failed: {e}", file=sys.stderr)
+                return 1
+            prog.update(task, completed=total)
+
+        if not paths:
+            print("no dictionaries found in the export", file=sys.stderr)
             return 1
-        prog.update(task, completed=total)
 
-    if not paths:
-        print("no dictionaries found in the export", file=sys.stderr)
-        return 1
+        print(f"\nbuilding {len(paths)} dictionaries into the database…")
+        bar = BuildBar()
+        try:
+            cfg = import_zips(
+                [str(p) for p in paths],
+                imported_at=datetime.now(UTC).isoformat(),
+                progress=bar.update,
+            )
+        finally:
+            bar.close()
 
-    buckets: dict[str, list[str]] = {"dicts": [], "freq": [], "pitch": []}
-    print(f"\nimported {len(paths)} dictionaries:")
-    for p in paths:
-        kind = classify_zip(p)  # content-based: term_bank → dict; term_meta mode → freq/pitch
-        buckets[{"dict": "dicts", "freq": "freq", "pitch": "pitch"}[kind]].append(str(p))
-        print(f"  [{kind}] {p.name}")
-
-    cfg = {k: v for k, v in buckets.items() if v}
-    merged = {**load_config(), **cfg}  # overlay onto the existing config, preserving its tables
+    for kind in ("dicts", "freq", "pitch"):
+        if cfg.get(kind):
+            print(f"  {kind}: {cfg[kind]}")
+    merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
     print("\nProposed config:")
     print(dumps_toml(merged))
     backup = write_config(merged, confirm=(lambda _p: True) if yes else _ask)
@@ -1014,6 +1054,7 @@ def attach(
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PerfOptions,
         ReaderOptions,
         TooltipOptions,
         TranslationOptions,
@@ -1085,6 +1126,7 @@ def attach(
     # with none configured, attach stays a working subtitle renderer (jamdict-fallback tooltips).
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
+    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
 
     opts = ReaderOptions(
         keys=KeyOptions(
@@ -1097,11 +1139,24 @@ def attach(
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
         ),
         tooltip=TooltipOptions(
-            tip_max_frac=cfg.get("tip_height", 0.5),
-            show_dict_tabs=bool(cfg.get("show_dict_tabs", True)),
+            tip_max_frac=cfg.get("tip_height", _tt.tip_max_frac),
+            nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
+            show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
+            hide_delay=cfg.get("hide_delay", _tt.hide_delay),
+            flash_secs=cfg.get("flash_secs", _tt.flash_secs),
+            panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
         ),
-        mining=MiningOptions(play_audio=not bool(cfg.get("no_audio_play", False))),
+        mining=MiningOptions(
+            play_audio=not bool(cfg.get("no_audio_play", False)),
+            max_bulk=cfg.get("max_bulk", _mo.max_bulk),
+            anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
+            anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
+        ),
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
+        perf=PerfOptions(
+            poll_interval=cfg.get("poll_interval", _po.poll_interval),
+            prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+        ),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
@@ -1168,20 +1223,26 @@ def _harden_runtime() -> None:  # pragma: no cover — process-global startup si
 
 
 def main() -> None:  # pragma: no cover — live-run entry point
-    _ensure_free_threaded()
-    _setup_logging()
-    _harden_runtime()
-    from overlay.app.crashlog import install as install_crash_handlers
-    from overlay.app.signals import install as install_shutdown_signals
+    try:
+        _ensure_free_threaded()
+        _setup_logging()
+        _harden_runtime()
+        from overlay.app.crashlog import install as install_crash_handlers
+        from overlay.app.signals import install as install_shutdown_signals
 
-    install_crash_handlers()  # main-thread + worker-thread + faulthandler crash capture
-    install_shutdown_signals()  # SIGTERM / SIGBREAK → graceful cleanup (like Ctrl+C)
-    override = _argv_config_override(sys.argv[1:])
-    if override:  # --config PATH re-points the declarative TOML
-        app.config = cyclopts.config.Toml(
-            override, must_exist=False, use_commands_as_keys=False, allow_unknown=True
-        )
-    sys.exit(app())
+        install_crash_handlers()  # main-thread + worker-thread + faulthandler crash capture
+        install_shutdown_signals()  # SIGTERM / SIGBREAK → graceful cleanup (like Ctrl+C)
+        override = _argv_config_override(sys.argv[1:])
+        if override:  # --config PATH re-points the declarative TOML
+            app.config = cyclopts.config.Toml(
+                override, must_exist=False, use_commands_as_keys=False, allow_unknown=True
+            )
+        sys.exit(app())
+    except KeyboardInterrupt:
+        # Ctrl+C is the documented way to stop the reader. The run/attach loop already tore down mpv,
+        # the socket and temp files in its `finally`; swallow the interrupt here so the user sees a
+        # clean exit, not a traceback. 130 = 128 + SIGINT, the shell convention.
+        sys.exit(130)
 
 
 if __name__ == "__main__":

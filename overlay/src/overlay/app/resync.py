@@ -21,9 +21,6 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Default timeout for the resync subprocess (seconds). Long enough for feature-length subs.
-_TIMEOUT = 300
-
 
 class ResyncUnavailable(RuntimeError):
     """Neither alass nor uvx is on PATH — resync cannot be performed."""
@@ -38,7 +35,7 @@ def _marker(out: Path) -> Path:
     return out.with_suffix(out.suffix + ".synced")
 
 
-def resync(video: Path, src: Path, out: Path, *, timeout: int = _TIMEOUT) -> Path:
+def resync(video: Path, src: Path, out: Path, *, timeout: int | None = None) -> Path:
     """Synchronise ``src`` to ``video`` and write the result to ``out``.
 
     Uses ``alass`` if on PATH, else ``uvx ffsubsync``.  Writes a ``<out>.synced``
@@ -53,7 +50,8 @@ def resync(video: Path, src: Path, out: Path, *, timeout: int = _TIMEOUT) -> Pat
     out:
         Destination path for the resynced subtitle.
     timeout:
-        Maximum seconds to wait for the subprocess (default 300).
+        Maximum seconds to wait for the subprocess (``None`` resolves the ``resync_timeout``
+        config value, default 300).
 
     Returns
     -------
@@ -67,6 +65,10 @@ def resync(video: Path, src: Path, out: Path, *, timeout: int = _TIMEOUT) -> Pat
     ResyncFailed
         The tool exited with a non-zero code or timed out.
     """
+    if timeout is None:
+        from overlay.app.config import resolve_resync_timeout
+
+        timeout = resolve_resync_timeout()
     marker = _marker(out)
     if marker.exists() and out.exists():
         log.debug("resync: cache hit for %s — skipping", out.name)
@@ -104,7 +106,7 @@ def maybe_resync(
     src: Path,
     *,
     enabled: bool = True,
-    timeout: int = _TIMEOUT,
+    timeout: int | None = None,
 ) -> Path:
     """Resync ``src`` to ``video`` if *enabled*, returning the synced path.
 

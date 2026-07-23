@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import statistics
 import sys
 import sysconfig
@@ -27,7 +26,7 @@ import time
 
 from pathlib import Path
 
-from overlay.app.config import expand_paths, load_config
+from overlay.app.config import load_config
 from overlay.app.controller import Reader
 from overlay.app.tokenize import Token, tokenize
 from overlay.mpvio.osd import to_bgra, to_bgra_array
@@ -35,6 +34,10 @@ from overlay.panel import Definition, Entry, LazyPanel, panel_rows
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
 OSD = (1920, 1080)
+_STRESS_CACHE_CAP = (
+    24  # --stress forces reader.panel_cache_max to this — a test control, independent
+)
+# of the user's own [tooltip].panel_cache_max — so eviction thrash is exercised deterministically
 
 # Hand-picked multi-sense words Serj still sees pathological first lookups on: very polysemous
 # common words whose monolingual entries are enormous (手 alone is ~100 senses in a big monolingual dict).
@@ -148,31 +151,35 @@ def format_runtime(rt: dict) -> str:
     )
 
 
-def discover_pathological(db_path: str, n: int = 5) -> list[tuple[str, str, int]]:
-    """The ``n`` entries with the LARGEST glossary payloads in a built dict index — the worst
-    cold-first-paint candidates (longest structured-content JSON = tallest render). Returns
-    ``(term, reading, payload_bytes)`` rows, biggest first."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        rows = conn.execute(
-            "SELECT term, reading, length(glossary) FROM entries "
+def discover_pathological(db, dict_id: int, n: int = 5) -> list[tuple[str, str, int]]:
+    """The ``n`` entries with the LARGEST glossary payloads for one dictionary in the consolidated
+    DB — the worst cold-first-paint candidates (longest structured-content JSON = tallest render).
+    Returns ``(term, reading, payload_bytes)`` rows, biggest first."""
+    rows = (
+        db._conn()
+        .execute(
+            "SELECT term, reading, length(glossary) FROM entries WHERE dict_id=? "
             "ORDER BY length(glossary) DESC LIMIT ?",
-            (n,),
-        ).fetchall()
-    finally:
-        conn.close()
+            (dict_id, n),
+        )
+        .fetchall()
+    )
     return [(t, r, s) for t, r, s in rows]
 
 
 def _load_dict_set():
+    """Resolve the configured dict/freq/pitch **titles** against the consolidated DB (built once by
+    ``saitenka-overlay import`` — see ``app/config.py``, dicts are titles, not zip paths)."""
     cfg = load_config()
-    dicts = expand_paths(cfg.get("dicts"))
-    if not dicts:
+    dict_titles = list(cfg.get("dicts") or [])
+    if not dict_titles:
         return None, "no dicts in overlay.toml — falling back to a synthetic 6-dict entry"
+    from overlay.app.dictdb import DictionaryDb
     from overlay.app.dictionary import DictionarySet
 
-    ds = DictionarySet.load(
-        dicts, freq_paths=expand_paths(cfg.get("freq")), pitch_paths=expand_paths(cfg.get("pitch"))
+    db = DictionaryDb.open()
+    ds = DictionarySet.from_db(
+        db, dict_titles, list(cfg.get("freq") or []), list(cfg.get("pitch") or [])
     )
     tag = f"{len(ds.dicts)} dicts + {len(ds.freqs)} freq + {len(ds.pitches)} pitch"
     return ds, tag
@@ -218,7 +225,7 @@ def _pathological_corpus(ds, per_dict: int = 3) -> list[tuple[str, str, str]]:
     corpus: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for d in getattr(ds, "dicts", []):
-        for term, reading, _size in discover_pathological(d._db_path, n=per_dict):
+        for term, reading, _size in discover_pathological(d.db, d.dict_id, n=per_dict):
             if term not in seen:
                 seen.add(term)
                 corpus.append((d.title, term, reading))
@@ -266,13 +273,13 @@ def run_pathological(
     corpus = _pathological_corpus(ds)
     reader = _cold_reader(ds)
 
-    # First-hover-after-launch: brand-new SQLite connections (fresh process ≈ cold page cache for
-    # the non-mmap'd portions; the OS file cache may still be warm — note in the output).
-    from overlay.app.dictionary import Dictionary, DictionarySet
+    # First-hover-after-launch: a brand-new DictionaryDb (fresh process ≈ cold page cache for the
+    # non-mmap'd portions; the OS file cache may still be warm — note in the output).
+    from overlay.app.dictdb import DictionaryDb
+    from overlay.app.dictionary import DictionarySet
 
-    fresh = DictionarySet(
-        [Dictionary(d.title, d._db_path, d.tags) for d in ds.dicts], ds.freqs, ds.pitches
-    )
+    fresh_db = DictionaryDb.open(ds.dicts[0].db.path)
+    fresh = DictionarySet.from_db(fresh_db, [d.title for d in ds.dicts])
     fresh_reader = _cold_reader(fresh)
     t0 = time.perf_counter()
     first_term, first_reading = corpus[0][1], corpus[0][2]
@@ -349,11 +356,10 @@ def run_stress(
     max_rss_mb: float | None = None,
 ) -> int:
     """A sustained, DETERMINISTIC chained session — cold hover → scroll → nested popup → scroll →
-    dismiss — over a large corpus of distinct heavy entries, repeated ``reps`` rounds. Unlike the
-    isolated micro-benchmarks it exercises what only shows under load: panel-cache eviction thrash
-    (the cache is LRU-capped at 48, so >48 distinct entries force churn), nested-state churn, and
-    memory growth across a long session. Reports the per-op frame-latency tail (MAX is the jank
-    signal) + peak RSS + growth, and can gate on ``--max-frame-ms`` / ``--max-rss-mb``."""
+    dismiss — over a corpus of distinct heavy entries, repeated ``reps`` rounds. Unlike the isolated
+    micro-benchmarks it exercises what only shows under load: panel-cache eviction thrash, nested-state
+    churn, and memory growth across a long session. Reports the per-op frame-latency tail (MAX is the
+    jank signal) + peak RSS + growth, and can gate on ``--max-frame-ms`` / ``--max-rss-mb``."""
     import tracemalloc
 
     from overlay.app.subtitles import WordBox
@@ -361,13 +367,19 @@ def run_stress(
     ds, tag = _load_dict_set()
     if ds is None:
         ds, tag = _SyntheticDS(), tag
-    # A corpus LARGER than the 48-entry cache cap is what forces eviction thrash — 10 biggest entries
-    # per dict (≈60 distinct) does it; without real dicts, repeat a small synthetic set (no eviction).
-    if hasattr(ds, "dicts"):
-        corpus = [(t, r) for _s, t, r in _pathological_corpus(ds, per_dict=10)]
+    reader = _cold_reader(ds)
+    # The cache cap is a TEST CONTROL, not the user's live [tooltip].panel_cache_max — fix it small
+    # and deterministic so eviction is exercised the same way regardless of how many dicts are
+    # configured or what the user's own cap is. Scaling the corpus to chase a large live cap instead
+    # blows up wall time / memory for reasons unrelated to what's being measured.
+    reader.panel_cache_max = _STRESS_CACHE_CAP
+    if hasattr(ds, "dicts") and ds.dicts:
+        # A fixed corpus comfortably larger than the fixed cap — forces real eviction thrash without
+        # depending on the live config.
+        per_dict = max(3, _STRESS_CACHE_CAP // len(ds.dicts) + 2)
+        corpus = [(t, r) for _s, t, r in _pathological_corpus(ds, per_dict=per_dict)]
     else:
         corpus = [(w, w) for w in ("手", "気", "出る", "見る", "行く", "上げる")]
-    reader = _cold_reader(ds)
     step = round(OSD[1] * 0.12)
     frames: list[float] = []
 
@@ -424,7 +436,8 @@ def run_stress(
         f"MAX {m['max']:.1f} ms  (cv {m['cv']:.2f})"
     )
     print(
-        f"panel cache: {cache_len}/48 entries (LRU-capped — steady state means eviction is working)"
+        f"panel cache: {cache_len}/{reader.panel_cache_max} entries "
+        "(LRU-capped — steady state means eviction is working)"
     )
     print(
         f"memory: peak RSS {rss_peak:.0f} MB · growth over rounds {growth:+.1f} MB · "
@@ -456,6 +469,7 @@ def run_stress(
                     "corpus_size": len(corpus),
                     "frame_latency_ms": m,
                     "panel_cache_len": cache_len,
+                    "panel_cache_max": reader.panel_cache_max,
                     "rss_peak_mb": rss_peak,
                     "rss_growth_mb": growth,
                     "py_obj_peak_mb": py_peak / 1e6,

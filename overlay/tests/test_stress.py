@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from util import FakeIPC
 
+from overlay.app.config import TooltipOptions
 from overlay.app.controller import NESTED_ID, TIP_ID, Reader
 from overlay.app.tokenize import Token
 from overlay.panel import Definition, Entry
+
+PANEL_CACHE_MAX = TooltipOptions().panel_cache_max
 
 
 class _TallDS:
@@ -39,8 +42,8 @@ def _reader() -> Reader:
     return r
 
 
-# 60 DISTINCT synthetic entries (> the 48-entry cache cap) so eviction is genuinely exercised
-_CORPUS = [f"語{i:02d}" for i in range(60)]
+# DISTINCT synthetic entries, comfortably over the LRU cache cap, so eviction is genuinely exercised
+_CORPUS = [f"語{i:03d}" for i in range(PANEL_CACHE_MAX + 24)]
 
 
 def _churn(r: Reader, term: str) -> bool:
@@ -66,20 +69,22 @@ def _churn(r: Reader, term: str) -> bool:
 
 
 def test_sustained_churn_evicts_and_stays_clean():
-    """Churning 60 distinct heavy entries (then revisiting evicted ones) must not raise, must keep the
-    panel cache within its 48-entry LRU cap, and must leave no tooltip/nested state after dismiss."""
+    """Churning many distinct heavy entries (then revisiting evicted ones) must not raise, must keep the
+    panel cache within its LRU cap, and must leave no tooltip/nested state after dismiss."""
     r = _reader()
     nested_seen = 0
     for term in _CORPUS:  # fill past the cap → eviction
         nested_seen += _churn(r, term)
-    assert len(r._panel_cache) <= 48, (
+    assert len(r._panel_cache) <= PANEL_CACHE_MAX, (
         f"cache overflowed its LRU cap mid-fill: {len(r._panel_cache)}"
     )
     for term in _CORPUS[:8]:  # revisit the earliest (now-evicted) entries → cold rebuild, no crash
         nested_seen += _churn(r, term)
 
     assert nested_seen > 0, "nested popups never opened — the nested path wasn't exercised"
-    assert len(r._panel_cache) <= 48, f"panel cache overflowed its LRU cap: {len(r._panel_cache)}"
+    assert len(r._panel_cache) <= PANEL_CACHE_MAX, (
+        f"panel cache overflowed its LRU cap: {len(r._panel_cache)}"
+    )
     # after the final set_hover(-1) the whole hover stack must be torn down
     assert r._tip_state is None and r._tip_bgra is None
     assert r._nest.state is None  # nested popup cleared

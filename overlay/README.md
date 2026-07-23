@@ -75,7 +75,7 @@ frequency from any Yomitan freq zip (user-supplied, e.g. under `tools/freq/`); J
 
 ```bash
 uv run python examples/mpv_reader.py --sub-file jp.srt --color \
-  --known "私,本,経" --freq ~/yomitan-dicts/freq-general.zip
+  --known "私,本,経" --freq "Frequency General"
 # or pull the known-set from Anki:
 uv run python examples/mpv_reader.py --sub-file jp.srt --color \
   --anki-decks '{"Kaishi 1.5k":["Word"]}'
@@ -92,7 +92,7 @@ stripped before tokenizing (`app/tokenize.py::strip_inline_furigana`).
 # real anime with an embedded JP track + your real Anki known-set (FSRS deck):
 uv run python examples/mpv_reader.py "Nippon Sangoku - 10 [...MultiSub...].mkv" \
   --color --anki-decks '{"Saitenka::Known":["Entry","Expression","Word"]}' \
-  --freq ~/yomitan-dicts/freq-general.zip
+  --freq "Frequency General"
 
 # a file with no JP subs → fetch from jimaku (title/episode parsed from the filename):
 uv run python examples/mpv_reader.py show.mkv --jimaku --color
@@ -109,7 +109,7 @@ JMdict ID. Dedup checks the deck first (no silent duplicates); a toast confirms 
 ```bash
 uv run python examples/mpv_reader.py episode.mkv --color \
   --anki-decks '{"Saitenka::Known":["Entry","Expression","Word"]}' \
-  --freq ~/yomitan-dicts/freq-general.zip \
+  --freq "Frequency General" \
   --mine --mine-deck "Saitenka::Mining" --mine-model Lapis
 # then hover a word in mpv and press Ctrl+m
 ```
@@ -128,11 +128,13 @@ deduped, then cleaned up.
 
 ### Multi-dictionary tooltip (Yomitan-style, ordered)
 
-`--dict a.zip --dict b.zip …` loads any **Yomitan term-bank** dictionaries (bilingual and/or
-monolingual — whichever you have) and shows the word across all of them, **in order**, each as its own
-section with the dict-name pill and rich structured content (ruby examples, notes, cross-refs). First run
-builds a **SQLite cache** (`~/.cache/saitenka-overlay/dicts/`); after that, load is instant and low-RAM.
-Falls back to JMdict/jamdict when no `--dict` is given.
+Import any **Yomitan term-bank** dictionaries (bilingual and/or monolingual — whichever you have) once
+with `saitenka-overlay import <dir>`; they build into a single **consolidated database**
+(`~/.local/share/saitenka/dictionaries.sqlite`, the Yomitan model). Then `--dict "Title A" --dict
+"Title B" …` (or the config lists) shows the word across all of them, **in order**, each as its own
+section with the dict-name pill and rich structured content (ruby examples, notes, cross-refs). Runtime
+only opens the DB — nothing is rebuilt at play time, and RAM stays low. Falls back to JMdict/jamdict when
+no dictionary is configured.
 
 ### Official-translation reveal (anti-crutch)
 
@@ -141,11 +143,12 @@ ja,jpn,jp`) and the embedded EN track as mpv's *secondary* sub (hidden). Press `
 line for the current cue above the JP subtitle — the professional translation on demand, not by default.
 
 ```bash
+saitenka-overlay import ~/yomitan-dicts   # once: build the DB, register the titles in the config
 uv run python examples/mpv_reader.py episode.mkv --color \
   --anki-decks '{"Saitenka::Known":["Entry"]}' --mine \
-  --dict ~/yomitan-dicts/bilingual.zip \
-  --dict ~/yomitan-dicts/monolingual-a.zip \
-  --dict ~/yomitan-dicts/monolingual-b.zip
+  --dict "Bilingual Dict" \
+  --dict "Monolingual Dict A" \
+  --dict "Monolingual Dict B"
 # hover a word; Ctrl+m mine · Shift+m mine-all · t translation
 ```
 
