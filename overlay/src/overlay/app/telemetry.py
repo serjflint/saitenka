@@ -20,11 +20,9 @@ if TYPE_CHECKING:
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
 
-log = logging.getLogger(__name__)
+    from overlay.app.otel_export import GatedSpanProcessor
 
-_lock = threading.Lock()
-_tracer_provider: TracerProvider | None = None
-_meter_provider: MeterProvider | None = None
+log = logging.getLogger(__name__)
 
 
 @final
@@ -47,6 +45,16 @@ class ActiveGate:
         self._on = value
 
 
+_lock = threading.Lock()
+_tracer_provider: TracerProvider | None = None
+_meter_provider: MeterProvider | None = None
+_span_processor: GatedSpanProcessor | None = None
+
+#: Gates the span pipeline once telemetry is configured. Off by default (matches the "free when
+#: nobody is inspecting" invariant) — nothing flips it on yet; that's a future doctor/keybind hook.
+span_gate = ActiveGate()
+
+
 def export_dir(options: TelemetryOptions) -> Path:
     return Path(options.export_dir) if options.export_dir else cache_dir() / "telemetry"
 
@@ -57,9 +65,13 @@ def is_enabled() -> bool:
     return _tracer_provider is not None
 
 
+def dropped_span_count() -> int:
+    return _span_processor.dropped_count if _span_processor is not None else 0
+
+
 def configure(options: TelemetryOptions) -> None:
     """Idempotent: a no-op if disabled, if the extra isn't installed, or if already configured."""
-    global _tracer_provider, _meter_provider
+    global _tracer_provider, _meter_provider, _span_processor
     if not options.enabled:
         return
     with _lock:
@@ -76,21 +88,26 @@ def configure(options: TelemetryOptions) -> None:
             )
             return
 
+        from overlay.app.otel_export import CTFSpanExporter, GatedSpanProcessor
+
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         tp = TracerProvider()
+        processor = GatedSpanProcessor(CTFSpanExporter(out_dir / "trace.json"), span_gate)
+        tp.add_span_processor(processor)
         mp = MeterProvider()
         trace.set_tracer_provider(tp)
         metrics.set_meter_provider(mp)
         _tracer_provider = tp
         _meter_provider = mp
+        _span_processor = processor
         log.info("telemetry enabled: export_dir=%s", out_dir)
 
 
 def shutdown() -> None:
     """Flush + tear down the providers. Safe to call even when telemetry was never configured."""
-    global _tracer_provider, _meter_provider
+    global _tracer_provider, _meter_provider, _span_processor
     with _lock:
         if _tracer_provider is not None:
             try:
@@ -104,3 +121,5 @@ def shutdown() -> None:
                 log.debug("meter provider shutdown failed", exc_info=True)
         _tracer_provider = None
         _meter_provider = None
+        _span_processor = None
+        span_gate.set(False)
