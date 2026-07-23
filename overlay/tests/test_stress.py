@@ -12,7 +12,8 @@ from __future__ import annotations
 from util import FakeIPC
 
 from overlay.app.config import TooltipOptions
-from overlay.app.controller import NESTED_ID, TIP_ID, Reader
+from overlay.app.controller import Reader
+from overlay.app.overlay_ids import OverlayId
 from overlay.app.tokenize import Token
 from overlay.panel import Definition, Entry
 
@@ -98,6 +99,6 @@ def test_churn_removes_both_overlays_no_ghost():
     for term in _CORPUS[:12]:
         _churn(r, term)
     removed = {c[1] for c in r.ipc.commands if c and c[0] == "overlay-remove"}
-    assert r.ov._oid(TIP_ID) in removed and r.ov._oid(NESTED_ID) in removed, (
+    assert r.ov._oid(OverlayId.TIP) in removed and r.ov._oid(OverlayId.NESTED) in removed, (
         f"tooltip/nested overlays never removed; removes={removed}"
     )

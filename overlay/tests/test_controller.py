@@ -5,7 +5,12 @@ import time
 import pytest
 
 import overlay.app.controller as C
-from overlay.app.controller import PanelKey, Reader
+import overlay.app.miner_ui as miner_ui
+import overlay.app.nested_popup as nested_popup
+import overlay.app.tooltip as tooltip
+from overlay.app.controller import Reader
+from overlay.app.overlay_ids import OverlayId
+from overlay.app.tooltip import PanelKey
 import functools
 
 
@@ -957,8 +962,8 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
     # a TALL entry anchored to an inner word in the upper-middle: default would drop below (more room
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
-    view_h = r._nested_view_h(full_h=800, wy=wy)
-    above_room = wy - C.TIP_GAP - margin
+    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
+    above_room = wy - nested_popup.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty + view_h <= wy  # …so it sits entirely above the inner word
@@ -968,7 +973,7 @@ def test_nested_popup_drops_below_when_no_room_above():
     r = Reader(FakeIPC())
     r.osd = (1280, 720)
     wy = 90  # inner word near the very top → can't fit above
-    view_h = r._nested_view_h(full_h=800, wy=wy)
+    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty >= wy  # falls back to below (safe)
 
@@ -1039,7 +1044,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     tx, ty, tw, _th = r._tip_rect
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1048,7 +1053,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     }  # header, not a scan cell
     r.copy_click()
     assert got and "本命" in got[0]  # copied the hovered word
-    assert r._flash_oid == C.TIP_ID and r._flash_until > 0
+    assert r._flash_oid == OverlayId.TIP and r._flash_until > 0
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
@@ -1059,12 +1064,12 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     nx, ny, nw, nh = r._nest.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
     r.copy_click()
     assert got and got[0].startswith("追")  # copied the inner scanned word
-    assert r._flash_oid == C.NESTED_ID
+    assert r._flash_oid == OverlayId.NESTED
 
 
 def test_flash_border_drawn_then_cleared(monkeypatch):
@@ -1075,7 +1080,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: None)
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: None)
     r.set_hover(0)
     shots = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda bgra, x, y, oid: shots.append((oid, bgra.copy())))
@@ -1083,8 +1088,8 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     oid, view = shots[-1]
-    hl = np.array(C.FLASH_BGRA, np.uint8)
-    assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
+    hl = np.array(tooltip.FLASH_BGRA, np.uint8)
+    assert oid == OverlayId.TIP and (view[0] == hl).all()  # top border row is the highlight
     clock[0] += r.flash_secs + 0.01
     r.poll_once()  # flash expires → redraw without the border
     _, view2 = shots[-1]
@@ -1124,14 +1129,14 @@ def _point_at(ipc, rect):
 
 def test_preview_does_not_autoplay(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     _preview_reader(FakeIPC())
     assert played == []  # showing the preview no longer autoplays
 
 
 def test_preview_audio_button_plays_on_click(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     _point_at(ipc, r._preview_audio_rect)
@@ -1141,7 +1146,7 @@ def test_preview_audio_button_plays_on_click(monkeypatch):
 
 def test_preview_empty_click_plays_nothing(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     px, py, _pw, ph = r._preview_rect
@@ -1235,10 +1240,10 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
     r.set_hover(0)
-    assert C.TRANS_ID in shown  # hovering a word auto-revealed the translation
+    assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
     assert r._trans_text == "I want you to read this."
     r.set_hover(-1)
-    assert C.TRANS_ID in hidden  # leaving the word hid it again
+    assert OverlayId.TRANS in hidden  # leaving the word hid it again
 
 
 def test_no_auto_translate_without_the_flag(monkeypatch):
@@ -1256,7 +1261,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     shown = []
     monkeypatch.setattr(r.ov, "show", lambda img, x, y, oid: shown.append(oid))
     r.set_hover(0)
-    assert C.TRANS_ID not in shown  # translation stays on the manual `t` key
+    assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
 
 def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
@@ -1459,7 +1464,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_subtitle("別の字幕")
 
-    assert C.TIP_ID in hidden  # tooltip was hidden
+    assert OverlayId.TIP in hidden  # tooltip was hidden
     assert r._tip_rect is None  # _tip_rect reset
     assert r._tip_state is None  # _tip_state reset
     assert r._tip_key is None  # _tip_key reset
@@ -1612,7 +1617,7 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_subtitle("別の字幕")
 
-    assert C.NESTED_ID in hidden or r._nest.state is None  # nested cleared
+    assert OverlayId.NESTED in hidden or r._nest.state is None  # nested cleared
 
 
 # --- Stage 7c: event-driven property reads (observe_property instead of per-tick get_property) ----

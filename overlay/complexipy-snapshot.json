@@ -34,32 +34,12 @@
     "file_name": "controller.py",
     "functions": [
       {
-        "name": "Reader::_panel_for",
-        "complexity": 21
-      },
-      {
-        "name": "Reader::_update_prefetch",
-        "complexity": 21
-      },
-      {
         "name": "Reader::_handle",
         "complexity": 23
       },
       {
-        "name": "Reader::_prefetch_worker",
-        "complexity": 23
-      },
-      {
-        "name": "Reader::on_click",
-        "complexity": 27
-      },
-      {
         "name": "Reader::poll_once",
         "complexity": 27
-      },
-      {
-        "name": "Reader::_update_hover_impl",
-        "complexity": 38
       }
     ]
   },

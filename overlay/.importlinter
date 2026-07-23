@@ -50,13 +50,14 @@ source_modules =
     overlay.app
 forbidden_modules =
     PIL
-# subtitles/toast/card_preview/controller migrate to the raster protocol opportunistically, later
-# (see tests/test_layering.py docstring, pre-existing allowlist).
+# subtitles/toast/card_preview/miner_ui migrate to the raster protocol opportunistically, later
+# (see tests/test_raster_backend.py, pre-existing allowlist — controller.py itself dropped off this
+# list once its preview code moved to miner_ui.py, see vibe/controller-split-plan.md Stage 2).
 ignore_imports =
     overlay.app.subtitles -> PIL
     overlay.app.toast -> PIL
     overlay.app.card_preview -> PIL
-    overlay.app.controller -> PIL
+    overlay.app.miner_ui -> PIL
 
 [importlinter:contract:gpl-chokepoint]
 name = only app.dictionary / app.doctor may import the GPL deinflect add-on

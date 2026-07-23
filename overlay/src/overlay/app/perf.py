@@ -12,6 +12,7 @@ own IPC round-trip — so there's no meaningful cost to gate.
 from __future__ import annotations
 
 import statistics
+import sys
 import threading
 import time
 from collections import deque
@@ -19,6 +20,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 _MAXLEN = 200  # per-op samples kept; old ones fall off, no unbounded growth
+
+
+def gil_disabled() -> bool:
+    """True on a free-threaded (3.14t) build actually running with the GIL off. ``getattr`` because
+    ``sys._is_gil_enabled`` only exists on free-threaded builds; a standard build has no GIL to
+    disable, so it's always "enabled" here."""
+    return not getattr(sys, "_is_gil_enabled", lambda: True)()
+
 
 _lock = threading.Lock()
 _ops: dict[str, deque[float]] = {}

@@ -34,14 +34,15 @@ class _RecOv:
 def test_draw_loading_shows_spinner_then_throttles():
     from util import FakeIPC
 
-    from overlay.app.controller import LOADING_ID, Reader
+    from overlay.app.controller import Reader
+    from overlay.app.overlay_ids import OverlayId
 
     r = Reader(FakeIPC())
     r.ov = _RecOv()
     r._loading = True
     r._load_next = 0.0  # allow an immediate first draw
     r._draw_loading()
-    assert LOADING_ID in r.ov.shown  # spinner painted top-left
+    assert OverlayId.LOADING in r.ov.shown  # spinner painted top-left
     assert r._load_frame == 1  # frame advanced
     shown_before = len(r.ov.shown)
     r._draw_loading()  # immediately again → throttled (now < _load_next), nothing new drawn
@@ -51,14 +52,15 @@ def test_draw_loading_shows_spinner_then_throttles():
 def test_apply_deps_stops_the_spinner():
     from util import FakeIPC
 
-    from overlay.app.controller import LOADING_ID, Reader
+    from overlay.app.controller import Reader
+    from overlay.app.overlay_ids import OverlayId
 
     r = Reader(FakeIPC())
     r.ov = _RecOv()
     r._loading = True
     r._apply_deps({})  # background load finished (even with nothing) → spinner off
     assert r._loading is False
-    assert LOADING_ID in r.ov.hidden
+    assert OverlayId.LOADING in r.ov.hidden
 
 
 def test_load_deps_async_uses_a_custom_build(monkeypatch):
