@@ -13,9 +13,16 @@ from overlay.app.dictionary import (
     DictionaryError,
     DictionarySet,
     _glossary_to_nodes,
+    _short_freq_name,
     split_existing,
 )
 from overlay.app.tokenize import Token, tokenize
+
+
+def test_short_freq_name_strips_saitenka_prefix():
+    assert _short_freq_name("Saitenka Known") == "Known"
+    assert _short_freq_name("saitenka-reactivate") == "reactivate"  # zip-style title
+    assert _short_freq_name("JPDB v2.2") == "JPDB v2.2"  # other dicts pass through untouched
 
 
 def test_dictionary_set_from_db_missing_title_raises_friendly_error():

@@ -68,6 +68,15 @@ FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
 
 
+def _short_freq_name(title: str) -> str:
+    """Freq-pill display name: strip the ``Saitenka`` product prefix (``Saitenka Known`` → ``Known``)
+    so our own frequency lists don't waste pill width. Case-insensitive; other dicts pass through."""
+    for prefix in ("Saitenka ", "saitenka-"):
+        if title.lower().startswith(prefix.lower()):
+            return title[len(prefix) :]
+    return title
+
+
 @dataclass
 class DictEntry:
     term: str
@@ -397,7 +406,7 @@ class DictionarySet:
         for fs in self.freqs:
             disp = fs.display(forms, reading)
             if disp:
-                pills.append(Freq(fs.title, disp, FREQ_COLOR))
+                pills.append(Freq(_short_freq_name(fs.title), disp, FREQ_COLOR))
         for ps in self.pitches:
             disp = ps.display(forms, reading)
             if disp:
