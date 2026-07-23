@@ -111,6 +111,54 @@ def test_traced_creates_a_real_span_when_telemetry_is_configured(registered):
     # didn't raise and the block ran; span content is covered end-to-end in test_telemetry.py.
 
 
+class _FakeSpan:
+    def __init__(self):
+        self.attributes = {}
+
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class _FakeTracer:
+    def __init__(self):
+        self.spans = []
+
+    def start_as_current_span(self, name):
+        span = _FakeSpan()
+        self.spans.append(span)
+        return span
+
+
+class _FakeTraceModule:
+    def __init__(self):
+        self.tracer = _FakeTracer()
+
+    def get_tracer(self, _name):
+        return self.tracer
+
+
+def test_traced_stamps_the_real_native_thread_id(monkeypatch):
+    """otel_export._span_to_ctf_event reads this attribute back for the CTF "tid" field — without
+    it, independently-started spans (no parent-child relationship, so different random trace_ids)
+    scatter across a different synthetic "thread" track each in Perfetto instead of grouping by the
+    actual Python thread that ran them. A fake trace module here keeps this deterministic — no
+    dependency on OTel's global-provider-set-once ordering across the test session."""
+    import threading
+
+    fake = _FakeTraceModule()
+    monkeypatch.setattr(otel_metrics, "_trace_available", True)
+    monkeypatch.setattr(otel_metrics, "_trace_module", fake)
+    with otel_metrics.traced("x"):
+        pass
+    assert fake.tracer.spans[0].attributes["thread.id"] == threading.get_native_id()
+
+
 def test_instrumented_is_a_noop_when_histogram_is_none():
     """The Stage 8 anchors that want both a span and a histogram (render, dict_sql, upload,
     sub_seek, hit_test) use instrumented() — must stay safe with telemetry off."""

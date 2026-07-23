@@ -108,6 +108,11 @@ def traced(name: str, **attributes: str) -> Generator[None]:
         yield
         return
     with trace.get_tracer("saitenka.overlay").start_as_current_span(name) as span:
+        # otel_export._span_to_ctf_event reads this back for the CTF event's "tid" — without it,
+        # every independently-started span (no parent) gets a random trace_id, and using THAT for
+        # tid scatters unrelated spans across a different synthetic "thread" row each, defeating the
+        # point of a timeline view (found by actually opening a real trace in Perfetto and looking).
+        span.set_attribute("thread.id", threading.get_native_id())
         for k, v in attributes.items():
             span.set_attribute(k, v)
         yield

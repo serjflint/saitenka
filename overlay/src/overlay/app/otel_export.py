@@ -27,10 +27,16 @@ log = logging.getLogger(__name__)
 
 def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
     """One Chrome Trace Format "complete" (``ph: X``) event. ``ts``/``dur`` are microseconds — CTF's
-    unit — converted from the span's nanosecond timestamps."""
+    unit — converted from the span's nanosecond timestamps. ``tid`` comes from the ``thread.id``
+    attribute ``otel_metrics.traced()`` stamps on every span — NOT the trace id: two independently
+    -started spans (no parent-child relationship) get different random trace ids, and using that for
+    tid scatters unrelated spans across a different synthetic "thread" track each in Perfetto,
+    instead of grouping same-thread spans onto one track the way a timeline view is meant to read."""
     ctx = span.get_span_context()
     start_ns = span.start_time or 0
     end_ns = span.end_time or start_ns
+    attrs = dict((span.attributes or {}).items())
+    tid = attrs.pop("thread.id", 0)
     return {
         "name": span.name,
         "cat": "span",
@@ -38,11 +44,11 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
         "ts": start_ns / 1000,
         "dur": max(end_ns - start_ns, 0) / 1000,
         "pid": 1,
-        "tid": (ctx.trace_id & 0xFFFFFFFF) if ctx else 0,
+        "tid": tid,
         "args": {
             "span_id": format(ctx.span_id, "016x") if ctx else "",
             "trace_id": format(ctx.trace_id, "032x") if ctx else "",
-            **dict((span.attributes or {}).items()),
+            **attrs,
         },
     }
 
