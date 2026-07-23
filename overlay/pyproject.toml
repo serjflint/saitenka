@@ -19,6 +19,7 @@ dependencies = [
     "certifi>=2026.6.17",
     "stamina>=26.1.0",
     "tomlkit>=0.15.1",
+    "msgspec>=0.21.1",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +66,7 @@ dev = [
     "pyfakefs>=6.2.0",
     "libcst>=1.8.6",
     "basedpyright>=1.39",
+    "py-spy>=0.4.2",
 ]
 
 [build-system]

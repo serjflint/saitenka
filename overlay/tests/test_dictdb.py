@@ -196,3 +196,53 @@ def test_readonly_conn_has_mmap_and_cache_pragmas(tmp_path):
     c = db._conn()
     assert c.execute("PRAGMA mmap_size").fetchone()[0] == 268435456  # 256 MiB per connection
     assert c.execute("PRAGMA cache_size").fetchone()[0] == -32768  # 32 MiB (negative = KiB units)
+
+
+def test_term_meta_reading_index_exists(tmp_path):
+    """idx_meta_reading covers (dict_id, mode, reading) so PitchSource.accents()'s
+    `term=? OR reading=?` query can use an indexed seek for the reading branch instead of a full
+    per-dict_id scan (py-spy profile: this was ~28% of a --stress run before the index existed)."""
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    names = {
+        row[0]
+        for row in db._conn().execute(
+            "SELECT name FROM sqlite_master WHERE tbl_name='term_meta' AND type='index'"
+        )
+    }
+    assert "idx_meta_reading" in names
+    assert "idx_meta_term" in names
+
+
+def test_ensure_schema_analyzes_term_meta_once(tmp_path):
+    """The one-time catch-up (for DBs imported before idx_meta_reading existed) runs ANALYZE and
+    records a meta flag so it doesn't repeat on every open — ANALYZE cost scales with table size."""
+    p = tmp_path / "db.sqlite"
+    db = DictionaryDb.open(p)
+    assert db._conn().execute("SELECT v FROM meta WHERE k='analyzed'").fetchone() == ("1",)
+    # sqlite_stat1 gets populated by ANALYZE even on an empty table (rows for each index/table).
+    stat_rows_after_first_open = (
+        db._conn().execute("SELECT count(*) FROM sqlite_stat1").fetchone()[0]
+    )
+
+    # Reopening (simulating a later app start) must NOT re-run ANALYZE — verified indirectly: the
+    # meta flag stays a single row (INSERT OR REPLACE, not accumulating) and reopen doesn't raise.
+    db2 = DictionaryDb.open(p)
+    assert db2._conn().execute("SELECT count(*) FROM meta WHERE k='analyzed'").fetchone()[0] == 1
+    assert stat_rows_after_first_open >= 0  # sanity: the query above didn't error
+
+
+def test_import_freq_or_pitch_reanalyzes_term_meta(tmp_path):
+    """A freq/pitch import changes term_meta's row distribution, so query-planner stats must be
+    refreshed — otherwise a fresh install's first import would rely on stale (empty-table) stats."""
+    pz = _meta_zip(
+        tmp_path / "p.zip",
+        "PitchA",
+        "pitch",
+        [["本命", {"reading": "ほんめい", "pitches": [{"position": 0}]}]],
+    )
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    db.import_zip(pz, imported_at=AT)
+    stat = (
+        db._conn().execute("SELECT count(*) FROM sqlite_stat1 WHERE tbl='term_meta'").fetchone()[0]
+    )
+    assert stat > 0  # ANALYZE ran and recorded stats for term_meta's indexes

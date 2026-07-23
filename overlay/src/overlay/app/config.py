@@ -195,6 +195,7 @@ class DictDbOptions:
     mmap_size: int = 268_435_456  # 256 MiB mmap window per read connection
     cache_size_kib: int = 32_768  # 32 MiB page cache per read connection
     dexie_chunk_size: int = 10_000  # entries per bank file when importing a dexie export
+    entry_cache_max: int = 256  # LRU cap on decoded DictEntry objects, per Dictionary instance
 
 
 def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
@@ -208,4 +209,5 @@ def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
         mmap_size=int(d.get("mmap_size", defaults.mmap_size)),
         cache_size_kib=int(d.get("cache_size_kib", defaults.cache_size_kib)),
         dexie_chunk_size=int(d.get("dexie_chunk_size", defaults.dexie_chunk_size)),
+        entry_cache_max=int(d.get("entry_cache_max", defaults.entry_cache_max)),
     )

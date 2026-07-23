@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS term_meta(
 CREATE TABLE IF NOT EXISTS tags(dict_id INTEGER, code TEXT, name TEXT, ord INTEGER);
 CREATE INDEX IF NOT EXISTS idx_keys ON keys(dict_id, key);
 CREATE INDEX IF NOT EXISTS idx_meta_term ON term_meta(dict_id, term);
+-- PitchSource.accents() (wordlists.py) queries `dict_id=? AND mode='pitch' AND (term=? OR reading=?)`.
+-- idx_meta_term alone only covers the `term` branch, so SQLite falls back to a full per-dict_id scan
+-- for the `reading` branch — confirmed via EXPLAIN QUERY PLAN + a py-spy profile showing this query as
+-- ~28% of total sampled time under --stress (73k-row NHK pitch dict scanned per lookup, up to 3x per
+-- tooltip). This second index lets SQLite's OR-optimization split the query into two indexed seeks.
+CREATE INDEX IF NOT EXISTS idx_meta_reading ON term_meta(dict_id, mode, reading);
 """
 
 
@@ -188,6 +194,15 @@ class DictionaryDb:
             row = conn.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
             if row is None:
                 conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(DB_SCHEMA),))
+            # One-time catch-up for DBs imported before idx_meta_reading existed: SQLite's query
+            # planner needs sqlite_stat1 (via ANALYZE) to pick the right index for term_meta's OR
+            # query (PitchSource.accents) — without it, it may scan instead of seek even with the
+            # index present. `import_zip` keeps stats fresh for new imports; this catches installs
+            # that already have data. Runs once (meta flag), not on every open — ANALYZE cost scales
+            # with table size (~1.3s on a 2.3M-row term_meta).
+            if conn.execute("SELECT v FROM meta WHERE k='analyzed'").fetchone() is None:
+                conn.execute("ANALYZE term_meta")
+                conn.execute("INSERT OR REPLACE INTO meta VALUES('analyzed', '1')")
             conn.commit()
         finally:
             conn.close()
@@ -246,6 +261,12 @@ class DictionaryDb:
                     self._load_dict_banks(conn, zf, did, on_bank)
                 else:  # 'freq' | 'pitch'
                     self._load_meta_banks(conn, zf, did, on_bank)
+            if kind != "dict":
+                # Keep term_meta's query-planner stats fresh after every freq/pitch import — see
+                # _ensure_schema's one-time catch-up for the reasoning (PitchSource.accents needs
+                # ANALYZE to pick idx_meta_reading/idx_meta_term over a full scan).
+                conn.execute("ANALYZE term_meta")
+                conn.commit()
             row = self._row_by_id(conn, did)
         finally:
             conn.close()

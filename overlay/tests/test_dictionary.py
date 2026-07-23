@@ -161,6 +161,30 @@ def test_dictionary_dedupes_kanji_and_kana_duplicate_rows(tmp_path):
     assert entry.defs[0].content.count("identical gloss") == 1  # not rendered twice
 
 
+def test_lookup_reuses_cached_entry_object_on_repeat_lookup(tmp_path):
+    """A second lookup of the same term returns the SAME DictEntry object (identity, not just equal
+    value) — confirms the decode is skipped on a cache hit, not just that the result is correct."""
+    d = _make_dict(tmp_path / "cache1.zip", "C", [["猫", "ねこ", ["cat"]]])
+    dic = dicthelp.load_dict(d)
+    first = dic.lookup("猫")
+    second = dic.lookup("猫")
+    assert first[0] is second[0]
+
+
+def test_lookup_cache_evicts_oldest_beyond_entry_cache_max(tmp_path):
+    entries = [[f"語{i}", f"ご{i}", [f"gloss {i}"]] for i in range(5)]
+    d = _make_dict(tmp_path / "cache2.zip", "C", entries)
+    dic = dicthelp.load_dict(d)
+    dic._entry_cache_max = 3
+    for i in range(5):
+        dic.lookup(f"語{i}")
+    assert len(dic._entry_cache) == 3
+    # the two oldest (語0, 語1) were evicted; re-looking them up must decode fresh, not reuse a stale
+    # cache slot that should no longer exist — and the cache stays bounded after the refill.
+    assert dic.lookup("語0")
+    assert len(dic._entry_cache) == 3
+
+
 def test_deftags_resolved_ordered_and_normalized(tmp_path):
     p = tmp_path / "d.zip"
     # the multi-word tag code uses an nbsp (\xa0) internally; defTags separate codes with a plain space

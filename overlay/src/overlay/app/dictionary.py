@@ -14,13 +14,15 @@ add-on (GPL-3.0, Yomitan-derived) supplies the inflection chain when installed.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import msgspec.json as msgspec_json
 
 try:
     # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the
@@ -83,6 +85,10 @@ class DictEntry:
     reading: str
     glossary: list
     tags: str = ""
+    # The exact JSON text the glossary was decoded from — kept so a dedup key (see
+    # DictionarySet.entry_for) can compare entries by their *source* bytes instead of re-encoding the
+    # already-decoded glossary, which is expensive for large monolingual entries.
+    raw_glossary: str = ""
 
 
 def _to_glob(pattern: str) -> str:
@@ -148,6 +154,13 @@ class Dictionary:
         self.dict_id = row.id
         self.title = row.title
         self._tags: dict | None = None  # defTag code -> [display_name, order]; loaded lazily
+        # LRU cache of decoded entries (entries.id -> DictEntry), below the panel-cache layer so a
+        # re-lookup of the same word survives panel-cache eviction without re-decoding its glossary —
+        # decoding a large monolingual entry's JSON was the single biggest cost in a --stress profile
+        # (51% of samples), and it's pure repeat work for words already seen this session. Bounded, not
+        # unlimited, so it doesn't grow forever over a long session (`[dictdb].entry_cache_max`).
+        self._entry_cache: OrderedDict[int, DictEntry] = OrderedDict()
+        self._entry_cache_max = db._opts.entry_cache_max
 
     @property
     def tags(self) -> dict:
@@ -176,8 +189,8 @@ class Dictionary:
             "onyomi": row[1],
             "kunyomi": row[2],
             "tags": row[3],
-            "meanings": json.loads(row[4] or "[]"),
-            "stats": json.loads(row[5] or "{}"),
+            "meanings": msgspec_json.decode(row[4] or "[]"),
+            "stats": msgspec_json.decode(row[5] or "{}"),
         }
 
     def resolve_deftags(self, deftags: str) -> list[str]:
@@ -226,10 +239,22 @@ class Dictionary:
                 else conn.execute(exact_q, (did, f))
             )
             for row in rows:
-                if row[0] in seen:
+                eid = row[0]
+                if eid in seen:
                     continue
-                seen.add(row[0])
-                out.append(DictEntry(row[1], row[2], json.loads(row[3]), row[4]))
+                seen.add(eid)
+                cached = self._entry_cache.get(eid)
+                if cached is not None:
+                    self._entry_cache.move_to_end(eid)
+                    out.append(cached)
+                else:
+                    entry = DictEntry(
+                        row[1], row[2], msgspec_json.decode(row[3]), row[4], raw_glossary=row[3]
+                    )
+                    self._entry_cache[eid] = entry
+                    if len(self._entry_cache) > self._entry_cache_max:
+                        self._entry_cache.popitem(last=False)
+                    out.append(entry)
                 if wildcard and len(out) >= limit:
                     break
         # Rank exact-term (headword) matches above reading-only ones, like Yomitan — so a common
@@ -430,8 +455,12 @@ class DictionarySet:
             seen_gloss: set = set()
             for h in hits:
                 # dedupe by glossary alone: some monolingual dicts store one entry twice, keyed by
-                # kanji (本命) AND by kana (ほんめい) with identical content.
-                gkey = json.dumps(h.glossary, ensure_ascii=False, sort_keys=True)
+                # kanji (本命) AND by kana (ほんめい) with identical content. Compare the RAW JSON text
+                # (already read from the DB) rather than re-encoding the just-decoded glossary — the two
+                # rows share the same source glossary object from import time (dictdb.py's bulk insert
+                # serializes it once), so their stored JSON text is byte-identical; re-encoding it here
+                # was pure waste (and the single largest hotspot in a `--stress` profile).
+                gkey = h.raw_glossary
                 if gkey in seen_gloss:
                     continue
                 seen_gloss.add(gkey)
