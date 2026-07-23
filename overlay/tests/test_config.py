@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
-from overlay.app.config import config_path, expand_paths, load_config
+from overlay.app.config import (
+    TelemetryOptions,
+    config_path,
+    expand_paths,
+    load_config,
+    resolve_telemetry,
+)
 
 
 def test_load_config_and_expand_paths(tmp_path):
@@ -36,3 +42,20 @@ def test_config_path_env_override(monkeypatch, tmp_path):
 
 def test_expand_paths_handles_none():
     assert expand_paths(None) == []
+
+
+def test_resolve_telemetry_defaults_off():
+    assert resolve_telemetry({}) == TelemetryOptions()
+    assert resolve_telemetry({}).enabled is False
+
+
+def test_resolve_telemetry_round_trips_table():
+    cfg = {"telemetry": {"enabled": True, "export_dir": "/tmp/tel", "sample_hot_path": 0.05}}
+    opts = resolve_telemetry(cfg)
+    assert opts == TelemetryOptions(enabled=True, export_dir="/tmp/tel", sample_hot_path=0.05)
+
+
+def test_resolve_telemetry_otel_sdk_disabled_wins_over_config(monkeypatch):
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    cfg = {"telemetry": {"enabled": True}}
+    assert resolve_telemetry(cfg).enabled is False

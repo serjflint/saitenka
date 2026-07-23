@@ -39,12 +39,20 @@ jmdict = [
     "jamdict-data>=1.5; platform_system != 'Windows'",
     "jamdict-data-fix>=1.5.1a2; platform_system == 'Windows'",
 ]
+# Runtime tracing/metrics (see vibe/observability-plan.md). OFF by default even when installed —
+# `[telemetry] enabled = true` is the actual opt-in. Kept out of core deps so a default install never
+# pulls the OTel SDK: `app/telemetry.py` imports it lazily, only once `enabled=true` is read from
+# config. Both packages are pure-Python (py3-none-any), so no free-threading risk either way.
+observability = [
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+]
 # Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
 # exists only so `saitenka-overlay[minimal]` reads as a deliberate choice. `full` pulls every optional
 # feature and is what the checkout installers install. Note `full` includes the GPL-3.0 `deinflect`
 # add-on, so a `full` install is GPL-3.0, not Apache-2.0 (see ../LICENSING.md).
 minimal = []
-full = ["saitenka-overlay[deinflect]", "saitenka-overlay[jmdict]"]
+full = ["saitenka-overlay[deinflect]", "saitenka-overlay[jmdict]", "saitenka-overlay[observability]"]
 
 [project.scripts]
 saitenka-overlay = "overlay.app.cli:main"

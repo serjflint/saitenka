@@ -1209,10 +1209,20 @@ def _harden_runtime() -> None:  # pragma: no cover — process-global startup si
     augment_path()
 
 
+def _setup_telemetry() -> None:
+    """Opt-in only: no-op unless ``[telemetry] enabled = true`` in config. See
+    :mod:`overlay.app.telemetry`."""
+    from overlay.app.config import load_config, resolve_telemetry
+    from overlay.app.telemetry import configure
+
+    configure(resolve_telemetry(load_config()))
+
+
 def main() -> None:  # pragma: no cover — live-run entry point
     try:
         _ensure_free_threaded()
         _setup_logging()
+        _setup_telemetry()
         _harden_runtime()
         from overlay.app.crashlog import install as install_crash_handlers
         from overlay.app.signals import install as install_shutdown_signals
@@ -1230,6 +1240,10 @@ def main() -> None:  # pragma: no cover — live-run entry point
         # the socket and temp files in its `finally`; swallow the interrupt here so the user sees a
         # clean exit, not a traceback. 130 = 128 + SIGINT, the shell convention.
         sys.exit(130)
+    finally:
+        from overlay.app.telemetry import shutdown as shutdown_telemetry
+
+        shutdown_telemetry()  # flush + tear down providers; a no-op if never configured
 
 
 if __name__ == "__main__":
