@@ -211,3 +211,33 @@ def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
         dexie_chunk_size=int(d.get("dexie_chunk_size", defaults.dexie_chunk_size)),
         entry_cache_max=int(d.get("entry_cache_max", defaults.entry_cache_max)),
     )
+
+
+@dataclass(frozen=True)
+class TelemetryOptions:
+    """Runtime tracing/metrics (see ``vibe/observability-plan.md``) — OFF by default even when the
+    ``observability`` extra is installed; ``enabled`` is the actual opt-in switch. ``sample_hot_path``
+    bounds the cost of instrumenting the per-tick hit-test path (0.0 = never sample it)."""
+
+    enabled: bool = False
+    export_dir: str | None = None  # None = paths.cache_dir() / "telemetry"
+    sample_hot_path: float = 0.0  # [0.0, 1.0]
+
+
+def resolve_telemetry(cfg: dict | None = None) -> TelemetryOptions:
+    """:class:`TelemetryOptions` from the ``[telemetry]`` config table. ``$OTEL_SDK_DISABLED`` (the
+    standard OTel env var) forces ``enabled=False`` even if the config table turns it on — it's the
+    documented emergency kill switch, so it must win over a stale/mistaken config file."""
+    if cfg is None:
+        cfg = load_config()
+    raw = cfg.get("telemetry")
+    d: dict = raw if isinstance(raw, dict) else {}
+    defaults = TelemetryOptions()
+    enabled = bool(d.get("enabled", defaults.enabled))
+    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in ("true", "1"):
+        enabled = False
+    return TelemetryOptions(
+        enabled=enabled,
+        export_dir=d.get("export_dir", defaults.export_dir),
+        sample_hot_path=float(d.get("sample_hot_path", defaults.sample_hot_path)),
+    )

@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 
 import msgspec.json as msgspec_json
 
+from overlay.app import otel_metrics
+
 try:
     # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the
     # inflection chain (🧩 -て « -いる « -た); without it the chain is empty and nothing is drawn.
@@ -233,11 +235,15 @@ class Dictionary:
         for f in forms:
             if not f:
                 continue
-            rows = (
-                conn.execute(glob_q, (did, did, _to_glob(f), limit))
-                if wildcard
-                else conn.execute(exact_q, (did, f))
-            )
+            with otel_metrics.instrumented(
+                otel_metrics.dict_sql_duration_ms, "dict_sql", dict=self.title
+            ):
+                cursor = (
+                    conn.execute(glob_q, (did, did, _to_glob(f), limit))
+                    if wildcard
+                    else conn.execute(exact_q, (did, f))
+                )
+                rows = cursor.fetchall()
             for row in rows:
                 eid = row[0]
                 if eid in seen:
@@ -247,7 +253,11 @@ class Dictionary:
                 if cached is not None:
                     self._entry_cache.move_to_end(eid)
                     out.append(cached)
+                    if otel_metrics.dict_cache_hits is not None:
+                        otel_metrics.dict_cache_hits.add(1)
                 else:
+                    if otel_metrics.dict_cache_misses is not None:
+                        otel_metrics.dict_cache_misses.add(1)
                     entry = DictEntry(
                         row[1], row[2], msgspec_json.decode(row[3]), row[4], raw_glossary=row[3]
                     )

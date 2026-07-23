@@ -315,6 +315,33 @@ def test_jimaku_keychain_key_is_ok(tmp_path, monkeypatch):
     assert c.status == "ok" and "keychain" in c.detail
 
 
+def test_telemetry_check_reports_disabled_by_default(tmp_path, monkeypatch):
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text("")
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    c = doc.check_telemetry()
+    assert c.status == "ok" and "disabled" in c.detail
+
+
+def test_telemetry_check_enabled_no_trace_yet(tmp_path, monkeypatch):
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text("[telemetry]\nenabled = true\n")
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    c = doc.check_telemetry()
+    assert c.status == "ok" and "no trace yet" in c.detail
+
+
+def test_telemetry_check_enabled_with_trace_file(tmp_path, monkeypatch):
+    export = tmp_path / "telemetry"
+    export.mkdir()
+    (export / "trace.json").write_text('{"traceEvents": []}')
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export}"\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    c = doc.check_telemetry()
+    assert c.status == "ok" and "last trace" in c.detail and "KiB" in c.detail
+
+
 def test_recent_errors_tails_log(tmp_path, monkeypatch):
     logf = tmp_path / "overlay.log"
     logf.write_text("2026-07-21 A\n2026-07-21 B ERROR boom\n")

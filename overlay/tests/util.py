@@ -55,6 +55,44 @@ def assert_golden(img: Image.Image, name: str, tol: float = 2.0) -> None:
     assert err <= tol, f"{name}: mean-abs-error {err:.3f} exceeds tol {tol}"
 
 
+def validate_ctf_document(data: dict) -> None:
+    """Assert *data* is a structurally valid Chrome Trace Format document — the shape Perfetto /
+    ``chrome://tracing`` actually require, not just "some events landed". Deliberately NOT a
+    byte/value golden comparison: ``ts``/``dur``/``span_id``/``trace_id``/``tid`` are inherently
+    non-deterministic run to run (real timestamps, random IDs, real native thread ids), so this
+    checks shape/types/required-keys-per-``ph``, not exact values. See ``tests/golden/sample_trace.json``
+    for a real example this validates (bundled, not compared value-for-value)."""
+    assert "traceEvents" in data, "missing top-level 'traceEvents' key"
+    events = data["traceEvents"]
+    assert isinstance(events, list), "'traceEvents' must be a list"
+    for i, e in enumerate(events):
+        assert isinstance(e, dict), f"event {i} is not an object"
+        for key in ("name", "ph", "ts", "pid"):
+            assert key in e, f"event {i} ({e.get('name')!r}) missing required key {key!r}"
+        assert isinstance(e["name"], str) and e["name"], f"event {i} has an empty/non-string name"
+        assert isinstance(e["ts"], int | float), f"event {i} 'ts' must be numeric"
+        assert isinstance(e["pid"], int), f"event {i} 'pid' must be an int"
+        ph = e["ph"]
+        if ph == "X":  # complete (duration) event — spans
+            for key in ("dur", "tid"):
+                assert key in e, f"event {i} (X/{e['name']}) missing required key {key!r}"
+            assert isinstance(e["dur"], int | float) and e["dur"] >= 0, (
+                f"event {i} 'dur' invalid: {e.get('dur')!r}"
+            )
+            assert isinstance(e["tid"], int), f"event {i} 'tid' must be an int"
+        elif ph == "C":  # counter event — gauges/counters
+            assert "args" in e and "value" in e.get("args", {}), (
+                f"event {i} (C/{e['name']}) missing args.value"
+            )
+            assert isinstance(e["args"]["value"], int | float), (
+                f"event {i} counter value not numeric: {e['args']['value']!r}"
+            )
+        else:
+            raise AssertionError(
+                f"event {i} has unsupported ph={ph!r} (this app only produces X/C)"
+            )
+
+
 @contextlib.contextmanager
 def use_platform(platform: str, *, userprofile: str = r"C:\Users\Tester"):
     r"""Make path-resolution code see ``platform`` — flipping ALL THREE layers that matter, because

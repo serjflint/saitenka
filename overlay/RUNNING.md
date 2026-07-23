@@ -209,8 +209,35 @@ Everything runs locally via [poethepoet](https://poethepoet.natn.io/):
 | `uv run poe bench` | the pathological cold-first-paint benchmark |
 | `uv run poe all` | the pre-push gate: lint → types → test → test-ft → cov |
 
-Logs: the overlay writes a rotating debug log to `~/.cache/saitenka-overlay/overlay.log`
-(DEBUG in the file, WARNING+ to stderr) — silent failures land there, not in a black hole.
+Logs: the overlay writes a rotating **JSON-lines** debug log to `~/.cache/saitenka-overlay/overlay.log`
+(DEBUG in the file, human-readable WARNING+ to stderr) — silent failures land there, not in a black
+hole. Each line is a redacted JSON object (`{"event": "...", "level": "...", "timestamp": "..."}`),
+so it's `jq`-able; `doctor`'s "recent errors" section and `report`'s bundle both read it as-is.
+
+### Telemetry (optional, off by default)
+
+Runtime tracing/metrics via OpenTelemetry — **not installed or enabled unless you opt in**. Install
+the extra, then turn it on in `overlay.toml`:
+
+```toml
+[telemetry]
+enabled = true
+# export_dir = "~/custom/telemetry"  # default: ~/.cache/saitenka-overlay/telemetry
+```
+
+```
+uv tool install --reinstall 'saitenka-overlay[observability]'   # or add to an existing [full] install
+```
+
+A session with telemetry enabled writes a Chrome Trace Format file to
+`~/.cache/saitenka-overlay/telemetry/trace.json` — open it directly in `chrome://tracing` or
+[Perfetto](https://ui.perfetto.dev/). Metrics (render/upload/hit-test/dict-SQL/IPC/sub-seek
+histograms, cache hit-miss counters, `gil_enabled`) are pull-based and process-local — they don't
+persist to disk on their own; `doctor` reports the trace file's presence/size, and `report` bundles
+it (redacted) if one exists. `$OTEL_SDK_DISABLED=true` force-disables telemetry even if the config
+says `enabled = true` (the standard OTel kill switch). See the "Observability" section of
+[ROADMAP.md](../ROADMAP.md) for the full design — non-goal: standing up a backend, the default path
+is local-file-only, no gRPC/OTLP.
 
 > **Linguistic-data pin:** the golden images encode **unidic-lite's tokenization** (word
 > boundaries, readings) and the bundled fonts' rasterization. Bumping `unidic-lite` (or Pillow /

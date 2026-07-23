@@ -191,6 +191,29 @@ def test_sub_nav_from_a_gap_opens_the_upcoming_cue(monkeypatch):
     assert r.sub_text == "さん"  # cue 3, the upcoming one — not skipped
 
 
+def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay.app import otel_metrics
+
+    r, ipc = _reader_with_index(monkeypatch)
+    ipc.props["sub-text"] = "いち"
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        r._handle(_msg_for(ipc, "Alt+RIGHT"))
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.sub_seek.duration_ms"]["count"] == 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
 def test_sub_nav_without_index_only_seeks(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
@@ -359,6 +382,40 @@ def test_panel_cache_avoids_rerender_on_revisit():
     r._show_tooltip(1)
     r._show_tooltip(0)  # revisit → served from cache
     assert calls == ["本命", "読む"]  # each word rendered once, not on every hover
+
+
+def test_panel_cache_records_otel_render_and_cache_metrics():
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay.app import otel_metrics
+    from overlay.app.subtitles import WordBox
+    from overlay.app.tokenize import Token
+    from overlay.panel import Definition, Entry
+
+    class FakeDS:
+        def entry_for(self, tok, inflected=None):
+            return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
+
+    r = Reader(FakeIPC(), dict_set=FakeDS())
+    r.osd = (1280, 720)
+    r.sub_origin = (0, 0)
+    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
+    r.boxes = [WordBox(0, 100, 100, 40, 40)]
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        r._show_tooltip(0)  # cache miss → render
+        r._show_tooltip(0)  # cache hit → no render
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.render.duration_ms"]["count"] == 1
+        assert snap["saitenka.panel_cache.misses"]["value"] == 1
+        assert snap["saitenka.panel_cache.hits"]["value"] == 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
 
 
 class _FakeDS:

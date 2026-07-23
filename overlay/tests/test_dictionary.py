@@ -161,6 +161,32 @@ def test_dictionary_dedupes_kanji_and_kana_duplicate_rows(tmp_path):
     assert entry.defs[0].content.count("identical gloss") == 1  # not rendered twice
 
 
+def test_lookup_records_otel_dict_sql_and_cache_metrics(tmp_path):
+    """Stage 8 instrumentation: a lookup should record dict_sql duration + a cache miss (first call)
+    then a cache hit (repeat call), when telemetry is configured."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay.app import otel_metrics
+
+    d = _make_dict(tmp_path / "otel.zip", "OtelDict", [["猫", "ねこ", ["cat"]]])
+    dic = dicthelp.load_dict(d)
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        dic.lookup("猫")
+        dic.lookup("猫")
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.dict_sql.duration_ms"]["count"] == 2
+        assert snap["saitenka.dict_cache.misses"]["value"] == 1
+        assert snap["saitenka.dict_cache.hits"]["value"] == 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
 def test_lookup_reuses_cached_entry_object_on_repeat_lookup(tmp_path):
     """A second lookup of the same term returns the SAME DictEntry object (identity, not just equal
     value) — confirms the decode is skipped on a cache hit, not just that the result is correct."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zipfile
+from pathlib import Path
 
 from overlay.app import report
 
@@ -79,6 +80,33 @@ def test_collect_includes_dict_listing_and_mpv_log(monkeypatch, tmp_path):
     members = report.collect(include_log=True)
     assert "MyDict" in members["dicts.listing.txt"]  # imported dictionary listed
     assert "mpv.log" in members and "mpv 0.40 started" in members["mpv.log"]
+
+
+def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, tmp_path):
+    """Stage 10: the CTF trace a LIVE session wrote to disk is bundled — collect() runs in its own
+    process, so it reads the file, not any in-memory metrics state. Home path gets scrubbed like
+    every other bundled artifact (span attributes only ever carry a dict title + hex ids today —
+    never a secret — so home-path scrubbing is what's realistically exercisable here)."""
+    cfg = _hermetic(monkeypatch, tmp_path)
+    tel_dir = tmp_path / "telemetry"
+    tel_dir.mkdir()
+    home = str(Path.home())
+    (tel_dir / "trace.json").write_text(
+        '{"traceEvents": [{"name": "op", "args": {"dict": "' + home + '/mydict"}}]}'
+    )
+    cfg.write_text(cfg.read_text() + f'\n[telemetry]\nenabled = true\nexport_dir = "{tel_dir}"\n')
+
+    members = report.collect(include_log=True)
+    assert "telemetry/trace.json" in members
+    assert "op" in members["telemetry/trace.json"]
+    assert home not in members["telemetry/trace.json"]
+    assert "<HOME>" in members["telemetry/trace.json"]
+
+
+def test_collect_omits_telemetry_when_disabled(monkeypatch, tmp_path):
+    _hermetic(monkeypatch, tmp_path)
+    members = report.collect(include_log=True)
+    assert not any(name.startswith("telemetry/") for name in members)
 
 
 def test_build_report_bundle_writes_timestamped_zip(monkeypatch, tmp_path):

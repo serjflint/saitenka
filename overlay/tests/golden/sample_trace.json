@@ -1,0 +1,289 @@
+{
+    "traceEvents": [
+        {
+            "name": "runtime.gil_enabled",
+            "ph": "C",
+            "ts": 1784817201385514.0,
+            "pid": 1,
+            "args": {
+                "value": 0.0
+            }
+        },
+        {
+            "name": "telemetry.dropped_spans",
+            "ph": "C",
+            "ts": 1784817201385514.0,
+            "pid": 1,
+            "args": {
+                "value": 0.0
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817201528300.0,
+            "dur": 3394.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "67c3727364b2d727",
+                "trace_id": "027fe0215212223d6914d78e8402adc2"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817201586938.0,
+            "dur": 1370.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "40d4fa411dac5b82",
+                "trace_id": "1bd9b531fd10c1d4f6896c073d9e6b82"
+            }
+        },
+        {
+            "name": "render",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817201588424.0,
+            "dur": 2837.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "c76883a8db04f61a",
+                "trace_id": "36ecc6157d6c69320bff6219a3e62c08"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817201634327.0,
+            "dur": 2450.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "2a5e1568f4e4532e",
+                "trace_id": "951e268454a54236a8cf51e8031bd119"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202172665.0,
+            "dur": 2776.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "de33654b22ebc501",
+                "trace_id": "11fba638d37b21889f966baacdc84f55"
+            }
+        },
+        {
+            "name": "render",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202175641.0,
+            "dur": 102.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "efd36b4b92be1f72",
+                "trace_id": "11fba638d37b21889f966baacdc84f55"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202184753.0,
+            "dur": 717.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "5ad064799d9cccd5",
+                "trace_id": "11fba638d37b21889f966baacdc84f55"
+            }
+        },
+        {
+            "name": "hit_test",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202153849.0,
+            "dur": 31700.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "dd49acdbb9b215af",
+                "trace_id": "11fba638d37b21889f966baacdc84f55"
+            }
+        },
+        {
+            "name": "runtime.gil_enabled",
+            "ph": "C",
+            "ts": 1784817202392973.0,
+            "pid": 1,
+            "args": {
+                "value": 1.0
+            }
+        },
+        {
+            "name": "prefetch.queue_depth",
+            "ph": "C",
+            "ts": 1784817202392973.0,
+            "pid": 1,
+            "args": {
+                "value": 5.0
+            }
+        },
+        {
+            "name": "panel_cache.misses",
+            "ph": "C",
+            "ts": 1784817202392973.0,
+            "pid": 1,
+            "args": {
+                "value": 2.0
+            }
+        },
+        {
+            "name": "telemetry.dropped_spans",
+            "ph": "C",
+            "ts": 1784817202392973.0,
+            "pid": 1,
+            "args": {
+                "value": 0.0
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202726083.0,
+            "dur": 4198.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "00bec7145cde227f",
+                "trace_id": "ec3bdb399f073f892c38b2a443af70e4"
+            }
+        },
+        {
+            "name": "render",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202730537.0,
+            "dur": 130.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "f7d54176b29361e7",
+                "trace_id": "f33de3147ba0b6e6a4a543dbb111ffd9"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817202742365.0,
+            "dur": 1409.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "a7f0c1eab5dc6088",
+                "trace_id": "c67825805208f8ff72cd75feb7af35d7"
+            }
+        },
+        {
+            "name": "hit_test",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817203156631.0,
+            "dur": 123.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "6f959ec5e703bd24",
+                "trace_id": "37eda00353b5d6daf92fbd56e35252e0"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817203282954.0,
+            "dur": 2446.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "d0f4e32c2d4f729f",
+                "trace_id": "53dbb54e711df97a178f7fa94a88040b"
+            }
+        },
+        {
+            "name": "render",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817203285572.0,
+            "dur": 99.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "ab24fc6d239b161d",
+                "trace_id": "6b7661d69f357a9a24166b1a90139b07"
+            }
+        },
+        {
+            "name": "upload",
+            "cat": "span",
+            "ph": "X",
+            "ts": 1784817203293000.0,
+            "dur": 812.0,
+            "pid": 1,
+            "tid": 47486519,
+            "args": {
+                "span_id": "ec6351e10e65bae6",
+                "trace_id": "4374adcccfd97be5a98b291aa01113e1"
+            }
+        },
+        {
+            "name": "runtime.gil_enabled",
+            "ph": "C",
+            "ts": 1784817203398828.0,
+            "pid": 1,
+            "args": {
+                "value": 1.0
+            }
+        },
+        {
+            "name": "prefetch.queue_depth",
+            "ph": "C",
+            "ts": 1784817203398828.0,
+            "pid": 1,
+            "args": {
+                "value": 5.0
+            }
+        },
+        {
+            "name": "panel_cache.misses",
+            "ph": "C",
+            "ts": 1784817203398828.0,
+            "pid": 1,
+            "args": {
+                "value": 4.0
+            }
+        },
+        {
+            "name": "telemetry.dropped_spans",
+            "ph": "C",
+            "ts": 1784817203398828.0,
+            "pid": 1,
+            "args": {
+                "value": 0.0
+            }
+        }
+    ]
+}
