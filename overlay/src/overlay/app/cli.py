@@ -1187,26 +1187,13 @@ LOG_PATH = cache_dir() / "overlay.log"
 
 
 def _setup_logging() -> None:
-    """Rotating file log (DEBUG) + WARNING+ to stderr. The file is what the doctor's "recent
-    errors" section tails; log.debug(exc_info=True) calls throughout the codebase land here
-    instead of silent except-pass black holes."""
-    import logging.handlers
+    """JSON-lines rotating file log (DEBUG) + human-readable WARNING+ to stderr, both redacted.
+    The file is what the doctor's "recent errors" section tails and ``report`` bundles;
+    log.debug(exc_info=True) calls throughout the codebase land here instead of silent
+    except-pass black holes. See :mod:`overlay.app.logsetup` for the structlog pipeline."""
+    from overlay.app.logsetup import configure_logging
 
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    root = logging.getLogger("overlay")
-    if root.handlers:  # idempotent (re-exec / tests)
-        return
-    root.setLevel(logging.DEBUG)
-    fh = logging.handlers.RotatingFileHandler(
-        LOG_PATH, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
-    )
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    sh = logging.StreamHandler()
-    sh.setLevel(logging.WARNING)
-    sh.setFormatter(logging.Formatter("[saitenka] %(levelname)s: %(message)s"))
-    root.addHandler(fh)
-    root.addHandler(sh)
+    configure_logging(LOG_PATH)
 
 
 def _harden_runtime() -> None:  # pragma: no cover — process-global startup side effects

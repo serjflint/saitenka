@@ -535,7 +535,7 @@ def check_recent_errors(n: int = 5) -> Check:
         lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as e:  # pragma: no cover
         return Check("recent-errors", "warn", f"couldn't read log: {e}")
-    errs = [ln for ln in lines if re.search(r"\b(ERROR|CRITICAL|WARNING)\b", ln)][-n:]
+    errs = [ln for ln in lines if re.search(r"\b(error|critical|warning)\b", ln, re.I)][-n:]
     if not errs:
         return Check("recent-errors", "ok", "no recent errors in the log")
     return Check("recent-errors", "warn", "recent log errors:\n    " + "\n    ".join(errs))

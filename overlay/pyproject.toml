@@ -20,6 +20,7 @@ dependencies = [
     "stamina>=26.1.0",
     "tomlkit>=0.15.1",
     "msgspec>=0.21.1",
+    "structlog>=26.1.0",
 ]
 
 [project.optional-dependencies]
