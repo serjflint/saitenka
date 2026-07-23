@@ -50,8 +50,10 @@ _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _span_processor: GatedSpanProcessor | None = None
 
-#: Gates the span pipeline once telemetry is configured. Off by default (matches the "free when
-#: nobody is inspecting" invariant) — nothing flips it on yet; that's a future doctor/keybind hook.
+#: Gates the span pipeline. Starts off (so it costs nothing before/without telemetry); `configure()`
+#: turns it on as part of enabling telemetry — see the comment there. Exists as a separate switch
+#: from `TelemetryOptions.enabled` for a future dynamic on/off (a doctor/keybind hook toggling
+#: capture without a restart), not as a second "is telemetry on" gate a user has to know about.
 span_gate = ActiveGate()
 
 
@@ -98,6 +100,12 @@ def configure(options: TelemetryOptions) -> None:
         tp = TracerProvider()
         processor = GatedSpanProcessor(CTFSpanExporter(out_dir / "trace.json"), span_gate)
         tp.add_span_processor(processor)
+        # TelemetryOptions.enabled is the actual opt-in switch; the gate defaulting off would mean
+        # enabling telemetry produces logs + metrics but NO trace ever, since nothing else flips it —
+        # confirmed live via a real `run --demo-word` session before this line was added. The gate
+        # stays around for a future dynamic on/off (a doctor/keybind hook toggling capture without a
+        # restart), not as a second "are we actually enabled" switch.
+        span_gate.set(True)
         reader = InMemoryMetricReader()  # pull-based: read on demand via otel_metrics.snapshot()
         mp = MeterProvider(metric_readers=[reader])
         trace.set_tracer_provider(tp)

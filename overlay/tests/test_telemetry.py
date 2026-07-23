@@ -75,6 +75,47 @@ def test_missing_extra_stays_disabled(monkeypatch, tmp_path, caplog):
     assert telemetry.is_enabled() is False
 
 
+def test_configure_turns_span_gate_on_so_traces_actually_get_captured(tmp_path):
+    """Regression: an earlier version left span_gate off by default, which meant enabling telemetry
+    produced logs + metrics but NEVER a trace file — nothing else in the codebase flips the gate.
+    Found via a real end-to-end `run --demo-word` session, not a unit test."""
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    assert bool(telemetry.span_gate) is True
+
+
+def test_shutdown_turns_span_gate_back_off(tmp_path):
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    telemetry.shutdown()
+    assert bool(telemetry.span_gate) is False
+
+
+def test_end_to_end_span_reaches_the_ctf_trace_file(tmp_path):
+    """The full path a real session exercises: configure telemetry, start a span the way
+    controller.load_deps_async does (`start_as_current_span`), shut down (which flushes), and
+    confirm an actual trace.json lands with that span in it — not just that the gate is on (the
+    regression above), the whole pipe end to end.
+
+    Uses the provider `configure()` just built directly (`telemetry._tracer_provider`), not the
+    global `opentelemetry.trace.get_tracer()` API: OTel only allows the global provider to be set
+    ONCE per process (by design — a real app calls `configure()` exactly once at startup, so this
+    never bites production), and this test file's other tests already latched a provider globally
+    earlier in the same pytest session."""
+    import json
+
+    export = tmp_path / "telemetry"
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
+    tp = telemetry._tracer_provider
+    assert tp is not None
+    with tp.get_tracer(__name__).start_as_current_span("load_deps_async"):
+        pass
+    telemetry.shutdown()
+
+    trace_path = export / "trace.json"
+    assert trace_path.exists()
+    data = json.loads(trace_path.read_text())
+    assert any(e["name"] == "load_deps_async" for e in data["traceEvents"])
+
+
 def test_active_gate_defaults_off_and_toggles():
     gate = telemetry.ActiveGate()
     assert bool(gate) is False
