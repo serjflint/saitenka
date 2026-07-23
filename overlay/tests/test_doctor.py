@@ -151,6 +151,16 @@ def test_free_threading_check(monkeypatch):
     assert c.status in ("ok", "warn")
 
 
+def test_python_check_reports_version_and_build():
+    import platform
+
+    c = doc.check_python()
+    assert c.status == "ok"
+    assert platform.python_version() in c.detail  # exact interpreter version is surfaced
+    # build fact present so a 3.14 vs 3.14t mix-up is unambiguous in a bug report
+    assert ("free-threaded" in c.detail) or ("standard" in c.detail)
+
+
 def test_mpv_ipc_coexistence_reports_known_sockets(tmp_path, monkeypatch):
     mpvconf = tmp_path / "mpv.conf"
     mpvconf.write_text("input-ipc-server=/tmp/mpv-socket\n")

@@ -327,6 +327,25 @@ def check_anki(deck: str, model: str) -> Check:
     return Check("anki", "ok", f"{detail}; deck+model present")
 
 
+def check_python() -> Check:
+    """Report the exact interpreter — version, implementation, and GIL/free-threaded build. Always
+    green (informational): it exists so a bug report shows *which* Python is really running, since the
+    free-threading advice below reads very differently on a 3.14 vs a 3.14t build, and a user can swap
+    builds between installs. ``platform.python_version()`` has no 't' suffix, so the build string
+    carries the free-threaded/GIL fact."""
+    import platform
+
+    ft_build = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+    if ft_build:
+        gil_off = not getattr(sys, "_is_gil_enabled", lambda: True)()
+        build = "free-threaded, GIL off" if gil_off else "free-threaded, GIL ON"
+    else:
+        build = "standard (GIL)"
+    return Check(
+        "python", "ok", f"{platform.python_implementation()} {platform.python_version()} ({build})"
+    )
+
+
 def check_free_threading() -> Check:
     ft_build = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
     gil_off = not getattr(sys, "_is_gil_enabled", lambda: True)()
@@ -524,6 +543,7 @@ def check_deinflect() -> Check:
 
 def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
     checks: list[Check] = [
+        check_python(),
         check_mpv(),
         check_ffmpeg(),
         check_free_threading(),
