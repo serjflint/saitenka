@@ -20,9 +20,11 @@ import numpy as np
 
 from overlay.app.card_preview import PreviewData
 from overlay.app.config import ReaderOptions
-from overlay.app import miner_ui, prefetch
+from overlay.app import miner_ui, nested_popup, prefetch
 from overlay.app.miner import Miner, tag_slug
+from overlay.app.nested_popup import TIP_GAP
 from overlay import otel_metrics
+from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled, timed
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem
@@ -54,17 +56,10 @@ from overlay.render.layout import Block, inline_width
 
 log = logging.getLogger(__name__)
 
-SUB_ID = 1
-TIP_ID = 2
-TOAST_ID = 3
-TRANS_ID = 4
-NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
-LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
 # dict-tab strip / reserve (space-saving).
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
-TIP_GAP = 12
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed
 # above, which is an unconditional deque append and stays on every tick)
 MINE_MSG = "saitenka-mine"
@@ -275,7 +270,7 @@ class Reader:
             -1.0,
         )  # latest cursor pos — routes the wheel to the popup under it
         self._flash_oid: int | None = (
-            None  # a popup pulsing a "copied" highlight border (TIP_ID / NESTED_ID)
+            None  # a popup pulsing a "copied" highlight border (OverlayId.TIP / OverlayId.NESTED)
         )
         self._flash_until = 0.0
         self._hover_reading = ""  # dict-form reading of the hovered word, for TTS
@@ -378,12 +373,12 @@ class Reader:
 
     # --- subtitle -----------------------------------------------------------------------------
     def _teardown_tip(self) -> None:
-        """Tear down the hover stack unconditionally: hide TIP_ID/NESTED_ID, reset all tooltip
+        """Tear down the hover stack unconditionally: hide OverlayId.TIP/OverlayId.NESTED, reset all tooltip
         state, and release any _paused_by_tip. Called by set_hover(-1) AND set_subtitle so that
         a cue change while a tooltip is showing always clears it via the real path — avoiding the
         early-return in set_hover (index == self.hover) that would otherwise short-circuit teardown
         when hover is already -1 but the tip is still on screen."""
-        self.ov.hide(TIP_ID)
+        self.ov.hide(OverlayId.TIP)
         self._hide_nested()
         self._tip_rect = None
         self._tip_bgra = None
@@ -402,7 +397,7 @@ class Reader:
 
     def set_subtitle(self, text: str) -> None:
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
-        # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
+        # OverlayId.TIP/OverlayId.NESTED are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
         # early-return (index == self.hover) would skip teardown if hover is already -1 but
         # tip state is present (e.g. _show_tooltip was called directly without set_hover).
@@ -413,8 +408,8 @@ class Reader:
         self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
             self.lines, self.tokens, self.boxes = [], [], []
-            self.ov.hide(SUB_ID)
-            self.ov.hide(TIP_ID)
+            self.ov.hide(OverlayId.SUB)
+            self.ov.hide(OverlayId.TIP)
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = text.replace("\\N", "\n").replace("\r", "")
@@ -441,7 +436,7 @@ class Reader:
             log.info(
                 "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
             )
-        self.ov.show(sr.image, ox, oy, oid=SUB_ID)
+        self.ov.show(sr.image, ox, oy, oid=OverlayId.SUB)
 
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
@@ -549,7 +544,7 @@ class Reader:
         self.hover = index
         self._draw_subtitle()
         if index < 0:
-            self._teardown_tip()  # hide TIP_ID/NESTED_ID, reset all state, release pause
+            self._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
             return
         self._show_tooltip(index)
         self._sync_auto_translation()  # hovering a word → auto-reveal the translation
@@ -586,7 +581,7 @@ class Reader:
         restore it after ``flash_secs``."""
         self._flash_oid = oid
         self._flash_until = time.monotonic() + self.flash_secs
-        self._render_nested_view() if oid == NESTED_ID else self._render_tip_view()
+        self._render_nested_view() if oid == OverlayId.NESTED else self._render_tip_view()
 
     def copy_click(self) -> None:
         """Right-click — copy the word under the cursor (the inner scanned word if over the nested
@@ -596,11 +591,11 @@ class Reader:
         if self._nest.rect is not None and self._in_rect(self._nest.rect, x, y):
             if self._nest.token is not None:
                 self._copy_token(self._nest.token)
-                self._flash(NESTED_ID)
+                self._flash(OverlayId.NESTED)
             return
         if self._tip_rect is not None and self._in_rect(self._tip_rect, x, y):
             self.copy_hovered()
-            self._flash(TIP_ID)
+            self._flash(OverlayId.TIP)
             return
         idx = self._hit(x, y) if self.tokens else -1  # not over a popup → the subtitle word, if any
         if idx >= 0:
@@ -957,21 +952,6 @@ class Reader:
         ty = max(margin, min(ty, self.osd[1] - margin - view_h))
         return int(tx), int(ty)
 
-    _NEST_MIN_ABOVE = (
-        140  # min room above an inner word to keep its nested popup above it (else below)
-    )
-
-    def _nested_view_h(self, full_h: int, wy: float) -> int:
-        """Nested-popup viewport height, capped to the room ABOVE the hovered inner word (when that room
-        is decent) so the popup stays above it and the text below the cursor — the definition and the
-        subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
-        margin = max(16, round(self.osd[1] * 0.05))
-        view_h = min(full_h, prefetch.cap_for(self, self.nested_max_frac))
-        above_room = int(wy) - TIP_GAP - margin
-        if view_h > above_room >= self._NEST_MIN_ABOVE:
-            view_h = above_room  # shrink to fit above rather than drop below
-        return view_h
-
     def _refresh_tip_full(self) -> None:
         """A background finish grew the shown panel (deferred bodies rendered) → re-upload the view so
         the scrollbar reflects the true height and the below-the-fold content is scrollable."""
@@ -1088,25 +1068,15 @@ class Reader:
             self._tip_scroll,
             self._tip_view_h,
             self._tip_xy,
-            TIP_ID,
+            OverlayId.TIP,
             header=header,
         )
 
     def _render_nested_view(self) -> None:
-        # No dict-tab strip on the nested popup — it's built tabs=False (no reserve), so it stays
-        # compact and gives the deep-dive its full height (a depth-1 quick look, scrolled with the wheel).
-        if self._nest.bgra is None:
-            return
-        self._nest.rect = self._blit_panel(
-            self._nest.bgra, self._nest.scroll, self._nest.view_h, self._nest.xy, NESTED_ID
-        )
+        nested_popup.render_nested_view(self)
 
     def _refresh_nested_full(self) -> None:
-        st = self._nest.state
-        if st is None or not st.ready:
-            return
-        self._nest.bgra = st.bgra()  # re-decompress the grown nested panel into its scroll buffer
-        self._render_nested_view()
+        nested_popup.refresh_nested_full(self)
 
     def _scroll_tip(self, delta: int) -> None:
         # route the wheel to whichever popup the cursor is over (nested sits on top)
@@ -1126,14 +1096,7 @@ class Reader:
             self._render_tip_view()
 
     def _scroll_nested(self, delta: int) -> None:
-        if self._nest.bgra is None:
-            return
-        maxs = max(0, self._nest.bgra.shape[0] - self._nest.view_h)
-        ns = min(maxs, max(0, self._nest.scroll + delta))
-        if ns != self._nest.scroll:
-            self._nest.scroll = ns
-            self._nest.hide_at = 0.0
-            self._render_nested_view()
+        nested_popup.scroll_nested(self, delta)
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
@@ -1151,181 +1114,39 @@ class Reader:
         return None
 
     def _show_nested(self, sb) -> None:
-        """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
-        Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
-        popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
-        tokens = tokenize(sb.text)
-        tok = tokens[0] if tokens else None
-        if tok is None or tok.pos in SKIP_POS or not tok.surface.strip():
-            self._hide_nested()
-            return
-        if tok.surface == self._nest.word and self._nest.state is not None:
-            self._nest.tail = sb.text  # same word, new cell → don't re-scan it
-            return
-        sx, sy = self._tip_xy  # anchor to the inner word's screen cell
-        wx = sx + sb.x
-        wy = sy + (sb.y - self._tip_scroll)
-        self._open_nested(tok, tok.surface, wx, wy, sb.h, tail=sb.text)
+        nested_popup.show_nested(self, sb)
 
     def _open_nested(self, tok, inflected, wx: float, wy: float, wh: float, tail=None) -> None:
-        """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
-        Shared by scan-hover and a clicked cross-reference link."""
-        mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined, tabs=False)  # nested: no tab strip / reserve
-        st = self._panel_for(
-            tok,
-            inflected,
-            min_h=self._tip_cap(),
-            finish=not self._finish_available(),
-            mined=mined,
-            tabs=False,
-        )
-        self._place_nested(st, key, tok, tok.surface, wx, wy, wh, tail)
+        nested_popup.open_nested(self, tok, inflected, wx, wy, wh, tail)
 
     def _place_nested(
         self, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None
     ) -> None:
-        """Anchor a built :class:`_TipPanel` ``st`` as the nested popup. ``token`` is the inner Token to
-        mine via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
-        self._nest.state, self._nest.key = st, key
-        self._nest.token, self._nest.word = token, word
-        self._nest.tail = tail
-        self._nest.dirty, self._nest.scroll = False, 0
-        self._nest.bgra = st.bgra()  # decompress the cached nested panel into its scroll buffer
-        ph, pw = st.shape[0], st.shape[1]
-        self._nest.view_h = self._nested_view_h(ph, wy)
-        self._nest.xy = self._place_panel(pw, wx, wy, wh, self._nest.view_h)
-        self._render_nested_view()
-        if not st.complete:
-            self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _nest.dirty → refresh
+        nested_popup.place_nested(self, st, key, token, word, wx, wy, wh, tail)
 
     # --- clickable cross-reference links ---------------------------------------------------------
     @staticmethod
     def _link_hit(mx: float, my: float, state, xy, scroll: int):
-        """Which :class:`LinkBox` of ``state`` is under (mx, my)? Maps screen → panel coords (scroll)."""
-        if state is None:
-            return None
-        sx, sy = xy
-        px, py = mx - sx, (my - sy) + scroll
-        for lb in state.lazy.link_boxes:
-            if lb.x <= px < lb.x + lb.w and lb.y <= py < lb.y + lb.h:
-                return lb
-        return None
+        return nested_popup.link_hit(mx, my, state, xy, scroll)
 
     def _open_link(self, lb, xy, scroll: int) -> None:
-        """A cross-reference link was clicked → open its target in the nested popup (navigating it if
-        the click came from a nested popup). A wildcard target (``*``/``?``) opens a search-results
-        popup whose rows are themselves clickable links back into exact terms."""
-        q = lb.query
-        sx, sy = xy
-        wx, wy = sx + lb.x, sy + (lb.y - scroll)
-        if self.dict_set is not None and any(c in q for c in "*?＊？"):
-            self._open_search(q, wx, wy, lb.h)
-            return
-        tokens = tokenize(q)
-        tok = tokens[0] if tokens else None
-        if tok is None or not tok.surface.strip():
-            return
-        self._open_nested(tok, tok.surface, wx, wy, lb.h, tail=None)
+        nested_popup.open_link(self, lb, xy, scroll)
 
     def _open_search(self, pattern: str, wx: float, wy: float, wh: float) -> None:
-        """Open a wildcard/prefix search-results popup for ``pattern``."""
-        if self.dict_set is None:
-            return
-        key = ("search", pattern, self.tip_width)
-        st = self._panel_cache.get(key)
-        if st is None:
-            entry = self.dict_set.search(pattern)
-            lazy = LazyPanel(
-                panel_rows(entry, self.tip_width, add_button=False, speak_button=self._tts_ok),
-                self.tip_width,
-            )
-            st = _TipPanel(lazy, "")
-            with self._cache_lock:
-                st = self._panel_cache_setdefault(key, st)
-        else:
-            with self._cache_lock:
-                try:
-                    self._panel_cache.move_to_end(key)
-                except KeyError:
-                    pass
-        if self._finish_available():
-            st.render_head(self._tip_cap())
-        else:
-            st.finish()
-        self._place_nested(st, key, None, pattern, wx, wy, wh)
+        nested_popup.open_search(self, pattern, wx, wy, wh)
 
     # --- kanji lookup mode ------------------------------------------------------------------------
-    @staticmethod
-    def _is_ideograph(ch: str) -> bool:
-        o = ord(ch)
-        return 0x3400 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF
-
     def kanji_current(self) -> None:
-        """`k` — open the hovered word's first kanji in the nested popup; repeat cycles through
-        the word's kanji."""
-        if self.dict_set is None or not (0 <= self.hover < len(self.tokens)):
-            return
-        chars = [c for c in self.tokens[self.hover].surface if self._is_ideograph(c)]
-        if not chars:
-            self._toast("no kanji in this word", "warn", 1.2)
-            return
-        ch = chars[self._kanji_index % len(chars)]
-        self._kanji_index += 1
-        ox, oy = self.sub_origin
-        b = self.boxes[self.hover]
-        self._open_kanji(ch, ox + b.x, oy + b.y, b.h)
+        nested_popup.kanji_current(self)
 
     def _open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
-        """Open the kanji entry for ``ch`` in the nested popup (normal panel path, no raster code)."""
-        assert self.dict_set is not None
-        entry = self.dict_set.kanji_for(ch)
-        if entry is None:
-            self._toast(f"no kanji entry for {ch}", "warn", 1.2)
-            return
-        key = ("kanji", ch, self.tip_width)
-        st = self._panel_cache.get(key)
-        if st is None:
-            lazy = LazyPanel(
-                panel_rows(entry, self.tip_width, speak_button=self._tts_ok), self.tip_width
-            )
-            st = _TipPanel(lazy, entry.reading)
-            st.finish()  # kanji entries are small — render whole
-            with self._cache_lock:
-                st = self._panel_cache_setdefault(key, st)
-        else:
-            with self._cache_lock:
-                try:
-                    self._panel_cache.move_to_end(key)
-                except KeyError:
-                    pass
-        self._place_nested(st, key, None, ch, wx, wy, wh)
+        nested_popup.open_kanji(self, ch, wx, wy, wh)
 
     def _click_kanji_fallback(self, x: float, y: float) -> None:
-        """A click on a SINGLE-ideograph scan cell whose token has no term match opens the kanji
-        entry instead — reuses the nested-popup route."""
-        if self.dict_set is None:
-            return
-        sb = self._scan_hit(x, y)
-        if sb is None or not sb.text:
-            return
-        ch = sb.text[0]
-        if not self._is_ideograph(ch):
-            return
-        toks = tokenize(sb.text)
-        tok = toks[0] if toks else None
-        if (
-            tok is not None
-            and len(tok.surface) == 1
-            and not self.dict_set.has_term(tok.lemma, tok.surface, tok.reading)
-        ):
-            sx, sy = self._tip_xy
-            self._open_kanji(ch, sx + sb.x, sy + (sb.y - self._tip_scroll), sb.h)
+        nested_popup.click_kanji_fallback(self, x, y)
 
     def _hide_nested(self) -> None:
-        if self._nest.state is not None or self._nest.rect is not None:
-            self.ov.hide(NESTED_ID)
-        self._nest = _Nested()
+        nested_popup.hide_nested(self)
 
     # --- mining (flow lives in app/miner.py; thin delegates here) --------------------------------
     def _mine_target(self) -> int | None:
@@ -1416,7 +1237,7 @@ class Reader:
         if self._translation_visible():
             self._draw_translation()
         elif not self._translate_on:
-            self.ov.hide(TRANS_ID)
+            self.ov.hide(OverlayId.TRANS)
             self._trans_text = None
 
     def toggle_translation(self) -> None:
@@ -1424,7 +1245,7 @@ class Reader:
         if self._translation_visible():
             self._draw_translation()
         else:
-            self.ov.hide(TRANS_ID)
+            self.ov.hide(OverlayId.TRANS)
             self._trans_text = None
 
     def _secondary_text(self) -> str:
@@ -1436,7 +1257,7 @@ class Reader:
         text = self._secondary_text()
         self._trans_text = text
         if not text:
-            self.ov.hide(TRANS_ID)
+            self.ov.hide(OverlayId.TRANS)
             return
         size = max(20, round(self.osd[1] * 0.032))
         style = Style(size=size, color=(220, 224, 235, 255))
@@ -1450,13 +1271,13 @@ class Reader:
         # top of the screen (SubMiner-style) — separate from the JP subs at the bottom, and clear of
         # the tooltip that anchors above the hovered word.
         y = max(8, round(self.osd[1] * 0.035))
-        self.ov.show(flow, x, y, oid=TRANS_ID)
+        self.ov.show(flow, x, y, oid=OverlayId.TRANS)
 
     def _toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         img = render_toast(text, kind)
         x = (self.osd[0] - img.width) // 2
         y = round(self.osd[1] * 0.08)
-        self.ov.show(img, x, y, oid=TOAST_ID)
+        self.ov.show(img, x, y, oid=OverlayId.TOAST)
         self._toast_until = time.monotonic() + seconds
 
     def _register_keybinds(self) -> None:
@@ -1563,13 +1384,13 @@ class Reader:
             if scroll_steps:
                 self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
             if self._toast_until and time.monotonic() > self._toast_until:
-                self.ov.hide(TOAST_ID)
+                self.ov.hide(OverlayId.TOAST)
                 self._toast_until = 0.0
             if self._flash_until and time.monotonic() >= self._flash_until:
                 oid, self._flash_oid, self._flash_until = self._flash_oid, None, 0.0
-                if oid == NESTED_ID:
+                if oid == OverlayId.NESTED:
                     self._render_nested_view()  # redraw without the highlight border
-                elif oid == TIP_ID:
+                elif oid == OverlayId.TIP:
                     self._render_tip_view()
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
@@ -1724,7 +1545,7 @@ class Reader:
     def _apply_deps(self, deps: dict) -> None:
         """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
         self._loading = False
-        self.ov.hide(LOADING_ID)
+        self.ov.hide(OverlayId.LOADING)
         self.scorer = deps.get("scorer")
         self.anki = deps.get("anki")
         self.mine_cfg = deps.get("mine_cfg")
@@ -1746,7 +1567,7 @@ class Reader:
         img = loading_image("saitenka loading dictionaries", self._load_frame)
         self._load_frame += 1
         try:
-            self.ov.show(img, x=24, y=24, oid=LOADING_ID)
+            self.ov.show(img, x=24, y=24, oid=OverlayId.LOADING)
         except Exception:
             log.debug("loading spinner draw failed", exc_info=True)
 

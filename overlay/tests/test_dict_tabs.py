@@ -109,7 +109,7 @@ def test_nested_popup_has_no_tab_strip_or_reserve(monkeypatch):
     """A nested scan popup deliberately carries NO dict-tab strip and NO reserved band even for a
     multi-dict word — it stays compact so the deep-dive gets its full height. (The base tooltip keeps
     its strip.)"""
-    from overlay.app.controller import NESTED_ID
+    from overlay.app.overlay_ids import OverlayId
 
     r = _shown(monkeypatch, _reader())  # _MultiDS → 3 dict sections for every word
     assert r._tab_rects, "base tooltip should still have its dict tabs"
@@ -120,7 +120,7 @@ def test_nested_popup_has_no_tab_strip_or_reserve(monkeypatch):
     orig = r._blit_panel
 
     def spy(bgra, scroll, view_h, xy, oid, header=None):
-        if oid == NESTED_ID:
+        if oid == OverlayId.NESTED:
             captured["header"] = header
         return orig(bgra, scroll, view_h, xy, oid, header=header)
 

@@ -18,11 +18,10 @@ from PIL import Image
 
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.media import audio_duration, play_audio
+from overlay.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
-
-PREVIEW_ID = 5
 
 
 def _strip_tags(s: str) -> str:
@@ -165,7 +164,7 @@ def render_preview(reader: Reader) -> None:
         return
     pr = render_card_preview(pv, width=max(440, reader.tip_width), zoom=reader._preview_zoom)
     px, py = round(reader.osd[0] * 0.03), round(reader.osd[1] * 0.06)
-    reader.ov.show(pr.image, px, py, oid=PREVIEW_ID)
+    reader.ov.show(pr.image, px, py, oid=OverlayId.PREVIEW)
     reader._preview_rect = (px, py, pr.image.width, pr.image.height)
 
     def _screen(r):
@@ -177,7 +176,7 @@ def render_preview(reader: Reader) -> None:
 
 
 def hide_preview(reader: Reader) -> None:
-    reader.ov.hide(PREVIEW_ID)
+    reader.ov.hide(OverlayId.PREVIEW)
     reader._last_preview = None
     reader._preview_rect = reader._preview_close_rect = None
     reader._preview_audio_rect = reader._preview_image_rect = None
