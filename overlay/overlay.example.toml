@@ -81,3 +81,10 @@ enabled = true
 resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) — recommended
 # force = true      # prefer jimaku OVER the embedded JP track (mistimed/wrong baked-in subs);
 #                   # falls back to the embedded track if the fetch fails. Same as --jimaku-force.
+
+# Runtime tracing/metrics (OpenTelemetry) — OFF by default, and requires the `observability` extra
+# (`saitenka-overlay[observability]`) even when enabled here. Local-only: a Chrome Trace Format file
+# under the cache dir, no backend/gRPC. See RUNNING.md "Telemetry".
+# [telemetry]
+# enabled = true
+# export_dir = "~/custom/telemetry"   # default: <cache dir>/telemetry
