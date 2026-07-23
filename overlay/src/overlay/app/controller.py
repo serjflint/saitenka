@@ -1953,12 +1953,8 @@ class Reader:
             build = _default_build
 
         def _load() -> None:
-            # A real OTel span, not otel_metrics.timed: the `trace` API returns a no-op tracer when
-            # telemetry is disabled/unconfigured, so this is safe to leave unconditional.
-            from opentelemetry import trace
-
             try:
-                with trace.get_tracer(__name__).start_as_current_span("load_deps_async"):
+                with otel_metrics.traced("load_deps_async"):
                     scorer, anki, mine_cfg, dict_set = build()
                 self._pending_deps = {
                     "scorer": scorer,

@@ -70,6 +70,28 @@ def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
         histogram.record((time.perf_counter() - start) * 1000.0, attributes or None)
 
 
+@contextmanager
+def traced(name: str, **attributes: str) -> Generator[None]:
+    """A real OTel span via the global tracer API — a no-op (not just an unrecorded span, but no
+    `opentelemetry` import at all) when the ``observability`` extra isn't installed, so every call
+    site stays safe to wrap unconditionally, same contract as :func:`timed`. When the extra IS
+    installed but telemetry isn't configured, `trace.get_tracer()` itself returns OTel's built-in
+    no-op tracer — that path costs an import + a cheap proxy call, not a crash.
+
+    Bug this exists to prevent: an earlier direct ``from opentelemetry import trace`` at a call site
+    crashed a background thread on any install without the extra — found via live end-to-end testing,
+    not by any test in this suite (the dev/test env always has the extra installed via `[full]`)."""
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        yield
+        return
+    with trace.get_tracer("saitenka.overlay").start_as_current_span(name) as span:
+        for k, v in attributes.items():
+            span.set_attribute(k, v)
+        yield
+
+
 def _gil_enabled_callback(_options):
     from opentelemetry.metrics import Observation
 

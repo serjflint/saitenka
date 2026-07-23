@@ -79,3 +79,29 @@ def test_timed_records_even_on_exception(registered):
         raise ValueError("boom")
     snap = otel_metrics.snapshot()
     assert snap["saitenka.render.duration_ms"]["count"] == 1
+
+
+def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkeypatch):
+    """Regression: controller.load_deps_async used to do a bare `from opentelemetry import trace`
+    directly, which crashed on any install without the `observability` extra (found via live
+    end-to-end testing — the dev/test env always has the extra via `[full]`, so no test caught it).
+    traced() must run the wrapped block regardless of whether opentelemetry is importable."""
+    real_import = __import__
+
+    def _fake_import(name, *a, **kw):
+        if name == "opentelemetry":
+            raise ImportError(name)
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr("builtins.__import__", _fake_import)
+    ran = False
+    with otel_metrics.traced("test-span"):
+        ran = True
+    assert ran
+
+
+def test_traced_creates_a_real_span_when_telemetry_is_configured(registered):
+    with otel_metrics.traced("my-span", foo="bar"):
+        pass
+    # the fixture's provider has no exporter attached — this just proves start_as_current_span
+    # didn't raise and the block ran; span content is covered end-to-end in test_telemetry.py.
