@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from overlay.app import otel_metrics
 from overlay.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
@@ -86,25 +87,27 @@ class Overlay:
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         oid = self._oid(oid)
-        data, w, h, stride = to_bgra(img)
-        path = self._tempfile(oid)
-        path.write_bytes(data)
-        res = self.ipc.command(
-            "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride
-        )
+        with otel_metrics.timed(otel_metrics.upload_duration_ms):
+            data, w, h, stride = to_bgra(img)
+            path = self._tempfile(oid)
+            path.write_bytes(data)
+            res = self.ipc.command(
+                "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride
+            )
         _warn_overlay_add(oid, w, h, res)
         return res
 
     def show_bgra(self, bgra: np.ndarray, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         """Upload an already-BGRA (H, W, 4) array — skips the RGBA→BGRA premultiply (fast scroll)."""
         oid = self._oid(oid)
-        buf = np.ascontiguousarray(bgra)
-        h, w = buf.shape[:2]
-        path = self._tempfile(oid)
-        path.write_bytes(buf.tobytes())
-        res = self.ipc.command(
-            "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4
-        )
+        with otel_metrics.timed(otel_metrics.upload_duration_ms):
+            buf = np.ascontiguousarray(bgra)
+            h, w = buf.shape[:2]
+            path = self._tempfile(oid)
+            path.write_bytes(buf.tobytes())
+            res = self.ipc.command(
+                "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4
+            )
         _warn_overlay_add(oid, w, h, res)
         return res
 

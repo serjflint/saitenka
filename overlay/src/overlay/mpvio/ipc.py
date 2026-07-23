@@ -19,6 +19,7 @@ import threading
 import time
 from pathlib import Path
 
+from overlay.app import otel_metrics
 from overlay.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTransport
 
 log = logging.getLogger(__name__)
@@ -151,33 +152,34 @@ class MpvIPC:
         """Send a command array and return the first non-event reply (or an error dict)."""
         if self._closed.is_set():
             return {"error": "disconnected"}
-        # Clear any stale reply left by a previously timed-out command (single-flight otherwise).
-        try:
-            while True:
-                self._replies.get_nowait()
-        except queue.Empty:
-            pass
-        cmd = args[0] if args else "?"
-        try:
-            self._write(json.dumps({"command": list(args)}).encode() + b"\n")
-        except OSError as e:
-            log.warning("mpv IPC: write failed for %r (%s) — disconnected", cmd, e)
-            self._closed.set()
-            return {"error": "disconnected"}
-        wait = timeout if timeout is not None else 10.0
-        try:
-            msg = self._replies.get(timeout=wait)
-        except queue.Empty:
-            # No reply in `wait`s — on Windows this is the tell-tale of a dead pipe read direction:
-            # writes land but mpv's replies/events never come back (bytes_read stays 0).
-            log.warning(
-                "mpv IPC: %r got no reply in %.0fs (bytes from mpv=%d) — replies not reaching us",
-                cmd,
-                wait,
-                self._bytes_read,
-            )
-            return {"error": "timeout"}
-        return {"error": "disconnected"} if msg is _DISCONNECT else msg
+        with otel_metrics.timed(otel_metrics.ipc_roundtrip_ms):
+            # Clear any stale reply left by a previously timed-out command (single-flight otherwise).
+            try:
+                while True:
+                    self._replies.get_nowait()
+            except queue.Empty:
+                pass
+            cmd = args[0] if args else "?"
+            try:
+                self._write(json.dumps({"command": list(args)}).encode() + b"\n")
+            except OSError as e:
+                log.warning("mpv IPC: write failed for %r (%s) — disconnected", cmd, e)
+                self._closed.set()
+                return {"error": "disconnected"}
+            wait = timeout if timeout is not None else 10.0
+            try:
+                msg = self._replies.get(timeout=wait)
+            except queue.Empty:
+                # No reply in `wait`s — on Windows this is the tell-tale of a dead pipe read
+                # direction: writes land but mpv's replies/events never come back (bytes_read=0).
+                log.warning(
+                    "mpv IPC: %r got no reply in %.0fs (bytes from mpv=%d) — replies not reaching us",
+                    cmd,
+                    wait,
+                    self._bytes_read,
+                )
+                return {"error": "timeout"}
+            return {"error": "disconnected"} if msg is _DISCONNECT else msg
 
     def pump(self) -> None:
         """Surface a disconnect so the poll loop stops. The reader thread does the actual socket

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -48,6 +51,23 @@ _ALL_HISTOGRAM_NAMES = (
     "saitenka.ipc.roundtrip_ms",
     "saitenka.sub_seek.duration_ms",
 )
+
+
+@contextmanager
+def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
+    """Record the wrapped block's duration (ms) into *histogram* — a no-op when it's ``None``
+    (telemetry disabled or not yet configured), so every call site stays safe to wrap
+    unconditionally. Pass the live module attribute (e.g. ``otel_metrics.dict_sql_duration_ms``),
+    not a captured local — the attribute is re-read fresh each time the ``with`` block is entered,
+    so it tracks configure()/shutdown() without the call site needing to care."""
+    if histogram is None:
+        yield
+        return
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        histogram.record((time.perf_counter() - start) * 1000.0, attributes or None)
 
 
 def _gil_enabled_callback(_options):

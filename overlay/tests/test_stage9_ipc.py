@@ -88,6 +88,38 @@ def test_command_raises_on_error_response():
         th.join(3)
 
 
+def test_command_and_overlay_show_record_otel_metrics():
+    """Stage 8 instrumentation: ipc.command() records an ipc_roundtrip span, and Overlay.show()
+    (which calls command() internally) records its own, separate upload_duration_ms sample."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay.app import otel_metrics
+
+    ipc, server = _client_with_server()
+    received: list = []
+    th = threading.Thread(
+        target=_serve_one_command, args=(server, received, b'{"request_id":0,"error":"success"}\n')
+    )
+    th.start()
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        ov = Overlay(ipc)
+        ov.show(Image.new("RGBA", (4, 4), (0, 0, 0, 255)))
+        th.join(3)
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.ipc.roundtrip_ms"]["count"] == 1
+        assert snap["saitenka.upload.duration_ms"]["count"] == 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+        ipc.close()
+        server.close()
+
+
 # --- BGRA conversion (pure) ----------------------------------------------------------------------
 
 

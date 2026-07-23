@@ -56,3 +56,26 @@ def test_unregister_resets_instruments_to_none(registered):
 
 def test_percentiles_helper_on_empty_histogram():
     assert otel_metrics._percentiles([], [], 0.0, 0) == {"p50": None, "p95": None, "p99": None}
+
+
+def test_timed_is_a_noop_when_histogram_is_none():
+    """Every Stage 8 call site wraps with `otel_metrics.timed(otel_metrics.<hist>)` unconditionally
+    — this must be safe when telemetry is disabled (the module attribute is None)."""
+    ran = False
+    with otel_metrics.timed(None):
+        ran = True
+    assert ran
+
+
+def test_timed_records_duration_and_attributes(registered):
+    with otel_metrics.timed(otel_metrics.dict_sql_duration_ms, dict="Jitendex"):
+        pass
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.dict_sql.duration_ms"]["count"] == 1
+
+
+def test_timed_records_even_on_exception(registered):
+    with pytest.raises(ValueError), otel_metrics.timed(otel_metrics.render_duration_ms):
+        raise ValueError("boom")
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.render.duration_ms"]["count"] == 1

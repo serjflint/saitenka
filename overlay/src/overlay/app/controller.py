@@ -27,6 +27,7 @@ from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
 from overlay.app.miner import Miner, tag_slug
+from overlay.app import otel_metrics
 from overlay.app.perf import timed
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem, PrefetchItem
@@ -73,6 +74,8 @@ LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive sta
 SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
+_HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed
+# above, which is an unconditional deque append and stays on every tick)
 MINE_MSG = "saitenka-mine"
 MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
@@ -244,6 +247,7 @@ class Reader:
         self._prefetch_gen = 0  # bumped on line change / resume / seek → cancels in-flight
         self._prefetch_key: tuple[str, bool] | None = None
         self._mouse_in = False  # cursor over the video window — an engagement signal
+        self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._stop = threading.Event()
         self._prefetch_threads: list[threading.Thread] = []
         # translation reveal: manual toggle (`t`), or auto-reveal on hover when opted in.
@@ -492,7 +496,14 @@ class Reader:
         its trigger OR on the popup itself, lingering ``hide_delay`` after leaving both. Hovering a
         word *inside* the tooltip opens a nested scan popup."""
         with timed("hover_hit_test"):
-            self._update_hover_impl()
+            # Sampled, not every tick: this runs at poll cadence (~40Hz), and an OTel histogram
+            # .record() call costs real cycles unlike perf.timed's plain deque append above.
+            self._hit_test_tick = (self._hit_test_tick + 1) % _HIT_TEST_SAMPLE_EVERY
+            if otel_metrics.hit_test_duration_ms is not None and self._hit_test_tick == 0:
+                with otel_metrics.timed(otel_metrics.hit_test_duration_ms):
+                    self._update_hover_impl()
+            else:
+                self._update_hover_impl()
 
     def _update_hover_impl(self) -> None:
         mp = self._prop("mouse-pos") or {}
@@ -853,31 +864,36 @@ class Reader:
         key = self._panel_key(tok, inflected, mined, tabs)
         st = self._panel_cache.get(key)
         if st is None:
-            entry = self._entry_for(tok, inflected)
-            # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it
-            # clears the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for
-            # this word's dict names at this width, so a many-dict strip that wraps onto several rows
-            # reserves enough. Nested popups (tabs=False) reserve nothing — no strip, no blank band.
-            reserve = (
-                tab_strip_height([d.dict_name for d in entry.defs], self.tip_width)
-                if (tabs and len(entry.defs) >= 2)
-                else 0
-            )
-            lazy = LazyPanel(
-                panel_rows(
-                    entry,
+            if otel_metrics.panel_cache_misses is not None:
+                otel_metrics.panel_cache_misses.add(1)
+            with otel_metrics.timed(otel_metrics.render_duration_ms):
+                entry = self._entry_for(tok, inflected)
+                # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it
+                # clears the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height
+                # for this word's dict names at this width, so a many-dict strip that wraps onto
+                # several rows reserves enough. Nested popups (tabs=False) reserve nothing.
+                reserve = (
+                    tab_strip_height([d.dict_name for d in entry.defs], self.tip_width)
+                    if (tabs and len(entry.defs) >= 2)
+                    else 0
+                )
+                lazy = LazyPanel(
+                    panel_rows(
+                        entry,
+                        self.tip_width,
+                        add_button=self._anki_ok(),
+                        mined=mined,
+                        speak_button=self._tts_ok,
+                    ),
                     self.tip_width,
-                    add_button=self._anki_ok(),
-                    mined=mined,
-                    speak_button=self._tts_ok,
-                ),
-                self.tip_width,
-                top_reserve=reserve,
-            )
-            st = _TipPanel(lazy, getattr(entry, "reading", "") or tok.reading)
+                    top_reserve=reserve,
+                )
+                st = _TipPanel(lazy, getattr(entry, "reading", "") or tok.reading)
             with self._cache_lock:
                 st = self._panel_cache_setdefault(key, st)
         else:
+            if otel_metrics.panel_cache_hits is not None:
+                otel_metrics.panel_cache_hits.add(1)
             # Cache hit: move to end (most-recently-used) under the lock so the LRU order stays accurate.
             with self._cache_lock:
                 try:
@@ -944,6 +960,8 @@ class Reader:
                 item: PrefetchItem = self._prefetch_q.get(timeout=0.2)
             except queue.Empty:
                 continue
+            if otel_metrics.prefetch_queue_depth is not None:
+                otel_metrics.prefetch_queue_depth.add(-1)
             if self._stop.is_set() or item.gen != self._prefetch_gen:
                 continue  # cancelled (line changed / resumed / seek / closing)
             try:
@@ -986,6 +1004,8 @@ class Reader:
                 self._prefetch_q.put(
                     PrefetchItem(gen, t, self._inflected_surface(i), self._is_mined(t))
                 )
+                if otel_metrics.prefetch_queue_depth is not None:
+                    otel_metrics.prefetch_queue_depth.add(1)
 
     def _cap_for(self, frac: float) -> int:
         """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
@@ -1873,23 +1893,24 @@ class Reader:
         idx = self._sub_index
         if idx is None or len(idx) == 0:
             return False
-        sub_start = self._get_float("sub-start")
-        time_pos = self._get_float("time-pos")
-        current = idx.locate(
-            text=self.sub_text, sub_start=sub_start, time_pos=time_pos, preferred=self._nav_idx
-        )
-        if current < 0:
-            return False
-        # Is a cue actually on screen now, or is `current` just the upcoming one in a gap? A sub is
-        # showing (non-empty text), or the position falls inside current's span. This decides whether
-        # prev/next straddle the cue or step onto the upcoming one (see SubIndex.target).
-        c = idx.cues[current]
-        inside = bool(self.sub_text.strip())
-        if not inside and sub_start is not None:
-            inside = c.start <= sub_start < c.end
-        if not inside and time_pos is not None:
-            inside = c.start <= time_pos < c.end
-        tgt = idx.target(current, delta, inside=inside)
+        with otel_metrics.timed(otel_metrics.sub_seek_duration_ms):
+            sub_start = self._get_float("sub-start")
+            time_pos = self._get_float("time-pos")
+            current = idx.locate(
+                text=self.sub_text, sub_start=sub_start, time_pos=time_pos, preferred=self._nav_idx
+            )
+            if current < 0:
+                return False
+            # Is a cue actually on screen now, or is `current` just the upcoming one in a gap? A sub
+            # is showing (non-empty text), or the position falls inside current's span. This decides
+            # whether prev/next straddle the cue or step onto the upcoming one (see SubIndex.target).
+            c = idx.cues[current]
+            inside = bool(self.sub_text.strip())
+            if not inside and sub_start is not None:
+                inside = c.start <= sub_start < c.end
+            if not inside and time_pos is not None:
+                inside = c.start <= time_pos < c.end
+            tgt = idx.target(current, delta, inside=inside)
         if tgt < 0:
             return False  # out of range / ambiguous → let mpv's sub-seek handle it
         self.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
@@ -1932,8 +1953,13 @@ class Reader:
             build = _default_build
 
         def _load() -> None:
+            # A real OTel span, not otel_metrics.timed: the `trace` API returns a no-op tracer when
+            # telemetry is disabled/unconfigured, so this is safe to leave unconditional.
+            from opentelemetry import trace
+
             try:
-                scorer, anki, mine_cfg, dict_set = build()
+                with trace.get_tracer(__name__).start_as_current_span("load_deps_async"):
+                    scorer, anki, mine_cfg, dict_set = build()
                 self._pending_deps = {
                     "scorer": scorer,
                     "anki": anki,
