@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -528,6 +529,35 @@ def check_perf() -> Check:
     return Check("perf", "ok", "; ".join(parts))
 
 
+def check_telemetry() -> Check:
+    """OTel tracing/metrics status (see ``vibe/observability-plan.md``) — off by default, purely
+    informational either way. ``doctor`` runs as its OWN short-lived process, so it can't read a
+    separate live overlay session's in-memory metrics (pull-based / process-local by design,
+    :func:`overlay.app.otel_metrics.snapshot`); it reports config state + the on-disk CTF trace
+    file the live session wrote, if telemetry was enabled for it."""
+    from overlay.app.config import load_config, resolve_telemetry
+    from overlay.app.telemetry import export_dir
+
+    opts = resolve_telemetry(load_config())
+    if not opts.enabled:
+        return Check("telemetry", "ok", "disabled ([telemetry] enabled = false)")
+    trace_path = export_dir(opts) / "trace.json"
+    if not trace_path.exists():
+        return Check(
+            "telemetry",
+            "ok",
+            f"enabled, no trace yet at {trace_path} (nothing recorded this session, or the "
+            "'observability' extra isn't installed)",
+        )
+    st = trace_path.stat()
+    return Check(
+        "telemetry",
+        "ok",
+        f"enabled — last trace {trace_path} ({st.st_size / 1024:.0f} KiB, "
+        f"modified {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.st_mtime))})",
+    )
+
+
 def check_recent_errors(n: int = 5) -> Check:
     if not LOG_PATH.exists():
         return Check("recent-errors", "ok", "no log yet (nothing has failed)")
@@ -581,6 +611,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_crashes(),
         check_recent_errors(),
         check_perf(),
+        check_telemetry(),
     ]
     return Report(checks)
 
