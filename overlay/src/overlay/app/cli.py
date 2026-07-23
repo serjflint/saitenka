@@ -53,7 +53,13 @@ def _ensure_free_threaded() -> None:
             # os.execv on Windows does NOT truly replace the process — it duplicates execution and
             # corrupts the console (double output, and interactive prompts that can't take input).
             # Spawn a child that shares our console, wait, and exit with its status instead.
-            sys.exit(subprocess.run(argv).returncode)
+            try:
+                sys.exit(subprocess.run(argv).returncode)
+            except KeyboardInterrupt:
+                # Ctrl+C on the shared console reaches BOTH processes: the child cleans up and exits
+                # on its own SIGINT; the parent must not dump a KeyboardInterrupt traceback from
+                # subprocess.wait(). Exit quietly with the conventional 130 (128 + SIGINT).
+                sys.exit(130)
         os.execv(sys.executable, argv)
 
 
@@ -243,15 +249,16 @@ def run(
         bool,
         cyclopts.Parameter(
             negative="--no-dict-tabs",
-            help="draw the sticky per-dictionary tab strip on the tooltip (default: on)",
+            help="draw the sticky per-dictionary tab strip on the tooltip (default: off)",
         ),
-    ] = True,
+    ] = False,
     pause_on_tooltip: Annotated[
         bool,
         cyclopts.Parameter(
-            negative=(), help="auto-pause playback while a tooltip is shown (resumes when it hides)"
+            negative="--no-pause-on-tooltip",  # on by default now → give an explicit off switch
+            help="auto-pause playback while a tooltip is shown (resumes when it hides)",
         ),
-    ] = False,
+    ] = True,
     prefetch: Annotated[
         bool,
         cyclopts.Parameter(
@@ -495,6 +502,7 @@ def run(
         fullscreen=fullscreen,
     )
     print("launching:", " ".join(cmd))
+    log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
     proc = subprocess.Popen(cmd)
 
     try:
@@ -528,8 +536,8 @@ def run(
             tip_max_frac=tip_height,
             pause_on_tooltip=pause_on_tooltip,
             hover_switch_delay=hover_switch_delay,
-            # off if EITHER the config disables it or --no-dict-tabs is passed
-            show_dict_tabs=dict_tabs and bool(cfg.get("show_dict_tabs", True)),
+            # off by default; on if EITHER --dict-tabs is passed or the config enables it
+            show_dict_tabs=dict_tabs or bool(cfg.get("show_dict_tabs", False)),
         ),
         mining=MiningOptions(play_audio=not no_audio_play),
         translation=TranslationOptions(auto_translate=auto_translate),
@@ -1115,7 +1123,7 @@ def attach(
         ),
         tooltip=TooltipOptions(
             tip_max_frac=cfg.get("tip_height", TooltipOptions().tip_max_frac),
-            show_dict_tabs=bool(cfg.get("show_dict_tabs", True)),
+            show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
         ),
         mining=MiningOptions(play_audio=not bool(cfg.get("no_audio_play", False))),
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
@@ -1185,20 +1193,26 @@ def _harden_runtime() -> None:  # pragma: no cover — process-global startup si
 
 
 def main() -> None:  # pragma: no cover — live-run entry point
-    _ensure_free_threaded()
-    _setup_logging()
-    _harden_runtime()
-    from overlay.app.crashlog import install as install_crash_handlers
-    from overlay.app.signals import install as install_shutdown_signals
+    try:
+        _ensure_free_threaded()
+        _setup_logging()
+        _harden_runtime()
+        from overlay.app.crashlog import install as install_crash_handlers
+        from overlay.app.signals import install as install_shutdown_signals
 
-    install_crash_handlers()  # main-thread + worker-thread + faulthandler crash capture
-    install_shutdown_signals()  # SIGTERM / SIGBREAK → graceful cleanup (like Ctrl+C)
-    override = _argv_config_override(sys.argv[1:])
-    if override:  # --config PATH re-points the declarative TOML
-        app.config = cyclopts.config.Toml(
-            override, must_exist=False, use_commands_as_keys=False, allow_unknown=True
-        )
-    sys.exit(app())
+        install_crash_handlers()  # main-thread + worker-thread + faulthandler crash capture
+        install_shutdown_signals()  # SIGTERM / SIGBREAK → graceful cleanup (like Ctrl+C)
+        override = _argv_config_override(sys.argv[1:])
+        if override:  # --config PATH re-points the declarative TOML
+            app.config = cyclopts.config.Toml(
+                override, must_exist=False, use_commands_as_keys=False, allow_unknown=True
+            )
+        sys.exit(app())
+    except KeyboardInterrupt:
+        # Ctrl+C is the documented way to stop the reader. The run/attach loop already tore down mpv,
+        # the socket and temp files in its `finally`; swallow the interrupt here so the user sees a
+        # clean exit, not a traceback. 130 = 128 + SIGINT, the shell convention.
+        sys.exit(130)
 
 
 if __name__ == "__main__":

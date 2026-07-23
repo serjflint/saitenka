@@ -70,6 +70,7 @@ LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive sta
 # doesn't cramp the deep-dive; the nested popup also carries no dict-tab strip / reserve (space-saving).
 _NESTED_MAX_FRAC = 0.6
 SKIP_POS = {"補助記号", "記号", "空白"}
+PANEL_CACHE_MAX = 128  # LRU-bounded tooltip panels; each is a zlib-compressed BGRA blob (sub-MB)
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 TIP_GAP = 12
 MINE_MSG = "saitenka-mine"
@@ -268,11 +269,8 @@ class Reader:
             None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
         )
         self._hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
-        self._tip_full: object | None = (
-            None  # full (unclipped) tooltip image; the view is a scrolled crop
-        )
         self._tip_bgra: np.ndarray | None = (
-            None  # full panel as a premultiplied BGRA array — scroll slices this
+            None  # active panel decompressed to a premultiplied BGRA array — scroll slices this
         )
         self._tip_scroll = 0
         self._tip_view_h = 0
@@ -317,11 +315,12 @@ class Reader:
         self._tab_h = 0
         self._tab_active = -1
         self._tip_keys_bound = False
-        # LRU cache: OrderedDict keyed by panel_key, bounded at 48 entries (≈one paused episode scene).
-        # Each _TipPanel holds BGRA arrays (≈1–4 MB each), so ~100–200 MB at 48 panels — well within
-        # the OS's reclaimable page budget.  On overflow we evict the LEAST-recently-used entry (the
-        # OrderedDict move_to_end protocol) rather than clearing everything (which would lose the
-        # already-rendered panels the user is likely to re-hover).
+        # LRU cache: OrderedDict keyed by panel_key, bounded at PANEL_CACHE_MAX entries. Each _TipPanel
+        # now holds only a zlib-compressed BGRA blob (~16x on mostly-transparent panels → sub-MB even
+        # for a tall multi-dict entry), so the whole cache is tens of MB — we raised the cap from 48 to
+        # 128 accordingly. On overflow we evict the LEAST-recently-used entry (the OrderedDict
+        # move_to_end protocol) rather than clearing everything (which would lose already-rendered
+        # panels the user is likely to re-hover).
         self._panel_cache: OrderedDict = OrderedDict()  # key -> _TipPanel
         self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         self._toast_until = 0.0
@@ -389,6 +388,11 @@ class Reader:
     def _on_property_change(self, ev: dict) -> None:
         name = ev.get("name")
         if name:
+            if name == "pause" and ev.get("data") != self._observed.get(name):
+                # Breadcrumb for the "overlay only updates on mouse move" report: while paused, mpv's
+                # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
+                # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
+                log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
 
     def refresh_osd(self) -> bool:
@@ -409,7 +413,6 @@ class Reader:
         self.ov.hide(TIP_ID)
         self._hide_nested()
         self._tip_rect = None
-        self._tip_full = None
         self._tip_bgra = None
         self._tip_state = None
         self._tip_key = None
@@ -780,8 +783,15 @@ class Reader:
         level — the same signal the subtitle draws as an underline (``Scorer._style``). The pill's hue
         is the level's underline color (darkened for legible white text), so the tooltip and the
         underline read as the same thing."""
+        from overlay.app.scoring import _is_content
+
         sc = self.scorer
         if sc is None or not getattr(sc, "enable_jlpt", False) or sc.jlpt is None:
+            return None
+        # Gate on content POS exactly like the subtitle underline (Scorer._style). Without this a
+        # particle/aux (は, ね) whose bare-kana READING collides with an N1 word's reading in the JLPT
+        # map gets mislabelled — usually N1, since _put keeps the highest level. Better no pill.
+        if not _is_content(tok):
             return None
         level = sc.jlpt.level(tok.lemma, tok.surface, tok.reading)
         if not level:
@@ -874,14 +884,14 @@ class Reader:
         return st
 
     def _panel_cache_setdefault(self, key, st) -> _TipPanel:
-        """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over 48.
+        """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over the cap.
         Must be called under ``self._cache_lock``.  First-writer-wins: if two workers race to build
         the same panel, the winner's result is kept and the loser is discarded (both are equivalent)."""
         if key in self._panel_cache:
             self._panel_cache.move_to_end(key)
             return self._panel_cache[key]
         # Evict least-recently-used entries until we are at the limit.
-        while len(self._panel_cache) >= 48:
+        while len(self._panel_cache) >= PANEL_CACHE_MAX:
             self._panel_cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
         self._panel_cache[key] = st
         return st
@@ -987,11 +997,9 @@ class Reader:
             tok, inflected, min_h=cap, finish=not self._finish_available(), mined=mined
         )
         self._tip_state, self._tip_key, self._tip_dirty = st, key, False
-        self._tip_full = st.image
-        self._tip_bgra = st.bgra
+        self._tip_bgra = st.bgra()  # decompress the cached panel into the active scroll buffer
         self._hover_reading = st.reading
         self._tip_scroll = 0
-        full = st.image
 
         ox, oy = self.sub_origin
         b = self.boxes[index]
@@ -999,9 +1007,10 @@ class Reader:
         # Safe area: keep clear of the OSC/window header at the top and the controls/edge at the
         # bottom, so the tooltip never spills under the window chrome. It scrolls, so we cap the
         # height rather than trying to fit the whole (very tall) entry.
-        assert full is not None  # head render above guarantees the image
-        self._tip_view_h = min(full.height, cap)
-        self._tip_xy = self._place_panel(full.width, wx, wy, b.h, self._tip_view_h)
+        assert st.ready  # head render above guarantees the panel is stored
+        ph, pw = st.shape[0], st.shape[1]
+        self._tip_view_h = min(ph, cap)
+        self._tip_xy = self._place_panel(pw, wx, wy, b.h, self._tip_view_h)
         self._update_tabs()
         self._render_tip_view()
         self._bind_tip_keys()  # LEFT/RIGHT/UP/DOWN/ESC live only while the tip shows
@@ -1047,10 +1056,9 @@ class Reader:
         """A background finish grew the shown panel (deferred bodies rendered) → re-upload the view so
         the scrollbar reflects the true height and the below-the-fold content is scrollable."""
         st = self._tip_state
-        if st is None or st.bgra is None:
+        if st is None or not st.ready:
             return
-        self._tip_full = st.image
-        self._tip_bgra = st.bgra
+        self._tip_bgra = st.bgra()  # re-decompress the grown panel into the active scroll buffer
         self._update_tabs()  # the streamed tail may add sections / move offsets
         self._render_tip_view()
 
@@ -1130,11 +1138,15 @@ class Reader:
         self._tip_keys_bound = True
 
     def _unbind_tip_keys(self) -> None:
-        """Release the tooltip keys back to mpv — a leaked bind would steal its arrows."""
+        """Neutralise the tooltip keys so a leaked bind can't fire ``tab-prev``/etc. when no tooltip is
+        up. mpv has no unbind verb over IPC, and ``keybind KEY ""`` is REJECTED — it logs the noisy
+        ``[input] Command name missing`` / ``Invalid command for key binding 'LEFT': ''`` triple (visible
+        on the Windows console; silently on the mac log). Rebind to the valid no-op ``ignore`` instead:
+        no error, and the key stops doing tooltip work while the popup is gone."""
         if not self._tip_keys_bound:
             return
         for key, _msg in TIP_KEYBINDS:
-            self.ipc.command("keybind", key, "")  # empty command = unbind
+            self.ipc.command("keybind", key, "ignore")  # valid no-op; "" would be rejected by mpv
         self._tip_keys_bound = False
 
     def _render_tip_view(self) -> None:
@@ -1171,9 +1183,9 @@ class Reader:
 
     def _refresh_nested_full(self) -> None:
         st = self._nest.state
-        if st is None or st.bgra is None:
+        if st is None or not st.ready:
             return
-        self._nest.bgra = st.bgra
+        self._nest.bgra = st.bgra()  # re-decompress the grown nested panel into its scroll buffer
         self._render_nested_view()
 
     def _scroll_tip(self, delta: int) -> None:
@@ -1259,10 +1271,10 @@ class Reader:
         self._nest.token, self._nest.word = token, word
         self._nest.tail = tail
         self._nest.dirty, self._nest.scroll = False, 0
-        self._nest.bgra = st.bgra
-        full = st.image
-        self._nest.view_h = self._nested_view_h(full.height, wy)
-        self._nest.xy = self._place_panel(full.width, wx, wy, wh, self._nest.view_h)
+        self._nest.bgra = st.bgra()  # decompress the cached nested panel into its scroll buffer
+        ph, pw = st.shape[0], st.shape[1]
+        self._nest.view_h = self._nested_view_h(ph, wy)
+        self._nest.xy = self._place_panel(pw, wx, wy, wh, self._nest.view_h)
         self._render_nested_view()
         if not st.complete:
             self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _nest.dirty → refresh
@@ -1446,7 +1458,7 @@ class Reader:
         st = self._panel_for(tok, tok.surface, min_h=self._tip_cap(), finish=True, mined=mined)
         self._nest.state = st
         self._nest.key = self._panel_key(tok, tok.surface, mined)
-        self._nest.bgra = st.bgra
+        self._nest.bgra = st.bgra()  # decompress the cached panel into the nested scroll buffer
         self._render_nested_view()
 
     # --- card preview (verify correctness / image / sound, one surface) -----------------------

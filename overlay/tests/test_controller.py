@@ -5,7 +5,7 @@ import time
 import pytest
 
 import overlay.app.controller as C
-from overlay.app.controller import Reader
+from overlay.app.controller import PanelKey, Reader
 import functools
 
 
@@ -429,10 +429,16 @@ def test_prefetch_worker_warms_cache_then_close_joins():
     r.start_prefetch()
     try:
         r._update_prefetch()  # queue 本命 for the worker
-        # PanelKey(lemma, surface, reading, inflected, width, anki_ok, mined); no anki → anki_ok False.
-        # A plain tuple of the same values matches the PanelKey dict key (NamedTuple compares as a
-        # tuple). Trailing True = tabs (base tooltip / prefetch build; a nested build would be False).
-        key = ("本命", "本命", "ほんめい", "本命", r.tip_width, False, False, True)
+        key = PanelKey(
+            lemma="本命",
+            surface="本命",
+            reading="ほんめい",
+            inflected="本命",
+            width=r.tip_width,
+            anki_ok=False,  # no anki configured
+            mined=False,
+            tabs=False,  # show_dict_tabs is OFF by default
+        )
         for _ in range(300):
             if key in r._panel_cache:
                 break
@@ -491,7 +497,7 @@ def test_show_tooltip_finishes_synchronously_without_worker():
     r._show_tooltip(0)
     assert r._tip_state.complete
     assert r._finish_q.empty()
-    assert r._tip_bgra.shape[0] == r._tip_state.image.height
+    assert r._tip_bgra.shape[0] == r._tip_state.shape[0]
 
 
 def test_show_tooltip_defers_tail_when_worker_available(monkeypatch):
@@ -503,7 +509,7 @@ def test_show_tooltip_defers_tail_when_worker_available(monkeypatch):
     r._show_tooltip(0)
     st = r._tip_state
     assert not st.complete  # tall entry → head only
-    head_h = st.image.height
+    head_h = st.shape[0]
     assert head_h >= r._tip_cap()  # …but the viewport is fully covered
     assert r._finish_q.qsize() == 1  # the tail was queued for a worker
 
@@ -511,9 +517,9 @@ def test_show_tooltip_defers_tail_when_worker_available(monkeypatch):
     job = r._finish_q.get()  # typed FinishItem (Stage 8b)
     job.panel.finish()
     r._tip_dirty = True
-    assert st.complete and st.image.height > head_h
+    assert st.complete and st.shape[0] > head_h
     r.poll_once()
-    assert r._tip_bgra.shape[0] == st.image.height  # the full, taller panel is now uploaded
+    assert r._tip_bgra.shape[0] == st.shape[0]  # the full, taller panel is now uploaded
 
 
 def _click_center_of_add_button(r, ipc):
@@ -1247,6 +1253,19 @@ def test_no_jlpt_pill_without_level_or_scorer():
     assert Reader(FakeIPC(), dict_set=_FakeDS())._jlpt_pill(tok) is None
 
 
+def test_no_jlpt_pill_for_function_words_even_on_reading_collision():
+    """Particles/aux (は, ね) share a bare-kana reading with N1 kanji words in the JLPT map. The pill
+    must gate on content POS like the underline does, so は (助詞) gets NO pill even though its reading
+    is present at N1 — otherwise every は/ね is mislabelled N1."""
+    from overlay.app.tokenize import Token
+
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), scorer=_jlpt_scorer({"は": "N1", "ね": "N1"}))
+    assert r._jlpt_pill(Token("は", "は", "は", "助詞", 0, 1)) is None  # particle → no pill
+    assert r._jlpt_pill(Token("ね", "ね", "ね", "助詞", 0, 1)) is None
+    # a real content word whose reading legitimately maps still gets its pill
+    assert r._jlpt_pill(Token("葉", "葉", "は", "名詞", 0, 1)) is not None
+
+
 def test_jlpt_pill_suppressed_when_disabled():
     from overlay.app.tokenize import Token
 
@@ -1306,17 +1325,21 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     from overlay.app.subtitles import WordBox
 
     # Fill the cache to exactly the limit + 1 to trigger eviction.
-    # We'll manually insert sentinel keys to test LRU behaviour.
+    # We'll manually insert sentinel keys to test LRU behaviour. Fill exactly to the cap so the next
+    # insert (the real tooltip below) triggers a single eviction of the oldest.
+    from overlay.app.controller import PANEL_CACHE_MAX
+
     sentinel = object()
-    for i in range(49):
+    for i in range(PANEL_CACHE_MAX):
         r._panel_cache[f"key_{i}"] = sentinel
-    # Cache now has 49 entries. One more should evict the oldest (key_0), not clear all.
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     r.tokens = [tok]
     r._show_tooltip(0)
-    # key_48 (most-recently inserted before the overflow) should survive; key_0 should not.
-    assert "key_48" in r._panel_cache, "LRU eviction removed recently-used entry"
+    # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
+    assert f"key_{PANEL_CACHE_MAX - 1}" in r._panel_cache, (
+        "LRU eviction removed recently-used entry"
+    )
     assert "key_0" not in r._panel_cache, "LRU eviction should have removed oldest entry"
 
 
@@ -1457,7 +1480,7 @@ def test_tip_panel_finish_does_not_block_render_head():
     lazy = LazyPanel(panel_rows(entry, r.tip_width, add_button=False), r.tip_width)
     st = _TipPanel(lazy, "ほんめい")
     st.render_head(min_h=r._tip_cap())
-    initial_bgra = st.bgra
+    initial_bgra = st.bgra()
 
     blocked_for: list[float] = []
 
@@ -1487,7 +1510,7 @@ def test_tip_panel_finish_does_not_block_render_head():
     # (bottom margin + one ~48px line of slack).
     head_h = initial_bgra.shape[0]
     stable_h = head_h - 64
-    assert (st.bgra[:stable_h] == initial_bgra[:stable_h]).all()
+    assert (st.bgra()[:stable_h] == initial_bgra[:stable_h]).all()
 
 
 def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):

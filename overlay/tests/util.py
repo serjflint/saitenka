@@ -21,6 +21,18 @@ GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
 
 
+def bgra_to_image(bgra: np.ndarray) -> Image.Image:
+    """Un-premultiply a premultiplied-BGRA array back to an RGBA image, for goldens on cached panels
+    (which retain only the compressed BGRA). Exact where alpha is 0 or 255 (the bulk of a panel);
+    ±1 at anti-aliased edges — well within the golden MAE tolerance."""
+    b, g, r, a = (bgra[..., i].astype(np.uint16) for i in range(4))
+    rgb = np.stack([r, g, b], axis=-1)
+    safe_a = np.where(a == 0, 1, a)[..., None]
+    rgb = np.where(a[..., None] > 0, np.minimum(255, rgb * 255 // safe_a), 0)
+    rgba = np.dstack([rgb.astype(np.uint8), a.astype(np.uint8)])
+    return Image.fromarray(rgba, "RGBA")
+
+
 def mae(a: Image.Image, b: Image.Image) -> float:
     """Mean absolute error per channel (0..255) between two RGBA images of equal size."""
     aa = np.asarray(a.convert("RGBA"), dtype=np.int16)

@@ -288,12 +288,14 @@ def panel_rows(
         def _freqs(freqs=tuple(entry.freqs)):
             fflow: list = []
             for f in freqs:
+                # freq pills are secondary signal → render a notch smaller than the def pills (px19)
+                # and body (px23), so more fit on the row and they don't compete with the readings.
                 fflow.append(
                     ChipBox(
-                        f.name, ChipStyle(size=theme.px(20), weight=600, bg=f.color, value=f.value)
+                        f.name, ChipStyle(size=theme.px(16), weight=600, bg=f.color, value=f.value)
                     )
                 )
-                fflow.append(Span("  ", Style(size=theme.px(20))))
+                fflow.append(Span("  ", Style(size=theme.px(16))))
             return _flow_row(fflow, content_w, scale=1.7), [], []
 
         rows.append(Row(m, _freqs))
@@ -516,6 +518,7 @@ class LazyPanel:
         self._row_sections: list[str | None] = []  # parallel to _rendered (dict-tab sections)
         self.scan_boxes: list[ScanBox] = []  # panel-space hitboxes for the rendered rows
         self.link_boxes: list[LinkBox] = []  # panel-space clickable link regions
+        self._offsets_frozen: list[tuple[str, int]] | None = None  # cached at release_rows()
 
     @property
     def complete(self) -> bool:
@@ -553,9 +556,24 @@ class LazyPanel:
         self.link_boxes = links
         return canvas
 
+    def release_rows(self) -> None:
+        """Drop the per-row rendered sub-images once the panel is complete and its BGRA has been
+        captured elsewhere — they are the single largest retained buffer (a full second copy of the
+        panel) and are never needed again: scrolling slices the BGRA, hit-testing uses ``scan_boxes`` /
+        ``link_boxes`` (already composed onto ``self``), and the only other reader — ``section_offsets``
+        — is frozen here first. Idempotent."""
+        if self._offsets_frozen is None:
+            self._offsets_frozen = self.section_offsets()
+        self._rendered = []
+        self._row_sections = []
+        self._partial = None
+
     def section_offsets(self) -> list[tuple[str, int]]:
         """(dict_name, y) for each rendered section-start row, in panel coords — the scroll targets
-        for the tab row and LEFT/RIGHT keyboard nav. Grows as finish() streams."""
+        for the tab row and LEFT/RIGHT keyboard nav. Grows as finish() streams, then frozen by
+        release_rows() so it survives dropping the row images."""
+        if self._offsets_frozen is not None:
+            return self._offsets_frozen
         m = self.theme.margin
         y = m + self.top_reserve
         out: list[tuple[str, int]] = []
