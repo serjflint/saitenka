@@ -79,9 +79,9 @@ def test_full_queue_increments_dropped_count(tmp_path):
     exporter = CTFSpanExporter(tmp_path / "trace.json")
     gate = ActiveGate()
     gate.set(True)
-    processor = GatedSpanProcessor(exporter, gate, maxsize=1)
+    # start_thread=False: no live consumer racing to drain the queue between our two puts.
+    processor = GatedSpanProcessor(exporter, gate, maxsize=1, start_thread=False)
     try:
-        # fill the queue directly so the writer thread can't drain it before we overflow it
         span = _make_span()
         processor._queue.put_nowait(span)
         processor.on_end(span)
@@ -94,7 +94,7 @@ def test_force_flush_drains_synchronously(tmp_path):
     path = tmp_path / "trace.json"
     exporter = CTFSpanExporter(path)
     gate = ActiveGate()
-    processor = GatedSpanProcessor(exporter, gate, maxsize=8)
+    processor = GatedSpanProcessor(exporter, gate, maxsize=8, start_thread=False)
     try:
         span = _make_span()
         processor._queue.put_nowait(span)

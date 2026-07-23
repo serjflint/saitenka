@@ -80,6 +80,7 @@ def configure(options: TelemetryOptions) -> None:
         try:
             from opentelemetry import metrics, trace
             from opentelemetry.sdk.metrics import MeterProvider
+            from opentelemetry.sdk.metrics.export import InMemoryMetricReader
             from opentelemetry.sdk.trace import TracerProvider
         except ImportError:
             log.warning(
@@ -89,6 +90,7 @@ def configure(options: TelemetryOptions) -> None:
             return
 
         from overlay.app.otel_export import CTFSpanExporter, GatedSpanProcessor
+        from overlay.app.otel_metrics import register as register_metrics
 
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -96,9 +98,11 @@ def configure(options: TelemetryOptions) -> None:
         tp = TracerProvider()
         processor = GatedSpanProcessor(CTFSpanExporter(out_dir / "trace.json"), span_gate)
         tp.add_span_processor(processor)
-        mp = MeterProvider()
+        reader = InMemoryMetricReader()  # pull-based: read on demand via otel_metrics.snapshot()
+        mp = MeterProvider(metric_readers=[reader])
         trace.set_tracer_provider(tp)
         metrics.set_meter_provider(mp)
+        register_metrics(reader, mp.get_meter("saitenka.overlay"))
         _tracer_provider = tp
         _meter_provider = mp
         _span_processor = processor
@@ -119,6 +123,10 @@ def shutdown() -> None:
                 _meter_provider.shutdown()
             except Exception:
                 log.debug("meter provider shutdown failed", exc_info=True)
+
+            from overlay.app.otel_metrics import unregister as unregister_metrics
+
+            unregister_metrics()
         _tracer_provider = None
         _meter_provider = None
         _span_processor = None

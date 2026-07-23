@@ -77,7 +77,16 @@ class GatedSpanProcessor(SpanProcessor):
     dedicated writer thread drains it and calls *exporter*. A full queue drops the span and
     increments :attr:`dropped_count` instead of blocking whichever thread just ended a span."""
 
-    def __init__(self, exporter: SpanExporter, gate: ActiveGate, maxsize: int = 2048) -> None:
+    def __init__(
+        self,
+        exporter: SpanExporter,
+        gate: ActiveGate,
+        maxsize: int = 2048,
+        start_thread: bool = True,
+    ) -> None:
+        """*start_thread=False* skips spawning the writer thread — for tests that need to observe
+        queue state (e.g. a full queue) without racing a live consumer; production code always
+        leaves it ``True``."""
         super().__init__()
         self._exporter = exporter
         self._gate = gate
@@ -85,8 +94,10 @@ class GatedSpanProcessor(SpanProcessor):
         self._dropped = 0
         self._dropped_lock = threading.Lock()
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="otel-span-writer", daemon=True)
-        self._thread.start()
+        self._thread: threading.Thread | None = None
+        if start_thread:
+            self._thread = threading.Thread(target=self._run, name="otel-span-writer", daemon=True)
+            self._thread.start()
 
     @property
     def dropped_count(self) -> int:
@@ -117,7 +128,8 @@ class GatedSpanProcessor(SpanProcessor):
 
     def shutdown(self) -> None:
         self._stop.set()
-        self._thread.join(timeout=2.0)
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         self.force_flush()
         self._exporter.shutdown()
 
