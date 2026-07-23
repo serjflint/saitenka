@@ -18,8 +18,6 @@ from overlay.app.media import clip_audio, current_timespan, screenshot
 
 log = logging.getLogger(__name__)
 
-MAX_BULK = 12
-
 
 def tag_slug(text: str) -> str:
     """A tag-safe slug (Anki tags can't contain spaces): 'Nippon Sangoku' → 'Nippon_Sangoku'."""
@@ -204,7 +202,7 @@ class Miner:
                 continue
             seen.add(t.lemma)
             targets.append(i)
-            if len(targets) >= MAX_BULK:
+            if len(targets) >= r.max_bulk:
                 break
         if not targets:
             r._toast("no new words", "warn")

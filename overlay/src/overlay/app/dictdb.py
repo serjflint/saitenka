@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from overlay.app import paths
+from overlay.app.config import DictDbOptions, resolve_dictdb
 
 log = logging.getLogger(__name__)
 
@@ -162,16 +163,19 @@ class DictionaryDb:
     is used only by :meth:`import_zip`. WAL mode lets readers proceed during an import.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, db_opts: DictDbOptions | None = None):
         self.path = Path(path)
         self._local = threading.local()
+        self._opts = db_opts if db_opts is not None else resolve_dictdb()
 
     # --- lifecycle ----------------------------------------------------------------------------
 
     @classmethod
-    def open(cls, path: str | Path | None = None) -> DictionaryDb:
+    def open(
+        cls, path: str | Path | None = None, db_opts: DictDbOptions | None = None
+    ) -> DictionaryDb:
         """Open (creating + schema-initialising if needed) the consolidated DB."""
-        db = cls(path or db_path())
+        db = cls(path or db_path(), db_opts)
         db.path.parent.mkdir(parents=True, exist_ok=True)
         db._ensure_schema()
         return db
@@ -198,9 +202,10 @@ class DictionaryDb:
             # set on EACH per-thread connection (main + prefetch workers); on Windows the mapped view
             # counts toward the process working set, so a 1 GiB window × N threads was inflating RAM by
             # gigabytes. A benchmark showed the mmap win over pread was mostly a page-cache artifact, so
-            # shrinking the window costs ~nothing. 32 MiB page cache per connection (negative = KiB).
-            c.execute("PRAGMA mmap_size=268435456")
-            c.execute("PRAGMA cache_size=-32768")
+            # shrinking the window costs ~nothing. 32 MiB page cache per connection (negative = KiB) —
+            # both tunable via ``[dictdb]`` in overlay.toml (app/config.py: DictDbOptions).
+            c.execute(f"PRAGMA mmap_size={self._opts.mmap_size}")
+            c.execute(f"PRAGMA cache_size=-{self._opts.cache_size_kib}")
             self._local.conn = c
         return c
 

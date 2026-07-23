@@ -517,11 +517,13 @@ def run(
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PerfOptions,
         ReaderOptions,
         TooltipOptions,
         TranslationOptions,
     )
 
+    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
     opts = ReaderOptions(
         keys=KeyOptions(
             mine_key=mine_key,
@@ -534,13 +536,26 @@ def run(
         ),
         tooltip=TooltipOptions(
             tip_max_frac=tip_height,
+            nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
             pause_on_tooltip=pause_on_tooltip,
             hover_switch_delay=hover_switch_delay,
+            hide_delay=cfg.get("hide_delay", _tt.hide_delay),
+            flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             # off by default; on if EITHER --dict-tabs is passed or the config enables it
             show_dict_tabs=dict_tabs or bool(cfg.get("show_dict_tabs", False)),
+            panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
         ),
-        mining=MiningOptions(play_audio=not no_audio_play),
+        mining=MiningOptions(
+            play_audio=not no_audio_play,
+            max_bulk=cfg.get("max_bulk", _mo.max_bulk),
+            anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
+            anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
+        ),
         translation=TranslationOptions(auto_translate=auto_translate),
+        perf=PerfOptions(
+            poll_interval=cfg.get("poll_interval", _po.poll_interval),
+            prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+        ),
         prefetch=prefetch,
     )
     # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
@@ -1039,6 +1054,7 @@ def attach(
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PerfOptions,
         ReaderOptions,
         TooltipOptions,
         TranslationOptions,
@@ -1110,6 +1126,7 @@ def attach(
     # with none configured, attach stays a working subtitle renderer (jamdict-fallback tooltips).
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
+    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
 
     opts = ReaderOptions(
         keys=KeyOptions(
@@ -1122,11 +1139,24 @@ def attach(
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
         ),
         tooltip=TooltipOptions(
-            tip_max_frac=cfg.get("tip_height", TooltipOptions().tip_max_frac),
+            tip_max_frac=cfg.get("tip_height", _tt.tip_max_frac),
+            nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
             show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
+            hide_delay=cfg.get("hide_delay", _tt.hide_delay),
+            flash_secs=cfg.get("flash_secs", _tt.flash_secs),
+            panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
         ),
-        mining=MiningOptions(play_audio=not bool(cfg.get("no_audio_play", False))),
+        mining=MiningOptions(
+            play_audio=not bool(cfg.get("no_audio_play", False)),
+            max_bulk=cfg.get("max_bulk", _mo.max_bulk),
+            anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
+            anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
+        ),
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
+        perf=PerfOptions(
+            poll_interval=cfg.get("poll_interval", _po.poll_interval),
+            prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+        ),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below

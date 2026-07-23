@@ -305,14 +305,14 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
     assert r.hover == 0 and r._hide_at == 0.0
 
     mouse(300, 300)  # left the word → schedule hide, still shown
-    assert r.hover == 0 and r._hide_at == 1000.0 + C.HIDE_DELAY
+    assert r.hover == 0 and r._hide_at == 1000.0 + r.hide_delay
 
     mouse(120, 120)  # reached the tooltip in time → stays alive
     assert r._hide_at == 0.0 and r.hover == 0
 
     mouse(300, 300)  # leave everything → reschedule hide
     assert r._hide_at > 0.0
-    clock[0] += C.HIDE_DELAY + 0.1  # …and let it elapse
+    clock[0] += r.hide_delay + 0.1  # …and let it elapse
     mouse(300, 300)
     assert seen[-1] == -1  # hidden only after the delay
 
@@ -741,7 +741,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
     r._update_hover()
     assert r._nest.hide_at > 0  # scheduled, not instant
-    clock[0] += C.HIDE_DELAY + 0.1
+    clock[0] += r.hide_delay + 0.1
     r._update_hover()
     assert r._nest.state is None  # dismissed after the linger
 
@@ -1028,7 +1028,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     oid, view = shots[-1]
     hl = np.array(C.FLASH_BGRA, np.uint8)
     assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
-    clock[0] += C.FLASH_SECS + 0.01
+    clock[0] += r.flash_secs + 0.01
     r.poll_once()  # flash expires → redraw without the border
     _, view2 = shots[-1]
     assert not (view2[0] == hl).all()
@@ -1327,17 +1327,15 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     # Fill the cache to exactly the limit + 1 to trigger eviction.
     # We'll manually insert sentinel keys to test LRU behaviour. Fill exactly to the cap so the next
     # insert (the real tooltip below) triggers a single eviction of the oldest.
-    from overlay.app.controller import PANEL_CACHE_MAX
-
     sentinel = object()
-    for i in range(PANEL_CACHE_MAX):
+    for i in range(r.panel_cache_max):
         r._panel_cache[f"key_{i}"] = sentinel
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     r.tokens = [tok]
     r._show_tooltip(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
-    assert f"key_{PANEL_CACHE_MAX - 1}" in r._panel_cache, (
+    assert f"key_{r.panel_cache_max - 1}" in r._panel_cache, (
         "LRU eviction removed recently-used entry"
     )
     assert "key_0" not in r._panel_cache, "LRU eviction should have removed oldest entry"

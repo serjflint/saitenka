@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from util import FakeIPC
 
-from overlay.app.controller import NESTED_ID, PANEL_CACHE_MAX, TIP_ID, Reader
+from overlay.app.config import TooltipOptions
+from overlay.app.controller import NESTED_ID, TIP_ID, Reader
 from overlay.app.tokenize import Token
 from overlay.panel import Definition, Entry
+
+PANEL_CACHE_MAX = TooltipOptions().panel_cache_max
 
 
 class _TallDS:
