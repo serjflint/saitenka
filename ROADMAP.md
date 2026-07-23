@@ -37,6 +37,18 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   kernel, and Docker/Podman on a Mac only run *Linux* containers in an ARM VM (an earlier note calling
   it "high-effort but possible" was wrong). Deferred on purpose; the mac-local gate covers ~98% and the
   groundwork makes turning CI on later a small change.
+- **Architecture enforcement — cycles, layering, GPL chokepoint.** `overlay/app/` has grown into a
+  coupling hotspot (~38 modules, god-objects: `controller.py` ~2000 LOC, `cli.py` ~1200), and the
+  only guard is one regex test (`tests/test_layering.py`, single PIL rule). Replace it with a real
+  dependency-contract engine — **trial import-linter vs Tach**, then pick — folded into
+  `uv run poe all`, enforcing three rules: **no import cycles**, the **PIL-agnostic core**, and a
+  **GPL chokepoint** (only `app/dictionary.py` may import the optional `saitenka_deinflect` add-on,
+  guarded — a chokepoint, *not* a ban, since the core imports it on purpose). Rolled out via a
+  **ratchet/baseline** so it lands without a big-bang refactor (`sc/` isn't layer-pure today). Cheap
+  `ruff TID` ban as defense-in-depth on the license boundary; **pyscn** for offline god-object
+  metrics (CBO + complexity) feeding the `controller.py` decomposition — metrics *inform*, contracts
+  *enforce* (Goodhart). Analyzers run out-of-process on the standard interpreter (never imported into
+  the free-threaded runtime). Plan: `vibe/architecture-enforcement-plan.md`.
 - **Deeper cross-platform hardening** — unified signal / clean-shutdown handling (Windows vs POSIX),
   filename sanitization applied at more write sites, `psutil`-based process-tree cleanup coverage.
 - **Test tooling** — `pytest-subprocess` for mpv/ffmpeg launch-argument coverage (currently the live
@@ -50,10 +62,26 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   CodSpeed (its CPU-instruction model is blind to our IO + free-threaded contention). The suspected
   ~55 ms temp-file **upload floor turned out to be a page-cache artifact** (the write is ~1 ms), so an
   mmap/shared-memory upload backend is **de-prioritised** — cold first-paint is render + lookup bound.
-- **Structured logging (`structlog`)** — key-value event logs for the rotating log + `report` bundle,
-  so diagnostics are grepable/parseable (e.g. `event=jimaku.fetch title=… status=400`) instead of
-  free-text. Keep the human console renderer; JSON to the file. Low-risk, incremental over the current
-  stdlib `logging`; do it when the diagnostics story needs it.
+- **Observability — non-blocking logs, traces, and metrics.** Make the latency story
+  *measurable at runtime*, not just in the benchmark harness. Three grounded decisions (after surveying
+  how mpv and comparable tools do it):
+  - **Structured logging (`structlog` + JSON).** Key-value event logs for the rotating log + `report`
+    bundle so diagnostics are grepable/parseable (e.g. `event=jimaku.fetch title=… status=400`) instead
+    of free-text; redaction as a pipeline processor; keep the human console renderer, JSON to the file.
+    Low-risk, incremental over the current stdlib `logging`.
+  - **Tracing/metrics via the OpenTelemetry *API* — not the deployment.** Instrument the
+    latency-critical points (render/raster, overlay upload, hover hit-test, panel/dict caches, dict SQL,
+    IPC round-trip, sub-seek, prefetch depth) with `opentelemetry-{api,sdk}` (both pure-Python, so
+    free-threading-safe — no C extension to re-enable the GIL). Vendor-neutral and swappable, vs. a
+    hand-rolled facade. Lift the harness's p50/p95/**p99** into live histograms; add a `gil_enabled` gauge.
+  - **Non-blocking + local-first by design.** A custom mpv-style *gated* span processor (an atomic
+    "active" flag → ~free when nobody is inspecting, a bounded ring buffer with a surfaced `dropped`
+    counter, off-hot-path export, sampling on the hot per-tick paths). Default export is a small
+    **Chrome Trace Format** writer → view in `chrome://tracing` / Perfetto, **no backend, no gRPC/protobuf**
+    (the OTLP/gRPC exporter has no free-threaded wheels and can silently re-enable the GIL — kept as an
+    opt-in HTTP-only extra for anyone who wants a self-hosted backend). Traps to respect:
+    `contextvars` don't cross a `queue.Queue` (context must be reattached in worker threads), and a CI
+    check should assert the GIL stays off after telemetry imports.
 
 ## Explicitly not planned
 
