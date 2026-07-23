@@ -7,8 +7,10 @@ import pytest
 import overlay.app.controller as C
 import overlay.app.miner_ui as miner_ui
 import overlay.app.nested_popup as nested_popup
-from overlay.app.controller import PanelKey, Reader
+import overlay.app.tooltip as tooltip
+from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId
+from overlay.app.tooltip import PanelKey
 import functools
 
 
@@ -1042,7 +1044,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     tx, ty, tw, _th = r._tip_rect
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1062,7 +1064,7 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     nx, ny, nw, nh = r._nest.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
     r.copy_click()
@@ -1078,7 +1080,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: None)
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: None)
     r.set_hover(0)
     shots = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda bgra, x, y, oid: shots.append((oid, bgra.copy())))
@@ -1086,7 +1088,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     oid, view = shots[-1]
-    hl = np.array(C.FLASH_BGRA, np.uint8)
+    hl = np.array(tooltip.FLASH_BGRA, np.uint8)
     assert oid == OverlayId.TIP and (view[0] == hl).all()  # top border row is the highlight
     clock[0] += r.flash_secs + 0.01
     r.poll_once()  # flash expires → redraw without the border
