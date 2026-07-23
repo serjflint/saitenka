@@ -70,49 +70,77 @@ def start_prefetch(reader: Reader) -> None:
         reader._prefetch_threads.append(th)
 
 
+def _try_finish_job(reader: Reader) -> bool:
+    """Finish the deferred tail of the tooltip the user is looking at RIGHT NOW — ahead of
+    speculatively warming the rest of the line. Returns True if a job was found (handled either
+    way), so the caller knows to skip straight to the next loop iteration."""
+    try:
+        fin: FinishItem = reader._finish_q.get_nowait()
+    except queue.Empty:
+        return False
+    try:
+        fin.panel.finish()
+    except Exception:
+        log.debug("finish job failed", exc_info=True)
+        return True
+    if fin.key == reader._tip_key and fin.panel is reader._tip_state:
+        reader._tip_dirty = True  # main loop re-uploads the now-complete panel
+    elif fin.key == reader._nest.key and fin.panel is reader._nest.state:
+        reader._nest.dirty = True
+    return True
+
+
+def _try_prefetch_item(reader: Reader) -> None:
+    """Dequeue and speculatively render one line-content word's panel, if one is queued and still
+    current (not cancelled by a line change / resume / seek / close since it was enqueued)."""
+    try:
+        item: PrefetchItem = reader._prefetch_q.get(timeout=0.2)
+    except queue.Empty:
+        return
+    if otel_metrics.prefetch_queue_depth is not None:
+        otel_metrics.prefetch_queue_depth.add(-1)
+    if reader._stop.is_set() or item.gen != reader._prefetch_gen:
+        return  # cancelled
+    try:
+        # item.mined came from the main thread — never call _is_mined/card_for from a worker
+        # (jamdict is not thread-safe on free-threaded builds).
+        reader._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
+    except Exception:
+        log.debug(
+            "prefetch render failed for %r", item.token.surface, exc_info=True
+        )  # a bad word must never kill the worker
+
+
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
-        # Priority: finish the deferred tail of the tooltip the user is looking at RIGHT NOW,
-        # ahead of speculatively warming the rest of the line.
-        try:
-            fin: FinishItem | None = reader._finish_q.get_nowait()
-        except queue.Empty:
-            fin = None
-        if fin is not None:
-            try:
-                fin.panel.finish()
-            except Exception:
-                log.debug("finish job failed", exc_info=True)
-            else:
-                if fin.key == reader._tip_key and fin.panel is reader._tip_state:
-                    reader._tip_dirty = True  # main loop re-uploads the now-complete panel
-                elif fin.key == reader._nest.key and fin.panel is reader._nest.state:
-                    reader._nest.dirty = True
+        if _try_finish_job(reader):
             continue
-        try:
-            item: PrefetchItem = reader._prefetch_q.get(timeout=0.2)
-        except queue.Empty:
+        _try_prefetch_item(reader)
+
+
+def _prefetch_candidates(reader: Reader) -> list[tuple[int, int, Token]]:
+    """This line's content words worth warming, N+1 first (likeliest hover / mine target),
+    de-duplicated by lemma. Each entry is ``(priority, token_index, token)``."""
+    seen: set[str] = set()
+    items: list[tuple[int, int, Token]] = []
+    for i, t in enumerate(reader.tokens):
+        if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
             continue
-        if otel_metrics.prefetch_queue_depth is not None:
-            otel_metrics.prefetch_queue_depth.add(-1)
-        if reader._stop.is_set() or item.gen != reader._prefetch_gen:
-            continue  # cancelled (line changed / resumed / seek / closing)
-        try:
-            # item.mined came from the main thread — never call _is_mined/card_for from a
-            # worker (jamdict is not thread-safe on free-threaded builds).
-            reader._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
-        except Exception:
-            log.debug(
-                "prefetch render failed for %r", item.token.surface, exc_info=True
-            )  # a bad word must never kill the worker
+        seen.add(t.lemma)
+        np1 = bool(
+            reader.styles and i < len(reader.styles) and reader.styles[i].tag.startswith("n+1")
+        )
+        items.append((0 if np1 else 1, i, t))
+    items.sort(key=lambda x: x[0])
+    return items
 
 
 def update_prefetch(reader: Reader) -> None:
     """Queue the current line's content words for background rendering when the user is *engaged*
     — paused OR the cursor is over the video (you rarely move the mouse without intent to hover).
-    N+1 words go first (likeliest hover / mine target). On any change (resume, mouse-out, seek,
-    new line) bump the generation so in-flight renders are dropped. Tokens are passed by value
-    (frozen), so a line change can't make a worker read stale state."""
+    On any change (resume, mouse-out, seek, new line) bump the generation so in-flight renders are
+    dropped. Tokens are passed by value (frozen), so a line change can't make a worker read stale
+    state."""
     if not reader.prefetch or reader.dict_set is None:
         return
     engaged = bool(reader._prop("pause")) or reader._mouse_in
@@ -121,25 +149,17 @@ def update_prefetch(reader: Reader) -> None:
         return
     reader._prefetch_key = key
     reader._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
-    if engaged and reader.tokens:
-        gen, seen, items = reader._prefetch_gen, set(), []
-        for i, t in enumerate(reader.tokens):
-            if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
-                continue
-            seen.add(t.lemma)
-            np1 = bool(
-                reader.styles and i < len(reader.styles) and reader.styles[i].tag.startswith("n+1")
-            )
-            items.append((0 if np1 else 1, i, t))
-        items.sort(key=lambda x: x[0])  # N+1 first
-        for _, i, t in items:
-            # Evaluate _is_mined on the main thread (card_for → jamdict must not be called
-            # from a worker thread — jamdict is not thread-safe on free-threaded builds).
-            reader._prefetch_q.put(
-                PrefetchItem(gen, t, reader._inflected_surface(i), reader._is_mined(t))
-            )
-            if otel_metrics.prefetch_queue_depth is not None:
-                otel_metrics.prefetch_queue_depth.add(1)
+    if not (engaged and reader.tokens):
+        return
+    gen = reader._prefetch_gen
+    for _, i, t in _prefetch_candidates(reader):
+        # Evaluate _is_mined on the main thread (card_for → jamdict must not be called from a
+        # worker thread — jamdict is not thread-safe on free-threaded builds).
+        reader._prefetch_q.put(
+            PrefetchItem(gen, t, reader._inflected_surface(i), reader._is_mined(t))
+        )
+        if otel_metrics.prefetch_queue_depth is not None:
+            otel_metrics.prefetch_queue_depth.add(1)
 
 
 def cap_for(reader: Reader, frac: float) -> int:
