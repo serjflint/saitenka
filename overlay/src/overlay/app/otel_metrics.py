@@ -15,6 +15,7 @@ import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -70,25 +71,57 @@ def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
         histogram.record((time.perf_counter() - start) * 1000.0, attributes or None)
 
 
+#: Memoized resolution of `opentelemetry.trace`: `None` = not yet checked, ``False`` = confirmed
+#: unavailable (the observability extra isn't installed — this can't change at runtime, so caching
+#: it forever is correct). Avoids re-attempting (and re-catching ImportError from) a failing import
+#: on every single call from a hot call site like `traced()`.
+_trace_available: bool | None = None
+_trace_module: ModuleType | None = None
+
+
+def _resolve_trace_module() -> ModuleType | None:
+    global _trace_available, _trace_module
+    if _trace_available is None:
+        try:
+            import opentelemetry.trace as _trace
+        except ImportError:
+            _trace_available = False
+        else:
+            _trace_available = True
+            _trace_module = _trace
+    return _trace_module if _trace_available else None
+
+
 @contextmanager
 def traced(name: str, **attributes: str) -> Generator[None]:
     """A real OTel span via the global tracer API — a no-op (not just an unrecorded span, but no
-    `opentelemetry` import at all) when the ``observability`` extra isn't installed, so every call
-    site stays safe to wrap unconditionally, same contract as :func:`timed`. When the extra IS
-    installed but telemetry isn't configured, `trace.get_tracer()` itself returns OTel's built-in
-    no-op tracer — that path costs an import + a cheap proxy call, not a crash.
+    `opentelemetry` import attempt beyond the first) when the ``observability`` extra isn't
+    installed, so every call site stays safe to wrap unconditionally, same contract as :func:`timed`.
+    When the extra IS installed but telemetry isn't configured, `trace.get_tracer()` itself returns
+    OTel's built-in no-op tracer — cheap, not a crash.
 
     Bug this exists to prevent: an earlier direct ``from opentelemetry import trace`` at a call site
     crashed a background thread on any install without the extra — found via live end-to-end testing,
     not by any test in this suite (the dev/test env always has the extra installed via `[full]`)."""
-    try:
-        from opentelemetry import trace
-    except ImportError:
+    trace = _resolve_trace_module()
+    if trace is None:
         yield
         return
     with trace.get_tracer("saitenka.overlay").start_as_current_span(name) as span:
         for k, v in attributes.items():
             span.set_attribute(k, v)
+        yield
+
+
+@contextmanager
+def instrumented(histogram: Histogram | None, span_name: str, **attributes: str) -> Generator[None]:
+    """:func:`traced` + :func:`timed` together — a span AND a histogram sample from the same block,
+    for anchors where both a live percentile and a visible Perfetto timeline entry are useful.
+    Deliberately NOT used at every anchor: a very-high-frequency call site (e.g. the mpv IPC
+    round-trip, called on effectively every poll tick) would flood trace.json with spans — it stays
+    on :func:`timed` alone. See the anchor list in ``vibe/observability-plan.md`` Stage 8 for which
+    is which."""
+    with traced(span_name, **attributes), timed(histogram, **attributes):
         yield
 
 

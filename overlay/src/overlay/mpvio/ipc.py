@@ -152,6 +152,8 @@ class MpvIPC:
         """Send a command array and return the first non-event reply (or an error dict)."""
         if self._closed.is_set():
             return {"error": "disconnected"}
+        # Metrics only (timed, not instrumented) — this runs on effectively every poll tick, and a
+        # span per call would flood trace.json for no visualization benefit at that frequency.
         with otel_metrics.timed(otel_metrics.ipc_roundtrip_ms):
             # Clear any stale reply left by a previously timed-out command (single-flight otherwise).
             try:

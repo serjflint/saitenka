@@ -235,7 +235,9 @@ class Dictionary:
         for f in forms:
             if not f:
                 continue
-            with otel_metrics.timed(otel_metrics.dict_sql_duration_ms, dict=self.title):
+            with otel_metrics.instrumented(
+                otel_metrics.dict_sql_duration_ms, "dict_sql", dict=self.title
+            ):
                 cursor = (
                     conn.execute(glob_q, (did, did, _to_glob(f), limit))
                     if wildcard

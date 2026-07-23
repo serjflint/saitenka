@@ -89,11 +89,15 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     real_import = __import__
 
     def _fake_import(name, *a, **kw):
-        if name == "opentelemetry":
+        if name.startswith("opentelemetry"):
             raise ImportError(name)
         return real_import(name, *a, **kw)
 
     monkeypatch.setattr("builtins.__import__", _fake_import)
+    # traced() memoizes the import resolution (a hot-path optimization) — reset it so this test's
+    # patched __import__ actually gets exercised instead of an earlier test's cached success.
+    monkeypatch.setattr(otel_metrics, "_trace_available", None)
+    monkeypatch.setattr(otel_metrics, "_trace_module", None)
     ran = False
     with otel_metrics.traced("test-span"):
         ran = True
@@ -105,3 +109,19 @@ def test_traced_creates_a_real_span_when_telemetry_is_configured(registered):
         pass
     # the fixture's provider has no exporter attached — this just proves start_as_current_span
     # didn't raise and the block ran; span content is covered end-to-end in test_telemetry.py.
+
+
+def test_instrumented_is_a_noop_when_histogram_is_none():
+    """The Stage 8 anchors that want both a span and a histogram (render, dict_sql, upload,
+    sub_seek, hit_test) use instrumented() — must stay safe with telemetry off."""
+    ran = False
+    with otel_metrics.instrumented(None, "some-span"):
+        ran = True
+    assert ran
+
+
+def test_instrumented_records_both_the_histogram_and_a_span(registered):
+    with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render", dict="X"):
+        pass
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.render.duration_ms"]["count"] == 1

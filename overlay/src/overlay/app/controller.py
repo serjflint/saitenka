@@ -500,7 +500,9 @@ class Reader:
             # .record() call costs real cycles unlike perf.timed's plain deque append above.
             self._hit_test_tick = (self._hit_test_tick + 1) % _HIT_TEST_SAMPLE_EVERY
             if otel_metrics.hit_test_duration_ms is not None and self._hit_test_tick == 0:
-                with otel_metrics.timed(otel_metrics.hit_test_duration_ms):
+                # instrumented() (span + histogram) only on the sampled tick — a span every tick
+                # would flood the trace at poll cadence for no visualization benefit.
+                with otel_metrics.instrumented(otel_metrics.hit_test_duration_ms, "hit_test"):
                     self._update_hover_impl()
             else:
                 self._update_hover_impl()
@@ -866,7 +868,7 @@ class Reader:
         if st is None:
             if otel_metrics.panel_cache_misses is not None:
                 otel_metrics.panel_cache_misses.add(1)
-            with otel_metrics.timed(otel_metrics.render_duration_ms):
+            with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render"):
                 entry = self._entry_for(tok, inflected)
                 # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it
                 # clears the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height
@@ -1893,7 +1895,7 @@ class Reader:
         idx = self._sub_index
         if idx is None or len(idx) == 0:
             return False
-        with otel_metrics.timed(otel_metrics.sub_seek_duration_ms):
+        with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek"):
             sub_start = self._get_float("sub-start")
             time_pos = self._get_float("time-pos")
             current = idx.locate(

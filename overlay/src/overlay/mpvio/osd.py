@@ -87,7 +87,7 @@ class Overlay:
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         oid = self._oid(oid)
-        with otel_metrics.timed(otel_metrics.upload_duration_ms):
+        with otel_metrics.instrumented(otel_metrics.upload_duration_ms, "upload"):
             data, w, h, stride = to_bgra(img)
             path = self._tempfile(oid)
             path.write_bytes(data)
@@ -100,7 +100,7 @@ class Overlay:
     def show_bgra(self, bgra: np.ndarray, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         """Upload an already-BGRA (H, W, 4) array — skips the RGBA→BGRA premultiply (fast scroll)."""
         oid = self._oid(oid)
-        with otel_metrics.timed(otel_metrics.upload_duration_ms):
+        with otel_metrics.instrumented(otel_metrics.upload_duration_ms, "upload"):
             buf = np.ascontiguousarray(bgra)
             h, w = buf.shape[:2]
             path = self._tempfile(oid)
