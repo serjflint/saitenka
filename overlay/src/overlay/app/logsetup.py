@@ -10,13 +10,23 @@ from __future__ import annotations
 import logging
 import logging.handlers
 from pathlib import Path
+from typing import Any
 
+import msgspec
 import structlog
 from structlog.types import EventDict, Processor, WrappedLogger
 
 from overlay.app.report import redact
 
 ROOT_LOGGER_NAME = "overlay"
+
+
+def _json_dumps(obj: EventDict, **_kw: Any) -> str:
+    """``structlog.processors.JSONRenderer``'s serializer hook. msgspec, already a dependency, ships
+    true free-threaded (``cp3XXt``) wheels — unlike orjson, which has none — so it's the faster choice
+    over stdlib ``json`` without the GIL risk. ``**_kw`` absorbs ``JSONRenderer.__init__``'s
+    ``**dumps_kw`` passthrough (unused here, msgspec takes no equivalent)."""
+    return msgspec.json.encode(obj).decode("utf-8")
 
 
 def _redact_event_dict(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
@@ -57,7 +67,7 @@ def configure_logging(log_path: Path) -> None:
         foreign_pre_chain=shared_processors,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            structlog.processors.JSONRenderer(),
+            structlog.processors.JSONRenderer(serializer=_json_dumps),
         ],
     )
     console_formatter = structlog.stdlib.ProcessorFormatter(
