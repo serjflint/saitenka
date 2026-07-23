@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
 
-    from overlay.app.otel_export import GatedSpanProcessor
+    from overlay.app.otel_export import CounterSampler, GatedSpanProcessor
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +49,19 @@ _lock = threading.Lock()
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _span_processor: GatedSpanProcessor | None = None
+_counter_sampler: CounterSampler | None = None
+
+#: Named counter/gauge instruments (see otel_metrics.register) sampled once per tick into the CTF
+#: trace as graph tracks — curated, not "every instrument": duration histograms are visualized as
+#: spans instead (that's what Perfetto's timeline is for), not as a value-over-time line.
+_SAMPLED_COUNTERS = (
+    "saitenka.runtime.gil_enabled",
+    "saitenka.prefetch.queue_depth",
+    "saitenka.panel_cache.hits",
+    "saitenka.panel_cache.misses",
+    "saitenka.dict_cache.hits",
+    "saitenka.dict_cache.misses",
+)
 
 #: Gates the span pipeline. Starts off (so it costs nothing before/without telemetry); `configure()`
 #: turns it on as part of enabling telemetry — see the comment there. Exists as a separate switch
@@ -71,9 +84,26 @@ def dropped_span_count() -> int:
     return _span_processor.dropped_count if _span_processor is not None else 0
 
 
+def _sample_counters() -> dict[str, float]:
+    """The CounterSampler's ``sample_fn``: the curated instrument values from the last
+    ``otel_metrics.snapshot()``, plus the span queue's live dropped-count (not itself an OTel
+    instrument — reading straight from the processor avoids double-bookkeeping a Counter that would
+    need incrementing from two different places)."""
+    from overlay.app import otel_metrics
+
+    snap = otel_metrics.snapshot()
+    out: dict[str, float] = {}
+    for name in _SAMPLED_COUNTERS:
+        value = snap.get(name, {}).get("value")
+        if isinstance(value, int | float):
+            out[name.removeprefix("saitenka.")] = float(value)
+    out["telemetry.dropped_spans"] = float(dropped_span_count())
+    return out
+
+
 def configure(options: TelemetryOptions) -> None:
     """Idempotent: a no-op if disabled, if the extra isn't installed, or if already configured."""
-    global _tracer_provider, _meter_provider, _span_processor
+    global _tracer_provider, _meter_provider, _span_processor, _counter_sampler
     if not options.enabled:
         return
     with _lock:
@@ -91,14 +121,15 @@ def configure(options: TelemetryOptions) -> None:
             )
             return
 
-        from overlay.app.otel_export import CTFSpanExporter, GatedSpanProcessor
+        from overlay.app.otel_export import CounterSampler, CTFSpanExporter, GatedSpanProcessor
         from overlay.app.otel_metrics import register as register_metrics
 
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         tp = TracerProvider()
-        processor = GatedSpanProcessor(CTFSpanExporter(out_dir / "trace.json"), span_gate)
+        exporter = CTFSpanExporter(out_dir / "trace.json")
+        processor = GatedSpanProcessor(exporter, span_gate)
         tp.add_span_processor(processor)
         # TelemetryOptions.enabled is the actual opt-in switch; the gate defaulting off would mean
         # enabling telemetry produces logs + metrics but NO trace ever, since nothing else flips it —
@@ -114,13 +145,18 @@ def configure(options: TelemetryOptions) -> None:
         _tracer_provider = tp
         _meter_provider = mp
         _span_processor = processor
+        # Gauges/counters as CTF "counter" tracks in the SAME trace.json — Perfetto graphs them next
+        # to the spans, time-correlated, with no separate metrics-visualization stack.
+        _counter_sampler = CounterSampler(exporter, _sample_counters)
         log.info("telemetry enabled: export_dir=%s", out_dir)
 
 
 def shutdown() -> None:
     """Flush + tear down the providers. Safe to call even when telemetry was never configured."""
-    global _tracer_provider, _meter_provider, _span_processor
+    global _tracer_provider, _meter_provider, _span_processor, _counter_sampler
     with _lock:
+        if _counter_sampler is not None:
+            _counter_sampler.shutdown()
         if _tracer_provider is not None:
             try:
                 _tracer_provider.shutdown()
@@ -138,4 +174,5 @@ def shutdown() -> None:
         _tracer_provider = None
         _meter_provider = None
         _span_processor = None
+        _counter_sampler = None
         span_gate.set(False)

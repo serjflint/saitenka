@@ -116,6 +116,43 @@ def test_end_to_end_span_reaches_the_ctf_trace_file(tmp_path):
     assert any(e["name"] == "load_deps_async" for e in data["traceEvents"])
 
 
+def test_sample_counters_reads_gil_enabled_and_dropped_spans(tmp_path):
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    values = telemetry._sample_counters()
+    assert values["runtime.gil_enabled"] in (0.0, 1.0)
+    assert values["telemetry.dropped_spans"] == 0.0
+
+
+def test_sample_counters_empty_when_not_configured():
+    assert telemetry._sample_counters() == {"telemetry.dropped_spans": 0.0}
+
+
+def test_configure_writes_counter_tracks_into_the_trace_file(tmp_path):
+    """End-to-end: configure() wires a CounterSampler that periodically appends CTF counter (ph: C)
+    events to the same trace.json the spans go into — verifies the whole pipeline, not just that
+    _sample_counters() returns the right dict. Uses the sampler's real (1s) interval, so this test
+    is allowed to take a couple of seconds."""
+    import json
+    import time as time_mod
+
+    export = tmp_path / "telemetry"
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
+    trace_path = export / "trace.json"
+
+    for _ in range(60):
+        if trace_path.exists():
+            data = json.loads(trace_path.read_text())
+            if any(e["ph"] == "C" for e in data["traceEvents"]):
+                break
+        time_mod.sleep(0.1)
+    else:
+        raise AssertionError("no counter event landed in trace.json within 6s")
+
+    counter_names = {e["name"] for e in data["traceEvents"] if e["ph"] == "C"}
+    assert "runtime.gil_enabled" in counter_names
+    assert "telemetry.dropped_spans" in counter_names
+
+
 def test_active_gate_defaults_off_and_toggles():
     gate = telemetry.ActiveGate()
     assert bool(gate) is False

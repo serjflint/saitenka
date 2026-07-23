@@ -12,7 +12,8 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import msgspec
@@ -46,24 +47,42 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
     }
 
 
+def _counter_event(name: str, value: float, ts_ns: int, pid: int) -> dict[str, object]:
+    """A Chrome Trace Format "counter" (``ph: C``) event. Perfetto/``chrome://tracing`` render each
+    distinct *name* as its own graph track — this is how a metrics-style value-over-time view shows
+    up in the SAME trace.json the spans go into, no separate metrics-visualization stack needed."""
+    return {"name": name, "ph": "C", "ts": ts_ns / 1000, "pid": pid, "args": {"value": value}}
+
+
 class CTFSpanExporter(SpanExporter):
-    """Rewrites ``{"traceEvents": [...]}`` to *path* on every export call. Simple (no incremental
-    append — a valid CTF file must be one JSON document), acceptable because export only happens off
-    the hot path on the writer thread, at whatever batch cadence the processor drains at."""
+    """Rewrites ``{"traceEvents": [...]}`` to *path* on every export/counter call. Simple (no
+    incremental append — a valid CTF file must be one JSON document), acceptable because both spans
+    and counters are written off the hot path (the span writer thread / the counter sampler thread).
+    ``_lock`` guards ``_events`` + the file write since both threads share this exporter."""
 
     def __init__(self, path: Path) -> None:
         super().__init__()
         self._path = path
         self._events: list[dict[str, object]] = []
+        self._lock = threading.Lock()
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         try:
-            self._events.extend(_span_to_ctf_event(s) for s in spans)
-            self._path.write_bytes(msgspec.json.encode({"traceEvents": self._events}))
+            with self._lock:
+                self._events.extend(_span_to_ctf_event(s) for s in spans)
+                self._path.write_bytes(msgspec.json.encode({"traceEvents": self._events}))
         except OSError:
             log.debug("CTF export failed", exc_info=True)
             return SpanExportResult.FAILURE
         return SpanExportResult.SUCCESS
+
+    def add_counter_event(self, name: str, value: float, ts_ns: int, pid: int = 1) -> None:
+        try:
+            with self._lock:
+                self._events.append(_counter_event(name, value, ts_ns, pid))
+                self._path.write_bytes(msgspec.json.encode({"traceEvents": self._events}))
+        except OSError:
+            log.debug("CTF counter export failed", exc_info=True)
 
     def shutdown(self) -> None:
         pass
@@ -144,3 +163,39 @@ class GatedSpanProcessor(SpanProcessor):
         if batch:
             self._exporter.export(batch)
         return True
+
+
+class CounterSampler:
+    """Periodically calls *sample_fn* (returns a flat ``{name: value}`` snapshot — deliberately a
+    plain callable, not coupled to :mod:`overlay.app.otel_metrics` specifically) and writes each
+    value as a CTF counter event via :meth:`CTFSpanExporter.add_counter_event`. Same non-blocking,
+    local-file philosophy as the span pipeline: one dedicated daemon thread, no push/pull server."""
+
+    def __init__(
+        self,
+        exporter: CTFSpanExporter,
+        sample_fn: Callable[[], dict[str, float]],
+        interval: float = 1.0,
+    ) -> None:
+        self._exporter = exporter
+        self._sample_fn = sample_fn
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, args=(interval,), name="otel-counter-sampler", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self, interval: float) -> None:  # pragma: no cover — timing-dependent background loop
+        while not self._stop.wait(interval):
+            try:
+                values = self._sample_fn()
+            except Exception:
+                log.debug("counter sample failed", exc_info=True)
+                continue
+            ts_ns = time.time_ns()
+            for name, value in values.items():
+                self._exporter.add_counter_event(name, value, ts_ns)
+
+    def shutdown(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2.0)
