@@ -19,7 +19,7 @@ import numpy as np
 
 from overlay.app.card_preview import PreviewData
 from overlay.app.config import ReaderOptions
-from overlay.app import miner_ui, nested_popup, prefetch, tooltip
+from overlay.app import miner_ui, nested_popup, prefetch, tooltip, translation
 from overlay.app.miner import Miner, tag_slug
 from overlay import otel_metrics
 from overlay.app.overlay_ids import OverlayId
@@ -33,14 +33,11 @@ from overlay.app.media import (
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import SKIP_POS, Token, tokenize
-from overlay.model import Span, Style
 from overlay.mpvio.ipc import MpvIPC
 from overlay.mpvio.osd import Overlay
 from overlay.panel import (
     Freq,
 )
-from overlay.render.flow import render_flow
-from overlay.render.layout import Block, inline_width
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +81,6 @@ TIP_KEYBINDS: tuple[tuple[str, str], ...] = (
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
-EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
 
 
 # Popup view/panel classes live in app/popups.py; legacy aliases kept because the controller
@@ -685,65 +681,22 @@ class Reader:
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def _setup_secondary(self) -> int | None:
-        tracks = [t for t in (self._get("track-list") or []) if t.get("type") == "sub"]
-        primary = self._get("sid")
-        # prefer an English-tagged track; else any other sub track (generated demo subs carry no lang)
-        pick = next((t for t in tracks if (t.get("lang") or "").lower() in EN_LANGS), None)
-        if pick is None:
-            pick = next((t for t in tracks if t.get("id") != primary), None)
-        if pick is None:
-            return None
-        self.ipc.command("set_property", "secondary-sid", pick["id"])
-        self.ipc.command("set_property", "secondary-sub-visibility", False)
-        return pick["id"]
+        return translation.setup_secondary(self)
 
     def _translation_visible(self) -> bool:
-        """Should the EN translation be shown now? Manual toggle (`t`), OR auto-reveal while a tooltip
-        is up (auto-translate opt-in)."""
-        return self._translate_on or (self.auto_translate and self.hover >= 0)
+        return translation.translation_visible(self)
 
     def _sync_auto_translation(self) -> None:
-        """Reconcile the auto-translation overlay with the hover state (only when opted in)."""
-        if not self.auto_translate:
-            return
-        if self._translation_visible():
-            self._draw_translation()
-        elif not self._translate_on:
-            self.ov.hide(OverlayId.TRANS)
-            self._trans_text = None
+        translation.sync_auto_translation(self)
 
     def toggle_translation(self) -> None:
-        self._translate_on = not self._translate_on
-        if self._translation_visible():
-            self._draw_translation()
-        else:
-            self.ov.hide(OverlayId.TRANS)
-            self._trans_text = None
+        translation.toggle_translation(self)
 
     def _secondary_text(self) -> str:
-        return (
-            (self._prop("secondary-sub-text") or "").replace("\\N", " ").replace("\n", " ").strip()
-        )
+        return translation.secondary_text(self)
 
     def _draw_translation(self) -> None:
-        text = self._secondary_text()
-        self._trans_text = text
-        if not text:
-            self.ov.hide(OverlayId.TRANS)
-            return
-        size = max(20, round(self.osd[1] * 0.032))
-        style = Style(size=size, color=(220, 224, 235, 255))
-        pad = 14
-        # trim the box to the text (wrap only if it exceeds 80% of the width), then centre it
-        box_w = min(round(inline_width([Span(text, style)])) + 2 * pad, int(self.osd[0] * 0.8))
-        flow = render_flow(
-            [Span(text, style)], Block(width=box_w, padding=pad, background=(0, 0, 0, 170))
-        )
-        x = (self.osd[0] - flow.width) // 2
-        # top of the screen (SubMiner-style) — separate from the JP subs at the bottom, and clear of
-        # the tooltip that anchors above the hovered word.
-        y = max(8, round(self.osd[1] * 0.035))
-        self.ov.show(flow, x, y, oid=OverlayId.TRANS)
+        translation.draw_translation(self)
 
     def _toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         img = render_toast(text, kind)
