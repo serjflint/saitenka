@@ -3,7 +3,7 @@
 from PIL import Image
 
 from overlay.app.card_preview import PreviewData, render_card_preview
-from overlay.app.controller import _html_items, _html_lines, _media_name
+from overlay.app.miner_ui import _html_items, _html_lines, _media_name
 
 
 def test_preview_renders_all_sections():

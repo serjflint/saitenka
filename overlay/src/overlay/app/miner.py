@@ -15,6 +15,8 @@ from pathlib import Path
 from overlay.app.anki import AnkiError, bold_word, build_note, dedupe
 from overlay.app.lookup import card_for
 from overlay.app.media import clip_audio, current_timespan, screenshot
+from overlay.app.miner_ui import _strip_tags
+from overlay.app.tokenize import SKIP_POS
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +50,6 @@ class Miner:
     def mine_target(self) -> int | None:
         """Which token to mine: the hovered one, else the N+1 word, else the first content word."""
         r = self.r
-        from overlay.app.controller import SKIP_POS
-
         if r.hover >= 0:
             return r.hover
         if not r.tokens:
@@ -187,8 +187,6 @@ class Miner:
     def bulk_mine(self) -> None:
         """Mine every unknown content word in the current cue, sharing one screenshot + audio."""
         r = self.r
-        from overlay.app.controller import SKIP_POS
-
         if not r.anki or not r.mine_cfg or not r.tokens:
             r._toast("nothing to mine", "warn")
             return
@@ -248,8 +246,6 @@ class Miner:
         r = self.r
         if not r.anki or not r.mine_cfg:
             return
-        from overlay.app.controller import _strip_tags
-
         fieldname = r.mine_cfg.fields.get("expression", "Expression")
         try:
             ids = r.anki.find_notes(f'deck:"{r.mine_cfg.deck}"')

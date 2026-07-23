@@ -5,6 +5,7 @@ import time
 import pytest
 
 import overlay.app.controller as C
+import overlay.app.miner_ui as miner_ui
 from overlay.app.controller import PanelKey, Reader
 import functools
 
@@ -1124,14 +1125,14 @@ def _point_at(ipc, rect):
 
 def test_preview_does_not_autoplay(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     _preview_reader(FakeIPC())
     assert played == []  # showing the preview no longer autoplays
 
 
 def test_preview_audio_button_plays_on_click(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     _point_at(ipc, r._preview_audio_rect)
@@ -1141,7 +1142,7 @@ def test_preview_audio_button_plays_on_click(monkeypatch):
 
 def test_preview_empty_click_plays_nothing(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     px, py, _pw, ph = r._preview_rect

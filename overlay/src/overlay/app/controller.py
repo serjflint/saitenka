@@ -8,9 +8,7 @@ near the word. Both overlays live in mpv's own OSD surface → fullscreen-safe.
 from __future__ import annotations
 
 import logging
-import io
 import queue
-import re
 import tempfile
 import threading
 import time
@@ -19,12 +17,10 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-from PIL import Image
 
-from overlay.app.anki import AnkiError
-from overlay.app.card_preview import PreviewData, render_card_preview
+from overlay.app.card_preview import PreviewData
 from overlay.app.config import ReaderOptions
-from overlay.app import prefetch
+from overlay.app import miner_ui, prefetch
 from overlay.app.miner import Miner, tag_slug
 from overlay import otel_metrics
 from overlay.app.perf import gil_disabled, timed
@@ -33,9 +29,7 @@ from overlay.app.prefetch import FinishItem
 from overlay.app.lookup import card_for, entry_for
 from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.media import (
-    audio_duration,
     copy_clipboard,
-    play_audio,
     speak,
     tts_available,
 )
@@ -64,7 +58,6 @@ SUB_ID = 1
 TIP_ID = 2
 TOAST_ID = 3
 TRANS_ID = 4
-PREVIEW_ID = 5
 NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
 LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
@@ -136,24 +129,6 @@ FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RG
 JLPT_DARKEN = (
     0.62  # darken the pastel underline hue for the pill name-segment so white text is legible
 )
-
-
-def _strip_tags(s: str) -> str:
-    return re.sub(r"<[^>]+>", "", s).strip()
-
-
-def _html_lines(html: str) -> list[str]:
-    parts = re.split(r"<br\s*/?>", html or "")
-    return [t for t in (_strip_tags(p) for p in parts) if t]
-
-
-def _html_items(html: str) -> list[str]:
-    return [_strip_tags(m) for m in re.findall(r"<li>(.*?)</li>", html or "", re.S)]
-
-
-def _media_name(field_html: str, pattern: str) -> str:
-    m = re.search(pattern, field_html or "")
-    return m.group(1) if m else ""
 
 
 # Popup view/panel classes live in app/popups.py; legacy aliases kept because the controller
@@ -603,7 +578,7 @@ class Reader:
         if not self.lines:
             self._toast("no line to copy", "warn", 1.2)
             return
-        copy_clipboard("\n".join(self._sentence_lines()))
+        copy_clipboard("\n".join(miner_ui.sentence_lines(self)))
         self._toast("copied line", "ok", 1.2)
 
     def _flash(self, oid: int) -> None:
@@ -1385,155 +1360,26 @@ class Reader:
         self._miner.mine_token(tok)
 
     def _mark_mined(self, expression: str) -> None:
-        """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately."""
-        if not expression:
-            return
-        self._mined.add(expression)
-        if self.hover >= 0 and self._tip_state is not None:
-            self._show_tooltip(self.hover)  # rebuild the base tooltip (✓ if it's this word)
-        if self._nest.state is not None and self._nest.token is not None:
-            self._rerender_nested()  # and the nested popup
+        miner_ui.mark_mined(self, expression)
 
-    def _rerender_nested(self) -> None:
-        """Rebuild the nested popup in place with the current mined-state, keeping its position."""
-        tok = self._nest.token
-        if tok is None:
-            return
-        mined = self._is_mined(tok)
-        st = self._panel_for(tok, tok.surface, min_h=self._tip_cap(), finish=True, mined=mined)
-        self._nest.state = st
-        self._nest.key = self._panel_key(tok, tok.surface, mined)
-        self._nest.bgra = st.bgra()  # decompress the cached panel into the nested scroll buffer
-        self._render_nested_view()
-
-    # --- card preview (verify correctness / image / sound, one surface) -----------------------
-    def _sentence_lines(self) -> list[str]:
-        return ["".join(t.surface for t in line) for line in self.lines]
-
-    def _footer(self, video) -> str:
-        assert self.mine_cfg is not None  # previews only exist after a mine
-        return f"{self.mine_cfg.deck} · {self.mine_cfg.model} · {self._provenance(video)}"
-
+    # --- card preview (verify correctness / image / sound, one surface) — logic in app/miner_ui.py
     def _preview_mined(self, card, tok, video) -> None:
-        img = None
-        if self._last_jpg and Path(self._last_jpg).exists():
-            img = Image.open(self._last_jpg)
-        secs = audio_duration(self._last_audio) if self._last_audio else None
-        pv = PreviewData(
-            "mined",
-            card.expression,
-            card.reading,
-            self._sentence_lines(),
-            tok.surface,
-            list(card.glosses),
-            img,
-            secs,
-            self._footer(video),
-        )
-        self._show_preview(pv, self._last_audio)
+        miner_ui.preview_mined(self, card, tok, video)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
-        assert self.anki is not None and self.mine_cfg is not None  # duplicate path = mining on
-        try:
-            info = self.anki.notes_info([note_id])
-        except AnkiError:
-            info = []
-        if not info:
-            self._toast(f"already have {card.expression}", "warn")
-            return
-        f, fld = info[0]["fields"], self.mine_cfg.fields
-
-        def val(logical):
-            return f.get(fld.get(logical, ""), {}).get("value", "")
-
-        img = self._media_image(_media_name(val("picture"), r'src="([^"]+)"'))
-        mp3 = self._media_tempfile(_media_name(val("audio"), r"\[sound:([^\]]+)\]"))
-        secs = audio_duration(mp3) if mp3 else None
-        pv = PreviewData(
-            status,
-            val("expression") or card.expression,
-            val("reading") or card.reading,
-            _html_lines(val("sentence")),
-            val("expression") or card.expression,
-            _html_items(val("glossary")) or list(card.glosses),
-            img,
-            secs,
-            self._footer(self._get("path")),
-        )
-        self._show_preview(pv, mp3)
-
-    def _media_image(self, name):
-        if not name or self.anki is None:
-            return None
-        try:
-            data = self.anki.retrieve_media(name)
-            return Image.open(io.BytesIO(data)) if data else None
-        except Exception:
-            return None
-
-    def _media_tempfile(self, name):
-        if not name or self.anki is None:
-            return None
-        try:
-            data = self.anki.retrieve_media(name)
-            if not data:
-                return None
-            p = self._tmp / name
-            p.write_bytes(data)
-            return p
-        except Exception:
-            return None
+        miner_ui.preview_existing(self, note_id, card, status)
 
     def _show_preview(self, pv: PreviewData, audio_path) -> None:
-        # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
-        self._last_preview, self._last_audio = pv, audio_path
-        self._preview_zoom = False
-        self._render_preview()
-
-    def _render_preview(self) -> None:
-        pv = self._last_preview
-        if pv is None:
-            return
-        pr = render_card_preview(pv, width=max(440, self.tip_width), zoom=self._preview_zoom)
-        px, py = round(self.osd[0] * 0.03), round(self.osd[1] * 0.06)
-        self.ov.show(pr.image, px, py, oid=PREVIEW_ID)
-        self._preview_rect = (px, py, pr.image.width, pr.image.height)
-
-        def _screen(r):
-            return (px + r[0], py + r[1], r[2], r[3]) if r else None
-
-        self._preview_close_rect = _screen(pr.close_rect)
-        self._preview_audio_rect = _screen(pr.audio_rect)
-        self._preview_image_rect = _screen(pr.image_rect)
+        miner_ui.show_preview(self, pv, audio_path)
 
     def _hide_preview(self) -> None:
-        self.ov.hide(PREVIEW_ID)
-        self._last_preview = None
-        self._preview_rect = self._preview_close_rect = None
-        self._preview_audio_rect = self._preview_image_rect = None
+        miner_ui.hide_preview(self)
 
     def _click_preview(self, x: float, y: float) -> bool:
-        """Handle a click on the card preview: ✕ dismiss, screenshot → toggle enlarge, ▶ → play audio.
-        An empty click does nothing. Returns True if the click landed on the preview."""
-        if self._preview_rect is None or not self._in_rect(self._preview_rect, x, y):
-            return False
-        if self._preview_close_rect and self._in_rect(self._preview_close_rect, x, y):
-            self._hide_preview()
-        elif self._preview_image_rect and self._in_rect(self._preview_image_rect, x, y):
-            self._preview_zoom = not self._preview_zoom
-            self._render_preview()  # enlarge to verify the frame / shrink back
-        elif (
-            self._preview_audio_rect
-            and self._in_rect(self._preview_audio_rect, x, y)
-            and self.play_audio
-            and self._last_audio
-        ):
-            play_audio(self._last_audio)  # ▶ → play the mined clip on demand
-        return True
+        return miner_ui.click_preview(self, x, y)
 
     def replay_preview(self) -> None:
-        if self._last_preview:
-            self._show_preview(self._last_preview, self._last_audio)
+        miner_ui.replay_preview(self)
 
     def _frequency(self, tok) -> tuple[str, str]:
         return self._miner.frequency(tok)
