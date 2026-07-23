@@ -1,0 +1,71 @@
+[importlinter]
+root_packages =
+    overlay
+include_external_packages = True
+exclude_type_checking_imports = True
+
+[importlinter:contract:no-cycles]
+name = No import cycles among overlay's top-level packages
+type = acyclic_siblings
+ancestors =
+    overlay
+# Ratchet baseline (2026-07-23): overlay/ is NOT layer-pure today (sc/model.py:11 already imports
+# overlay.render; sc/walk.py:19,230 too). These entries
+# grandfather the pre-existing cycles found on adoption so the gate is green on day one; burn them
+# down under the Stage 5 controller.py split, never add new ones. The mpvio<->app cycle (2 imports)
+# was fixed outright, not ratcheted: overlay/app/otel_metrics.py moved to overlay/otel_metrics.py —
+# it's a leaf instrumentation module with no app/ dependencies, so mpvio importing it from app/ was
+# a pure layering accident, not a real coupling. A facade wasn't needed; relocating the module to its
+# correct layer removed the backward edge entirely.
+ignore_imports =
+    overlay.render.document -> overlay.sc.model
+    overlay.draw.chip -> overlay.render.layout
+    overlay.app.dictdb -> overlay.app.yomitan_import
+    overlay.app.doctor -> overlay.app.crashlog
+    overlay.app.controller -> overlay.app.miner
+    overlay.app.report -> overlay.app.crashlog
+    overlay.app.otel_export -> overlay.app.telemetry
+    overlay.app.dictdb -> overlay.app.wordlists
+
+[importlinter:contract:pil-agnostic-core]
+name = sc/ and model.py stay PIL-agnostic
+type = forbidden
+# Direct imports only (allow_indirect_imports): sc/ legitimately imports overlay.render for the
+# Inline type (see the no-cycles ratchet above) and render/draw pull in PIL themselves — a
+# transitive check would flag that pre-existing, accepted design. This preserves the original
+# test_layering.py semantics (a literal `import PIL` line), just without the hand-parsed
+# TYPE_CHECKING logic (exclude_type_checking_imports does that for free).
+allow_indirect_imports = True
+source_modules =
+    overlay.sc
+    overlay.model
+forbidden_modules =
+    PIL
+
+[importlinter:contract:pil-app-allowlist]
+name = app/ imports PIL only via raster/ or the migration allowlist
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    overlay.app
+forbidden_modules =
+    PIL
+# subtitles/toast/card_preview/controller migrate to the raster protocol opportunistically, later
+# (see tests/test_layering.py docstring, pre-existing allowlist).
+ignore_imports =
+    overlay.app.subtitles -> PIL
+    overlay.app.toast -> PIL
+    overlay.app.card_preview -> PIL
+    overlay.app.controller -> PIL
+
+[importlinter:contract:gpl-chokepoint]
+name = only app.dictionary / app.doctor may import the GPL deinflect add-on
+type = forbidden
+source_modules =
+    overlay
+forbidden_modules =
+    saitenka_deinflect
+ignore_imports =
+    overlay.app.dictionary -> saitenka_deinflect
+    overlay.app.doctor -> saitenka_deinflect
+

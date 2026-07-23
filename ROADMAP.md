@@ -37,18 +37,19 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   kernel, and Docker/Podman on a Mac only run *Linux* containers in an ARM VM (an earlier note calling
   it "high-effort but possible" was wrong). Deferred on purpose; the mac-local gate covers ~98% and the
   groundwork makes turning CI on later a small change.
-- **Architecture enforcement — cycles, layering, GPL chokepoint.** `overlay/app/` has grown into a
-  coupling hotspot (~38 modules, god-objects: `controller.py` ~2000 LOC, `cli.py` ~1200), and the
-  only guard is one regex test (`tests/test_layering.py`, single PIL rule). Replace it with a real
-  dependency-contract engine — **trial import-linter vs Tach**, then pick — folded into
-  `uv run poe all`, enforcing three rules: **no import cycles**, the **PIL-agnostic core**, and a
-  **GPL chokepoint** (only `app/dictionary.py` may import the optional `saitenka_deinflect` add-on,
-  guarded — a chokepoint, *not* a ban, since the core imports it on purpose). Rolled out via a
-  **ratchet/baseline** so it lands without a big-bang refactor (`sc/` isn't layer-pure today). Cheap
-  `ruff TID` ban as defense-in-depth on the license boundary; **pyscn** for offline god-object
-  metrics (CBO + complexity) feeding the `controller.py` decomposition — metrics *inform*, contracts
-  *enforce* (Goodhart). Analyzers run out-of-process on the standard interpreter (never imported into
-  the free-threaded runtime). Plan: `vibe/architecture-enforcement-plan.md`.
+- **`controller.py` decomposition, under the architecture ratchet.** The dependency-contract engine
+  (`uv run poe arch` — no import cycles, PIL-agnostic core, GPL chokepoint) shipped; what's left is
+  using it. `poe arch-report` (`pyscn`) already confirms the god-object: `controller.py`'s `Reader`
+  class (~1850 LOC, CBO 20) is the top coupling hit. Extract responsibilities into `app/*`
+  submodules behind stable seams (see `AGENTS.md`'s refactoring section — LSP-navigated,
+  codemod-applied), which will also let the cycle ratchet in `.importlinter` (currently covering
+  `overlay.render`<->`overlay.sc`, `overlay.draw`<->`overlay.render`, and an `app/`-internal cluster:
+  `dictdb`/`yomitan_import`/`wordlists`/`init_wizard`/`doctor`/`crashlog`/`report`,
+  `controller`<->`miner`) tighten — burn down `ignore_imports` entries as splits remove edges, never
+  add new ones. A cognitive-complexity gate (`uv run poe complexity`, `complexipy`) also shipped
+  alongside `arch`, ratcheted against a checked-in baseline (`overlay/complexipy-snapshot.json`) —
+  `cli.py`'s `run()` (147) and `render/flow.py`'s `render_flow` (74) are its worst offenders and good
+  secondary split targets once `controller.py` itself is underway.
 - **Deeper cross-platform hardening** — unified signal / clean-shutdown handling (Windows vs POSIX),
   filename sanitization applied at more write sites, `psutil`-based process-tree cleanup coverage.
 - **Test tooling** — `pytest-subprocess` for mpv/ffmpeg launch-argument coverage (currently the live

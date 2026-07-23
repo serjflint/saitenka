@@ -530,10 +530,10 @@ def check_perf() -> Check:
 
 
 def check_telemetry() -> Check:
-    """OTel tracing/metrics status (see ``vibe/observability-plan.md``) — off by default, purely
+    """OTel tracing/metrics status — off by default, purely
     informational either way. ``doctor`` runs as its OWN short-lived process, so it can't read a
     separate live overlay session's in-memory metrics (pull-based / process-local by design,
-    :func:`overlay.app.otel_metrics.snapshot`); it reports config state + the on-disk CTF trace
+    :func:`overlay.otel_metrics.snapshot`); it reports config state + the on-disk CTF trace
     file the live session wrote, if telemetry was enabled for it."""
     from overlay.app.config import load_config, resolve_telemetry
     from overlay.app.telemetry import export_dir

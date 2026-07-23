@@ -21,6 +21,10 @@ dev = ["poethepoet>=0.30"]
 all = { cmd = "uv run poe all", cwd = "overlay" }
 lint = { cmd = "uv run poe lint", cwd = "overlay" }
 types = { cmd = "uv run poe types", cwd = "overlay" }
+arch = { cmd = "uv run poe arch", cwd = "overlay" }
+arch-report = { cmd = "uv run poe arch-report", cwd = "overlay" }
+complexity = { cmd = "uv run poe complexity", cwd = "overlay" }
+complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
 test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
 cov = { cmd = "uv run poe cov", cwd = "overlay" }

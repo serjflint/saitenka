@@ -7,6 +7,25 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **Dependency-contract engine (`uv run poe arch`)** replaces the single-rule regex layering test:
+  no import cycles among `overlay`'s top-level packages, the `sc`/`model.py` core stays PIL-agnostic,
+  and the optional GPL-3.0 `saitenka_deinflect` add-on is only importable through its
+  `app/dictionary.py` + `app/doctor.py` chokepoint (`ruff` `TID` bans it elsewhere as
+  defense-in-depth). Folded into `poe all`. A non-gating `poe arch-report` (`pyscn`) ranks coupling
+  hotspots to guide the `controller.py` split.
+- **Cognitive-complexity gate (`uv run poe complexity`)** — `complexipy`, ratcheted against a
+  checked-in baseline (`overlay/complexipy-snapshot.json`) so today's pre-existing high-complexity
+  functions are grandfathered and only new complexity growth fails the gate. Folded into `poe all`;
+  regenerate the baseline with `poe complexity-baseline` after a deliberate refactor.
+
+### Fixed
+
+- **`overlay.mpvio` importing from `overlay.app`** (a real import cycle) — `otel_metrics.py`, a leaf
+  instrumentation module with no `app/` dependencies, had been placed under `app/` by accident; moved
+  to `overlay/otel_metrics.py`.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added

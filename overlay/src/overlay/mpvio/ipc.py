@@ -19,7 +19,7 @@ import threading
 import time
 from pathlib import Path
 
-from overlay.app import otel_metrics
+from overlay import otel_metrics
 from overlay.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTransport
 
 log = logging.getLogger(__name__)

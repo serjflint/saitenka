@@ -25,9 +25,14 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
 - **Dev gate (no CI):** `uv run poe all` — lint (ruff), types (mypy + basedpyright blocking, pyrefly + ty
-  advisory), tests (incl. free-threaded), coverage floor 85%. Run it before pushing. The real tasks
-  live in `overlay/`; the repo-root `pyproject.toml` is a non-package poe shim that delegates there, so
-  `uv run poe <task>` (all, test, bench, smoke-live, …) works from **either the repo root or `overlay/`**.
+  advisory), arch (import-linter — no cycles, PIL-agnostic core, GPL chokepoint; `.importlinter`),
+  complexity (complexipy, ratcheted against a checked-in `overlay/complexipy-snapshot.json` baseline —
+  regenerate with `poe complexity-baseline` after a deliberate refactor, never to silence a real
+  regression), tests (incl. free-threaded), coverage floor 85%. Run it before pushing. `poe
+  arch-report` (pyscn) is a separate, non-gating coupling/complexity report guiding the `controller.py`
+  split. The real tasks live in `overlay/`; the repo-root `pyproject.toml` is a non-package poe shim
+  that delegates there, so `uv run poe <task>` (all, test, bench, smoke-live, …) works from **either
+  the repo root or `overlay/`**.
 
 ## Refactoring
 

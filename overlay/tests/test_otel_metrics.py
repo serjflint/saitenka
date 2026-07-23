@@ -1,4 +1,4 @@
-"""Tests for overlay.app.otel_metrics: instrument registration + pull-based snapshot (Stage 7)."""
+"""Tests for overlay.otel_metrics: instrument registration + pull-based snapshot (Stage 7)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
-from overlay.app import otel_metrics
+from overlay import otel_metrics
 
 
 @pytest.fixture

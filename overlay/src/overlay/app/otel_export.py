@@ -1,7 +1,7 @@
 """Non-blocking span pipeline: a gated, bounded-queue :class:`SpanProcessor` feeding a Chrome Trace
 Format (CTF) :class:`SpanExporter` — no backend, opens directly in ``chrome://tracing`` / Perfetto.
 
-Mirrors mpv's own telemetry model (see ``vibe/observability-plan.md``): the hot path (whatever thread
+Mirrors mpv's own telemetry model: the hot path (whatever thread
 ends a span) pays a single :class:`~overlay.app.telemetry.ActiveGate` check when the gate is off, and
 a non-blocking queue push when it's on — a dedicated writer thread does the actual (slow) export, and
 a full queue drops the span and counts it rather than blocking the caller.
@@ -173,7 +173,7 @@ class GatedSpanProcessor(SpanProcessor):
 
 class CounterSampler:
     """Periodically calls *sample_fn* (returns a flat ``{name: value}`` snapshot — deliberately a
-    plain callable, not coupled to :mod:`overlay.app.otel_metrics` specifically) and writes each
+    plain callable, not coupled to :mod:`overlay.otel_metrics` specifically) and writes each
     value as a CTF counter event via :meth:`CTFSpanExporter.add_counter_event`. Same non-blocking,
     local-file philosophy as the span pipeline: one dedicated daemon thread, no push/pull server."""
 

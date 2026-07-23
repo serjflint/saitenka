@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from overlay.app import otel_metrics
+from overlay import otel_metrics
 from overlay.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)

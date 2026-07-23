@@ -32,13 +32,13 @@ def test_gil_stays_disabled_after_all_imports():
     reason="only meaningful under `poe test-ft` (3.14t + PYTHON_GIL=0)",
 )
 def test_gil_stays_disabled_with_telemetry_enabled(tmp_path):
-    """Stage 11 of vibe/observability-plan.md: opentelemetry-api/sdk are pure-Python (verified in
-    Stage 0), but importing AND actually running the telemetry stack (providers, the span writer
-    thread, an instrument snapshot) is the real test — a C extension pulled in transitively could
-    still silently re-enable the GIL only once exercised, not merely imported."""
+    """opentelemetry-api/sdk are pure-Python, but importing AND actually running the telemetry
+    stack (providers, the span writer thread, an instrument snapshot) is the real test — a C
+    extension pulled in transitively could still silently re-enable the GIL only once exercised,
+    not merely imported."""
     from overlay.app.config import TelemetryOptions
     from overlay.app.telemetry import configure, shutdown
-    from overlay.app import otel_metrics
+    from overlay import otel_metrics
 
     try:
         configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "telemetry")))

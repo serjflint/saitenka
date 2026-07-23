@@ -185,7 +185,7 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
         for c in sorted(cd.glob("crash-*.log"))[-5:]:
             members[f"crashes/{c.name}"] = c.read_text(encoding="utf-8", errors="replace")
 
-    # Telemetry (see vibe/observability-plan.md): the CTF trace file the LIVE overlay session wrote
+    # Telemetry: the CTF trace file the LIVE overlay session wrote
     # to disk, if telemetry was enabled for it — `report` runs in its own short-lived process, so it
     # can only see what made it to disk, not the in-memory metrics snapshot of a session that has
     # already exited (metrics stay pull-based / process-local by design, see otel_metrics.snapshot).

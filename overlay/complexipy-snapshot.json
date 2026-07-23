@@ -1,0 +1,326 @@
+[
+  {
+    "path": "src/overlay/app/card_preview.py",
+    "file_name": "card_preview.py",
+    "functions": [
+      {
+        "name": "render_card_preview",
+        "complexity": 19
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/cli.py",
+    "file_name": "cli.py",
+    "functions": [
+      {
+        "name": "run",
+        "complexity": 147
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/config.py",
+    "file_name": "config.py",
+    "functions": [
+      {
+        "name": "ReaderOptions::with_overrides",
+        "complexity": 16
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/controller.py",
+    "file_name": "controller.py",
+    "functions": [
+      {
+        "name": "Reader::_panel_for",
+        "complexity": 21
+      },
+      {
+        "name": "Reader::_update_prefetch",
+        "complexity": 21
+      },
+      {
+        "name": "Reader::_handle",
+        "complexity": 23
+      },
+      {
+        "name": "Reader::_prefetch_worker",
+        "complexity": 23
+      },
+      {
+        "name": "Reader::on_click",
+        "complexity": 27
+      },
+      {
+        "name": "Reader::poll_once",
+        "complexity": 27
+      },
+      {
+        "name": "Reader::_update_hover_impl",
+        "complexity": 38
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/dictdb.py",
+    "file_name": "dictdb.py",
+    "functions": [
+      {
+        "name": "DictionaryDb::_load_dict_banks",
+        "complexity": 36
+      },
+      {
+        "name": "_read_term_meta",
+        "complexity": 41
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/dictionary.py",
+    "file_name": "dictionary.py",
+    "functions": [
+      {
+        "name": "DictionarySet::kanji_for",
+        "complexity": 16
+      },
+      {
+        "name": "DictionarySet::entry_for",
+        "complexity": 18
+      },
+      {
+        "name": "DictionarySet::search",
+        "complexity": 19
+      },
+      {
+        "name": "Dictionary::lookup",
+        "complexity": 32
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/doctor.py",
+    "file_name": "doctor.py",
+    "functions": [
+      {
+        "name": "check_dict_db",
+        "complexity": 16
+      },
+      {
+        "name": "print_report",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/fsrs.py",
+    "file_name": "fsrs.py",
+    "functions": [
+      {
+        "name": "_read",
+        "complexity": 70
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/jimaku.py",
+    "file_name": "jimaku.py",
+    "functions": [
+      {
+        "name": "JimakuClient::_get",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/lookup.py",
+    "file_name": "lookup.py",
+    "functions": [
+      {
+        "name": "lookup_entry",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/miner.py",
+    "file_name": "miner.py",
+    "functions": [
+      {
+        "name": "Miner::bulk_mine",
+        "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/reader_deps.py",
+    "file_name": "reader_deps.py",
+    "functions": [
+      {
+        "name": "build_reader_deps",
+        "complexity": 36
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/report.py",
+    "file_name": "report.py",
+    "functions": [
+      {
+        "name": "collect",
+        "complexity": 30
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/scoring.py",
+    "file_name": "scoring.py",
+    "functions": [
+      {
+        "name": "Scorer::_style",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/setup_wizard.py",
+    "file_name": "setup_wizard.py",
+    "functions": [
+      {
+        "name": "_offer_anki",
+        "complexity": 16
+      },
+      {
+        "name": "install_plan",
+        "complexity": 16
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/sub_index.py",
+    "file_name": "sub_index.py",
+    "functions": [
+      {
+        "name": "parse_ass",
+        "complexity": 27
+      },
+      {
+        "name": "SubIndex::locate",
+        "complexity": 42
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/subtitles.py",
+    "file_name": "subtitles.py",
+    "functions": [
+      {
+        "name": "render_subtitle",
+        "complexity": 32
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/tokenize.py",
+    "file_name": "tokenize.py",
+    "functions": [
+      {
+        "name": "merge_inflected",
+        "complexity": 22
+      },
+      {
+        "name": "strip_inline_furigana",
+        "complexity": 22
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/wordlists.py",
+    "file_name": "wordlists.py",
+    "functions": [
+      {
+        "name": "FreqSource::display",
+        "complexity": 26
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/yomitan_db_import.py",
+    "file_name": "yomitan_db_import.py",
+    "functions": [
+      {
+        "name": "import_database",
+        "complexity": 28
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/yomitan_import.py",
+    "file_name": "yomitan_import.py",
+    "functions": [
+      {
+        "name": "run_import",
+        "complexity": 18
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/panel.py",
+    "file_name": "panel.py",
+    "functions": [
+      {
+        "name": "panel_rows",
+        "complexity": 31
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/render/document.py",
+    "file_name": "document.py",
+    "functions": [
+      {
+        "name": "render_document",
+        "complexity": 32
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/render/flow.py",
+    "file_name": "flow.py",
+    "functions": [
+      {
+        "name": "wrap_items",
+        "complexity": 17
+      },
+      {
+        "name": "render_flow",
+        "complexity": 74
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/render/layout.py",
+    "file_name": "layout.py",
+    "functions": [
+      {
+        "name": "wrap",
+        "complexity": 18
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/sc/walk.py",
+    "file_name": "walk.py",
+    "functions": [
+      {
+        "name": "_parse_color",
+        "complexity": 19
+      },
+      {
+        "name": "_Walker::_emit_inline",
+        "complexity": 48
+      }
+    ]
+  }
+]
