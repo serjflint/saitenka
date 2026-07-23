@@ -67,6 +67,25 @@ def _log_tail() -> str:
     return _redact_secrets("\n".join(lines))
 
 
+def _perf_summary() -> str:
+    """Recent op-latency percentiles + current RSS leading up to the crash — was the overlay janking
+    or memory-heavy right before it died? Empty (no section) when nothing has been recorded yet (e.g.
+    crash during startup)."""
+    from overlay.app.perf import rss_mb, snapshot
+
+    snap = snapshot()
+    rss = rss_mb()
+    if not snap and rss is None:
+        return ""
+    lines = [
+        f"{op}: n={s['n']:.0f} p50={s['p50']:.1f}ms p95={s['p95']:.1f}ms max={s['max']:.1f}ms"
+        for op, s in snap.items()
+    ]
+    if rss is not None:
+        lines.append(f"rss: {rss:.0f}MB")
+    return "\n--- recent op timings ---\n" + "\n".join(lines) + "\n"
+
+
 def write_report(kind: str, tb_text: str, thread: str | None = None) -> Path:
     """Write one crash report (redacted) and prune old ones. Returns its path."""
     from overlay import __version__
@@ -90,6 +109,7 @@ def write_report(kind: str, tb_text: str, thread: str | None = None) -> Path:
         "\n".join(header)
         + "\n\n--- traceback ---\n"
         + tb_text
+        + _perf_summary()
         + "\n--- recent log ---\n"
         + _log_tail()
         + "\n"

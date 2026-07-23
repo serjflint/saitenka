@@ -27,6 +27,7 @@ from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
 from overlay.app.miner import Miner, tag_slug
+from overlay.app.perf import timed
 from overlay.app.popups import PopupView, TipPanel
 from overlay.app.prefetch import FinishItem, PrefetchItem
 from overlay.app.lookup import card_for, entry_for
@@ -490,6 +491,10 @@ class Reader:
         """Hover with hysteresis across the popup stack: keep each level alive while the cursor is on
         its trigger OR on the popup itself, lingering ``hide_delay`` after leaving both. Hovering a
         word *inside* the tooltip opens a nested scan popup."""
+        with timed("hover_hit_test"):
+            self._update_hover_impl()
+
+    def _update_hover_impl(self) -> None:
         mp = self._prop("mouse-pos") or {}
         inside = bool(mp.get("hover"))
         self._mouse_in = inside  # engagement signal for prefetch
@@ -993,6 +998,10 @@ class Reader:
         return self._cap_for(self.tip_max_frac)
 
     def _show_tooltip(self, index: int) -> None:
+        with timed("show_tooltip"):
+            self._show_tooltip_impl(index)
+
+    def _show_tooltip_impl(self, index: int) -> None:
         self._hide_nested()  # switching the base word drops any stale scan popup
         self._kanji_index = 0  # a new word restarts the `k` kanji cycle
         tok = self.tokens[index]

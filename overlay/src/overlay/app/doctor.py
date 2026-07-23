@@ -509,6 +509,25 @@ def check_crashes() -> Check:
     )
 
 
+def check_perf() -> Check:
+    """Live latency + memory snapshot (render, hover hit-test, RSS) from :mod:`overlay.app.perf` — the
+    same percentiles the ``--stress`` benchmark reports, but from the actual running session.
+    Informational: latency is empty until a tooltip has been shown; RSS is always available."""
+    from overlay.app.perf import rss_mb, snapshot
+
+    snap = snapshot()
+    rss = rss_mb()
+    parts = [
+        f"{op} p50={s['p50']:.1f}ms p95={s['p95']:.1f}ms max={s['max']:.1f}ms (n={s['n']:.0f})"
+        for op, s in snap.items()
+    ]
+    if not parts:
+        parts.append("no ops recorded yet (nothing shown this session)")
+    if rss is not None:
+        parts.append(f"rss={rss:.0f}MB")
+    return Check("perf", "ok", "; ".join(parts))
+
+
 def check_recent_errors(n: int = 5) -> Check:
     if not LOG_PATH.exists():
         return Check("recent-errors", "ok", "no log yet (nothing has failed)")
@@ -561,6 +580,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_jimaku(),
         check_crashes(),
         check_recent_errors(),
+        check_perf(),
     ]
     return Report(checks)
 
