@@ -67,6 +67,8 @@ dev = [
     "libcst>=1.8.6",
     "basedpyright>=1.39",
     "py-spy>=0.4.2",
+    "memray>=1.19.3",
+    "pytest-memray>=1.9.0",
 ]
 
 [build-system]
@@ -142,11 +144,14 @@ lint = { shell = "uv run --extra full ruff check --fix src tests examples && uv 
 types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
 # Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
 test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e)'" }
-test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q" }
-cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85"
+test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -m 'not slow'" }
+cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not slow'"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
 smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
+# Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
+# `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
+stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
