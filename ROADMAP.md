@@ -54,15 +54,29 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   filename sanitization applied at more write sites, `psutil`-based process-tree cleanup coverage.
 - **Test tooling** — `pytest-subprocess` for mpv/ffmpeg launch-argument coverage (currently the live
   launch path is only smoke-tested).
+- **Dead-code + duplication reduction.** Hygiene the gate doesn't cover today: `vulture` for unused
+  functions/classes/unreachable code (ruff `F` catches only unused *imports*) and `jscpd` for
+  copy-paste — both most valuable right after the `controller.py` split, which tends to orphan helpers
+  and leave near-duplicate blocks across the new `app/*` modules. Advisory/periodic like `arch-report`,
+  not a `poe all` blocker (both are heuristic and false-positive-prone) — run on demand, triage to
+  fixes. Adjacent: `deptry` for unused/missing declared deps as the
+  `[minimal]/[jmdict]/[deinflect]/[observability]/[full]` extras surface drifts.
 - **Benchmarking depth** — the headless harness (`examples/bench_responsiveness.py`, incl. `--stress`)
   now reports p50/p95/**p99** + CV, records the GIL state, and isolates raster/BGRA/upload timing. Not
   yet built, in rough priority: a **live-mpv jank harness** that polls mpv's own `frame-drop-count`
   while driving the overlay (the only true real-time signal — the fake-IPC harness can't see mpv's
-  compositor); a **noise-aware regression gate** for CI (fail on a >X% p95 delta only once run-to-run
-  variance is characterized); and continuous benchmarking (`asv`) once there's CI history. **Not**
-  CodSpeed (its CPU-instruction model is blind to our IO + free-threaded contention). The suspected
-  ~55 ms temp-file **upload floor turned out to be a page-cache artifact** (the write is ~1 ms), so an
-  mmap/shared-memory upload backend is **de-prioritised** — cold first-paint is render + lookup bound.
+  compositor); and continuous benchmarking (`asv`) once there's CI history (the regression *gate* built
+  on these is its own item below). **Not** CodSpeed (its CPU-instruction model is blind to our IO +
+  free-threaded contention). The suspected ~55 ms temp-file **upload floor turned out to be a
+  page-cache artifact** (the write is ~1 ms), so an mmap/shared-memory upload backend is
+  **de-prioritised** — cold first-paint is render + lookup bound.
+- **Performance regression gating.** Promote the `bench_responsiveness.py` harness (p50/p95/p99 + CV,
+  GIL state) from a manual measurement to a gate: commit a baseline, fail on a >X% p95/p99 delta —
+  **noise-aware** (only once run-to-run variance is characterized, so it doesn't flap), ratcheted like
+  `complexipy`/`arch` (regenerate on a deliberate perf change, never to hide a regression). Needs CI
+  history to mean anything, so it rides on the CI-matrix item; measurement caveats (why **not** CodSpeed)
+  are under *Benchmarking depth* above. Pairs with the live-mpv jank harness (mpv's own
+  `frame-drop-count`) for the true real-time signal.
 - **Observability — non-blocking logs, traces, and metrics.** Make the latency story
   *measurable at runtime*, not just in the benchmark harness. Three grounded decisions (after surveying
   how mpv and comparable tools do it):

@@ -46,3 +46,33 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   (`def f(reader: Reader)`) and leave thin delegating methods, so the public API is unchanged and both
   mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). Repoint any
   `monkeypatch.setattr` to the symbol's new lookup site, or tests raise `AttributeError`.
+
+## Comments
+
+Agentic from day one → comments trend to LLM over-explaining. Treat comment bloat like code cognitive
+complexity: something to cut, not preserve. The dense multi-clause comments already in the tree are the
+target, not the model.
+
+- **Information delta only.** Comment the *why*, a gotcha, a constraint, a bug/PR ref — never the
+  *what* (`# loop over the dicts`). Delete zero-delta echoes.
+- **Distill to the irreducible signal.** Keep the delta, cut the words — no teaching tone, no
+  narrative, no hedging. One tight clause beats a paragraph. A long comment is a smell: compress it or
+  justify it. The `ipc.py` Windows-pipe lesson is one line ("single-threaded `pump()` was a no-op on
+  the named pipe → reader thread"), not an essay.
+- **No process scars.** No `(plan R4)`, `Stage N`, "as discussed".
+- **Not a gate.** "Echoes the code" / "too verbose" is semantic, not AST-matchable — a review
+  discipline, not a `poe` check.
+
+## Mutation auditing
+
+- **The pure core is mutation-audited** — `sub_index`, `fsrs`, and (as they gain focused tests)
+  `scoring`, `tokenize`, `render.flow`, `deinflect`. `uv run poe mutate [module]` (cosmic-ray,
+  git-guarded, opt-in — minutes/module, NOT in `poe all`). Glue (controller/mpvio) is excluded:
+  I/O-bound, floods equivalent mutants.
+- **Survivors → Hypothesis, not a score.** A surviving mutant is a coordinate to harden, not a number
+  to maximise (equivalent mutants make 100% unreachable). Kill the *class* with a property —
+  boundary / round-trip / spec-oracle — and pin the shrunk input as `@example` so the kill is
+  deterministic on every rerun (see `tests/test_sub_index_properties.py`). Re-run `poe mutate` to
+  confirm the score moved.
+- **cosmic-ray on 3.14t re-enables the GIL** via SQLAlchemy (harness only — the test subprocess still
+  runs free-threaded). Expected, not a regression.
