@@ -1,0 +1,14 @@
+id: no-print-in-lib
+valid:
+  # library code logs through the scrubbing pipeline
+  - |
+    def run(self):
+        log.info("runtime: %s", mode)
+invalid:
+  # print bypasses logsetup's secret/path scrubbing
+  - |
+    def run(self):
+        print(f"[saitenka] runtime: {mode}")
+  - |
+    def dump(self):
+        print("dictionaries:", titles)

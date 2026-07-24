@@ -175,6 +175,17 @@ types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright 
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
 arch = { shell = "uv run --extra full lint-imports" }
+# Call-level invariant gate (ast-grep, config: sgconfig.yml) — anti-patterns import-linter can't see:
+# no time.sleep in the mpv reader thread, single-writer IPC pipe, no model-derived readings.
+# `severity: error` fails the gate; `warning` advises. Rust binary, no build/FT exposure. Tests run
+# first so a rule can't rot into a no-op. Install: `uvx --from ast-grep-cli ast-grep` / `brew install`.
+invariants = { shell = "ast-grep test --skip-snapshot-tests && ast-grep scan" }
+invariants-test = { shell = "ast-grep test --skip-snapshot-tests" }
+# OPT-IN taint tier (not in `all`): semgrep dataflow for what ast-grep can't — model output reaching a
+# reading/pitch field via intermediate vars. Pinned to 3.13 (prebuilt clib wheel; semgrep never imports
+# our code, so its interpreter is unrelated to the 3.14t runtime). For 3.14t use the clib-drop crutch:
+# `--config-file tools/semgrep/uv.toml --python 3.14t`. ~2s → opt-in; run when touching lookup/scoring/miner.
+invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semgrep/rules.yml src" }
 # Cognitive-complexity gate, ratcheted against complexipy-snapshot.json (config: [tool.complexipy]).
 # Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
 complexity = { shell = "uv run --extra full complexipy" }
@@ -196,7 +207,11 @@ stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist te
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the
 # free-threaded runtime. Install once: `uv tool install pyscn`.
 arch-report = { shell = "uvx pyscn analyze --select complexity,cbo --no-open src/overlay" }
+# Mutation campaign over the pure core (cosmic-ray, git-guarded, scoped). Opt-in, NOT in `all` —
+# minutes/module. `poe mutate` runs all targets; `poe mutate sub_index` narrows. Survivors → harden
+# with Hypothesis properties, re-run to confirm. See tools/mutate/run.py + AGENTS.md "Mutation auditing".
+mutate = { cmd = "uv run --extra full --with cosmic-ray python tools/mutate/run.py" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
-all = ["lint", "types", "arch", "complexity", "test", "test-ft", "cov"]
+all = ["lint", "types", "arch", "invariants", "complexity", "test", "test-ft", "cov"]

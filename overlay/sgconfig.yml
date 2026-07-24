@@ -1,0 +1,7 @@
+# ast-grep call-level invariant gate (`poe invariants`) — catches anti-patterns below import-linter's
+# module graph (single-threaded pipe = THE Windows hang; dict-first readings). Rules carry planted
+# positive/negative tests (`poe invariants-test`): an AST rule matching zero things enforces nothing.
+ruleDirs:
+  - sgconfig/rules
+testConfigs:
+  - testDir: sgconfig/rule-tests

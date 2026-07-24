@@ -1,0 +1,15 @@
+id: no-model-derived-reading
+valid:
+  # reading looked up from a dictionary entry — the grounded path
+  - |
+    card.reading = entry.reading
+  - |
+    card.pitch = dict_entry.pitch_accents[0]
+invalid:
+  # reading synthesised by a model — hallucination risk, forbidden
+  - |
+    card.reading = llm.generate(prompt)
+  - |
+    card.pitch = model.complete(context)
+  - |
+    card.reading_html = client.generate(word)

@@ -1,0 +1,18 @@
+rules:
+  - id: no-model-derived-reading-taint
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Model output reaches a reading/pitch field (via intermediate vars) — dataflow-tracked.
+      Readings come from dictionaries, never a model.
+    pattern-sources:
+      - pattern: $M.generate(...)
+      - pattern: $M.complete(...)
+    pattern-sinks:
+      - patterns:
+          - pattern: $OBJ.reading = $X
+          - focus-metavariable: $X
+      - patterns:
+          - pattern: $OBJ.pitch = $X
+          - focus-metavariable: $X

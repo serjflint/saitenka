@@ -23,6 +23,10 @@ lint = { cmd = "uv run poe lint", cwd = "overlay" }
 types = { cmd = "uv run poe types", cwd = "overlay" }
 arch = { cmd = "uv run poe arch", cwd = "overlay" }
 arch-report = { cmd = "uv run poe arch-report", cwd = "overlay" }
+invariants = { cmd = "uv run poe invariants", cwd = "overlay" }
+invariants-test = { cmd = "uv run poe invariants-test", cwd = "overlay" }
+invariants-taint = { cmd = "uv run poe invariants-taint", cwd = "overlay" }
+mutate = { cmd = "uv run poe mutate", cwd = "overlay" }
 complexity = { cmd = "uv run poe complexity", cwd = "overlay" }
 complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
