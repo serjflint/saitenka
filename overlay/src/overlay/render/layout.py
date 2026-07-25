@@ -11,11 +11,15 @@ wrapped paragraph can mix bold / colour / size. Line height adapts to the talles
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
 from overlay import fonts
 from overlay.model import RichText, Span, Style
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Characters that may not start a line (行頭禁則): closing punctuation, small kana, prolonged marks.
 NO_START = set(
@@ -190,7 +194,7 @@ def _line_box(line: list[Token], scale: float) -> tuple[int, int, int]:
 
 
 def new_panel_image(
-    block: Block, boxes: list[tuple[int, ...]]
+    block: Block, boxes: Sequence[tuple[int, ...]]
 ) -> tuple[Image.Image, ImageDraw.ImageDraw, int]:
     """Allocate the panel image sized to `block` + wrapped-line `boxes`; return (img, draw, first-line y)."""
     w = block.width + 2 * block.padding
