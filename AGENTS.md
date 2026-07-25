@@ -10,6 +10,10 @@ Guidance for AI agents and developers working in this repo. Feature docs: `overl
   **`ROADMAP.md`** — future direction. Trackable work → issues/milestones. Scratch → `vibe/` (git-ignored).
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
+- **`.agents/skills/`** — repo-local, tool-agnostic agent skills (`write-test`, `dev-gate`); each is a
+  `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard.
+  `.claude/skills` symlinks to it so Claude Code auto-discovers them; `.claude/` local settings stay
+  git-ignored.
 
 ## Python: always `uv`
 
