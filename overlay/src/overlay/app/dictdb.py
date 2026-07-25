@@ -101,6 +101,42 @@ def _revision_of(zf: zipfile.ZipFile) -> str:
         return ""
 
 
+def _parse_freq_entry(
+    data,
+) -> tuple[str | None, int | None, str | None]:
+    """``(reading, rank, disp)`` from a freq term_meta value — plain int, ``{"value"/
+    "displayValue"}``, ``{"reading","frequency"}``, or the JLPT
+    ``{"frequency": {"value": -1, "displayValue": "N5"}}`` form."""
+    reading, rank, disp = None, None, None
+    if isinstance(data, (int, float)):
+        rank = int(data)
+    elif isinstance(data, dict):
+        reading = data.get("reading")
+        fval = data.get("frequency", data)
+        if isinstance(fval, dict):
+            rank = fval.get("value")
+            disp = fval.get("displayValue")
+        elif isinstance(fval, (int, float)):
+            rank = int(fval)
+    return reading, rank, disp
+
+
+def _parse_pitch_entry(term: str, data) -> tuple[str, str] | None:
+    """``(reading, positions_json)`` from a pitch term_meta value (``{"reading", "pitches":
+    [{"position": n}]}``), or ``None`` when there's no usable pitch position."""
+    if not isinstance(data, dict):
+        return None
+    reading = data.get("reading") or term
+    positions = [
+        pos
+        for p in data.get("pitches", [])
+        if isinstance(p, dict) and isinstance(pos := p.get("position"), int)
+    ]
+    if not positions:
+        return None
+    return reading, json.dumps(positions)
+
+
 def _read_term_meta(
     zf: zipfile.ZipFile,
 ) -> Iterable[tuple[str, str, str | None, int | None, str | None, str | None]]:
@@ -120,30 +156,14 @@ def _read_term_meta(
                 continue
             term, mode, data = entry[0], entry[1], entry[2]
             if mode == "freq":
-                reading, rank, disp = None, None, None
-                if isinstance(data, (int, float)):
-                    rank = int(data)
-                elif isinstance(data, dict):
-                    reading = data.get("reading")
-                    fval = data.get("frequency", data)
-                    if isinstance(fval, dict):
-                        rank = fval.get("value")
-                        disp = fval.get("displayValue")
-                    elif isinstance(fval, (int, float)):
-                        rank = int(fval)
+                reading, rank, disp = _parse_freq_entry(data)
                 yield term, "freq", reading, rank, disp, None
             elif mode == "pitch":
-                if not isinstance(data, dict):
+                parsed = _parse_pitch_entry(term, data)
+                if parsed is None:
                     continue
-                reading = data.get("reading") or term
-                positions = [
-                    pos
-                    for p in data.get("pitches", [])
-                    if isinstance(p, dict) and isinstance(pos := p.get("position"), int)
-                ]
-                if not positions:
-                    continue
-                yield term, "pitch", reading, None, None, json.dumps(positions)
+                reading, positions_json = parsed
+                yield term, "pitch", reading, None, None, positions_json
 
 
 def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int]]:

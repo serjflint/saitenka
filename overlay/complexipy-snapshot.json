@@ -76,12 +76,12 @@
     "file_name": "dictdb.py",
     "functions": [
       {
-        "name": "DictionaryDb::_load_dict_banks",
-        "complexity": 36
+        "name": "_read_term_meta",
+        "complexity": 19
       },
       {
-        "name": "_read_term_meta",
-        "complexity": 41
+        "name": "DictionaryDb::_load_dict_banks",
+        "complexity": 36
       }
     ]
   },
@@ -158,16 +158,6 @@
       {
         "name": "Miner::bulk_mine",
         "complexity": 24
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/reader_deps.py",
-    "file_name": "reader_deps.py",
-    "functions": [
-      {
-        "name": "build_reader_deps",
-        "complexity": 36
       }
     ]
   },
@@ -288,8 +278,8 @@
     "file_name": "document.py",
     "functions": [
       {
-        "name": "render_document",
-        "complexity": 32
+        "name": "_render_blocks",
+        "complexity": 18
       }
     ]
   },
