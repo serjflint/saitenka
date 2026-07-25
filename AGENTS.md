@@ -24,33 +24,17 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate (no CI):** `uv run poe all` — lint (ruff), types (mypy + basedpyright blocking, pyrefly + ty
-  advisory), arch (import-linter — no cycles, PIL-agnostic core, GPL chokepoint; `.importlinter`),
-  complexity (complexipy, ratcheted against a checked-in `overlay/complexipy-snapshot.json` baseline —
-  regenerate with `poe complexity-baseline` after a deliberate refactor, never to silence a real
-  regression), tests (incl. free-threaded), coverage floor 85%, plus **supply-chain & hygiene** —
-  `audit` (`uv audit` vuln scan over `uv.lock`), `deps` (deptry — unused/missing/misplaced deps),
-  `licenses` (pip-licenses — the only copyleft allowed in the graph is our own GPL `deinflect` add-on;
-  a dependency-boundary guard next to the import-linter code boundary), `spell` (typos; allowlist in
-  root `_typos.toml`), `links` (lychee `--offline` local-link integrity), `shell` (shellcheck over the
-  `install/*.sh` user-facing installers). Run it before pushing. `poe
-  arch-report` (pyscn) is a separate, non-gating coupling/complexity report guiding the `controller.py`
-  split. The real tasks live in `overlay/`; the repo-root `pyproject.toml` is a non-package poe shim
-  that delegates there, so `uv run poe <task>` (all, test, bench, smoke-live, …) works from **either
-  the repo root or `overlay/`**.
-  The `lint` step runs a broad **explicit** ruff select (not `ALL` — that breaks unpredictably on ruff
-  upgrades), favouring auto-fixable categories; **flake8-bandit `S` (SAST) is folded in**, so security
-  linting is gated here (per-site `# noqa: S…` with reasons at the legit subprocess/urlopen/SQL sites,
-  four categorically-safe rules in `ignore`). Every `ignore` / per-file entry carries its reason.
-- **Advisory tier — `poe hygiene` (NOT in `all`; nightly / pre-release / agent-triage):** `deadcode`
-  (vulture + `.vulture_whitelist.py`), `dup` (jscpd copy-paste, `--threshold` ceiling). Standalone
-  advisory not in the bundle: `ps1` (PSScriptAnalyzer over the `.ps1` installers — needs `pwsh`),
-  `links-net` (network link crawl), `perf-risk` (repowise's static, no-LLM I/O-in-loop / N+1 /
-  blocking-in-async check — metric that informs, not a contract), `mutate` / `fuzz` / `crosshair`
-  (adequacy — see below). Each
-  tool was chosen by test-driving it on THIS repo (see `vibe/quality-growth-plan.md`); prefer
-  standalone Rust/Go binaries (out-of-process → free-threading-safe). These emit file:line / JSON
-  findings — feed them to the repowise-indexed navigator for agent-driven fixes rather than fixing blind.
+- **Dev gate (no CI):** `uv run poe all` is the pre-push gate — 14 tasks (lint/types/arch/invariants/
+  complexity/test/test-ft/cov + supply-chain: audit/deps/licenses/spell/links/shell). Run it before
+  pushing. The task-by-task runbook, how to read each failure, the advisory `poe hygiene` tier, and the
+  free-threaded / 3.13-pinned-env traps live in the **dev-gate skill** (`.agents/skills/dev-gate/`) — consult it. The real tasks live
+  in `overlay/`; the repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works from the repo
+  root or `overlay/`. Standing constraints while editing (don't relitigate these): `lint` is an
+  **explicit** ruff select (never `ALL`) with flake8-bandit `S` folded in — justify each `# noqa: S…` and
+  each `ignore`; `complexity` is ratcheted against `overlay/complexipy-snapshot.json` — regenerate only
+  after a deliberate refactor, never to silence a regression; the only copyleft allowed in the graph is
+  our own GPL `deinflect`; new advisory tools are test-driven on THIS repo first (`vibe/quality-growth-plan.md`),
+  preferring standalone out-of-process binaries (free-threading-safe).
 
 ## Refactoring
 
@@ -80,6 +64,52 @@ target, not the model.
 - **No process scars.** No `(plan R4)`, `Stage N`, "as discussed".
 - **Not a gate.** "Echoes the code" / "too verbose" is semantic, not AST-matchable — a review
   discipline, not a `poe` check.
+
+## Testing
+
+Forward-looking discipline: every **new** test follows these; existing tests migrate opportunistically
+when you touch them, never in a big-bang sweep. Tiers run via `poe test` (fast: `-n auto`, excludes
+`slow`/`integration`/`requires_display`/`e2e`) and `poe test-ft` (`PYTHON_GIL=0`, whole-suite
+free-threaded — the FT check is the *suite run*, not a per-test assert). Adequacy beyond the unit suite
+is its own contract: see **Mutation auditing** and **Fuzzing & symbolic checks** below.
+
+The rules below are the *invariants*; the step-by-step procedure for authoring one test — decision tree,
+recipes against the real fakes, when-not-to-test — is the **write-test skill** (`.agents/skills/write-test/`).
+Consult it when adding or rewriting a test.
+
+- **Test the seam, not the shell.** Pure core (`sub_index`, `tokenize`, `scoring`, `render.flow`,
+  `anki.build_note`, deinflect behind the chokepoint) gets fast default-tier tests against constructed
+  objects; anything crossing a subprocess/socket/display is `integration` or `live` and goes through
+  the existing fakes (`FakeMpvServer`, `FakeTransport`, `FakeAnki`, `Driver`) — **never a real `mpv`**
+  outside the single `live`/`smoke-live` gate. Humble-object: don't unit-test I/O glue (it floods
+  equivalent mutants and duplicates the integration job).
+- **Assert observable behaviour.** Return value, emitted IPC message, written note dict — never a
+  private attribute or a mock call-count. This repo is already classicist (≈1500 plain asserts, ~9
+  mocks); keep it that way.
+- **`monkeypatch` is the sanctioned seam, `mock` is not.** Injecting a fake or repointing an extracted
+  symbol via `monkeypatch.setattr` is correct and normal here (see **Refactoring**). Do **not** reach
+  for `unittest.mock`/`MagicMock` to fake *internal* behaviour — construct the real collaborator or use
+  a `Fake*`. Mocking an out-of-process boundary you don't own (rare) is the only exception.
+- **Construct over fixture; function scope only.** Instantiate in the test body (or a small local
+  `Fake*`); reserve `@pytest.fixture` for resource lifecycle/override/parametrised clients. No
+  `scope="module"|"session"` — cross-test shared mutable state is a no-GIL data-race foot-gun (`deque`
+  et al. are unsafe under free-threading).
+- **One act per test; name for the scenario.** One trigger + one assertion chain; split multi-act
+  tests. Match the existing descriptive style (`test_doctor_warns_when_subminer_running`), not a rigid
+  template.
+- **Assertion ladder.** Plain `assert` by default → `dirty-equals` (`IsPartialDict`, `IsStr(regex=…)`,
+  `Contains`) when a dict/IPC/Anki-note payload has keys you don't care about or volatile
+  ids/timestamps → an existing **golden** for large structured output. A golden diff **is** the
+  behaviour review — re-bless deliberately (e.g. a `unidic-lite` bump), never regenerate to green.
+- **Determinism.** No wall-clock, ambient `random`, or unrestored env in a test; `pytest-randomly`
+  stays on to surface order-coupling. Inject the clock at the seam (the suite already does this via
+  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears).
+- **Timeouts on anything that can hang.** New `integration`/`live` tests touching a socket/subprocess
+  carry `@pytest.mark.timeout(5)` (30 for `live`). Opt-in per test — there is no global default, so
+  legitimately-slow tests are unaffected.
+- **Don't add a plugin when a pattern exists.** Data → Hypothesis strategies; flexible asserts →
+  `dirty-equals`; IPC → the transport `Fake*`. A new test dependency is a `quality-growth` decision
+  (test-drive it on this repo first), not a reflex.
 
 ## Mutation auditing
 
