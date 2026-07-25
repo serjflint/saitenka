@@ -10,12 +10,20 @@
     ]
   },
   {
-    "path": "src/overlay/app/cli.py",
-    "file_name": "cli.py",
+    "path": "src/overlay/app/cli_run.py",
+    "file_name": "cli_run.py",
     "functions": [
       {
-        "name": "run",
-        "complexity": 147
+        "name": "_resolve_dict_set",
+        "complexity": 19
+      },
+      {
+        "name": "_resolve_subtitles",
+        "complexity": 23
+      },
+      {
+        "name": "_execute_reader_session",
+        "complexity": 35
       }
     ]
   },
