@@ -204,8 +204,8 @@
     "file_name": "subtitles.py",
     "functions": [
       {
-        "name": "render_subtitle",
-        "complexity": 32
+        "name": "_draw_visual_lines",
+        "complexity": 20
       }
     ]
   },
