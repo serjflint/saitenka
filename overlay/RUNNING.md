@@ -162,7 +162,7 @@ IDS=$(curl -s 127.0.0.1:8765 -d '{"action":"findNotes","version":6,"params":{"qu
 curl -s 127.0.0.1:8765 -d "{\"action\":\"deleteNotes\",\"version\":6,\"params\":{\"notes\":$IDS}}"
 ```
 
-## 7a. mpv coexistence — attach & plugin modes (Stage 16)
+## 7a. mpv coexistence — attach & plugin modes
 
 The overlay does not need to own mpv. It can **join** an already-running mpv, sharing the IPC socket
 with mpv_websocket / animecards (mpv accepts many concurrent IPC clients — we join, we don't take
@@ -195,19 +195,12 @@ choco / winget shims.
   card's `SentenceAudio` should read `[sound:saitenka_….mp3]`.
 - **Keys do nothing** — the mpv window must have focus; the flags print the active keys at launch.
 
-## 9. Developer workflow (Stage 8b — local task runner, no CI)
+## 9. Developer workflow (local task runner, no CI)
 
-Everything runs locally via [poethepoet](https://poethepoet.natn.io/):
-
-| Task | What it runs |
-|---|---|
-| `uv run poe lint` | `ruff check --fix` + `ruff format` (B/SIM/TRY/PERF/RUF/UP/C4 hardened) |
-| `uv run poe types` | mypy + pyright (blocking) · pyrefly + ty (advisory, pre-1.0) |
-| `uv run poe test` | pytest, parallel (`-n auto`, pytest-randomly seeds each run) |
-| `uv run poe test-ft` | the suite under `PYTHON_GIL=0` + a GIL-stays-off assertion |
-| `uv run poe cov` | coverage with an **85% floor** (`--cov-fail-under=85`) |
-| `uv run poe bench` | the pathological cold-first-paint benchmark |
-| `uv run poe all` | the pre-push gate: lint → types → test → test-ft → cov |
+Everything runs locally via [poethepoet](https://poethepoet.natn.io/); `uv run poe all` is the
+pre-push gate. The full task-by-task breakdown, how to read a failure, the advisory `poe hygiene`
+tier, and the free-threaded / 3.13-pinned-env traps live in the `dev-gate` skill
+(`.agents/skills/dev-gate/`) — consult it rather than this table, which drifts.
 
 Logs: the overlay writes a rotating **JSON-lines** debug log to `~/.cache/saitenka-overlay/overlay.log`
 (DEBUG in the file, human-readable WARNING+ to stderr) — silent failures land there, not in a black

@@ -20,6 +20,8 @@ the libmpv render API if/when Pillow hits a wall.
 - `tests/golden/` — golden PNGs; `tests/fixtures/` — structured-content JSON.
 - `examples/render_png.py` — CLI: render a string or a fixture JSON to a PNG.
 
+Module-by-module map and the hover→lookup→render→mine data flow: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Usage
 
 ```bash
@@ -164,7 +166,7 @@ goldens) is the spec that escalation must match.
 No PyPI or public repo needed. Build one shareable archive and send it:
 
 ```bash
-uv run install/make_bundle.py            # → dist/saitenka-overlay-<ver>.zip
+uv run poe bundle                        # → dist/saitenka-overlay-<ver>.zip
 ```
 
 The zip carries the wheel (all fonts/wordlists/lua/data ride inside it via `importlib.resources`),
@@ -182,11 +184,7 @@ writes the config (`init`), and offers `import-settings` + `install-plugin`. Eve
 confirm-first, `--yes`/`--dry-run` are honoured, and it is resumable (re-runs skip satisfied steps).
 Upgrade = re-run with a newer bundle (`uv tool install --reinstall ./<wheel>`).
 
-## Developer workflow
+## Development
 
-Local task runner (no CI): `uv run poe all` is the pre-push gate — see RUNNING.md §9 for the
-task table (lint / types / test / test-ft / cov / bench). Type checking: mypy + pyright blocking,
-pyrefly + ty advisory. Coverage floor 85%.
-
-**Linguistic-data pin:** goldens encode `unidic-lite`'s tokenization — bumping it legitimately
-moves goldens; inspect and re-bless deliberately, don't "fix" them blindly.
+Local task runner (no CI); `uv run poe all` is the pre-push gate. Full task-by-task breakdown and
+traps: [RUNNING.md](RUNNING.md) §9 / the `dev-gate` skill.

@@ -1,7 +1,8 @@
 # AGENTS.md — Saitenka (Japanese immersion tooling)
 
 Guidance for AI agents and developers working in this repo. Feature docs: `overlay/README.md` (renderer
-+ reader tour) and `overlay/RUNNING.md` (run/test walkthrough).
++ reader tour), `overlay/RUNNING.md` (run/test walkthrough), and `overlay/ARCHITECTURE.md` (module map
++ data flow).
 
 ## Planning artifacts
 
@@ -68,6 +69,29 @@ target, not the model.
 - **No process scars.** No `(plan R4)`, `Stage N`, "as discussed".
 - **Not a gate.** "Echoes the code" / "too verbose" is semantic, not AST-matchable — a review
   discipline, not a `poe` check.
+
+## Documentation
+
+Same over-explaining trend as **Comments** above, one layer up: duplicated specifics rot faster than
+prose bloat does, because two copies of a fact drift independently and one goes stale silently. (Real
+incident: README.md and RUNNING.md each carried their own copy of the `poe all` task list; both were
+wrong — the real gate had grown to 14 tasks, the docs still said 5.)
+
+- **One canonical source per fact.** A task list, a command, a version number — state it once, where
+  it's authoritative (`pyproject.toml`'s `[tool.poe.tasks]` for what runs; `.agents/skills/` for the
+  procedure; the code itself for behavior), and *point* to it everywhere else. Never re-describe steps
+  another doc or skill already owns.
+- **Information delta only, distilled.** Same test as comments: does this sentence tell the reader
+  something the heading/command name doesn't already? Cut the paragraph restating the heading.
+- **No process scars.** No `(Stage N)` section tags — same rule as comments, same reason.
+- **High-level over step-by-step, when a canonical walkthrough exists.** README explains *what* and
+  *why*; RUNNING.md (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
+  not the fix.
+- **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh Claude — no
+  conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
+  invent something is the doc's bug, not the reader's (this is exactly how an auto-generated repowise
+  wiki page's hallucinations got caught — the same check works on hand-written docs).
+- **Not a gate.** Same as comments — a review discipline, not a `poe` check.
 
 ## Testing
 

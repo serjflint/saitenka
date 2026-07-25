@@ -172,6 +172,8 @@ _Nested = PopupView
 
 
 class Reader:
+    """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
+
     def __init__(
         self,
         ipc: MpvIPC,
