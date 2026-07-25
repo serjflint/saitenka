@@ -190,12 +190,12 @@
     "file_name": "sub_index.py",
     "functions": [
       {
-        "name": "parse_ass",
+        "name": "SubIndex::locate",
         "complexity": 27
       },
       {
-        "name": "SubIndex::locate",
-        "complexity": 42
+        "name": "parse_ass",
+        "complexity": 27
       }
     ]
   },
