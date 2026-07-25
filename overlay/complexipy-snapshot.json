@@ -171,7 +171,7 @@
     "functions": [
       {
         "name": "Scorer::_style",
-        "complexity": 17
+        "complexity": 18
       }
     ]
   },
