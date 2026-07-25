@@ -11,9 +11,9 @@ Guidance for AI agents and developers working in this repo. Feature docs: `overl
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
 - **`.agents/skills/`** — repo-local, tool-agnostic agent skills (`write-test`, `dev-gate`); each is a
-  `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard.
-  `.claude/skills` symlinks to it so Claude Code auto-discovers them; `.claude/` local settings stay
-  git-ignored.
+  `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard. For
+  Claude Code auto-discovery, create a **local** symlink (`.claude/` is git-ignored, never committed):
+  `ln -s ../.agents/skills .claude/skills`.
 
 ## Python: always `uv`
 
