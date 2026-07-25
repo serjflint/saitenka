@@ -1,8 +1,9 @@
 """Stage 4: styled runs — bold / colour / size mixed within one wrapped paragraph."""
 
+from util import assert_golden
+
 from overlay.model import Span, Style
 from overlay.render.layout import Block, render_rich
-from util import assert_golden
 
 RED = (200, 40, 40, 255)
 GREY = (120, 120, 120, 255)

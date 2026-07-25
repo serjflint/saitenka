@@ -157,6 +157,20 @@ class SubIndex:
     def __len__(self) -> int:
         return len(self.cues)
 
+    def _disambiguate_text_matches(
+        self, matches: list[int], preferred: int, sub_start: float | None
+    ) -> int:
+        """Pick one cue among several sharing identical (normalized) text: the ``preferred`` hint
+        (last jump) wins first, then whichever match's timing window actually contains
+        ``sub_start``, else the first match."""
+        if preferred >= 0:
+            return min(matches, key=lambda i: abs(i - preferred))
+        if sub_start is not None:
+            for i in matches:
+                if self.cues[i].start <= sub_start < self.cues[i].end:
+                    return i
+        return matches[0]
+
     def locate(
         self,
         *,
@@ -183,13 +197,7 @@ class SubIndex:
             if len(matches) == 1:
                 return matches[0]
             if matches:
-                if preferred >= 0:
-                    return min(matches, key=lambda i: abs(i - preferred))
-                if sub_start is not None:
-                    for i in matches:
-                        if cues[i].start <= sub_start < cues[i].end:
-                            return i
-                return matches[0]
+                return self._disambiguate_text_matches(matches, preferred, sub_start)
         if sub_start is not None:
             for i, c in enumerate(cues):
                 if c.start <= sub_start < c.end:

@@ -11,11 +11,15 @@ wrapped paragraph can mix bold / colour / size. Line height adapts to the talles
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
 from overlay import fonts
 from overlay.model import RichText, Span, Style
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Characters that may not start a line (行頭禁則): closing punctuation, small kana, prolonged marks.
 NO_START = set(
@@ -189,18 +193,24 @@ def _line_box(line: list[Token], scale: float) -> tuple[int, int, int]:
     return box, lead, a
 
 
+def new_panel_image(
+    block: Block, boxes: Sequence[tuple[int, ...]]
+) -> tuple[Image.Image, ImageDraw.ImageDraw, int]:
+    """Allocate the panel image sized to `block` + wrapped-line `boxes`; return (img, draw, first-line y)."""
+    w = block.width + 2 * block.padding
+    h = 2 * block.padding + sum(b[0] for b in boxes)
+    img = Image.new("RGBA", (w, max(h, 1)), block.background)
+    draw = ImageDraw.Draw(img)
+    return img, draw, block.padding
+
+
 def render_rich(rich: RichText, block: Block) -> Image.Image:
     """Wrap and render styled inline content into a fixed-width transparent panel image."""
     tokens = tokenize_rich(rich)
     lines = wrap(tokens, block.width)
     boxes = [_line_box(line, block.line_height_scale) for line in lines]
 
-    w = block.width + 2 * block.padding
-    h = 2 * block.padding + sum(b[0] for b in boxes)
-    img = Image.new("RGBA", (w, max(h, 1)), block.background)
-    draw = ImageDraw.Draw(img)
-
-    y = block.padding
+    img, draw, y = new_panel_image(block, boxes)
     for line, (box, lead, ascent) in zip(lines, boxes, strict=True):
         baseline = y + lead + ascent
         x = float(block.padding)

@@ -1,0 +1,18 @@
+id: single-writer-pipe
+language: python
+severity: error
+message: >-
+  Only MpvIPC._write may write self._transport — the channel is single-flight; a second writer
+  interleaves bytes into mpv's JSON framing and corrupts the stream. Route sends through _write().
+note: mpvio/ipc.py — transport.write has exactly one caller by contract.
+files:
+  - "src/overlay/**/*.py"
+rule:
+  pattern: self._transport.write($$$)
+  not:
+    inside:
+      kind: function_definition
+      stopBy: end
+      has:
+        field: name
+        regex: "^_write$"

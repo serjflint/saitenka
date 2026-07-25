@@ -12,6 +12,18 @@ import pytest  # noqa: E402
 
 import overlay.app.dictdb as _dictdb  # noqa: E402
 
+# Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
+# Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 .venv-cx), so default test
+# runs are untouched. Select with `pytest --hypothesis-profile=crosshair`; a per-test @settings that
+# omits `backend` inherits this profile's crosshair backend. See AGENTS.md "Fuzzing & symbolic checks".
+try:
+    import crosshair  # noqa: F401  # crosshair-tool; the "crosshair" hypothesis backend rides on it
+    from hypothesis import settings as _hyp_settings
+
+    _hyp_settings.register_profile("crosshair", backend="crosshair", deadline=None)
+except ImportError:
+    pass
+
 
 @pytest.fixture(autouse=True)
 def _hermetic_dict_db(tmp_path, monkeypatch):

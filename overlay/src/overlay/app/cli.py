@@ -14,28 +14,28 @@ and selects the JP sub track / fetches jimaku), and ``setup``.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import subprocess
 import sys
 import sysconfig
-import tempfile
-import time
+from datetime import UTC
 from pathlib import Path
 from typing import Annotated
 
 import cyclopts
 
 from overlay import __version__
+
+# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
+from overlay.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414
+from overlay.app.cli_run import jimaku_should_fetch as jimaku_should_fetch  # noqa: PLC0414
+from overlay.app.cli_run import run_impl
 from overlay.app.config import TooltipOptions, config_path, load_config
 from overlay.app.paths import cache_dir
-from datetime import UTC
 
 log = logging.getLogger(__name__)
-
-DEMO_LINE = "門前の小僧習わぬ経を読む"
-DEMO_LINE_EN = "A shop-boy at the temple gate recites sutras he was never taught."
 
 
 def _ensure_free_threaded() -> None:
@@ -54,19 +54,13 @@ def _ensure_free_threaded() -> None:
             # corrupts the console (double output, and interactive prompts that can't take input).
             # Spawn a child that shares our console, wait, and exit with its status instead.
             try:
-                sys.exit(subprocess.run(argv).returncode)
+                sys.exit(subprocess.run(argv, check=False).returncode)
             except KeyboardInterrupt:
                 # Ctrl+C on the shared console reaches BOTH processes: the child cleans up and exits
                 # on its own SIGINT; the parent must not dump a KeyboardInterrupt traceback from
                 # subprocess.wait(). Exit quietly with the conventional 130 (128 + SIGINT).
                 sys.exit(130)
         os.execv(sys.executable, argv)
-
-
-def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:
-    """Flag values win over the config file. Values are dictionary **titles** resolved against the
-    consolidated DB (imported once) — not paths, so no ~/$VAR expansion is needed."""
-    return list(flag_vals or []) or list(cfg.get(key) or [])
 
 
 def _print_legacy_note() -> None:  # pragma: no cover — cosmetic, filesystem-dependent
@@ -84,24 +78,6 @@ def _print_legacy_note() -> None:  # pragma: no cover — cosmetic, filesystem-d
     )
     for d, n, b in arts:
         print(f"  {d}  ({n} files, {b / 1e6:.0f} MB)")
-
-
-def jimaku_should_fetch(
-    explicit_flag: bool, cfg_fetch: bool, video: str | None, slang: str = "ja,jpn,jp", probe=None
-) -> bool:
-    """Decide whether ``run`` fetches jimaku. Explicit ``--jimaku`` always wins. Config-driven fetch
-    (``[jimaku].fetch``) fires ONLY when the file has no embedded JP subtitle track — so a global
-    fetch=true doesn't override good embedded subs (matching what ``attach`` does over IPC). Unknown
-    (can't probe) → fetch, since the point of a configured key is to provide subs."""
-    if not video:  # no real file (demo/test clip) — nothing to fetch for
-        return False
-    if explicit_flag:
-        return True
-    if not cfg_fetch:
-        return False
-    if probe is None:
-        from overlay.app.media import has_sub_lang as probe
-    return probe(video, slang) is not True  # fetch unless a JP track is definitely present
 
 
 def _argv_config_override(argv: list[str]) -> str | None:
@@ -284,378 +260,48 @@ def run(
     ] = 0.15,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
-    from overlay.app.controller import Reader
-    from overlay.mpvio.ipc import MpvIPC
-
-    # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
-    # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka-overlay install`. Don't hand it to
-    # mpv as a filename (the cryptic "Failed to recognize file format"); show the commands instead.
-    if video and "://" not in video and not Path(video).expanduser().exists():
-        print(
-            f"no such file: {video!r}\n"
-            "If you meant a command, run `saitenka-overlay --help` — e.g. `setup`/`install` "
-            "(configure options), `doctor` (health check), `install-plugin`, `import-settings`, "
-            "`import-dictionaries`, `attach`.",
-            file=sys.stderr,
-        )
-        return 2
-
-    cfg = load_config(config)
-
-    # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file.
-    # These are dictionary TITLES resolved against the consolidated DB — never built here.
-    dict_titles = _resolve_names(dicts, cfg, "dicts")
-    freq_titles = _resolve_names(freq, cfg, "freq")
-    pitch_titles = _resolve_names(pitch, cfg, "pitch")
-    known_cfg = json.loads(anki_decks) if anki_decks else cfg.get("known")
-
-    if not (color or known_cfg or known or dict_titles or mine):
-        print(
-            "[hint] bare demo: no coloring, no monolingual dicts, no mining. Configure it once with\n"
-            "       `saitenka-overlay setup`, or edit your config (see overlay.example.toml):\n"
-            f"       {config_path()}\n"
-            '       …or pass --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
-            "       --mine  (see RUNNING.md §3)."
-        )
-
-    # Building the coloring/dict/mining collaborators is the slow part (the first-run dictionary
-    # cache build is 25–66s per dict). Rather than block the mpv window on it, `run` defers this to a
-    # BACKGROUND thread (see reader.load_deps_async below) so plain subtitles draw immediately and
-    # coloring/tooltips/mining light up in place once loaded — exactly like `attach`. The closure
-    # captures the CLI-flag inputs (`--dict/--freq/--anki-decks/--mine` …) that config-only
-    # build_reader_deps can't see. It must NOT touch the mpv IPC (it runs off the main thread); its
-    # prints go to the terminal, the in-mpv spinner covers the on-screen feedback.
-    def _build_deps():
-        # Anki-backed features — mining, and known-word coloring from a deck — need Anki running.
-        # Start it for the user (like `attach` does) instead of crashing on a refused connection;
-        # warn and degrade (coloring → freq+JLPT, mining unavailable) if it can't be reached.
-        if mine or known_cfg:
-            from overlay.app.anki import ensure_anki_running
-
-            if not ensure_anki_running():
-                print(
-                    "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect "
-                    "add-on). Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
-                    file=sys.stderr,
-                )
-
-        anki = mine_conf = None
-        if mine:
-            from overlay.app.anki import Anki, MineConfig
-
-            anki = Anki()
-            mine_conf = MineConfig(deck=mine_deck, model=mine_model)
-            print(
-                f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
-                f"→ {mine_deck} ({mine_model})"
-            )
-            log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
-        else:
-            log.info("mining disabled (no [mine] config / --no-mine)")
-
-        # Resolve dict/freq/pitch TITLES against the consolidated DB (imported once by `import`);
-        # a title with no imported dictionary is warned and skipped — nothing is built here.
-        from overlay.app.dictdb import DictionaryDb
-
-        db = DictionaryDb.open()
-        dict_set = None
-        freq_rows: list = []
-        if dict_titles or freq_titles or pitch_titles:
-            from overlay.app.dictionary import _MISSING_HINT, DictionarySet
-
-            d_rows, dmiss = db.resolve(dict_titles)
-            freq_rows, fmiss = db.resolve(freq_titles)
-            p_rows, pmiss = db.resolve(pitch_titles)
-            for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
-                if miss:
-                    print(
-                        f"{kind}(s) not imported, skipped: {', '.join(repr(m) for m in miss)}. "
-                        f"{_MISSING_HINT}",
-                        file=sys.stderr,
-                    )
-            if d_rows or freq_rows or p_rows:
-                dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows)
-                print("dictionaries:", [d.title for d in dict_set.dicts])
-                if dict_set.freqs:
-                    print("frequency:", [f.title for f in dict_set.freqs])
-                if dict_set.pitches:
-                    print("pitch:", [p.title for p in dict_set.pitches])
-                log.info(
-                    "dictionaries loaded: %d defn, %d freq, %d pitch",
-                    len(dict_set.dicts),
-                    len(dict_set.freqs),
-                    len(dict_set.pitches),
-                )
-
-        scorer = None
-        if color or known or known_cfg or freq_titles:
-            from overlay.app.scoring import Scorer
-            from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
-
-            if known_cfg:
-                try:
-                    kw = KnownWords.from_ankiconnect(known_cfg)
-                except Exception as e:  # Anki still closed / AnkiConnect down — don't crash the run
-                    print(
-                        f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only",
-                        file=sys.stderr,
-                    )
-                    kw = KnownWords.from_set([w for w in known.split(",") if w])
-            else:
-                kw = KnownWords.from_set([w for w in known.split(",") if w])
-            if not freq_rows:  # scorer may be on without a dict set (coloring-only run)
-                freq_rows, _ = db.resolve(freq_titles)
-            fd = FreqDict.from_db(db, freq_rows[0]) if freq_rows else None
-            scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load(db))
-            print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
-
-        return scorer, anki, mine_conf, dict_set
-
-    tmp = Path(tempfile.mkdtemp(prefix="saitenka-reader-"))
-    dur = max(8, int(seconds))
-    video_path = Path(video).expanduser() if video else tmp / "clip.mp4"
-    if not video:
-        print(f"no video — generating a {width}x{height} test clip…")
-        _make_clip(video_path, dur, width, height)
-
-    # subtitle source: explicit file > jimaku fetch > embedded track (--slang) > generated demo line.
-    # jimaku fires on --jimaku OR when the config enables it (`[jimaku].fetch = true`); the config path
-    # only fetches when the file has NO embedded JP track, so it doesn't override good embedded subs.
-    _jm = cfg.get("jimaku")
-    jimaku_cfg = _jm if isinstance(_jm, dict) else {}
-    jimaku_on = jimaku_should_fetch(
-        jimaku, bool(jimaku_cfg.get("fetch")), str(video_path) if video else None, slang
-    )
-    log.info(
-        "jimaku fetch: %s (flag=%s cfg_fetch=%s)", jimaku_on, jimaku, bool(jimaku_cfg.get("fetch"))
-    )
-    sub_path = en_sub_path = None
-    if sub_file:
-        sub_path = Path(sub_file).expanduser()
-    elif jimaku_on:
-        from overlay.app.jimaku import (
-            JimakuClient,
-            JimakuError,
-            cached_subs,
-            parse_filename,
-            store_subs,
-        )
-
-        title, ep = parse_filename(video_path)
-        title = jimaku_title or title
-        ep = episode if episode is not None else ep
-        hit = cached_subs(video_path, title, ep) if video_path.exists() else None
-        if hit:
-            print("jimaku: using cached subs", hit.name)
-            sub_path = hit
-            log.info("jimaku cache hit: %s", hit)
-        else:
-            print(f"jimaku: fetching subs for {title!r} ep {ep}…")
-            try:
-                sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
-                print("jimaku: got", sub_path.name)
-                if resync and video_path.exists():
-                    from overlay.app.resync import maybe_resync
-
-                    print("jimaku: resyncing…")
-                    sub_path = maybe_resync(video_path, sub_path, enabled=True)
-                    print("jimaku: resync →", sub_path.name)
-                if video_path.exists():  # cache the finished (synced) sub for the next rewatch
-                    sub_path = store_subs(video_path, title, ep, sub_path)
-            except JimakuError as e:
-                print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
-    elif not video:
-        sub_path = tmp / "line.srt"
-        _make_srt(sub_path, dur, DEMO_LINE)
-        en_sub_path = tmp / "line.en.srt"  # secondary EN track → test the `t` translation reveal
-        _make_srt(en_sub_path, dur, DEMO_LINE_EN)
-
-    from overlay.mpvio.discover import find_mpv
-    from overlay.mpvio.ipc import default_ipc_path
-
-    mpv_bin = find_mpv(cfg.get("mpv_path"))
-    if not mpv_bin:
-        print(
-            "mpv not found — install it (Windows: `winget install shinchiro.mpv`; macOS: "
-            "`brew install mpv`), or set `mpv_path` in overlay.toml. Run `saitenka-overlay doctor`.",
-            file=sys.stderr,
-        )
-        return 2
-    # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
-    sock = default_ipc_path(tmp.name)
-    # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
-    # track select failures) is otherwise invisible in a bug report. Overwritten each run.
-    mpv_log = cache_dir() / "mpv.log"
-    from overlay.mpvio.launch import build_mpv_argv
-
-    cmd = build_mpv_argv(
-        mpv_bin,
-        sock,
-        mpv_log,
-        video_path,
+    return run_impl(
+        video,
+        config=config,
+        sub_file=sub_file,
         slang=slang,
+        dicts=dicts,
+        translate_key=translate_key,
         start=start,
-        screenshot=bool(screenshot),
-        sub_path=sub_path,
-        en_sub_path=en_sub_path,
-        use_config=use_config,
+        jimaku=jimaku,
+        jimaku_key=jimaku_key,
+        jimaku_title=jimaku_title,
+        resync=resync,
+        episode=episode,
+        width=width,
+        height=height,
         fullscreen=fullscreen,
-    )
-    print("launching:", " ".join(cmd))
-    log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
-    proc = subprocess.Popen(cmd)
-
-    try:
-        ipc = MpvIPC(sock).connect(timeout=15)
-    except TimeoutError as e:
-        print("mpv IPC unreachable:", e, file=sys.stderr)
-        from overlay.app.procutil import kill_process_tree
-
-        kill_process_tree(proc)
-        return 2
-
-    from overlay.app.config import (
-        KeyOptions,
-        MiningOptions,
-        PerfOptions,
-        ReaderOptions,
-        TooltipOptions,
-        TranslationOptions,
-    )
-
-    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
-    opts = ReaderOptions(
-        keys=KeyOptions(
-            mine_key=mine_key,
-            mine_all_key=mine_all_key,
-            translate_key=translate_key,
-            preview_key=preview_key,
-            sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
-            sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
-            sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
-        ),
-        tooltip=TooltipOptions(
-            tip_max_frac=tip_height,
-            nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
-            pause_on_tooltip=pause_on_tooltip,
-            hover_switch_delay=hover_switch_delay,
-            hide_delay=cfg.get("hide_delay", _tt.hide_delay),
-            flash_secs=cfg.get("flash_secs", _tt.flash_secs),
-            # off by default; on if EITHER --dict-tabs is passed or the config enables it
-            show_dict_tabs=dict_tabs or bool(cfg.get("show_dict_tabs", False)),
-            panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
-        ),
-        mining=MiningOptions(
-            play_audio=not no_audio_play,
-            max_bulk=cfg.get("max_bulk", _mo.max_bulk),
-            anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
-            anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
-        ),
-        translation=TranslationOptions(auto_translate=auto_translate),
-        perf=PerfOptions(
-            poll_interval=cfg.get("poll_interval", _po.poll_interval),
-            prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
-        ),
+        use_config=use_config,
+        demo_word=demo_word,
+        demo_translate=demo_translate,
+        demo_scroll=demo_scroll,
+        bulk=bulk,
+        screenshot=screenshot,
+        seconds=seconds,
+        color=color,
+        known=known,
+        anki_decks=anki_decks,
+        freq=freq,
+        pitch=pitch,
+        mine=mine,
+        mine_deck=mine_deck,
+        mine_model=mine_model,
+        mine_key=mine_key,
+        mine_all_key=mine_all_key,
+        preview_key=preview_key,
+        no_audio_play=no_audio_play,
+        tip_height=tip_height,
+        dict_tabs=dict_tabs,
+        pause_on_tooltip=pause_on_tooltip,
         prefetch=prefetch,
+        auto_translate=auto_translate,
+        hover_switch_delay=hover_switch_delay,
     )
-    # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
-    # scorer / mining collaborators PRESENT synchronously — build them inline. The interactive path
-    # builds them in the BACKGROUND (progressive startup): plain subs draw now, a spinner runs, and
-    # coloring/tooltips/mining land in place once loaded.
-    if demo_word or screenshot:
-        scorer, anki, mine_conf, dict_set = _build_deps()
-        reader = Reader(
-            ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
-        )
-    else:
-        reader = Reader(ipc, options=opts)  # deps injected asynchronously below
-        if sub_path:  # index the external sub so Alt+←/→/↓ can render the target line instantly
-            reader.load_sub_index(sub_path)
-        reader.load_deps_async(cfg, build=_build_deps)
-    try:
-        if demo_word or screenshot:
-            time.sleep(0.8)
-            reader.refresh_osd()
-            text = reader._get("sub-text") or ""
-            if not text and video:  # real file: hop to the next subtitle cue
-                for _ in range(80):
-                    ipc.command("sub-seek", 1)
-                    time.sleep(0.12)
-                    text = reader._get("sub-text") or ""
-                    if text:
-                        break
-            text = text or DEMO_LINE
-            print("sub-text:", repr(text))
-            reader.set_subtitle(text)
-            target = demo_word or "読む"
-            idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
-            if idx is None:
-                idx = next((i for i, t in enumerate(reader.tokens) if t.is_content), 0)
-            print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
-            reader.set_hover(idx)
-            for _ in range(demo_scroll):
-                reader._scroll_tip(round(reader.osd[1] * 0.12))
-            if demo_translate:
-                reader._setup_secondary()
-                reader.toggle_translation()
-                time.sleep(0.3)
-            if mine:
-                (reader.bulk_mine if bulk else reader.mine_current)()
-                time.sleep(0.5)
-            if screenshot:
-                time.sleep(0.4)
-                r = ipc.command("screenshot-to-file", screenshot, "window")
-                print("screenshot:", r, "->", screenshot)
-                time.sleep(0.3)
-            else:
-                time.sleep(seconds)
-        else:
-            print(
-                f"reader running — hover words; '{translate_key}' toggles the EN translation; "
-                "Ctrl+C or quit mpv to stop."
-            )
-            reader.run()
-    finally:
-        try:
-            reader.close()
-            ipc.command("quit")
-            ipc.close()
-        except Exception:
-            log.debug("reader/ipc shutdown cleanup failed", exc_info=True)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            from overlay.app.procutil import kill_process_tree
-
-            kill_process_tree(proc)  # mpv didn't quit → kill it + any children (no orphans)
-    return 0
-
-
-def _make_clip(
-    path: Path, seconds: int, w: int, h: int
-) -> None:  # pragma: no cover — live-run entry point
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"color=c=0x18283a:size={w}x{h}:rate=30:duration={seconds}",
-            "-pix_fmt",
-            "yuv420p",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
-    )
-
-
-def _make_srt(
-    path: Path, seconds: int, line: str
-) -> None:  # pragma: no cover — live-run entry point
-    end = f"00:00:{seconds:02d},000"
-    path.write_text(f"1\n00:00:00,000 --> {end}\n{line}\n", encoding="utf-8")
 
 
 # --- setup / maintenance subcommands ---------------------------------------------------------------

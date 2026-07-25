@@ -10,12 +10,20 @@
     ]
   },
   {
-    "path": "src/overlay/app/cli.py",
-    "file_name": "cli.py",
+    "path": "src/overlay/app/cli_run.py",
+    "file_name": "cli_run.py",
     "functions": [
       {
-        "name": "run",
-        "complexity": 147
+        "name": "_resolve_dict_set",
+        "complexity": 19
+      },
+      {
+        "name": "_resolve_subtitles",
+        "complexity": 23
+      },
+      {
+        "name": "_execute_reader_session",
+        "complexity": 35
       }
     ]
   },
@@ -68,12 +76,12 @@
     "file_name": "dictdb.py",
     "functions": [
       {
-        "name": "DictionaryDb::_load_dict_banks",
-        "complexity": 36
+        "name": "_read_term_meta",
+        "complexity": 19
       },
       {
-        "name": "_read_term_meta",
-        "complexity": 41
+        "name": "DictionaryDb::_load_dict_banks",
+        "complexity": 36
       }
     ]
   },
@@ -118,8 +126,12 @@
     "file_name": "fsrs.py",
     "functions": [
       {
-        "name": "_read",
-        "complexity": 70
+        "name": "_extract_term_reading",
+        "complexity": 20
+      },
+      {
+        "name": "_build_card_info",
+        "complexity": 24
       }
     ]
   },
@@ -144,26 +156,6 @@
     ]
   },
   {
-    "path": "src/overlay/app/miner.py",
-    "file_name": "miner.py",
-    "functions": [
-      {
-        "name": "Miner::bulk_mine",
-        "complexity": 24
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/reader_deps.py",
-    "file_name": "reader_deps.py",
-    "functions": [
-      {
-        "name": "build_reader_deps",
-        "complexity": 36
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/report.py",
     "file_name": "report.py",
     "functions": [
@@ -179,7 +171,7 @@
     "functions": [
       {
         "name": "Scorer::_style",
-        "complexity": 17
+        "complexity": 18
       }
     ]
   },
@@ -202,12 +194,12 @@
     "file_name": "sub_index.py",
     "functions": [
       {
-        "name": "parse_ass",
+        "name": "SubIndex::locate",
         "complexity": 27
       },
       {
-        "name": "SubIndex::locate",
-        "complexity": 42
+        "name": "parse_ass",
+        "complexity": 27
       }
     ]
   },
@@ -216,8 +208,8 @@
     "file_name": "subtitles.py",
     "functions": [
       {
-        "name": "render_subtitle",
-        "complexity": 32
+        "name": "_draw_visual_lines",
+        "complexity": 20
       }
     ]
   },
@@ -280,8 +272,8 @@
     "file_name": "document.py",
     "functions": [
       {
-        "name": "render_document",
-        "complexity": 32
+        "name": "_render_blocks",
+        "complexity": 18
       }
     ]
   },
@@ -292,10 +284,6 @@
       {
         "name": "wrap_items",
         "complexity": 17
-      },
-      {
-        "name": "render_flow",
-        "complexity": 74
       }
     ]
   },

@@ -13,13 +13,13 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, final
 
-from overlay.app.config import TelemetryOptions
 from overlay.app.paths import cache_dir
 
 if TYPE_CHECKING:
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
 
+    from overlay.app.config import TelemetryOptions
     from overlay.app.otel_export import CounterSampler, GatedSpanProcessor
 
 log = logging.getLogger(__name__)

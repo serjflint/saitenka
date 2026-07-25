@@ -138,7 +138,7 @@ def test_defaults_match_legacy(tmp_path, monkeypatch):
     # pointing at an absent file and reloading — this tests the PARAMETER defaults, deterministically.
     import importlib
 
-    import overlay.app.cli as cli
+    from overlay.app import cli
 
     monkeypatch.setenv("SAITENKA_CONFIG", str(tmp_path / "absent.toml"))
     importlib.reload(cli)
@@ -175,7 +175,7 @@ def test_toml_config_feeds_defaults(tmp_path, monkeypatch):
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfgfile))
     import importlib
 
-    import overlay.app.cli as cli
+    from overlay.app import cli
 
     importlib.reload(cli)  # pick up the env-pointed config path
     try:

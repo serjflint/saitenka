@@ -1,0 +1,18 @@
+id: no-model-derived-reading
+language: python
+severity: error
+message: >-
+  Readings/pitch come from dictionaries, never a model — assigning .generate()/.complete() into a
+  reading/pitch field breaks dict-first grounding (a hallucinated reading is worse than none).
+note: >-
+  Grounding guard (AGENTS.md). Matches nothing in src today by design — future-guard against LLM regressions.
+files:
+  - "src/overlay/**/*.py"
+rule:
+  any:
+    - pattern: $OBJ.reading = $CALL
+    - pattern: $OBJ.pitch = $CALL
+    - pattern: $OBJ.reading_html = $CALL
+constraints:
+  CALL:
+    regex: "\\.(generate|complete)\\("

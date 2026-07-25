@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-25
+
 ### Added
 
 - **Dependency-contract engine (`uv run poe arch`)** replaces the single-rule regex layering test:
@@ -19,12 +21,61 @@ logs.
   checked-in baseline (`overlay/complexipy-snapshot.json`) so today's pre-existing high-complexity
   functions are grandfathered and only new complexity growth fails the gate. Folded into `poe all`;
   regenerate the baseline with `poe complexity-baseline` after a deliberate refactor.
+- **Structured logging + opt-in OpenTelemetry tracing/metrics.** `structlog` JSON-lines logging
+  (always on, redacted, free-threading-safe `msgspec` serialization) plus an opt-in OTel stack: a
+  gated, bounded-queue span pipeline exporting Chrome Trace Format, pull-based metric instruments,
+  and CTF counter tracks — spans and metrics land in one Perfetto-viewable `trace.json`, no
+  Prometheus/backend required. `doctor`/`report` surface the trace file; `$OTEL_SDK_DISABLED=true`
+  force-disables it even when configured on. Fully no-op (memoized) when the `[observability]` extra
+  isn't installed.
+- **Call-level invariant gate (`poe invariants`, ast-grep)** — catches anti-patterns below
+  import-linter's module graph: no `time.sleep` in the mpv reader thread, single-writer IPC pipe, no
+  model-derived readings. Blocking, in `poe all`. Ships planted +/− rule tests so a rule can't
+  silently match nothing.
+- **Dataflow taint tier (`poe invariants-taint`, opt-in, semgrep)** — the one check ast-grep can't
+  do: model output reaching a reading field *through* intermediate variables.
+- **Mutation auditing (`poe mutate`, opt-in, cosmic-ray)** — reruns the test suite against small
+  code mutations to measure how much the tests actually catch, not just cover. `sub_index.py`'s
+  score went 57% → 66% after 4 new Hypothesis properties (59 mutants killed).
+- **Supply-chain & hygiene gate tier** — `poe all` gained vulnerability scanning (`uv audit`),
+  unused/missing dependency checks (`deptry`), a license boundary gate (only the project's own
+  GPL-3.0 `deinflect` add-on may be copyleft), spell-check, offline link-check, and shellcheck over
+  the installers. Adequacy beyond the unit suite is now three-pronged and opt-in: mutation auditing
+  above, coverage-guided fuzzing (`poe fuzz`, atheris, over the subtitle parser), and symbolic
+  execution (`poe crosshair`, CrossHair/z3) — each catches a different class of bug.
+
+### Changed
+
+- Complexity-reduction sweep across several high-cognitive-complexity functions flagged by the new
+  `complexity` gate: `cli.py::run` (CCN 147, split into `cli_run.py`), `render/flow.py::render_flow`,
+  `SubIndex::locate`, `fsrs.py::_read`, `Miner::bulk_mine`, and `subtitles.py::render_subtitle` —
+  each split into smaller, independently-testable helpers with no behavior change.
 
 ### Fixed
 
+- **Episode detection for `SxxExx`-style filenames** — `parse_filename` now recognizes
+  `Show.S02E01.…`, `S2E03`, and `1x08` (yielding the episode) in addition to a bare trailing number,
+  and an underscore-delimited `Show_ep05_…` parses correctly. A resolution like `1920x1080` is not
+  mistaken for a season×episode. This is what jimaku uses to pick the right subtitle file.
 - **`overlay.mpvio` importing from `overlay.app`** (a real import cycle) — `otel_metrics.py`, a leaf
   instrumentation module with no `app/` dependencies, had been placed under `app/` by accident; moved
   to `overlay/otel_metrics.py`.
+- **Telemetry span gate defaulted off** with nothing to flip it on, so telemetry produced logs but
+  never a trace file.
+- **A bare OpenTelemetry import crashed background dependency loading** on any install without the
+  `observability` extra (the default) — now a no-op when the package isn't importable.
+- **Chrome Trace Format thread IDs were derived from the random trace ID**, not the real thread —
+  every independently-started span landed on its own synthetic row in Perfetto instead of grouping
+  by the thread that ran it.
+
+### Development
+
+- Persisted a working local-MLX setup (`repowise-mlx-*`/`repowise-doc-*` poe tasks) for repowise's
+  optional LLM doc generation, after finding model size alone doesn't fix its hallucination-prone
+  synthesis pages — a prompt-grounding gap in the tool, not a capability ceiling
+  (`vibe/repowise-local-mlx-investigation.md`, local notes).
+- Added `ARCHITECTURE.md` (module map + data flow) and fixed stale, duplicated task references in
+  README and RUNNING.md — both now point at the `dev-gate` skill as the single source of truth.
 
 ## [0.4.0] - 2026-07-23
 

@@ -1,0 +1,24 @@
+id: reader-thread-no-sleep
+valid:
+  # sleep in the controller poll loop is fine — that's where pacing belongs
+  - |
+    def run(self):
+        while self.poll_once():
+            time.sleep(interval)
+  # reader blocks on read(), not sleep
+  - |
+    def _read_loop(self):
+        while not self._closed.is_set():
+            chunk = transport.read(65536)
+invalid:
+  # sleep directly in the reader loop — the regression we never want back
+  - |
+    def _read_loop(self):
+        while not self._closed.is_set():
+            time.sleep(0.1)
+            chunk = transport.read(65536)
+  # sleep in the framing/split helper, also reader-thread-only
+  - |
+    def _feed(self, chunk):
+        time.sleep(0.01)
+        self._buf += chunk

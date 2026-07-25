@@ -11,10 +11,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 from overlay.mpvio import discover
 from overlay.mpvio.osd import Overlay
-
 
 # --- mpv discovery ---------------------------------------------------------------------------
 

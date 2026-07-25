@@ -23,6 +23,12 @@ lint = { cmd = "uv run poe lint", cwd = "overlay" }
 types = { cmd = "uv run poe types", cwd = "overlay" }
 arch = { cmd = "uv run poe arch", cwd = "overlay" }
 arch-report = { cmd = "uv run poe arch-report", cwd = "overlay" }
+invariants = { cmd = "uv run poe invariants", cwd = "overlay" }
+invariants-test = { cmd = "uv run poe invariants-test", cwd = "overlay" }
+invariants-taint = { cmd = "uv run poe invariants-taint", cwd = "overlay" }
+mutate = { cmd = "uv run poe mutate", cwd = "overlay" }
+fuzz = { cmd = "uv run poe fuzz", cwd = "overlay" }
+crosshair = { cmd = "uv run poe crosshair", cwd = "overlay" }
 complexity = { cmd = "uv run poe complexity", cwd = "overlay" }
 complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
@@ -31,3 +37,17 @@ cov = { cmd = "uv run poe cov", cwd = "overlay" }
 bench = { cmd = "uv run poe bench", cwd = "overlay" }
 smoke-live = { cmd = "uv run poe smoke-live", cwd = "overlay" }
 changelog = { cmd = "uv run poe changelog", cwd = "overlay" }
+bundle = { cmd = "uv run poe bundle", cwd = "overlay" }
+# Supply-chain & hygiene (real tasks + rationale live in overlay/pyproject.toml).
+audit = { cmd = "uv run poe audit", cwd = "overlay" }
+spell = { cmd = "uv run poe spell", cwd = "overlay" }
+links = { cmd = "uv run poe links", cwd = "overlay" }
+links-net = { cmd = "uv run poe links-net", cwd = "overlay" }
+deps = { cmd = "uv run poe deps", cwd = "overlay" }
+licenses = { cmd = "uv run poe licenses", cwd = "overlay" }
+deadcode = { cmd = "uv run poe deadcode", cwd = "overlay" }
+dup = { cmd = "uv run poe dup", cwd = "overlay" }
+perf-risk = { cmd = "uv run poe perf-risk", cwd = "overlay" }
+shell = { cmd = "uv run poe shell", cwd = "overlay" }
+ps1 = { cmd = "uv run poe ps1", cwd = "overlay" }
+hygiene = { cmd = "uv run poe hygiene", cwd = "overlay" }

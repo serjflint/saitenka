@@ -1,0 +1,20 @@
+id: single-writer-pipe
+valid:
+  # the one sanctioned writer
+  - |
+    def _write(self, data):
+        assert self._transport is not None
+        self._transport.write(data)
+  # reads are unrelated
+  - |
+    def _read_loop(self):
+        chunk = self._transport.read(65536)
+invalid:
+  # a second writer bypassing _write — interleaves into mpv's JSON framing
+  - |
+    def command(self, *args):
+        self._transport.write(json.dumps(args).encode())
+  # even inside a differently-named helper
+  - |
+    def _flush_now(self, data):
+        self._transport.write(data)

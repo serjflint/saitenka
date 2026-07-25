@@ -19,13 +19,15 @@ from __future__ import annotations
 import json
 import re
 import zipfile
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import ijson
 
 from overlay.app.config import resolve_dictdb
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class YomitanDbImportError(RuntimeError):

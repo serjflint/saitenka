@@ -9,10 +9,9 @@ image the controller composites over mpv video in a single surface.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from PIL import Image
 
@@ -23,6 +22,9 @@ from overlay.render.document import GUTTER_PX, INDENT_PX, render_document
 from overlay.render.flow import ChipBox, ImgBox, render_flow
 from overlay.render.layout import Block as FlowBlock
 from overlay.sc.walk import inline_flow, walk
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass(frozen=True)

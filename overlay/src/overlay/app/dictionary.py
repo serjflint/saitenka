@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import re
 from collections import OrderedDict
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -37,12 +36,14 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 
 
 from overlay.app.lookup import CardData, furigana
-from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqSource, PitchSource
 from overlay.panel import Definition, Entry, Freq
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from overlay.app.dictdb import DictionaryDb, DictRow
+    from overlay.app.tokenize import Token
 
 log = logging.getLogger(__name__)
 

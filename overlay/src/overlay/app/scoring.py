@@ -12,11 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
 
 if TYPE_CHECKING:
     from overlay.app.fsrs import KnownSnap
+    from overlay.app.tokenize import Token
 
 RGBA = tuple[int, int, int, int]
 
@@ -148,7 +148,10 @@ class Scorer:
 
         if is_n1:
             return TokenStyle(p.n_plus_one, underline, self._tag("n+1", level))
-        if is_known:
+        # known/forgotten/freq all gate on `content` so a function word stays base even when it lands
+        # in KnownWords (the documented model: function words never take a colour). N+1 needs no gate —
+        # mark_n_plus_one already excludes function words.
+        if content and is_known:
             return TokenStyle(p.known, underline, self._tag("known", level))
         # forgotten words resurface visibly with the forgotten tint (between known/unknown)
         if content and self._is_forgotten(t):

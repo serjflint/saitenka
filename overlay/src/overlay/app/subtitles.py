@@ -9,12 +9,15 @@ per-line translucent rounded box; the hovered word is tinted.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
 from overlay import fonts
-from overlay.app.tokenize import Token
 from overlay.render.layout import NO_START
+
+if TYPE_CHECKING:
+    from overlay.app.tokenize import Token
 
 WHITE = (255, 255, 255, 255)
 HOVER = (255, 214, 90, 255)  # warm yellow highlight
@@ -61,24 +64,11 @@ def _wrap_line(line: list[tuple[int, Token, float]], max_w: float) -> list[list]
     return visual
 
 
-def render_subtitle(
-    lines: list[list[Token]],
-    osd_w: int,
-    size: int = 44,
-    hover: int | None = None,
-    styles: list | None = None,
-    pad_x: int = 20,
-    pad_y: int = 8,
-    line_gap: int = 5,
-) -> SubtitleRender:
-    """`lines` is a list of source lines (each a token list); global token index is row-major.
-
-    `styles` (optional, indexed by global token index) gives each token a text color and an optional
-    JLPT underline color; the hovered token overrides the text color with the highlight.
-    """
-    max_w = osd_w * 0.94
-
-    # measure with global indices, shrinking if even one token is wider than the screen
+def _fit_font_size(lines: list[list[Token]], max_w: float, pad_x: int, size: int):
+    """Shrink ``size`` (down to a floor of 20) until every measured token fits within ``max_w``
+    (minus padding), or 8 attempts are exhausted. Returns ``(font, size, measured)`` — ``measured``
+    carries (global_index, token, width) triples with global (row-major) indices already assigned,
+    so the caller never re-measures."""
     for _ in range(8):
         font = _font(size)
         measured: list[list[tuple[int, Token, float]]] = []
@@ -95,26 +85,28 @@ def render_subtitle(
         if widest + 2 * pad_x <= max_w or size <= 20:
             break
         size = max(20, int(size * max_w / (widest + 2 * pad_x)))
+    return font, size, measured
 
-    font = _font(size)
-    ascent, descent = font.getmetrics()
-    text_h = ascent + descent
-    row_h = text_h + 2 * pad_y
 
-    # wrap each source line into visual lines
-    visual_lines: list[list[tuple[int, Token, float]]] = []
-    for row in measured:
-        visual_lines.extend(_wrap_line(row, max_w - 2 * pad_x))
-    if not visual_lines:
-        return SubtitleRender(Image.new("RGBA", (1, 1), (0, 0, 0, 0)), [])
-
-    line_widths = [sum(w for _, _, w in vl) + 2 * pad_x for vl in visual_lines]
-    img_w = int(max(line_widths))
-    img_h = len(visual_lines) * row_h + (len(visual_lines) - 1) * line_gap
-    img = Image.new("RGBA", (max(img_w, 1), max(img_h, 1)), (0, 0, 0, 0))
+def _draw_visual_lines(
+    img: Image.Image,
+    visual_lines: list[list[tuple[int, Token, float]]],
+    line_widths: list[float],
+    *,
+    img_w: int,
+    row_h: int,
+    line_gap: int,
+    pad_x: int,
+    pad_y: int,
+    ascent: int,
+    text_h: int,
+    font,
+    size: int,
+    stroke: int,
+    styles: list | None,
+    hover: int | None,
+) -> list[WordBox]:
     draw = ImageDraw.Draw(img)
-    stroke = max(1, size // 16)
-
     boxes: list[WordBox] = []
     y = 0
     for vl, lw in zip(visual_lines, line_widths, strict=True):
@@ -141,4 +133,59 @@ def render_subtitle(
             boxes.append(WordBox(gi, int(x), y + pad_y, int(w), text_h))
             x += w
         y += row_h + line_gap
+    return boxes
+
+
+def render_subtitle(
+    lines: list[list[Token]],
+    osd_w: int,
+    size: int = 44,
+    hover: int | None = None,
+    styles: list | None = None,
+    pad_x: int = 20,
+    pad_y: int = 8,
+    line_gap: int = 5,
+) -> SubtitleRender:
+    """`lines` is a list of source lines (each a token list); global token index is row-major.
+
+    `styles` (optional, indexed by global token index) gives each token a text color and an optional
+    JLPT underline color; the hovered token overrides the text color with the highlight.
+    """
+    max_w = osd_w * 0.94
+    font, size, measured = _fit_font_size(lines, max_w, pad_x, size)
+
+    ascent, descent = font.getmetrics()
+    text_h = ascent + descent
+    row_h = text_h + 2 * pad_y
+
+    # wrap each source line into visual lines
+    visual_lines: list[list[tuple[int, Token, float]]] = []
+    for row in measured:
+        visual_lines.extend(_wrap_line(row, max_w - 2 * pad_x))
+    if not visual_lines:
+        return SubtitleRender(Image.new("RGBA", (1, 1), (0, 0, 0, 0)), [])
+
+    line_widths = [sum(w for _, _, w in vl) + 2 * pad_x for vl in visual_lines]
+    img_w = int(max(line_widths))
+    img_h = len(visual_lines) * row_h + (len(visual_lines) - 1) * line_gap
+    img = Image.new("RGBA", (max(img_w, 1), max(img_h, 1)), (0, 0, 0, 0))
+    stroke = max(1, size // 16)
+
+    boxes = _draw_visual_lines(
+        img,
+        visual_lines,
+        line_widths,
+        img_w=img_w,
+        row_h=row_h,
+        line_gap=line_gap,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        ascent=ascent,
+        text_h=text_h,
+        font=font,
+        size=size,
+        stroke=stroke,
+        styles=styles,
+        hover=hover,
+    )
     return SubtitleRender(img, boxes)

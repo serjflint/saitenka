@@ -32,7 +32,9 @@ def subminer_running() -> bool:
     """True if a SubMiner process is live — it will attach its own overlay to mpv, so we must not."""
     if _PLATFORM == "darwin":
         try:
-            r = subprocess.run(["pgrep", "-f", _SUBMINER_PROC], capture_output=True, timeout=5)
+            r = subprocess.run(
+                ["pgrep", "-f", _SUBMINER_PROC], capture_output=True, timeout=5, check=False
+            )
         except (OSError, subprocess.SubprocessError):
             return False
         return r.returncode == 0
@@ -43,6 +45,7 @@ def subminer_running() -> bool:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError):
             return False

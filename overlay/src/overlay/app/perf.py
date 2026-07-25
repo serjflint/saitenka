@@ -15,8 +15,11 @@ import statistics
 import threading
 import time
 from collections import deque
-from collections.abc import Generator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 _MAXLEN = 200  # per-op samples kept; old ones fall off, no unbounded growth
 

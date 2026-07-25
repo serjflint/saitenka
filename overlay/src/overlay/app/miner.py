@@ -37,6 +37,26 @@ def source_meta(video) -> tuple[str, int | None]:
         return "", None
 
 
+def _select_bulk_targets(r) -> list[int]:
+    """Token indices ``bulk_mine`` should mine: content words, not already "known"-colored, deduped
+    by lemma (first occurrence wins), capped at ``r.max_bulk``."""
+    from overlay.app.controller import SKIP_POS
+
+    targets, seen = [], set()
+    for i, t in enumerate(r.tokens):
+        if not (t.is_content and t.pos not in SKIP_POS):
+            continue
+        if r.styles and r.styles[i].tag == "known":
+            continue
+        if t.lemma in seen:
+            continue
+        seen.add(t.lemma)
+        targets.append(i)
+        if len(targets) >= r.max_bulk:
+            break
+    return targets
+
+
 class Miner:
     """Mines words from the current cue into Anki. All IPC happens on the main thread (the mining
     entry points are key/click handlers dispatched by the Reader's poll loop)."""
@@ -187,23 +207,10 @@ class Miner:
     def bulk_mine(self) -> None:
         """Mine every unknown content word in the current cue, sharing one screenshot + audio."""
         r = self.r
-        from overlay.app.controller import SKIP_POS
-
         if not r.anki or not r.mine_cfg or not r.tokens:
             r._toast("nothing to mine", "warn")
             return
-        targets, seen = [], set()
-        for i, t in enumerate(r.tokens):
-            if not (t.is_content and t.pos not in SKIP_POS):
-                continue
-            if r.styles and r.styles[i].tag == "known":
-                continue
-            if t.lemma in seen:
-                continue
-            seen.add(t.lemma)
-            targets.append(i)
-            if len(targets) >= r.max_bulk:
-                break
+        targets = _select_bulk_targets(r)
         if not targets:
             r._toast("no new words", "warn")
             return

@@ -5,12 +5,16 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from PIL import Image
 
 from overlay import otel_metrics
-from overlay.mpvio.ipc import MpvIPC
+
+if TYPE_CHECKING:
+    from PIL import Image
+
+    from overlay.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
 

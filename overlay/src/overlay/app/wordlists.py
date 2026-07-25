@@ -21,10 +21,10 @@ import math
 import re
 import zipfile
 from dataclasses import dataclass
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from overlay.resources import asset
-from datetime import UTC
 
 if TYPE_CHECKING:
     from overlay.app.dictdb import DictionaryDb, DictRow
@@ -38,7 +38,7 @@ def _crc_lenient():
     pitch-accent dicts) write wrong/zero CRCs even though the deflate data is perfectly intact;
     Python's strict check would otherwise reject them. Scoped + restored, single-threaded use."""
     orig = zipfile.ZipExtFile._update_crc  # type: ignore[attr-defined]  # deliberate
-    zipfile.ZipExtFile._update_crc = lambda self, newdata: None  # type: ignore[attr-defined]
+    zipfile.ZipExtFile._update_crc = lambda self, *_: None  # type: ignore[attr-defined]  # patched sig takes the data chunk; ignored
     try:
         yield
     finally:
@@ -279,8 +279,8 @@ class KnownWords:
 
         def call(action, **params):
             body = json.dumps({"action": action, "version": 6, "params": params}).encode()
-            req = urllib.request.Request(host, body, {"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as r:
+            req = urllib.request.Request(host, body, {"Content-Type": "application/json"})  # noqa: S310  # HTTPS frequency-list download - fixed scheme
+            with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310  # HTTPS frequency-list download - fixed scheme
                 return json.loads(r.read()).get("result")
 
         words: set[str] = set()

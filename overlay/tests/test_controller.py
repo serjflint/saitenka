@@ -1,12 +1,12 @@
 """Controller: live-run startup + hover hysteresis (Yomitan-style linger)."""
 
+import functools
 import time
 
 import pytest
 
 import overlay.app.controller as C
 from overlay.app.controller import PanelKey, Reader
-import functools
 
 
 class FakeIPC:
@@ -1493,7 +1493,8 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup(monkeypatch):
     from overlay.app.tokenize import Token
 
     # A dict_set backed by a real lru_cache so the same Entry object is returned on repeated calls.
-    from overlay.panel import Definition, Entry as _Entry
+    from overlay.panel import Definition
+    from overlay.panel import Entry as _Entry
 
     class _CachedDS:
         @functools.cache  # noqa: B019 — the test NEEDS a same-object cache to expose Entry mutation
@@ -1517,6 +1518,7 @@ def test_tip_panel_finish_does_not_block_render_head():
     """_TipPanel.finish() must not hold the lock during the entire tail render so that a concurrent
     render_head() call from the main thread can fast-path without waiting for the worker."""
     import threading
+
     from overlay.app.controller import _TipPanel
 
     # Use a TallDS entry so finish() actually has work to do (lazy panel with deferred tail).

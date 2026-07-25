@@ -1,9 +1,10 @@
 """Stage 6: ruby in flow — inline ruby inside wrapped rich text."""
 
+from util import assert_golden
+
 from overlay.model import Span, Style
 from overlay.render.flow import build_items, render_flow, ruby, wrap_items
 from overlay.render.layout import Block
-from util import assert_golden
 
 S = Style(size=30)
 

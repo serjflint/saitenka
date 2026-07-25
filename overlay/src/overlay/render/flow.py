@@ -11,8 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw
-
 from overlay import fonts
 from overlay.model import LinkBox, ScanBox, Span, Style
 from overlay.render.layout import (
@@ -23,10 +21,13 @@ from overlay.render.layout import (
     _font,
     _tokenize_span,
     draw_token,
+    new_panel_image,
 )
 from overlay.render.ruby import RubyBox, _base_size, layout_ruby
 
 if TYPE_CHECKING:
+    from PIL import Image, ImageDraw
+
     from overlay.draw.chip import ChipStyle, Sprite
 
 
@@ -252,6 +253,128 @@ def _ruby_base_tokens(box: RubyBox):
     return toks
 
 
+def _clip_lines_to_height(
+    lines: list[list[Item]],
+    boxes: list[tuple[int, int, int]],
+    max_height: int | None,
+    padding: int,
+    clipped_out: list | None,
+) -> tuple[list[list[Item]], list[tuple[int, int, int]]]:
+    """Keep only the wrapped lines up to the first one that COVERS ``max_height`` px (layout/wrapping
+    of the whole flow already ran — it's cheap; drawing is the cost), so a pathologically tall single
+    block first-paints O(viewport), not O(block). Records a drop in ``clipped_out``."""
+    if max_height is None or not lines:
+        return lines, boxes
+    acc = 2 * padding
+    keep = 0
+    for b in boxes:
+        if acc >= max_height:
+            break
+        acc += b[0]
+        keep += 1
+    keep = max(1, keep)  # always draw at least one line
+    if keep < len(lines):
+        if clipped_out is not None:
+            clipped_out.append(True)
+        return lines[:keep], boxes[:keep]
+    return lines, boxes
+
+
+def _draw_item(
+    img: Image.Image, draw: ImageDraw.ImageDraw, it: Item, x: float, baseline: float
+) -> None:
+    if it.kind == "ruby" and it.box is not None:  # kind implies the field (build_items)
+        it.box.draw(img, draw, x, baseline)
+    elif it.kind == "img" and it.img is not None:
+        it.img.draw(img, draw, x, baseline)
+    elif it.kind == "chip" and it.chip is not None:
+        it.chip.draw(img, draw, x, baseline)
+    elif it.kind == "text" and it.tok is not None:
+        draw_token(img, draw, x, baseline, it.tok)
+
+
+def _update_scan_run(
+    it: Item,
+    x: float,
+    y: float,
+    line_box_h: int,
+    run: list[tuple[str, float, float]],
+    scan_out: list[ScanBox],
+) -> list[tuple[str, float, float]]:
+    """Extend the contiguous-CJK-char ``run`` with ``it``, flushing it to ``scan_out`` when a
+    non-CJK item breaks the run. A ruby box's BASE kanji continue the run (see :func:`render_flow`'s
+    docstring) — the reading itself never breaks it."""
+    if it.kind == "text" and it.tok is not None and it.tok.kind == "cjk":
+        run.append((it.tok.text, x, it.width))
+        return run
+    if it.kind == "ruby" and it.box is not None:
+        bx = it.box.base_x(x)
+        for btok in _ruby_base_tokens(it.box):
+            if btok.kind == "cjk":
+                run.append((btok.text, bx, btok.width))
+            elif run:  # kana/latin inside the base breaks the run
+                _flush_scan_run(run, scan_out, y, line_box_h)
+                run = []
+            bx += btok.width
+        return run
+    if run:
+        _flush_scan_run(run, scan_out, y, line_box_h)
+        return []
+    return run
+
+
+def _update_link_run(
+    it: Item,
+    x: float,
+    y: float,
+    line_box_h: int,
+    link: tuple[str, float, float] | None,
+    link_out: list[LinkBox],
+) -> tuple[str, float, float] | None:
+    """Extend the current internal-link run (``(query, x_start, x_end)``), flushing it to
+    ``link_out`` as one :class:`LinkBox` when the href changes or ends."""
+    href = it.tok.href if (it.kind == "text" and it.tok is not None) else None
+    if href:
+        return (
+            (href, link[1], x + it.width) if (link and link[0] == href) else (href, x, x + it.width)
+        )
+    if link is not None:
+        q, xs, xe = link
+        link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), line_box_h))
+        return None
+    return link
+
+
+def _draw_flow_line(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    line: list[Item],
+    line_box_h: int,
+    base_from_top: int,
+    y: float,
+    *,
+    scan_out: list[ScanBox] | None,
+    link_out: list[LinkBox] | None,
+    padding: int,
+) -> None:
+    baseline = y + base_from_top
+    x = float(padding)
+    run: list[tuple[str, float, float]] = []  # contiguous CJK chars: (char, x, width)
+    link: tuple[str, float, float] | None = None  # (query, x_start, x_end) of the current link run
+    for it in line:
+        _draw_item(img, draw, it, x, baseline)
+        if scan_out is not None:
+            run = _update_scan_run(it, x, y, line_box_h, run, scan_out)
+        if link_out is not None:
+            link = _update_link_run(it, x, y, line_box_h, link, link_out)
+        x += it.width
+    if scan_out is not None and run:
+        _flush_scan_run(run, scan_out, y, line_box_h)
+    if link_out is not None and link is not None:
+        q, xs, xe = link
+        link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), line_box_h))
+
+
 def render_flow(
     flow: list[Inline],
     block: Block,
@@ -274,76 +397,20 @@ def render_flow(
     items = build_items(flow)
     lines = wrap_items(items, block.width)
     boxes = [_item_line_box(line, block.line_height_scale) for line in lines]
-    if max_height is not None and lines:
-        acc = 2 * block.padding
-        keep = 0
-        for b in boxes:
-            if acc >= max_height:
-                break
-            acc += b[0]
-            keep += 1
-        keep = max(1, keep)  # always draw at least one line
-        if keep < len(lines):
-            lines, boxes = lines[:keep], boxes[:keep]
-            if clipped_out is not None:
-                clipped_out.append(True)
+    lines, boxes = _clip_lines_to_height(lines, boxes, max_height, block.padding, clipped_out)
 
-    w = block.width + 2 * block.padding
-    h = 2 * block.padding + sum(b[0] for b in boxes)
-    img = Image.new("RGBA", (w, max(h, 1)), block.background)
-    draw = ImageDraw.Draw(img)
-
-    y = block.padding
+    img, draw, y = new_panel_image(block, boxes)
     for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
-        baseline = y + base_from_top
-        x = float(block.padding)
-        run: list[tuple[str, float, float]] = []  # contiguous CJK chars: (char, x, width)
-        link: tuple[str, float, float] | None = (
-            None  # (query, x_start, x_end) of the current link run
+        _draw_flow_line(
+            img,
+            draw,
+            line,
+            box,
+            base_from_top,
+            y,
+            scan_out=scan_out,
+            link_out=link_out,
+            padding=block.padding,
         )
-        for it in line:
-            if it.kind == "ruby" and it.box is not None:  # kind implies the field (build_items)
-                it.box.draw(img, draw, x, baseline)
-            elif it.kind == "img" and it.img is not None:
-                it.img.draw(img, draw, x, baseline)
-            elif it.kind == "chip" and it.chip is not None:
-                it.chip.draw(img, draw, x, baseline)
-            elif it.kind == "text" and it.tok is not None:
-                draw_token(img, draw, x, baseline, it.tok)
-            if scan_out is not None:
-                if it.kind == "text" and it.tok is not None and it.tok.kind == "cjk":
-                    run.append((it.tok.text, x, it.width))
-                elif it.kind == "ruby" and it.box is not None:
-                    # Make the ruby's BASE kanji scannable at their (centred) positions inside the box;
-                    # they continue the contiguous CJK run so a word spanning ruby + okurigana scans whole.
-                    bx = it.box.base_x(x)
-                    for btok in _ruby_base_tokens(it.box):
-                        if btok.kind == "cjk":
-                            run.append((btok.text, bx, btok.width))
-                        elif run:  # kana/latin inside the base breaks the run
-                            _flush_scan_run(run, scan_out, y, box)
-                            run = []
-                        bx += btok.width
-                elif run:
-                    _flush_scan_run(run, scan_out, y, box)
-                    run = []
-            if link_out is not None:
-                href = it.tok.href if (it.kind == "text" and it.tok is not None) else None
-                if href:
-                    link = (
-                        (href, link[1], x + it.width)
-                        if (link and link[0] == href)
-                        else (href, x, x + it.width)
-                    )
-                elif link is not None:
-                    q, xs, xe = link
-                    link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), round(box)))
-                    link = None
-            x += it.width
-        if scan_out is not None and run:
-            _flush_scan_run(run, scan_out, y, box)
-        if link_out is not None and link is not None:
-            q, xs, xe = link
-            link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), round(box)))
         y += box
     return img

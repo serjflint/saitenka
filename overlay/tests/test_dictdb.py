@@ -164,7 +164,7 @@ def test_import_tolerates_wrong_crc_meta(tmp_path):
 
 def test_failed_import_rolls_back(tmp_path, monkeypatch):
     """A failure mid-import must leave the DB untouched — the whole import is one transaction."""
-    import overlay.app.dictdb as dictdb
+    from overlay.app import dictdb
 
     z = _term_zip(tmp_path / "d.zip", "Boom", [["猫", "ねこ", ["cat"]]], tags=[["★", "p", 1]])
     db = DictionaryDb.open(tmp_path / "db.sqlite")

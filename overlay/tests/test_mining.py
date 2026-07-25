@@ -88,7 +88,6 @@ def test_clip_audio_builds_ffmpeg(monkeypatch):
 
     def fake_run(cmd, **kw):
         calls["cmd"] = cmd
-        return None
 
     monkeypatch.setattr("overlay.app.media.subprocess.run", fake_run)
     # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
@@ -127,7 +126,7 @@ def test_bold_word_escapes_html_in_sentence():
 def test_dedupe_escapes_special_chars_in_query():
     """dedupe must escape * and spaces in the expression to avoid Anki query injection.
     The escaped query must contain \\* (backslash-star), not a bare unescaped *."""
-    from overlay.app.anki import dedupe, MineConfig
+    from overlay.app.anki import MineConfig, dedupe
 
     queries = []
 
@@ -217,6 +216,40 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     assert "読む" in r._mined  # ⊕ flips to ✓
 
 
+def test_select_bulk_targets_dedupes_skips_known_and_caps():
+    """Characterization test for the target-selection logic bulk_mine delegates to: content words
+    only, "known"-tagged words skipped, duplicate lemmas collapsed to the first occurrence, capped
+    at max_bulk."""
+    from types import SimpleNamespace
+
+    from overlay.app.miner import _select_bulk_targets
+    from overlay.app.scoring import TokenStyle
+    from overlay.app.tokenize import Token
+
+    def tok(surface, lemma, pos="名詞"):
+        return Token(surface=surface, lemma=lemma, reading="", pos=pos, start=0, end=len(surface))
+
+    tokens = [
+        tok("猫", "猫"),  # 0: content, novel -> kept
+        tok("は", "は", pos="助詞"),  # 1: particle -> not content, skipped
+        tok("犬", "犬"),  # 2: content, "known"-tagged -> skipped
+        tok("猫", "猫"),  # 3: content, dup lemma of #0 -> skipped
+        tok("鳥", "鳥"),  # 4: content, novel -> kept
+    ]
+    styles = [
+        TokenStyle(color=(0, 0, 0, 255)),
+        TokenStyle(color=(0, 0, 0, 255)),
+        TokenStyle(color=(0, 0, 0, 255), tag="known"),
+        TokenStyle(color=(0, 0, 0, 255)),
+        TokenStyle(color=(0, 0, 0, 255)),
+    ]
+    r = SimpleNamespace(tokens=tokens, styles=styles, max_bulk=1)
+    assert _select_bulk_targets(r) == [0]  # capped at 1 before reaching 鳥
+
+    r.max_bulk = 10
+    assert _select_bulk_targets(r) == [0, 4]  # は/犬/dup-猫 all filtered out
+
+
 def test_bulk_mine_counts_and_toasts(monkeypatch):
     from util import FakeIPC
 
@@ -275,7 +308,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
 def test_card_for_degrades_without_jamdict(monkeypatch):
     """When the optional jmdict extra (jamdict) isn't installed, card_for degrades to an
     expression-only card instead of crashing — the broad except in lookup is load-bearing."""
-    import overlay.app.lookup as lookup
+    from overlay.app import lookup
 
     lookup.card_data.cache_clear()
 

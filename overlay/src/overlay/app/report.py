@@ -58,7 +58,7 @@ def _redact_config(text: str) -> str:
     the line so the report still shows the key *was* set — just not its value."""
     out = []
     for line in text.splitlines():
-        if re.match(r"\s*#?\s*(api[_-]?key|key|token|secret|password)\s*=", line, re.I):
+        if re.match(r"\s*#?\s*(api[_-]?key|key|token|secret|password)\s*=", line, re.IGNORECASE):
             out.append(re.sub(r"=\s*.*$", '= "<redacted>"', line))
         else:
             out.append(line)
@@ -67,7 +67,7 @@ def _redact_config(text: str) -> str:
 
 def _first_line(*cmd: str) -> str:
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
         lines = ((out.stdout or "") + (out.stderr or "")).strip().splitlines()
         return lines[0] if lines else "no output"
     except (OSError, subprocess.SubprocessError):

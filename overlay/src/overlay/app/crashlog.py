@@ -19,7 +19,10 @@ import sys
 import threading
 import time
 import traceback
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _LOG_TAIL = 60  # lines of the overlay log to attach as context
 _KEEP = 20  # cap stored crash reports (retention)
@@ -140,7 +143,7 @@ def _excepthook(exc_type, exc_value, exc_tb) -> None:
     tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     try:
         _notify(write_report("main-thread", tb))
-    except Exception:  # never let crash handling itself crash
+    except Exception:  # never let crash handling itself crash  # noqa: S110
         pass
     sys.__excepthook__(exc_type, exc_value, exc_tb)  # preserve the stderr traceback + exit code
 
@@ -152,7 +155,7 @@ def _thread_excepthook(args) -> None:
     name = getattr(args.thread, "name", None)
     try:
         _notify(write_report("thread", tb, thread=name))
-    except Exception:
+    except Exception:  # noqa: S110
         pass
 
 
@@ -167,7 +170,7 @@ def install() -> None:
         d.mkdir(parents=True, exist_ok=True)
         _fault_fp = open(d / "faulthandler.log", "a", encoding="utf-8")  # noqa: SIM115 — process-lifetime
         faulthandler.enable(file=_fault_fp)
-    except Exception:  # pragma: no cover — faulthandler unavailable / unwritable dir
+    except Exception:  # pragma: no cover — faulthandler unavailable / unwritable dir  # noqa: S110
         pass
     sys.excepthook = _excepthook
     threading.excepthook = _thread_excepthook

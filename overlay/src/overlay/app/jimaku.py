@@ -14,8 +14,8 @@ import logging
 import os
 import re
 import sys
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,7 +238,7 @@ class JimakuClient:
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         if q:
             url += "?" + q
-        req = urllib.request.Request(url, headers={"Authorization": self.api_key})
+        req = urllib.request.Request(url, headers={"Authorization": self.api_key})  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
         # Retry transient failures (429 / 5xx / network) with backoff; client errors (400/401/404) are
         # raised immediately with jimaku's error body (retrying them can't help).
         for attempt in stamina.retry_context(
@@ -246,7 +246,7 @@ class JimakuClient:
         ):
             with attempt:
                 try:
-                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
+                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
                         return json.loads(r.read())
                 except urllib.error.HTTPError as e:  # 400/401/404 client · 429/5xx transient
                     detail = _http_error_detail(e)
@@ -280,8 +280,8 @@ class JimakuClient:
 
     def download(self, jf: JimakuFile, dest_dir: str | Path) -> Path:
         dest = Path(dest_dir) / jf.name
-        req = urllib.request.Request(jf.url, headers={"Authorization": self.api_key})
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:
+        req = urllib.request.Request(jf.url, headers={"Authorization": self.api_key})  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
             dest.write_bytes(r.read())
         return dest
 
@@ -306,22 +306,35 @@ class JimakuClient:
         return self.download(best, dest_dir)
 
 
-_FN_EP = re.compile(r"[-_ ]\s*(?:e|ep|episode)?\s*(\d{1,3})\b", re.IGNORECASE)
+# Season+episode forms take precedence over a bare number and yield the E part: S01E05 / s1e5 /
+# S01.E05 → 5, and 1x08 → 8. `\d{1,2}` on the left half keeps a resolution like 1920x1080 from
+# matching (no 1–2-digit run sits directly before the `x`/`e`).
+_FN_SXXEXX = re.compile(r"s\d{1,2}[\s._-]*e(\d{1,3})(?!\d)", re.IGNORECASE)
+_FN_NXNN = re.compile(r"\b\d{1,2}x(\d{1,3})(?!\d)", re.IGNORECASE)
+# Bare number, optionally prefixed e/ep/episode. `(?!\d)` (not `\b`) so a trailing word char like the
+# '_' in 'Show_ep05_1080p' still terminates the episode — `\b` failed there ('5' and '_' are both \w).
+_FN_EP = re.compile(r"[-_ ]\s*(?:e|ep|episode)?\s*(\d{1,3})(?!\d)", re.IGNORECASE)
 
 
 def parse_filename(path: str | Path) -> tuple[str, int | None]:
     """Best-effort (title, episode) from an anime filename.
 
     '[Erai-raws] Nippon Sangoku - 10 [1080p …].mkv' → ('Nippon Sangoku', 10).
+    'Show S01E05 [x265].mkv' → ('Show', 5).
     """
     stem = Path(path).stem
     stem = re.sub(r"\[[^\]]*\]", " ", stem)  # drop [group]/[quality] tags
     stem = re.sub(r"\([^)]*\)", " ", stem)
-    episode = None
-    m = list(_FN_EP.finditer(stem))
-    if m:
-        episode = int(m[-1].group(1))
-        stem = stem[: m[-1].start()]
+    episode: int | None = None
+    cut: int | None = None
+    for rx in (_FN_SXXEXX, _FN_NXNN, _FN_EP):
+        m = list(rx.finditer(stem))
+        if m:
+            episode = int(m[-1].group(1))
+            cut = m[-1].start()
+            break  # SxxExx / NxNN win over a bare number; the title is what precedes the match
+    if cut is not None:
+        stem = stem[:cut]
     title = re.sub(r"[-_.]+", " ", stem)
     title = re.sub(r"\s+", " ", title).strip(" -–—")
     return title, episode

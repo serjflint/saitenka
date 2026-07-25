@@ -8,6 +8,8 @@ set -uo pipefail
 
 pass=0; warn=0; fail=0
 ok(){ printf '  \033[32m✓\033[0m %s\n' "$*"; pass=$((pass+1)); }
+# shellcheck disable=SC2329  # reserved warning path — symmetric with ok()/er(); the `warn` count it
+# feeds is printed in the Summary line. Kept for the first toolchain soft-fail check that needs it.
 wn(){ printf '  \033[33m!\033[0m %s\n' "$*"; warn=$((warn+1)); }
 er(){ printf '  \033[31m✗\033[0m %s\n' "$*"; fail=$((fail+1)); }
 hdr(){ printf '\n\033[1m%s\033[0m\n' "$*"; }

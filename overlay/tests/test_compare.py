@@ -28,7 +28,7 @@ pytestmark = pytest.mark.skipif(
 def dict_set():
     # This parity test deliberately runs against the USER'S real, already-imported dictionary DB —
     # opt out of conftest's per-test hermetic DB override so we read data_dir()/dictionaries.sqlite.
-    import overlay.app.dictdb as dictdb
+    from overlay.app import dictdb
     from overlay.app.dictionary import DictionarySet
 
     saved = dictdb._DB_PATH_OVERRIDE
