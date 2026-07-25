@@ -11,8 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw
-
 from overlay import fonts
 from overlay.model import LinkBox, ScanBox, Span, Style
 from overlay.render.layout import (
@@ -28,6 +26,8 @@ from overlay.render.layout import (
 from overlay.render.ruby import RubyBox, _base_size, layout_ruby
 
 if TYPE_CHECKING:
+    from PIL import Image, ImageDraw
+
     from overlay.draw.chip import ChipStyle, Sprite
 
 
