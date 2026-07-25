@@ -6,12 +6,16 @@ Used to golden-render a walked structured-content tree; the panel composer layer
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PIL import Image
 
 from overlay.model import RGBA, LinkBox, ScanBox, Span, Style
 from overlay.render.flow import first_baseline, render_flow
 from overlay.render.layout import Block as FlowBlock
-from overlay.sc.model import Block
+
+if TYPE_CHECKING:
+    from overlay.sc.model import Block
 
 INDENT_PX = 18
 GUTTER_PX = 22

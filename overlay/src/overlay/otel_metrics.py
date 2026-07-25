@@ -13,12 +13,13 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from collections.abc import Generator
 from contextlib import contextmanager
-from types import ModuleType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+    from types import ModuleType
+
     from opentelemetry.metrics import Counter, Histogram, Meter, UpDownCounter
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader, MetricsData
 

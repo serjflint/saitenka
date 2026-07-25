@@ -7,8 +7,10 @@ A :class:`Block` is one block-level unit (paragraph / list item), carrying an in
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from overlay.render.flow import Inline
+if TYPE_CHECKING:
+    from overlay.render.flow import Inline
 
 
 @dataclass

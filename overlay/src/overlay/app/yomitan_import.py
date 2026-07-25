@@ -21,10 +21,13 @@ import json
 import re
 import sys
 import zipfile
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from datetime import UTC
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 MAX_SETTINGS_BYTES = 50 * 1024 * 1024  # a settings export is < 1 MB; refuse a collection export
 

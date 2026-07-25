@@ -88,7 +88,6 @@ def test_clip_audio_builds_ffmpeg(monkeypatch):
 
     def fake_run(cmd, **kw):
         calls["cmd"] = cmd
-        return None
 
     monkeypatch.setattr("overlay.app.media.subprocess.run", fake_run)
     # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
@@ -127,7 +126,7 @@ def test_bold_word_escapes_html_in_sentence():
 def test_dedupe_escapes_special_chars_in_query():
     """dedupe must escape * and spaces in the expression to avoid Anki query injection.
     The escaped query must contain \\* (backslash-star), not a bare unescaped *."""
-    from overlay.app.anki import dedupe, MineConfig
+    from overlay.app.anki import MineConfig, dedupe
 
     queries = []
 
@@ -275,7 +274,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
 def test_card_for_degrades_without_jamdict(monkeypatch):
     """When the optional jmdict extra (jamdict) isn't installed, card_for degrades to an
     expression-only card instead of crashing — the broad except in lookup is load-bearing."""
-    import overlay.app.lookup as lookup
+    from overlay.app import lookup
 
     lookup.card_data.cache_clear()
 

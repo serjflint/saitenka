@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helper: import the module (fails until it exists)
 # ---------------------------------------------------------------------------

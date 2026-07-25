@@ -15,11 +15,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from overlay.model import LinkBox, ScanBox
-
 if TYPE_CHECKING:
     import numpy as np
 
+    from overlay.model import LinkBox, ScanBox
     from overlay.panel import Row, Theme
 
 

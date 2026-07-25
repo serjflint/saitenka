@@ -10,10 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from overlay.app.tokenize import Token
-
 if TYPE_CHECKING:
     from overlay.app.popups import TipPanel
+    from overlay.app.tokenize import Token
 
 
 @dataclass(frozen=True, slots=True)

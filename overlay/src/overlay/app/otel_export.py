@@ -13,14 +13,17 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import msgspec
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from overlay.app.telemetry import ActiveGate
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
+
+    from overlay.app.telemetry import ActiveGate
 
 log = logging.getLogger(__name__)
 

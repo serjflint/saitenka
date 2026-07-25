@@ -7,8 +7,8 @@ near the word. Both overlays live in mpv's own OSD surface → fullscreen-safe.
 
 from __future__ import annotations
 
-import logging
 import io
+import logging
 import os
 import queue
 import re
@@ -18,21 +18,15 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-import numpy as np
 from PIL import Image
 
+from overlay import otel_metrics
 from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
-from overlay.app.miner import Miner, tag_slug
-from overlay import otel_metrics
-from overlay.app.perf import timed
-from overlay.app.popups import PopupView, TipPanel
-from overlay.app.prefetch import FinishItem, PrefetchItem
 from overlay.app.lookup import card_for, entry_for
-from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.media import (
     audio_duration,
     copy_clipboard,
@@ -40,13 +34,16 @@ from overlay.app.media import (
     speak,
     tts_available,
 )
+from overlay.app.miner import Miner, tag_slug
+from overlay.app.perf import timed
+from overlay.app.popups import PopupView, TipPanel
+from overlay.app.prefetch import FinishItem, PrefetchItem
+from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import Token, tokenize
 from overlay.model import Span, Style
-from overlay.mpvio.ipc import MpvIPC
-from overlay.mpvio.osd import Overlay
-from overlay.mpvio.osd import to_bgra_array
+from overlay.mpvio.osd import Overlay, to_bgra_array
 from overlay.panel import (
     Freq,
     LazyPanel,
@@ -58,6 +55,11 @@ from overlay.panel import (
 )
 from overlay.render.flow import render_flow
 from overlay.render.layout import Block, inline_width
+
+if TYPE_CHECKING:
+    import numpy as np
+
+    from overlay.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
 
@@ -155,7 +157,7 @@ def _html_lines(html: str) -> list[str]:
 
 
 def _html_items(html: str) -> list[str]:
-    return [_strip_tags(m) for m in re.findall(r"<li>(.*?)</li>", html or "", re.S)]
+    return [_strip_tags(m) for m in re.findall(r"<li>(.*?)</li>", html or "", re.DOTALL)]
 
 
 def _media_name(field_html: str, pattern: str) -> str:

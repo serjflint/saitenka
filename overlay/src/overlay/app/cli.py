@@ -14,14 +14,15 @@ and selects the JP sub track / fetches jimaku), and ``setup``.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import subprocess
 import sys
 import sysconfig
 import tempfile
 import time
+from datetime import UTC
 from pathlib import Path
 from typing import Annotated
 
@@ -30,7 +31,6 @@ import cyclopts
 from overlay import __version__
 from overlay.app.config import TooltipOptions, config_path, load_config
 from overlay.app.paths import cache_dir
-from datetime import UTC
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def _ensure_free_threaded() -> None:
             # corrupts the console (double output, and interactive prompts that can't take input).
             # Spawn a child that shares our console, wait, and exit with its status instead.
             try:
-                sys.exit(subprocess.run(argv).returncode)
+                sys.exit(subprocess.run(argv, check=False).returncode)
             except KeyboardInterrupt:
                 # Ctrl+C on the shared console reaches BOTH processes: the child cleans up and exits
                 # on its own SIGINT; the parent must not dump a KeyboardInterrupt traceback from

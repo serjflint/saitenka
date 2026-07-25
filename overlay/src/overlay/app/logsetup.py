@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import msgspec
 import structlog
-from structlog.types import EventDict, Processor, WrappedLogger
 
 from overlay.app.report import redact
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from structlog.types import EventDict, Processor, WrappedLogger
 
 ROOT_LOGGER_NAME = "overlay"
 

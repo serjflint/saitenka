@@ -11,6 +11,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from util import validate_ctf_document
 
 from overlay.app.otel_export import (
     CounterSampler,
@@ -19,7 +20,6 @@ from overlay.app.otel_export import (
     _span_to_ctf_event,
 )
 from overlay.app.telemetry import ActiveGate
-from util import validate_ctf_document
 
 GOLDEN_TRACE = Path(__file__).resolve().parent / "golden" / "sample_trace.json"
 

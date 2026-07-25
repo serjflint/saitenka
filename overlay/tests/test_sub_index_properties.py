@@ -72,7 +72,9 @@ def _fmt_ass(t: float) -> str:
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-_ASS_HEADER = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+_ASS_HEADER = (
+    "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+)
 
 
 # --- P1: SRT round-trip pins the timestamp arithmetic (h*3600 + m*60 + s + ms/1000) ---------------
@@ -97,7 +99,9 @@ def test_srt_roundtrip(cues):
 @given(cues=ass_cues())
 @settings(max_examples=100, deadline=None)
 def test_ass_roundtrip(cues):
-    body = "".join(f"Dialogue: 0,{_fmt_ass(s)},{_fmt_ass(e)},D,,0,0,0,,{txt}\n" for s, e, txt in cues)
+    body = "".join(
+        f"Dialogue: 0,{_fmt_ass(s)},{_fmt_ass(e)},D,,0,0,0,,{txt}\n" for s, e, txt in cues
+    )
     parsed = parse_ass(_ASS_HEADER + body)
     assert len(parsed) == len(cues)
     for got, (s, e, txt) in zip(parsed, cues, strict=True):
@@ -109,7 +113,9 @@ def test_ass_roundtrip(cues):
 # --- P2: locate(sub_start) containment pins the `start <= t < end` boundary ------------------------
 
 
-@example(cues=[SubCue(0.0, 1.0, "あ"), SubCue(2.0, 3.0, "い")])  # t==0 lower-incl, t==1/3 upper-excl
+@example(
+    cues=[SubCue(0.0, 1.0, "あ"), SubCue(2.0, 3.0, "い")]
+)  # t==0 lower-incl, t==1/3 upper-excl
 @given(cues=index_cues())
 @settings(max_examples=100, deadline=None)
 def test_locate_sub_start_containment(cues):
@@ -124,7 +130,9 @@ def test_locate_sub_start_containment(cues):
 
 
 @example(cues=[SubCue(0.0, 1.0, "あ")], current=0, delta=1, inside=True)  # next past last → -1
-@example(cues=[SubCue(0, 1, "あ"), SubCue(2, 3, "い")], current=1, delta=-1, inside=False)  # gap prev
+@example(
+    cues=[SubCue(0, 1, "あ"), SubCue(2, 3, "い")], current=1, delta=-1, inside=False
+)  # gap prev
 @given(
     cues=index_cues(min_size=0),
     current=st.integers(-2, 8),

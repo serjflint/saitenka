@@ -39,9 +39,9 @@ MPV_MIN = (0, 37)  # overlay-add BGRA landed in 0.37
 # Known consumers of an mpv input-ipc-server socket — flagged for the coexistence story so the user
 # knows we JOIN a shared socket rather than fight over it (the SubMiner-vs-animecards Windows bug).
 KNOWN_SOCKETS = {
-    "/tmp/subminer-socket": "SubMiner",
-    "/tmp/mpv-socket": "animecards",
-    "/tmp/mpvsocket": "mpv_websocket",
+    "/tmp/subminer-socket": "SubMiner",  # noqa: S108  # third-party tool socket path we DETECT, not one we create
+    "/tmp/mpv-socket": "animecards",  # noqa: S108  # third-party tool socket path we DETECT, not one we create
+    "/tmp/mpvsocket": "mpv_websocket",  # noqa: S108  # third-party tool socket path we DETECT, not one we create
 }
 
 
@@ -82,7 +82,7 @@ class Report:
 def _run(*args: str) -> str:
     """Run a command, returning combined stdout (best-effort; '' on failure)."""
     try:
-        out = subprocess.run(args, capture_output=True, text=True, timeout=10)
+        out = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
         return (out.stdout or "") + (out.stderr or "")
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -95,10 +95,10 @@ def _anki_call(action: str, **params):
     payload: dict = {"action": action, "version": 6, "params": params}
     if api_key:
         payload["key"] = api_key
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310  # our own probe URL - fixed scheme
         host, json.dumps(payload).encode(), {"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=5) as r:
+    with urllib.request.urlopen(req, timeout=5) as r:  # noqa: S310  # our own probe URL - fixed scheme
         res = json.loads(r.read())
     if res.get("error"):
         raise RuntimeError(res["error"])
@@ -565,7 +565,9 @@ def check_recent_errors(n: int = 5) -> Check:
         lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as e:  # pragma: no cover
         return Check("recent-errors", "warn", f"couldn't read log: {e}")
-    errs = [ln for ln in lines if re.search(r"\b(error|critical|warning)\b", ln, re.I)][-n:]
+    errs = [ln for ln in lines if re.search(r"\b(error|critical|warning)\b", ln, re.IGNORECASE)][
+        -n:
+    ]
     if not errs:
         return Check("recent-errors", "ok", "no recent errors in the log")
     return Check("recent-errors", "warn", "recent log errors:\n    " + "\n    ".join(errs))

@@ -23,7 +23,6 @@ import statistics
 import sys
 import sysconfig
 import time
-
 from pathlib import Path
 
 from overlay.app.config import load_config
@@ -366,7 +365,7 @@ def run_stress(
 
     ds, tag = _load_dict_set()
     if ds is None:
-        ds, tag = _SyntheticDS(), tag
+        ds = _SyntheticDS()
     reader = _cold_reader(ds)
     # The cache cap is a TEST CONTROL, not the user's live [tooltip].panel_cache_max — fix it small
     # and deterministic so eviction is exercised the same way regardless of how many dicts are
@@ -531,7 +530,7 @@ def main() -> int:
 
     ds, tag = _load_dict_set()
     if ds is None:
-        ds, tag = _SyntheticDS(), tag
+        ds = _SyntheticDS()
 
     reader = Reader(FakeIPC(), dict_set=ds, prefetch=False)
     reader.osd = OSD

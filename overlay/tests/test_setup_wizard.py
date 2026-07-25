@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 from overlay.app import setup_wizard as sw
 
-
 # --- package-manager selection ---------------------------------------------------------------
 
 

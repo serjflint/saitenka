@@ -161,7 +161,7 @@ def _voices_out() -> str:
 
 def _run_out(*args: str) -> str:
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
+        r = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
         return (r.stdout or "") + (r.stderr or "")
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -212,6 +212,7 @@ def audio_duration(path: str | Path) -> float | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         return float(out.stdout.strip())
     except (OSError, ValueError):
@@ -242,6 +243,7 @@ def has_sub_lang(path: str | Path, langs: str = "ja,jpn,jp") -> bool | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
     except OSError:
         return None

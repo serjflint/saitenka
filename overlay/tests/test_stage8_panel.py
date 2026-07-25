@@ -3,10 +3,10 @@
 from pathlib import Path
 
 import numpy as np
+from util import assert_golden
 
 from overlay.draw.chip import ChipStyle, render_chip
 from overlay.panel import load_entry, render_panel
-from util import assert_golden
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 

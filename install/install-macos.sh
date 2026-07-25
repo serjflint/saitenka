@@ -41,7 +41,7 @@ for t in brew uv mpv ffmpeg yt-dlp; do
   else printf '  \033[31m✗\033[0m %-9s (missing)\n' "$t"; fi
 done
 [ -d /Applications/Anki.app ] && printf '  \033[32m✓\033[0m Anki.app\n' || printf '  \033[31m✗\033[0m Anki.app (missing)\n'
-$DEV && for app in Obsidian; do [ -d "/Applications/$app.app" ] && printf '  \033[32m✓\033[0m %s.app\n' "$app"; done
+if $DEV && [ -d /Applications/Obsidian.app ]; then printf '  \033[32m✓\033[0m Obsidian.app\n'; fi
 
 # ── 1. Homebrew — install ONLY what's missing (no update, no upgrade) ───────
 if ! have brew; then
@@ -149,6 +149,8 @@ addon 2055492159 AnkiConnect    "mining + FSRS coloring"
 addon 759844606  "FSRS Helper"  "better scheduling"
 addon 1771074083 "Review Heatmap" "streak view"
 if dicts_present; then
+  # shellcheck disable=SC2016  # the backticks are intentional literal markdown emphasis shown to the
+  # user (see `saitenka-overlay doctor`), NOT a command substitution — single quotes are correct here
   printf '  3. Dictionaries:  \033[32m✓\033[0m imported into the database (see `saitenka-overlay doctor`)\n'
 else
   echo "  3. Dictionaries: run  saitenka-overlay import <folder of your Yomitan .zip dicts>"

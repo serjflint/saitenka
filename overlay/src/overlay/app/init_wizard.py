@@ -11,9 +11,12 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from overlay.app.config import config_path
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # The default config a fresh install starts from (what `init`/`setup` propose writing). One template,
 # shared by both wizards — edit a starter value here, not in two places.

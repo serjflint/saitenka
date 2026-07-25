@@ -19,9 +19,9 @@ if TYPE_CHECKING:
     from PIL import Image
 
     from overlay.app.tokenize import Token
+    from overlay.panel import LazyPanel
 
 from overlay.mpvio.osd import to_bgra_array
-from overlay.panel import LazyPanel
 
 # zlib level for cached panels: ~16x on the mostly-transparent BGRA, ~3 ms to decompress a tall panel.
 # Compress runs on the prefetch worker (off the hot path); decompress only when a cached panel becomes

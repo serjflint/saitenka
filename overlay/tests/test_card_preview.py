@@ -77,7 +77,7 @@ def test_media_name_extracts_filenames():
 
 
 def test_play_audio_builds_command(monkeypatch):
-    import overlay.app.media as media
+    from overlay.app import media
 
     calls = {}
     monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **kw: calls.__setitem__("cmd", cmd))

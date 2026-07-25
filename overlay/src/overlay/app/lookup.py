@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
-from overlay.app.tokenize import Token
 from overlay.panel import Definition, Entry
+
+if TYPE_CHECKING:
+    from overlay.app.tokenize import Token
 
 POS_EN = {
     "名詞": "noun",

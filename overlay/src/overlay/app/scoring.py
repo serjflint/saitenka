@@ -12,11 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
 
 if TYPE_CHECKING:
     from overlay.app.fsrs import KnownSnap
+    from overlay.app.tokenize import Token
 
 RGBA = tuple[int, int, int, int]
 

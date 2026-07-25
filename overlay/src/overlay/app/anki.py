@@ -16,10 +16,12 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import stamina
 
-from overlay.app.lookup import CardData
+if TYPE_CHECKING:
+    from overlay.app.lookup import CardData
 
 log = logging.getLogger(__name__)
 
@@ -54,9 +56,9 @@ def anki_reachable(
     """True if AnkiConnect answers a version ping. Host/key resolve from config when not given."""
     if host is None:
         host, api_key = resolve_anki()
-    req = urllib.request.Request(host, _ping_body(api_key), {"Content-Type": "application/json"})
+    req = urllib.request.Request(host, _ping_body(api_key), {"Content-Type": "application/json"})  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
             return b'"result"' in r.read()
     except Exception:
         return False
@@ -137,13 +139,13 @@ class Anki:
         if self.api_key:
             payload["key"] = self.api_key  # AnkiConnect apiKey → request body
         body = json.dumps(payload).encode()
-        req = urllib.request.Request(self.host, body, {"Content-Type": "application/json"})
+        req = urllib.request.Request(self.host, body, {"Content-Type": "application/json"})  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
         for attempt in stamina.retry_context(
             on=_AnkiRetryable, attempts=2, wait_initial=0.3, wait_max=1.0
         ):
             with attempt:
                 try:
-                    with urllib.request.urlopen(req, timeout=20) as r:
+                    with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
                         res = json.loads(r.read())
                 except OSError as e:  # connection refused / timeout — transient, retry once
                     raise _AnkiRetryable(f"AnkiConnect unreachable at {self.host}: {e}") from e

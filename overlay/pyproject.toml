@@ -21,6 +21,7 @@ dependencies = [
     "tomlkit>=0.15.1",
     "msgspec>=0.21.1",
     "structlog>=26.1.0",
+    "rich>=14.0",  # progress bars in cli.py; used directly, so declared (not left transitive via cyclopts)
 ]
 
 [project.optional-dependencies]
@@ -80,6 +81,7 @@ dev = [
     "pytest-memray>=1.9.0",
     "import-linter>=2.13",
     "complexipy>=6.2.0",
+    "ruff>=0.16",
 ]
 
 [build-system]
@@ -114,21 +116,63 @@ max-complexity-allowed = 15
 line-length = 100
 
 [tool.ruff.lint]
-# Stage 8b tooling hardening: bugbear, simplify, tryceratops, perf, ruff-specific, pyupgrade,
-# comprehensions — on top of the default E/F. Every surviving hit is fixed or carries a reasoned
-# per-line noqa; the only config-level ignores are the style-only rules noted below.
-select = ["E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4", "TID"]
+# Explicit whitelist, NOT `select = ["ALL"]`: ALL silently enables new rules on every ruff upgrade and
+# breaks the gate unpredictably. We add categories by choice, favouring ones ruff can AUTO-FIX (cheap to
+# adopt and keep green). Noisy sub-rules of a kept category are pruned in `ignore` with a reason; a
+# category we don't want simply isn't selected. Residual per-site suppressions are `# noqa: … # reason`.
+select = [
+    # already had ─────────────────────────────────────────────────────────────────────────────────
+    "E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4", "TID",
+    # new, auto-fixable → near-free to adopt ──────────────────────────────────────────────────────
+    "W",       # pycodestyle warnings (fix)
+    "I",       # isort — import ordering (fix)
+    "RET",     # flake8-return — return-flow simplifications (fix)
+    "PIE",     # flake8-pie — misc modernizations (fix)
+    "FLY",     # flynt — static str.join → f-string (fix)
+    "FURB",    # refurb — modern idioms (fix)
+    "ICN",     # import conventions, e.g. `import numpy as np` (fix)
+    "ISC",     # implicit string concat (ISC001 conflicts with the formatter → ignored below)
+    "FA",      # future annotations (fix)
+    "TC",      # type-checking-only imports → TYPE_CHECKING block (fix)
+    "PGH",     # pygrep-hooks — blanket-noqa / eval / bad type-ignore
+    "NPY",     # NumPy-specific incl. the 2.0 migration (NPY201, fix) — we depend on numpy>=2
+    # new, security / correctness — high signal, low noise (mostly manual, but small) ──────────────
+    "S",       # flake8-bandit — the SAST gate (graduated from the standalone `sec` task)
+    "N",       # pep8-naming
+    "ASYNC", "DTZ", "LOG", "G", "PT", "SLOT", "YTT", "EXE", "T10", "INT",
+    # pylint — the logic/error rules; count/style cousins pruned in `ignore` ───────────────────────
+    "PLE", "PLW", "PLC", "PLR",
+]
+# Each entry prunes a noisy sub-rule of a SELECTED category (a category we don't want just isn't
+# selected above — no ignore needed for it).
 ignore = [
-    "TRY003",  # long messages in raise — our error strings ARE the UX (toasts/CLI); a message-
-               # class hierarchy would be ceremony without benefit here
-    "TRY300",  # move return to else — the existing try/return shapes in the poll-loop/mining
-               # code read clearer as-is; rewriting is churn without behavior change
-    "SIM105",  # contextlib.suppress over try/except-pass — remaining pass bodies became
-               # log.debug(exc_info=True) in this stage; suppress would re-hide them
-    "E501",    # line length — the formatter governs; JP-heavy lines (double-width chars,
-               # ・/·/→ in comments) misreport badly and rewrapping them is pure churn
-    "RUF001", "RUF002", "RUF003",  # "ambiguous" unicode — this codebase renders Japanese;
-               # ・ ～ × … in strings/comments/docstrings are intentional typography
+    # ── Formatter owns these ────────────────────────────────────────────────────────────────────────
+    "E501",    # line length — the formatter governs; JP double-width chars (・/～/×/→) misreport badly
+    "ISC001",  # single-line-implicit-concat — conflicts with `ruff format`
+    # ── Japanese typography (RUF) ───────────────────────────────────────────────────────────────────
+    "RUF001", "RUF002", "RUF003",  # "ambiguous" unicode — ・ ～ × … are intentional JP typography
+    # ── tryceratops / simplify (inline error strings ARE the UX here) ───────────────────────────────
+    "TRY003",  # long messages in raise — a message-class hierarchy would be ceremony without benefit
+    "TRY300",  # move-return-to-else — the poll-loop/mining try/return shapes read clearer as-is
+    "SIM105",  # suppress over try/except-pass — remaining pass bodies are log.debug(exc_info=True)
+    # ── flake8-bandit (S): keep the gate, drop the categorically-safe rules ─────────────────────────
+    "S101",    # asserts — invariant / free-threading GIL guardrails; the app never runs under -O
+    "S603",    # subprocess-without-shell — ruff flags ALL subprocess; ours pass list args, no shell
+    "S607",    # partial exe path — intentional PATH resolution of mpv/ffmpeg/brew (cross-platform)
+    "S606",    # start-process-without-shell — the safe (no-shell) form; flagged only for being direct
+    # ── pylint: keep PLE + logic rules, drop count/style cousins ────────────────────────────────────
+    "PLC0415", # import-outside-top-level — deliberate lazy imports (deinflect/rich/otel/jamdict)
+    "PLR2004", # magic-value — pervasive in rendering/geometry math where the literal IS the meaning
+    "PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0916", "PLR0917", "PLR0904", "PLR1702",
+               # too-many-{returns,branches,args,positional,locals,statements,…} — complexipy's job
+    "PLW0603", # global-statement — intentional module-level singletons (caches/registries)
+    "PLW2901", # redefined-loop-name — idiomatic reuse in a couple of tight loops
+    "PLW0108", # unnecessary-lambda — several are intentional deferred/lazy thunks
+    # ── pep8-naming (N) single-rule noise ───────────────────────────────────────────────────────────
+    "N818",    # exception without Error suffix — our names read fine
+    "N812",    # lowercase import aliased to non-lowercase — deliberate module aliases
+    # ── pytest (PT) ─────────────────────────────────────────────────────────────────────────────────
+    "PT018",   # composite-assertion — `assert a and b` reads fine
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -141,8 +185,30 @@ ignore = [
 # Defense-in-depth alongside the .importlinter gpl-chokepoint contract.
 "src/overlay/app/dictionary.py" = ["TID251"]
 "src/overlay/app/doctor.py" = ["TID251"]
+# media.py dispatches on sys.platform with a `return` per branch; the explicit `else` is a DELIBERATE
+# mypy platform-narrowing guard (without it, mypy flags the fall-through as unreachable on the build
+# host). RET's else-after-return "simplification" fights that guard, so opt those rules out here.
+"src/overlay/app/media.py" = ["RET505", "RET506", "RET508"]
 # Property tests exercise the deinflect chain directly (hypothesis), not through the app chokepoint.
 "tests/test_properties.py" = ["TID251"]
+# Tests legitimately reach into private members and take shortcuts a library shouldn't:
+"tests/**" = [
+    "SLF001",  # white-box access to _private state is how the internals get tested
+    "S101",    # asserts ARE the test framework
+    "S105", "S106", "S311",  # fake tokens/passwords + non-crypto random in fixtures
+    "S108",    # temp-file paths in tests are throwaway fixtures, not process-lifetime files
+    "S110",    # try/except/pass in test teardown/probes is fine
+    "PLR2004", # magic values are fine in test expectations
+    "PT011", "PT017", "PT018",  # broad pytest.raises / assert-in-except / composite asserts are fine here
+    "PLW1510", # subprocess.run in tests drives a child then asserts on .returncode/.stdout — the test
+               # IS the check; explicit check= would be noise. (In src/, PLW1510 now gates: every call
+               # carries an explicit check=False after the 2026-07-25 sweep.)
+]
+"examples/**" = ["T201", "S", "INP001"]  # demo scripts: print() is the output, security/init noise N/A
+# NOTE: security suppressions in `src/` are DELIBERATELY per-line `# noqa: S…  # reason` at each
+# site (see anki.py/jimaku.py/wordlists.py/crashlog.py/fsrs.py/dictdb.py/doctor.py), not centralized
+# here — a per-line noqa is more precise (a NEW unsafe occurrence in the same file still fails) and
+# self-documents the reason next to the code. Config-level ignores stay reserved for categorical rules.
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "saitenka_deinflect".msg = "GPL-3.0 add-on — only overlay/app/dictionary.py and overlay/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
@@ -162,6 +228,23 @@ ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 include = ["src/overlay"]
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
+
+# Spell-check allowlist lives in the repo-root _typos.toml (poe spell scans repo-wide; typos resolves
+# config from the scan root, not from overlay/).
+
+# Dependency hygiene (poe deps, now clean → folded into `all`). Every ignore below is a runtime-implicit
+# data package, an extras self-reference, or a deliberate forward-declaration — not a silenced defect.
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+    "unidic-lite",      # runtime dictionary data loaded implicitly by fugashi (never imported)
+    "jamdict-data",     # CC BY-SA DB loaded by jamdict at runtime (never imported)
+    "jamdict-data-fix", # Windows drop-in for jamdict-data (never imported)
+    "saitenka-overlay", # self-reference from the `full`/`minimal` convenience extras
+    "saitenka-overlay-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
+    "filelock",         # declared ahead of use for the planned Windows mandatory-lock work (ROADMAP.md
+                        # "real Windows kernel" residue); not yet imported. Remove IF that work is dropped.
+]
+DEP003 = ["saitenka_deinflect"]  # GPL add-on via the editable `deinflect` extra — the chokepoint import
 
 # --- Stage 8b: local task runner (no CI — `poe all` is the pre-push gate) -------------------------
 # Every `uv run` carries `--extra full` so the optional features (deinflect inflection chain + JMdict
@@ -211,7 +294,86 @@ arch-report = { shell = "uvx pyscn analyze --select complexity,cbo --no-open src
 # minutes/module. `poe mutate` runs all targets; `poe mutate sub_index` narrows. Survivors → harden
 # with Hypothesis properties, re-run to confirm. See tools/mutate/run.py + AGENTS.md "Mutation auditing".
 mutate = { cmd = "uv run --extra full --with cosmic-ray python tools/mutate/run.py" }
+# Coverage-guided fuzzing of the subtitle parser (atheris/libFuzzer). Opt-in, NOT in `all`. Pinned to
+# CPython 3.13 in a SEPARATE .venv-fuzz (UV_PROJECT_ENVIRONMENT) — atheris is a libFuzzer C-extension
+# that can't load under the free-threaded 3.14t default; the parser itself is pure-Python, fine on 3.13
+# (same out-of-process 3.13 pattern as `invariants-taint`). 60s bounded default; a crasher drops a
+# `crash-*` repro → shrink it, add as a regression golden, fix. Complements the Hypothesis property tests.
+fuzz = { shell = "UV_PROJECT_ENVIRONMENT=.venv-fuzz uv run --python 3.13 --extra full --with atheris python tools/fuzz/fuzz_sub_index.py -max_total_time=60 -artifact_prefix=tools/fuzz/" }
+# Symbolic-execution adequacy pass over the pure-core property tests (CrossHair via the Hypothesis
+# `crosshair` backend) — a THIRD technique next to mutation (cosmic-ray) and coverage-guided fuzzing
+# (atheris): a z3 SMT solver finds exact-boundary counterexamples random search misses. Opt-in, NOT in
+# `all` (slow). Pinned CPython 3.13 in a SEPARATE .venv-cx (z3 is a C-ext, no free-threading); the
+# crosshair backend is registered in conftest only when hypothesis-crosshair is present. HypoFuzz was
+# TEST-DRIVEN (ran clean on the property suite, found nothing atheris/crosshair didn't) but NOT adopted:
+# its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS) — unfit to commit into a
+# licence-careful Apache-2.0 repo — and atheris+crosshair already cover the pure-core adequacy angle.
+crosshair = { shell = "UV_PROJECT_ENVIRONMENT=.venv-cx uv run --python 3.13 --extra full --with hypothesis-crosshair pytest -q -p no:randomly --hypothesis-profile=crosshair tests/test_sub_index_properties.py tests/test_properties.py tests/test_property.py" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
-all = ["lint", "types", "arch", "invariants", "complexity", "test", "test-ft", "cov"]
+
+# --- Supply-chain & hygiene (test-driven & wired 2026-07-25; see vibe/quality-growth-plan.md) --------
+# Winners chosen by running each candidate on THIS repo, not by reputation. Design: only fast,
+# deterministic, already-clean checks join `all` (audit/spell/links). Tools that surface real findings
+# today (sec/deps/deadcode/dup) stay ADVISORY — graduating each to the gate is its own focused sweep,
+# deliberately deferred. Rust/Go binaries are preferred (out-of-process → free-threading-safe).
+
+# GATE (in `all`) — vulnerability scan over the resolved uv.lock. Native uv command (Rust): reads the
+# lockfile directly, no venv build (pip-audit SIGABRTs building one on uv-managed pythons; its
+# `--no-deps` mode is the documented fallback). Experimental → the preview flag pins the interface.
+audit = { shell = "uv audit --preview-features audit-command" }
+# GATE (in `all`) — spelling across code + docs. typos (Rust via uvx), gitignore-aware; allowlist in
+# [tool.typos]. Ran from repo root so it covers the top-level docs and the deinflect add-on too.
+spell = { shell = "cd .. && uvx typos" }
+# GATE (in `all`) — local link integrity (relative/anchor links resolve). `--offline` checks only
+# on-disk targets → deterministic and network-free; the full external-URL crawl is the advisory
+# `links-net` below (network → flaky → not in `all`). lychee = Rust binary (brew install lychee).
+links = { shell = "cd .. && lychee --offline --no-progress '**/*.md'" }
+links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress '**/*.md'" }
+
+# SAST (flake8-bandit `S`) is now folded into the ruff `select` above, so it runs inside `lint` (in
+# `all`) — no separate `sec` task. The 2026-07-25 triage put reasoned per-line `# noqa: S…` at each
+# legitimate site (subprocess launch of mpv/ffmpeg/anki, localhost/HTTPS urlopen, the dictdb SQL) and
+# the four categorically-safe rules in `ignore`. semgrep taint (the cross-file layer `S` can't do)
+# stays as the opt-in `invariants-taint`.
+# GATE (in `all`) — unused/missing/misplaced deps. deptry, run in-project (uv run --with) so PIL→pillow
+# etc. resolve via installed metadata; running it isolated via uvx misreports everything. Clean after
+# the [tool.deptry] ignores (declared rich, forward-declared filelock). JSON for agents: add `-o dep.json`.
+deps = { shell = "uv run --extra full --with deptry deptry src" }
+# ADVISORY — cross-module dead code (ruff `F` only catches unused imports/locals). vulture with a
+# whitelist for interface-mandated params (structlog processors, OTel exporter overrides, signal
+# handlers) that are "unused" by signature but required. Tune with --min-confidence.
+deadcode = { shell = "uvx vulture src .vulture_whitelist.py --min-confidence 80" }
+# ADVISORY — copy-paste detection. jscpd v5 (Rust core via npx). 0.19% today (the controller split
+# paid off); `--threshold` can gate a ceiling later. `--reporters ai` emits agent/MCP-friendly output.
+dup = { shell = "npx --yes jscpd@latest src --min-tokens 50 --threshold 3 --reporters consoleFull" }
+# ADVISORY (NOT in `all`) — repowise's static code-health + PERF-RISK (I/O-in-loop / N+1 / regex- and
+# defer-in-loop / blocking-in-async), the unique non-LLM check it offers over our other tools. Runs
+# in-process, no network, NO LLM (it rebuilds its own call graph each run — no stale-index problem; the
+# `--generate-code` LLM flag is opt-in and NOT used here). Metric-that-informs, not a contract that
+# enforces (Goodhart), so it stays out of the gate. Prereq: `uv tool install repowise` + a built index
+# (.repowise/). `--format json` for agent triage. See vibe/quality-growth-plan.md (repowise finding).
+perf-risk = { shell = "cd .. && repowise health --module overlay/src/overlay" }
+# GATE (in `all`) — dependency license boundary. The ONLY copyleft in our graph must be our own
+# deliberate GPL-3.0 add-on (saitenka-overlay-deinflect); ANY other GPL/AGPL/LGPL is a transitive leak
+# into the Apache-2.0-clean core and fails. Complements the import-linter GPL chokepoint (code boundary)
+# and ruff TID251 (import boundary) with a dependency-graph boundary. If a benign LGPL dep ever appears,
+# add it to --ignore-packages with a note (ratchet), don't drop the check. pip-licenses reads installed
+# metadata → needs the full env. See ../LICENSING.md.
+licenses = { shell = "uv run --extra full --with pip-licenses pip-licenses --partial-match --fail-on 'GPL' --ignore-packages saitenka-overlay-deinflect" }
+# GATE (in `all`) — shell installer static analysis (shellcheck, standalone binary: brew install
+# shellcheck). The install/*.sh scripts run on users' machines, so correctness matters. Clean at
+# default severity after the 2026-07-25 nit sweep (SC2043/SC2012 fixed, SC2016/SC2329 reasoned-disabled).
+shell = { shell = "cd .. && shellcheck install/*.sh" }
+# ADVISORY — PowerShell installer static analysis (PSScriptAnalyzer). Prereqs: `brew install --cask
+# powershell` + `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`. Kept OUT of `hygiene`
+# because pwsh is a heavy, mac-uncommon prereq and the .ps1 files only matter for Windows packaging.
+# Excludes PSAvoidUsingWriteHost (installers legitimately colour output) + PSUseBOMForUnicodeEncodedFile
+# (bad advice cross-platform); leaves the real ones (empty catch, Invoke-Expression). -EnableExit → rc=findings.
+ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost,PSUseBOMForUnicodeEncodedFile -EnableExit\"" }
+
+# Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
+hygiene = ["deadcode", "dup"]
+
+all = ["lint", "types", "arch", "invariants", "complexity", "test", "test-ft", "cov", "audit", "deps", "licenses", "spell", "links", "shell"]

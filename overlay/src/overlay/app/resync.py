@@ -17,7 +17,10 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +91,7 @@ def resync(video: Path, src: Path, out: Path, *, timeout: int | None = None) -> 
 
     log.debug("resync: running %s on %s", tool, src.name)
     try:
-        result = subprocess.run(cmd, timeout=timeout, capture_output=True)
+        result = subprocess.run(cmd, timeout=timeout, capture_output=True, check=False)
     except subprocess.TimeoutExpired as exc:
         raise ResyncFailed(f"resync timed out after {timeout}s ({tool})") from exc
 

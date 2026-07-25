@@ -9,8 +9,8 @@ Properties pinned:
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from saitenka_deinflect import inflection_chain
+
 from overlay.app.tokenize import Token, merge_inflected, strip_inline_furigana
 from overlay.model import Span, Style
 from overlay.render.flow import build_items, ruby, wrap_items

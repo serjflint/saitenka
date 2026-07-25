@@ -14,8 +14,8 @@ import logging
 import os
 import re
 import sys
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,7 +238,7 @@ class JimakuClient:
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         if q:
             url += "?" + q
-        req = urllib.request.Request(url, headers={"Authorization": self.api_key})
+        req = urllib.request.Request(url, headers={"Authorization": self.api_key})  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
         # Retry transient failures (429 / 5xx / network) with backoff; client errors (400/401/404) are
         # raised immediately with jimaku's error body (retrying them can't help).
         for attempt in stamina.retry_context(
@@ -246,7 +246,7 @@ class JimakuClient:
         ):
             with attempt:
                 try:
-                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:
+                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
                         return json.loads(r.read())
                 except urllib.error.HTTPError as e:  # 400/401/404 client · 429/5xx transient
                     detail = _http_error_detail(e)
@@ -280,8 +280,8 @@ class JimakuClient:
 
     def download(self, jf: JimakuFile, dest_dir: str | Path) -> Path:
         dest = Path(dest_dir) / jf.name
-        req = urllib.request.Request(jf.url, headers={"Authorization": self.api_key})
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:
+        req = urllib.request.Request(jf.url, headers={"Authorization": self.api_key})  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
             dest.write_bytes(r.read())
         return dest
 

@@ -21,12 +21,15 @@ import logging
 import sqlite3
 import threading
 import zipfile
-from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from overlay.app import paths
 from overlay.app.config import DictDbOptions, resolve_dictdb
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Sequence
 
 log = logging.getLogger(__name__)
 
@@ -354,7 +357,7 @@ class DictionaryDb:
             return
         did = row[0]
         for table in ("entries", "keys", "kanji", "term_meta", "tags"):
-            conn.execute(f"DELETE FROM {table} WHERE dict_id=?", (did,))
+            conn.execute(f"DELETE FROM {table} WHERE dict_id=?", (did,))  # noqa: S608  # table name is an internal constant; the value is parameterized with ?
         conn.execute("DELETE FROM dictionaries WHERE id=?", (did,))
 
     def drop(self, title: str) -> bool:
@@ -405,7 +408,7 @@ class DictionaryDb:
         c = self._conn()
         return {
             t: c.execute(
-                f"SELECT COUNT(*) FROM {t} WHERE dict_id=?",
+                f"SELECT COUNT(*) FROM {t} WHERE dict_id=?",  # noqa: S608  # table name is an internal constant; the value is parameterized with ?
                 (dict_id,),
             ).fetchone()[0]
             for t in ("entries", "keys", "kanji", "term_meta", "tags")

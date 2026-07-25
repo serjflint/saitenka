@@ -104,7 +104,7 @@ _READING_FIELDS = {
 def _strip_markup(s: str) -> str:
     s = html.unescape(s or "")
     s = re.sub(r"<[^>]+>", "", s)
-    for z in ("​", "﻿", "‎", "‏"):
+    for z in ("\u200b", "﻿", "‎", "‏"):  # noqa: PLE2502  # this line IS the strip-list of invisible/bidi chars
         s = s.replace(z, "")
     return s.strip()
 
@@ -231,7 +231,7 @@ def _read(
                 j = json.loads(data)
                 s = j.get("s")
                 d_card = j.get("decay")
-            except Exception:
+            except Exception:  # noqa: S110  # best-effort parse - fall back to a default
                 pass
         decay = decay_override or (-d_card if d_card else FSRS_DEFAULT_DECAY)
         elapsed = (now_ms - last_rev[cid]) / 86_400_000.0 if cid in last_rev else None
@@ -263,7 +263,7 @@ def _read(
             "SELECT ntid, ord, name FROM fields ORDER BY ntid, ord"
         ):
             field_names.setdefault(ntid, []).append(name.lower())
-    except Exception:
+    except Exception:  # noqa: S110  # best-effort parse - fall back to a default
         pass  # older schema or missing table — fall back
 
     states: dict[str, str] = {}

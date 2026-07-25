@@ -17,14 +17,15 @@ ancestors =
 # it's a leaf instrumentation module with no app/ dependencies, so mpvio importing it from app/ was
 # a pure layering accident, not a real coupling. A facade wasn't needed; relocating the module to its
 # correct layer removed the backward edge entirely.
+# Burned down 2026-07-25: render.document -> sc.model and otel_export -> telemetry were removed here
+# when the ruff `TC` autofix moved those (typing-only) imports into TYPE_CHECKING blocks, so they are
+# no longer runtime edges — the ratchet tightened for free. Never re-add; only remove as edges vanish.
 ignore_imports =
-    overlay.render.document -> overlay.sc.model
     overlay.draw.chip -> overlay.render.layout
     overlay.app.dictdb -> overlay.app.yomitan_import
     overlay.app.doctor -> overlay.app.crashlog
     overlay.app.controller -> overlay.app.miner
     overlay.app.report -> overlay.app.crashlog
-    overlay.app.otel_export -> overlay.app.telemetry
     overlay.app.dictdb -> overlay.app.wordlists
 
 [importlinter:contract:pil-agnostic-core]

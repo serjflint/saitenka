@@ -9,12 +9,15 @@ per-line translucent rounded box; the hovered word is tinted.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
 from overlay import fonts
-from overlay.app.tokenize import Token
 from overlay.render.layout import NO_START
+
+if TYPE_CHECKING:
+    from overlay.app.tokenize import Token
 
 WHITE = (255, 255, 255, 255)
 HOVER = (255, 214, 90, 255)  # warm yellow highlight

@@ -22,7 +22,10 @@ fi
 # resolved from PyPI). The GPL-3.0 deinflect add-on (inflection chains) isn't on PyPI, so it rides in
 # the bundle as an SDIST (source — GPLv3's Corresponding Source) and installs via --with. Together this
 # mirrors the checkout installers' [full].
+# shellcheck disable=SC2012  # ls -t picks the newest by mtime (BSD find lacks -printf); our own
+# wheel/sdist filenames are controlled — no whitespace/newline surprises for ls to mishandle.
 WHEEL="$(ls -t "$SELF_DIR"/saitenka_overlay-*.whl 2>/dev/null | head -1 || true)"
+# shellcheck disable=SC2012  # (same rationale) controlled sdist filename, ls -t = newest by mtime
 DEINFLECT="$(ls -t "$SELF_DIR"/saitenka_overlay_deinflect-*.tar.gz 2>/dev/null | head -1 || true)"
 if [ -z "${WHEEL:-}" ]; then
   echo "[saitenka] no overlay wheel found next to this installer — is the bundle intact?" >&2

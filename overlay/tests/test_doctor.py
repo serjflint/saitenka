@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import tomllib
 
-
 from overlay.app import doctor as doc
 from overlay.app import init_wizard as wiz
-
 
 # --- individual checks -----------------------------------------------------------------------
 
@@ -106,7 +104,7 @@ def test_dict_db_check_reports_unimported_title(tmp_path, monkeypatch):
 
 
 def test_legacy_files_check_ok_when_none(monkeypatch):
-    monkeypatch.setattr("overlay.app.paths.legacy_dict_artifacts", lambda: [])
+    monkeypatch.setattr("overlay.app.paths.legacy_dict_artifacts", list)
     assert doc.check_legacy_files().status == "ok"
 
 
