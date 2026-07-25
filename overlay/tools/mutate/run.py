@@ -31,8 +31,12 @@ TARGETS = {
 
 
 def campaign(name: str, module: str, tests: str) -> None:
-    if subprocess.run(["git", "status", "--porcelain", "--", module], text=True, capture_output=True).stdout.strip():
-        sys.exit(f"{module} has uncommitted changes — commit/stash first (mutation edits in place).")
+    if subprocess.run(
+        ["git", "status", "--porcelain", "--", module], text=True, capture_output=True
+    ).stdout.strip():
+        sys.exit(
+            f"{module} has uncommitted changes — commit/stash first (mutation edits in place)."
+        )
     db = os.path.join(tempfile.gettempdir(), module.replace("/", "_") + ".sqlite")
     with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as cfg:
         cfg.write(
@@ -48,8 +52,7 @@ def campaign(name: str, module: str, tests: str) -> None:
     finally:
         subprocess.run(["git", "checkout", "--", module])  # always restore the in-place mutation
     print(f"\n=== {name} ({module}) ===")
-    dump = subprocess.run(["cosmic-ray", "dump", db], capture_output=True, text=True).stdout
-    subprocess.run(["cr-rate"], input=dump, text=True)
+    subprocess.run(["cr-rate", db])  # newer cr-rate takes the session file as an arg, not stdin
 
 
 def main() -> None:

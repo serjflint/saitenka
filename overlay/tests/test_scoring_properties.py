@@ -11,6 +11,7 @@ from __future__ import annotations
 import hypothesis.strategies as st
 from hypothesis import given
 
+from overlay.app.fsrs import KnownSnap
 from overlay.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
 from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
@@ -165,3 +166,139 @@ def test_jlpt_level_suppresses_frequency(line):
         if _content(t):
             assert s.underline == PAL.jlpt["N3"]
             assert not s.tag.startswith("freq")
+
+
+# --- concrete palette RGBA: pins _hex byte-slicing so the colour literals can't silently drift ------
+# _hex mutants otherwise SURVIVE — everything else compares palette colours for *equality*, and both
+# sides derive from the same _hex, so a mutated slice/constant stays self-consistent. One concrete
+# assertion breaks that self-reference.
+
+
+def test_palette_literals_are_concrete():
+    p = Palette()
+    assert p.base == (202, 211, 245, 255)  # #cad3f5
+    assert p.known == (166, 218, 149, 255)  # #a6da95
+    assert p.forgotten == (238, 153, 160, 255)  # #ee99a0
+    assert p.n_plus_one == (198, 160, 246, 255)  # #c6a0f6
+    assert p.freq_single == (245, 169, 127, 255)  # #f5a97f
+    assert p.jlpt["N3"] == (249, 226, 175, 255)  # #f9e2af
+
+
+# --- frequency colouring: the whole freq branch was under-tested (the example test only checks that
+#     function words stay base, and skips when no freq zip is present) — so band indexing / rank guard
+#     / freq_mode all survived. Drive a real FreqDict and assert the exact band colour. ----------------
+
+
+def _kanji_token(surface: str = "本") -> Token:
+    """A guaranteed content token (名詞, kanji so not kana-only, not a proper noun)."""
+    return Token(surface, surface, "ほん", "名詞", 0, len(surface), "")
+
+
+@given(rank=st.integers(min_value=1, max_value=10000))
+def test_freq_banded_colour_matches_the_band(rank):
+    """A ranked content word with no other signal gets the freq band colour FreqDict.band selects —
+    pins the `band - 1` index and the `rank is not None` guard."""
+    t = _kanji_token()
+    sc = Scorer(
+        known=KnownWords.from_set([]),
+        freq=FreqDict({"本": rank, "ほん": rank}, "t"),
+        enable_jlpt=False,
+        enable_n_plus_one=False,
+    )
+    band = FreqDict.band(rank, sc.freq_top_x, len(PAL.freq_bands))
+    assert band is not None  # rank ≤ top_x always bands
+    s = sc.score_line([t])[0]
+    assert s.color == PAL.freq_bands[band - 1]
+    assert s.tag == f"freq-{band}"
+
+
+def test_freq_single_mode_uses_one_colour():
+    """freq_mode='single' colours every ranked word freq_single with tag 'freq' — no banding."""
+    sc = Scorer(
+        known=KnownWords.from_set([]),
+        freq=FreqDict({"本": 500, "ほん": 500}, "t"),
+        freq_mode="single",
+        enable_jlpt=False,
+        enable_n_plus_one=False,
+    )
+    s = sc.score_line([_kanji_token()])[0]
+    assert s.color == PAL.freq_single
+    assert s.tag == "freq"
+
+
+def test_out_of_range_rank_falls_through_to_base():
+    """A rank past top_x has no band → the word stays base (freq only colours the top_x)."""
+    sc = Scorer(
+        known=KnownWords.from_set([]),
+        freq=FreqDict({"本": 99_999, "ほん": 99_999}, "t"),
+        enable_jlpt=False,
+        enable_n_plus_one=False,
+    )
+    s = sc.score_line([_kanji_token()])[0]
+    assert s.color == PAL.base
+    assert s.tag == "base"
+
+
+# --- forgotten (FSRS) tint: the whole fsrs_snap path had no test — is_forgotten never fired. ---------
+
+
+def test_forgotten_word_gets_the_forgotten_tint():
+    """An FSRS 'forgotten' content word (not known, not N+1) resurfaces with the forgotten colour,
+    between known and unknown."""
+    snap = KnownSnap(_states={"本": "forgotten"})
+    sc = Scorer(
+        known=KnownWords.from_set([]),
+        fsrs_snap=snap,
+        enable_freq=False,
+        enable_jlpt=False,
+        enable_n_plus_one=False,
+    )
+    s = sc.score_line([_kanji_token()])[0]
+    assert s.color == PAL.forgotten
+    assert s.tag.startswith("forgotten")
+
+
+def test_fsrs_known_beats_forgotten_and_freq():
+    """A word the snapshot marks 'known' takes the known colour even with a freq dict present."""
+    snap = KnownSnap(_states={"本": "known"})
+    sc = Scorer(
+        known=KnownWords.from_set([]),
+        fsrs_snap=snap,
+        freq=FreqDict({"本": 1}, "t"),
+        enable_jlpt=False,
+        enable_n_plus_one=False,
+    )
+    s = sc.score_line([_kanji_token()])[0]
+    assert s.color == PAL.known
+
+
+# --- multi-sentence N+1: each sentence is scored independently — pins the `start = i + 1` advance and
+#     the sentence range, which single-sentence tests leave untouched. --------------------------------
+
+
+def test_n1_marks_each_sentence_independently():
+    """Two 。-separated sentences, each with exactly one eligible unknown among ≥3 content words, get
+    their own N+1 mark. A broken sentence-boundary advance would merge them (2 candidates → no fire)."""
+
+    def n(surface: str, pos: str = "名詞") -> Token:
+        return Token(surface, surface, "よみ", pos, 0, len(surface), "")
+
+    toks = [
+        n("私"),
+        n("本"),
+        n("読む", "動詞"),
+        n("。", "補助記号"),
+        n("犬"),
+        n("人"),
+        n("待つ", "動詞"),
+    ]
+    known = [
+        True,
+        True,
+        False,
+        False,
+        True,
+        True,
+        False,
+    ]  # 読む (idx 2) and 待つ (idx 6) are the lone unknowns
+    assert mark_n_plus_one(toks, known, min_words=3) == {2, 6}
