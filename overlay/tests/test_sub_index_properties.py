@@ -155,3 +155,30 @@ def test_target_spec(cues, current, delta, inside):
         assert r == (current - 1 if 0 <= current - 1 < n else -1)  # gap "prev" → cue before the gap
     else:
         assert r == -1  # replay from a gap is ambiguous → defer
+
+
+# --- P4 (metamorphic): locate(time_pos) is monotonic — advancing the clock never moves the cursor
+#     backwards. Past the last cue locate returns -1, which ranks AFTER every real index (the cursor
+#     has run off the end, not jumped back). Kills a flipped comparison / wrong loop bound in the
+#     time_pos fallback that would let a later time resolve to an earlier cue. -------------------------
+
+
+@example(
+    cues=[SubCue(0.0, 1.0, "あ"), SubCue(2.0, 3.0, "い")], a=0.5, b=2.5
+)  # spans a gap + two cues
+@given(
+    cues=index_cues(min_size=1),
+    a=st.floats(-1, 60, allow_nan=False),
+    b=st.floats(-1, 60, allow_nan=False),
+)
+@settings(max_examples=200, deadline=None)
+def test_locate_time_pos_is_monotonic(cues, a, b):
+    idx = SubIndex(cues)
+    n = len(cues)
+    lo, hi = sorted((a, b))
+
+    def rank(t: float) -> int:
+        r = idx.locate(time_pos=t)
+        return n if r < 0 else r  # -1 (past the last cue) sorts after every real index
+
+    assert rank(lo) <= rank(hi)

@@ -9,7 +9,7 @@ Properties pinned:
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from saitenka_deinflect import inflection_chain
+from saitenka_deinflect import deinflect, inflection_chain
 
 from overlay.app.tokenize import Token, merge_inflected, strip_inline_furigana
 from overlay.model import Span, Style
@@ -97,6 +97,43 @@ def test_inflection_chain_reaches_lemma_or_empty(surface, lemma):
     # a non-empty chain must be a list of transform names (strings)
     for name in chain:
         assert isinstance(name, str) and name
+
+
+# --- deinflect ⇄ inflection_chain agree (metamorphic cross-check) --------------------------------
+# Real inflected surfaces so the reachability relation has teeth — random kana rarely inflects.
+_INFLECTED = [
+    "聞こえてた",
+    "預けた",
+    "食べない",
+    "読まれる",
+    "走りたい",
+    "読みます",
+    "早く",
+    "食べちゃった",
+    "行った",
+    "行って",
+    "習わぬ",
+    "知らん",
+    "本命",
+    "猫",
+]
+
+
+@given(surface=st.one_of(st.sampled_from(_INFLECTED), jp_text))
+@settings(max_examples=100, deadline=None)
+def test_deinflect_and_inflection_chain_agree(surface):
+    """The two deinflect entry points must never disagree: for every base form ``deinflect`` reaches,
+    ``inflection_chain(surface, form)`` is non-empty exactly when the form differs from the surface
+    (the identity reduction has an empty chain), and a form ``deinflect`` can't reach yields no chain."""
+    results = deinflect(surface)
+    assert (
+        results[0].text == surface and results[0].chain == ()
+    )  # identity candidate is always first
+    for target in {d.text for d in results}:
+        assert bool(inflection_chain(surface, target)) == (target != surface)
+    assert (
+        inflection_chain(surface, surface + "zz") == []
+    )  # deinflect never lengthens → unreachable
 
 
 # --- merge_inflected output concatenates back to its input ---------------------------------------
