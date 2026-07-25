@@ -208,20 +208,18 @@ def _load(
         con.close()
 
 
-def _read(
+def _build_card_info(
     con: sqlite3.Connection,
+    last_rev: dict[int, int],
+    now_ms: float,
     *,
     forgotten_r: float,
     mature_ivl: int,
     decay_override: float | None,
-) -> KnownSnap:
-    now_ms = time.time() * 1000.0
-
-    # Build last-review timestamp per card
-    last_rev: dict[int, int] = dict(con.execute("SELECT cid, MAX(id) FROM revlog GROUP BY cid"))
-
-    # Card data: type (0=new,1=lrn,2=rev,3=relearn), interval, FSRS data
-    card_info: dict[int, dict] = {}  # nid → best card info
+) -> dict[int, dict]:
+    """nid → best card info (``{"st": state, "k": knowledge_score}``) — when a note has more than
+    one card, the highest-knowledge card wins. ``ctype``: 0=new, 1=lrn, 2=rev, 3=relearn."""
+    card_info: dict[int, dict] = {}
     for cid, nid, ctype, ivl, _queue, data in con.execute(
         "SELECT id,nid,type,ivl,queue,data FROM cards"
     ):
@@ -253,11 +251,13 @@ def _read(
         prev = card_info.get(nid)
         if prev is None or k > prev["k"]:
             card_info[nid] = {"st": st, "k": k}
+    return card_info
 
-    # Map notes → words
-    # We need note fields: field order from the `fields` table (Anki 2.1 schema)
-    # Fall back to splitting on \x1f and trying TERM_FIELDS / READING_FIELDS by name.
-    field_names: dict[int, list[str]] = {}  # ntid → [fname_ord0, fname_ord1, …]
+
+def _read_field_names(con: sqlite3.Connection) -> dict[int, list[str]]:
+    """ntid → [fname_ord0, fname_ord1, …] from the ``fields`` table (Anki 2.1 schema). Empty on an
+    older schema / missing table — callers fall back to scanning every field by content instead."""
+    field_names: dict[int, list[str]] = {}
     try:
         for ntid, _ord, name in con.execute(
             "SELECT ntid, ord, name FROM fields ORDER BY ntid, ord"
@@ -265,54 +265,86 @@ def _read(
             field_names.setdefault(ntid, []).append(name.lower())
     except Exception:  # noqa: S110  # best-effort parse - fall back to a default
         pass  # older schema or missing table — fall back
+    return field_names
 
+
+def _extract_term_reading(names: list[str], parts: list[str]) -> tuple[str, str]:
+    """(term, reading) for one note: match known field names (``_TERM_FIELDS``/``_READING_FIELDS``)
+    at their mapped position; when no field map is available (or none matched), scan every field
+    for the first word-like value and take the next field as its reading."""
+    term = reading = ""
+    for i, fname in enumerate(names):
+        val = parts[i] if i < len(parts) else ""
+        cleaned = _strip_markup(val)
+        base = _term_base(cleaned)
+        if fname in _TERM_FIELDS and not term and _wordlike(base):
+            term = base
+        if fname in _READING_FIELDS and not reading:
+            reading = _to_reading(cleaned)
+
+    if not term and parts:
+        for i, p in enumerate(parts):
+            cleaned = _strip_markup(p)
+            base = _term_base(cleaned)
+            if _wordlike(base):
+                term = base
+                if i + 1 < len(parts):  # next field might be reading
+                    reading = _to_reading(_strip_markup(parts[i + 1]))
+                break
+    return term, reading
+
+
+# Prefer states with higher priority: known > forgotten > young > learning.
+_STATE_PRIORITY = {"known": 4, "forgotten": 3, "young": 2, "learning": 1}
+
+
+def _record_state(states: dict[str, str], key: str, st: str) -> None:
+    cur = states.get(key)
+    if cur is None or _STATE_PRIORITY.get(st, 0) > _STATE_PRIORITY.get(cur, 0):
+        states[key] = st
+
+
+def _build_states(
+    con: sqlite3.Connection, card_info: dict[int, dict], field_names: dict[int, list[str]]
+) -> dict[str, str]:
+    """word → best state, scanning every note whose best card isn't "new". Both the term and (if
+    distinct) its reading are recorded, so either form resolves via :meth:`KnownSnap.state`."""
     states: dict[str, str] = {}
-
     for nid, mid, flds in con.execute("SELECT id, mid, flds FROM notes"):
         info = card_info.get(nid)
         if info is None or info["st"] == "new":
             continue  # new cards don't appear in the snapshot
 
-        parts = flds.split("\x1f")
-        names = field_names.get(mid, [])
-
-        # Find term and reading fields by position
-        term = reading = ""
-        for i, fname in enumerate(names):
-            val = parts[i] if i < len(parts) else ""
-            cleaned = _strip_markup(val)
-            base = _term_base(cleaned)
-            if fname in _TERM_FIELDS and not term and _wordlike(base):
-                term = base
-            if fname in _READING_FIELDS and not reading:
-                reading = _to_reading(cleaned)
-
-        # Fallback: if no field map, scan all fields
-        if not term and parts:
-            for i, p in enumerate(parts):
-                cleaned = _strip_markup(p)
-                base = _term_base(cleaned)
-                if _wordlike(base):
-                    term = base
-                    # next field might be reading
-                    if i + 1 < len(parts):
-                        reading = _to_reading(_strip_markup(parts[i + 1]))
-                    break
-
+        term, reading = _extract_term_reading(field_names.get(mid, []), flds.split("\x1f"))
         if not term:
             continue
 
         st = info["st"]
-        # Prefer states with higher priority: known > forgotten > young > learning
-        _priority = {"known": 4, "forgotten": 3, "young": 2, "learning": 1}
-        cur_st = states.get(term)
-        if cur_st is None or _priority.get(st, 0) > _priority.get(cur_st, 0):
-            states[term] = st
+        _record_state(states, term, st)
         if reading and reading != term:
-            cur_st_r = states.get(reading)
-            if cur_st_r is None or _priority.get(st, 0) > _priority.get(cur_st_r, 0):
-                states[reading] = st
+            _record_state(states, reading, st)
+    return states
 
+
+def _read(
+    con: sqlite3.Connection,
+    *,
+    forgotten_r: float,
+    mature_ivl: int,
+    decay_override: float | None,
+) -> KnownSnap:
+    now_ms = time.time() * 1000.0
+    last_rev: dict[int, int] = dict(con.execute("SELECT cid, MAX(id) FROM revlog GROUP BY cid"))
+    card_info = _build_card_info(
+        con,
+        last_rev,
+        now_ms,
+        forgotten_r=forgotten_r,
+        mature_ivl=mature_ivl,
+        decay_override=decay_override,
+    )
+    field_names = _read_field_names(con)
+    states = _build_states(con, card_info, field_names)
     return KnownSnap(_states=states)
 
 

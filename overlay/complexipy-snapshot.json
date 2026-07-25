@@ -126,8 +126,12 @@
     "file_name": "fsrs.py",
     "functions": [
       {
-        "name": "_read",
-        "complexity": 70
+        "name": "_extract_term_reading",
+        "complexity": 20
+      },
+      {
+        "name": "_build_card_info",
+        "complexity": 24
       }
     ]
   },
