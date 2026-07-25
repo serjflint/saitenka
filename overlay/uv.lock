@@ -324,6 +324,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dirty-equals"
+version = "0.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/1d/c5913ac9d6615515a00f4bdc71356d302437cb74ff2e9aaccd3c14493b78/dirty_equals-0.11.tar.gz", hash = "sha256:f4ac74ee88f2d11e2fa0f65eb30ee4f07105c5f86f4dc92b09eb1138775027c3", size = 128067, upload-time = "2025-11-17T01:51:24.451Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/8d/dbff05239043271dbeace563a7686212a3dd517864a35623fe4d4a64ca19/dirty_equals-0.11-py3-none-any.whl", hash = "sha256:b1d7093273fc2f9be12f443a8ead954ef6daaf6746fd42ef3a5616433ee85286", size = 28051, upload-time = "2025-11-17T01:51:22.849Z" },
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1427,6 +1436,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
+]
+
+[[package]]
 name = "pytest-xdist"
 version = "3.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1609,6 +1630,7 @@ observability = [
 dev = [
     { name = "basedpyright" },
     { name = "complexipy" },
+    { name = "dirty-equals" },
     { name = "hypothesis" },
     { name = "import-linter" },
     { name = "libcst" },
@@ -1623,6 +1645,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-memray" },
     { name = "pytest-randomly" },
+    { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "ty" },
@@ -1663,6 +1686,7 @@ provides-extras = ["deinflect", "jmdict", "observability", "minimal", "full"]
 dev = [
     { name = "basedpyright", specifier = ">=1.39" },
     { name = "complexipy", specifier = ">=6.2.0" },
+    { name = "dirty-equals", specifier = ">=0.11" },
     { name = "hypothesis", specifier = ">=6.157.2" },
     { name = "import-linter", specifier = ">=2.13" },
     { name = "libcst", specifier = ">=1.8.6" },
@@ -1677,6 +1701,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-memray", specifier = ">=1.9.0" },
     { name = "pytest-randomly", specifier = ">=4.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16" },
     { name = "ty", specifier = ">=0.0.61" },
