@@ -22,6 +22,10 @@ logs.
 
 ### Fixed
 
+- **Episode detection for `SxxExx`-style filenames** — `parse_filename` now recognizes
+  `Show.S02E01.…`, `S2E03`, and `1x08` (yielding the episode) in addition to a bare trailing number,
+  and an underscore-delimited `Show_ep05_…` parses correctly. A resolution like `1920x1080` is not
+  mistaken for a season×episode. This is what jimaku uses to pick the right subtitle file.
 - **`overlay.mpvio` importing from `overlay.app`** (a real import cycle) — `otel_metrics.py`, a leaf
   instrumentation module with no `app/` dependencies, had been placed under `app/` by accident; moved
   to `overlay/otel_metrics.py`.
