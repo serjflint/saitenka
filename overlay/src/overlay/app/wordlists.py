@@ -38,7 +38,7 @@ def _crc_lenient():
     pitch-accent dicts) write wrong/zero CRCs even though the deflate data is perfectly intact;
     Python's strict check would otherwise reject them. Scoped + restored, single-threaded use."""
     orig = zipfile.ZipExtFile._update_crc  # type: ignore[attr-defined]  # deliberate
-    zipfile.ZipExtFile._update_crc = lambda self, newdata: None  # type: ignore[attr-defined]
+    zipfile.ZipExtFile._update_crc = lambda self, *_: None  # type: ignore[attr-defined]  # patched sig takes the data chunk; ignored
     try:
         yield
     finally:
