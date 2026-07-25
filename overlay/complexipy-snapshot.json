@@ -152,16 +152,6 @@
     ]
   },
   {
-    "path": "src/overlay/app/miner.py",
-    "file_name": "miner.py",
-    "functions": [
-      {
-        "name": "Miner::bulk_mine",
-        "complexity": 24
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/report.py",
     "file_name": "report.py",
     "functions": [
