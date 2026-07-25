@@ -23,6 +23,10 @@ TARGETS = {
         "tests/test_sub_index.py tests/test_sub_index_properties.py",
     ),
     "fsrs": ("src/overlay/app/fsrs.py", "tests/test_fsrs.py"),
+    "scoring": (
+        "src/overlay/app/scoring.py",
+        "tests/test_coloring.py tests/test_scoring_properties.py",
+    ),
 }
 
 
