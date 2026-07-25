@@ -314,6 +314,10 @@ crosshair = { shell = "UV_PROJECT_ENVIRONMENT=.venv-cx uv run --python 3.13 --ex
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
+# Build the one shareable bundle (wheel + both bootstrap installers + INSTALL.txt) → dist/<ver>.zip.
+# install/make_bundle.py resolves its own paths from `__file__`, but needs repo-root cwd for `uv run`
+# to see it at all — `cd ..` here is that, not a path fix on the script's side.
+bundle = { shell = "cd .. && uv run install/make_bundle.py" }
 
 # --- Supply-chain & hygiene (test-driven & wired 2026-07-25; see vibe/quality-growth-plan.md) --------
 # Winners chosen by running each candidate on THIS repo, not by reputation. Design: only fast,
@@ -357,6 +361,23 @@ dup = { shell = "npx --yes jscpd@latest src --min-tokens 50 --threshold 3 --repo
 # enforces (Goodhart), so it stays out of the gate. Prereq: `uv tool install repowise` + a built index
 # (.repowise/). `--format json` for agent triage. See vibe/quality-growth-plan.md (repowise finding).
 perf-risk = { shell = "cd .. && repowise health --module overlay/src/overlay" }
+# ADVISORY (NOT in `all`) — local-MLX backend for repowise's LLM doc generation (`repowise init`/
+# `update`, distinct from the no-LLM `perf-risk` above). `.repowise/` (the generated wiki) is
+# deliberately NOT committed — same treatment as `.mypy_cache`, a regeneratable local index the tool
+# re-derives, not source. These tasks persist the WORKING setup instead, so it doesn't need
+# re-deriving: `repowise-mlx-install` once, `repowise-mlx-serve` in one terminal, `repowise-doc-gen`/
+# `-update` in another. Qwen2.5-Coder-7B-Instruct-4bit over a bigger model: a full source-verified
+# audit (all pages, not a sample) found 90.7% doc accuracy, and upgrading the worst pages to
+# 14B+speculative-decoding did NOT fix the remaining hallucinations (a prompt-grounding gap in
+# repowise itself, not a capability ceiling this machine can buy its way out of) while nearly OOMing
+# it via unbounded KV-cache growth. `--embedder mock` avoids repowise silently 404ing every embedding
+# call against `/v1/embeddings` (unimplemented by `mlx_lm.server`) — swap to `--embedder ollama` (see
+# repowise's own `--help`) for real semantic search instead of FTS-only. Findings + the diagnosed
+# root cause: `vibe/repowise-local-mlx-investigation.md`.
+repowise-mlx-install = { shell = "uv tool install mlx-lm --python 3.12" }  # 3.14t default breaks mlx
+repowise-mlx-serve = { shell = "mlx_lm.server --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --port 8080 --decode-concurrency 1 --prompt-concurrency 1" }
+repowise-doc-gen = { shell = "cd .. && OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_API_KEY=not-needed repowise init --provider openai --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --embedder mock --concurrency 1 -y overlay" }
+repowise-doc-update = { shell = "cd .. && OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_API_KEY=not-needed repowise update --provider openai --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --embedder mock --concurrency 1 overlay" }
 # GATE (in `all`) — dependency license boundary. The ONLY copyleft in our graph must be our own
 # deliberate GPL-3.0 add-on (saitenka-overlay-deinflect); ANY other GPL/AGPL/LGPL is a transitive leak
 # into the Apache-2.0-clean core and fails. Complements the import-linter GPL chokepoint (code boundary)

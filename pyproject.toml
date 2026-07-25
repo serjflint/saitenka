@@ -37,6 +37,7 @@ cov = { cmd = "uv run poe cov", cwd = "overlay" }
 bench = { cmd = "uv run poe bench", cwd = "overlay" }
 smoke-live = { cmd = "uv run poe smoke-live", cwd = "overlay" }
 changelog = { cmd = "uv run poe changelog", cwd = "overlay" }
+bundle = { cmd = "uv run poe bundle", cwd = "overlay" }
 # Supply-chain & hygiene (real tasks + rationale live in overlay/pyproject.toml).
 audit = { cmd = "uv run poe audit", cwd = "overlay" }
 spell = { cmd = "uv run poe spell", cwd = "overlay" }
