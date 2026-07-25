@@ -23,6 +23,7 @@ from overlay.render.layout import (
     _font,
     _tokenize_span,
     draw_token,
+    new_panel_image,
 )
 from overlay.render.ruby import RubyBox, _base_size, layout_ruby
 
@@ -279,7 +280,9 @@ def _clip_lines_to_height(
     return lines, boxes
 
 
-def _draw_item(img: Image.Image, draw: ImageDraw.ImageDraw, it: Item, x: float, baseline: float) -> None:
+def _draw_item(
+    img: Image.Image, draw: ImageDraw.ImageDraw, it: Item, x: float, baseline: float
+) -> None:
     if it.kind == "ruby" and it.box is not None:  # kind implies the field (build_items)
         it.box.draw(img, draw, x, baseline)
     elif it.kind == "img" and it.img is not None:
@@ -332,7 +335,9 @@ def _update_link_run(
     ``link_out`` as one :class:`LinkBox` when the href changes or ends."""
     href = it.tok.href if (it.kind == "text" and it.tok is not None) else None
     if href:
-        return (href, link[1], x + it.width) if (link and link[0] == href) else (href, x, x + it.width)
+        return (
+            (href, link[1], x + it.width) if (link and link[0] == href) else (href, x, x + it.width)
+        )
     if link is not None:
         q, xs, xe = link
         link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), line_box_h))
@@ -394,12 +399,7 @@ def render_flow(
     boxes = [_item_line_box(line, block.line_height_scale) for line in lines]
     lines, boxes = _clip_lines_to_height(lines, boxes, max_height, block.padding, clipped_out)
 
-    w = block.width + 2 * block.padding
-    h = 2 * block.padding + sum(b[0] for b in boxes)
-    img = Image.new("RGBA", (w, max(h, 1)), block.background)
-    draw = ImageDraw.Draw(img)
-
-    y = block.padding
+    img, draw, y = new_panel_image(block, boxes)
     for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
         _draw_flow_line(
             img,
