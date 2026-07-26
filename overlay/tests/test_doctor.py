@@ -149,6 +149,32 @@ def test_free_threading_check(monkeypatch):
     assert c.status in ("ok", "warn")
 
 
+def test_version_check_reports_overlay_version(monkeypatch):
+    import overlay.app.report as rep
+
+    monkeypatch.setattr(rep, "_overlay_version", lambda: "9.9.9")
+    c = doc.check_version()
+    assert c.name == "version" and c.status == "ok" and "9.9.9" in c.detail
+
+
+def test_windows_and_powershell_checks_are_ok_off_windows(monkeypatch):
+    monkeypatch.setattr(doc.sys, "platform", "darwin")
+    assert doc.check_windows().status == "ok"
+    ps = doc.check_powershell()
+    assert ps.status == "ok" and "n/a" in ps.detail  # doesn't shell out off Windows
+
+
+def test_mpv_socket_check_reports_set_and_unset(monkeypatch):
+    monkeypatch.setattr(doc, "load_config", lambda: {"mpv_socket": r"\\.\pipe\mpvsocket"})
+    set_c = doc.check_mpv_socket()
+    assert set_c.status == "ok" and "mpvsocket" in set_c.detail
+    monkeypatch.setattr(doc, "load_config", dict)
+    unset_c = doc.check_mpv_socket()
+    assert (
+        unset_c.status == "ok" and "attach to YOUR" in unset_c.detail
+    )  # informational hint, not a warn
+
+
 def test_python_check_reports_version_and_build():
     import platform
 

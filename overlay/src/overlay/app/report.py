@@ -204,7 +204,7 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
 
 def _manifest(members: dict[str, str], *, include_log: bool) -> str:
     lines = [
-        "saitenka-overlay diagnostics bundle",
+        f"saitenka-overlay {_overlay_version()} diagnostics bundle",
         f"generated: {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
         "",
         "PRIVACY — read before sharing:",
