@@ -173,3 +173,18 @@ def test_instrumented_records_both_the_histogram_and_a_span(registered):
         pass
     snap = otel_metrics.snapshot()
     assert snap["saitenka.render.duration_ms"]["count"] == 1
+
+
+def test_snapshot_sums_a_labeled_histogram_across_every_label(registered):
+    """Regression: dict_sql_duration_ms is recorded with a per-dict `dict=<title>` attribute, which
+    OTel fans out into one data point PER distinct label — `_summarize_metric` used to read only
+    `points[-1]`, silently reporting one dict's count/sum instead of the total across all of them
+    (found by cross-checking a live snapshot against the CTF trace.json span totals for the same
+    run: ~9-11x undercount)."""
+    otel_metrics.dict_sql_duration_ms.record(5, {"dict": "Jitendex"})
+    otel_metrics.dict_sql_duration_ms.record(500, {"dict": "Daijisen"})
+    otel_metrics.dict_sql_duration_ms.record(5, {"dict": "JMdict"})
+    snap = otel_metrics.snapshot()
+    hist = snap["saitenka.dict_sql.duration_ms"]
+    assert hist["count"] == 3
+    assert hist["sum"] == 510
