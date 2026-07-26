@@ -255,7 +255,7 @@ class Miner:
         r = self.r
         if not r.anki or not r.mine_cfg:
             return
-        from overlay.app.controller import _strip_tags
+        from overlay.app.miner_ui import _strip_tags
 
         fieldname = r.mine_cfg.fields.get("expression", "Expression")
         try:
