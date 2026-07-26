@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from PIL import Image
 
 from overlay.draw.chip import ChipStyle
 from overlay.draw.icons import check, dot, plus, speaker
-from overlay.model import RGBA, LinkBox, ScanBox, Span, Style
+from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme
 from overlay.render.document import GUTTER_PX, INDENT_PX, render_document
 from overlay.render.flow import ChipBox, ImgBox, render_flow
 from overlay.render.layout import Block as FlowBlock
@@ -26,39 +26,8 @@ from overlay.sc.walk import inline_flow, walk
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-
-@dataclass(frozen=True)
-class Theme:
-    bg: RGBA = (252, 252, 250, 255)
-    text: RGBA = (33, 33, 33, 255)
-    muted: RGBA = (110, 118, 110, 255)
-    accent: RGBA = (60, 110, 210, 255)  # ▶ triangle / links
-    purple: RGBA = (126, 96, 168, 255)  # dictionary-name pills
-    tag: RGBA = (96, 125, 175, 255)  # defTag pills (★ / priority form)
-    # Every size in this module is defined at the REFERENCE window (scale 1.0) and multiplied by this,
-    # so the whole tooltip renders at window_height / REF_H — mpv's OSD model, giving the same amount of
-    # content at any window size (just scaled). A plain ``Theme()`` (scale 1.0) is byte-identical to before.
-    scale: float = 1.0
-    # Reference-size structural paddings (at scale 1.0); the scaled values are the properties below.
-    _MARGIN: ClassVar[int] = 16
-    _GAP: ClassVar[int] = 7
-    _BODY_INDENT: ClassVar[int] = 20
-
-    def px(self, v: float) -> int:
-        """Scale a reference-canvas pixel size to the current window (floor 1px so nothing vanishes)."""
-        return max(1, round(v * self.scale))
-
-    @property
-    def margin(self) -> int:
-        return self.px(self._MARGIN)
-
-    @property
-    def gap(self) -> int:
-        return self.px(self._GAP)
-
-    @property
-    def body_indent(self) -> int:
-        return self.px(self._BODY_INDENT)
+# Theme + _DEFAULT_THEME moved to overlay.model (value types, no render deps) to break the
+# render↔panel cycle; re-exported here so ``from overlay.panel import Theme`` keeps working.
 
 
 @dataclass
@@ -112,7 +81,6 @@ def load_entry(path: str | Path) -> Entry:
     )
 
 
-_DEFAULT_THEME = Theme()  # frozen — safe module singleton (B008: no per-call Theme())
 
 
 def _flow_row(flow, content_w: int, scale: float = 1.35) -> Image.Image:

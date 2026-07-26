@@ -150,9 +150,9 @@ def test_free_threading_check(monkeypatch):
 
 
 def test_version_check_reports_overlay_version(monkeypatch):
-    import overlay.app.report as rep
+    import overlay.version as ver
 
-    monkeypatch.setattr(rep, "_overlay_version", lambda: "9.9.9")
+    monkeypatch.setattr(ver, "overlay_version", lambda: "9.9.9")
     c = doc.check_version()
     assert c.name == "version" and c.status == "ok" and "9.9.9" in c.detail
 
@@ -349,7 +349,8 @@ def test_telemetry_check_reports_disabled_by_default(tmp_path, monkeypatch):
 
 def test_telemetry_check_enabled_no_trace_yet(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
-    cfg.write_text("[telemetry]\nenabled = true\n")
+    export = tmp_path / "tel"  # isolate the export dir (empty) so a real ~/.cache trace can't leak in
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export}"\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     c = doc.check_telemetry()
     assert c.status == "ok" and "no trace yet" in c.detail

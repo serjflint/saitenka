@@ -16,8 +16,9 @@ import subprocess
 import sys
 import time
 import zipfile
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+
+from overlay.version import overlay_version as _overlay_version
 
 # Scrub ``key = "..."`` / ``token: ...`` / ``Authorization: Bearer <tok>`` style secrets from any text.
 # The ``(?:bearer|token)\s+`` skip is why ``Authorization: Bearer <tok>`` redacts the TOKEN, not the
@@ -72,13 +73,6 @@ def _first_line(*cmd: str) -> str:
         return lines[0] if lines else "no output"
     except (OSError, subprocess.SubprocessError):
         return "not found"
-
-
-def _overlay_version() -> str:
-    try:
-        return version("saitenka-overlay")
-    except PackageNotFoundError:  # pragma: no cover — source checkout without an installed dist
-        return "0+unknown"
 
 
 def _gil_state() -> str:

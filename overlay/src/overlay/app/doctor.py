@@ -595,7 +595,7 @@ def check_deinflect() -> Check:
 def check_version() -> Check:
     """The overlay's own version — first line of the report, so a bug report is anchored to a build
     without cross-referencing versions.txt."""
-    from overlay.app.report import _overlay_version
+    from overlay.version import overlay_version as _overlay_version
 
     return Check("version", "ok", f"saitenka-overlay {_overlay_version()}")
 
