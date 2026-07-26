@@ -6,7 +6,7 @@ import time
 import pytest
 
 import overlay.app.controller as C
-import overlay.app.miner_ui as miner_ui
+from overlay.app import miner_ui, nested_popup
 from overlay.app.controller import PanelKey, Reader
 
 
@@ -1070,7 +1070,7 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
     # a TALL entry anchored to an inner word in the upper-middle: default would drop below (more room
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
-    view_h = r._nested_view_h(full_h=800, wy=wy)
+    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
     above_room = wy - C.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
@@ -1081,7 +1081,7 @@ def test_nested_popup_drops_below_when_no_room_above():
     r = Reader(FakeIPC())
     r.osd = (1280, 720)
     wy = 90  # inner word near the very top → can't fit above
-    view_h = r._nested_view_h(full_h=800, wy=wy)
+    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty >= wy  # falls back to below (safe)
 
