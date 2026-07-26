@@ -1,10 +1,21 @@
-"""Non-blocking span pipeline: a gated, bounded-queue :class:`SpanProcessor` feeding a Chrome Trace
-Format (CTF) :class:`SpanExporter` — no backend, opens directly in ``chrome://tracing`` / Perfetto.
+"""Non-blocking CTF trace pipeline: one gated :class:`SpanProcessor` that owns one bounded queue and
+one writer thread — the sole toucher of the trace file. No backend, opens directly in
+``chrome://tracing`` / Perfetto.
 
-Mirrors mpv's own telemetry model: the hot path (whatever thread
-ends a span) pays a single :class:`~overlay.app.telemetry.ActiveGate` check when the gate is off, and
-a non-blocking queue push when it's on — a dedicated writer thread does the actual (slow) export, and
-a full queue drops the span and counts it rather than blocking the caller.
+Collapsed on purpose (see ``vibe/observability-pipeline-redesign.md``): the OTel processor/exporter
+split earns its keep for swappable protocol backends, not a local file we'll never swap, and stock
+`BatchSpanProcessor` buffers in a `collections.deque` whose free-threading safety this repo declines to
+bet on. So this is a single custom processor — the `SimpleSpanProcessor` pattern (export logic inline)
+extended with a batching queue.
+
+Mirrors mpv's telemetry model: the thread that ends a span pays only a gate check + a non-blocking
+`put_nowait`; encoding and file I/O happen entirely on the writer thread. Counters aren't queued at
+all — the writer self-samples *sample_fn* on an interval and writes them as CTF counter tracks in the
+same file. A full queue drops the span and counts it rather than blocking the caller.
+
+Deadlock guardrail (``find-lock-bugs`` Pattern 1): ``on_end`` briefly holds `queue.Queue`'s
+non-reentrant mutex — never start/end a span from a ``__del__``/finalizer, or GC firing mid-`put_nowait`
+could re-enter it.
 """
 
 from __future__ import annotations
@@ -17,10 +28,9 @@ from typing import TYPE_CHECKING
 
 import msgspec
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
     from pathlib import Path
 
     from overlay.app.telemetry import ActiveGate
@@ -56,75 +66,55 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
     }
 
 
-def _counter_event(name: str, value: float, ts_ns: int, pid: int) -> dict[str, object]:
+def _counter_event(name: str, value: float, ts_ns: int, pid: int = 1) -> dict[str, object]:
     """A Chrome Trace Format "counter" (``ph: C``) event. Perfetto/``chrome://tracing`` render each
     distinct *name* as its own graph track — this is how a metrics-style value-over-time view shows
     up in the SAME trace.json the spans go into, no separate metrics-visualization stack needed."""
     return {"name": name, "ph": "C", "ts": ts_ns / 1000, "pid": pid, "args": {"value": value}}
 
 
-class CTFSpanExporter(SpanExporter):
-    """Rewrites ``{"traceEvents": [...]}`` to *path* on every export/counter call. Simple (no
-    incremental append — a valid CTF file must be one JSON document), acceptable because both spans
-    and counters are written off the hot path (the span writer thread / the counter sampler thread).
-    ``_lock`` guards ``_events`` + the file write since both threads share this exporter."""
+class CTFSpanProcessor(SpanProcessor):
+    """The single stage of the CTF pipeline and the only thing that ever touches *path*.
 
-    def __init__(self, path: Path) -> None:
-        super().__init__()
-        self._path = path
-        self._events: list[dict[str, object]] = []
-        self._lock = threading.Lock()
+    ``on_end`` (hot path) is gate + one bounded ``put_nowait`` — a full queue drops the span and bumps
+    :attr:`dropped_count` instead of blocking. One writer thread drains the queue, encodes off the
+    ending thread, self-samples *sample_fn* every *interval* seconds into CTF counter tracks, and does
+    exactly one ``open`` + (``seek`` +) one ``write`` per batch. ``_io_lock`` wraps drain **and** write
+    as a single critical section so a concurrent :meth:`force_flush` can't split the queue or return
+    before a write lands; the separate ``_dropped_lock`` keeps ``on_end``'s drop bump off the I/O path.
+    """
 
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        try:
-            with self._lock:
-                self._events.extend(_span_to_ctf_event(s) for s in spans)
-                self._path.write_bytes(msgspec.json.encode({"traceEvents": self._events}))
-        except OSError:
-            log.debug("CTF export failed", exc_info=True)
-            return SpanExportResult.FAILURE
-        return SpanExportResult.SUCCESS
-
-    def add_counter_event(self, name: str, value: float, ts_ns: int, pid: int = 1) -> None:
-        try:
-            with self._lock:
-                self._events.append(_counter_event(name, value, ts_ns, pid))
-                self._path.write_bytes(msgspec.json.encode({"traceEvents": self._events}))
-        except OSError:
-            log.debug("CTF counter export failed", exc_info=True)
-
-    def shutdown(self) -> None:
-        pass
-
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        return True
-
-
-class GatedSpanProcessor(SpanProcessor):
-    """``on_end`` is free when *gate* is off. When on, spans are pushed onto a bounded queue — a
-    dedicated writer thread drains it and calls *exporter*. A full queue drops the span and
-    increments :attr:`dropped_count` instead of blocking whichever thread just ended a span."""
+    _CLOSING = b"]}"
 
     def __init__(
         self,
-        exporter: SpanExporter,
+        path: Path,
         gate: ActiveGate,
+        *,
+        sample_fn: Callable[[], dict[str, float]] | None = None,
+        interval: float = 1.0,
         maxsize: int = 2048,
         start_thread: bool = True,
     ) -> None:
-        """*start_thread=False* skips spawning the writer thread — for tests that need to observe
-        queue state (e.g. a full queue) without racing a live consumer; production code always
-        leaves it ``True``."""
+        """*sample_fn* is polled by the writer thread every *interval* seconds (``None`` = no
+        counters). *start_thread=False* skips the writer thread — tests drive flushes deterministically
+        via :meth:`force_flush`; with ``interval=0`` every flush also samples. Production leaves both
+        defaults."""
         super().__init__()
-        self._exporter = exporter
+        self._path = path
         self._gate = gate
+        self._sample_fn = sample_fn
+        self._interval = interval
         self._queue: queue.Queue[ReadableSpan] = queue.Queue(maxsize=maxsize)
-        self._dropped = 0
+        self._io_lock = threading.Lock()
         self._dropped_lock = threading.Lock()
+        self._dropped = 0
+        self._initialized = False
+        self._last_sample = time.monotonic()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         if start_thread:
-            self._thread = threading.Thread(target=self._run, name="otel-span-writer", daemon=True)
+            self._thread = threading.Thread(target=self._run, name="ctf-writer", daemon=True)
             self._thread.start()
 
     @property
@@ -144,67 +134,67 @@ class GatedSpanProcessor(SpanProcessor):
     def _run(self) -> None:  # pragma: no cover — timing-dependent background loop
         while not self._stop.is_set():
             try:
-                batch = [self._queue.get(timeout=0.5)]
+                seed = [self._queue.get(timeout=self._interval)]
             except queue.Empty:
-                continue
+                seed = []
+            self._flush(seed)
+
+    def _flush(self, seed: list[ReadableSpan]) -> None:
+        """Drain the queue into *seed*, encode, sample counters if the interval elapsed, and write —
+        all under ``_io_lock`` so this whole unit is atomic against a concurrent flusher."""
+        with self._io_lock:
+            spans = seed
             while True:
                 try:
-                    batch.append(self._queue.get_nowait())
+                    spans.append(self._queue.get_nowait())
                 except queue.Empty:
                     break
-            self._exporter.export(batch)
+            events = [_span_to_ctf_event(s) for s in spans]
+            if self._sample_fn is not None:
+                now = time.monotonic()
+                if now - self._last_sample >= self._interval:
+                    self._last_sample = now
+                    events.extend(self._sample_counter_events())
+            if events:
+                self._write_events(events)
+
+    def _sample_counter_events(self) -> list[dict[str, object]]:
+        try:
+            values = self._sample_fn() if self._sample_fn is not None else {}
+        except Exception:
+            log.debug("counter sample failed", exc_info=True)
+            return []
+        ts_ns = time.time_ns()
+        return [_counter_event(name, value, ts_ns) for name, value in values.items()]
+
+    def _write_events(self, events: list[dict[str, object]]) -> None:
+        """One open + one write for the whole batch. First call creates the document; later calls seek
+        past the trailing ``]}`` and splice the batch in — O(new events), not O(events so far). Caller
+        holds ``_io_lock`` (guards ``_initialized`` + the file position)."""
+        chunk = b",".join(msgspec.json.encode(e) for e in events)
+        try:
+            if not self._initialized:
+                with self._path.open("wb") as f:
+                    f.write(b'{"traceEvents":[' + chunk + self._CLOSING)
+                self._initialized = True
+            else:
+                with self._path.open("r+b") as f:
+                    f.seek(-len(self._CLOSING), 2)
+                    f.write(b"," + chunk + self._CLOSING)
+        except OSError:
+            log.debug("CTF write failed", exc_info=True)
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        """Drain + write synchronously on the calling thread. Airtight only against a stopped writer
+        (:meth:`shutdown` joins first); while the writer runs it may hold a just-``get``'d span outside
+        the lock, so a racing force_flush can write later spans first — a harmless ts reorder Perfetto
+        sorts out, never a loss. Unreachable in production (force_flush only runs post-join at shutdown)
+        and in tests (``start_thread=False``)."""
+        self._flush([])
+        return True
 
     def shutdown(self) -> None:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
-        self.force_flush()
-        self._exporter.shutdown()
-
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        """Drain whatever's queued right now, synchronously, on the calling thread."""
-        batch: list[ReadableSpan] = []
-        while True:
-            try:
-                batch.append(self._queue.get_nowait())
-            except queue.Empty:
-                break
-        if batch:
-            self._exporter.export(batch)
-        return True
-
-
-class CounterSampler:
-    """Periodically calls *sample_fn* (returns a flat ``{name: value}`` snapshot — deliberately a
-    plain callable, not coupled to :mod:`overlay.otel_metrics` specifically) and writes each
-    value as a CTF counter event via :meth:`CTFSpanExporter.add_counter_event`. Same non-blocking,
-    local-file philosophy as the span pipeline: one dedicated daemon thread, no push/pull server."""
-
-    def __init__(
-        self,
-        exporter: CTFSpanExporter,
-        sample_fn: Callable[[], dict[str, float]],
-        interval: float = 1.0,
-    ) -> None:
-        self._exporter = exporter
-        self._sample_fn = sample_fn
-        self._stop = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, args=(interval,), name="otel-counter-sampler", daemon=True
-        )
-        self._thread.start()
-
-    def _run(self, interval: float) -> None:  # pragma: no cover — timing-dependent background loop
-        while not self._stop.wait(interval):
-            try:
-                values = self._sample_fn()
-            except Exception:
-                log.debug("counter sample failed", exc_info=True)
-                continue
-            ts_ns = time.time_ns()
-            for name, value in values.items():
-                self._exporter.add_counter_event(name, value, ts_ns)
-
-    def shutdown(self) -> None:
-        self._stop.set()
-        self._thread.join(timeout=2.0)
+        self._flush([])

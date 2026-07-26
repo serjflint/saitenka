@@ -20,9 +20,10 @@ import os
 import subprocess
 import sys
 import sysconfig
+import time
 from datetime import UTC
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import cyclopts
 
@@ -333,6 +334,79 @@ def doctor(
     else:
         print_report(report, summary=summary)
     return report.exit_code
+
+
+def _print_telemetry_status(st) -> None:  # pragma: no cover — presentation; state fn is unit-tested
+    from overlay.app.telemetry_toggle import INSTALL_HINT
+
+    on = lambda b: "on" if b else "off"  # noqa: E731
+    print(f"config [telemetry] enabled : {on(st.config_enabled)}")
+    print(f"telemetry extra installed  : {'yes' if st.extra_installed else 'no'}")
+    if st.kill_switch:
+        print("OTEL_SDK_DISABLED          : ACTIVE — forces telemetry off regardless of config")
+    print(f"→ effectively recording    : {'YES' if st.effective else 'no'}")
+    if st.config_enabled and not st.effective:
+        reason = (
+            "OTEL_SDK_DISABLED is set"
+            if st.kill_switch
+            else "the 'telemetry' extra isn't installed"
+        )
+        print(f"   enabled in config, but {reason}")
+        if not st.extra_installed and not st.kill_switch:
+            print(f"   install it: {INSTALL_HINT}")
+    print(f"export dir                 : {st.export_dir}")
+    if st.trace_exists:
+        s = st.trace_path.stat()
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s.st_mtime))
+        print(f"last trace                 : {st.trace_path} ({s.st_size / 1024:.0f} KiB, {when})")
+    else:
+        print(f"last trace                 : none yet at {st.trace_path}")
+
+
+@app.command
+def telemetry(
+    action: Annotated[
+        Literal["status", "enable", "disable"],
+        cyclopts.Parameter(help="flip [telemetry] enabled in overlay.toml, or show status"),
+    ] = "status",
+) -> int:  # pragma: no cover — thin CLI wrapper; set_enabled/telemetry_state are unit-tested
+    """Turn runtime telemetry on or off without hand-editing overlay.toml.
+
+    ``enable``/``disable`` flip ``[telemetry] enabled`` (comment-preserving, prior file backed up).
+    The OTel SDK it needs is a SEPARATE ``telemetry`` extra — ``enable`` prints the install command if
+    it's missing (config flag and dependency are two switches). ``status`` (default) reports both.
+    """
+    from overlay.app.config import config_path
+    from overlay.app.telemetry_toggle import INSTALL_HINT, set_enabled, telemetry_state
+
+    if action == "status":
+        _print_telemetry_status(telemetry_state())
+        return 0
+
+    enabled = action == "enable"
+    verb = "enabled" if enabled else "disabled"
+    changed, backup = set_enabled(enabled)
+    if changed:
+        print(f"telemetry {verb} in {config_path()}")
+        if backup:
+            print(f"  backed up previous config → {backup}")
+    else:
+        print(f"telemetry already {verb} in {config_path()}")
+
+    st = telemetry_state()
+    if enabled and not st.extra_installed:
+        print("\n⚠ the 'telemetry' extra isn't installed — nothing will record until you run:")
+        print(f"    {INSTALL_HINT}")
+    elif enabled:
+        print(f"  trace → {st.trace_path}")
+        print(
+            "  use the overlay (watch + hover a while), then `saitenka-overlay report` to bundle it"
+        )
+    elif st.extra_installed:
+        print(
+            "  (the 'telemetry' extra stays installed — uninstall separately if you want it gone)"
+        )
+    return 0
 
 
 @app.command(

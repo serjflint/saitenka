@@ -547,7 +547,7 @@ def check_telemetry() -> Check:
             "telemetry",
             "ok",
             f"enabled, no trace yet at {trace_path} (nothing recorded this session, or the "
-            "'observability' extra isn't installed)",
+            "'telemetry' extra isn't installed)",
         )
     st = trace_path.stat()
     return Check(

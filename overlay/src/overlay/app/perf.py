@@ -2,7 +2,7 @@
 
 Deliberately small: it exists to give a crash report and ``doctor`` a live latency snapshot (was the
 overlay janking right before it crashed? is the panel cache thrashing right now?) without standing up
-the full OpenTelemetry stack from ROADMAP.md ("Observability"). If that plan is ever built, this module
+the full OpenTelemetry stack from ROADMAP.md ("Telemetry"). If that plan is ever built, this module
 is the thing it replaces — not a first stage of it.
 
 Always on (no opt-in flag): recording is a lock-guarded ``deque.append`` — cheaper than the poll tick's

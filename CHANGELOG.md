@@ -7,6 +7,23 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`saitenka-overlay telemetry enable|disable|status`** — flip `[telemetry] enabled` without
+  hand-editing `overlay.toml` (comment-preserving, backs up the prior file), plus a `status` readout
+  of both switches (config flag + whether the `telemetry` extra is installed), the export dir, and
+  the last trace. `enable` prints the install command if the extra is missing.
+
+### Changed
+
+- **Renamed the optional `observability` extra to `telemetry`** for consistency with the
+  `[telemetry]` config table and the new command — install as `saitenka-overlay[telemetry]`
+  (the old `[observability]` name no longer resolves; `[full]` is unaffected).
+- **Collapsed the trace write-pipeline** into a single `CTFSpanProcessor` (one bounded queue, one
+  writer thread) from three classes / two queues / three threads. Fixes an O(n²) full-file rewrite
+  per flush, a `force_flush` drain/write race, and an unbounded second queue; the CTF output and the
+  public telemetry behaviour are unchanged.
+
 ## [0.5.0] - 2026-07-25
 
 ### Added

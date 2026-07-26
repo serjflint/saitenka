@@ -1,6 +1,6 @@
 """OpenTelemetry tracer/meter provider lifecycle — fully opt-in, fully no-op when disabled.
 
-The ``opentelemetry`` package (the ``observability`` extra) is imported lazily, only inside
+The ``opentelemetry`` package (the ``telemetry`` extra) is imported lazily, only inside
 :func:`configure`, and only once ``TelemetryOptions.enabled`` is true —
 a default install pays zero import cost, and a config with telemetry off never touches the SDK at
 all: no providers, no threads, no export directory created.
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from opentelemetry.sdk.trace import TracerProvider
 
     from overlay.app.config import TelemetryOptions
-    from overlay.app.otel_export import CounterSampler, GatedSpanProcessor
+    from overlay.app.otel_export import CTFSpanProcessor
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +48,7 @@ class ActiveGate:
 _lock = threading.Lock()
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
-_span_processor: GatedSpanProcessor | None = None
-_counter_sampler: CounterSampler | None = None
+_span_processor: CTFSpanProcessor | None = None
 
 #: Named counter/gauge instruments (see otel_metrics.register) sampled once per tick into the CTF
 #: trace as graph tracks — curated, not "every instrument": duration histograms are visualized as
@@ -76,7 +75,7 @@ def export_dir(options: TelemetryOptions) -> Path:
 
 def is_enabled() -> bool:
     """True once :func:`configure` has stood up live providers (i.e. telemetry is enabled AND the
-    ``observability`` extra is installed)."""
+    ``telemetry`` extra is installed)."""
     return _tracer_provider is not None
 
 
@@ -85,7 +84,7 @@ def dropped_span_count() -> int:
 
 
 def _sample_counters() -> dict[str, float]:
-    """The CounterSampler's ``sample_fn``: the curated instrument values from the last
+    """The writer thread's ``sample_fn``: the curated instrument values from the last
     ``otel_metrics.snapshot()``, plus the span queue's live dropped-count (not itself an OTel
     instrument — reading straight from the processor avoids double-bookkeeping a Counter that would
     need incrementing from two different places)."""
@@ -103,7 +102,7 @@ def _sample_counters() -> dict[str, float]:
 
 def configure(options: TelemetryOptions) -> None:
     """Idempotent: a no-op if disabled, if the extra isn't installed, or if already configured."""
-    global _tracer_provider, _meter_provider, _span_processor, _counter_sampler
+    global _tracer_provider, _meter_provider, _span_processor
     if not options.enabled:
         return
     with _lock:
@@ -116,20 +115,22 @@ def configure(options: TelemetryOptions) -> None:
             from opentelemetry.sdk.trace import TracerProvider
         except ImportError:
             log.warning(
-                "telemetry.enabled=true but the 'observability' extra isn't installed "
-                "(pip install 'saitenka-overlay[observability]') — telemetry stays off"
+                "telemetry.enabled=true but the 'telemetry' extra isn't installed "
+                "(uv tool install --reinstall 'saitenka-overlay[telemetry]') — telemetry stays off"
             )
             return
 
-        from overlay.app.otel_export import CounterSampler, CTFSpanExporter, GatedSpanProcessor
+        from overlay.app.otel_export import CTFSpanProcessor
         from overlay.otel_metrics import register as register_metrics
 
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
 
         tp = TracerProvider()
-        exporter = CTFSpanExporter(out_dir / "trace.json")
-        processor = GatedSpanProcessor(exporter, span_gate)
+        # One processor owns the queue, the writer thread, and the file. sample_fn wires the curated
+        # counters (below) as CTF "counter" tracks in the SAME trace.json the spans go into — Perfetto
+        # graphs them next to the spans, time-correlated, no separate metrics-visualization stack.
+        processor = CTFSpanProcessor(out_dir / "trace.json", span_gate, sample_fn=_sample_counters)
         tp.add_span_processor(processor)
         # TelemetryOptions.enabled is the actual opt-in switch; the gate defaulting off would mean
         # enabling telemetry produces logs + metrics but NO trace ever, since nothing else flips it —
@@ -145,20 +146,17 @@ def configure(options: TelemetryOptions) -> None:
         _tracer_provider = tp
         _meter_provider = mp
         _span_processor = processor
-        # Gauges/counters as CTF "counter" tracks in the SAME trace.json — Perfetto graphs them next
-        # to the spans, time-correlated, with no separate metrics-visualization stack.
-        _counter_sampler = CounterSampler(exporter, _sample_counters)
         log.info("telemetry enabled: export_dir=%s", out_dir)
 
 
 def shutdown() -> None:
     """Flush + tear down the providers. Safe to call even when telemetry was never configured."""
-    global _tracer_provider, _meter_provider, _span_processor, _counter_sampler
+    global _tracer_provider, _meter_provider, _span_processor
     with _lock:
-        if _counter_sampler is not None:
-            _counter_sampler.shutdown()
         if _tracer_provider is not None:
             try:
+                # Cascades into the processor's shutdown (stop writer thread, join, final flush) via
+                # the SynchronousMultiSpanProcessor the TracerProvider owns.
                 _tracer_provider.shutdown()
             except Exception:
                 log.debug("tracer provider shutdown failed", exc_info=True)
@@ -174,5 +172,4 @@ def shutdown() -> None:
         _tracer_provider = None
         _meter_provider = None
         _span_processor = None
-        _counter_sampler = None
         span_gate.set(False)

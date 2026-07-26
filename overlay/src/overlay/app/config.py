@@ -215,7 +215,7 @@ def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
 
 @dataclass(frozen=True)
 class TelemetryOptions:
-    """Runtime tracing/metrics — OFF by default even when the ``observability`` extra is installed;
+    """Runtime tracing/metrics — OFF by default even when the ``telemetry`` extra is installed;
     ``enabled`` is the actual opt-in switch. ``sample_hot_path``
     bounds the cost of instrumenting the per-tick hit-test path (0.0 = never sample it)."""
 
