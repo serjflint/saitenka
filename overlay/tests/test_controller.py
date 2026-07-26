@@ -8,6 +8,7 @@ import pytest
 import overlay.app.controller as C
 from overlay.app import miner_ui, nested_popup, tooltip
 from overlay.app.controller import Reader
+from overlay.app.overlay_ids import OverlayId
 from overlay.app.tooltip import PanelKey
 
 
@@ -1349,10 +1350,10 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
     r.set_hover(0)
-    assert C.TRANS_ID in shown  # hovering a word auto-revealed the translation
+    assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
     assert r._trans_text == "I want you to read this."
     r.set_hover(-1)
-    assert C.TRANS_ID in hidden  # leaving the word hid it again
+    assert OverlayId.TRANS in hidden  # leaving the word hid it again
 
 
 def test_no_auto_translate_without_the_flag(monkeypatch):
@@ -1370,7 +1371,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     shown = []
     monkeypatch.setattr(r.ov, "show", lambda img, x, y, oid: shown.append(oid))
     r.set_hover(0)
-    assert C.TRANS_ID not in shown  # translation stays on the manual `t` key
+    assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
 
 def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
