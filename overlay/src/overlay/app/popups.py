@@ -58,6 +58,11 @@ class TipPanel:
         return self._packed is not None
 
     @property
+    def packed_nbytes(self) -> int:
+        """Compressed on-heap size of the stored panel (0 before first paint) — for the cache gauge."""
+        return len(self._packed) if self._packed is not None else 0
+
+    @property
     def shape(self) -> tuple[int, int, int]:
         """(h, w, 4) of the stored panel — for placement without decompressing."""
         assert self._shape is not None, "shape read before the panel was rendered"

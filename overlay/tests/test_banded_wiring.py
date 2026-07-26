@@ -17,7 +17,9 @@ from overlay.panel import Definition, Entry
 
 class _FakeDS:
     def entry_for(self, tok, inflected=None):
-        para = "とても長い定義の本文で追いかける。" * 8  # tall + CJK → scrollable, yields scan cells
+        para = (
+            "とても長い定義の本文で追いかける。" * 8
+        )  # tall + CJK → scrollable, yields scan cells
         return Entry(
             headword=[tok.surface],
             reading=getattr(tok, "reading", "") or tok.surface,

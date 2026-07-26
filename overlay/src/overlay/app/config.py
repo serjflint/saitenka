@@ -119,10 +119,16 @@ class TranslationOptions:
 
 @dataclass(frozen=True)
 class PerfOptions:
-    """Background-work tuning: poll cadence and prefetch parallelism."""
+    """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
 
     poll_interval: float = 0.025  # main loop tick — trades CPU usage against input latency
     prefetch_workers: int = 2  # constrained-parallel (GIL build) tooltip-warming worker count
+    prefetch_lookahead: int = (
+        0  # upcoming subtitle cues to WARM ahead of the current line (0 = only
+    )
+    # the current line). Each decodes+caches the next cue's dictionary glossaries during idle playback,
+    # so the first hover after the line advances (or an Alt+→ nav) is already warm. Needs an external
+    # sub index — embedded/jimaku tracks have none, so it's a no-op there.
 
 
 @dataclass(frozen=True)

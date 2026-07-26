@@ -556,8 +556,10 @@ def run_vocab(
                 best = min(best, time.perf_counter() - t0)
         n = len(jobs)
         print(f"=== PARALLEL batch render ({mode}, {workers} workers) ===")
-        print(f"  {n} renders in {best * 1000:.0f} ms   →  {best / n * 1000:.2f} ms/render   "
-              f"({n / best:.0f} renders/s)")
+        print(
+            f"  {n} renders in {best * 1000:.0f} ms   →  {best / n * 1000:.2f} ms/render   "
+            f"({n / best:.0f} renders/s)"
+        )
         return gil_rc
 
     # --- serial path: per-word latency distribution (the default py-spy target) ---
@@ -573,7 +575,12 @@ def run_vocab(
             t1 = time.perf_counter()
             from overlay.app.tokenize import Token
 
-            LazyPanel(panel_rows(ds.entry_for(Token(surface, lemma, reading, pos, 0, len(surface))), width), width).render_to(432)
+            LazyPanel(
+                panel_rows(
+                    ds.entry_for(Token(surface, lemma, reading, pos, 0, len(surface))), width
+                ),
+                width,
+            ).render_to(432)
             cold_ms.append((time.perf_counter() - t1) * 1000.0)
             slowest.append((full_ms[-1], surface, h))
 
@@ -639,7 +646,9 @@ def run_windowed(reps: int, rt: dict, require_ft: bool, json_path: str | None = 
     gil_rc = finalize_runtime(rt, require_ft)
     print(f"\nSaitenka overlay — WINDOWED vs whole-panel render   ({tag})")
     print(format_runtime(rt))
-    print(f"tip_width: {width}   viewport cap: {cap}px   reps/word: {reps}   cache cap: {cache_cap} blocks\n")
+    print(
+        f"tip_width: {width}   viewport cap: {cap}px   reps/word: {reps}   cache cap: {cache_cap} blocks\n"
+    )
     hdr = f"{'word':<12}{'blocks':>7}{'full_px':>9}{'full_ms':>9}{'win_cold':>10}{'win_scroll':>12}{'peak_blk':>9}"
     print(hdr)
     print("-" * len(hdr))

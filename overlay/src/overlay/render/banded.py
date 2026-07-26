@@ -183,7 +183,9 @@ class WindowedPanel:
         """Cache a rendered block's pixels + geometry + height. Call under ``self._lock``. Idempotent:
         ``set_height`` is deterministic and re-storing just overwrites/re-touches the LRU entry."""
         self._offsets.set_height(rb.index, rb.image.height)
-        self._geom[rb.index] = BlockGeom(rb.x, rb.scan, rb.links)  # retained past pixel eviction (hits)
+        self._geom[rb.index] = BlockGeom(
+            rb.x, rb.scan, rb.links
+        )  # retained past pixel eviction (hits)
         block = CachedBlock.make(rb.x, rb.image, rb.scan, rb.links, compress=self._compress)
         self._blocks[rb.index] = block
         self._blocks.move_to_end(rb.index)  # LRU touch
@@ -294,7 +296,9 @@ class WindowedPanel:
         if not todo:
             return 0
         rendered = 0
-        with ThreadPoolExecutor(max_workers=workers) as ex:  # threads only: shared cache, no pickling
+        with ThreadPoolExecutor(
+            max_workers=workers
+        ) as ex:  # threads only: shared cache, no pickling
             futures = {ex.submit(self._render_pixels, i): i for i in todo}
             for fut in as_completed(futures):
                 if should_cancel is not None and should_cancel():
@@ -320,7 +324,9 @@ class WindowedPanel:
                 (b.x, b.image()) if (b := self._blocks.get(i)) is not None else None
                 for i in range(len(self._rows))
             ]
-            missing = [(table.starts[i], table.ends[i]) for i in range(start, end) if blocks[i] is None]
+            missing = [
+                (table.starts[i], table.ends[i]) for i in range(start, end) if blocks[i] is None
+            ]
         img = composite_window(
             blocks, table, scroll, view_h, width=self.width, background=self.theme.bg
         )

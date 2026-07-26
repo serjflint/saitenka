@@ -111,7 +111,9 @@ def test_entry_for_drops_reading_only_homophones_when_a_term_matches(tmp_path):
     ds = dicthelp.load_set([d])
     tok = Token(surface="気", lemma="気", reading="き", pos="名詞", start=0, end=1)
     entry = ds.entry_for(tok)
-    assert "気" in json.dumps(entry.headword, ensure_ascii=False)  # headword is 気 (ruby'd 気【き】)
+    assert "気" in json.dumps(
+        entry.headword, ensure_ascii=False
+    )  # headword is 気 (ruby'd 気【き】)
     glosses = json.dumps(entry.defs[0].content, ensure_ascii=False)
     assert "spirit" in glosses  # 気's own gloss is shown
     assert "tree" not in glosses and "raw" not in glosses  # 木/生 homophones are NOT merged in

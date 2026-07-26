@@ -274,6 +274,7 @@ def _build_run_options(
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+            prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
         ),
         prefetch=prefetch,
     )

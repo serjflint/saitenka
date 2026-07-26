@@ -332,6 +332,11 @@ class DictionarySet:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""
         return any(d.lookup(*forms) for d in self.dicts)
 
+    def decoded_entry_count(self) -> int:
+        """Decoded :class:`DictEntry` objects currently cached across every dictionary — the
+        ``dict_cache.size`` gauge (each dict's ``_entry_cache`` is bounded by ``entry_cache_max``)."""
+        return sum(len(d._entry_cache) for d in self.dicts)
+
     def kanji_for(self, char: str) -> Entry | None:
         """A panel :class:`Entry` for one kanji, from the first dict whose kanji_bank has it: big
         glyph headword, 音/訓 reading rows + numbered meanings in the def body, stroke count and

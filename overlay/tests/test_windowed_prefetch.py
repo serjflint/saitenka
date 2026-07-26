@@ -27,7 +27,10 @@ GIL_FORCED_OFF = os.environ.get("PYTHON_GIL") == "0"
 def _entry(n_defs: int = 16) -> Entry:
     return Entry(
         headword=["掛ける", {"tag": "rt", "content": "かける"}],
-        defs=[Definition(f"辞書{i}", [f"意味{i}：長い説明文が縦に伸びていく本文。" * 2]) for i in range(n_defs)],
+        defs=[
+            Definition(f"辞書{i}", [f"意味{i}：長い説明文が縦に伸びていく本文。" * 2])
+            for i in range(n_defs)
+        ],
     )
 
 
@@ -57,7 +60,12 @@ def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
         results[ft] = (n, wp.measured)
         # the pre-rendered ahead blocks composite pixel-identically to the one-shot crop
         win = wp.viewport(0, 260)
-        assert np.abs(np.asarray(win, np.int16) - np.asarray(ref.crop((0, 0, WIDTH, 260)), np.int16)).max() == 0
+        assert (
+            np.abs(
+                np.asarray(win, np.int16) - np.asarray(ref.crop((0, 0, WIDTH, 260)), np.int16)
+            ).max()
+            == 0
+        )
     assert results[True] == results[False]  # same block count + measured prefix either way
 
 
@@ -90,7 +98,9 @@ def test_skeleton_converges_to_the_exact_viewport_once_filled():
     wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)  # no cap → nothing evicted
     exact = np.asarray(wp.viewport(scroll, vh))  # renders every visible block
     skel = np.asarray(wp.skeleton_frame(scroll, vh))  # all visible now cached → no skeleton bands
-    assert np.array_equal(skel, exact)  # the skeleton frame is pixel-exact once the blocks have landed
+    assert np.array_equal(
+        skel, exact
+    )  # the skeleton frame is pixel-exact once the blocks have landed
 
 
 def test_skeleton_draws_bands_only_where_blocks_are_missing():
@@ -105,7 +115,9 @@ def test_skeleton_draws_bands_only_where_blocks_are_missing():
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-@pytest.mark.skipif(not GIL_FORCED_OFF, reason="needs real free-threading (run under `poe test-ft`)")
+@pytest.mark.skipif(
+    not GIL_FORCED_OFF, reason="needs real free-threading (run under `poe test-ft`)"
+)
 def test_concurrent_worker_and_main_stay_consistent():
     # A prefetch worker renders ahead while the main thread composites viewports over the SAME panel;
     # the shared cache must not corrupt and every main-thread frame must still equal render_panel.

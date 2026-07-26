@@ -963,6 +963,7 @@ def attach(
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+            prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
         ),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )

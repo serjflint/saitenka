@@ -81,8 +81,6 @@ def load_entry(path: str | Path) -> Entry:
     )
 
 
-
-
 def _flow_row(flow, content_w: int, scale: float = 1.35) -> Image.Image:
     return render_flow(
         flow,

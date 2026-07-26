@@ -349,7 +349,9 @@ def test_telemetry_check_reports_disabled_by_default(tmp_path, monkeypatch):
 
 def test_telemetry_check_enabled_no_trace_yet(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
-    export = tmp_path / "tel"  # isolate the export dir (empty) so a real ~/.cache trace can't leak in
+    export = (
+        tmp_path / "tel"
+    )  # isolate the export dir (empty) so a real ~/.cache trace can't leak in
     cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export}"\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     c = doc.check_telemetry()

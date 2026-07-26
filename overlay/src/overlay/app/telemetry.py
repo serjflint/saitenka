@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, final
 from overlay.app.paths import cache_dir
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.trace import TracerProvider
 
@@ -85,12 +87,29 @@ def dropped_span_count() -> int:
     return _span_processor.dropped_count if _span_processor is not None else 0
 
 
+#: Live state-gauge provider (cache sizes) registered by the running Reader — see
+#: ``set_gauge_provider``. Sampled on the writer thread's interval alongside the OTel counters, NOT
+#: an OTel instrument itself: the values it reports (panel/dict cache occupancy) are the Reader's own
+#: live state, cheaper to read directly than to mirror into an observable gauge the Reader would have
+#: to keep pushing. RSS is read straight from ``perf`` (process-global, no Reader needed).
+_gauge_provider: Callable[[], dict[str, float]] | None = None
+
+
+def set_gauge_provider(fn: Callable[[], dict[str, float]] | None) -> None:
+    """Register (or clear, with ``None``) the state-gauge source sampled each interval. The Reader
+    registers its cache-size gauges here in ``run`` and clears them in ``close``."""
+    global _gauge_provider
+    _gauge_provider = fn
+
+
 def _sample_counters() -> dict[str, float]:
     """The writer thread's ``sample_fn``: the curated instrument values from the last
     ``otel_metrics.snapshot()``, plus the span queue's live dropped-count (not itself an OTel
     instrument — reading straight from the processor avoids double-bookkeeping a Counter that would
-    need incrementing from two different places)."""
+    need incrementing from two different places), plus process RSS and any registered state gauges
+    (cache sizes). All sampled on the same ~1s cadence so they graph time-correlated with the spans."""
     from overlay import otel_metrics
+    from overlay.app import perf
 
     snap = otel_metrics.snapshot()
     out: dict[str, float] = {}
@@ -99,6 +118,14 @@ def _sample_counters() -> dict[str, float]:
         if isinstance(value, int | float):
             out[name.removeprefix("saitenka.")] = float(value)
     out["telemetry.dropped_spans"] = float(dropped_span_count())
+    rss = perf.rss_mb()
+    if rss is not None:
+        out["process.rss_mb"] = rss
+    if _gauge_provider is not None:
+        try:
+            out.update(_gauge_provider())
+        except Exception:
+            log.debug("gauge provider failed", exc_info=True)
     return out
 
 
@@ -174,4 +201,5 @@ def shutdown() -> None:
         _tracer_provider = None
         _meter_provider = None
         _span_processor = None
+        set_gauge_provider(None)  # drop the Reader's cache-gauge closure with the providers
         span_gate.set(False)

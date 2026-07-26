@@ -91,7 +91,9 @@ def _subinterpreter_probe() -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--words", type=int, default=48, help="how many words from vocab.json to render")
+    ap.add_argument(
+        "--words", type=int, default=48, help="how many words from vocab.json to render"
+    )
     ap.add_argument("--reps", type=int, default=3, help="repetitions; the min is reported")
     ap.add_argument(
         "--vocab", default=str(Path(__file__).with_name("vocab.json")), help="frozen word list"
@@ -115,7 +117,9 @@ def main() -> int:
         return best
 
     gil = sys._is_gil_enabled() if hasattr(sys, "_is_gil_enabled") else None
-    print(f"Python {sys.version.split()[0]}  GIL={'off' if gil is False else gil}  cores={os.cpu_count()}")
+    print(
+        f"Python {sys.version.split()[0]}  GIL={'off' if gil is False else gil}  cores={os.cpu_count()}"
+    )
     print(f"rendering {len(toks)} real-word panels, {args.reps} reps (min)\n")
 
     for t in toks[:8]:  # warm the main thread's font cache + OS page cache
@@ -131,7 +135,9 @@ def main() -> int:
                 list(ex.map(_render, toks))
 
         ms = timed(run_threads)
-        print(f"  threads x{w:<15}{ms:9.1f} ms   {serial / ms:.2f}x  ({serial / ms / w * 100:.0f}% eff)")
+        print(
+            f"  threads x{w:<15}{ms:9.1f} ms   {serial / ms:.2f}x  ({serial / ms / w * 100:.0f}% eff)"
+        )
 
     print(f"\n  subinterpreters         {_subinterpreter_probe()}\n")
 
@@ -140,7 +146,9 @@ def main() -> int:
         with ProcessPoolExecutor(max_workers=w, initializer=_proc_init) as ex:
             list(ex.map(_render, toks[:w]))  # warm each worker's imports + DB
             ms = timed(lambda ex=ex: list(ex.map(_render, toks)))
-        print(f"  process pool x{w:<11}{ms:9.1f} ms   {serial / ms:.2f}x  ({serial / ms / w * 100:.0f}% eff)")
+        print(
+            f"  process pool x{w:<11}{ms:9.1f} ms   {serial / ms:.2f}x  ({serial / ms / w * 100:.0f}% eff)"
+        )
 
     # The shipping policy (overlay.parallel): threads on free-threading, processes on a GIL build.
     from overlay.parallel import is_free_threaded, pick_executor

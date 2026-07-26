@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from PIL import Image
 
 from overlay import otel_metrics
+from overlay.app import telemetry
 from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
@@ -75,6 +76,20 @@ LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive sta
 # dict-tab strip / reserve (space-saving).
 SKIP_POS = {"補助記号", "記号", "空白"}
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
+
+
+def _inflected_in(tokens: list[Token], index: int) -> str:
+    """Token surface + trailing auxiliary tokens (助動詞), so the chain deinflects the full word
+    (習わ + ぬ → 習わぬ); the tokenizer splits inflected verbs from their auxiliaries. Free function so
+    a prefetch lookahead can inflect a *future* line's tokens, not just the on-screen ``self.tokens``."""
+    s = tokens[index].surface
+    j = index + 1
+    while j < len(tokens) and tokens[j].pos in AUX_POS:
+        s += tokens[j].surface
+        j += 1
+    return s
+
+
 TIP_GAP = 12
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed
 # above, which is an unconditional deque append and stays on every tick)
@@ -241,6 +256,9 @@ class Reader:
         self.prefetch_workers = (
             o.perf.prefetch_workers
         )  # constrained-parallel (GIL build) worker count
+        self.prefetch_lookahead = (
+            o.perf.prefetch_lookahead
+        )  # cues to warm ahead of the current line
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -762,14 +780,7 @@ class Reader:
                 self._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
 
     def _inflected_surface(self, index: int) -> str:
-        """Token surface + trailing auxiliary tokens (助動詞), so the chain deinflects the full word
-        (習わ + ぬ → 習わぬ); the tokenizer splits inflected verbs from their auxiliaries."""
-        s = self.tokens[index].surface
-        j = index + 1
-        while j < len(self.tokens) and self.tokens[j].pos in AUX_POS:
-            s += self.tokens[j].surface
-            j += 1
-        return s
+        return _inflected_in(self.tokens, index)
 
     def _panel_key(self, tok, inflected, mined: bool = False, tabs: bool = True) -> PanelKey:
         # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
@@ -913,7 +924,9 @@ class Reader:
                     top_reserve=reserve,
                 )
                 st = _TipPanel(lazy, getattr(entry, "reading", "") or tok.reading)
-                if self._banded:  # windowed renderer over the SAME rows (fresh thunks, cheap to rebuild)
+                if (
+                    self._banded
+                ):  # windowed renderer over the SAME rows (fresh thunks, cheap to rebuild)
                     from overlay.render.banded import WindowedPanel
 
                     st.windowed = WindowedPanel(
@@ -979,20 +992,7 @@ class Reader:
         while not self._stop.is_set():
             # Priority: finish the deferred tail of the tooltip the user is looking at RIGHT NOW,
             # ahead of speculatively warming the rest of the line.
-            try:
-                fin: FinishItem | None = self._finish_q.get_nowait()
-            except queue.Empty:
-                fin = None
-            if fin is not None:
-                try:
-                    fin.panel.finish()
-                except Exception:
-                    log.debug("finish job failed", exc_info=True)
-                else:
-                    if fin.key == self._tip_key and fin.panel is self._tip_state:
-                        self._tip_dirty = True  # main loop re-uploads the now-complete panel
-                    elif fin.key == self._nest.key and fin.panel is self._nest.state:
-                        self._nest.dirty = True
+            if self._run_finish_job():
                 continue
             try:
                 item: PrefetchItem = self._prefetch_q.get(timeout=0.2)
@@ -1003,19 +1003,40 @@ class Reader:
             if self._stop.is_set() or item.gen != self._prefetch_gen:
                 continue  # cancelled (line changed / resumed / seek / closing)
             try:
-                if item.full:
-                    # item.mined came from the main thread — never call _is_mined/card_for from a
-                    # worker (jamdict is not thread-safe on free-threaded builds).
-                    self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
-                else:
-                    # Cheap warm: decode+cache each dict's glossary for this word, no layout/drawing —
-                    # populates Dictionary._entry_cache so a later engaged/hover-triggered full render
-                    # (or the actual hover) skips the JSON-decode cost entirely.
-                    self.dict_set.entry_for(item.token, item.inflected)
+                self._run_prefetch_item(item)
             except Exception:
                 log.debug(
                     "prefetch render failed for %r", item.token.surface, exc_info=True
                 )  # a bad word must never kill the worker
+
+    def _run_finish_job(self) -> bool:
+        """Finish the deferred tail of the on-screen tooltip if one is queued; ``True`` when handled
+        (so the worker loops before touching the warm queue — the visible panel outranks warming)."""
+        try:
+            fin: FinishItem = self._finish_q.get_nowait()
+        except queue.Empty:
+            return False
+        try:
+            fin.panel.finish()
+        except Exception:
+            log.debug("finish job failed", exc_info=True)
+            return True
+        if fin.key == self._tip_key and fin.panel is self._tip_state:
+            self._tip_dirty = True  # main loop re-uploads the now-complete panel
+        elif fin.key == self._nest.key and fin.panel is self._nest.state:
+            self._nest.dirty = True
+        return True
+
+    def _run_prefetch_item(self, item: PrefetchItem) -> None:
+        """One prefetch job: a FULL panel render when the user's engaged, else a cheap dict-only WARM
+        (decode+cache the glossary into ``Dictionary._entry_cache``, no layout/drawing) so a later
+        hover/full render skips the JSON-decode cost."""
+        if item.full:
+            # item.mined came from the main thread — never call _is_mined/card_for from a worker
+            # (jamdict is not thread-safe on free-threaded builds).
+            self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
+        elif self.dict_set is not None:  # None only if dicts were torn down mid-flight
+            self.dict_set.entry_for(item.token, item.inflected)
 
     def _update_prefetch(self) -> None:
         """Queue the current line's content words for background work every time the line (or
@@ -1025,7 +1046,10 @@ class Reader:
         that's exactly the idle time to pay the JSON-decode cost in the background instead of on the
         first real hover. N+1 words go first (likeliest hover / mine target). On any change (resume,
         mouse-out, seek, new line) bump the generation so in-flight renders are dropped. Tokens are
-        passed by value (frozen), so a line change can't make a worker read stale state."""
+        passed by value (frozen), so a line change can't make a worker read stale state.
+
+        With ``prefetch_lookahead`` set, the next few cues' words are then WARMED too (dict-only, off
+        the same idle CPU) so the first hover after the line advances is already decoded."""
         if not self.prefetch or self.dict_set is None:
             return
         engaged = bool(self._prop("pause")) or self._mouse_in
@@ -1034,8 +1058,9 @@ class Reader:
             return
         self._prefetch_key = key
         self._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
+        gen, seen = self._prefetch_gen, set()
         if self.tokens:
-            gen, seen, items = self._prefetch_gen, set(), []
+            items = []
             for i, t in enumerate(self.tokens):
                 if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
                     continue
@@ -1048,13 +1073,60 @@ class Reader:
             for _, i, t in items:
                 # Evaluate _is_mined on the main thread (card_for → jamdict must not be called
                 # from a worker thread — jamdict is not thread-safe on free-threaded builds).
-                self._prefetch_q.put(
+                self._enqueue_prefetch(
                     PrefetchItem(
                         gen, t, self._inflected_surface(i), self._is_mined(t), full=engaged
                     )
                 )
-                if otel_metrics.prefetch_queue_depth is not None:
-                    otel_metrics.prefetch_queue_depth.add(1)
+        if self.prefetch_lookahead > 0:
+            self._enqueue_lookahead(gen, seen)
+
+    def _enqueue_prefetch(self, item: PrefetchItem) -> None:
+        self._prefetch_q.put(item)
+        if otel_metrics.prefetch_queue_depth is not None:
+            otel_metrics.prefetch_queue_depth.add(1)
+
+    def _telemetry_gauges(self) -> dict[str, float]:
+        """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
+        the hot path). ``panel_cache.bytes`` is the compressed on-heap footprint; ``dict_cache.size``
+        the decoded-entry count across every dictionary. Read under ``_cache_lock`` so a concurrent
+        prefetch worker mutating the panel cache can't fault the iteration."""
+        with self._cache_lock:
+            panel_n = len(self._panel_cache)
+            panel_bytes = sum(st.packed_nbytes for st in self._panel_cache.values())
+        dict_n = self.dict_set.decoded_entry_count() if self.dict_set is not None else 0
+        return {
+            "panel_cache.size": float(panel_n),
+            "panel_cache.bytes": float(panel_bytes),
+            "dict_cache.size": float(dict_n),
+        }
+
+    def _enqueue_lookahead(self, gen: int, seen: set[str]) -> None:
+        """WARM (dict-only, never full, ``mined=False``) the content words of the next
+        ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
+        main-thread jamdict/scorer work runs here. ``seen`` carries the current line's lemmas so a word
+        already queued isn't warmed twice. No-op without an external sub index."""
+        for text in self._upcoming_cue_texts(self.prefetch_lookahead):
+            toks = tokenize(text)
+            for i, t in enumerate(toks):
+                if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
+                    continue
+                seen.add(t.lemma)
+                self._enqueue_prefetch(
+                    PrefetchItem(gen, t, _inflected_in(toks, i), mined=False, full=False)
+                )
+
+    def _upcoming_cue_texts(self, n: int) -> list[str]:
+        """Text of the ``n`` cues after the one on screen, from the external sub index (empty when
+        there's no index, the line isn't located, or we're at the tail). Located by the displayed text
+        alone — the reliable signal per :meth:`SubIndex.locate` — so it stays off the mpv IPC path."""
+        idx = self._sub_index
+        if idx is None or not len(idx) or n <= 0:
+            return []
+        current = idx.locate(text=self.sub_text, preferred=self._nav_idx)
+        if current < 0:
+            return []
+        return [idx.cues[i].text for i in range(current + 1, min(len(idx), current + 1 + n))]
 
     def _cap_for(self, frac: float) -> int:
         """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
@@ -1160,7 +1232,9 @@ class Reader:
         view = bgra[y0 : y0 + vh].copy()  # cheap slice of the pre-converted panel
         return self._decorate_and_upload(view, y0, full_h, xy, oid, header)
 
-    def _blit_panel_banded(self, wp, scroll: int, view_h: int, xy, oid: int, full_h: int, header=None):
+    def _blit_panel_banded(
+        self, wp, scroll: int, view_h: int, xy, oid: int, full_h: int, header=None
+    ):
         """Banded path: composite the ``[y0, y0+vh)`` viewport straight from the windowed engine
         (O(viewport)) instead of slicing a whole-panel blob, then decorate + upload identically. Yields
         the same pixels as :meth:`_blit_panel` at every offset (windowed==crop parity)."""
@@ -1268,8 +1342,13 @@ class Reader:
         wp = self._tip_state.windowed if self._tip_state is not None else None
         if self._banded and wp is not None:  # composite the viewport from the windowed engine
             self._tip_rect = self._blit_panel_banded(
-                wp, self._tip_scroll, self._tip_view_h, self._tip_xy, TIP_ID,
-                int(self._tip_bgra.shape[0]), header=header,
+                wp,
+                self._tip_scroll,
+                self._tip_view_h,
+                self._tip_xy,
+                TIP_ID,
+                int(self._tip_bgra.shape[0]),
+                header=header,
             )
             return
         self._tip_rect = self._blit_panel(
@@ -1334,7 +1413,9 @@ class Reader:
         sx, sy = self._tip_xy
         px = mx - sx
         py = (my - sy) + self._tip_scroll
-        if self._banded and st.windowed is not None:  # windowed hit-test (retained per-block geometry)
+        if (
+            self._banded and st.windowed is not None
+        ):  # windowed hit-test (retained per-block geometry)
             return st.windowed.scan_hit(int(px), int(py))
         for sb in st.lazy.scan_boxes:
             if sb.x <= px < sb.x + sb.w and sb.y <= py < sb.y + sb.h:
@@ -2106,6 +2187,7 @@ class Reader:
         self._register_keybinds()
         self._seed_mined()
         self.start_prefetch()
+        telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
         mode = "free-threaded (GIL off)" if _gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
@@ -2116,6 +2198,7 @@ class Reader:
     def close(self) -> None:
         import shutil
 
+        telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck

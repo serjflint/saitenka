@@ -45,7 +45,9 @@ def main() -> int:
 
     from concurrent import interpreters
 
-    print(f"Python {sys.version.split()[0]}  GIL={sys._is_gil_enabled()}  — reproducing the crash\n")
+    print(
+        f"Python {sys.version.split()[0]}  GIL={sys._is_gil_enabled()}  — reproducing the crash\n"
+    )
 
     # --- step 1: a SINGLE sub-interpreter renders fine under the override -------------------------
     q = interpreters.create_queue()
@@ -64,11 +66,15 @@ q.put((time.perf_counter() - t0) * 1000)
     solo = interpreters.create()
     solo.prepare_main(q=q, count=20)
     solo.exec(work)
-    print(f"  1 sub-interpreter: OK, {q.get_nowait():.0f} ms for 20 renders (single-threaded is safe)")
+    print(
+        f"  1 sub-interpreter: OK, {q.get_nowait():.0f} ms for 20 renders (single-threaded is safe)"
+    )
     solo.close()
 
     # --- step 2: N sub-interpreters rendering IN PARALLEL → segfault in PIL.Image.new -------------
-    print("\n  8 sub-interpreters rendering in parallel → expect SIGSEGV/SIGBUS in PIL.Image.new ...")
+    print(
+        "\n  8 sub-interpreters rendering in parallel → expect SIGSEGV/SIGBUS in PIL.Image.new ..."
+    )
     sys.stdout.flush()  # a hard crash won't flush buffered stdout
     interps = [interpreters.create() for _ in range(8)]
     for it in interps:
