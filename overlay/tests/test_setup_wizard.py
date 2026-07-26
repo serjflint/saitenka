@@ -56,15 +56,27 @@ def test_no_manager_available(monkeypatch):
 
 
 def test_inventory_reports_missing(monkeypatch):
-    monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/mpv" if n == "mpv" else None)
+    monkeypatch.setattr(sw, "_present", lambda t: t == "mpv")
     inv = sw.inventory()
     assert inv["mpv"] is True
     assert inv["ffmpeg"] is False
 
 
 def test_missing_tools_filters_present(monkeypatch):
-    monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/uv" if n in ("uv", "mpv") else None)
+    monkeypatch.setattr(sw, "_present", lambda t: t in ("uv", "mpv"))
     assert sw.missing_tools(["mpv", "ffmpeg", "uv"]) == ["ffmpeg"]
+
+
+def test_present_mpv_routes_through_find_mpv(monkeypatch):
+    """mpv presence uses find_mpv (knows C:\\mpv / mpv.net / registry), not bare PATH — the fix for the
+    winget-crash loop when mpv is installed off-PATH."""
+    from overlay.mpvio import discover
+
+    monkeypatch.setattr(sw.shutil, "which", lambda n: None)  # nothing on PATH
+    monkeypatch.setattr(discover, "find_mpv", lambda config_path=None: "C:\\mpv\\mpv.exe")
+    assert sw._present("mpv") is True
+    monkeypatch.setattr(discover, "find_mpv", lambda config_path=None: None)
+    assert sw._present("mpv") is False
 
 
 # --- step running (mocked subprocess boundary) -----------------------------------------------
@@ -72,6 +84,7 @@ def test_missing_tools_filters_present(monkeypatch):
 
 def test_run_install_dry_run_executes_nothing(monkeypatch):
     calls = []
+    monkeypatch.setattr(sw, "_present", lambda t: False)  # force both tools "missing"
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
@@ -82,6 +95,7 @@ def test_run_install_dry_run_executes_nothing(monkeypatch):
 
 def test_run_install_declined_executes_nothing(monkeypatch):
     calls = []
+    monkeypatch.setattr(sw, "_present", lambda t: False)
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
@@ -92,6 +106,7 @@ def test_run_install_declined_executes_nothing(monkeypatch):
 
 def test_run_install_confirmed_invokes_manager(monkeypatch):
     calls = []
+    monkeypatch.setattr(sw, "_present", lambda t: False)
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
@@ -99,10 +114,27 @@ def test_run_install_confirmed_invokes_manager(monkeypatch):
     assert calls == [["brew", "install", "mpv"]]
 
 
+def test_do_install_continues_and_survives_a_failed_manager(monkeypatch):
+    """A package manager exiting non-zero (winget already-installed / declined) must NOT crash setup —
+    the other tools still install and the count reflects only the successes."""
+    monkeypatch.setattr(sw, "_present", lambda t: False)
+    monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
+
+    def _run(cmd):
+        if "mpv" in cmd:
+            raise sw.subprocess.CalledProcessError(1, cmd)  # mpv install fails
+        # ffmpeg succeeds
+
+    monkeypatch.setattr(sw, "_run_cmd", _run)
+    n = sw.do_install(["mpv", "ffmpeg"], dry_run=False, confirm=lambda _p: True)
+    assert n == 1  # ffmpeg installed; the mpv failure was swallowed, not raised
+
+
 def test_full_wizard_resumable_skips_satisfied(monkeypatch):
     """Everything already present → the wizard installs nothing and still reaches doctor/init."""
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(sw.shutil, "which", lambda n: f"/bin/{n}")  # all tools present
+    monkeypatch.setattr(sw, "_present", lambda t: True)  # all tools present
     installs = []
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: installs.append(cmd))
     ran = {"doctor": False, "init": False}
@@ -133,6 +165,17 @@ def test_anki_config_fragment():
     }
     assert f("", "", "D", "M") == {"mine": {"deck": "D", "model": "M"}}  # no deck → no [known]
     assert f("K", "", "D", "M")["known"] == {"K": ["Expression"]}  # blank field → default
+
+
+def test_resolve_mpv_input_accepts_exe_strips_quotes_and_scans_dir(tmp_path):
+    exe = tmp_path / ("mpv.exe" if sw.sys.platform == "win32" else "mpv")
+    exe.write_text("")
+    exe.chmod(0o755)
+    assert sw._resolve_mpv_input(str(exe)) == str(exe)  # direct path
+    assert sw._resolve_mpv_input(f'"{exe}"') == str(exe)  # Windows "Copy as path" quotes stripped
+    assert sw._resolve_mpv_input(str(tmp_path)) == str(exe)  # a DIR → finds the binary inside
+    assert sw._resolve_mpv_input("") is None
+    assert sw._resolve_mpv_input(str(tmp_path / "nope")) is None  # non-existent → None
 
 
 def test_rank_decks_biggest_first():
