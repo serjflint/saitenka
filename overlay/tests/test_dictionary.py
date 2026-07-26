@@ -99,6 +99,38 @@ def test_lookup_ranks_exact_term_above_reading_only(tmp_path):
     assert hits[0].term == "の"  # exact-term match wins, not reading-only 箆
 
 
+def test_entry_for_drops_reading_only_homophones_when_a_term_matches(tmp_path):
+    # Hovering 気 (reading き) must NOT merge every き-homophone (木/生) into its tooltip — Yomitan groups
+    # on the term, so a reading collision is a separate entry, never fused. With an exact-term hit we
+    # keep only it and drop the reading-only homophones.
+    d = _make_dict(
+        tmp_path / "h.zip",
+        "H",
+        [["気", "き", ["spirit; mind"]], ["木", "き", ["tree"]], ["生", "き", ["raw"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="気", lemma="気", reading="き", pos="名詞", start=0, end=1)
+    entry = ds.entry_for(tok)
+    assert "気" in json.dumps(entry.headword, ensure_ascii=False)  # headword is 気 (ruby'd 気【き】)
+    glosses = json.dumps(entry.defs[0].content, ensure_ascii=False)
+    assert "spirit" in glosses  # 気's own gloss is shown
+    assert "tree" not in glosses and "raw" not in glosses  # 木/生 homophones are NOT merged in
+
+
+def test_entry_for_keeps_all_reading_matches_for_a_kana_word(tmp_path):
+    # A kana word whose dictionary forms are all kanji (かける → 掛ける/懸ける) has NO exact-term hit, so
+    # the reading fallback keeps every form — that IS the intended polysemy, not a homophone collision.
+    d = _make_dict(
+        tmp_path / "k.zip",
+        "K",
+        [["掛ける", "かける", ["to hang"]], ["懸ける", "かける", ["to wager"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="かける", lemma="かける", reading="かける", pos="動詞", start=0, end=3)
+    glosses = json.dumps(ds.entry_for(tok).defs[0].content, ensure_ascii=False)
+    assert "hang" in glosses and "wager" in glosses  # both かける forms kept
+
+
 def test_entry_for_particle_prefers_particle_headword(tmp_path):
     d = _make_dict(
         tmp_path / "n2.zip",
@@ -125,6 +157,32 @@ def test_dictionary_set_miss_falls_back(tmp_path):
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     entry = ds.entry_for(tok)
     assert entry.defs[0].dict_name == "—"  # not found placeholder
+
+
+def test_entry_for_headword_comes_from_the_first_dict_with_a_hit(tmp_path):
+    """`entry_for` fans per-dict lookups out across a thread pool (see `_lookup_all`) but must still
+    pick the headword/reading from whichever dict is FIRST in `self.dicts`, not whichever lookup
+    happens to finish first — a race the pool's `executor.map` ordering guards against."""
+    a = _make_dict(tmp_path / "first.zip", "First", [["行く", "いく", ["to go"]]])
+    b = _make_dict(tmp_path / "second.zip", "Second", [["行く", "ゆく", ["to go (poetic)"]]])
+    ds = dicthelp.load_set([a, b])
+    tok = next(t for t in tokenize("学校に行く") if t.surface == "行く")
+    entry = ds.entry_for(tok)
+    assert entry.reading == "いく"  # First dict's reading wins, not Second's
+
+
+def test_entry_for_with_many_dicts_preserves_order_and_content(tmp_path):
+    """Exercises the parallel fan-out path (`len(self.dicts) > 1`) with enough dicts to actually use
+    more than one pool worker, guarding against a race scrambling section order or content."""
+    paths = [
+        _make_dict(tmp_path / f"d{i}.zip", f"Dict{i}", [["猫", "ねこ", [f"cat ({i})"]]])
+        for i in range(6)
+    ]
+    ds = dicthelp.load_set(paths)
+    tok = next(t for t in tokenize("猫がいる") if t.surface == "猫")
+    entry = ds.entry_for(tok)
+    assert [d.dict_name for d in entry.defs] == [f"Dict{i}" for i in range(6)]
+    assert [d.content[0] for d in entry.defs] == [f"cat ({i})" for i in range(6)]
 
 
 def test_card_for_uses_user_dictionary(tmp_path):
