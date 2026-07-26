@@ -294,3 +294,40 @@ def test_compose_panel_geometry():
     m, gap = Theme().margin, Theme().gap
     assert img.height == 2 * m + 40 + 30 + gap
     assert img.width == WIDTH
+
+
+def _draw_line(canvas_h: int, y: int, font, text: str):
+    """Draw ``text`` at integer offset ``y`` on a fresh transparent (premultiplied) RGBA canvas."""
+    from PIL import Image, ImageDraw
+
+    im = Image.new("RGBA", (WIDTH, canvas_h), (0, 0, 0, 0))
+    ImageDraw.Draw(im).text((8, y), text, font=font, fill=(255, 255, 255, 255))
+    return np.asarray(im)
+
+
+def test_integer_y_band_split_is_pixel_exact():
+    """The invariant a future banded/tiled renderer relies on: with **integer** Y band boundaries,
+    drawing the SAME text primitive into two adjacent band canvases (each clipping the glyph, one at
+    the bottom edge and one at the top) and stacking them is byte-for-byte identical to one tall
+    render — even when the cut falls *mid-glyph*.
+
+    This holds because PIL/FreeType grid-fits glyphs to the integer pixel grid, so an integer Y
+    translation leaves the raster unchanged and clipping is a pure buffer-window copy. It does NOT
+    hold for fractional offsets (`getmask2` warns the raster shifts at fractional coordinates) — hence
+    band edges must always be integers. AA fringe + CJK + Latin ligatures are all exercised; a Pillow
+    change that broke this would silently seam every tiled tooltip, so this guards it."""
+    from overlay import fonts
+
+    font = fonts.load(fonts.FontSpec("NotoSansJP.ttf", 28))
+    text = "定義文の例 fi fl — anti-aliased 明鏡"
+    full = _draw_line(120, 40, font, text)  # one tall render; glyphs span ~y20..y66
+
+    # cut at integer y=60 (mid-glyph): band0 = rows[30:60), band1 = rows[60:90)
+    band0 = _draw_line(30, 40 - 30, font, text)  # y=10, glyph bottoms clipped off the canvas
+    band1 = _draw_line(30, 40 - 60, font, text)  # y=-20, glyph tops clipped off the canvas
+    stacked = np.vstack([band0, band1])
+
+    diff = np.abs(full[30:90].astype(np.int16) - stacked.astype(np.int16))
+    assert (
+        diff.max() == 0
+    )  # the two clipped halves reconstitute the original exactly, seam included

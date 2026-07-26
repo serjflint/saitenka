@@ -17,6 +17,8 @@ from functools import lru_cache
 _TAG_LOCK = threading.Lock()
 
 CONTENT_POS = {"名詞", "動詞", "形容詞", "副詞", "形状詞", "連体詞", "感動詞"}
+SKIP_POS = {"補助記号", "記号", "空白"}  # symbol / punctuation / whitespace — never worth a tooltip
+AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +143,18 @@ def merge_inflected(tokens: list[Token]) -> list[Token]:
             out.append(t)
             i += 1
     return out
+
+
+def inflected_in(tokens: list[Token], index: int) -> str:
+    """Token surface + trailing auxiliary tokens (助動詞), so the chain deinflects the full word
+    (習わ + ぬ → 習わぬ); the tokenizer splits inflected verbs from their auxiliaries. Free function so
+    a prefetch lookahead can inflect a *future* line's tokens, not just the on-screen tokens."""
+    s = tokens[index].surface
+    j = index + 1
+    while j < len(tokens) and tokens[j].pos in AUX_POS:
+        s += tokens[j].surface
+        j += 1
+    return s
 
 
 def tokenize(line: str, strip_furigana: bool = True, merge: bool = True) -> list[Token]:

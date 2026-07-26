@@ -95,6 +95,9 @@ class TooltipOptions:
         False  # sticky per-dictionary tab strip on the BASE tooltip (off default)
     )
     panel_cache_max: int = 128  # LRU cap on cached (zlib-compressed) rendered tooltip panels
+    banded: bool = False  # experimental: render the base tooltip via the windowed (banded) engine —
+    # O(viewport) compositing + hit-testing instead of slicing a whole-panel blob. Off default; the
+    # SAITENKA_BANDED=1 env var also enables it (env wins, for quick trials without editing overlay.toml)
 
 
 @dataclass(frozen=True)
@@ -116,10 +119,16 @@ class TranslationOptions:
 
 @dataclass(frozen=True)
 class PerfOptions:
-    """Background-work tuning: poll cadence and prefetch parallelism."""
+    """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
 
     poll_interval: float = 0.025  # main loop tick — trades CPU usage against input latency
     prefetch_workers: int = 2  # constrained-parallel (GIL build) tooltip-warming worker count
+    prefetch_lookahead: int = (
+        0  # upcoming subtitle cues to WARM ahead of the current line (0 = only
+    )
+    # the current line). Each decodes+caches the next cue's dictionary glossaries during idle playback,
+    # so the first hover after the line advances (or an Alt+→ nav) is already warm. Needs an external
+    # sub index — embedded/jimaku tracks have none, so it's a no-op there.
 
 
 @dataclass(frozen=True)
@@ -215,7 +224,7 @@ def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
 
 @dataclass(frozen=True)
 class TelemetryOptions:
-    """Runtime tracing/metrics — OFF by default even when the ``observability`` extra is installed;
+    """Runtime tracing/metrics — OFF by default even when the ``telemetry`` extra is installed;
     ``enabled`` is the actual opt-in switch. ``sample_hot_path``
     bounds the cost of instrumenting the per-tick hit-test path (0.0 = never sample it)."""
 

@@ -41,6 +41,10 @@ dict_cache_hits: Counter | None = None
 dict_cache_misses: Counter | None = None
 dropped_telemetry_spans: Counter | None = None
 cold_first_paint_overshoot: Counter | None = None
+osd_paused_draw: Counter | None = (
+    None  # overlay draws that landed while paused (the #8172 bug window)
+)
+osd_paused_nudge: Counter | None = None  # paused-OSD re-flushes issued to un-throttle mpv
 
 # Gauges (prefetch queue depth is push-updated by the caller; gil_enabled is observed on read).
 prefetch_queue_depth: UpDownCounter | None = None
@@ -73,7 +77,7 @@ def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
 
 
 #: Memoized resolution of `opentelemetry.trace`: `None` = not yet checked, ``False`` = confirmed
-#: unavailable (the observability extra isn't installed — this can't change at runtime, so caching
+#: unavailable (the telemetry extra isn't installed — this can't change at runtime, so caching
 #: it forever is correct). Avoids re-attempting (and re-catching ImportError from) a failing import
 #: on every single call from a hot call site like `traced()`.
 _trace_available: bool | None = None
@@ -96,7 +100,7 @@ def _resolve_trace_module() -> ModuleType | None:
 @contextmanager
 def traced(name: str, **attributes: str) -> Generator[None]:
     """A real OTel span via the global tracer API — a no-op (not just an unrecorded span, but no
-    `opentelemetry` import attempt beyond the first) when the ``observability`` extra isn't
+    `opentelemetry` import attempt beyond the first) when the ``telemetry`` extra isn't
     installed, so every call site stays safe to wrap unconditionally, same contract as :func:`timed`.
     When the extra IS installed but telemetry isn't configured, `trace.get_tracer()` itself returns
     OTel's built-in no-op tracer — cheap, not a crash.
@@ -144,6 +148,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
+    global osd_paused_draw, osd_paused_nudge
 
     with _lock:
         _reader = reader
@@ -173,6 +178,13 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         cold_first_paint_overshoot = meter.create_counter(
             "saitenka.render.cold_first_paint_overshoot"
         )
+        osd_paused_draw = meter.create_counter(
+            "saitenka.osd.paused_draw", description="overlay draws that landed while mpv was paused"
+        )
+        osd_paused_nudge = meter.create_counter(
+            "saitenka.osd.paused_nudge",
+            description="paused-OSD re-flushes issued (mpv #8172 workaround)",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -187,6 +199,7 @@ def unregister() -> None:
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
+    global osd_paused_draw, osd_paused_nudge
 
     with _lock:
         _reader = None
@@ -202,6 +215,8 @@ def unregister() -> None:
         dict_cache_misses = None
         dropped_telemetry_spans = None
         cold_first_paint_overshoot = None
+        osd_paused_draw = None
+        osd_paused_nudge = None
         prefetch_queue_depth = None
 
 
@@ -246,15 +261,24 @@ def snapshot() -> dict[str, dict[str, object]]:
 
 
 def _summarize_metric(metric) -> dict[str, object]:
+    """Merge every data point into one summary — an instrument recorded with per-label attributes
+    (e.g. `dict_sql_duration_ms`'s `dict=<title>`) fans out into one point PER label, not one point
+    total. A previous version read only `points[-1]` on the (false, for labeled instruments)
+    assumption of a single track, silently reporting one label's count/sum instead of the sum across
+    all of them — found via cross-checking this snapshot against the CTF trace.json span totals for
+    the same run (~9-11x undercount, one point per dictionary title)."""
     data = metric.data
     points = getattr(data, "data_points", [])
     if not points:
         return {}
-    point = points[-1]  # single-track instruments here (no per-label fan-out) — latest point
-    if hasattr(point, "bucket_counts"):  # HistogramDataPoint
+    if hasattr(points[0], "bucket_counts"):  # HistogramDataPoint(s) — same bucket bounds per metric
+        count = sum(p.count for p in points)
+        total = sum(p.sum for p in points)
+        dp_max = max(p.max for p in points)
+        bucket_counts = [sum(b) for b in zip(*(p.bucket_counts for p in points), strict=True)]
         return {
-            "count": point.count,
-            "sum": point.sum,
-            **_percentiles(point.bucket_counts, point.explicit_bounds, point.max, point.count),
+            "count": count,
+            "sum": total,
+            **_percentiles(bucket_counts, points[0].explicit_bounds, dp_max, count),
         }
-    return {"value": point.value}
+    return {"value": sum(p.value for p in points)}

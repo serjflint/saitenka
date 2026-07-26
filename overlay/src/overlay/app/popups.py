@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from overlay.app.tokenize import Token
     from overlay.panel import LazyPanel
+    from overlay.render.banded import WindowedPanel
 
 from overlay.mpvio.osd import to_bgra_array
 
@@ -46,11 +47,20 @@ class TipPanel:
         self._packed: bytes | None = None  # zlib(premultiplied BGRA bytes)
         self._shape: tuple[int, int, int] | None = None  # (h, w, 4) of the stored panel
         self._lock = threading.Lock()
+        # Optional windowed (banded) renderer over the SAME rows — built only under the SAITENKA_BANDED
+        # flag. When set, the controller composites each visible viewport from it (O(viewport)) instead
+        # of slicing the whole-panel blob; the blob path stays the default. See WindowedPanel.
+        self.windowed: WindowedPanel | None = None
 
     @property
     def ready(self) -> bool:
         """True once the head (or full panel) has been rendered and stored — cheap; no decompress."""
         return self._packed is not None
+
+    @property
+    def packed_nbytes(self) -> int:
+        """Compressed on-heap size of the stored panel (0 before first paint) — for the cache gauge."""
+        return len(self._packed) if self._packed is not None else 0
 
     @property
     def shape(self) -> tuple[int, int, int]:

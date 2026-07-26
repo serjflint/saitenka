@@ -1582,7 +1582,7 @@ wheels = [
 
 [[package]]
 name = "saitenka-overlay"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "certifi" },
@@ -1621,7 +1621,7 @@ jmdict = [
     { name = "jamdict-data", marker = "sys_platform != 'win32'" },
     { name = "jamdict-data-fix", marker = "sys_platform == 'win32'" },
 ]
-observability = [
+telemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
@@ -1665,22 +1665,22 @@ requires-dist = [
     { name = "keyring", specifier = ">=25.7.0" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "opentelemetry-api", marker = "extra == 'observability'", specifier = ">=1.44.0" },
-    { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.44.0" },
+    { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.44.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'telemetry'", specifier = ">=1.44.0" },
     { name = "pillow", specifier = ">=11.0" },
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "rich", specifier = ">=14.0" },
     { name = "saitenka-overlay", extras = ["deinflect"], marker = "extra == 'full'" },
     { name = "saitenka-overlay", extras = ["jmdict"], marker = "extra == 'full'" },
-    { name = "saitenka-overlay", extras = ["observability"], marker = "extra == 'full'" },
+    { name = "saitenka-overlay", extras = ["telemetry"], marker = "extra == 'full'" },
     { name = "saitenka-overlay-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect", "jmdict", "observability", "minimal", "full"]
+provides-extras = ["deinflect", "jmdict", "telemetry", "minimal", "full"]
 
 [package.metadata.requires-dev]
 dev = [

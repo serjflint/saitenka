@@ -7,6 +7,75 @@ logs.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-26
+
+### Added
+
+- **`saitenka-overlay telemetry enable|disable|status`** — flip `[telemetry] enabled` without
+  hand-editing `overlay.toml` (comment-preserving, backs up the prior file), plus a `status` readout
+  of both switches (config flag + whether the `telemetry` extra is installed), the export dir, and
+  the last trace. `enable` prints the install command if the extra is missing.
+- **Windowed (banded) tooltip render engine**, behind `[tooltip].banded` / `SAITENKA_BANDED=1` (off by
+  default): composites only the blocks in the viewport (± overscan) and hit-tests from retained
+  per-block geometry, instead of slicing a whole-panel bitmap. Byte-for-byte identical to the
+  existing renderer at every scroll offset; the blob path is untouched when off.
+- **Prefetch lookahead** (`prefetch_lookahead` config knob, off by default) — warms the next N
+  subtitle cues' dictionary glossaries during idle playback (needs an external sub index; a no-op on
+  embedded/jimaku tracks), plus a cheap dict-only warm pass while just playing (not paused/hovering)
+  so the JSON-decode cost is usually already paid by the first hover.
+- **Cache-size and RSS telemetry gauges** — panel-cache size/bytes, decoded dictionary-entry count,
+  and process RSS, sampled on the telemetry writer thread's 1s cadence.
+- **`doctor` reports app version, Windows edition/build, PowerShell version, and an `mpv_socket`
+  hint** — closes the diagnostic gap around attaching to your own already-running mpv. The report
+  bundle's manifest header now carries the version too.
+- **`reinstall` preserves installed extras** (a bare reinstall previously replaced the extras set,
+  silently dropping `deinflect`/`telemetry`); tries PyPI then the latest GitHub release tag
+  (overridable). **`uninstall`** removes config/dicts/cache/crash logs and the mpv plugin, but never
+  touches mpv/ffmpeg (`--keep-dicts`, `--yes`).
+- **Render-executor policy + parallelism benchmarks** — free-threaded builds render tooltip panels
+  across threads (FreeType releases the GIL; ~78% of the render tail is glyph rasterization), falling
+  back to a process pool on a GIL build; `examples/bench_responsiveness.py --vocab` and
+  `bench_parallelism.py` benchmark the policy against a frozen real-episode word list. Sub-interpreters
+  were evaluated and rejected — PIL's C extension segfaults across them.
+- **`overlay.example.toml` rewritten sshd-style** — every flag documented at its default, the common
+  ones active, the rest commented, so it stays legible as the config surface grows.
+
+### Changed
+
+- **Renamed the optional `observability` extra to `telemetry`** for consistency with the
+  `[telemetry]` config table and the new command — install as `saitenka-overlay[telemetry]`
+  (the old `[observability]` name no longer resolves; `[full]` is unaffected).
+- **Collapsed the trace write-pipeline** into a single `CTFSpanProcessor` (one bounded queue, one
+  writer thread) from three classes / two queues / three threads. Fixes an O(n²) full-file rewrite
+  per flush, a `force_flush` drain/write race, and an unbounded second queue; the CTF output and the
+  public telemetry behaviour are unchanged.
+- **Split `controller.py`'s remaining subsystems into their own modules** — background prefetch,
+  card-preview UI, the nested (scan) popup, the base tooltip (hover hysteresis, panel cache, tabs),
+  translation reveal, and subtitle navigation each moved to their own `app/*.py` file behind thin
+  delegating methods on `Reader`, with the progressive dep-loading glue folded into the existing
+  `reader_deps.py`. `controller.py`: 2028 → ~1030 lines. No behavior change.
+- **Complexity-reduction pass** on `Reader.poll_once`, `DictionarySet.entry_for`, and
+  `_windows_registry_mpv`, each split into smaller, independently-testable helpers to stay under the
+  `poe complexity` gate.
+- Moved `Theme` and `overlay_version` to the core `overlay.model`/`overlay.version` layer to break
+  two import cycles (`render↔panel`, `report↔doctor`) uncovered while adding the banded renderer.
+
+### Fixed
+
+- **Off-PATH mpv on Windows** — `find_mpv` gains a registry probe (App Paths + the default video-file
+  handler); `setup` now survives a package-manager install failure (e.g. winget's non-zero exit)
+  instead of crashing the whole wizard, and falls back to an interactive prompt that persists
+  `mpv_path`.
+- **The paused-overlay "only updates on mouse move" bug on Windows** — mpv throttles OSD updates while
+  paused (mpv #8172); a draw landing mid-pause now schedules a one-tick-later re-flush so mpv actually
+  presents it. `--d3d11-flip=no` alone was insufficient (the throttle isn't flip-model-specific).
+- **A reading collision (き → 気/木/生/期/器…) dumped every unrelated homophone into one tooltip** —
+  `entry_for` now groups on the term like Yomitan, keeping only exact-term hits when any exist (a
+  kana word whose forms are all kanji still keeps every reading match, the intended polysemy).
+- **A per-dictionary telemetry histogram (`dict_sql_duration_ms`) undercounted ~9-11x** — OTel fans a
+  labeled instrument into one data point per label; the summarizer read only the last point instead
+  of summing across all of them.
+
 ## [0.5.0] - 2026-07-25
 
 ### Added

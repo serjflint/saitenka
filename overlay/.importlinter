@@ -57,7 +57,7 @@ ignore_imports =
     overlay.app.subtitles -> PIL
     overlay.app.toast -> PIL
     overlay.app.card_preview -> PIL
-    overlay.app.controller -> PIL
+    overlay.app.miner_ui -> PIL
 
 [importlinter:contract:gpl-chokepoint]
 name = only app.dictionary / app.doctor may import the GPL deinflect add-on

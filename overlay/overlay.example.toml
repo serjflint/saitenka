@@ -1,62 +1,91 @@
-# Saitenka overlay settings — copy to ~/.config/saitenka/overlay.toml
+# Saitenka overlay settings — copy to ~/.config/saitenka/overlay.toml (or point --config / $SAITENKA_CONFIG
+# elsewhere). Precedence: built-in default < this file < explicit CLI flag.
 #
-# Lives in its own XDG dir (not mixed into mpv.conf or the animecards rig). Anything here is a
-# DEFAULT; an explicit CLI flag to mpv_reader.py overrides it. Point elsewhere with --config or
-# $SAITENKA_CONFIG. Dictionaries are imported ONCE into a consolidated database
-# (~/.local/share/saitenka/dictionaries.sqlite) by `saitenka-overlay import <dir-with-zips>`; the lists
-# below are dictionary TITLES resolved against that DB (not file paths). Import first, then reference.
+# HOW TO READ THIS FILE (sshd_config style):
+#   • Every recognized key appears below, shown at its BUILT-IN DEFAULT.
+#   • Commented (#) lines are those defaults — uncomment only to CHANGE one. The commonly-edited keys
+#     (dictionaries, decks, jimaku) are left active as a starting point.
+#   • Flat `key = value` lines are TOP-LEVEL and must sit ABOVE the first [table] header. Grouped keys
+#     live under their [table] ([mine], [known], [anki], [jimaku], [telemetry], [dictdb]). TOML rule:
+#     once a [table] header appears, every later key belongs to it — so keep all flat keys at the top.
+#
+# Dictionaries are imported ONCE into a consolidated DB (~/.local/share/saitenka/dictionaries.sqlite) by
+# `saitenka-overlay import <dir-with-zips>`; the lists below are dictionary TITLES resolved against that
+# DB (not file paths). Run `saitenka-overlay doctor` to see what's imported and `import` to fill them in.
 
-slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
-tip_height = 0.4           # max tooltip height as a fraction of the video height (default 0.4)
-translate_key = "t"        # toggle the official EN translation
-pause_on_tooltip = false   # auto-pause playback while a tooltip is shown (resumes when it hides)
+# ── Subtitles & languages ────────────────────────────────────────────────────────────────────────
+# slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
 
-# Subtitle navigation keys (Stage 4 — crucial feature).
-sub_prev_key   = "Alt+LEFT"    # jump to the PREVIOUS subtitle line (sub-seek -1)
-sub_next_key   = "Alt+RIGHT"   # jump to the NEXT subtitle line (sub-seek  1)
-sub_replay_key = "Alt+DOWN"    # replay the CURRENT subtitle line from its start (sub-seek 0)
-# Sub-delay nudges z / Z / x (mpv defaults, kept working via our overlay keybind pass-through).
+# ── Tooltip geometry & feel ──────────────────────────────────────────────────────────────────────
+# tip_height = 0.4           # BASE tooltip max height as a fraction of the video height
+# nested_max_frac = 0.6      # nested (scan) popup max height fraction — deliberately roomier
+# show_dict_tabs = false     # sticky per-dictionary tab strip on the base tooltip
+# hide_delay = 0.6           # seconds the tooltip lingers after the cursor leaves the word
+# flash_secs = 0.22          # duration of the "copied" highlight pulse on a popup
+# hover_switch_delay = 0.15  # dwell before the tooltip switches to a NEW word
+# panel_cache_max = 128      # LRU cap on cached (compressed) rendered tooltip panels
+# pause_on_tooltip = true    # freeze the frame while a tooltip is shown (the mining default)
+# banded = true              # experimental windowed (O(viewport)) tooltip renderer; SAITENKA_BANDED=1 also enables it
 
-# mpv coexistence (Stage 16). All optional.
-# mpv_path      = "/Applications/mpv.app/Contents/MacOS/mpv"  # override auto-discovery
-# mpv_socket    = "/tmp/mpv-socket"   # default socket for `saitenka-overlay attach` (share with
-#                                     # mpv_websocket/animecards — mpv allows many IPC clients)
-# overlay_id_base = 1  # shift our OSD overlay ids (we use 6 starting here) if another mpv script
-#                      # already owns ids 1..6; 1 = default, no shift.
+# ── Translation ──────────────────────────────────────────────────────────────────────────────────
+# translate_key = "t"        # mpv key to toggle the official EN translation
+# auto_translate = false     # reveal the EN automatically while a tooltip is open (anti-crutch: only then)
 
-# Definition dictionaries by TITLE, in tooltip order (first = top). The tooltip scrolls, so include as
-# many as you like — the DB keeps RAM low regardless of size. Titles are the Yomitan dictionary names
-# (see `saitenka-overlay doctor`, which lists what's imported). Import them first:
-#   saitenka-overlay import ~/yomitan-dicts    # builds them into the DB and fills these lists for you
+# ── Subtitle navigation keys ─────────────────────────────────────────────────────────────────────
+# sub_prev_key   = "Alt+LEFT"    # jump to the PREVIOUS subtitle line (sub-seek -1)
+# sub_next_key   = "Alt+RIGHT"   # jump to the NEXT subtitle line (sub-seek  1)
+# sub_replay_key = "Alt+DOWN"    # replay the CURRENT subtitle line from its start (sub-seek 0)
+# Sub-delay nudges z / Z / x are mpv defaults, passed through by our keybinds.
+
+# ── Background work (prefetch & polling) ─────────────────────────────────────────────────────────
+# prefetch = true            # warm the current line's tooltips on idle CPU so the first hover is instant
+# prefetch_workers = 2       # tooltip-warming worker threads (auto-scales higher on free-threaded builds)
+# prefetch_lookahead = 0     # ALSO warm this many UPCOMING cues (dict-only) so the first hover after the
+#                            # line advances / an Alt+→ is already decoded. Needs an external sub index
+#                            # (embedded/jimaku tracks have none → no-op). Try 1–3.
+# poll_interval = 0.025      # main-loop tick (s) — trades CPU against input latency
+# no_audio_play = false      # set true to NOT auto-play the sentence audio on mine
+
+# ── Mining feel ──────────────────────────────────────────────────────────────────────────────────
+# max_bulk = 12              # cap on words mined in one "mine all" (Shift+m) action
+# anki_ok_ttl = 3.0          # seconds an AnkiConnect reachability check is cached
+# anki_ping_timeout = 0.4    # timeout (s) for that reachability ping (hot hover path)
+
+# ── mpv coexistence ──────────────────────────────────────────────────────────────────────────────
+# mpv_path = "/Applications/mpv.app/Contents/MacOS/mpv"  # override mpv auto-discovery
+# mpv_socket = "/tmp/mpv-socket"   # socket for `attach` (share with mpv.net/animecards — many clients OK)
+# overlay_id_base = 1        # shift our OSD overlay ids (we use 6 from here) if another script owns 1..6
+# resync_timeout = 300       # timeout (s) for the jimaku sub-resync subprocess (alass/ffsubsync)
+
+# ── Dictionaries (TITLES, not paths — see the header) ────────────────────────────────────────────
+# Definition dictionaries, in tooltip order (first = top). The tooltip scrolls; add as many as you like.
 dicts = [
   "Bilingual Dict",
   "Monolingual Dict A",
   "Monolingual Dict B",
-  # add as many definition dictionaries as you like — the tooltip scrolls.
-  # grammar / name / kanji dictionaries can go here too.
 ]
 
-# Frequency dictionaries → green pills (order preserved; harmonic-blended). Titles, not paths.
+# Frequency dictionaries → green pills (order preserved; harmonic-blended).
 freq = [
   "Frequency General",
   "Frequency Media",
   "Frequency Novels",
 ]
 
-# Pitch-accent dictionaries → purple pills. Titles, not paths.
+# Pitch-accent dictionaries → purple pills.
 pitch = [
   "Pitch Accent",
 ]
 
-# Known-word source for FSRS-aware coloring: Anki decks -> fields (read via AnkiConnect).
+# ── [known] Known-word source for FSRS-aware coloring: Anki decks → fields (read via AnkiConnect) ──
 [known]
 "Saitenka::Known" = ["Expression"]
 
-# One-key mining target.
+# ── [mine] One-key mining target ─────────────────────────────────────────────────────────────────
+# Mining is ON whenever this table is present (Ctrl+m mines the hovered word). enabled=false keeps the
+# config but turns it off (--no-mine does the same for one run). When mining (or Anki-backed coloring)
+# is on, Saitenka starts Anki for you if it's closed.
 [mine]
-# Mining is ON whenever this [mine] table is present (Ctrl+m mines the hovered word). Set
-# enabled = false to keep the config but turn mining off; --no-mine does the same for one run.
-# When mining (or Anki-backed known-word coloring) is on, Saitenka starts Anki for you if it's closed.
 enabled = true
 deck = "Saitenka::Mining"
 model = "Lapis"
@@ -64,27 +93,33 @@ key = "Ctrl+m"
 all_key = "Shift+m"
 preview_key = "p"
 
-# AnkiConnect endpoint — only needed if you changed AnkiConnect's defaults (Anki → Tools → Add-ons →
-# AnkiConnect → Config: webBindPort / webBindAddress / apiKey). Stock default is 127.0.0.1:8765, no key.
+# ── [anki] AnkiConnect endpoint — only if you changed its defaults (stock: 127.0.0.1:8765, no key) ──
 # [anki]
 # url = "http://127.0.0.1:8765"   # or set host/port separately: host = "127.0.0.1", port = 8765
 # api_key = "..."                 # only if you set an AnkiConnect apiKey
 
-# jimaku.cc subtitle fetch for attach/plugin mode. `attach` first selects an embedded JP track;
-# only when the file has NO Japanese subs does it fetch from jimaku (so this is safe to leave on).
-# API key resolution: this `key` > $JIMAKU_API_KEY > macOS Keychain. Prefer the Keychain —
-# `saitenka-overlay set-jimaku-key` — because a GUI-launched (plugin-mode) mpv can read it, while a
-# shell env var (and, less securely, a key written here in plaintext) it can only read from a terminal.
+# ── [jimaku] jimaku.cc subtitle fetch for attach/plugin mode ─────────────────────────────────────
+# `attach` first selects an embedded JP track; only when the file has NO Japanese subs does it fetch
+# from jimaku (safe to leave on). Key resolution: this `key` > $JIMAKU_API_KEY > macOS Keychain. Prefer
+# the Keychain (`saitenka-overlay set-jimaku-key`) — a GUI-launched mpv can read it; a shell env var and
+# a plaintext key here it cannot (or should not).
 [jimaku]
 enabled = true
-# key = "..."       # last resort — plaintext; Keychain (set-jimaku-key) is preferred
 resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) — recommended
-# force = true      # prefer jimaku OVER the embedded JP track (mistimed/wrong baked-in subs);
-#                   # falls back to the embedded track if the fetch fails. Same as --jimaku-force.
+# key = "..."       # last resort — plaintext; Keychain (set-jimaku-key) is preferred
+# force = true      # prefer jimaku OVER the embedded JP track (mistimed/wrong baked-in subs)
 
-# Runtime tracing/metrics (OpenTelemetry) — OFF by default, and requires the `observability` extra
-# (`saitenka-overlay[observability]`) even when enabled here. Local-only: a Chrome Trace Format file
-# under the cache dir, no backend/gRPC. See RUNNING.md "Telemetry".
+# ── [telemetry] Runtime tracing/metrics (OpenTelemetry) — OFF by default ─────────────────────────
+# Requires the `telemetry` extra (`saitenka-overlay[telemetry]`) even when enabled here. Local-only: a
+# Chrome Trace Format file under the cache dir, no backend/gRPC. See RUNNING.md "Telemetry".
 # [telemetry]
 # enabled = true
 # export_dir = "~/custom/telemetry"   # default: <cache dir>/telemetry
+# sample_hot_path = 0.0               # [0.0–1.0] fraction of per-tick hit-tests to instrument (0 = never)
+
+# ── [dictdb] Per-connection SQLite tuning for the consolidated dictionary DB (advanced) ──────────
+# [dictdb]
+# mmap_size = 268435456      # 256 MiB mmap window per read connection
+# cache_size_kib = 32768     # 32 MiB page cache per read connection
+# entry_cache_max = 256      # LRU cap on decoded dictionary entries, per dictionary
+# dexie_chunk_size = 10000   # entries per bank file when importing a dexie (5.x) export

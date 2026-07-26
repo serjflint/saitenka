@@ -18,10 +18,18 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 - **`sc/`** — Yomitan `structured-content` model and parsing (the input format). Kept PIL-agnostic
   (enforced by `.importlinter`).
 - **`render/`** — layout/flow: the text walker, ruby positioning, line wrapping, panel chrome.
-  `render.flow` is the core.
+  `render.flow` is the core. `render/window.py` is the PIL-free geometry kernel (block offset table +
+  half-open visible-range) and `render/banded.py` the **windowed (banded) tooltip engine**
+  (`WindowedPanel`): render only the blocks in the viewport±overscan, retain heights/hit-geometry past
+  pixel eviction, composite O(viewport) — pixel-identical to a `render_panel` crop. Wired into the base
+  tooltip behind `[tooltip].banded` / `SAITENKA_BANDED=1` (off by default; blob-slice path is default).
 - **`draw/`** — rasterization primitives that paint the laid-out content.
 - **`raster/`** + top-level **`panel`** — compose the final RGBA panel image; `Definition`/`Entry`
-  (in `panel.py`) hold one dictionary's rendered entry for a word.
+  (in `panel.py`) hold one dictionary's rendered entry for a word. Value types with no render deps —
+  `model.Theme`, `version.overlay_version` — live at the package root to keep `render`/`app` acyclic.
+- **`parallel.py`** — the CPU-bound-render executor policy: free-threaded threads (FreeType releases
+  the GIL, faces are thread-local; ~78% of the render tail is `getmask2`/`getlength`), process-pool
+  fallback on a GIL build. Sub-interpreters are out (PIL's C extension segfaults across them).
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
 - **`app/`** — the application layer. `controller.py`'s `Reader` is the main-loop orchestrator

@@ -6,7 +6,10 @@ import time
 import pytest
 
 import overlay.app.controller as C
-from overlay.app.controller import PanelKey, Reader
+from overlay.app import miner_ui, nested_popup, tooltip
+from overlay.app.controller import Reader
+from overlay.app.overlay_ids import OverlayId
+from overlay.app.tooltip import PanelKey
 
 
 class FakeIPC:
@@ -259,6 +262,111 @@ def test_poll_once_before_subtitle_does_not_raise():
     assert Reader(FakeIPC()).poll_once() is True
 
 
+def _count_adds(ipc):
+    return sum(1 for c in ipc.commands if c and c[0] == "overlay-add")
+
+
+def test_paused_draw_schedules_and_fires_an_osd_nudge():
+    """A subtitle draw while mpv is paused must re-flush the OSD on the NEXT tick — otherwise mpv
+    doesn't present it until an input event (mpv #8172, the 'updates only on mouse move' bug)."""
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = True
+    r = Reader(ipc)
+    r.refresh_osd()
+    ipc.props["sub-text"] = "いち"
+    r.poll_once()  # adopts the cue → draws SUB_ID while paused → schedules the nudge
+    assert r._nudge_pending is True
+    before = _count_adds(ipc)
+    r.poll_once()  # nudge fires → repaint re-issues the live overlay(s)
+    assert _count_adds(ipc) > before
+    assert r._nudge_pending is False
+
+
+def test_playing_draw_does_not_nudge():
+    """While playing, frames present on their own — no re-flush (would be per-tick waste)."""
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = False
+    r = Reader(ipc)
+    r.refresh_osd()
+    ipc.props["sub-text"] = "いち"
+    r.poll_once()
+    assert r._nudge_pending is False
+
+
+def test_overlay_repaint_reissues_live_overlays():
+    from PIL import Image
+
+    from overlay.mpvio.osd import Overlay
+
+    ipc = FakeIPC()
+    ov = Overlay(ipc)
+    ov.show(Image.new("RGBA", (4, 4)), 1, 2, oid=1)
+    ov.hide(oid=1)  # removed → not live → must NOT be re-added
+    ov.show(Image.new("RGBA", (4, 4)), 3, 4, oid=2)
+    ipc.commands.clear()
+    ov.repaint()
+    adds = [c for c in ipc.commands if c and c[0] == "overlay-add"]
+    assert len(adds) == 1 and adds[0][1] == 2  # only the still-live oid 2
+
+
+def test_paused_nudge_records_otel_counters():
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay import otel_metrics
+
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = True
+    r = Reader(ipc)
+    r.refresh_osd()
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        ipc.props["sub-text"] = "いち"
+        r.poll_once()  # a draw lands while paused → osd.paused_draw, schedules the nudge
+        r.poll_once()  # nudge fires → osd.paused_nudge
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.osd.paused_draw"]["value"] >= 1
+        assert snap["saitenka.osd.paused_nudge"]["value"] >= 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_stall_stays_quiet_when_ipc_alive_but_no_subs(caplog):
+    """A section with no subtitles (an OP) must NOT warn: IPC alive (bytes flowing + osd-dimensions ok)
+    is healthy even with no cue for minutes — the old 'no subtitle text' warning was a false alarm."""
+    import logging
+
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc._bytes_read = 500  # mpv's replies ARE arriving
+    r = Reader(ipc)
+    r._run_started = time.monotonic() - 10  # past the threshold
+    with caplog.at_level(logging.WARNING):
+        r._maybe_log_stall()
+    assert not [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+
+
+def test_stall_warns_when_read_direction_is_dead(caplog):
+    """Zero bytes ever read = the Windows named-pipe failure → warn (nothing can draw), regardless of
+    subtitles."""
+    import logging
+
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc._bytes_read = 0  # dead read direction
+    r = Reader(ipc)
+    r._run_started = time.monotonic() - 10
+    with caplog.at_level(logging.WARNING):
+        r._maybe_log_stall()
+    assert any("IPC looks dead" in rec.message for rec in caplog.records)
+
+
 def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
@@ -457,7 +565,7 @@ def test_pause_on_tooltip_respects_manual_pause():
     assert not r._paused_by_tip  # never took ownership → won't resume
 
 
-def test_prefetch_queues_content_words_only_when_paused():
+def test_prefetch_queues_full_render_when_paused():
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
@@ -465,18 +573,25 @@ def test_prefetch_queues_content_words_only_when_paused():
     r._update_prefetch()
     queued = []
     while not r._prefetch_q.empty():
-        queued.append(r._prefetch_q.get().token.surface)  # typed PrefetchItem (Stage 8b)
-    assert queued == ["本命"]  # the content word got queued
+        queued.append(r._prefetch_q.get())  # typed PrefetchItem (Stage 8b)
+    assert [i.token.surface for i in queued] == ["本命"]  # the content word got queued
+    assert all(i.full for i in queued)  # engaged → a hover is imminent, full panel render
 
 
-def test_prefetch_cancels_generation_when_resumed():
+def test_prefetch_queues_cheap_warm_while_just_playing():
+    """Not engaged (playing, mouse off the video) still queues the content word — as a cheap
+    dict-only WARM (`full=False`), not the expensive full render. This is the idle time the video
+    is only being watched/listened to: paying the JSON-decode cost here means a later hover (or the
+    user pausing/mousing over) usually hits an already-warm `Dictionary._entry_cache`."""
     ipc = FakeIPC()
-    ipc.props["pause"] = False  # playing
+    ipc.props["pause"] = False  # playing, not engaged
     r = _reader_with_word(ipc)
     g0 = r._prefetch_gen
     r._update_prefetch()
     assert r._prefetch_gen == g0 + 1  # bumped → in-flight work is invalidated
-    assert r._prefetch_q.empty()  # nothing queued while playing
+    item = r._prefetch_q.get_nowait()
+    assert item.token.surface == "本命"
+    assert item.full is False  # idle-time warm only, no layout/drawing
 
 
 def test_prefetch_worker_warms_cache_then_close_joins():
@@ -957,8 +1072,8 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
     # a TALL entry anchored to an inner word in the upper-middle: default would drop below (more room
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
-    view_h = r._nested_view_h(full_h=800, wy=wy)
-    above_room = wy - C.TIP_GAP - margin
+    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
+    above_room = wy - nested_popup.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty + view_h <= wy  # …so it sits entirely above the inner word
@@ -968,7 +1083,7 @@ def test_nested_popup_drops_below_when_no_room_above():
     r = Reader(FakeIPC())
     r.osd = (1280, 720)
     wy = 90  # inner word near the very top → can't fit above
-    view_h = r._nested_view_h(full_h=800, wy=wy)
+    view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty >= wy  # falls back to below (safe)
 
@@ -1039,7 +1154,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     tx, ty, tw, _th = r._tip_rect
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1059,7 +1174,7 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     nx, ny, nw, nh = r._nest.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
     r.copy_click()
@@ -1075,7 +1190,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: None)
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: None)
     r.set_hover(0)
     shots = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda bgra, x, y, oid: shots.append((oid, bgra.copy())))
@@ -1083,7 +1198,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     oid, view = shots[-1]
-    hl = np.array(C.FLASH_BGRA, np.uint8)
+    hl = np.array(tooltip.FLASH_BGRA, np.uint8)
     assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
     clock[0] += r.flash_secs + 0.01
     r.poll_once()  # flash expires → redraw without the border
@@ -1124,14 +1239,14 @@ def _point_at(ipc, rect):
 
 def test_preview_does_not_autoplay(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     _preview_reader(FakeIPC())
     assert played == []  # showing the preview no longer autoplays
 
 
 def test_preview_audio_button_plays_on_click(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     _point_at(ipc, r._preview_audio_rect)
@@ -1141,7 +1256,7 @@ def test_preview_audio_button_plays_on_click(monkeypatch):
 
 def test_preview_empty_click_plays_nothing(monkeypatch):
     played = []
-    monkeypatch.setattr(C, "play_audio", lambda p: played.append(p))
+    monkeypatch.setattr(miner_ui, "play_audio", lambda p: played.append(p))
     ipc = FakeIPC()
     r = _preview_reader(ipc)
     px, py, _pw, ph = r._preview_rect
@@ -1235,10 +1350,10 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
     r.set_hover(0)
-    assert C.TRANS_ID in shown  # hovering a word auto-revealed the translation
+    assert OverlayId.TRANS in shown  # hovering a word auto-revealed the translation
     assert r._trans_text == "I want you to read this."
     r.set_hover(-1)
-    assert C.TRANS_ID in hidden  # leaving the word hid it again
+    assert OverlayId.TRANS in hidden  # leaving the word hid it again
 
 
 def test_no_auto_translate_without_the_flag(monkeypatch):
@@ -1256,7 +1371,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     shown = []
     monkeypatch.setattr(r.ov, "show", lambda img, x, y, oid: shown.append(oid))
     r.set_hover(0)
-    assert C.TRANS_ID not in shown  # translation stays on the manual `t` key
+    assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
 
 def test_manual_toggle_overrides_auto_and_persists(monkeypatch):

@@ -123,8 +123,41 @@ def test_sample_counters_reads_gil_enabled_and_dropped_spans(tmp_path):
     assert values["telemetry.dropped_spans"] == 0.0
 
 
-def test_sample_counters_empty_when_not_configured():
-    assert telemetry._sample_counters() == {"telemetry.dropped_spans": 0.0}
+def test_sample_counters_has_no_otel_counters_when_not_configured():
+    # snapshot() is empty without providers, so no OTel counter keys — but the process-global RSS
+    # gauge and the dropped-span count are read directly and always present.
+    values = telemetry._sample_counters()
+    assert values["telemetry.dropped_spans"] == 0.0
+    assert "process.rss_mb" in values
+    assert "runtime.gil_enabled" not in values  # OTel instrument, needs configure()
+
+
+def test_sample_counters_includes_registered_state_gauges(monkeypatch):
+    # A Reader registers cache-size gauges via set_gauge_provider; the interval sampler folds them in
+    # alongside RSS. Provider values pass through verbatim, RSS from perf.
+    from overlay.app import perf
+
+    monkeypatch.setattr(perf, "rss_mb", lambda: 123.5)
+    telemetry.set_gauge_provider(lambda: {"panel_cache.size": 4.0, "dict_cache.size": 9.0})
+    try:
+        values = telemetry._sample_counters()
+    finally:
+        telemetry.set_gauge_provider(None)
+    assert values["process.rss_mb"] == 123.5
+    assert values["panel_cache.size"] == 4.0
+    assert values["dict_cache.size"] == 9.0
+
+
+def test_gauge_provider_exception_never_breaks_a_sample(monkeypatch):
+    def _boom():
+        raise RuntimeError("cache read failed")
+
+    telemetry.set_gauge_provider(_boom)
+    try:
+        values = telemetry._sample_counters()  # must not raise
+    finally:
+        telemetry.set_gauge_provider(None)
+    assert values["telemetry.dropped_spans"] == 0.0  # the rest of the sample still lands
 
 
 def test_configure_writes_counter_tracks_into_the_trace_file(tmp_path):

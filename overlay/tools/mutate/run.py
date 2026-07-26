@@ -27,6 +27,7 @@ TARGETS = {
         "src/overlay/app/scoring.py",
         "tests/test_coloring.py tests/test_scoring_properties.py",
     ),
+    "window": ("src/overlay/render/window.py", "tests/test_window_geometry.py"),
 }
 
 

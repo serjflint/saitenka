@@ -60,7 +60,7 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   and leave near-duplicate blocks across the new `app/*` modules. Advisory/periodic like `arch-report`,
   not a `poe all` blocker (both are heuristic and false-positive-prone) — run on demand, triage to
   fixes. Adjacent: `deptry` for unused/missing declared deps as the
-  `[minimal]/[jmdict]/[deinflect]/[observability]/[full]` extras surface drifts.
+  `[minimal]/[jmdict]/[deinflect]/[telemetry]/[full]` extras surface drifts.
 - **Benchmarking depth** — the headless harness (`examples/bench_responsiveness.py`, incl. `--stress`)
   now reports p50/p95/**p99** + CV, records the GIL state, and isolates raster/BGRA/upload timing. Not
   yet built, in rough priority: a **live-mpv jank harness** that polls mpv's own `frame-drop-count`
@@ -77,7 +77,7 @@ trackable work lives in the issue tracker and milestones. Shipped work is in
   history to mean anything, so it rides on the CI-matrix item; measurement caveats (why **not** CodSpeed)
   are under *Benchmarking depth* above. Pairs with the live-mpv jank harness (mpv's own
   `frame-drop-count`) for the true real-time signal.
-- **Observability — non-blocking logs, traces, and metrics.** Make the latency story
+- **Telemetry — non-blocking logs, traces, and metrics.** Make the latency story
   *measurable at runtime*, not just in the benchmark harness. Three grounded decisions (after surveying
   how mpv and comparable tools do it):
   - **Structured logging (`structlog` + JSON).** Key-value event logs for the rotating log + `report`

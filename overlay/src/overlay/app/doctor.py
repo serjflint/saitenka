@@ -547,7 +547,7 @@ def check_telemetry() -> Check:
             "telemetry",
             "ok",
             f"enabled, no trace yet at {trace_path} (nothing recorded this session, or the "
-            "'observability' extra isn't installed)",
+            "'telemetry' extra isn't installed)",
         )
     st = trace_path.stat()
     return Check(
@@ -592,9 +592,68 @@ def check_deinflect() -> Check:
 # --- driver ----------------------------------------------------------------------------------
 
 
+def check_version() -> Check:
+    """The overlay's own version — first line of the report, so a bug report is anchored to a build
+    without cross-referencing versions.txt."""
+    from overlay.version import overlay_version as _overlay_version
+
+    return Check("version", "ok", f"saitenka-overlay {_overlay_version()}")
+
+
+def check_windows() -> Check:
+    """Windows edition + build (the OS half of a Windows bug report). Green everywhere — informational;
+    on non-Windows it just records the platform. Positive ``== 'win32'`` guard so mypy exempts the
+    Windows-only branch from ``warn_unreachable`` off-Windows."""
+    import platform
+
+    if sys.platform == "win32":
+        return Check(
+            "windows", "ok", f"{platform.platform()} (edition {platform.win32_edition() or '?'})"
+        )
+    return Check("windows", "ok", f"not Windows ({platform.system()})")
+
+
+def check_powershell() -> Check:
+    """PowerShell version — the shell that runs the install stubs; a bug report needs it and it isn't
+    in versions.txt. Non-Windows → n/a."""
+    if sys.platform == "win32":
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return Check("powershell", "warn", "PowerShell not found / not queryable")
+        v = out.stdout.strip()
+        return Check("powershell", "ok", f"PowerShell {v}" if v else "PowerShell (version unknown)")
+    return Check("powershell", "ok", "n/a (not Windows)")
+
+
+def check_mpv_socket() -> Check:
+    """Whether ``mpv_socket`` is set (attach-to-your-own-mpv). Informational (never warns): plugin mode
+    passes its own socket, so an unset value is fine — but a manual ``attach`` NEEDS it, and its silent
+    absence is what stalls users. mpv.net's default IPC pipe is ``\\\\.\\pipe\\mpvsocket``."""
+    sock = load_config().get("mpv_socket")
+    if sock:
+        return Check("mpv-socket", "ok", f"mpv_socket set ({sock}) — bare `attach` connects here")
+    hint = "\\\\.\\pipe\\mpvsocket" if sys.platform == "win32" else "/tmp/mpv-socket"  # noqa: S108  # doc hint string, not a temp file we create
+    return Check(
+        "mpv-socket",
+        "ok",
+        "no mpv_socket — plugin mode auto-passes its own; to attach to YOUR already-running mpv set "
+        f"mpv_socket in overlay.toml (mpv.net default: {hint})",
+    )
+
+
 def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
     checks: list[Check] = [
+        check_version(),
         check_python(),
+        check_windows(),
+        check_powershell(),
         check_mpv(),
         check_ffmpeg(),
         check_free_threading(),
@@ -607,6 +666,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_deinflect(),
         check_anki(deck, model),
         check_mpv_ipc(),
+        check_mpv_socket(),
         check_plugin(),
         check_subminer_conflict(),
         check_jimaku(),

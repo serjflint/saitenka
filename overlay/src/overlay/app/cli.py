@@ -20,9 +20,10 @@ import os
 import subprocess
 import sys
 import sysconfig
+import time
 from datetime import UTC
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import cyclopts
 
@@ -335,6 +336,79 @@ def doctor(
     return report.exit_code
 
 
+def _print_telemetry_status(st) -> None:  # pragma: no cover — presentation; state fn is unit-tested
+    from overlay.app.telemetry_toggle import INSTALL_HINT
+
+    on = lambda b: "on" if b else "off"  # noqa: E731
+    print(f"config [telemetry] enabled : {on(st.config_enabled)}")
+    print(f"telemetry extra installed  : {'yes' if st.extra_installed else 'no'}")
+    if st.kill_switch:
+        print("OTEL_SDK_DISABLED          : ACTIVE — forces telemetry off regardless of config")
+    print(f"→ effectively recording    : {'YES' if st.effective else 'no'}")
+    if st.config_enabled and not st.effective:
+        reason = (
+            "OTEL_SDK_DISABLED is set"
+            if st.kill_switch
+            else "the 'telemetry' extra isn't installed"
+        )
+        print(f"   enabled in config, but {reason}")
+        if not st.extra_installed and not st.kill_switch:
+            print(f"   install it: {INSTALL_HINT}")
+    print(f"export dir                 : {st.export_dir}")
+    if st.trace_exists:
+        s = st.trace_path.stat()
+        when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(s.st_mtime))
+        print(f"last trace                 : {st.trace_path} ({s.st_size / 1024:.0f} KiB, {when})")
+    else:
+        print(f"last trace                 : none yet at {st.trace_path}")
+
+
+@app.command
+def telemetry(
+    action: Annotated[
+        Literal["status", "enable", "disable"],
+        cyclopts.Parameter(help="flip [telemetry] enabled in overlay.toml, or show status"),
+    ] = "status",
+) -> int:  # pragma: no cover — thin CLI wrapper; set_enabled/telemetry_state are unit-tested
+    """Turn runtime telemetry on or off without hand-editing overlay.toml.
+
+    ``enable``/``disable`` flip ``[telemetry] enabled`` (comment-preserving, prior file backed up).
+    The OTel SDK it needs is a SEPARATE ``telemetry`` extra — ``enable`` prints the install command if
+    it's missing (config flag and dependency are two switches). ``status`` (default) reports both.
+    """
+    from overlay.app.config import config_path
+    from overlay.app.telemetry_toggle import INSTALL_HINT, set_enabled, telemetry_state
+
+    if action == "status":
+        _print_telemetry_status(telemetry_state())
+        return 0
+
+    enabled = action == "enable"
+    verb = "enabled" if enabled else "disabled"
+    changed, backup = set_enabled(enabled)
+    if changed:
+        print(f"telemetry {verb} in {config_path()}")
+        if backup:
+            print(f"  backed up previous config → {backup}")
+    else:
+        print(f"telemetry already {verb} in {config_path()}")
+
+    st = telemetry_state()
+    if enabled and not st.extra_installed:
+        print("\n⚠ the 'telemetry' extra isn't installed — nothing will record until you run:")
+        print(f"    {INSTALL_HINT}")
+    elif enabled:
+        print(f"  trace → {st.trace_path}")
+        print(
+            "  use the overlay (watch + hover a while), then `saitenka-overlay report` to bundle it"
+        )
+    elif st.extra_installed:
+        print(
+            "  (the 'telemetry' extra stays installed — uninstall separately if you want it gone)"
+        )
+    return 0
+
+
 @app.command(
     show=False
 )  # low-level primitive — end users run `setup` (which calls this); hidden from help
@@ -604,6 +678,92 @@ def uninstall_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin 
 
 
 @app.command
+def reinstall(
+    *,
+    source: Annotated[
+        Literal["auto", "pypi", "github"],
+        cyclopts.Parameter(help="where to reinstall from (auto = PyPI, fall back to GitHub)"),
+    ] = "auto",
+    ref: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="GitHub tag/branch to install (e.g. v0.5.0 or main); implies --source github. "
+            "Default: the latest RELEASE tag, falling back to main"
+        ),
+    ] = None,
+    yes: Annotated[
+        bool, cyclopts.Parameter(negative=(), help="don't prompt; just run the reinstall")
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; detect_extras/reinstall_attempts are unit-tested
+    """Reinstall (pull the latest) preserving your extras. A bare ``uv tool install --reinstall``
+    *replaces* the extras set (silently dropping deinflect/telemetry); this detects what's installed
+    and keeps it. From PyPI, falling back to GitHub (which also carries the GPL deinflect add-on). The
+    GitHub attempt targets the latest RELEASE tag by default — not bleeding-edge main; pass ``--ref
+    main`` for that, or ``--ref vX.Y.Z`` to pin a release."""
+    import subprocess
+
+    from overlay.app.lifecycle import detect_extras, latest_release_tag, reinstall_attempts
+
+    extras = detect_extras()
+    github_ref: str | None = None
+    if ref is not None:
+        source = "github"  # an explicit --ref pins the GitHub source
+        github_ref = ref
+    elif source in ("auto", "github"):
+        github_ref = latest_release_tag()  # default the GitHub attempt to the latest release
+        print(f"latest release: {github_ref}" if github_ref else "no release info — using main")
+    attempts = reinstall_attempts(extras, source=source, github_ref=github_ref)
+    print(f"detected extras: {', '.join(extras) or '(none)'}")
+    if not yes and input(
+        f"Reinstall keeping [{','.join(extras) or 'none'}]? [y/N] "
+    ).strip().lower() not in ("y", "yes"):
+        print("cancelled")
+        return 1
+    rc = 1
+    for i, cmd in enumerate(attempts):
+        print("  $", " ".join(cmd))
+        rc = subprocess.run(cmd, check=False).returncode
+        if rc == 0:
+            return 0
+        if i + 1 < len(attempts):
+            print(f"  that source failed (exit {rc}) — trying the next…")
+    return rc
+
+
+@app.command
+def uninstall(
+    *,
+    yes: Annotated[
+        bool, cyclopts.Parameter(negative=(), help="don't prompt; delete without confirming")
+    ] = False,
+    keep_dicts: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative=(), help="keep the (expensive) dictionary DB; remove everything else"
+        ),
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; the removal logic is unit-tested in test_lifecycle
+    """Delete saitenka's config, dictionaries, cache/logs, crash reports and mpv plugin. Leaves mpv and
+    ffmpeg installed. Does NOT remove the saitenka-overlay binary itself — the last line tells you how."""
+    from overlay.app.lifecycle import uninstall as do_uninstall
+
+    confirm = (
+        (lambda _p: True)
+        if yes
+        else (lambda p: input(f"{p} [y/N] ").strip().lower() in ("y", "yes"))
+    )
+    removed = do_uninstall(confirm, keep_dicts=keep_dicts)
+    if not removed:
+        print("nothing removed (no saitenka data found, or cancelled)")
+    else:
+        for d in removed:
+            print(f"  removed {d}")
+    print("mpv / ffmpeg left untouched.")
+    print("To remove the app itself:  uv tool uninstall saitenka-overlay")
+    return 0
+
+
+@app.command
 def report(
     *,
     out: Annotated[
@@ -791,6 +951,7 @@ def attach(
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
+            banded=bool(cfg.get("banded", _tt.banded)),
         ),
         mining=MiningOptions(
             play_audio=not bool(cfg.get("no_audio_play", False)),
@@ -802,6 +963,7 @@ def attach(
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+            prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
         ),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )

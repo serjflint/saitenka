@@ -262,6 +262,7 @@ def _build_run_options(
             # off by default; on if EITHER --dict-tabs is passed or the config enables it
             show_dict_tabs=dict_tabs or bool(cfg.get("show_dict_tabs", False)),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
+            banded=bool(cfg.get("banded", _tt.banded)),
         ),
         mining=MiningOptions(
             play_audio=not no_audio_play,
@@ -273,6 +274,7 @@ def _build_run_options(
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
+            prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
         ),
         prefetch=prefetch,
     )

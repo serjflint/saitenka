@@ -2,7 +2,7 @@
 
 Deliberately small: it exists to give a crash report and ``doctor`` a live latency snapshot (was the
 overlay janking right before it crashed? is the panel cache thrashing right now?) without standing up
-the full OpenTelemetry stack from ROADMAP.md ("Observability"). If that plan is ever built, this module
+the full OpenTelemetry stack from ROADMAP.md ("Telemetry"). If that plan is ever built, this module
 is the thing it replaces — not a first stage of it.
 
 Always on (no opt-in flag): recording is a lock-guarded ``deque.append`` — cheaper than the poll tick's
@@ -12,6 +12,7 @@ own IPC round-trip — so there's no meaningful cost to gate.
 from __future__ import annotations
 
 import statistics
+import sys
 import threading
 import time
 from collections import deque
@@ -22,6 +23,12 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 _MAXLEN = 200  # per-op samples kept; old ones fall off, no unbounded growth
+
+
+def gil_disabled() -> bool:
+    """True on a free-threaded build running GIL-free — rendering then scales across workers."""
+    return not getattr(sys, "_is_gil_enabled", lambda: True)()
+
 
 _lock = threading.Lock()
 _ops: dict[str, deque[float]] = {}

@@ -7,77 +7,62 @@ near the word. Both overlays live in mpv's own OSD surface → fullscreen-safe.
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 import queue
-import re
-import sys
 import tempfile
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
-
-from PIL import Image
+from typing import TYPE_CHECKING
 
 from overlay import otel_metrics
-from overlay.app.anki import AnkiError
-from overlay.app.card_preview import PreviewData, render_card_preview
+from overlay.app import (
+    miner_ui,
+    nested_popup,
+    prefetch,
+    reader_deps,
+    subnav,
+    telemetry,
+    tooltip,
+    translation,
+)
 from overlay.app.config import ReaderOptions
-from overlay.app.lookup import card_for, entry_for
 from overlay.app.media import (
-    audio_duration,
     copy_clipboard,
-    play_audio,
-    speak,
     tts_available,
 )
 from overlay.app.miner import Miner, tag_slug
-from overlay.app.perf import timed
+from overlay.app.overlay_ids import OverlayId
+from overlay.app.perf import gil_disabled
 from overlay.app.popups import PopupView, TipPanel
-from overlay.app.prefetch import FinishItem, PrefetchItem
-from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
-from overlay.app.tokenize import Token, tokenize
-from overlay.model import Span, Style
-from overlay.mpvio.osd import Overlay, to_bgra_array
-from overlay.panel import (
-    Freq,
-    LazyPanel,
-    header_add_rect,
-    header_speaker_rect,
-    panel_rows,
-    render_tab_row,
-    tab_strip_height,
-)
-from overlay.render.flow import render_flow
-from overlay.render.layout import Block, inline_width
+from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
+from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
     import numpy as np
 
+    from overlay.app.card_preview import PreviewData
+    from overlay.app.sub_index import SubIndex
     from overlay.mpvio.ipc import MpvIPC
+    from overlay.panel import Freq
 
 log = logging.getLogger(__name__)
 
-SUB_ID = 1
-TIP_ID = 2
-TOAST_ID = 3
-TRANS_ID = 4
-PREVIEW_ID = 5
-NESTED_ID = 6  # a scan popup opened by hovering a word *inside* the tooltip
-LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive startup
+# Local names for the shared OSD slot registry (overlay_ids.OverlayId is the single source of truth
+# so extracted subsystems can't collide on slot numbers). IntEnum → drop-in int at every call site.
+SUB_ID = OverlayId.SUB
+TIP_ID = OverlayId.TIP
+TOAST_ID = OverlayId.TOAST
+NESTED_ID = OverlayId.NESTED
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
 # dict-tab strip / reserve (space-saving).
-SKIP_POS = {"補助記号", "記号", "空白"}
-AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
-TIP_GAP = 12
-_HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed
-# above, which is an unconditional deque append and stays on every tick)
+
+
 MINE_MSG = "saitenka-mine"
 MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
@@ -112,57 +97,9 @@ TIP_KEYBINDS: tuple[tuple[str, str], ...] = (
 )
 
 
-class PanelKey(NamedTuple):
-    """Identity of a rendered tooltip panel — the ``_panel_cache`` key. Named (not a bare tuple) so
-    callers read ``.mined`` / ``.anki_ok`` instead of brittle positions, and adding a field can't
-    silently shift another. Still a tuple, so hashing, dict-key use, and equality with a plain tuple
-    of the same values are all unchanged."""
-
-    lemma: str
-    surface: str
-    reading: str
-    inflected: str
-    width: int
-    anki_ok: bool  # is Anki reachable now → is the ⊕ button drawn (rechecked per show, ~3s TTL)
-    mined: bool  # is the word already in the deck → its ⊕ shows ✓ (tests read this by name)
-    tabs: bool = (
-        True  # dict-tab strip reserved/drawn (base tooltip); a nested popup builds with tabs=False
-    )
-
-
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
-EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
-
-
-def _gil_disabled() -> bool:
-    """True on a free-threaded build running GIL-free — rendering then scales across workers."""
-    return not getattr(sys, "_is_gil_enabled", lambda: True)()
-
-
-FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RGB 255,214,90)
-JLPT_DARKEN = (
-    0.62  # darken the pastel underline hue for the pill name-segment so white text is legible
-)
-
-
-def _strip_tags(s: str) -> str:
-    return re.sub(r"<[^>]+>", "", s).strip()
-
-
-def _html_lines(html: str) -> list[str]:
-    parts = re.split(r"<br\s*/?>", html or "")
-    return [t for t in (_strip_tags(p) for p in parts) if t]
-
-
-def _html_items(html: str) -> list[str]:
-    return [_strip_tags(m) for m in re.findall(r"<li>(.*?)</li>", html or "", re.DOTALL)]
-
-
-def _media_name(field_html: str, pattern: str) -> str:
-    m = re.search(pattern, field_html or "")
-    return m.group(1) if m else ""
 
 
 # Popup view/panel classes live in app/popups.py; legacy aliases kept because the controller
@@ -241,6 +178,9 @@ class Reader:
         self.prefetch_workers = (
             o.perf.prefetch_workers
         )  # constrained-parallel (GIL build) worker count
+        self.prefetch_lookahead = (
+            o.perf.prefetch_lookahead
+        )  # cues to warm ahead of the current line
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -283,11 +223,18 @@ class Reader:
         )
         self._tip_scroll = 0
         self._tip_view_h = 0
-        self._tip_xy = (0, 0)
+        self._tip_xy: tuple[int, int] = (0, 0)
+        # Experimental: render the base tooltip's visible frames from the windowed (banded) engine —
+        # O(viewport) compositing + windowed hit-testing — instead of slicing a whole-panel BGRA blob.
+        # Off by default; the blob path is untouched. From [tooltip].banded, or SAITENKA_BANDED=1 (env
+        # wins, for quick trials). Parity-gated (tests/test_banded_wiring.py).
+        self._banded = o.tooltip.banded or os.environ.get("SAITENKA_BANDED") == "1"
+        if self._banded:
+            log.info("banded tooltip renderer ENABLED (windowed O(viewport) compositing)")
         self._tip_state: TipPanel | None = (
             None  # _TipPanel currently shown (viewport-first render may still be filling)
         )
-        self._tip_key: PanelKey | None = (
+        self._tip_key: tooltip.PanelKey | None = (
             None  # its cache key — the finisher only refreshes the panel still on screen
         )
         self._tip_dirty = (
@@ -351,6 +298,9 @@ class Reader:
         self._sub_index: SubIndex | None = None
         self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
         self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
+        self._nudge_pending = (
+            False  # a draw happened while paused → re-flush the OSD next tick (#8172)
+        )
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
@@ -386,6 +336,11 @@ class Reader:
             self._observed.get("osd-dimensions"),
             self._observed.get("sub-text"),
         )
+        if self._observed.get("osd-dimensions") is None:
+            log.warning(
+                "osd-dimensions seed is None — mpv isn't returning get_property replies (dead pipe / "
+                "attached to a not-yet-ready mpv); the overlay won't draw until that recovers"
+            )
 
     def _prop(self, name: str):
         """Latest value of a property: the observed (event-driven) state when observing, else a
@@ -437,6 +392,9 @@ class Reader:
         self._sync_auto_translation()
 
     def set_subtitle(self, text: str) -> None:
+        # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
+        # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
+        log.debug("sub-text change: %d chars, paused=%s", len(text.strip()), self._prop("pause"))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
@@ -496,118 +454,19 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        """Hover with hysteresis across the popup stack: keep each level alive while the cursor is on
-        its trigger OR on the popup itself, lingering ``hide_delay`` after leaving both. Hovering a
-        word *inside* the tooltip opens a nested scan popup."""
-        with timed("hover_hit_test"):
-            # Sampled, not every tick: this runs at poll cadence (~40Hz), and an OTel histogram
-            # .record() call costs real cycles unlike perf.timed's plain deque append above.
-            self._hit_test_tick = (self._hit_test_tick + 1) % _HIT_TEST_SAMPLE_EVERY
-            if otel_metrics.hit_test_duration_ms is not None and self._hit_test_tick == 0:
-                # instrumented() (span + histogram) only on the sampled tick — a span every tick
-                # would flood the trace at poll cadence for no visualization benefit.
-                with otel_metrics.instrumented(otel_metrics.hit_test_duration_ms, "hit_test"):
-                    self._update_hover_impl()
-            else:
-                self._update_hover_impl()
-
-    def _update_hover_impl(self) -> None:
-        mp = self._prop("mouse-pos") or {}
-        inside = bool(mp.get("hover"))
-        self._mouse_in = inside  # engagement signal for prefetch
-        mx, my = mp.get("x", -1), mp.get("y", -1)
-        self._last_mouse = (mx, my)
-        over_word = self._hit(mx, my) if (inside and self.tokens) else -1
-        over_tip = inside and self._tip_rect is not None and self._in_rect(self._tip_rect, mx, my)
-        over_nest = (
-            inside and self._nest.rect is not None and self._in_rect(self._nest.rect, mx, my)
-        )
-
-        # --- nested level: scan a word inside the tooltip; keep its popup alive while engaged ---
-        # A cross-reference LINK is click-to-open, NOT hover-scan — so scrolling past / reading a
-        # link doesn't spawn scan popups that clutter the panel.
-        scan = self._scan_hit(mx, my) if (over_tip and not over_nest) else None
-        if scan is not None and self._link_hit(
-            mx, my, self._tip_state, self._tip_xy, self._tip_scroll
-        ):
-            scan = None
-        if scan is not None:
-            now = time.monotonic()
-            if scan.text != self._scan_target:
-                self._scan_target, self._scan_since = scan.text, now  # moved → restart the dwell
-            # open only once the cursor has rested on this cell (scan delay), and it isn't already shown
-            if now - self._scan_since >= self.scan_delay and self._nest.tail != scan.text:
-                self._show_nested(scan)
-            self._nest.hide_at = 0.0
-        elif over_nest:
-            self._scan_target = None
-            self._nest.hide_at = 0.0
-        elif self._nest.state is not None:
-            self._scan_target = None
-            now = time.monotonic()
-            if self._nest.hide_at == 0.0:
-                self._nest.hide_at = now + self.hide_delay
-            elif now >= self._nest.hide_at:
-                self._hide_nested()
-        else:
-            self._scan_target = None
-
-        # --- base tooltip: also kept alive while the cursor is on the nested popup ---
-        if over_word >= 0:
-            # First open is instant, but SWITCHING to a different word needs a brief dwell — so dragging
-            # the cursor up to the tooltip across the OTHER line of a two-line sub doesn't hijack it onto
-            # every word it passes over. Only resting on a new word switches.
-            if over_word == self.hover:
-                self._word_target = None
-            else:
-                now = time.monotonic()
-                if over_word != self._word_target:
-                    self._word_target, self._word_since = over_word, now
-                if self.hover < 0 or now - self._word_since >= self.hover_switch_delay:
-                    self.set_hover(over_word)
-                    self._word_target = None
-            self._hide_at = 0.0
-        elif over_tip or over_nest:
-            self._hide_at = 0.0  # resting on the tooltip or its scan popup → keep it alive
-            self._word_target = None
-        elif self.hover != -1:
-            self._word_target = None
-            now = time.monotonic()
-            if self._hide_at == 0.0:
-                self._hide_at = now + self.hide_delay
-            elif now >= self._hide_at:
-                self.set_hover(-1)
-                self._hide_at = 0.0
+        tooltip.update_hover(self)
 
     def set_hover(self, index: int) -> None:
-        if index == self.hover:
-            return
-        self.hover = index
-        self._draw_subtitle()
-        if index < 0:
-            self._teardown_tip()  # hide TIP_ID/NESTED_ID, reset all state, release pause
-            return
-        self._show_tooltip(index)
-        self._sync_auto_translation()  # hovering a word → auto-reveal the translation
+        tooltip.set_hover(self, index)
 
     def speak_hovered(self) -> None:
-        # speak the DICTIONARY-form reading (習う → ならう), not the kanji surface (say reads 習 as
-        # しゅう → "shuuwa") nor the bare stem reading ならわ. Falls back to the token reading/surface.
-        if 0 <= self.hover < len(self.tokens):
-            t = self.tokens[self.hover]
-            speak(self._hover_reading or t.reading or t.surface)
+        tooltip.speak_hovered(self)
 
     def copy_hovered(self) -> None:
-        if 0 <= self.hover < len(self.tokens):
-            self._copy_token(self.tokens[self.hover])
-
-    @staticmethod
-    def _token_clip(t) -> str:
-        return f"{t.surface}【{t.reading}】" if t.reading else t.surface
+        tooltip.copy_hovered(self)
 
     def _copy_token(self, t) -> None:
-        copy_clipboard(self._token_clip(t))
-        self._toast(f"copied {t.surface}", "ok", 1.2)
+        tooltip.copy_token(self, t)
 
     def copy_line(self) -> None:
         """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""
@@ -618,230 +477,55 @@ class Reader:
         self._toast("copied line", "ok", 1.2)
 
     def _flash(self, oid: int) -> None:
-        """Pulse a "copied" highlight border on a popup as copy feedback, then let the poll loop
-        restore it after ``flash_secs``."""
-        self._flash_oid = oid
-        self._flash_until = time.monotonic() + self.flash_secs
-        self._render_nested_view() if oid == NESTED_ID else self._render_tip_view()
+        tooltip.flash(self, oid)
 
     def copy_click(self) -> None:
-        """Right-click — copy the word under the cursor (the inner scanned word if over the nested
-        popup, else the hovered/pointed subtitle word), with a brief highlight flash."""
-        mp = self._get("mouse-pos") or {}
-        x, y = mp.get("x", -1), mp.get("y", -1)
-        if self._nest.rect is not None and self._in_rect(self._nest.rect, x, y):
-            if self._nest.token is not None:
-                self._copy_token(self._nest.token)
-                self._flash(NESTED_ID)
-            return
-        if self._tip_rect is not None and self._in_rect(self._tip_rect, x, y):
-            self.copy_hovered()
-            self._flash(TIP_ID)
-            return
-        idx = self._hit(x, y) if self.tokens else -1  # not over a popup → the subtitle word, if any
-        if idx >= 0:
-            self._copy_token(self.tokens[idx])
+        tooltip.copy_click(self)
 
     def _hit_header_region(self, x: float, y: float, prect, xy, scroll: int, view_h: int) -> bool:
-        """Is (x, y) on a header button (panel-space ``prect``)? Only while it's inside the scrolled
-        viewport (the header scrolls off). Shared by the base tooltip and the nested popup."""
-        px, py, pw, ph = prect
-        top = py - scroll
-        if top < 0 or top + ph > view_h:  # header scrolled out of the viewport
-            return False
-        sx, sy = xy
-        return self._in_rect((sx + px, sy + top, pw, ph), x, y)
+        return tooltip.hit_header_region(self, x, y, prect, xy, scroll, view_h)
 
     def _tip_reserve(self) -> int:
-        """The base tooltip's tab-strip top-reserve (0 when no tabs) — header hit-boxes must match it."""
-        return self._tip_state.lazy.top_reserve if self._tip_state is not None else 0
+        return tooltip.tip_reserve(self)
 
     def _hit_header_add(self, x: float, y: float) -> bool:
-        if self._tip_state is None or not self._anki_ok():  # ⊕ only when Anki is reachable now
-            return False
-        return self._hit_header_region(
-            x,
-            y,
-            header_add_rect(
-                self.tip_width, top_reserve=self._tip_reserve(), speak_button=self._tts_ok
-            ),
-            self._tip_xy,
-            self._tip_scroll,
-            self._tip_view_h,
-        )
+        return tooltip.hit_header_add(self, x, y)
 
     def _hit_header_speaker(self, x: float, y: float) -> bool:
-        if self._tip_state is None or not self._tts_ok:  # 🔊 hidden when no JA TTS voice
-            return False
-        return self._hit_header_region(
-            x,
-            y,
-            header_speaker_rect(self.tip_width, top_reserve=self._tip_reserve()),
-            self._tip_xy,
-            self._tip_scroll,
-            self._tip_view_h,
-        )
+        return tooltip.hit_header_speaker(self, x, y)
 
     def _hit_nested_add(self, x: float, y: float) -> bool:
-        if self._nest.state is None or not self._anki_ok():
-            return False
-        return self._hit_header_region(
-            x,
-            y,
-            header_add_rect(self.tip_width, speak_button=self._tts_ok),
-            self._nest.xy,
-            self._nest.scroll,
-            self._nest.view_h,
-        )
+        return tooltip.hit_nested_add(self, x, y)
 
     def _hit_nested_speaker(self, x: float, y: float) -> bool:
-        if self._nest.state is None or not self._tts_ok:  # 🔊 hidden when no JA TTS voice
-            return False
-        return self._hit_header_region(
-            x,
-            y,
-            header_speaker_rect(self.tip_width),
-            self._nest.xy,
-            self._nest.scroll,
-            self._nest.view_h,
-        )
+        return tooltip.hit_nested_speaker(self, x, y)
 
     def on_click(self) -> None:
-        # Left-click drives buttons only — the card preview's ✕/screenshot/▶, and each popup's ⊕/🔊.
-        # Clicking an empty area does NOTHING: audio must not fire on a stray body click.
-        mp = self._get("mouse-pos") or {}
-        x, y = mp.get("x", -1), mp.get("y", -1)
-        if self._click_preview(x, y):
-            return
-        # The nested popup sits on top → test it first.
-        if self._nest.rect is not None and self._in_rect(self._nest.rect, x, y):
-            if self._hit_nested_add(x, y) and self._nest.token is not None:
-                self._mine_token(self._nest.token)  # ⊕ → mine the *inner* (scanned) word
-            elif self._hit_nested_speaker(x, y) and self._nest.state:
-                speak(self._nest.state.reading)  # 🔊 → read the inner word aloud
-            else:
-                lb = self._link_hit(x, y, self._nest.state, self._nest.xy, self._nest.scroll)
-                if lb is not None:
-                    self._open_link(lb, self._nest.xy, self._nest.scroll)  # cross-ref → navigate
-            return
-        if self._tip_rect is not None and self._in_rect(self._tip_rect, x, y):
-            # Header ⊕/🔊 are specific top-right affordances — they win over the general dict-tab
-            # band, which spans the full width and would otherwise steal a click that overlaps them.
-            if self._hit_header_add(x, y):
-                self.mine_current()  # ⊕ → mine the hovered word into Anki
-                return
-            if self._hit_header_speaker(x, y):
-                self.speak_hovered()  # 🔊 → hear the word (TTS)
-                return
-            for rect, off in zip(self._tab_rects, self._tab_offsets, strict=False):
-                if self._in_rect(rect, x, y):  # dict tab → jump the viewport to that section
-                    self._scroll_to_section(off)
-                    return
-            lb = self._link_hit(x, y, self._tip_state, self._tip_xy, self._tip_scroll)
-            if lb is not None:
-                self._open_link(lb, self._tip_xy, self._tip_scroll)  # cross-ref → nested popup
-            else:
-                self._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
+        tooltip.on_click(self)
 
-    def _inflected_surface(self, index: int) -> str:
-        """Token surface + trailing auxiliary tokens (助動詞), so the chain deinflects the full word
-        (習わ + ぬ → 習わぬ); the tokenizer splits inflected verbs from their auxiliaries."""
-        s = self.tokens[index].surface
-        j = index + 1
-        while j < len(self.tokens) and self.tokens[j].pos in AUX_POS:
-            s += self.tokens[j].surface
-            j += 1
-        return s
-
-    def _panel_key(self, tok, inflected, mined: bool = False, tabs: bool = True) -> PanelKey:
-        # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
-        # ``tabs`` distinguishes the base build (with the dict-tab reserve) from a nested build (none),
-        # so the same word shown in both places doesn't share the wrong reserve.
-        return PanelKey(
-            tok.lemma,
-            tok.surface,
-            tok.reading,
-            inflected,
-            self.tip_width,
-            self._anki_ok(),
-            mined,
-            tabs,
-        )
+    def _panel_key(
+        self, tok, inflected, mined: bool = False, tabs: bool = True
+    ) -> tooltip.PanelKey:
+        return tooltip.panel_key(self, tok, inflected, mined, tabs)
 
     def _is_mined(self, tok) -> bool:
-        """Is this token's word already in the deck? (its ⊕ shows ✓ instead). Cheap short-circuit
-        while nothing has been mined; else a card_for lookup (lru-cached)."""
-        if not self._mined:
-            return False
-        try:
-            return card_for(tok).expression in self._mined
-        except Exception:
-            return False
+        return tooltip.is_mined(self, tok)
 
     def _anki_ok(self) -> bool:
-        """Is AnkiConnect reachable RIGHT NOW? Gates the ⊕ button per card show, so it appears/hides as
-        the user opens/closes Anki mid-session (not frozen at startup). Kept fast: a short timeout with
-        0 retries fails immediately when Anki is closed, and the result is cached ``anki_ok_ttl``
-        seconds so rapid hovers don't ping repeatedly. False when mining isn't configured at all."""
-        if self.anki is None:
-            return False
-        now = time.monotonic()
-        ts, ok = self._anki_cache
-        if now - ts < self.anki_ok_ttl:
-            return ok
-        from overlay.app.anki import anki_reachable
-
-        ok = anki_reachable(
-            timeout=self.anki_ping_timeout
-        )  # resolves host/key from config; 0 retries
-        self._anki_cache = (now, ok)
-        return ok
+        return tooltip.anki_ok(self)
 
     @staticmethod
-    def _darken(rgba, f: float = JLPT_DARKEN):
-        r, g, b, a = rgba
-        return (round(r * f), round(g * f), round(b * f), a)
+    def _darken(rgba, f: float = tooltip.JLPT_DARKEN):
+        return tooltip._darken(rgba, f)
 
     def _jlpt_pill(self, tok) -> Freq | None:
-        """A ``JLPT | Nx`` pill for the tooltip's frequency row, shown only when the word has a JLPT
-        level — the same signal the subtitle draws as an underline (``Scorer._style``). The pill's hue
-        is the level's underline color (darkened for legible white text), so the tooltip and the
-        underline read as the same thing."""
-        from overlay.app.scoring import _is_content
-
-        sc = self.scorer
-        if sc is None or not getattr(sc, "enable_jlpt", False) or sc.jlpt is None:
-            return None
-        # Gate on content POS exactly like the subtitle underline (Scorer._style). Without this a
-        # particle/aux (は, ね) whose bare-kana READING collides with an N1 word's reading in the JLPT
-        # map gets mislabelled — usually N1, since _put keeps the highest level. Better no pill.
-        if not _is_content(tok):
-            return None
-        level = sc.jlpt.level(tok.lemma, tok.surface, tok.reading)
-        if not level:
-            return None
-        base = sc.palette.jlpt.get(level, (96, 125, 175, 255))
-        return Freq("JLPT", level, self._darken(base))
+        return tooltip.jlpt_pill(self, tok)
 
     def _entry_for(self, tok, inflected):
-        """Look up the panel entry and fold in the JLPT pill (near the frequency pills) when the word
-        carries a JLPT level, so it mirrors the subtitle underline.
-
-        Never mutates the lru_cached Entry from lookup.lookup_entry / dict_set.entry_for — returns
-        a shallow copy with a new freqs list so repeated calls do not accumulate pills."""
-        import dataclasses as _dc
-
-        entry = self.dict_set.entry_for(tok, inflected) if self.dict_set else entry_for(tok)
-        pill = self._jlpt_pill(tok)
-        if pill is not None and hasattr(entry, "freqs"):
-            # Build the pill list into a shallow copy — never mutate the cached original.
-            entry = _dc.replace(entry, freqs=[pill, *entry.freqs])
-        return entry
+        return tooltip.entry_for_tok(self, tok, inflected)
 
     def _finish_available(self) -> bool:
-        """A running prefetch worker can render a tooltip's deferred tail. Without one (prefetch off,
-        or before the workers start) we finish synchronously so a partial panel never gets stuck."""
-        return bool(self.prefetch and self._prefetch_threads)
+        return tooltip.finish_available(self)
 
     def _panel_for(
         self,
@@ -852,326 +536,82 @@ class Reader:
         mined: bool | None = None,
         tabs: bool | None = None,
     ):
-        """The memoised :class:`_TipPanel` for a token. ``finish`` renders the whole entry (prefetch /
-        no-worker path); otherwise only the head that fills ``min_h`` px is rendered now (viewport-first)
-        and the tail is deferred. Re-hovering is instant and scrolling is cheap. ``mined`` (default: look
-        it up) selects the ⊕ vs ✓ header variant and is part of the cache key. ``tabs`` (default: the
-        ``show_dict_tabs`` config) reserves + will draw the sticky dict-tab strip; a nested popup passes
-        ``tabs=False`` so it carries no strip and no reserved band.
+        return tooltip.panel_for(self, tok, inflected, min_h, finish, mined, tabs)
 
-        Thread-safe: the panel is *built* lock-free (thread-local DB conns + fonts, each render owns its
-        images), and only the tiny cache write/LRU update is locked.  On a free-threaded (no-GIL) build,
-        OrderedDict.get() is NOT atomic, so cache hits also acquire the lock briefly to move_to_end.
-        Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
-        if mined is None:
-            mined = self._is_mined(tok)
-        if tabs is None:
-            tabs = self.show_dict_tabs
-        key = self._panel_key(tok, inflected, mined, tabs)
-        st = self._panel_cache.get(key)
-        if st is None:
-            if otel_metrics.panel_cache_misses is not None:
-                otel_metrics.panel_cache_misses.add(1)
-            with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render"):
-                entry = self._entry_for(tok, inflected)
-                # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it
-                # clears the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height
-                # for this word's dict names at this width, so a many-dict strip that wraps onto
-                # several rows reserves enough. Nested popups (tabs=False) reserve nothing.
-                reserve = (
-                    tab_strip_height([d.dict_name for d in entry.defs], self.tip_width)
-                    if (tabs and len(entry.defs) >= 2)
-                    else 0
-                )
-                lazy = LazyPanel(
-                    panel_rows(
-                        entry,
-                        self.tip_width,
-                        add_button=self._anki_ok(),
-                        mined=mined,
-                        speak_button=self._tts_ok,
-                    ),
-                    self.tip_width,
-                    top_reserve=reserve,
-                )
-                st = _TipPanel(lazy, getattr(entry, "reading", "") or tok.reading)
-            with self._cache_lock:
-                st = self._panel_cache_setdefault(key, st)
-        else:
-            if otel_metrics.panel_cache_hits is not None:
-                otel_metrics.panel_cache_hits.add(1)
-            # Cache hit: move to end (most-recently-used) under the lock so the LRU order stays accurate.
-            with self._cache_lock:
-                try:
-                    self._panel_cache.move_to_end(key)
-                except KeyError:
-                    pass  # evicted between get() and move_to_end() — harmless
-        if finish:
-            st.finish()
-        else:
-            st.render_head(min_h if min_h is not None else self._tip_cap())
-        return st
+    def _panel_cache_setdefault(self, key, st) -> TipPanel:
+        return tooltip.panel_cache_setdefault(self, key, st)
 
-    def _panel_cache_setdefault(self, key, st) -> _TipPanel:
-        """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over the cap.
-        Must be called under ``self._cache_lock``.  First-writer-wins: if two workers race to build
-        the same panel, the winner's result is kept and the loser is discarded (both are equivalent)."""
-        if key in self._panel_cache:
-            self._panel_cache.move_to_end(key)
-            return self._panel_cache[key]
-        # Evict least-recently-used entries until we are at the limit.
-        while len(self._panel_cache) >= self.panel_cache_max:
-            self._panel_cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
-        self._panel_cache[key] = st
-        return st
-
-    def _prefetch_worker_count(self) -> int:
-        # GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
-        # ~3.8× on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
-        if _gil_disabled():
-            return min(8, max(2, (os.cpu_count() or 4) - 2))
-        return self.prefetch_workers
-
-    # --- background prefetch (warm the paused line's tooltips) --------------------------------
+    # --- background prefetch (warm the current/next line's tooltips) — logic in app/prefetch.py --
     def start_prefetch(self) -> None:
-        if not self.prefetch or self.dict_set is None or self._prefetch_threads:
-            return
-        for k in range(self._prefetch_worker_count()):
-            th = threading.Thread(
-                target=self._prefetch_worker, name=f"saitenka-prefetch-{k}", daemon=True
-            )
-            th.start()
-            self._prefetch_threads.append(th)
-
-    def _prefetch_worker(self) -> None:
-        while not self._stop.is_set():
-            # Priority: finish the deferred tail of the tooltip the user is looking at RIGHT NOW,
-            # ahead of speculatively warming the rest of the line.
-            try:
-                fin: FinishItem | None = self._finish_q.get_nowait()
-            except queue.Empty:
-                fin = None
-            if fin is not None:
-                try:
-                    fin.panel.finish()
-                except Exception:
-                    log.debug("finish job failed", exc_info=True)
-                else:
-                    if fin.key == self._tip_key and fin.panel is self._tip_state:
-                        self._tip_dirty = True  # main loop re-uploads the now-complete panel
-                    elif fin.key == self._nest.key and fin.panel is self._nest.state:
-                        self._nest.dirty = True
-                continue
-            try:
-                item: PrefetchItem = self._prefetch_q.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if otel_metrics.prefetch_queue_depth is not None:
-                otel_metrics.prefetch_queue_depth.add(-1)
-            if self._stop.is_set() or item.gen != self._prefetch_gen:
-                continue  # cancelled (line changed / resumed / seek / closing)
-            try:
-                # item.mined came from the main thread — never call _is_mined/card_for from a
-                # worker (jamdict is not thread-safe on free-threaded builds).
-                self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
-            except Exception:
-                log.debug(
-                    "prefetch render failed for %r", item.token.surface, exc_info=True
-                )  # a bad word must never kill the worker
+        prefetch.start_prefetch(self)
 
     def _update_prefetch(self) -> None:
-        """Queue the current line's content words for background rendering when the user is *engaged*
-        — paused OR the cursor is over the video (you rarely move the mouse without intent to hover).
-        N+1 words go first (likeliest hover / mine target). On any change (resume, mouse-out, seek,
-        new line) bump the generation so in-flight renders are dropped. Tokens are passed by value
-        (frozen), so a line change can't make a worker read stale state."""
-        if not self.prefetch or self.dict_set is None:
-            return
-        engaged = bool(self._prop("pause")) or self._mouse_in
-        key = (self.sub_text, engaged)
-        if key == self._prefetch_key:
-            return
-        self._prefetch_key = key
-        self._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
-        if engaged and self.tokens:
-            gen, seen, items = self._prefetch_gen, set(), []
-            for i, t in enumerate(self.tokens):
-                if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
-                    continue
-                seen.add(t.lemma)
-                np1 = bool(
-                    self.styles and i < len(self.styles) and self.styles[i].tag.startswith("n+1")
-                )
-                items.append((0 if np1 else 1, i, t))
-            items.sort(key=lambda x: x[0])  # N+1 first
-            for _, i, t in items:
-                # Evaluate _is_mined on the main thread (card_for → jamdict must not be called
-                # from a worker thread — jamdict is not thread-safe on free-threaded builds).
-                self._prefetch_q.put(
-                    PrefetchItem(gen, t, self._inflected_surface(i), self._is_mined(t))
-                )
-                if otel_metrics.prefetch_queue_depth is not None:
-                    otel_metrics.prefetch_queue_depth.add(1)
+        prefetch.update_prefetch(self)
+
+    def _upcoming_cue_texts(self, n: int) -> list[str]:
+        return prefetch.upcoming_cue_texts(self, n)
+
+    def _inflected_surface(self, index: int) -> str:
+        return inflected_in(self.tokens, index)
+
+    def _telemetry_gauges(self) -> dict[str, float]:
+        """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
+        the hot path). ``panel_cache.bytes`` is the compressed on-heap footprint; ``dict_cache.size``
+        the decoded-entry count across every dictionary. Read under ``_cache_lock`` so a concurrent
+        prefetch worker mutating the panel cache can't fault the iteration."""
+        with self._cache_lock:
+            panel_n = len(self._panel_cache)
+            panel_bytes = sum(st.packed_nbytes for st in self._panel_cache.values())
+        dict_n = self.dict_set.decoded_entry_count() if self.dict_set is not None else 0
+        return {
+            "panel_cache.size": float(panel_n),
+            "panel_cache.bytes": float(panel_bytes),
+            "dict_cache.size": float(dict_n),
+        }
 
     def _cap_for(self, frac: float) -> int:
-        """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
-        margin = max(16, round(self.osd[1] * 0.05))
-        return min(round(self.osd[1] * frac), self.osd[1] - 2 * margin)
+        return prefetch.cap_for(self, frac)
 
     def _tip_cap(self) -> int:
-        """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
-        own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
-        return self._cap_for(self.tip_max_frac)
+        return prefetch.tip_cap(self)
 
     def _show_tooltip(self, index: int) -> None:
-        with timed("show_tooltip"):
-            self._show_tooltip_impl(index)
+        tooltip.show_tooltip(self, index)
 
     def _show_tooltip_impl(self, index: int) -> None:
-        self._hide_nested()  # switching the base word drops any stale scan popup
-        self._kanji_index = 0  # a new word restarts the `k` kanji cycle
-        tok = self.tokens[index]
-        inflected = self._inflected_surface(index)
-        cap = self._tip_cap()
-        # Viewport-first: paint only the head that fills the viewport now; a worker renders the tail.
-        # Without a worker (prefetch off) finish synchronously so the panel is never left partial.
-        mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined)
-        st = self._panel_for(
-            tok, inflected, min_h=cap, finish=not self._finish_available(), mined=mined
-        )
-        self._tip_state, self._tip_key, self._tip_dirty = st, key, False
-        self._tip_bgra = st.bgra()  # decompress the cached panel into the active scroll buffer
-        self._hover_reading = st.reading
-        self._tip_scroll = 0
-
-        ox, oy = self.sub_origin
-        b = self.boxes[index]
-        wx, wy = ox + b.x, oy + b.y
-        # Safe area: keep clear of the OSC/window header at the top and the controls/edge at the
-        # bottom, so the tooltip never spills under the window chrome. It scrolls, so we cap the
-        # height rather than trying to fit the whole (very tall) entry.
-        assert st.ready  # head render above guarantees the panel is stored
-        ph, pw = st.shape[0], st.shape[1]
-        self._tip_view_h = min(ph, cap)
-        self._tip_xy = self._place_panel(pw, wx, wy, b.h, self._tip_view_h)
-        self._update_tabs()
-        self._render_tip_view()
-        self._bind_tip_keys()  # LEFT/RIGHT/UP/DOWN/ESC live only while the tip shows
-        if not st.complete:
-            self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _tip_dirty → refresh
-        if self.pause_on_tooltip and not self._paused_by_tip and not self._prop("pause"):
-            self.ipc.command("set_property", "pause", True)  # freeze the frame while you read
-            self._paused_by_tip = True
+        tooltip.show_tooltip_impl(self, index)
 
     def _place_panel(
         self, full_w: int, wx: float, wy: float, wh: float, view_h: int
     ) -> tuple[int, int]:
-        """Choose a top-left (tx, ty) for a panel of width ``full_w`` and height ``view_h`` anchored to
-        an on-screen word box (wx, wy, wh): above it if there's room, else below, clamped to the safe
-        area. Shared by the base tooltip and nested popups."""
-        margin = max(16, round(self.osd[1] * 0.05))
-        above_room = wy - TIP_GAP - margin
-        below_room = (self.osd[1] - margin) - (wy + wh + TIP_GAP)
-        if above_room >= view_h or above_room >= below_room:
-            ty = wy - TIP_GAP - view_h  # above the word
-        else:
-            ty = wy + wh + TIP_GAP  # below the word
-        tx = max(margin, min(wx, self.osd[0] - full_w - margin))
-        ty = max(margin, min(ty, self.osd[1] - margin - view_h))
-        return int(tx), int(ty)
-
-    _NEST_MIN_ABOVE = (
-        140  # min room above an inner word to keep its nested popup above it (else below)
-    )
-
-    def _nested_view_h(self, full_h: int, wy: float) -> int:
-        """Nested-popup viewport height, capped to the room ABOVE the hovered inner word (when that room
-        is decent) so the popup stays above it and the text below the cursor — the definition and the
-        subtitle sentence — remains readable (the popup scrolls, so capping loses nothing)."""
-        margin = max(16, round(self.osd[1] * 0.05))
-        view_h = min(full_h, self._cap_for(self.nested_max_frac))
-        above_room = int(wy) - TIP_GAP - margin
-        if view_h > above_room >= self._NEST_MIN_ABOVE:
-            view_h = above_room  # shrink to fit above rather than drop below
-        return view_h
+        return tooltip.place_panel(self, full_w, wx, wy, wh, view_h)
 
     def _refresh_tip_full(self) -> None:
-        """A background finish grew the shown panel (deferred bodies rendered) → re-upload the view so
-        the scrollbar reflects the true height and the below-the-fold content is scrollable."""
-        st = self._tip_state
-        if st is None or not st.ready:
-            return
-        self._tip_bgra = st.bgra()  # re-decompress the grown panel into the active scroll buffer
-        self._update_tabs()  # the streamed tail may add sections / move offsets
-        self._render_tip_view()
+        tooltip.refresh_tip_full(self)
 
     def _blit_panel(self, bgra, scroll: int, view_h: int, xy, oid: int, header=None):
-        """Upload a scrolled viewport slice of a premultiplied BGRA panel to an OSD overlay, drawing a
-        scrollbar thumb when the panel is taller than the viewport. ``header`` is an opaque BGRA
-        strip composited over the TOP of the viewport — the sticky dict-tab row.
-        Returns the shown screen rect."""
-        full_h, full_w = bgra.shape[:2]
-        vh = min(view_h, full_h)
-        y0 = max(0, min(scroll, max(0, full_h - vh)))
-        view = bgra[y0 : y0 + vh].copy()  # cheap slice of the pre-converted panel
-        if header is not None and header.shape[0] < view.shape[0]:
-            view[: header.shape[0], : header.shape[1]] = header  # opaque → occludes scrolled rows
-        if full_h > vh:  # scrollbar thumb (premultiplied BGRA gray)
-            track = vh - 8
-            th = max(28, int(track * vh / full_h))
-            tyb = 4 + int((track - th) * (y0 / max(1, full_h - vh)))
-            view[tyb : tyb + th, full_w - 7 : full_w - 3] = (99, 99, 99, 210)
-        if self._flash_oid == oid and time.monotonic() < self._flash_until:
-            b = 4  # "copied" highlight border (a brief visual pulse)
-            view[:b, :] = view[-b:, :] = FLASH_BGRA
-            view[:, :b] = view[:, -b:] = FLASH_BGRA
-        tx, ty = xy
-        self.ov.show_bgra(view, tx, ty, oid=oid)
-        return (tx, ty, full_w, view.shape[0])
+        return tooltip.blit_panel(self, bgra, scroll, view_h, xy, oid, header)
+
+    def _blit_panel_banded(
+        self, wp, scroll: int, view_h: int, xy, oid: int, full_h: int, header=None
+    ):
+        return tooltip.blit_panel_banded(self, wp, scroll, view_h, xy, oid, full_h, header)
+
+    def _decorate_and_upload(self, view, y0: int, full_h: int, xy, oid: int, header=None):
+        return tooltip.decorate_and_upload(self, view, y0, full_h, xy, oid, header)
 
     # --- per-dictionary tabs + tooltip keys -------------------------------------------------------
     def _update_tabs(self) -> None:
-        """Recompute the dict-tab sections from the shown panel (≥2 sections → tabs). Off entirely when
-        ``show_dict_tabs`` is disabled — the panel is then built without the reserve too, so drawing a
-        strip would overlap content."""
-        st = self._tip_state
-        offs = st.lazy.section_offsets() if (st is not None and self.show_dict_tabs) else []
-        if len(offs) >= 2:
-            self._tab_names = [name for name, _ in offs]
-            self._tab_offsets = [y for _, y in offs]
-        else:
-            self._tab_names, self._tab_offsets, self._tab_rects = [], [], []
-            self._tab_bgra, self._tab_h = None, 0
-        self._tab_active = -1  # force a strip + screen-rect rebuild on the next render
+        tooltip.update_tabs(self)
 
     def _active_section(self) -> int:
-        """Index of the section the viewport currently shows (for the highlighted tab)."""
-        active = 0
-        for i, off in enumerate(self._tab_offsets):
-            if off <= self._tip_scroll + self._tab_h + 1:
-                active = i
-        return active
+        return tooltip.active_section(self)
 
     def _scroll_to_section(self, offset: int) -> None:
-        if self._tip_bgra is None:
-            return
-        maxs = max(0, self._tip_bgra.shape[0] - self._tip_view_h)
-        # the FIRST section's target is the panel top (headword visible); later sections tuck
-        # their def-head just under the sticky tab row
-        target = (
-            0 if (self._tab_offsets and offset <= self._tab_offsets[0]) else offset - self._tab_h
-        )
-        self._tip_scroll = min(maxs, max(0, target))
-        self._hide_at = 0.0  # navigating counts as interacting
-        self._scan_target = None
-        self._render_tip_view()
+        tooltip.scroll_to_section(self, offset)
 
     def _tab_step(self, delta: int) -> None:
-        if not self._tab_offsets:
-            return
-        idx = max(0, min(len(self._tab_offsets) - 1, self._active_section() + delta))
-        self._scroll_to_section(self._tab_offsets[idx])
+        tooltip.tab_step(self, delta)
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
@@ -1194,262 +634,58 @@ class Reader:
         self._tip_keys_bound = False
 
     def _render_tip_view(self) -> None:
-        if self._tip_bgra is None:
-            return
-        header = None
-        if self._tab_names:
-            active = self._active_section()
-            if active != self._tab_active or self._tab_bgra is None:
-                self._tab_active = active
-                img, rects = render_tab_row(self._tab_names, active, int(self._tip_bgra.shape[1]))
-                self._tab_bgra = to_bgra_array(img)
-                self._tab_h = img.height
-                tx, ty = self._tip_xy
-                self._tab_rects = [(tx + x, ty + y, w, h) for x, y, w, h in rects]
-            header = self._tab_bgra
-        self._tip_rect = self._blit_panel(
-            self._tip_bgra,
-            self._tip_scroll,
-            self._tip_view_h,
-            self._tip_xy,
-            TIP_ID,
-            header=header,
-        )
+        tooltip.render_tip_view(self)
 
     def _render_nested_view(self) -> None:
-        # No dict-tab strip on the nested popup — it's built tabs=False (no reserve), so it stays
-        # compact and gives the deep-dive its full height (a depth-1 quick look, scrolled with the wheel).
-        if self._nest.bgra is None:
-            return
-        self._nest.rect = self._blit_panel(
-            self._nest.bgra, self._nest.scroll, self._nest.view_h, self._nest.xy, NESTED_ID
-        )
+        nested_popup.render_nested_view(self)
 
     def _refresh_nested_full(self) -> None:
-        st = self._nest.state
-        if st is None or not st.ready:
-            return
-        self._nest.bgra = st.bgra()  # re-decompress the grown nested panel into its scroll buffer
-        self._render_nested_view()
+        nested_popup.refresh_nested_full(self)
 
     def _scroll_tip(self, delta: int) -> None:
-        # route the wheel to whichever popup the cursor is over (nested sits on top)
-        if self._nest.rect is not None and self._in_rect(self._nest.rect, *self._last_mouse):
-            self._scroll_nested(delta)
-            return
-        if self._tip_bgra is None:
-            return
-        maxs = max(0, self._tip_bgra.shape[0] - self._tip_view_h)
-        ns = min(maxs, max(0, self._tip_scroll + delta))
-        if ns != self._tip_scroll:
-            self._tip_scroll = ns
-            self._hide_at = 0.0  # scrolling counts as interacting → keep it up
-            self._scan_target = (
-                None  # content moved under the cursor → restart the scan dwell (no clutter)
-            )
-            self._render_tip_view()
+        tooltip.scroll_tip(self, delta)
 
     def _scroll_nested(self, delta: int) -> None:
-        if self._nest.bgra is None:
-            return
-        maxs = max(0, self._nest.bgra.shape[0] - self._nest.view_h)
-        ns = min(maxs, max(0, self._nest.scroll + delta))
-        if ns != self._nest.scroll:
-            self._nest.scroll = ns
-            self._nest.hide_at = 0.0
-            self._render_nested_view()
+        nested_popup.scroll_nested(self, delta)
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
-        """Which per-character scan cell of the base tooltip is under (mx, my)? Maps screen → panel
-        coords (accounting for scroll) and returns the :class:`ScanBox`, or None."""
-        st = self._tip_state
-        if st is None or self._tip_rect is None:
-            return None
-        sx, sy = self._tip_xy
-        px = mx - sx
-        py = (my - sy) + self._tip_scroll
-        for sb in st.lazy.scan_boxes:
-            if sb.x <= px < sb.x + sb.w and sb.y <= py < sb.y + sb.h:
-                return sb
-        return None
+        return tooltip.scan_hit(self, mx, my)
 
     def _show_nested(self, sb) -> None:
-        """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
-        Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
-        popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
-        tokens = tokenize(sb.text)
-        tok = tokens[0] if tokens else None
-        if tok is None or tok.pos in SKIP_POS or not tok.surface.strip():
-            self._hide_nested()
-            return
-        if tok.surface == self._nest.word and self._nest.state is not None:
-            self._nest.tail = sb.text  # same word, new cell → don't re-scan it
-            return
-        sx, sy = self._tip_xy  # anchor to the inner word's screen cell
-        wx = sx + sb.x
-        wy = sy + (sb.y - self._tip_scroll)
-        self._open_nested(tok, tok.surface, wx, wy, sb.h, tail=sb.text)
+        nested_popup.show_nested(self, sb)
 
     def _open_nested(self, tok, inflected, wx: float, wy: float, wh: float, tail=None) -> None:
-        """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
-        Shared by scan-hover and a clicked cross-reference link."""
-        mined = self._is_mined(tok)
-        key = self._panel_key(tok, inflected, mined, tabs=False)  # nested: no tab strip / reserve
-        st = self._panel_for(
-            tok,
-            inflected,
-            min_h=self._tip_cap(),
-            finish=not self._finish_available(),
-            mined=mined,
-            tabs=False,
-        )
-        self._place_nested(st, key, tok, tok.surface, wx, wy, wh, tail)
+        nested_popup.open_nested(self, tok, inflected, wx, wy, wh, tail)
 
     def _place_nested(
         self, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None
     ) -> None:
-        """Anchor a built :class:`_TipPanel` ``st`` as the nested popup. ``token`` is the inner Token to
-        mine via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
-        self._nest.state, self._nest.key = st, key
-        self._nest.token, self._nest.word = token, word
-        self._nest.tail = tail
-        self._nest.dirty, self._nest.scroll = False, 0
-        self._nest.bgra = st.bgra()  # decompress the cached nested panel into its scroll buffer
-        ph, pw = st.shape[0], st.shape[1]
-        self._nest.view_h = self._nested_view_h(ph, wy)
-        self._nest.xy = self._place_panel(pw, wx, wy, wh, self._nest.view_h)
-        self._render_nested_view()
-        if not st.complete:
-            self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _nest.dirty → refresh
+        nested_popup.place_nested(self, st, key, token, word, wx, wy, wh, tail)
 
     # --- clickable cross-reference links ---------------------------------------------------------
     @staticmethod
     def _link_hit(mx: float, my: float, state, xy, scroll: int):
-        """Which :class:`LinkBox` of ``state`` is under (mx, my)? Maps screen → panel coords (scroll)."""
-        if state is None:
-            return None
-        sx, sy = xy
-        px, py = mx - sx, (my - sy) + scroll
-        for lb in state.lazy.link_boxes:
-            if lb.x <= px < lb.x + lb.w and lb.y <= py < lb.y + lb.h:
-                return lb
-        return None
+        return nested_popup.link_hit(mx, my, state, xy, scroll)
 
     def _open_link(self, lb, xy, scroll: int) -> None:
-        """A cross-reference link was clicked → open its target in the nested popup (navigating it if
-        the click came from a nested popup). A wildcard target (``*``/``?``) opens a search-results
-        popup whose rows are themselves clickable links back into exact terms."""
-        q = lb.query
-        sx, sy = xy
-        wx, wy = sx + lb.x, sy + (lb.y - scroll)
-        if self.dict_set is not None and any(c in q for c in "*?＊？"):
-            self._open_search(q, wx, wy, lb.h)
-            return
-        tokens = tokenize(q)
-        tok = tokens[0] if tokens else None
-        if tok is None or not tok.surface.strip():
-            return
-        self._open_nested(tok, tok.surface, wx, wy, lb.h, tail=None)
+        nested_popup.open_link(self, lb, xy, scroll)
 
     def _open_search(self, pattern: str, wx: float, wy: float, wh: float) -> None:
-        """Open a wildcard/prefix search-results popup for ``pattern``."""
-        if self.dict_set is None:
-            return
-        key = ("search", pattern, self.tip_width)
-        st = self._panel_cache.get(key)
-        if st is None:
-            entry = self.dict_set.search(pattern)
-            lazy = LazyPanel(
-                panel_rows(entry, self.tip_width, add_button=False, speak_button=self._tts_ok),
-                self.tip_width,
-            )
-            st = _TipPanel(lazy, "")
-            with self._cache_lock:
-                st = self._panel_cache_setdefault(key, st)
-        else:
-            with self._cache_lock:
-                try:
-                    self._panel_cache.move_to_end(key)
-                except KeyError:
-                    pass
-        if self._finish_available():
-            st.render_head(self._tip_cap())
-        else:
-            st.finish()
-        self._place_nested(st, key, None, pattern, wx, wy, wh)
+        nested_popup.open_search(self, pattern, wx, wy, wh)
 
     # --- kanji lookup mode ------------------------------------------------------------------------
-    @staticmethod
-    def _is_ideograph(ch: str) -> bool:
-        o = ord(ch)
-        return 0x3400 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF
-
     def kanji_current(self) -> None:
-        """`k` — open the hovered word's first kanji in the nested popup; repeat cycles through
-        the word's kanji."""
-        if self.dict_set is None or not (0 <= self.hover < len(self.tokens)):
-            return
-        chars = [c for c in self.tokens[self.hover].surface if self._is_ideograph(c)]
-        if not chars:
-            self._toast("no kanji in this word", "warn", 1.2)
-            return
-        ch = chars[self._kanji_index % len(chars)]
-        self._kanji_index += 1
-        ox, oy = self.sub_origin
-        b = self.boxes[self.hover]
-        self._open_kanji(ch, ox + b.x, oy + b.y, b.h)
+        nested_popup.kanji_current(self)
 
     def _open_kanji(self, ch: str, wx: float, wy: float, wh: float) -> None:
-        """Open the kanji entry for ``ch`` in the nested popup (normal panel path, no raster code)."""
-        assert self.dict_set is not None
-        entry = self.dict_set.kanji_for(ch)
-        if entry is None:
-            self._toast(f"no kanji entry for {ch}", "warn", 1.2)
-            return
-        key = ("kanji", ch, self.tip_width)
-        st = self._panel_cache.get(key)
-        if st is None:
-            lazy = LazyPanel(
-                panel_rows(entry, self.tip_width, speak_button=self._tts_ok), self.tip_width
-            )
-            st = _TipPanel(lazy, entry.reading)
-            st.finish()  # kanji entries are small — render whole
-            with self._cache_lock:
-                st = self._panel_cache_setdefault(key, st)
-        else:
-            with self._cache_lock:
-                try:
-                    self._panel_cache.move_to_end(key)
-                except KeyError:
-                    pass
-        self._place_nested(st, key, None, ch, wx, wy, wh)
+        nested_popup.open_kanji(self, ch, wx, wy, wh)
 
     def _click_kanji_fallback(self, x: float, y: float) -> None:
-        """A click on a SINGLE-ideograph scan cell whose token has no term match opens the kanji
-        entry instead — reuses the nested-popup route."""
-        if self.dict_set is None:
-            return
-        sb = self._scan_hit(x, y)
-        if sb is None or not sb.text:
-            return
-        ch = sb.text[0]
-        if not self._is_ideograph(ch):
-            return
-        toks = tokenize(sb.text)
-        tok = toks[0] if toks else None
-        if (
-            tok is not None
-            and len(tok.surface) == 1
-            and not self.dict_set.has_term(tok.lemma, tok.surface, tok.reading)
-        ):
-            sx, sy = self._tip_xy
-            self._open_kanji(ch, sx + sb.x, sy + (sb.y - self._tip_scroll), sb.h)
+        nested_popup.click_kanji_fallback(self, x, y)
 
     def _hide_nested(self) -> None:
-        if self._nest.state is not None or self._nest.rect is not None:
-            self.ov.hide(NESTED_ID)
-        self._nest = _Nested()
+        nested_popup.hide_nested(self)
 
     # --- mining (flow lives in app/miner.py; thin delegates here) --------------------------------
     def _mine_target(self) -> int | None:
@@ -1484,155 +720,44 @@ class Reader:
         self._miner.mine_token(tok)
 
     def _mark_mined(self, expression: str) -> None:
-        """Record a word as in-deck and refresh the shown popups so their ⊕ flips to ✓ immediately."""
-        if not expression:
-            return
-        self._mined.add(expression)
-        if self.hover >= 0 and self._tip_state is not None:
-            self._show_tooltip(self.hover)  # rebuild the base tooltip (✓ if it's this word)
-        if self._nest.state is not None and self._nest.token is not None:
-            self._rerender_nested()  # and the nested popup
+        miner_ui.mark_mined(self, expression)
 
     def _rerender_nested(self) -> None:
-        """Rebuild the nested popup in place with the current mined-state, keeping its position."""
-        tok = self._nest.token
-        if tok is None:
-            return
-        mined = self._is_mined(tok)
-        st = self._panel_for(tok, tok.surface, min_h=self._tip_cap(), finish=True, mined=mined)
-        self._nest.state = st
-        self._nest.key = self._panel_key(tok, tok.surface, mined)
-        self._nest.bgra = st.bgra()  # decompress the cached panel into the nested scroll buffer
-        self._render_nested_view()
+        miner_ui.rerender_nested(self)
 
-    # --- card preview (verify correctness / image / sound, one surface) -----------------------
+    # --- card preview (verify correctness / image / sound, one surface) — logic in app/miner_ui.py
     def _sentence_lines(self) -> list[str]:
-        return ["".join(t.surface for t in line) for line in self.lines]
+        return miner_ui.sentence_lines(self)
 
     def _footer(self, video) -> str:
-        assert self.mine_cfg is not None  # previews only exist after a mine
-        return f"{self.mine_cfg.deck} · {self.mine_cfg.model} · {self._provenance(video)}"
+        return miner_ui.footer(self, video)
 
     def _preview_mined(self, card, tok, video) -> None:
-        img = None
-        if self._last_jpg and Path(self._last_jpg).exists():
-            img = Image.open(self._last_jpg)
-        secs = audio_duration(self._last_audio) if self._last_audio else None
-        pv = PreviewData(
-            "mined",
-            card.expression,
-            card.reading,
-            self._sentence_lines(),
-            tok.surface,
-            list(card.glosses),
-            img,
-            secs,
-            self._footer(video),
-        )
-        self._show_preview(pv, self._last_audio)
+        miner_ui.preview_mined(self, card, tok, video)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
-        assert self.anki is not None and self.mine_cfg is not None  # duplicate path = mining on
-        try:
-            info = self.anki.notes_info([note_id])
-        except AnkiError:
-            info = []
-        if not info:
-            self._toast(f"already have {card.expression}", "warn")
-            return
-        f, fld = info[0]["fields"], self.mine_cfg.fields
-
-        def val(logical):
-            return f.get(fld.get(logical, ""), {}).get("value", "")
-
-        img = self._media_image(_media_name(val("picture"), r'src="([^"]+)"'))
-        mp3 = self._media_tempfile(_media_name(val("audio"), r"\[sound:([^\]]+)\]"))
-        secs = audio_duration(mp3) if mp3 else None
-        pv = PreviewData(
-            status,
-            val("expression") or card.expression,
-            val("reading") or card.reading,
-            _html_lines(val("sentence")),
-            val("expression") or card.expression,
-            _html_items(val("glossary")) or list(card.glosses),
-            img,
-            secs,
-            self._footer(self._get("path")),
-        )
-        self._show_preview(pv, mp3)
+        miner_ui.preview_existing(self, note_id, card, status)
 
     def _media_image(self, name):
-        if not name or self.anki is None:
-            return None
-        try:
-            data = self.anki.retrieve_media(name)
-            return Image.open(io.BytesIO(data)) if data else None
-        except Exception:
-            return None
+        return miner_ui.media_image(self, name)
 
     def _media_tempfile(self, name):
-        if not name or self.anki is None:
-            return None
-        try:
-            data = self.anki.retrieve_media(name)
-            if not data:
-                return None
-            p = self._tmp / name
-            p.write_bytes(data)
-            return p
-        except Exception:
-            return None
+        return miner_ui.media_tempfile(self, name)
 
     def _show_preview(self, pv: PreviewData, audio_path) -> None:
-        # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
-        self._last_preview, self._last_audio = pv, audio_path
-        self._preview_zoom = False
-        self._render_preview()
+        miner_ui.show_preview(self, pv, audio_path)
 
     def _render_preview(self) -> None:
-        pv = self._last_preview
-        if pv is None:
-            return
-        pr = render_card_preview(pv, width=max(440, self.tip_width), zoom=self._preview_zoom)
-        px, py = round(self.osd[0] * 0.03), round(self.osd[1] * 0.06)
-        self.ov.show(pr.image, px, py, oid=PREVIEW_ID)
-        self._preview_rect = (px, py, pr.image.width, pr.image.height)
-
-        def _screen(r):
-            return (px + r[0], py + r[1], r[2], r[3]) if r else None
-
-        self._preview_close_rect = _screen(pr.close_rect)
-        self._preview_audio_rect = _screen(pr.audio_rect)
-        self._preview_image_rect = _screen(pr.image_rect)
+        miner_ui.render_preview(self)
 
     def _hide_preview(self) -> None:
-        self.ov.hide(PREVIEW_ID)
-        self._last_preview = None
-        self._preview_rect = self._preview_close_rect = None
-        self._preview_audio_rect = self._preview_image_rect = None
+        miner_ui.hide_preview(self)
 
     def _click_preview(self, x: float, y: float) -> bool:
-        """Handle a click on the card preview: ✕ dismiss, screenshot → toggle enlarge, ▶ → play audio.
-        An empty click does nothing. Returns True if the click landed on the preview."""
-        if self._preview_rect is None or not self._in_rect(self._preview_rect, x, y):
-            return False
-        if self._preview_close_rect and self._in_rect(self._preview_close_rect, x, y):
-            self._hide_preview()
-        elif self._preview_image_rect and self._in_rect(self._preview_image_rect, x, y):
-            self._preview_zoom = not self._preview_zoom
-            self._render_preview()  # enlarge to verify the frame / shrink back
-        elif (
-            self._preview_audio_rect
-            and self._in_rect(self._preview_audio_rect, x, y)
-            and self.play_audio
-            and self._last_audio
-        ):
-            play_audio(self._last_audio)  # ▶ → play the mined clip on demand
-        return True
+        return miner_ui.click_preview(self, x, y)
 
     def replay_preview(self) -> None:
-        if self._last_preview:
-            self._show_preview(self._last_preview, self._last_audio)
+        miner_ui.replay_preview(self)
 
     def _frequency(self, tok) -> tuple[str, str]:
         return self._miner.frequency(tok)
@@ -1645,65 +770,22 @@ class Reader:
 
     # --- translation reveal (EN secondary track) ----------------------------------------------
     def _setup_secondary(self) -> int | None:
-        tracks = [t for t in (self._get("track-list") or []) if t.get("type") == "sub"]
-        primary = self._get("sid")
-        # prefer an English-tagged track; else any other sub track (generated demo subs carry no lang)
-        pick = next((t for t in tracks if (t.get("lang") or "").lower() in EN_LANGS), None)
-        if pick is None:
-            pick = next((t for t in tracks if t.get("id") != primary), None)
-        if pick is None:
-            return None
-        self.ipc.command("set_property", "secondary-sid", pick["id"])
-        self.ipc.command("set_property", "secondary-sub-visibility", False)
-        return pick["id"]
+        return translation.setup_secondary(self)
 
     def _translation_visible(self) -> bool:
-        """Should the EN translation be shown now? Manual toggle (`t`), OR auto-reveal while a tooltip
-        is up (auto-translate opt-in)."""
-        return self._translate_on or (self.auto_translate and self.hover >= 0)
+        return translation.translation_visible(self)
 
     def _sync_auto_translation(self) -> None:
-        """Reconcile the auto-translation overlay with the hover state (only when opted in)."""
-        if not self.auto_translate:
-            return
-        if self._translation_visible():
-            self._draw_translation()
-        elif not self._translate_on:
-            self.ov.hide(TRANS_ID)
-            self._trans_text = None
+        translation.sync_auto_translation(self)
 
     def toggle_translation(self) -> None:
-        self._translate_on = not self._translate_on
-        if self._translation_visible():
-            self._draw_translation()
-        else:
-            self.ov.hide(TRANS_ID)
-            self._trans_text = None
+        translation.toggle_translation(self)
 
     def _secondary_text(self) -> str:
-        return (
-            (self._prop("secondary-sub-text") or "").replace("\\N", " ").replace("\n", " ").strip()
-        )
+        return translation.secondary_text(self)
 
     def _draw_translation(self) -> None:
-        text = self._secondary_text()
-        self._trans_text = text
-        if not text:
-            self.ov.hide(TRANS_ID)
-            return
-        size = max(20, round(self.osd[1] * 0.032))
-        style = Style(size=size, color=(220, 224, 235, 255))
-        pad = 14
-        # trim the box to the text (wrap only if it exceeds 80% of the width), then centre it
-        box_w = min(round(inline_width([Span(text, style)])) + 2 * pad, int(self.osd[0] * 0.8))
-        flow = render_flow(
-            [Span(text, style)], Block(width=box_w, padding=pad, background=(0, 0, 0, 170))
-        )
-        x = (self.osd[0] - flow.width) // 2
-        # top of the screen (SubMiner-style) — separate from the JP subs at the bottom, and clear of
-        # the tooltip that anchors above the hovered word.
-        y = max(8, round(self.osd[1] * 0.035))
-        self.ov.show(flow, x, y, oid=TRANS_ID)
+        translation.draw_translation(self)
 
     def _toast(self, text: str, kind: str = "ok", seconds: float = 2.8) -> None:
         img = render_toast(text, kind)
@@ -1800,208 +882,150 @@ class Reader:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
-            scroll_steps = 0
-            for ev in self.ipc.drain_events():
-                kind = ev.get("event")
-                if kind == "property-change":  # observed state — no round-trips
-                    self._on_property_change(ev)
-                elif kind == "client-message":
-                    msg = (ev.get("args") or [""])[0]
-                    if msg == SCROLL_UP_MSG:
-                        scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
-                    elif msg == SCROLL_DOWN_MSG:
-                        scroll_steps += 1
-                    else:
-                        self._handle(msg)
+            self._flush_paused_nudge()
+            ops_before = self.ov.ops
+            scroll_steps = self._drain_events()
             if scroll_steps:
                 self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
-            if self._toast_until and time.monotonic() > self._toast_until:
-                self.ov.hide(TOAST_ID)
-                self._toast_until = 0.0
-            if self._flash_until and time.monotonic() >= self._flash_until:
-                oid, self._flash_oid, self._flash_until = self._flash_oid, None, 0.0
-                if oid == NESTED_ID:
-                    self._render_nested_view()  # redraw without the highlight border
-                elif oid == TIP_ID:
-                    self._render_tip_view()
+            self._expire_toast()
+            self._expire_flash()
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
-            # progressive startup: inject background-loaded deps (once), else animate the spinner
-            if self._pending_deps is not None:
-                deps, self._pending_deps = self._pending_deps, None
-                self._apply_deps(deps)
-            elif self._loading:
-                self._draw_loading()
+            self._apply_pending_deps_or_spinner()
             self._update_hover()
-            if self._tip_dirty:  # a worker finished the shown panel's deferred tail
-                self._tip_dirty = False
-                self._refresh_tip_full()
-            if self._nest.dirty:  # …or the nested scan popup's tail
-                self._nest.dirty = False
-                self._refresh_nested_full()
+            self._refresh_dirty_panels()
             self._update_prefetch()
             if self._translation_visible() and self._secondary_text() != self._trans_text:
                 self._draw_translation()  # keep the (manual or auto) translation current as subs change
+            self._schedule_paused_nudge(ops_before)
             return True
         except (OSError, ValueError):
             return False
 
+    def _flush_paused_nudge(self) -> None:
+        """A draw landed while paused last tick — poke the throttled OSD so mpv actually presents it."""
+        if not self._nudge_pending:
+            return
+        self._nudge_pending = False
+        self.ov.repaint()
+        log.debug("paused OSD nudge: re-flushed %d overlay(s)", len(self.ov._live))
+        if otel_metrics.osd_paused_nudge is not None:
+            otel_metrics.osd_paused_nudge.add(1)
+
+    def _drain_events(self) -> int:
+        """Consume this tick's mpv events; returns the net scroll delta (coalesced, not yet applied)."""
+        scroll_steps = 0
+        for ev in self.ipc.drain_events():
+            kind = ev.get("event")
+            if kind == "property-change":  # observed state — no round-trips
+                self._on_property_change(ev)
+            elif kind == "client-message":
+                msg = (ev.get("args") or [""])[0]
+                if msg == SCROLL_UP_MSG:
+                    scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
+                elif msg == SCROLL_DOWN_MSG:
+                    scroll_steps += 1
+                else:
+                    self._handle(msg)
+        return scroll_steps
+
+    def _expire_toast(self) -> None:
+        if self._toast_until and time.monotonic() > self._toast_until:
+            self.ov.hide(TOAST_ID)
+            self._toast_until = 0.0
+
+    def _expire_flash(self) -> None:
+        if not (self._flash_until and time.monotonic() >= self._flash_until):
+            return
+        oid, self._flash_oid, self._flash_until = self._flash_oid, None, 0.0
+        if oid == NESTED_ID:
+            self._render_nested_view()  # redraw without the highlight border
+        elif oid == TIP_ID:
+            self._render_tip_view()
+
+    def _apply_pending_deps_or_spinner(self) -> None:
+        """Progressive startup: inject background-loaded deps (once), else animate the spinner."""
+        if self._pending_deps is not None:
+            deps, self._pending_deps = self._pending_deps, None
+            self._apply_deps(deps)
+        elif self._loading:
+            self._draw_loading()
+
+    def _refresh_dirty_panels(self) -> None:
+        if self._tip_dirty:  # a worker finished the shown panel's deferred tail
+            self._tip_dirty = False
+            self._refresh_tip_full()
+        if self._nest.dirty:  # …or the nested scan popup's tail
+            self._nest.dirty = False
+            self._refresh_nested_full()
+
+    def _schedule_paused_nudge(self, ops_before: int) -> None:
+        """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
+        presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
+        their own, and re-adding every tick would be wasteful."""
+        if self.ov.ops != ops_before and self._prop("pause"):
+            self._nudge_pending = True
+            if otel_metrics.osd_paused_draw is not None:
+                otel_metrics.osd_paused_draw.add(1)
+
     def _maybe_log_stall(self) -> None:
-        """One-time loud diagnostic for 'mpv plays but nothing draws': if several seconds pass with no
-        subtitle text ever observed, mpv's IPC replies/events aren't reaching us. The byte count from
-        the reader thread distinguishes the causes — 0 bytes means the pipe read direction is dead (the
-        classic Windows named-pipe failure); >0 bytes means reads work but the subtitle track/property
-        never produced text. Playback continues regardless, so this only lives in overlay.log / report."""
-        if getattr(self, "_stall_warned", False) or self.sub_text:
+        """One-time startup diagnostic for 'mpv plays but the overlay can't draw'. The RELIABLE failure
+        signal is a dead read direction, NOT missing subtitles: a section can legitimately have no subs
+        for minutes (an anime OP), so 'no sub-text' alone must never warn — that was the old
+        false-alarm. We WARN only when mpv's replies aren't reaching us — zero bytes ever read (the
+        classic Windows named-pipe failure) or osd-dimensions never resolved — because then nothing can
+        draw regardless of subtitles. If the pipe is alive but there's simply no cue yet, note it once
+        at debug. Lives in overlay.log / report; playback is unaffected."""
+        if getattr(self, "_stall_warned", False):
             return
         started = getattr(self, "_run_started", None)
-        if started is None or time.monotonic() - started < 4.0:
+        if started is None or time.monotonic() - started < 8.0:
             return
         self._stall_warned = True
-        log.warning(
-            "no subtitle text %.0fs after start (bytes from mpv=%d). Nothing drawing usually means "
-            "mpv's IPC replies aren't reaching the overlay (bytes=0 → dead pipe read) or no JP "
-            "subtitle track/text was selected (bytes>0).",
-            time.monotonic() - started,
-            getattr(self.ipc, "_bytes_read", -1),
-        )
+        secs = time.monotonic() - started
+        bytes_read = getattr(self.ipc, "_bytes_read", -1)
+        osd_ok = self._prop("osd-dimensions") not in (None, {})
+        if bytes_read == 0 or not osd_ok:
+            log.warning(
+                "IPC looks dead %.0fs after start (bytes from mpv=%d, osd-dimensions=%s) — mpv's "
+                "replies/events aren't reaching the overlay, so nothing will draw (Windows named-pipe "
+                "read failure, or attached to a not-yet-ready mpv).",
+                secs,
+                bytes_read,
+                "ok" if osd_ok else "None",
+            )
+        elif not self.sub_text:
+            log.debug(
+                "IPC alive %.0fs in (bytes=%d, osd-dimensions ok) but no subtitle text yet — normal if "
+                "this section has no subs (e.g. an OP); the overlay will draw when a cue appears.",
+                secs,
+                bytes_read,
+            )
 
     def _seed_mined(self) -> None:
         self._miner.seed_mined()
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     def load_sub_index(self, path) -> None:
-        """Parse the external subtitle file at ``path`` into a cue index so Alt+←/→/↓ can render the
-        target line instantly. Fail-soft: an unreadable/empty/unsupported file just leaves the index
-        None → navigation falls back to a plain mpv sub-seek."""
-        self._sub_index = load_index(path)
-
-    def _get_float(self, prop: str) -> float | None:
-        v = self._get(prop)  # a direct get_property is fine: nav keys are rare, not per-tick
-        if v is None:
-            return None
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return None
+        subnav.load_sub_index(self, path)
 
     def _sub_nav(self, delta: int) -> bool:
-        """Render the cue ``delta`` steps away (-1 prev / 0 replay / +1 next) in the overlay right
-        now, from the parsed index — the perceived-instant half of subtitle navigation. Returns True
-        if it drew a target line. The caller still issues the real ``sub-seek`` so the video catches
-        up; the poll loop reconciles to mpv's ``sub-text`` once the seek settles.
-
-        Chaining works while the video seek is still in flight (time-pos/sub-start are stale): after
-        a nav render ``sub_text`` is the line we drew, so ``locate`` finds it by text and ``_nav_idx``
-        disambiguates duplicates — next/next/next steps forward predictably."""
-        idx = self._sub_index
-        if idx is None or len(idx) == 0:
-            return False
-        with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek"):
-            sub_start = self._get_float("sub-start")
-            time_pos = self._get_float("time-pos")
-            current = idx.locate(
-                text=self.sub_text, sub_start=sub_start, time_pos=time_pos, preferred=self._nav_idx
-            )
-            if current < 0:
-                return False
-            # Is a cue actually on screen now, or is `current` just the upcoming one in a gap? A sub
-            # is showing (non-empty text), or the position falls inside current's span. This decides
-            # whether prev/next straddle the cue or step onto the upcoming one (see SubIndex.target).
-            c = idx.cues[current]
-            inside = bool(self.sub_text.strip())
-            if not inside and sub_start is not None:
-                inside = c.start <= sub_start < c.end
-            if not inside and time_pos is not None:
-                inside = c.start <= time_pos < c.end
-            tgt = idx.target(current, delta, inside=inside)
-        if tgt < 0:
-            return False  # out of range / ambiguous → let mpv's sub-seek handle it
-        self.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
-        self._nav_idx = tgt
-        # Guard the reconcile: mpv's sub-text briefly reads empty mid-seek; ignoring that avoids a
-        # blank flicker before it settles on the real (matching) cue text. ~1s covers a slow seek.
-        self._sub_settle_until = time.monotonic() + 1.0
-        return True
+        return subnav.sub_nav(self, delta)
 
     def _reconcile_sub_text(self, text: str) -> None:
-        """Poll-loop hook: adopt mpv's current ``sub-text`` when it changed. mpv is the source of
-        truth (it corrects the line if our instant-nav index guessed wrong), EXCEPT for the empty
-        blip mpv emits mid-seek right after a manual sub-nav — swallow that within the settle window
-        so the overlay doesn't flash blank before the real cue text lands."""
-        if text == self.sub_text:
-            return
-        if text.strip() or time.monotonic() >= self._sub_settle_until:
-            self.set_subtitle(text)
-            self._sub_settle_until = 0.0
+        subnav.reconcile_sub_text(self, text)
 
     # --- progressive dep loading --------------------------------------------------------------
     def load_deps_async(self, cfg: dict, build=None) -> None:
-        """Load coloring/dict/mining collaborators on a BACKGROUND thread (dicts/scorer/anki — none
-        touch the mpv IPC), then hand them to the poll loop, which injects them on the main thread.
-        Plain subs draw meanwhile; a spinner shows until the deps land.
-
-        ``build`` is a zero-arg callable returning ``(scorer, anki, mine_cfg, dict_set)``; it defaults
-        to ``build_reader_deps(cfg)`` (attach/plugin mode). ``run`` passes its own closure so it can
-        honour CLI flags (``--dict/--freq/--anki-decks/--mine`` …) while still loading progressively.
-        The one rule: the builder must NOT touch the mpv IPC (it runs off the main thread)."""
-        self._loading = True
-
-        if build is None:
-
-            def _default_build():
-                from overlay.app.reader_deps import build_reader_deps
-
-                return build_reader_deps(cfg)
-
-            build = _default_build
-
-        def _load() -> None:
-            try:
-                with otel_metrics.traced("load_deps_async"):
-                    scorer, anki, mine_cfg, dict_set = build()
-                self._pending_deps = {
-                    "scorer": scorer,
-                    "anki": anki,
-                    "mine_cfg": mine_cfg,
-                    "dict_set": dict_set,
-                }
-            except Exception:
-                log.warning("background dep load failed — staying subs-only", exc_info=True)
-                self._pending_deps = {}  # signal "done" so the spinner stops
-
-        threading.Thread(target=_load, name="saitenka-deps", daemon=True).start()
+        reader_deps.load_deps_async(self, cfg, build)
 
     def _apply_deps(self, deps: dict) -> None:
-        """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
-        self._loading = False
-        self.ov.hide(LOADING_ID)
-        self.scorer = deps.get("scorer")
-        self.anki = deps.get("anki")
-        self.mine_cfg = deps.get("mine_cfg")
-        self.dict_set = deps.get("dict_set")
-        if self.sub_text:  # re-tokenise + re-score the CURRENT cue so coloring appears now
-            self.set_subtitle(self.sub_text)
-        if self.anki:
-            self._seed_mined()  # ⊕→✓ from past mining
-        self.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
+        reader_deps.apply_deps(self, deps)
 
     def _draw_loading(self) -> None:
-        """Draw the throttled top-left spinner while deps load (main thread, from the poll loop)."""
-        now = time.monotonic()
-        if now < self._load_next:
-            return
-        self._load_next = now + 0.08
-        from overlay.app.loading import loading_image
-
-        img = loading_image("saitenka loading dictionaries", self._load_frame)
-        self._load_frame += 1
-        try:
-            self.ov.show(img, x=24, y=24, oid=LOADING_ID)
-        except Exception:
-            log.debug("loading spinner draw failed", exc_info=True)
+        reader_deps.draw_loading(self)
 
     def run(self, interval: float | None = None) -> None:
         interval = interval if interval is not None else self.poll_interval
@@ -2011,7 +1035,8 @@ class Reader:
         self._register_keybinds()
         self._seed_mined()
         self.start_prefetch()
-        mode = "free-threaded (GIL off)" if _gil_disabled() else "GIL"
+        telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
+        mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
         self._stall_warned = False
@@ -2021,6 +1046,7 @@ class Reader:
     def close(self) -> None:
         import shutil
 
+        telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck

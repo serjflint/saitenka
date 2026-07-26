@@ -20,6 +20,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -48,14 +49,28 @@ def _run_cmd(cmd: list[str]) -> None:  # pragma: no cover — real subprocess (m
     subprocess.run(cmd, check=True)
 
 
+def _present(tool: str) -> bool:
+    """Is ``tool`` usable? mpv/ffmpeg route through the SAME discovery launch/doctor use (``find_mpv``
+    knows ``C:\\mpv``, mpv.net, the registry; ``find_tool`` knows the off-PATH bin dirs) — so setup
+    doesn't try to reinstall an mpv that's present but simply not on PATH (the winget-crash loop).
+    Other tools (uv) fall back to PATH."""
+    from overlay.mpvio.discover import find_mpv, find_tool
+
+    if tool == "mpv":
+        return find_mpv() is not None
+    if tool in ("ffmpeg", "ffprobe"):
+        return find_tool(tool) is not None
+    return shutil.which(tool) is not None
+
+
 def inventory() -> dict[str, bool]:
     """Which required tools are present (✓/✗)."""
-    return {t: shutil.which(t) is not None for t in REQUIRED_TOOLS}
+    return {t: _present(t) for t in REQUIRED_TOOLS}
 
 
 def missing_tools(tools: list[str]) -> list[str]:
-    """The subset of ``tools`` not on PATH (resumability: only install what's missing)."""
-    return [t for t in tools if shutil.which(t) is None]
+    """The subset of ``tools`` not present (resumability: only install what's missing)."""
+    return [t for t in tools if not _present(t)]
 
 
 def _manager_command(manager: str, tool: str) -> list[str]:
@@ -123,10 +138,67 @@ def do_install(tools: list[str], dry_run: bool, confirm: Confirm) -> int:
     if not confirm(f"Install {', '.join(todo)} with {plan.manager}?"):
         print("  skipped install")
         return 0
-    for cmd in plan.commands:
+    installed = 0
+    for tool, cmd in zip(todo, plan.commands, strict=True):
         print("  $", " ".join(cmd))
-        _run_cmd(cmd)
-    return len(todo)
+        try:
+            _run_cmd(cmd)
+            installed += 1
+        except subprocess.CalledProcessError as e:
+            # A package manager exiting non-zero (already-installed, no applicable installer, declined
+            # UAC, source agreement) MUST NOT crash setup — warn, keep going, let doctor flag what's
+            # still missing. This was the "reinstall fucks stuff up" crash: winget nonzero → check=True.
+            print(
+                f"  {_FAIL} {tool} install failed (exit {e.returncode}) — skipping; {plan.hint or ''}".rstrip()
+            )
+            log.warning(
+                "setup: %s install failed via %s (exit %s)", tool, plan.manager, e.returncode
+            )
+    return installed
+
+
+def _resolve_mpv_input(raw: str) -> str | None:
+    """A user-typed mpv path → a validated executable, or None. Strips the quotes Windows "Copy as
+    path" adds; if a directory is given, looks for a known mpv binary inside. Pure — unit-tested."""
+    from overlay.mpvio.discover import _MPV_EXE_NAMES, _is_exe
+
+    s = raw.strip().strip('"').strip()
+    if not s:
+        return None
+    p = Path(s).expanduser()
+    if p.is_dir():
+        p = next((p / n for n in (*_MPV_EXE_NAMES, "mpv", "mpvnet") if _is_exe(p / n)), p)
+    return str(p) if _is_exe(p) else None
+
+
+def ensure_mpv_path(
+    confirm: Confirm,
+) -> str | None:  # pragma: no cover — interactive I/O + config write
+    """Last resort when auto-detection failed: ask for mpv's path and persist it to ``overlay.toml``
+    ``mpv_path`` (``find_mpv`` checks that first, so it sticks). Non-interactive (plugin/attach spawns
+    us with no console) → print a hint instead of hanging on ``input``."""
+    from overlay.mpvio.discover import find_mpv
+
+    if find_mpv() is not None:
+        return None
+    if not sys.stdin.isatty():
+        print(
+            "  mpv not found — set `mpv_path` in overlay.toml (or install mpv), then re-run setup."
+        )
+        return None
+    print("  mpv not found automatically.")
+    for _ in range(3):
+        raw = input("  Full path to the mpv / mpvnet executable (blank to skip): ").strip()
+        if not raw:
+            return None
+        if resolved := _resolve_mpv_input(raw):
+            from overlay.app.init_wizard import write_config
+
+            write_config({"mpv_path": resolved}, confirm=confirm)
+            print(f"  {_OK} saved mpv_path = {resolved}")
+            return resolved
+        print(f"  {_FAIL} not an mpv executable: {raw}")
+    return None
 
 
 # --- step glue (mock points; the CLI subcommands do the real work) --------------------------
@@ -329,6 +401,8 @@ def run_setup(yes: bool, dry_run: bool) -> int:
             print(f"  {_OK if present else _FAIL} {tool}")
         print("\nToolchain:")
         do_install(list(INSTALL_TOOLS), dry_run=dry_run, confirm=confirm)
+        if not dry_run:
+            ensure_mpv_path(confirm)  # still no mpv? ask for its path + persist to mpv_path
 
     print("\nConfig:")
     _run_init(confirm)

@@ -1,6 +1,6 @@
 [project]
 name = "saitenka-overlay"
-version = "0.5.0"
+version = "0.6.0"
 description = "Rich-text + ruby renderer for the native in-mpv Yomitan overlay (Saitenka)"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -44,7 +44,7 @@ jmdict = [
 # `[telemetry] enabled = true` is the actual opt-in. Kept out of core deps so a default install never
 # pulls the OTel SDK: `app/telemetry.py` imports it lazily, only once `enabled=true` is read from
 # config. Both packages are pure-Python (py3-none-any), so no free-threading risk either way.
-observability = [
+telemetry = [
     "opentelemetry-api>=1.44.0",
     "opentelemetry-sdk>=1.44.0",
 ]
@@ -53,7 +53,7 @@ observability = [
 # feature and is what the checkout installers install. Note `full` includes the GPL-3.0 `deinflect`
 # add-on, so a `full` install is GPL-3.0, not Apache-2.0 (see ../LICENSING.md).
 minimal = []
-full = ["saitenka-overlay[deinflect]", "saitenka-overlay[jmdict]", "saitenka-overlay[observability]"]
+full = ["saitenka-overlay[deinflect]", "saitenka-overlay[jmdict]", "saitenka-overlay[telemetry]"]
 
 [project.scripts]
 saitenka-overlay = "overlay.app.cli:main"
@@ -287,6 +287,32 @@ smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest 
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
+# py-spy can't introspect the free-threaded 3.14t build ("Failed to find python version from target
+# process") — same out-of-process 3.13 crutch as fuzz/crosshair/invariants-taint, in a repo-local
+# `.venv-pyspy` (gitignored, like `.venv-fuzz`/`.venv-cx` — NOT /tmp, which a reboot/tmp-cleaner wipes,
+# and NOT `uv run --isolated` — that forks the interpreter as a CHILD of the `uv` process, so py-spy
+# needs `--subprocesses` to see it, which measured ~10x slower sampling (100-300 Hz → 10-30 Hz) — too
+# coarse for the ms-scale jank this profiles. A stable venv lets py-spy attach to the interpreter
+# directly, no wrapper, full rate).
+# `sudo` needs a real controlling tty that poe's subprocess doesn't give it ("a terminal is required to
+# read the password" even run from an interactive shell), so this task only syncs the env and PRINTS
+# the profiling command — copy-paste and run the printed line yourself, NOT through poe. `uv sync`
+# (not a hand-rolled `uv venv`/`uv pip install`) manages `.venv-pyspy` the same way fuzz/crosshair do;
+# `py-spy` is already a `full`-extra dependency (pyproject `[project.optional-dependencies]`), so the
+# sync also installs it INTO `.venv-pyspy` — no Homebrew/uvx py-spy needed, one fewer moving part.
+stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo $(pwd)/.venv-pyspy/bin/py-spy record -o /tmp/stress-profile.raw -f raw --rate 100 --idle -- $(pwd)/.venv-pyspy/bin/python examples/bench_responsiveness.py --stress --reps 20\"" }
+# Same 3.13 crutch, but profiling the VOCAB render benchmark (examples/vocab.json — real-episode words,
+# parser out of the loop) so the sampled hot frames are pure lookup/decode/SC-walk/document-layout: the
+# whole-panel render tail this is meant to dissect. Prints the sudo line to run yourself.
+vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo $(pwd)/.venv-pyspy/bin/py-spy record -o /tmp/vocab-profile.raw -f raw --rate 200 --idle -- $(pwd)/.venv-pyspy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
+# END-STATE profile of the fixed + banded + PARALLEL render. py-spy CANNOT introspect the free-threaded
+# 3.14t build ("Failed to find a python interpreter in the .data section" — the interpreter state isn't
+# where py-spy scans on nogil; benfred/py-spy#460), so profile on GIL 3.13 where pick_executor falls back
+# to a PROCESS pool: --subprocesses captures the workers. The parallelism mechanism differs from the
+# shipped threads, but the per-render hot-spots (getmask2/getlength, banded block layout) are identical —
+# which is what this profile is for. (For a true free-threaded sample py-spy is out; a nogil-aware
+# sampler would be needed.)
+vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.13 --extra full -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo $(pwd)/.venv-pyspy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 --idle -- $(pwd)/.venv-pyspy/bin/python examples/bench_responsiveness.py --vocab --banded --parallel --reps 3\"" }
 # Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
 # controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the

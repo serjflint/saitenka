@@ -58,6 +58,12 @@ _MISSING_HINT = (
     "then they resolve by title. Run `saitenka-overlay doctor` to see what's imported."
 )
 
+# Fanning `Dictionary.lookup()` out across a thread pool in `entry_for` (one dict per worker) was
+# tried and measured under `--stress` with the GIL confirmed off (PYTHON_GIL=0): peak RSS rose ~54%
+# (1.1 GB → 1.7 GB, the free-threaded allocator's per-thread arenas) with latency flat-to-worse at
+# every percentile — msgspec.json.decode doesn't release the GIL enough for the dispatch overhead to
+# pay for itself at this width (9 dicts). Reverted in favour of the plain sequential loop below.
+
 
 def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
     """Partition ``paths`` into (existing, missing) files — used by the import command to keep the
@@ -326,6 +332,11 @@ class DictionarySet:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""
         return any(d.lookup(*forms) for d in self.dicts)
 
+    def decoded_entry_count(self) -> int:
+        """Decoded :class:`DictEntry` objects currently cached across every dictionary — the
+        ``dict_cache.size`` gauge (each dict's ``_entry_cache`` is bounded by ``entry_cache_max``)."""
+        return sum(len(d._entry_cache) for d in self.dicts)
+
     def kanji_for(self, char: str) -> Entry | None:
         """A panel :class:`Entry` for one kanji, from the first dict whose kanji_bank has it: big
         glyph headword, 音/訓 reading rows + numbered meanings in the def body, stroke count and
@@ -449,17 +460,24 @@ class DictionarySet:
                 pills.append(Freq(ps.title, disp, PITCH_COLOR))
         return pills
 
-    def entry_for(self, token: Token, inflected: str | None = None) -> Entry:
-        # `inflected` is the full inflected surface incl. trailing auxiliaries (習わ + ぬ → 習わぬ) so
-        # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
-        forms = (token.lemma, token.surface, token.reading)
+    def _dict_defs(
+        self, forms: tuple[str, str, str], termforms: set[str], default_reading: str
+    ) -> tuple[list[Definition], str | None, str]:
+        # Yomitan groups results on the EXPRESSION (term), never the reading, so a reading collision
+        # (き → 気/木/生/期/器…) is shown as separate entries, not fused into one. We anchor on the
+        # subtitle's own surface: when a dict has an exact-term hit for this word, keep ONLY those and
+        # drop the reading-only homophones (hovering 気 must not dump 木/生/期 into its tooltip). With no
+        # exact-term hit — a kana word whose dictionary forms are all kanji (かける → 掛ける/懸ける/架ける)
+        # — keep every reading match, which IS the intended polysemy. `lookup` already sorts exact-term
+        # first, so the kept order (and hits[0] headword) is unchanged.
         headword = None
-        reading = token.reading
+        reading = default_reading
         defs: list[Definition] = []
         for d in self.dicts:
             hits = d.lookup(*forms)
             if not hits:
                 continue
+            hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
             if headword is None:
                 headword, reading = hits[0].term, hits[0].reading
             nodes: list = []
@@ -477,8 +495,11 @@ class DictionarySet:
                 seen_gloss.add(gkey)
                 nodes.extend(_glossary_to_nodes(h.glossary))
             defs.append(Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags)))
-        if headword is None:
-            headword = token.lemma or token.surface
+        return defs, headword, reading
+
+    def _pitch_accents(
+        self, forms: tuple[str, str, str], reading: str
+    ) -> list[tuple[str, tuple[int, ...]]]:
         pitches: list[tuple[str, tuple[int, ...]]] = []
         for ps in self.pitches:
             got = ps.accents(forms, reading)
@@ -487,6 +508,17 @@ class DictionarySet:
                 item = (r, tuple(positions))
                 if item not in pitches:
                     pitches.append(item)
+        return pitches
+
+    def entry_for(self, token: Token, inflected: str | None = None) -> Entry:
+        # `inflected` is the full inflected surface incl. trailing auxiliaries (習わ + ぬ → 習わぬ) so
+        # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
+        forms = (token.lemma, token.surface, token.reading)
+        termforms = {f for f in (token.lemma, token.surface) if f}
+        defs, headword, reading = self._dict_defs(forms, termforms, token.reading)
+        if headword is None:
+            headword = token.lemma or token.surface
+        pitches = self._pitch_accents(forms, reading)
         return Entry(
             headword=furigana(headword, reading),
             tags=[],
