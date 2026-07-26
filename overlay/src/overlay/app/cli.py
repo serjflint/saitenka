@@ -951,6 +951,7 @@ def attach(
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
+            banded=bool(cfg.get("banded", _tt.banded)),
         ),
         mining=MiningOptions(
             play_audio=not bool(cfg.get("no_audio_play", False)),

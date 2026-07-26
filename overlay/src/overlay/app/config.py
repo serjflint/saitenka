@@ -95,6 +95,9 @@ class TooltipOptions:
         False  # sticky per-dictionary tab strip on the BASE tooltip (off default)
     )
     panel_cache_max: int = 128  # LRU cap on cached (zlib-compressed) rendered tooltip panels
+    banded: bool = False  # experimental: render the base tooltip via the windowed (banded) engine —
+    # O(viewport) compositing + hit-testing instead of slicing a whole-panel blob. Off default; the
+    # SAITENKA_BANDED=1 env var also enables it (env wins, for quick trials without editing overlay.toml)
 
 
 @dataclass(frozen=True)

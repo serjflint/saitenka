@@ -10,6 +10,9 @@ slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority ord
 tip_height = 0.4           # max tooltip height as a fraction of the video height (default 0.4)
 translate_key = "t"        # toggle the official EN translation
 pause_on_tooltip = false   # auto-pause playback while a tooltip is shown (resumes when it hides)
+# banded = true            # experimental: render the base tooltip via the windowed (banded) engine —
+                           # O(viewport) compositing + hit-testing instead of a whole-panel blob slice.
+                           # Off by default; SAITENKA_BANDED=1 also enables it (env wins).
 
 # Subtitle navigation keys (Stage 4 — crucial feature).
 sub_prev_key   = "Alt+LEFT"    # jump to the PREVIOUS subtitle line (sub-seek -1)

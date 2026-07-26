@@ -284,6 +284,13 @@ class Reader:
         self._tip_scroll = 0
         self._tip_view_h = 0
         self._tip_xy = (0, 0)
+        # Experimental: render the base tooltip's visible frames from the windowed (banded) engine —
+        # O(viewport) compositing + windowed hit-testing — instead of slicing a whole-panel BGRA blob.
+        # Off by default; the blob path is untouched. From [tooltip].banded, or SAITENKA_BANDED=1 (env
+        # wins, for quick trials). Parity-gated (tests/test_banded_wiring.py).
+        self._banded = o.tooltip.banded or os.environ.get("SAITENKA_BANDED") == "1"
+        if self._banded:
+            log.info("banded tooltip renderer ENABLED (windowed O(viewport) compositing)")
         self._tip_state: TipPanel | None = (
             None  # _TipPanel currently shown (viewport-first render may still be filling)
         )
@@ -906,6 +913,20 @@ class Reader:
                     top_reserve=reserve,
                 )
                 st = _TipPanel(lazy, getattr(entry, "reading", "") or tok.reading)
+                if self._banded:  # windowed renderer over the SAME rows (fresh thunks, cheap to rebuild)
+                    from overlay.render.banded import WindowedPanel
+
+                    st.windowed = WindowedPanel(
+                        panel_rows(
+                            entry,
+                            self.tip_width,
+                            add_button=self._anki_ok(),
+                            mined=mined,
+                            speak_button=self._tts_ok,
+                        ),
+                        self.tip_width,
+                        top_reserve=reserve,
+                    )
             with self._cache_lock:
                 st = self._panel_cache_setdefault(key, st)
         else:
@@ -982,20 +1003,29 @@ class Reader:
             if self._stop.is_set() or item.gen != self._prefetch_gen:
                 continue  # cancelled (line changed / resumed / seek / closing)
             try:
-                # item.mined came from the main thread — never call _is_mined/card_for from a
-                # worker (jamdict is not thread-safe on free-threaded builds).
-                self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
+                if item.full:
+                    # item.mined came from the main thread — never call _is_mined/card_for from a
+                    # worker (jamdict is not thread-safe on free-threaded builds).
+                    self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
+                else:
+                    # Cheap warm: decode+cache each dict's glossary for this word, no layout/drawing —
+                    # populates Dictionary._entry_cache so a later engaged/hover-triggered full render
+                    # (or the actual hover) skips the JSON-decode cost entirely.
+                    self.dict_set.entry_for(item.token, item.inflected)
             except Exception:
                 log.debug(
                     "prefetch render failed for %r", item.token.surface, exc_info=True
                 )  # a bad word must never kill the worker
 
     def _update_prefetch(self) -> None:
-        """Queue the current line's content words for background rendering when the user is *engaged*
-        — paused OR the cursor is over the video (you rarely move the mouse without intent to hover).
-        N+1 words go first (likeliest hover / mine target). On any change (resume, mouse-out, seek,
-        new line) bump the generation so in-flight renders are dropped. Tokens are passed by value
-        (frozen), so a line change can't make a worker read stale state."""
+        """Queue the current line's content words for background work every time the line (or
+        engagement) changes — *engaged* (paused OR the cursor over the video: you rarely move the
+        mouse without intent to hover) gets a FULL render (a hover is imminent); otherwise a cheap
+        dict-only WARM (``full=False``): the video is just playing and nobody's looking yet, but
+        that's exactly the idle time to pay the JSON-decode cost in the background instead of on the
+        first real hover. N+1 words go first (likeliest hover / mine target). On any change (resume,
+        mouse-out, seek, new line) bump the generation so in-flight renders are dropped. Tokens are
+        passed by value (frozen), so a line change can't make a worker read stale state."""
         if not self.prefetch or self.dict_set is None:
             return
         engaged = bool(self._prop("pause")) or self._mouse_in
@@ -1004,7 +1034,7 @@ class Reader:
             return
         self._prefetch_key = key
         self._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
-        if engaged and self.tokens:
+        if self.tokens:
             gen, seen, items = self._prefetch_gen, set(), []
             for i, t in enumerate(self.tokens):
                 if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
@@ -1019,7 +1049,9 @@ class Reader:
                 # Evaluate _is_mined on the main thread (card_for → jamdict must not be called
                 # from a worker thread — jamdict is not thread-safe on free-threaded builds).
                 self._prefetch_q.put(
-                    PrefetchItem(gen, t, self._inflected_surface(i), self._is_mined(t))
+                    PrefetchItem(
+                        gen, t, self._inflected_surface(i), self._is_mined(t), full=engaged
+                    )
                 )
                 if otel_metrics.prefetch_queue_depth is not None:
                     otel_metrics.prefetch_queue_depth.add(1)
@@ -1122,10 +1154,25 @@ class Reader:
         scrollbar thumb when the panel is taller than the viewport. ``header`` is an opaque BGRA
         strip composited over the TOP of the viewport — the sticky dict-tab row.
         Returns the shown screen rect."""
-        full_h, full_w = bgra.shape[:2]
+        full_h = bgra.shape[0]
         vh = min(view_h, full_h)
         y0 = max(0, min(scroll, max(0, full_h - vh)))
         view = bgra[y0 : y0 + vh].copy()  # cheap slice of the pre-converted panel
+        return self._decorate_and_upload(view, y0, full_h, xy, oid, header)
+
+    def _blit_panel_banded(self, wp, scroll: int, view_h: int, xy, oid: int, full_h: int, header=None):
+        """Banded path: composite the ``[y0, y0+vh)`` viewport straight from the windowed engine
+        (O(viewport)) instead of slicing a whole-panel blob, then decorate + upload identically. Yields
+        the same pixels as :meth:`_blit_panel` at every offset (windowed==crop parity)."""
+        vh = min(view_h, full_h)
+        y0 = max(0, min(scroll, max(0, full_h - vh)))
+        view = to_bgra_array(wp.viewport(y0, vh))  # exact viewport, premultiplied BGRA
+        return self._decorate_and_upload(view, y0, full_h, xy, oid, header)
+
+    def _decorate_and_upload(self, view, y0: int, full_h: int, xy, oid: int, header=None):
+        """Draw the sticky header, the scrollbar thumb, and the copy-flash border onto a viewport-sized
+        BGRA array, then upload it. Shared by the blob-slice and windowed-composite paths."""
+        vh, full_w = view.shape[0], view.shape[1]
         if header is not None and header.shape[0] < view.shape[0]:
             view[: header.shape[0], : header.shape[1]] = header  # opaque → occludes scrolled rows
         if full_h > vh:  # scrollbar thumb (premultiplied BGRA gray)
@@ -1218,6 +1265,13 @@ class Reader:
                 tx, ty = self._tip_xy
                 self._tab_rects = [(tx + x, ty + y, w, h) for x, y, w, h in rects]
             header = self._tab_bgra
+        wp = self._tip_state.windowed if self._tip_state is not None else None
+        if self._banded and wp is not None:  # composite the viewport from the windowed engine
+            self._tip_rect = self._blit_panel_banded(
+                wp, self._tip_scroll, self._tip_view_h, self._tip_xy, TIP_ID,
+                int(self._tip_bgra.shape[0]), header=header,
+            )
+            return
         self._tip_rect = self._blit_panel(
             self._tip_bgra,
             self._tip_scroll,
@@ -1280,6 +1334,8 @@ class Reader:
         sx, sy = self._tip_xy
         px = mx - sx
         py = (my - sy) + self._tip_scroll
+        if self._banded and st.windowed is not None:  # windowed hit-test (retained per-block geometry)
+            return st.windowed.scan_hit(int(px), int(py))
         for sb in st.lazy.scan_boxes:
             if sb.x <= px < sb.x + sb.w and sb.y <= py < sb.y + sb.h:
                 return sb
