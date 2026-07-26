@@ -562,7 +562,7 @@ def test_pause_on_tooltip_respects_manual_pause():
     assert not r._paused_by_tip  # never took ownership → won't resume
 
 
-def test_prefetch_queues_content_words_only_when_paused():
+def test_prefetch_queues_full_render_when_paused():
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
@@ -570,18 +570,25 @@ def test_prefetch_queues_content_words_only_when_paused():
     r._update_prefetch()
     queued = []
     while not r._prefetch_q.empty():
-        queued.append(r._prefetch_q.get().token.surface)  # typed PrefetchItem (Stage 8b)
-    assert queued == ["本命"]  # the content word got queued
+        queued.append(r._prefetch_q.get())  # typed PrefetchItem (Stage 8b)
+    assert [i.token.surface for i in queued] == ["本命"]  # the content word got queued
+    assert all(i.full for i in queued)  # engaged → a hover is imminent, full panel render
 
 
-def test_prefetch_cancels_generation_when_resumed():
+def test_prefetch_queues_cheap_warm_while_just_playing():
+    """Not engaged (playing, mouse off the video) still queues the content word — as a cheap
+    dict-only WARM (`full=False`), not the expensive full render. This is the idle time the video
+    is only being watched/listened to: paying the JSON-decode cost here means a later hover (or the
+    user pausing/mousing over) usually hits an already-warm `Dictionary._entry_cache`."""
     ipc = FakeIPC()
-    ipc.props["pause"] = False  # playing
+    ipc.props["pause"] = False  # playing, not engaged
     r = _reader_with_word(ipc)
     g0 = r._prefetch_gen
     r._update_prefetch()
     assert r._prefetch_gen == g0 + 1  # bumped → in-flight work is invalidated
-    assert r._prefetch_q.empty()  # nothing queued while playing
+    item = r._prefetch_q.get_nowait()
+    assert item.token.surface == "本命"
+    assert item.full is False  # idle-time warm only, no layout/drawing
 
 
 def test_prefetch_worker_warms_cache_then_close_joins():
