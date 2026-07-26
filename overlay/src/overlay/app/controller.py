@@ -12,7 +12,6 @@ import logging
 import os
 import queue
 import re
-import sys
 import tempfile
 import threading
 import time
@@ -23,7 +22,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from PIL import Image
 
 from overlay import otel_metrics
-from overlay.app import telemetry
+from overlay.app import prefetch, telemetry
 from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.config import ReaderOptions
@@ -36,13 +35,12 @@ from overlay.app.media import (
     tts_available,
 )
 from overlay.app.miner import Miner, tag_slug
-from overlay.app.perf import timed
+from overlay.app.perf import gil_disabled, timed
 from overlay.app.popups import PopupView, TipPanel
-from overlay.app.prefetch import FinishItem, PrefetchItem
 from overlay.app.sub_index import SubIndex, load_index
 from overlay.app.subtitles import render_subtitle
 from overlay.app.toast import render_toast
-from overlay.app.tokenize import Token, tokenize
+from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 from overlay.model import Span, Style
 from overlay.mpvio.osd import Overlay, to_bgra_array
 from overlay.panel import (
@@ -74,20 +72,6 @@ LOADING_ID = 9  # top-left "loading dictionaries" spinner during progressive sta
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
 # dict-tab strip / reserve (space-saving).
-SKIP_POS = {"補助記号", "記号", "空白"}
-AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
-
-
-def _inflected_in(tokens: list[Token], index: int) -> str:
-    """Token surface + trailing auxiliary tokens (助動詞), so the chain deinflects the full word
-    (習わ + ぬ → 習わぬ); the tokenizer splits inflected verbs from their auxiliaries. Free function so
-    a prefetch lookahead can inflect a *future* line's tokens, not just the on-screen ``self.tokens``."""
-    s = tokens[index].surface
-    j = index + 1
-    while j < len(tokens) and tokens[j].pos in AUX_POS:
-        s += tokens[j].surface
-        j += 1
-    return s
 
 
 TIP_GAP = 12
@@ -149,11 +133,6 @@ class PanelKey(NamedTuple):
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
-
-
-def _gil_disabled() -> bool:
-    """True on a free-threaded build running GIL-free — rendering then scales across workers."""
-    return not getattr(sys, "_is_gil_enabled", lambda: True)()
 
 
 FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RGB 255,214,90)
@@ -779,9 +758,6 @@ class Reader:
             else:
                 self._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
 
-    def _inflected_surface(self, index: int) -> str:
-        return _inflected_in(self.tokens, index)
-
     def _panel_key(self, tok, inflected, mined: bool = False, tabs: bool = True) -> PanelKey:
         # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
         # ``tabs`` distinguishes the base build (with the dict-tab reserve) from a nested build (none),
@@ -970,121 +946,18 @@ class Reader:
         self._panel_cache[key] = st
         return st
 
-    def _prefetch_worker_count(self) -> int:
-        # GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
-        # ~3.8× on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
-        if _gil_disabled():
-            return min(8, max(2, (os.cpu_count() or 4) - 2))
-        return self.prefetch_workers
-
-    # --- background prefetch (warm the paused line's tooltips) --------------------------------
+    # --- background prefetch (warm the current/next line's tooltips) — logic in app/prefetch.py --
     def start_prefetch(self) -> None:
-        if not self.prefetch or self.dict_set is None or self._prefetch_threads:
-            return
-        for k in range(self._prefetch_worker_count()):
-            th = threading.Thread(
-                target=self._prefetch_worker, name=f"saitenka-prefetch-{k}", daemon=True
-            )
-            th.start()
-            self._prefetch_threads.append(th)
-
-    def _prefetch_worker(self) -> None:
-        while not self._stop.is_set():
-            # Priority: finish the deferred tail of the tooltip the user is looking at RIGHT NOW,
-            # ahead of speculatively warming the rest of the line.
-            if self._run_finish_job():
-                continue
-            try:
-                item: PrefetchItem = self._prefetch_q.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if otel_metrics.prefetch_queue_depth is not None:
-                otel_metrics.prefetch_queue_depth.add(-1)
-            if self._stop.is_set() or item.gen != self._prefetch_gen:
-                continue  # cancelled (line changed / resumed / seek / closing)
-            try:
-                self._run_prefetch_item(item)
-            except Exception:
-                log.debug(
-                    "prefetch render failed for %r", item.token.surface, exc_info=True
-                )  # a bad word must never kill the worker
-
-    def _run_finish_job(self) -> bool:
-        """Finish the deferred tail of the on-screen tooltip if one is queued; ``True`` when handled
-        (so the worker loops before touching the warm queue — the visible panel outranks warming)."""
-        try:
-            fin: FinishItem = self._finish_q.get_nowait()
-        except queue.Empty:
-            return False
-        try:
-            fin.panel.finish()
-        except Exception:
-            log.debug("finish job failed", exc_info=True)
-            return True
-        if fin.key == self._tip_key and fin.panel is self._tip_state:
-            self._tip_dirty = True  # main loop re-uploads the now-complete panel
-        elif fin.key == self._nest.key and fin.panel is self._nest.state:
-            self._nest.dirty = True
-        return True
-
-    def _run_prefetch_item(self, item: PrefetchItem) -> None:
-        """One prefetch job: a FULL panel render when the user's engaged, else a cheap dict-only WARM
-        (decode+cache the glossary into ``Dictionary._entry_cache``, no layout/drawing) so a later
-        hover/full render skips the JSON-decode cost."""
-        if item.full:
-            # item.mined came from the main thread — never call _is_mined/card_for from a worker
-            # (jamdict is not thread-safe on free-threaded builds).
-            self._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
-        elif self.dict_set is not None:  # None only if dicts were torn down mid-flight
-            self.dict_set.entry_for(item.token, item.inflected)
+        prefetch.start_prefetch(self)
 
     def _update_prefetch(self) -> None:
-        """Queue the current line's content words for background work every time the line (or
-        engagement) changes — *engaged* (paused OR the cursor over the video: you rarely move the
-        mouse without intent to hover) gets a FULL render (a hover is imminent); otherwise a cheap
-        dict-only WARM (``full=False``): the video is just playing and nobody's looking yet, but
-        that's exactly the idle time to pay the JSON-decode cost in the background instead of on the
-        first real hover. N+1 words go first (likeliest hover / mine target). On any change (resume,
-        mouse-out, seek, new line) bump the generation so in-flight renders are dropped. Tokens are
-        passed by value (frozen), so a line change can't make a worker read stale state.
+        prefetch.update_prefetch(self)
 
-        With ``prefetch_lookahead`` set, the next few cues' words are then WARMED too (dict-only, off
-        the same idle CPU) so the first hover after the line advances is already decoded."""
-        if not self.prefetch or self.dict_set is None:
-            return
-        engaged = bool(self._prop("pause")) or self._mouse_in
-        key = (self.sub_text, engaged)
-        if key == self._prefetch_key:
-            return
-        self._prefetch_key = key
-        self._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
-        gen, seen = self._prefetch_gen, set()
-        if self.tokens:
-            items = []
-            for i, t in enumerate(self.tokens):
-                if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
-                    continue
-                seen.add(t.lemma)
-                np1 = bool(
-                    self.styles and i < len(self.styles) and self.styles[i].tag.startswith("n+1")
-                )
-                items.append((0 if np1 else 1, i, t))
-            items.sort(key=lambda x: x[0])  # N+1 first
-            for _, i, t in items:
-                # Evaluate _is_mined on the main thread (card_for → jamdict must not be called
-                # from a worker thread — jamdict is not thread-safe on free-threaded builds).
-                self._enqueue_prefetch(
-                    PrefetchItem(
-                        gen, t, self._inflected_surface(i), self._is_mined(t), full=engaged
-                    )
-                )
-        if self.prefetch_lookahead > 0:
-            self._enqueue_lookahead(gen, seen)
+    def _upcoming_cue_texts(self, n: int) -> list[str]:
+        return prefetch.upcoming_cue_texts(self, n)
 
-    def _enqueue_prefetch(self, item: PrefetchItem) -> None:
-        self._prefetch_q.put(item)
-        if otel_metrics.prefetch_queue_depth is not None:
-            otel_metrics.prefetch_queue_depth.add(1)
+    def _inflected_surface(self, index: int) -> str:
+        return inflected_in(self.tokens, index)
 
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
@@ -1101,42 +974,11 @@ class Reader:
             "dict_cache.size": float(dict_n),
         }
 
-    def _enqueue_lookahead(self, gen: int, seen: set[str]) -> None:
-        """WARM (dict-only, never full, ``mined=False``) the content words of the next
-        ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
-        main-thread jamdict/scorer work runs here. ``seen`` carries the current line's lemmas so a word
-        already queued isn't warmed twice. No-op without an external sub index."""
-        for text in self._upcoming_cue_texts(self.prefetch_lookahead):
-            toks = tokenize(text)
-            for i, t in enumerate(toks):
-                if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
-                    continue
-                seen.add(t.lemma)
-                self._enqueue_prefetch(
-                    PrefetchItem(gen, t, _inflected_in(toks, i), mined=False, full=False)
-                )
-
-    def _upcoming_cue_texts(self, n: int) -> list[str]:
-        """Text of the ``n`` cues after the one on screen, from the external sub index (empty when
-        there's no index, the line isn't located, or we're at the tail). Located by the displayed text
-        alone — the reliable signal per :meth:`SubIndex.locate` — so it stays off the mpv IPC path."""
-        idx = self._sub_index
-        if idx is None or not len(idx) or n <= 0:
-            return []
-        current = idx.locate(text=self.sub_text, preferred=self._nav_idx)
-        if current < 0:
-            return []
-        return [idx.cues[i].text for i in range(current + 1, min(len(idx), current + 1 + n))]
-
     def _cap_for(self, frac: float) -> int:
-        """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
-        margin = max(16, round(self.osd[1] * 0.05))
-        return min(round(self.osd[1] * frac), self.osd[1] - 2 * margin)
+        return prefetch.cap_for(self, frac)
 
     def _tip_cap(self) -> int:
-        """Max BASE tooltip viewport height (≤ ``tip_max_frac`` of the video). The nested popup has its
-        own, deliberately roomier cap (``nested_max_frac``) so shrinking the base doesn't cramp it."""
-        return self._cap_for(self.tip_max_frac)
+        return prefetch.tip_cap(self)
 
     def _show_tooltip(self, index: int) -> None:
         with timed("show_tooltip"):
@@ -1174,7 +1016,9 @@ class Reader:
         self._render_tip_view()
         self._bind_tip_keys()  # LEFT/RIGHT/UP/DOWN/ESC live only while the tip shows
         if not st.complete:
-            self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _tip_dirty → refresh
+            self._finish_q.put(
+                prefetch.FinishItem(st, key)
+            )  # worker fills the tail → _tip_dirty → refresh
         if self.pause_on_tooltip and not self._paused_by_tip and not self._prop("pause"):
             self.ipc.command("set_property", "pause", True)  # freeze the frame while you read
             self._paused_by_tip = True
@@ -1469,7 +1313,9 @@ class Reader:
         self._nest.xy = self._place_panel(pw, wx, wy, wh, self._nest.view_h)
         self._render_nested_view()
         if not st.complete:
-            self._finish_q.put(FinishItem(st, key))  # worker fills the tail → _nest.dirty → refresh
+            self._finish_q.put(
+                prefetch.FinishItem(st, key)
+            )  # worker fills the tail → _nest.dirty → refresh
 
     # --- clickable cross-reference links ---------------------------------------------------------
     @staticmethod
@@ -2188,7 +2034,7 @@ class Reader:
         self._seed_mined()
         self.start_prefetch()
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
-        mode = "free-threaded (GIL off)" if _gil_disabled() else "GIL"
+        mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
         self._stall_warned = False

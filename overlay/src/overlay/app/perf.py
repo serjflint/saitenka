@@ -12,6 +12,7 @@ own IPC round-trip — so there's no meaningful cost to gate.
 from __future__ import annotations
 
 import statistics
+import sys
 import threading
 import time
 from collections import deque
@@ -22,6 +23,12 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 _MAXLEN = 200  # per-op samples kept; old ones fall off, no unbounded growth
+
+
+def gil_disabled() -> bool:
+    """True on a free-threaded build running GIL-free — rendering then scales across workers."""
+    return not getattr(sys, "_is_gil_enabled", lambda: True)()
+
 
 _lock = threading.Lock()
 _ops: dict[str, deque[float]] = {}
