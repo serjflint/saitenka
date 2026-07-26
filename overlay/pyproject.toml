@@ -344,6 +344,14 @@ changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
 # install/make_bundle.py resolves its own paths from `__file__`, but needs repo-root cwd for `uv run`
 # to see it at all — `cd ..` here is that, not a path fix on the script's side.
 bundle = { shell = "cd .. && uv run install/make_bundle.py" }
+# RELEASING.md steps 1-7, automated: bump version, insert the curated RELEASE_NOTES.md entry (write
+# that first — the changelog is never auto-generated unattended), gate, build/checksum/smoke-test,
+# commit. Never pushes or opens a PR on its own. $POE_EXTRA_ARGS forwards flags, e.g.
+# `poe release-prepare --dry-run` or `--bump minor` — see `release.py`'s docstring for the full set.
+release-prepare = { shell = "cd .. && uv run install/release.py prepare $POE_EXTRA_ARGS" }
+# RELEASING.md steps 8-10, automated: tag, rebuild from the merged commit, draft the GitHub Release.
+# Leaves it as a draft unless `--publish` is passed — publishing is a deliberate, separate step.
+release-publish = { shell = "cd .. && uv run install/release.py publish $POE_EXTRA_ARGS" }
 
 # --- Supply-chain & hygiene (test-driven & wired 2026-07-25; see vibe/quality-growth-plan.md) --------
 # Winners chosen by running each candidate on THIS repo, not by reputation. Design: only fast,

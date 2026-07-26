@@ -2,7 +2,9 @@
 
 Releases are cut **manually from macOS** (CI is deferred — see `ROADMAP.md`). The distributable is a
 single `dist/saitenka-overlay-<ver>.zip` (wheel + GPL `deinflect` sdist + installers), published as a
-**GitHub Release**. This file is the source of truth for the human steps.
+**GitHub Release**. This file is the source of truth for the human steps — `install/release.py`
+automates them (see "Automated" below) but the review gates it can't remove (curating the changelog,
+merging the PR, publishing the Release) still happen exactly where they're described here.
 
 ## Versioning
 
@@ -12,6 +14,33 @@ being frozen.
 
 Single source of truth: **`overlay/pyproject.toml` `version`** (read at runtime via
 `importlib.metadata`, and by `install/make_bundle.py`). Nothing else hardcodes the version.
+
+## Automated
+
+`install/release.py` (via `poe release-prepare` / `poe release-publish`) runs steps 1-6 and 8-9
+below for you. It still requires a human at two points: the changelog entry (write it to
+`RELEASE_NOTES.md` first — never generated unattended) and the actual publish (`--publish`, or
+`gh release edit --draft=false` by hand) and PR merge (step 7 — never automated).
+
+```sh
+$EDITOR RELEASE_NOTES.md              # curate the changelog entry (bullets, no heading)
+uv run poe release-prepare             # steps 1-6: bump version (auto patch/minor/major from
+                                        # Conventional Commits, capped at minor pre-1.0), insert
+                                        # the changelog section, `poe all`, build+checksum+smoke-
+                                        # test, commit `chore(overlay): release X.Y.Z`
+git push && gh pr create               # step 7: open the PR, get it reviewed, merge it
+
+git checkout main && git pull
+uv run poe release-publish             # steps 8-9: tag, rebuild from the merged commit,
+                                        # checksum+smoke-test again, create the Release as a draft
+uv run poe release-publish --publish   # step 9b: flip the draft live (or `gh release edit` by hand)
+```
+
+Flags forward straight through poe (no `--` separator needed): `poe release-prepare --bump
+minor|patch|major` (override the auto-detected bump), `--version X.Y.Z` (exact override), `--dry-run`
+(print the computed version + notes, change nothing), `--push` (also push after committing). `poe
+release-publish --skip-gate` to re-run after a failed step without re-running the whole gate. Both
+wrap `uv run install/release.py prepare|publish --help` for the full set.
 
 ## Before merge (on the release branch, in the PR)
 
