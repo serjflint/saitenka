@@ -6,8 +6,9 @@ import time
 import pytest
 
 import overlay.app.controller as C
-from overlay.app import miner_ui, nested_popup
-from overlay.app.controller import PanelKey, Reader
+from overlay.app import miner_ui, nested_popup, tooltip
+from overlay.app.controller import Reader
+from overlay.app.tooltip import PanelKey
 
 
 class FakeIPC:
@@ -1071,7 +1072,7 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
     view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
-    above_room = wy - C.TIP_GAP - margin
+    above_room = wy - nested_popup.TIP_GAP - margin
     assert view_h == above_room  # shrunk to fit above
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
     assert ty + view_h <= wy  # …so it sits entirely above the inner word
@@ -1152,7 +1153,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     tx, ty, tw, _th = r._tip_rect
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1172,7 +1173,7 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
     got = []
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: got.append(s))
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     nx, ny, nw, nh = r._nest.rect
     ipc.props["mouse-pos"] = {"hover": True, "x": nx + nw / 2, "y": ny + nh / 2}
     r.copy_click()
@@ -1188,7 +1189,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(C, "copy_clipboard", lambda s: None)
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: None)
     r.set_hover(0)
     shots = []
     monkeypatch.setattr(r.ov, "show_bgra", lambda bgra, x, y, oid: shots.append((oid, bgra.copy())))
@@ -1196,7 +1197,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
     oid, view = shots[-1]
-    hl = np.array(C.FLASH_BGRA, np.uint8)
+    hl = np.array(tooltip.FLASH_BGRA, np.uint8)
     assert oid == C.TIP_ID and (view[0] == hl).all()  # top border row is the highlight
     clock[0] += r.flash_secs + 0.01
     r.poll_once()  # flash expires → redraw without the border
