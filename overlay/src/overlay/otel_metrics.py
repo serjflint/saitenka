@@ -77,7 +77,7 @@ def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
 
 
 #: Memoized resolution of `opentelemetry.trace`: `None` = not yet checked, ``False`` = confirmed
-#: unavailable (the observability extra isn't installed — this can't change at runtime, so caching
+#: unavailable (the telemetry extra isn't installed — this can't change at runtime, so caching
 #: it forever is correct). Avoids re-attempting (and re-catching ImportError from) a failing import
 #: on every single call from a hot call site like `traced()`.
 _trace_available: bool | None = None
@@ -100,7 +100,7 @@ def _resolve_trace_module() -> ModuleType | None:
 @contextmanager
 def traced(name: str, **attributes: str) -> Generator[None]:
     """A real OTel span via the global tracer API — a no-op (not just an unrecorded span, but no
-    `opentelemetry` import attempt beyond the first) when the ``observability`` extra isn't
+    `opentelemetry` import attempt beyond the first) when the ``telemetry`` extra isn't
     installed, so every call site stays safe to wrap unconditionally, same contract as :func:`timed`.
     When the extra IS installed but telemetry isn't configured, `trace.get_tracer()` itself returns
     OTel's built-in no-op tracer — cheap, not a crash.
@@ -261,15 +261,24 @@ def snapshot() -> dict[str, dict[str, object]]:
 
 
 def _summarize_metric(metric) -> dict[str, object]:
+    """Merge every data point into one summary — an instrument recorded with per-label attributes
+    (e.g. `dict_sql_duration_ms`'s `dict=<title>`) fans out into one point PER label, not one point
+    total. A previous version read only `points[-1]` on the (false, for labeled instruments)
+    assumption of a single track, silently reporting one label's count/sum instead of the sum across
+    all of them — found via cross-checking this snapshot against the CTF trace.json span totals for
+    the same run (~9-11x undercount, one point per dictionary title)."""
     data = metric.data
     points = getattr(data, "data_points", [])
     if not points:
         return {}
-    point = points[-1]  # single-track instruments here (no per-label fan-out) — latest point
-    if hasattr(point, "bucket_counts"):  # HistogramDataPoint
+    if hasattr(points[0], "bucket_counts"):  # HistogramDataPoint(s) — same bucket bounds per metric
+        count = sum(p.count for p in points)
+        total = sum(p.sum for p in points)
+        dp_max = max(p.max for p in points)
+        bucket_counts = [sum(b) for b in zip(*(p.bucket_counts for p in points), strict=True)]
         return {
-            "count": point.count,
-            "sum": point.sum,
-            **_percentiles(point.bucket_counts, point.explicit_bounds, point.max, point.count),
+            "count": count,
+            "sum": total,
+            **_percentiles(bucket_counts, points[0].explicit_bounds, dp_max, count),
         }
-    return {"value": point.value}
+    return {"value": sum(p.value for p in points)}
