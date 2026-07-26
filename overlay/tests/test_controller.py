@@ -259,6 +259,111 @@ def test_poll_once_before_subtitle_does_not_raise():
     assert Reader(FakeIPC()).poll_once() is True
 
 
+def _count_adds(ipc):
+    return sum(1 for c in ipc.commands if c and c[0] == "overlay-add")
+
+
+def test_paused_draw_schedules_and_fires_an_osd_nudge():
+    """A subtitle draw while mpv is paused must re-flush the OSD on the NEXT tick — otherwise mpv
+    doesn't present it until an input event (mpv #8172, the 'updates only on mouse move' bug)."""
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = True
+    r = Reader(ipc)
+    r.refresh_osd()
+    ipc.props["sub-text"] = "いち"
+    r.poll_once()  # adopts the cue → draws SUB_ID while paused → schedules the nudge
+    assert r._nudge_pending is True
+    before = _count_adds(ipc)
+    r.poll_once()  # nudge fires → repaint re-issues the live overlay(s)
+    assert _count_adds(ipc) > before
+    assert r._nudge_pending is False
+
+
+def test_playing_draw_does_not_nudge():
+    """While playing, frames present on their own — no re-flush (would be per-tick waste)."""
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = False
+    r = Reader(ipc)
+    r.refresh_osd()
+    ipc.props["sub-text"] = "いち"
+    r.poll_once()
+    assert r._nudge_pending is False
+
+
+def test_overlay_repaint_reissues_live_overlays():
+    from PIL import Image
+
+    from overlay.mpvio.osd import Overlay
+
+    ipc = FakeIPC()
+    ov = Overlay(ipc)
+    ov.show(Image.new("RGBA", (4, 4)), 1, 2, oid=1)
+    ov.hide(oid=1)  # removed → not live → must NOT be re-added
+    ov.show(Image.new("RGBA", (4, 4)), 3, 4, oid=2)
+    ipc.commands.clear()
+    ov.repaint()
+    adds = [c for c in ipc.commands if c and c[0] == "overlay-add"]
+    assert len(adds) == 1 and adds[0][1] == 2  # only the still-live oid 2
+
+
+def test_paused_nudge_records_otel_counters():
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay import otel_metrics
+
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc.props["pause"] = True
+    r = Reader(ipc)
+    r.refresh_osd()
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        ipc.props["sub-text"] = "いち"
+        r.poll_once()  # a draw lands while paused → osd.paused_draw, schedules the nudge
+        r.poll_once()  # nudge fires → osd.paused_nudge
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.osd.paused_draw"]["value"] >= 1
+        assert snap["saitenka.osd.paused_nudge"]["value"] >= 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_stall_stays_quiet_when_ipc_alive_but_no_subs(caplog):
+    """A section with no subtitles (an OP) must NOT warn: IPC alive (bytes flowing + osd-dimensions ok)
+    is healthy even with no cue for minutes — the old 'no subtitle text' warning was a false alarm."""
+    import logging
+
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc._bytes_read = 500  # mpv's replies ARE arriving
+    r = Reader(ipc)
+    r._run_started = time.monotonic() - 10  # past the threshold
+    with caplog.at_level(logging.WARNING):
+        r._maybe_log_stall()
+    assert not [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
+
+
+def test_stall_warns_when_read_direction_is_dead(caplog):
+    """Zero bytes ever read = the Windows named-pipe failure → warn (nothing can draw), regardless of
+    subtitles."""
+    import logging
+
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    ipc._bytes_read = 0  # dead read direction
+    r = Reader(ipc)
+    r._run_started = time.monotonic() - 10
+    with caplog.at_level(logging.WARNING):
+        r._maybe_log_stall()
+    assert any("IPC looks dead" in rec.message for rec in caplog.records)
+
+
 def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)

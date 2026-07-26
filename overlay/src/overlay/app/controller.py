@@ -351,6 +351,9 @@ class Reader:
         self._sub_index: SubIndex | None = None
         self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
         self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
+        self._nudge_pending = (
+            False  # a draw happened while paused → re-flush the OSD next tick (#8172)
+        )
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
@@ -386,6 +389,11 @@ class Reader:
             self._observed.get("osd-dimensions"),
             self._observed.get("sub-text"),
         )
+        if self._observed.get("osd-dimensions") is None:
+            log.warning(
+                "osd-dimensions seed is None — mpv isn't returning get_property replies (dead pipe / "
+                "attached to a not-yet-ready mpv); the overlay won't draw until that recovers"
+            )
 
     def _prop(self, name: str):
         """Latest value of a property: the observed (event-driven) state when observing, else a
@@ -437,6 +445,9 @@ class Reader:
         self._sync_auto_translation()
 
     def set_subtitle(self, text: str) -> None:
+        # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
+        # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
+        log.debug("sub-text change: %d chars, paused=%s", len(text.strip()), self._prop("pause"))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
@@ -1800,6 +1811,13 @@ class Reader:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
+            if self._nudge_pending:  # a draw landed while paused last tick — poke the throttled OSD
+                self._nudge_pending = False
+                self.ov.repaint()
+                log.debug("paused OSD nudge: re-flushed %d overlay(s)", len(self.ov._live))
+                if otel_metrics.osd_paused_nudge is not None:
+                    otel_metrics.osd_paused_nudge.add(1)
+            ops_before = self.ov.ops
             scroll_steps = 0
             for ev in self.ipc.drain_events():
                 kind = ev.get("event")
@@ -1844,29 +1862,50 @@ class Reader:
             self._update_prefetch()
             if self._translation_visible() and self._secondary_text() != self._trans_text:
                 self._draw_translation()  # keep the (manual or auto) translation current as subs change
+            # An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
+            # presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
+            # their own, and re-adding every tick would be wasteful.
+            if self.ov.ops != ops_before and self._prop("pause"):
+                self._nudge_pending = True
+                if otel_metrics.osd_paused_draw is not None:
+                    otel_metrics.osd_paused_draw.add(1)
             return True
         except (OSError, ValueError):
             return False
 
     def _maybe_log_stall(self) -> None:
-        """One-time loud diagnostic for 'mpv plays but nothing draws': if several seconds pass with no
-        subtitle text ever observed, mpv's IPC replies/events aren't reaching us. The byte count from
-        the reader thread distinguishes the causes — 0 bytes means the pipe read direction is dead (the
-        classic Windows named-pipe failure); >0 bytes means reads work but the subtitle track/property
-        never produced text. Playback continues regardless, so this only lives in overlay.log / report."""
-        if getattr(self, "_stall_warned", False) or self.sub_text:
+        """One-time startup diagnostic for 'mpv plays but the overlay can't draw'. The RELIABLE failure
+        signal is a dead read direction, NOT missing subtitles: a section can legitimately have no subs
+        for minutes (an anime OP), so 'no sub-text' alone must never warn — that was the old
+        false-alarm. We WARN only when mpv's replies aren't reaching us — zero bytes ever read (the
+        classic Windows named-pipe failure) or osd-dimensions never resolved — because then nothing can
+        draw regardless of subtitles. If the pipe is alive but there's simply no cue yet, note it once
+        at debug. Lives in overlay.log / report; playback is unaffected."""
+        if getattr(self, "_stall_warned", False):
             return
         started = getattr(self, "_run_started", None)
-        if started is None or time.monotonic() - started < 4.0:
+        if started is None or time.monotonic() - started < 8.0:
             return
         self._stall_warned = True
-        log.warning(
-            "no subtitle text %.0fs after start (bytes from mpv=%d). Nothing drawing usually means "
-            "mpv's IPC replies aren't reaching the overlay (bytes=0 → dead pipe read) or no JP "
-            "subtitle track/text was selected (bytes>0).",
-            time.monotonic() - started,
-            getattr(self.ipc, "_bytes_read", -1),
-        )
+        secs = time.monotonic() - started
+        bytes_read = getattr(self.ipc, "_bytes_read", -1)
+        osd_ok = self._prop("osd-dimensions") not in (None, {})
+        if bytes_read == 0 or not osd_ok:
+            log.warning(
+                "IPC looks dead %.0fs after start (bytes from mpv=%d, osd-dimensions=%s) — mpv's "
+                "replies/events aren't reaching the overlay, so nothing will draw (Windows named-pipe "
+                "read failure, or attached to a not-yet-ready mpv).",
+                secs,
+                bytes_read,
+                "ok" if osd_ok else "None",
+            )
+        elif not self.sub_text:
+            log.debug(
+                "IPC alive %.0fs in (bytes=%d, osd-dimensions ok) but no subtitle text yet — normal if "
+                "this section has no subs (e.g. an OP); the overlay will draw when a cue appears.",
+                secs,
+                bytes_read,
+            )
 
     def _seed_mined(self) -> None:
         self._miner.seed_mined()

@@ -71,6 +71,8 @@ class Overlay:
         self.ipc = ipc
         self.id_base = id_base
         self._files: dict[int, Path] = {}
+        self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
+        self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
 
     def _oid(self, oid: int) -> int:
         """Map a logical overlay id (1-based) to the configured physical range."""
@@ -95,9 +97,9 @@ class Overlay:
             data, w, h, stride = to_bgra(img)
             path = self._tempfile(oid)
             path.write_bytes(data)
-            res = self.ipc.command(
-                "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, stride
-            )
+            tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
+            res = self.ipc.command("overlay-add", oid, *tail)
+        self._live[oid], self.ops = tail, self.ops + 1
         _warn_overlay_add(oid, w, h, res)
         return res
 
@@ -109,19 +111,30 @@ class Overlay:
             h, w = buf.shape[:2]
             path = self._tempfile(oid)
             path.write_bytes(buf.tobytes())
-            res = self.ipc.command(
-                "overlay-add", oid, int(x), int(y), str(path), 0, "bgra", w, h, w * 4
-            )
+            tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
+            res = self.ipc.command("overlay-add", oid, *tail)
+        self._live[oid], self.ops = tail, self.ops + 1
         _warn_overlay_add(oid, w, h, res)
         return res
 
     def hide(self, oid: int = 0) -> dict:
         oid = self._oid(oid)
         res = self.ipc.command("overlay-remove", oid)
+        self._live.pop(oid, None)
+        self.ops += 1
         p = self._files.pop(oid, None)
         if p is not None and p.exists():
             p.unlink()
         return res
+
+    def repaint(self) -> None:
+        """Re-issue every live overlay so mpv re-composites and PRESENTS them. While paused (esp. on
+        Windows) mpv throttles OSD updates until *something* pokes the OSD (mpv #8172) — a new/updated
+        overlay only shows on the next frame or input event (the "doesn't update until I move the
+        mouse" bug). Re-adding the same overlays is that poke. Does NOT bump ``ops`` (it's the reaction
+        to a change, not a new one), so it can't feed back into another nudge."""
+        for oid, tail in list(self._live.items()):
+            self.ipc.command("overlay-add", oid, *tail)
 
     def close(self) -> None:
         for oid in list(self._files):

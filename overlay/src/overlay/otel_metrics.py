@@ -41,6 +41,10 @@ dict_cache_hits: Counter | None = None
 dict_cache_misses: Counter | None = None
 dropped_telemetry_spans: Counter | None = None
 cold_first_paint_overshoot: Counter | None = None
+osd_paused_draw: Counter | None = (
+    None  # overlay draws that landed while paused (the #8172 bug window)
+)
+osd_paused_nudge: Counter | None = None  # paused-OSD re-flushes issued to un-throttle mpv
 
 # Gauges (prefetch queue depth is push-updated by the caller; gil_enabled is observed on read).
 prefetch_queue_depth: UpDownCounter | None = None
@@ -144,6 +148,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
+    global osd_paused_draw, osd_paused_nudge
 
     with _lock:
         _reader = reader
@@ -173,6 +178,13 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         cold_first_paint_overshoot = meter.create_counter(
             "saitenka.render.cold_first_paint_overshoot"
         )
+        osd_paused_draw = meter.create_counter(
+            "saitenka.osd.paused_draw", description="overlay draws that landed while mpv was paused"
+        )
+        osd_paused_nudge = meter.create_counter(
+            "saitenka.osd.paused_nudge",
+            description="paused-OSD re-flushes issued (mpv #8172 workaround)",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -187,6 +199,7 @@ def unregister() -> None:
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
+    global osd_paused_draw, osd_paused_nudge
 
     with _lock:
         _reader = None
@@ -202,6 +215,8 @@ def unregister() -> None:
         dict_cache_misses = None
         dropped_telemetry_spans = None
         cold_first_paint_overshoot = None
+        osd_paused_draw = None
+        osd_paused_nudge = None
         prefetch_queue_depth = None
 
 

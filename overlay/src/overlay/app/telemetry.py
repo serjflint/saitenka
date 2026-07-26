@@ -60,6 +60,8 @@ _SAMPLED_COUNTERS = (
     "saitenka.panel_cache.misses",
     "saitenka.dict_cache.hits",
     "saitenka.dict_cache.misses",
+    "saitenka.osd.paused_draw",
+    "saitenka.osd.paused_nudge",
 )
 
 #: Gates the span pipeline. Starts off (so it costs nothing before/without telemetry); `configure()`
