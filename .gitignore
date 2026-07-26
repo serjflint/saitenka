@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 .venv-fuzz/          # pinned-3.13 atheris env for `poe fuzz` (kept out of the FT .venv)
 .venv-cx/            # pinned-3.13 CrossHair env for `poe crosshair` (z3 C-ext, no free-threading)
+.venv-pyspy/         # pinned-3.13 env for `poe stress-pyspy` (py-spy can't introspect 3.14t)
 *.egg-info/
 
 # atheris/libFuzzer crash + timeout repro artifacts (add real ones as regression goldens, don't commit blobs)
