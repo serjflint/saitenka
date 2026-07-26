@@ -481,6 +481,236 @@ def run_stress(
     return rc
 
 
+# Module-level worker state for the --vocab --parallel path (ProcessPool workers each rebuild the DB in
+# the initializer; threads share the copy run_vocab sets). Top-level so ProcessPool can pickle by name.
+_VOCAB_DS = None
+
+
+def _vocab_init() -> None:
+    global _VOCAB_DS
+    _VOCAB_DS = _load_dict_set()[0]
+
+
+def _vocab_render(job: tuple[str, str, str, str, bool, int]) -> int:
+    """Render one word; ``banded`` renders the windowed viewport (small blocks) instead of the full
+    panel. Self-contained over a picklable tuple so it works as a ProcessPool task or a thread task."""
+    from overlay.app.tokenize import Token
+
+    surface, lemma, reading, pos, banded, width = job
+    assert _VOCAB_DS is not None
+    entry = _VOCAB_DS.entry_for(Token(surface, lemma, reading, pos, 0, len(surface)))
+    if banded:
+        from overlay.render.banded import WindowedPanel
+
+        return WindowedPanel(panel_rows(entry, width), width).viewport(0, 432, overscan=80).height
+    return LazyPanel(panel_rows(entry, width), width).finish().height
+
+
+def run_vocab(
+    vocab_path: str,
+    reps: int,
+    rt: dict,
+    require_ft: bool,
+    json_path: str | None = None,
+    *,
+    banded: bool = False,
+    parallel: bool = False,
+    workers: int = 8,
+) -> int:
+    """Render-pipeline benchmark over a FROZEN word list (e.g. one anime episode's unique content words,
+    extracted once so the subtitle parser/tokenizer is out of the hot loop). For each word: build the
+    Token, ``entry_for`` + full ``finish`` render (the whole-entry cost) and the cold head paint. Reports
+    the latency distribution + the slowest words, and is the intended py-spy target — the CPU here is
+    entirely dict lookup + glossary decode + SC-walk + document layout, so a sampling profile pinpoints
+    which of those dominates the tail."""
+    global _VOCAB_DS
+    ds, tag = _load_dict_set()
+    if ds is None:
+        print("vocab benchmark needs the real dict set (overlay.toml) — nothing to measure")
+        return 1
+    _VOCAB_DS = ds  # threads + serial share this; ProcessPool workers rebuild it in _vocab_init
+    words = json.loads(Path(vocab_path).read_text(encoding="utf-8"))
+    width = 640
+    render = "banded viewport (small blocks)" if banded else "full finish"
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(f"\nSaitenka overlay — VOCAB render benchmark   ({tag})")
+    print(format_runtime(rt))
+    print(f"words: {len(words)}   reps: {reps}   tip_width: {width}   render: {render}")
+    print(f"source: {vocab_path}\n")
+
+    # --- parallel path: render the whole batch across pick_executor (threads on FT, processes on GIL) ---
+    if parallel:
+        from overlay.parallel import is_free_threaded, pick_executor
+
+        jobs = [(*w, banded, width) for w in words] * reps
+        for j in jobs[:workers]:  # warm main thread / each process worker
+            _vocab_render(j)
+        mode = "threads (free-threaded)" if is_free_threaded() else "processes (GIL fallback)"
+        best = float("inf")
+        for _ in range(reps):
+            with pick_executor(workers, initializer=_vocab_init) as ex:
+                list(ex.map(_vocab_render, jobs[: len(words)]))  # warm the process pool
+                t0 = time.perf_counter()
+                list(ex.map(_vocab_render, jobs))
+                best = min(best, time.perf_counter() - t0)
+        n = len(jobs)
+        print(f"=== PARALLEL batch render ({mode}, {workers} workers) ===")
+        print(f"  {n} renders in {best * 1000:.0f} ms   →  {best / n * 1000:.2f} ms/render   "
+              f"({n / best:.0f} renders/s)")
+        return gil_rc
+
+    # --- serial path: per-word latency distribution (the default py-spy target) ---
+    full_ms: list[float] = []
+    cold_ms: list[float] = []
+    slowest: list[tuple[float, str, int]] = []
+    for _ in range(reps):
+        for surface, lemma, reading, pos in words:
+            job = (surface, lemma, reading, pos, banded, width)
+            t0 = time.perf_counter()
+            h = _vocab_render(job)
+            full_ms.append((time.perf_counter() - t0) * 1000.0)
+            t1 = time.perf_counter()
+            from overlay.app.tokenize import Token
+
+            LazyPanel(panel_rows(ds.entry_for(Token(surface, lemma, reading, pos, 0, len(surface))), width), width).render_to(432)
+            cold_ms.append((time.perf_counter() - t1) * 1000.0)
+            slowest.append((full_ms[-1], surface, h))
+
+    def _p(samples: list[float], q: float) -> float:
+        s = sorted(samples)
+        return s[min(len(s) - 1, int(q * len(s)))]
+
+    print(f"=== {'BANDED viewport' if banded else 'FULL panel'} render (entry_for + render) ===")
+    print(
+        f"  median {statistics.median(full_ms):7.1f}   p90 {_p(full_ms, 0.9):7.1f}   "
+        f"p99 {_p(full_ms, 0.99):7.1f}   MAX {max(full_ms):7.1f}  ms"
+    )
+    print("=== COLD head paint (viewport only) ===")
+    print(
+        f"  median {statistics.median(cold_ms):7.1f}   p90 {_p(cold_ms, 0.9):7.1f}   "
+        f"MAX {max(cold_ms):7.1f}  ms"
+    )
+    print("\n  slowest 10 full renders (word, full_ms, panel_px):")
+    for full, word, px in sorted({s[1]: s for s in slowest}.values(), reverse=True)[:10]:
+        print(f"    {word:<8}{full:>9.1f}{px:>10}")
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {
+                    "runtime": rt,
+                    "words": len(words),
+                    "full_median_ms": statistics.median(full_ms),
+                    "full_p99_ms": _p(full_ms, 0.99),
+                    "full_max_ms": max(full_ms),
+                    "cold_median_ms": statistics.median(cold_ms),
+                    "cold_max_ms": max(cold_ms),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote vocab baseline → {json_path}")
+    return gil_rc
+
+
+def run_windowed(reps: int, rt: dict, require_ft: bool, json_path: str | None = None) -> int:
+    """Windowed (banded) vs whole-panel render on the real pathological corpus (かける/する/手…).
+
+    Contrasts today's "render the whole tall bitmap" path against the O(viewport) windowed engine
+    (``overlay.render.banded.WindowedPanel``): cold first paint renders only the head blocks, an
+    incremental scroll frame re-composites just the visible window, and the retained pixel set stays
+    bounded no matter how tall the entry — no 62 kpx allocation, no ~1 s tail stall."""
+    from overlay.render.banded import WindowedPanel
+
+    ds, tag = _load_dict_set()
+    if ds is None:
+        ds = _SyntheticDS()
+        corpus = [("synthetic", "掛ける", "かける")]
+        tag = "synthetic fallback (no real dicts in overlay.toml)"
+    else:
+        corpus = _pathological_corpus(ds)
+
+    reader = _cold_reader(ds)
+    width, cap = reader.tip_width, reader._tip_cap()
+    step = round(OSD[1] * 0.12)
+    cache_cap = 8  # LRU pixel-cache cap — the bounded working set the engine keeps while scrolling
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(f"\nSaitenka overlay — WINDOWED vs whole-panel render   ({tag})")
+    print(format_runtime(rt))
+    print(f"tip_width: {width}   viewport cap: {cap}px   reps/word: {reps}   cache cap: {cache_cap} blocks\n")
+    hdr = f"{'word':<12}{'blocks':>7}{'full_px':>9}{'full_ms':>9}{'win_cold':>10}{'win_scroll':>12}{'peak_blk':>9}"
+    print(hdr)
+    print("-" * len(hdr))
+
+    out: list[dict] = []
+    for _source, term, reading in corpus:
+        tok = Token(term, term, reading, "名詞", 0, len(term))
+        try:
+            entry = ds.entry_for(tok)
+        except Exception:  # a word absent from the configured dicts is skipped
+            continue
+        n_blocks = len(panel_rows(entry, width))
+        full_h = LazyPanel(panel_rows(entry, width), width).finish().height
+
+        def _full(e=entry):
+            LazyPanel(panel_rows(e, width), width).finish()  # today: the whole tall bitmap + tail
+
+        def _cold(e=entry):
+            WindowedPanel(
+                panel_rows(e, width), width, max_cached_blocks=cache_cap, compress=True
+            ).viewport(0, cap, overscan=step)  # head blocks only
+
+        warm = WindowedPanel(
+            panel_rows(entry, width), width, max_cached_blocks=cache_cap, compress=True
+        )
+        peak = 0
+        for s in range(0, max(1, full_h - cap), step):  # warm it, tracking the retained-pixel peak
+            warm.viewport(s, cap, overscan=step)
+            peak = max(peak, warm.cached_blocks)
+        offs = list(range(0, max(1, full_h - cap), step)) or [0]
+        cyc = {"i": 0}
+
+        # one incremental scroll frame on a warm panel (re-composite the window); loop vars bound as
+        # defaults (B023) — measure() calls it synchronously within this iteration anyway.
+        def _scroll(warm=warm, offs=offs, cyc=cyc):
+            warm.viewport(offs[cyc["i"] % len(offs)], cap, overscan=step)
+            cyc["i"] += 1
+
+        full = measure(_full, reps)
+        wcold = measure(_cold, reps)
+        wscroll = measure(_scroll, max(reps, len(offs)))
+        print(
+            f"{term:<12}{n_blocks:>7}{full_h:>9}{full['p50']:>9.1f}"
+            f"{wcold['p50']:>10.1f}{wscroll['p50']:>12.2f}{peak:>9}"
+        )
+        out.append(
+            {
+                "word": term,
+                "blocks": n_blocks,
+                "full_px": full_h,
+                "full_ms_p50": full["p50"],
+                "windowed_cold_ms_p50": wcold["p50"],
+                "windowed_scroll_ms_p50": wscroll["p50"],
+                "peak_cached_blocks": peak,
+            }
+        )
+
+    print(
+        "\nfull_ms   = render the WHOLE panel (today's tail); full_px = its bitmap height "
+        "(the 62 kpx artefact)\nwin_cold  = windowed head-only first paint; win_scroll = one "
+        "incremental scroll frame\npeak_blk  = max retained blocks while scrolling the whole entry "
+        f"(bounded by the {cache_cap}-block cap + visible span), never the full block count"
+    )
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps({"runtime": rt, "tag": tag, "words": out}, indent=2), encoding="utf-8"
+        )
+        print(f"\nwrote windowed baseline → {json_path}")
+    return gil_rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--reps", type=int, default=10)
@@ -499,6 +729,34 @@ def main() -> int:
         "--require-ft",
         action="store_true",
         help="fail if the GIL is enabled (a C-extension re-enabled it) — for free-threaded runs",
+    )
+    ap.add_argument(
+        "--vocab",
+        metavar="PATH",
+        nargs="?",
+        const=str(Path(__file__).with_name("vocab.json")),
+        help="render-pipeline benchmark over a frozen word list (JSON: [[surface,lemma,reading,pos],…]); "
+        "bare flag uses the bundled examples/vocab.json (608 unique content words from one real anime "
+        "episode). The subtitle parser is out of the loop, so a py-spy profile isolates "
+        "lookup/decode/walk/layout",
+    )
+    ap.add_argument(
+        "--banded",
+        action="store_true",
+        help="--vocab: render each word's windowed viewport (small blocks) instead of the full panel",
+    )
+    ap.add_argument(
+        "--parallel",
+        action="store_true",
+        help="--vocab: render the batch across a pool (overlay.parallel: threads on free-threading, "
+        "processes on a GIL build — py-spy needs --subprocesses for the process fallback)",
+    )
+    ap.add_argument("--workers", type=int, default=8, help="--vocab --parallel: pool size")
+    ap.add_argument(
+        "--windowed",
+        action="store_true",
+        help="compare the windowed (banded) render engine vs the whole-panel path on the "
+        "pathological corpus — cold first paint, incremental scroll frame, bounded retained pixels",
     )
     ap.add_argument(
         "--stress",
@@ -525,6 +783,19 @@ def main() -> int:
         return run_stress(
             args.reps, rt, args.require_ft, args.json, args.max_frame_ms, args.max_rss_mb
         )
+    if args.vocab:
+        return run_vocab(
+            args.vocab,
+            args.reps,
+            rt,
+            args.require_ft,
+            args.json,
+            banded=args.banded,
+            parallel=args.parallel,
+            workers=args.workers,
+        )
+    if args.windowed:
+        return run_windowed(args.reps, rt, args.require_ft, args.json)
     if args.pathological:
         return run_pathological(args.reps, rt, args.require_ft, args.json)
 
