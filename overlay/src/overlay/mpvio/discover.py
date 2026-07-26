@@ -76,10 +76,8 @@ def _exe_from_command(cmd: str | None) -> str | None:
     return cmd.split(" %", 1)[0].split()[0] or None  # bare: up to the "%1" arg → first token
 
 
-def _windows_registry_mpv() -> str | None:
-    """Find mpv/mpv.net via the registry when it's installed but off-PATH: App Paths first (installers
-    register the full exe path there), then the default video-file handler — the latter only trusted
-    when it resolves to a known mpv binary (the default app is often VLC/PotPlayer/Store Films&TV)."""
+def _registry_app_paths_mpv() -> str | None:
+    """App Paths registry entries — installers register the full exe path there."""
     for root in ("HKCU", "HKLM"):
         for base in (
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
@@ -89,6 +87,12 @@ def _windows_registry_mpv() -> str | None:
                 val = _reg_value(root, rf"{base}\{exe_name}")
                 if val and _is_exe(p := Path(val.strip('"'))):
                     return str(p)
+    return None
+
+
+def _registry_default_handler_mpv() -> str | None:
+    """The default video-file handler — only trusted when it resolves to a known mpv binary (the
+    default app is often VLC/PotPlayer/Store Films&TV)."""
     for ext in (".mkv", ".mp4", ".webm"):
         progid = _reg_value(
             "HKCU",
@@ -101,6 +105,12 @@ def _windows_registry_mpv() -> str | None:
         if exe and Path(exe).name.lower() in _MPV_EXE_NAMES and _is_exe(Path(exe)):
             return exe
     return None
+
+
+def _windows_registry_mpv() -> str | None:
+    """Find mpv/mpv.net via the registry when it's installed but off-PATH: App Paths first, then the
+    default video-file handler."""
+    return _registry_app_paths_mpv() or _registry_default_handler_mpv()
 
 
 def _is_exe(p: Path) -> bool:

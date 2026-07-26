@@ -8,7 +8,7 @@ The chain of facts this pins (all measured 2026-07-26, see the `saitenka-render-
 
 1. On the **free-threaded** build (3.14t, what we ship) the escape hatch is compiled out —
    ``_imp._override_multi_interp_extensions_check() cannot be used in the free-threaded build`` — so
-   this can't even be attempted there. It requires a **GIL-ful** CPython (e.g. Homebrew python3.14).
+   this can't even be attempted there. It requires a GIL-enabled CPython (e.g. Homebrew python3.14).
 2. With the ``-1`` override, a *single* sub-interpreter imports PIL/numpy and renders a panel fine
    (numpy still warns it "does not properly support sub-interpreters").
 3. Rendering from **N sub-interpreters in parallel** crashes. faulthandler pins it inside
@@ -40,7 +40,9 @@ def main() -> int:
         return 0
 
     if getattr(sys, "_is_gil_enabled", lambda: True)() is False:
-        print("free-threaded build — the override hatch is unavailable here; run on GIL-ful 3.14.")
+        print(
+            "free-threaded build — the override hatch is unavailable here; run on GIL-enabled 3.14."
+        )
         return 0
 
     from concurrent import interpreters

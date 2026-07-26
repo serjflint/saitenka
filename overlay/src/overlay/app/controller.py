@@ -882,67 +882,93 @@ class Reader:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
-            if self._nudge_pending:  # a draw landed while paused last tick — poke the throttled OSD
-                self._nudge_pending = False
-                self.ov.repaint()
-                log.debug("paused OSD nudge: re-flushed %d overlay(s)", len(self.ov._live))
-                if otel_metrics.osd_paused_nudge is not None:
-                    otel_metrics.osd_paused_nudge.add(1)
+            self._flush_paused_nudge()
             ops_before = self.ov.ops
-            scroll_steps = 0
-            for ev in self.ipc.drain_events():
-                kind = ev.get("event")
-                if kind == "property-change":  # observed state — no round-trips
-                    self._on_property_change(ev)
-                elif kind == "client-message":
-                    msg = (ev.get("args") or [""])[0]
-                    if msg == SCROLL_UP_MSG:
-                        scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
-                    elif msg == SCROLL_DOWN_MSG:
-                        scroll_steps += 1
-                    else:
-                        self._handle(msg)
+            scroll_steps = self._drain_events()
             if scroll_steps:
                 self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
-            if self._toast_until and time.monotonic() > self._toast_until:
-                self.ov.hide(TOAST_ID)
-                self._toast_until = 0.0
-            if self._flash_until and time.monotonic() >= self._flash_until:
-                oid, self._flash_oid, self._flash_until = self._flash_oid, None, 0.0
-                if oid == NESTED_ID:
-                    self._render_nested_view()  # redraw without the highlight border
-                elif oid == TIP_ID:
-                    self._render_tip_view()
+            self._expire_toast()
+            self._expire_flash()
             if self.refresh_osd() and self.tokens:
                 self._draw_subtitle()
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
-            # progressive startup: inject background-loaded deps (once), else animate the spinner
-            if self._pending_deps is not None:
-                deps, self._pending_deps = self._pending_deps, None
-                self._apply_deps(deps)
-            elif self._loading:
-                self._draw_loading()
+            self._apply_pending_deps_or_spinner()
             self._update_hover()
-            if self._tip_dirty:  # a worker finished the shown panel's deferred tail
-                self._tip_dirty = False
-                self._refresh_tip_full()
-            if self._nest.dirty:  # …or the nested scan popup's tail
-                self._nest.dirty = False
-                self._refresh_nested_full()
+            self._refresh_dirty_panels()
             self._update_prefetch()
             if self._translation_visible() and self._secondary_text() != self._trans_text:
                 self._draw_translation()  # keep the (manual or auto) translation current as subs change
-            # An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
-            # presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
-            # their own, and re-adding every tick would be wasteful.
-            if self.ov.ops != ops_before and self._prop("pause"):
-                self._nudge_pending = True
-                if otel_metrics.osd_paused_draw is not None:
-                    otel_metrics.osd_paused_draw.add(1)
+            self._schedule_paused_nudge(ops_before)
             return True
         except (OSError, ValueError):
             return False
+
+    def _flush_paused_nudge(self) -> None:
+        """A draw landed while paused last tick — poke the throttled OSD so mpv actually presents it."""
+        if not self._nudge_pending:
+            return
+        self._nudge_pending = False
+        self.ov.repaint()
+        log.debug("paused OSD nudge: re-flushed %d overlay(s)", len(self.ov._live))
+        if otel_metrics.osd_paused_nudge is not None:
+            otel_metrics.osd_paused_nudge.add(1)
+
+    def _drain_events(self) -> int:
+        """Consume this tick's mpv events; returns the net scroll delta (coalesced, not yet applied)."""
+        scroll_steps = 0
+        for ev in self.ipc.drain_events():
+            kind = ev.get("event")
+            if kind == "property-change":  # observed state — no round-trips
+                self._on_property_change(ev)
+            elif kind == "client-message":
+                msg = (ev.get("args") or [""])[0]
+                if msg == SCROLL_UP_MSG:
+                    scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
+                elif msg == SCROLL_DOWN_MSG:
+                    scroll_steps += 1
+                else:
+                    self._handle(msg)
+        return scroll_steps
+
+    def _expire_toast(self) -> None:
+        if self._toast_until and time.monotonic() > self._toast_until:
+            self.ov.hide(TOAST_ID)
+            self._toast_until = 0.0
+
+    def _expire_flash(self) -> None:
+        if not (self._flash_until and time.monotonic() >= self._flash_until):
+            return
+        oid, self._flash_oid, self._flash_until = self._flash_oid, None, 0.0
+        if oid == NESTED_ID:
+            self._render_nested_view()  # redraw without the highlight border
+        elif oid == TIP_ID:
+            self._render_tip_view()
+
+    def _apply_pending_deps_or_spinner(self) -> None:
+        """Progressive startup: inject background-loaded deps (once), else animate the spinner."""
+        if self._pending_deps is not None:
+            deps, self._pending_deps = self._pending_deps, None
+            self._apply_deps(deps)
+        elif self._loading:
+            self._draw_loading()
+
+    def _refresh_dirty_panels(self) -> None:
+        if self._tip_dirty:  # a worker finished the shown panel's deferred tail
+            self._tip_dirty = False
+            self._refresh_tip_full()
+        if self._nest.dirty:  # …or the nested scan popup's tail
+            self._nest.dirty = False
+            self._refresh_nested_full()
+
+    def _schedule_paused_nudge(self, ops_before: int) -> None:
+        """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
+        presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
+        their own, and re-adding every tick would be wasteful."""
+        if self.ov.ops != ops_before and self._prop("pause"):
+            self._nudge_pending = True
+            if otel_metrics.osd_paused_draw is not None:
+                otel_metrics.osd_paused_draw.add(1)
 
     def _maybe_log_stall(self) -> None:
         """One-time startup diagnostic for 'mpv plays but the overlay can't draw'. The RELIABLE failure
