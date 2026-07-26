@@ -678,6 +678,92 @@ def uninstall_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin 
 
 
 @app.command
+def reinstall(
+    *,
+    source: Annotated[
+        Literal["auto", "pypi", "github"],
+        cyclopts.Parameter(help="where to reinstall from (auto = PyPI, fall back to GitHub)"),
+    ] = "auto",
+    ref: Annotated[
+        str | None,
+        cyclopts.Parameter(
+            help="GitHub tag/branch to install (e.g. v0.5.0 or main); implies --source github. "
+            "Default: the latest RELEASE tag, falling back to main"
+        ),
+    ] = None,
+    yes: Annotated[
+        bool, cyclopts.Parameter(negative=(), help="don't prompt; just run the reinstall")
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; detect_extras/reinstall_attempts are unit-tested
+    """Reinstall (pull the latest) preserving your extras. A bare ``uv tool install --reinstall``
+    *replaces* the extras set (silently dropping deinflect/telemetry); this detects what's installed
+    and keeps it. From PyPI, falling back to GitHub (which also carries the GPL deinflect add-on). The
+    GitHub attempt targets the latest RELEASE tag by default — not bleeding-edge main; pass ``--ref
+    main`` for that, or ``--ref vX.Y.Z`` to pin a release."""
+    import subprocess
+
+    from overlay.app.lifecycle import detect_extras, latest_release_tag, reinstall_attempts
+
+    extras = detect_extras()
+    github_ref: str | None = None
+    if ref is not None:
+        source = "github"  # an explicit --ref pins the GitHub source
+        github_ref = ref
+    elif source in ("auto", "github"):
+        github_ref = latest_release_tag()  # default the GitHub attempt to the latest release
+        print(f"latest release: {github_ref}" if github_ref else "no release info — using main")
+    attempts = reinstall_attempts(extras, source=source, github_ref=github_ref)
+    print(f"detected extras: {', '.join(extras) or '(none)'}")
+    if not yes and input(
+        f"Reinstall keeping [{','.join(extras) or 'none'}]? [y/N] "
+    ).strip().lower() not in ("y", "yes"):
+        print("cancelled")
+        return 1
+    rc = 1
+    for i, cmd in enumerate(attempts):
+        print("  $", " ".join(cmd))
+        rc = subprocess.run(cmd, check=False).returncode
+        if rc == 0:
+            return 0
+        if i + 1 < len(attempts):
+            print(f"  that source failed (exit {rc}) — trying the next…")
+    return rc
+
+
+@app.command
+def uninstall(
+    *,
+    yes: Annotated[
+        bool, cyclopts.Parameter(negative=(), help="don't prompt; delete without confirming")
+    ] = False,
+    keep_dicts: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative=(), help="keep the (expensive) dictionary DB; remove everything else"
+        ),
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; the removal logic is unit-tested in test_lifecycle
+    """Delete saitenka's config, dictionaries, cache/logs, crash reports and mpv plugin. Leaves mpv and
+    ffmpeg installed. Does NOT remove the saitenka-overlay binary itself — the last line tells you how."""
+    from overlay.app.lifecycle import uninstall as do_uninstall
+
+    confirm = (
+        (lambda _p: True)
+        if yes
+        else (lambda p: input(f"{p} [y/N] ").strip().lower() in ("y", "yes"))
+    )
+    removed = do_uninstall(confirm, keep_dicts=keep_dicts)
+    if not removed:
+        print("nothing removed (no saitenka data found, or cancelled)")
+    else:
+        for d in removed:
+            print(f"  removed {d}")
+    print("mpv / ffmpeg left untouched.")
+    print("To remove the app itself:  uv tool uninstall saitenka-overlay")
+    return 0
+
+
+@app.command
 def report(
     *,
     out: Annotated[
