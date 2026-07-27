@@ -183,6 +183,39 @@ First run on the full 19-dict rig flagged **MAX ~950 ms / p99 ~920 ms** per op �
 monolingual entries blowing the frame budget under load (the known cold-p95 weakness, now visible in a
 sustained scenario). Confirms the open lever: **clip/stream the first def body**, not just defer later ones.
 
+### `--timeline` — idle-paced session (the felt-experience ground truth)
+
+`--stress` is deliberately worst-case: zero idle time, a shrunk 24-entry cache (vs. the real 128
+default), back-to-back heavy words. Real usage is the opposite — idle dominates (video plays, mouse
+doesn't move) punctuated by occasional hovers, with the background prefetch worker (`prefetch_lookahead`)
+warming ahead during the idle gaps. `--timeline` (`vibe/hot-path-idle-spreading-plan.md` Stage 1) models
+that: synthetic subtitle cues built from the real episode vocabulary (`examples/vocab.json` — 608 words
+from one Nippon Sangoku episode), advanced on a real clock (`time.sleep` between cues, so the real
+prefetch threads get real wall-clock idle time, not simulated time), with occasional injected hovers.
+Reports hover latency split **idle-warm** (the word's dictionary entries were already decoded before the
+hover) vs. **cold** (decoded synchronously, on hover), plus the worker's **lead time** (enqueued-as-upcoming
+→ decoded) against the idle budget it actually had (`lookahead × dwell`).
+
+Baseline — 2026-07-26, defaults (`--timeline-cues 80 --timeline-dwell-s 0.3 --timeline-lookahead 3`,
+900ms idle budget), 9 dicts + 9 freq + 1 pitch:
+
+| metric | p50 | p95 | max | n |
+|---|---|---|---|---|
+| hover latency — idle-warm | 36.8 | 75.7 | 75.7 | 20 |
+| hover latency — cold | — | — | — | 0 |
+| worker lead time (enqueued → decoded) | 175.5 | 410.6 | 410.6 | 19 |
+
+**0/20 misses** — at this dwell/lookahead the worker never fell behind; every hover in the run landed
+on an already-decoded word. **But "idle-warm" is not free**: idle-time warming (Stage 2) is decode-only
+(`entry_for`, no layout) — it does *not* pre-render the panel (Stage 4, pre-compiling heads, is explicitly
+deferred/opt-in because a pathological word's full render costs seconds, see `panel_mem.py` in the plan).
+So a first hover on a passively-watched (never engaged/paused) line still pays real layout + BGRA + upload
+cost even when fully idle-warm — this 36.8ms p50 is *that* cost, not the ~1-2ms "warm hover" KPI above,
+which assumes a FULL panel prefetch (only triggered once the user is already engaged — paused or hovering
+the video — which normal passive reading isn't, until the moment of the hover itself). Confirms the plan's
+Stage 4 lever (opt-in current-line head pre-compile) is the next step if this 30-75ms first-hover cost on
+a fresh line ever needs to shrink further; not yet built.
+
 ### Profiling & continuous benchmarking (verified 2026-07)
 
 To *explain* a regression (not just report it): **Scalene** is the one profiler verified to work on

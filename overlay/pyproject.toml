@@ -282,6 +282,9 @@ test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integra
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -m 'not slow'" }
 cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not slow'"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
+# Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between
+# synthetic cues, so it's slower than the other benches; not folded into `bench`/`poe all`.
+timeline-bench = "uv run --extra full python examples/bench_responsiveness.py --timeline"
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
 smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
