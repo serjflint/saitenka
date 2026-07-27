@@ -57,6 +57,9 @@ def test_telemetry_state_reflects_config_flag(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
     set_enabled(enabled=True, dest=cfg)
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    # Isolate the cache dir too: export_dir() falls back to cache_dir()/telemetry, so without this the
+    # developer's own real session traces leak in and trace_exists is spuriously True.
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     st = telemetry_state()
     assert st.config_enabled is True
