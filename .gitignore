@@ -28,6 +28,10 @@ dist/
 build/
 *.whl
 
+# release scratch: curated changelog entry for the in-progress release (release.py prepare); its
+# content is folded into CHANGELOG.md, not committed itself
+/RELEASE_NOTES.md
+
 # render / test scratch
 out.png
 *.out.png
