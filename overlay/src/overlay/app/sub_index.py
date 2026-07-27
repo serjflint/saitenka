@@ -82,6 +82,23 @@ def _ass_ts(raw: str) -> float | None:
     return int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3]) + int(m[4].ljust(2, "0")) / 100
 
 
+def _parse_format_line(fields_str: str) -> tuple[int, int, int]:
+    fields = [f.strip().lower() for f in fields_str.split(",")]
+    return _index_of(fields, "start"), _index_of(fields, "end"), _index_of(fields, "text")
+
+
+def _parse_dialogue_line(rest: str, start_i: int, end_i: int, text_i: int) -> SubCue | None:
+    fields = rest.split(",")
+    if start_i >= len(fields) or end_i >= len(fields) or text_i >= len(fields):
+        return None
+    start = _ass_ts(fields[start_i])
+    end = _ass_ts(fields[end_i])
+    if start is None or end is None:
+        return None
+    text = _sanitize(",".join(fields[text_i:]))
+    return SubCue(start, end, text) if text else None
+
+
 def parse_ass(content: str) -> list[SubCue]:
     """Parse ASS/SSA: read the ``[Events]`` ``Format:`` line for field order, then the ``Dialogue:``
     rows (the Text field is last and may itself contain commas → re-join the tail)."""
@@ -98,24 +115,15 @@ def parse_ass(content: str) -> list[SubCue]:
         if not in_events:
             continue
         if t.startswith("Format:"):
-            fields = [f.strip().lower() for f in t[len("Format:") :].split(",")]
-            start_i, end_i = _index_of(fields, "start"), _index_of(fields, "end")
-            text_i = _index_of(fields, "text")
+            start_i, end_i, text_i = _parse_format_line(t[len("Format:") :])
             continue
         if not t.startswith("Dialogue:"):
             continue
         if start_i < 0 or end_i < 0 or text_i < 0:
             continue
-        fields = t[len("Dialogue:") :].split(",")
-        if start_i >= len(fields) or end_i >= len(fields) or text_i >= len(fields):
-            continue
-        start = _ass_ts(fields[start_i])
-        end = _ass_ts(fields[end_i])
-        if start is None or end is None:
-            continue
-        text = _sanitize(",".join(fields[text_i:]))
-        if text:
-            cues.append(SubCue(start, end, text))
+        cue = _parse_dialogue_line(t[len("Dialogue:") :], start_i, end_i, text_i)
+        if cue:
+            cues.append(cue)
     return cues
 
 
@@ -171,6 +179,30 @@ class SubIndex:
                     return i
         return matches[0]
 
+    def _locate_by_text(self, text: str, preferred: int, sub_start: float | None) -> int | None:
+        norm = _norm(text)
+        matches = [i for i, c in enumerate(self.cues) if _norm(c.text) == norm]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            return self._disambiguate_text_matches(matches, preferred, sub_start)
+        return None
+
+    def _locate_by_sub_start(self, sub_start: float) -> int | None:
+        for i, c in enumerate(self.cues):
+            if c.start <= sub_start < c.end:
+                return i
+        return None
+
+    def _locate_by_time_pos(self, time_pos: float) -> int | None:
+        for i, c in enumerate(self.cues):
+            if c.end > time_pos and c.start <= time_pos + ACTIVE_CUE_LOOKAHEAD_SEC:
+                return i
+        for i, c in enumerate(self.cues):
+            if c.end > time_pos:
+                return i
+        return None
+
     def locate(
         self,
         *,
@@ -188,27 +220,20 @@ class SubIndex:
         timing. Only when the text gives nothing (a gap, or mpv re-wrapped it) do we fall back to the
         exact ``sub-start`` timing, then ``time-pos`` (active-or-upcoming, else the next cue) — the
         same signals SubMiner's findActiveSubtitleCueIndex uses."""
-        cues = self.cues
-        if not cues:
+        if not self.cues:
             return -1
         if text:
-            norm = _norm(text)
-            matches = [i for i, c in enumerate(cues) if _norm(c.text) == norm]
-            if len(matches) == 1:
-                return matches[0]
-            if matches:
-                return self._disambiguate_text_matches(matches, preferred, sub_start)
+            found = self._locate_by_text(text, preferred, sub_start)
+            if found is not None:
+                return found
         if sub_start is not None:
-            for i, c in enumerate(cues):
-                if c.start <= sub_start < c.end:
-                    return i
+            found = self._locate_by_sub_start(sub_start)
+            if found is not None:
+                return found
         if time_pos is not None:
-            for i, c in enumerate(cues):
-                if c.end > time_pos and c.start <= time_pos + ACTIVE_CUE_LOOKAHEAD_SEC:
-                    return i
-            for i, c in enumerate(cues):
-                if c.end > time_pos:
-                    return i
+            found = self._locate_by_time_pos(time_pos)
+            if found is not None:
+                return found
         return -1
 
     def target(self, current: int, delta: int, inside: bool = True) -> int:

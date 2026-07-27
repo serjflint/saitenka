@@ -208,6 +208,33 @@ def _load(
         con.close()
 
 
+def _parse_card_json(data: str | None) -> tuple[float | None, float | None]:
+    if not data:
+        return None, None
+    try:
+        j = json.loads(data)
+        return j.get("s"), j.get("decay")
+    except Exception:  # best-effort parse - fall back to a default
+        return None, None
+
+
+def _classify_state(
+    ctype: int, r: float | None, ivl: int, forgotten_r: float, mature_ivl: int
+) -> str:
+    """``ctype``: 0=new, 1=lrn, 2=rev, 3=relearn."""
+    match ctype:
+        case 0:
+            return "new"
+        case 1 | 3:
+            return "learning"
+        case _ if r is not None and r < forgotten_r:
+            return "forgotten"
+        case _ if ivl and ivl >= mature_ivl:
+            return "known"
+        case _:
+            return "young"
+
+
 def _build_card_info(
     con: sqlite3.Connection,
     last_rev: dict[int, int],
@@ -218,33 +245,16 @@ def _build_card_info(
     decay_override: float | None,
 ) -> dict[int, dict]:
     """nid → best card info (``{"st": state, "k": knowledge_score}``) — when a note has more than
-    one card, the highest-knowledge card wins. ``ctype``: 0=new, 1=lrn, 2=rev, 3=relearn."""
+    one card, the highest-knowledge card wins."""
     card_info: dict[int, dict] = {}
     for cid, nid, ctype, ivl, _queue, data in con.execute(
         "SELECT id,nid,type,ivl,queue,data FROM cards"
     ):
-        s = d_card = None
-        if data:
-            try:
-                j = json.loads(data)
-                s = j.get("s")
-                d_card = j.get("decay")
-            except Exception:  # noqa: S110  # best-effort parse - fall back to a default
-                pass
+        s, d_card = _parse_card_json(data)
         decay = decay_override or (-d_card if d_card else FSRS_DEFAULT_DECAY)
         elapsed = (now_ms - last_rev[cid]) / 86_400_000.0 if cid in last_rev else None
         r = retrievability(s, elapsed, decay) if elapsed is not None else None
-        # classify
-        if ctype == 0:
-            st = "new"
-        elif ctype in (1, 3):
-            st = "learning"
-        elif r is not None and r < forgotten_r:
-            st = "forgotten"
-        elif ivl and ivl >= mature_ivl:
-            st = "known"
-        else:
-            st = "young"
+        st = _classify_state(ctype, r, ivl, forgotten_r, mature_ivl)
         # knowledge score for deduplication (higher = better)
         k = (s or 0.0) * (r if r is not None else 1.0) if ctype == 2 else 0.0
         # keep best card per note
@@ -268,6 +278,18 @@ def _read_field_names(con: sqlite3.Connection) -> dict[int, list[str]]:
     return field_names
 
 
+def _fallback_term_scan(parts: list[str], reading: str) -> tuple[str, str]:
+    """Scan every field for the first word-like value, taking the next field as its reading."""
+    for i, p in enumerate(parts):
+        cleaned = _strip_markup(p)
+        base = _term_base(cleaned)
+        if _wordlike(base):
+            if i + 1 < len(parts):  # next field might be reading
+                reading = _to_reading(_strip_markup(parts[i + 1]))
+            return base, reading
+    return "", reading
+
+
 def _extract_term_reading(names: list[str], parts: list[str]) -> tuple[str, str]:
     """(term, reading) for one note: match known field names (``_TERM_FIELDS``/``_READING_FIELDS``)
     at their mapped position; when no field map is available (or none matched), scan every field
@@ -283,14 +305,7 @@ def _extract_term_reading(names: list[str], parts: list[str]) -> tuple[str, str]
             reading = _to_reading(cleaned)
 
     if not term and parts:
-        for i, p in enumerate(parts):
-            cleaned = _strip_markup(p)
-            base = _term_base(cleaned)
-            if _wordlike(base):
-                term = base
-                if i + 1 < len(parts):  # next field might be reading
-                    reading = _to_reading(_strip_markup(parts[i + 1]))
-                break
+        term, reading = _fallback_term_scan(parts, reading)
     return term, reading
 
 

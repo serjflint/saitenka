@@ -147,6 +147,16 @@ class PerfOptions:
     # panel_cache's LRU bounds RETAINED size, not concurrently-building PIL objects in flight
 
 
+# Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).
+_OPTION_GROUPS: dict[str, str] = {
+    **{f.name: "keys" for f in fields(KeyOptions)},
+    **{f.name: "tooltip" for f in fields(TooltipOptions)},
+    **{f.name: "mining" for f in fields(MiningOptions)},
+    **{f.name: "translation" for f in fields(TranslationOptions)},
+    **{f.name: "perf" for f in fields(PerfOptions)},
+}
+
+
 @dataclass(frozen=True)
 class ReaderOptions:
     """All Reader knobs, grouped by concern."""
@@ -163,33 +173,27 @@ class ReaderOptions:
     def with_overrides(self, **kw) -> ReaderOptions:
         """Route flat legacy kwargs (``mine_key=…``, ``tip_max_frac=…``) onto the right group.
         Unknown names raise TypeError so typos stay loud."""
-        key_names = {f.name for f in fields(KeyOptions)}
-        tip_names = {f.name for f in fields(TooltipOptions)}
-        mine_names = {f.name for f in fields(MiningOptions)}
-        trans_names = {f.name for f in fields(TranslationOptions)}
-        perf_names = {f.name for f in fields(PerfOptions)}
         keys, tooltip = self.keys, self.tooltip
         mining, translation = self.mining, self.translation
         perf = self.perf
-        prefetch = self.prefetch
-        resync = self.resync
-        overlay_id_base = self.overlay_id_base
+        prefetch, resync, overlay_id_base = self.prefetch, self.resync, self.overlay_id_base
         for name, value in kw.items():
+            group = _OPTION_GROUPS.get(name)
             if name == "prefetch":
                 prefetch = bool(value)
             elif name == "resync":
                 resync = bool(value)
             elif name == "overlay_id_base":
                 overlay_id_base = int(value)
-            elif name in key_names:
+            elif group == "keys":
                 keys = replace(keys, **{name: value})
-            elif name in tip_names:
+            elif group == "tooltip":
                 tooltip = replace(tooltip, **{name: value})
-            elif name in mine_names:
+            elif group == "mining":
                 mining = replace(mining, **{name: value})
-            elif name in trans_names:
+            elif group == "translation":
                 translation = replace(translation, **{name: value})
-            elif name in perf_names:
+            elif group == "perf":
                 perf = replace(perf, **{name: value})
             else:
                 raise TypeError(f"unknown Reader option: {name!r}")

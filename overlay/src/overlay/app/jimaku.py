@@ -233,6 +233,15 @@ class JimakuClient:
                 "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
             )
 
+    @staticmethod
+    def _http_error_exc(e: urllib.error.HTTPError, path: str) -> JimakuError:
+        """400/401/404 → plain :class:`JimakuError` (not retried); 429/5xx → :class:`_JimakuRetryable`."""
+        detail = _http_error_detail(e)
+        if e.code == 429 or e.code >= 500:
+            return _JimakuRetryable(f"jimaku {e.code} for {path}: {e.reason}{detail}")
+        hint = "  (check your API key: `saitenka-overlay set-jimaku-key`)" if e.code == 401 else ""
+        return JimakuError(f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}")
+
     def _get(self, path: str, **params):
         url = f"{self.base}{path}"
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
@@ -249,19 +258,7 @@ class JimakuClient:
                     with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
                         return json.loads(r.read())
                 except urllib.error.HTTPError as e:  # 400/401/404 client · 429/5xx transient
-                    detail = _http_error_detail(e)
-                    if e.code == 429 or e.code >= 500:
-                        raise _JimakuRetryable(
-                            f"jimaku {e.code} for {path}: {e.reason}{detail}"
-                        ) from e
-                    hint = (
-                        "  (check your API key: `saitenka-overlay set-jimaku-key`)"
-                        if e.code == 401
-                        else ""
-                    )
-                    raise JimakuError(
-                        f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}"
-                    ) from e
+                    raise self._http_error_exc(e, path) from e
                 except urllib.error.URLError as e:  # DNS / timeout / connection reset — transient
                     raise _JimakuRetryable(f"jimaku network error for {path}: {e.reason}") from e
                 except ValueError as e:  # illegal Authorization header — a stray char in the key

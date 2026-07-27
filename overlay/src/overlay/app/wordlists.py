@@ -166,6 +166,26 @@ class FreqSource:
         self.dict_id = row.id
         self.title = row.title
 
+    def _entries_for_form(self, conn, form: str) -> list[tuple[str | None, str]]:
+        rows = conn.execute(
+            "SELECT reading, disp, rank FROM term_meta WHERE dict_id=? AND mode='freq' AND term=?",
+            (self.dict_id, form),
+        ).fetchall()
+        ents: list[tuple[str | None, str]] = []
+        for r, disp, rank in rows:
+            display = disp if disp is not None else (str(rank) if rank is not None else None)
+            if display is not None:
+                ents.append((r, display))
+        return ents
+
+    @staticmethod
+    def _dedup_preferring_reading(ents: list[tuple[str | None, str]], reading: str | None) -> str:
+        matched = [d for (r, d) in ents if reading is None or r is None or r == reading]
+        use = matched or [d for _, d in ents]
+        seen: set[str] = set()
+        out = [d for d in use if not (d in seen or seen.add(d))]  # type: ignore[func-returns-value]
+        return ", ".join(out)
+
     def display(self, forms, reading: str | None = None) -> str | None:
         """Display string for the first matching form. Prefer entries whose reading matches the
         token's (disambiguates 本命/ほんめい), else fall back to all entries for that term."""
@@ -173,23 +193,10 @@ class FreqSource:
         for f in forms:
             if not f:
                 continue
-            rows = conn.execute(
-                "SELECT reading, disp, rank FROM term_meta WHERE dict_id=? AND mode='freq' "
-                "AND term=?",
-                (self.dict_id, f),
-            ).fetchall()
-            ents: list[tuple[str | None, str]] = []
-            for r, disp, rank in rows:
-                display = disp if disp is not None else (str(rank) if rank is not None else None)
-                if display is not None:
-                    ents.append((r, display))
+            ents = self._entries_for_form(conn, f)
             if not ents:
                 continue
-            matched = [d for (r, d) in ents if reading is None or r is None or r == reading]
-            use = matched or [d for _, d in ents]
-            seen: set[str] = set()
-            out = [d for d in use if not (d in seen or seen.add(d))]  # type: ignore[func-returns-value]
-            return ", ".join(out)
+            return self._dedup_preferring_reading(ents, reading)
         return None
 
 

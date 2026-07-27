@@ -15,7 +15,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from overlay import otel_metrics
 from overlay.app import (
@@ -860,59 +860,39 @@ class Reader:
         bind("Z", SUB_DELAY_PLUS_MSG)  # sub-delay +0.1 s
         bind("x", SUB_DELAY_RESET_MSG)  # reset sub-delay to 0
 
+    # msg -> handler(reader). Subtitle-nav entries render the target cue from the index INSTANTLY
+    # (if we have one), then issue the real sub-seek so the video catches up behind it (read the
+    # position first: _sub_nav samples sub-start/time-pos before the seek moves them).
+    _HANDLERS: ClassVar[dict] = {
+        MINE_MSG: lambda r: r.mine_current(),
+        MINE_ALL_MSG: lambda r: r.bulk_mine(),
+        TRANS_MSG: lambda r: r.toggle_translation(),
+        PREVIEW_MSG: lambda r: r.replay_preview(),
+        SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
+        SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
+        SPEAK_MSG: lambda r: r.speak_hovered(),
+        COPY_MSG: lambda r: r.copy_hovered(),
+        COPY_LINE_MSG: lambda r: r.copy_line(),
+        COPY_CLICK_MSG: lambda r: r.copy_click(),
+        CLICK_MSG: lambda r: r.on_click(),
+        SUB_PREV_MSG: lambda r: (r._sub_nav(-1), r.ipc.command("sub-seek", "-1")),
+        SUB_NEXT_MSG: lambda r: (r._sub_nav(1), r.ipc.command("sub-seek", "1")),
+        SUB_REPLAY_MSG: lambda r: (r._sub_nav(0), r.ipc.command("sub-seek", "0")),
+        SUB_DELAY_MINUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "-0.1"),
+        SUB_DELAY_PLUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "0.1"),
+        KANJI_MSG: lambda r: r.kanji_current(),
+        TAB_PREV_MSG: lambda r: r._tab_step(-1),
+        TAB_NEXT_MSG: lambda r: r._tab_step(1),
+        TIP_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
+        TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
+        TIP_CLOSE_MSG: lambda r: r.set_hover(-1),
+        SUB_DELAY_RESET_MSG: lambda r: r.ipc.command("set_property", "sub-delay", "0"),
+    }
+
     def _handle(self, msg: str) -> None:
-        if msg == MINE_MSG:
-            self.mine_current()
-        elif msg == MINE_ALL_MSG:
-            self.bulk_mine()
-        elif msg == TRANS_MSG:
-            self.toggle_translation()
-        elif msg == PREVIEW_MSG:
-            self.replay_preview()
-        elif msg == SCROLL_UP_MSG:
-            self._scroll_tip(-round(self.osd[1] * 0.12))
-        elif msg == SCROLL_DOWN_MSG:
-            self._scroll_tip(round(self.osd[1] * 0.12))
-        elif msg == SPEAK_MSG:
-            self.speak_hovered()
-        elif msg == COPY_MSG:
-            self.copy_hovered()
-        elif msg == COPY_LINE_MSG:
-            self.copy_line()
-        elif msg == COPY_CLICK_MSG:
-            self.copy_click()
-        elif msg == CLICK_MSG:
-            self.on_click()
-        # subtitle navigation — render the target cue from the index INSTANTLY (if we have one),
-        # then issue the real sub-seek so the video catches up behind it (read the position first:
-        # _sub_nav samples sub-start/time-pos before the seek moves them).
-        elif msg == SUB_PREV_MSG:
-            self._sub_nav(-1)
-            self.ipc.command("sub-seek", "-1")
-        elif msg == SUB_NEXT_MSG:
-            self._sub_nav(1)
-            self.ipc.command("sub-seek", "1")
-        elif msg == SUB_REPLAY_MSG:
-            self._sub_nav(0)
-            self.ipc.command("sub-seek", "0")
-        elif msg == SUB_DELAY_MINUS_MSG:
-            self.ipc.command("add", "sub-delay", "-0.1")
-        elif msg == SUB_DELAY_PLUS_MSG:
-            self.ipc.command("add", "sub-delay", "0.1")
-        elif msg == KANJI_MSG:
-            self.kanji_current()
-        elif msg == TAB_PREV_MSG:
-            self._tab_step(-1)
-        elif msg == TAB_NEXT_MSG:
-            self._tab_step(1)
-        elif msg == TIP_UP_MSG:
-            self._scroll_tip(-round(self.osd[1] * 0.12))
-        elif msg == TIP_DOWN_MSG:
-            self._scroll_tip(round(self.osd[1] * 0.12))
-        elif msg == TIP_CLOSE_MSG:
-            self.set_hover(-1)
-        elif msg == SUB_DELAY_RESET_MSG:
-            self.ipc.command("set_property", "sub-delay", "0")
+        handler = self._HANDLERS.get(msg)
+        if handler:
+            handler(self)
 
     # --- run loop -----------------------------------------------------------------------------
     def poll_once(self) -> bool:

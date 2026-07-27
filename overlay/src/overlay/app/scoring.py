@@ -10,7 +10,7 @@ re-surface as unknown.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
 
@@ -69,6 +69,18 @@ class TokenStyle:
 def _is_content(t: Token) -> bool:
     """Content word for coloring/N+1 = anything that isn't a function-word POS (SubMiner blacklist)."""
     return bool(t.surface.strip()) and t.pos not in FUNCTION_POS
+
+
+@dataclass(frozen=True)
+class _StyleCtx:
+    """Immutable bundle passed to each `_style_*` rule below — avoids a 5-parameter signature."""
+
+    t: Token
+    is_known: bool
+    is_n1: bool
+    content: bool
+    level: str | None
+    underline: RGBA | None
 
 
 def mark_n_plus_one(tokens: list[Token], known: list[bool], min_words: int = 3) -> set[int]:
@@ -135,36 +147,53 @@ class Scorer:
         )
         return [self._style(t, known[i], i in n1) for i, t in enumerate(tokens)]
 
+    def _style_n1(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
+        # N+1 needs no `content` gate — mark_n_plus_one already excludes function words.
+        if ctx.is_n1:
+            return TokenStyle(p.n_plus_one, ctx.underline, self._tag("n+1", ctx.level))
+        return None
+
+    def _style_known(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
+        # Gates on `content` so a function word stays base even when it lands in KnownWords (the
+        # documented model: function words never take a colour).
+        if ctx.content and ctx.is_known:
+            return TokenStyle(p.known, ctx.underline, self._tag("known", ctx.level))
+        return None
+
+    def _style_forgotten(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
+        # Forgotten words resurface visibly with the forgotten tint (between known/unknown).
+        if ctx.content and self._is_forgotten(ctx.t):
+            return TokenStyle(p.forgotten, ctx.underline, self._tag("forgotten", ctx.level))
+        return None
+
+    def _style_freq(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
+        # Frequency only when there is no other signal (incl. JLPT).
+        if not (ctx.content and self.enable_freq and self.freq and ctx.level is None):
+            return None
+        rank = self.freq.rank(ctx.t.lemma, ctx.t.surface, ctx.t.reading)
+        if rank is None:
+            return None
+        if self.freq_mode == "single":
+            return TokenStyle(p.freq_single, ctx.underline, "freq")
+        band = FreqDict.band(rank, self.freq_top_x, len(p.freq_bands))
+        return TokenStyle(p.freq_bands[band - 1], ctx.underline, f"freq-{band}") if band else None
+
+    _STYLE_RULES: ClassVar = (_style_n1, _style_known, _style_forgotten, _style_freq)
+
     def _style(self, t: Token, is_known: bool, is_n1: bool) -> TokenStyle:
         p = self.palette
         content = _is_content(t)
-
         level = (
             self.jlpt.level(t.lemma, t.surface, t.reading)
             if (self.enable_jlpt and self.jlpt and content)
             else None
         )
         underline = p.jlpt.get(level) if level else None
-
-        if is_n1:
-            return TokenStyle(p.n_plus_one, underline, self._tag("n+1", level))
-        # known/forgotten/freq all gate on `content` so a function word stays base even when it lands
-        # in KnownWords (the documented model: function words never take a colour). N+1 needs no gate —
-        # mark_n_plus_one already excludes function words.
-        if content and is_known:
-            return TokenStyle(p.known, underline, self._tag("known", level))
-        # forgotten words resurface visibly with the forgotten tint (between known/unknown)
-        if content and self._is_forgotten(t):
-            return TokenStyle(p.forgotten, underline, self._tag("forgotten", level))
-        # frequency only when there is no other signal (incl. JLPT)
-        if content and self.enable_freq and self.freq and level is None:
-            rank = self.freq.rank(t.lemma, t.surface, t.reading)
-            if rank is not None:
-                if self.freq_mode == "single":
-                    return TokenStyle(p.freq_single, underline, "freq")
-                band = FreqDict.band(rank, self.freq_top_x, len(p.freq_bands))
-                if band:
-                    return TokenStyle(p.freq_bands[band - 1], underline, f"freq-{band}")
+        ctx = _StyleCtx(t, is_known, is_n1, content, level, underline)
+        for rule in self._STYLE_RULES:
+            style = rule(self, p, ctx)
+            if style is not None:
+                return style
         return TokenStyle(p.base, underline, self._tag("base", level))
 
     @staticmethod

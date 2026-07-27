@@ -302,6 +302,36 @@ class WindowedPanel:
             rendered += 1
         return rendered
 
+    def _submit_process_pool(
+        self, ex, todo: list[int], should_cancel: Callable[[], bool] | None
+    ) -> tuple[dict[Future[Any], int], int]:
+        """Cheap (non-poolable) rows render inline immediately; the rest submit to the process pool.
+        Returns ``(futures, rendered_inline)`` — an empty ``futures`` means the caller is done (either
+        cancelled mid-inline or nothing left to submit) and should return ``rendered_inline`` as-is."""
+        rendered = 0
+        fn = self._render_block_fn
+        inline = (
+            todo
+            if fn is None  # no injected renderer (e.g. a caller that never set it) — degrade
+            else [i for i in todo if self._rows[i].body_args is None]  # cheap rows: not
+        )  # picklable, not FreeType-bound — just render them, whether or not a pool is available
+        poolable = [] if fn is None else [i for i in todo if self._rows[i].body_args is not None]
+        for i in inline:
+            if should_cancel is not None and should_cancel():
+                return {}, rendered
+            with self._lock:
+                self._store(self._render_pixels(i))
+            rendered += 1
+        if not poolable:
+            return {}, rendered
+        assert fn is not None  # poolable is only non-empty when fn is set
+        futures: dict[Future[Any], int] = {}
+        for i in poolable:
+            body_args = self._rows[i].body_args
+            assert body_args is not None  # poolable was filtered on this above
+            futures[ex.submit(fn, body_args, None)] = i
+        return futures, rendered
+
     def _render_ahead_parallel(
         self, order: list[int], workers: int, should_cancel: Callable[[], bool] | None
     ) -> int:
@@ -316,7 +346,6 @@ class WindowedPanel:
             todo = [i for i in order if i not in self._blocks]
         if not todo:
             return 0
-        rendered = 0
         ex = shared_executor(workers)
         threaded = isinstance(ex, ThreadPoolExecutor)
         # Future's result type differs by branch (RenderedBlock vs. render_body_block's raw 4-tuple)
@@ -324,31 +353,12 @@ class WindowedPanel:
         # there via `threaded`) — Any is the honest type, not a mypy workaround.
         futures: dict[Future[Any], int]
         if threaded:
+            rendered = 0
             futures = {ex.submit(self._render_pixels, i): i for i in todo}
         else:
-            fn = self._render_block_fn
-            inline = (
-                todo
-                if fn is None  # no injected renderer (e.g. a caller that never set it) — degrade
-                else [i for i in todo if self._rows[i].body_args is None]  # cheap rows: not
-            )  # picklable, not FreeType-bound — just render them, whether or not a pool is available
-            poolable = (
-                [] if fn is None else [i for i in todo if self._rows[i].body_args is not None]
-            )
-            for i in inline:
-                if should_cancel is not None and should_cancel():
-                    return rendered
-                with self._lock:
-                    self._store(self._render_pixels(i))
-                rendered += 1
-            if not poolable:
+            futures, rendered = self._submit_process_pool(ex, todo, should_cancel)
+            if not futures:
                 return rendered
-            assert fn is not None  # poolable is only non-empty when fn is set
-            futures = {}
-            for i in poolable:
-                body_args = self._rows[i].body_args
-                assert body_args is not None  # poolable was filtered on this above
-                futures[ex.submit(fn, body_args, None)] = i
         for fut in as_completed(futures):
             if should_cancel is not None and should_cancel():
                 for f in futures:

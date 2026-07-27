@@ -179,6 +179,19 @@ def read_header(src: str | Path) -> tuple[list[dict], int]:
     return tables, total
 
 
+def _route_row(table: str, v: dict, writer_for: Callable[..., _DictWriter]) -> None:
+    if table == "dictionaries":
+        title = v.get("title") or ""
+        if title:
+            writer_for(title, v)  # creates the zip + index.json
+    elif table in _ROUTES:
+        title = v.get("dictionary") or ""
+        if title:
+            prefix, conv = _ROUTES[table]
+            writer_for(title).add(prefix, conv(v))
+    # media / unknown tables: skipped
+
+
 def import_database(
     src: str | Path,
     out_dir: str | Path,
@@ -215,18 +228,8 @@ def import_database(
                     ptr += 1
                 table = bounds[ptr][1] if bounds else ""
                 v = _value(row)
-                if not isinstance(v, dict):
-                    continue
-                if table == "dictionaries":
-                    title = v.get("title") or ""
-                    if title:
-                        _writer_for(title, v)  # creates the zip + index.json
-                elif table in _ROUTES:
-                    title = v.get("dictionary") or ""
-                    if title:
-                        prefix, conv = _ROUTES[table]
-                        _writer_for(title).add(prefix, conv(v))
-                # media / unknown tables: skipped
+                if isinstance(v, dict):
+                    _route_row(table, v, _writer_for)
                 if progress is not None:
                     progress(idx + 1, total)
     finally:

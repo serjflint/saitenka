@@ -80,56 +80,71 @@ def _gil_state() -> str:
     return "free-threaded (GIL off)" if fn and not fn() else "standard (GIL on)"
 
 
-def collect(*, include_log: bool = True) -> dict[str, str]:
-    """Build ``{archive_member: text}`` for the bundle — all text, all redacted. Pure enough to test
-    with fake homes (it only reads files + runs read-only version/doctor checks)."""
-    from overlay.app.config import config_path, load_config
-    from overlay.app.doctor import run_checks
-    from overlay.app.paths import cache_dir
-
-    log_path = cache_dir() / "overlay.log"  # resolve dynamically (respects $SAITENKA_CACHE_DIR)
-    from overlay.app.paths import mpv_conf_paths, mpv_scripts_dirs
-    from overlay.app.plugin import LUA_NAME
+def _collect_versions() -> dict[str, str]:
+    from overlay.app.config import load_config
     from overlay.mpvio.discover import find_mpv
 
-    members: dict[str, str] = {}
-
     mpv = find_mpv(load_config().get("mpv_path"))
-    members["versions.txt"] = (
-        "\n".join(
-            [
-                f"saitenka-overlay: {_overlay_version()}",
-                f"python: {sys.version.split()[0]} — {_gil_state()}",
-                f"platform: {platform.platform()}",
-                f"mpv: {_first_line(mpv, '--version') if mpv else 'NOT FOUND'}",
-                f"ffmpeg: {_first_line('ffmpeg', '-version')}",
-            ]
+    return {
+        "versions.txt": (
+            "\n".join(
+                [
+                    f"saitenka-overlay: {_overlay_version()}",
+                    f"python: {sys.version.split()[0]} — {_gil_state()}",
+                    f"platform: {platform.platform()}",
+                    f"mpv: {_first_line(mpv, '--version') if mpv else 'NOT FOUND'}",
+                    f"ffmpeg: {_first_line('ffmpeg', '-version')}",
+                ]
+            )
+            + "\n"
         )
-        + "\n"
-    )
+    }
 
-    # Structured doctor report (the machine-readable version of the ✓/!/✗ health check).
+
+def _collect_doctor() -> dict[str, str]:
+    """Structured doctor report (the machine-readable version of the ✓/!/✗ health check)."""
+    from overlay.app.doctor import run_checks
+
     try:
-        members["doctor.json"] = json.dumps(run_checks().to_json(), ensure_ascii=False, indent=2)
+        return {"doctor.json": json.dumps(run_checks().to_json(), ensure_ascii=False, indent=2)}
     except Exception as e:  # never let a doctor hiccup abort the bundle
-        members["doctor.json"] = json.dumps({"error": str(e)})
+        return {"doctor.json": json.dumps({"error": str(e)})}
 
-    # Our config, secrets + home/username removed.
+
+def _collect_config() -> dict[str, str]:
+    """Our config, secrets + home/username removed."""
+    from overlay.app.config import config_path
+
     cp = config_path()
-    if cp.exists():
-        members["overlay.toml"] = _scrub_home(
+    if not cp.exists():
+        return {}
+    return {
+        "overlay.toml": _scrub_home(
             _redact_config(cp.read_text(encoding="utf-8", errors="replace"))
         )
+    }
 
-    # mpv / mpv.net config (input-ipc-server, sub-auto, … — the exact things that break).
+
+def _collect_mpv_conf() -> dict[str, str]:
+    """mpv / mpv.net config (input-ipc-server, sub-auto, … — the exact things that break)."""
+    from overlay.app.paths import mpv_conf_paths
+
+    members: dict[str, str] = {}
     for p in mpv_conf_paths():
         if p.exists():
             members[f"mpv/{p.parent.name}.{p.name}"] = p.read_text(
                 encoding="utf-8", errors="replace"
             )
+    return members
 
-    # OUR plugin lua in full; OTHER scripts by NAME only (they cause overlay conflicts, but their
-    # bodies aren't ours to bundle).
+
+def _collect_scripts() -> dict[str, str]:
+    """OUR plugin lua in full; OTHER scripts by NAME only (they cause overlay conflicts, but their
+    bodies aren't ours to bundle)."""
+    from overlay.app.paths import mpv_scripts_dirs
+    from overlay.app.plugin import LUA_NAME
+
+    members: dict[str, str] = {}
     for d in mpv_scripts_dirs():
         lua = d / LUA_NAME
         if lua.exists():
@@ -139,19 +154,12 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
         if d.exists():
             others = sorted(x.name for x in d.iterdir() if x.name != LUA_NAME)
             members[f"scripts/{d.parent.name}.listing.txt"] = "\n".join(others) + "\n"
+    return members
 
-    # The rotating overlay log — redacted; opt-out via --no-log (may contain filenames/sentences).
-    if include_log and log_path.exists():
-        members["overlay.log"] = redact(log_path.read_text(encoding="utf-8", errors="replace"))
 
-    # mpv's own log (run launches mpv with --log-file) — the codec / sub-load / track-select side that
-    # the overlay log can't see. Redacted + gated like the overlay log (it holds the video path).
-    mpv_log = cache_dir() / "mpv.log"
-    if include_log and mpv_log.exists():
-        members["mpv.log"] = redact(mpv_log.read_text(encoding="utf-8", errors="replace"))
-
-    # Dict inventory: what's imported into the consolidated DB, plus any pre-consolidation leftovers —
-    # makes "configured but not imported" and stale caches visible without the user's machine.
+def _collect_dict_inventory() -> dict[str, str]:
+    """What's imported into the consolidated DB, plus any pre-consolidation leftovers — makes
+    "configured but not imported" and stale caches visible without the user's machine."""
     from overlay.app.dictdb import DictionaryDb, db_path
     from overlay.app.paths import legacy_dict_artifacts
 
@@ -169,28 +177,64 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     if arts:
         inv += ["[legacy — unused, safe to delete]"]
         inv += [f"  {d} ({n} files, {b / 1e6:.0f} MB)" for d, n, b in arts]
-    members["dicts.listing.txt"] = _scrub_home("\n".join(inv) + "\n")
+    return {"dicts.listing.txt": _scrub_home("\n".join(inv) + "\n")}
 
-    # Recent crash reports (already redacted at write time; the whole point of capturing them).
+
+def _collect_crashes() -> dict[str, str]:
+    """Recent crash reports (already redacted at write time; the whole point of capturing them)."""
     from overlay.app.crashlog import crash_dir
 
+    members: dict[str, str] = {}
     cd = crash_dir()
     if cd.exists():
         for c in sorted(cd.glob("crash-*.log"))[-5:]:
             members[f"crashes/{c.name}"] = c.read_text(encoding="utf-8", errors="replace")
+    return members
 
-    # Telemetry: the CTF trace file the LIVE overlay session wrote
-    # to disk, if telemetry was enabled for it — `report` runs in its own short-lived process, so it
-    # can only see what made it to disk, not the in-memory metrics snapshot of a session that has
-    # already exited (metrics stay pull-based / process-local by design, see otel_metrics.snapshot).
+
+def _collect_telemetry() -> dict[str, str]:
+    """The CTF trace file the LIVE overlay session wrote to disk, if telemetry was enabled for it —
+    `report` runs in its own short-lived process, so it can only see what made it to disk, not the
+    in-memory metrics snapshot of a session that has already exited (metrics stay pull-based /
+    process-local by design, see otel_metrics.snapshot)."""
     from overlay.app.config import load_config, resolve_telemetry
     from overlay.app.telemetry import export_dir
 
     trace_path = export_dir(resolve_telemetry(load_config())) / "trace.json"
-    if trace_path.exists():
-        members["telemetry/trace.json"] = redact(
-            trace_path.read_text(encoding="utf-8", errors="replace")
-        )
+    if not trace_path.exists():
+        return {}
+    return {
+        "telemetry/trace.json": redact(trace_path.read_text(encoding="utf-8", errors="replace"))
+    }
+
+
+def collect(*, include_log: bool = True) -> dict[str, str]:
+    """Build ``{archive_member: text}`` for the bundle — all text, all redacted. Pure enough to test
+    with fake homes (it only reads files + runs read-only version/doctor checks)."""
+    from overlay.app.paths import cache_dir
+
+    log_path = cache_dir() / "overlay.log"  # resolve dynamically (respects $SAITENKA_CACHE_DIR)
+
+    members: dict[str, str] = {}
+    members.update(_collect_versions())
+    members.update(_collect_doctor())
+    members.update(_collect_config())
+    members.update(_collect_mpv_conf())
+    members.update(_collect_scripts())
+
+    # The rotating overlay log — redacted; opt-out via --no-log (may contain filenames/sentences).
+    if include_log and log_path.exists():
+        members["overlay.log"] = redact(log_path.read_text(encoding="utf-8", errors="replace"))
+
+    # mpv's own log (run launches mpv with --log-file) — the codec / sub-load / track-select side that
+    # the overlay log can't see. Redacted + gated like the overlay log (it holds the video path).
+    mpv_log = cache_dir() / "mpv.log"
+    if include_log and mpv_log.exists():
+        members["mpv.log"] = redact(mpv_log.read_text(encoding="utf-8", errors="replace"))
+
+    members.update(_collect_dict_inventory())
+    members.update(_collect_crashes())
+    members.update(_collect_telemetry())
 
     members["MANIFEST.txt"] = _manifest(members, include_log=include_log)
     return members

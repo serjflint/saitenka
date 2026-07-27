@@ -181,6 +181,16 @@ def build_items(flow: list[Inline]) -> list[Item]:
     return items
 
 
+def _flush_overflow_line(line: list[Item], it: Item) -> tuple[list[Item], list[Item], float]:
+    """`it` doesn't fit on `line`: pull any trailing NO_END items off `line` to carry onto the new
+    one with `it`. Returns ``(flushed_line, new_line, new_x)``."""
+    carry: list[Item] = []
+    while line and line[-1].no_end():
+        carry.insert(0, line.pop())
+    new_line = [*carry, it]
+    return line, new_line, sum(i.width for i in new_line)
+
+
 def wrap_items(items: list[Item], max_width: float) -> list[list[Item]]:
     lines: list[list[Item]] = []
     line: list[Item] = []
@@ -193,12 +203,8 @@ def wrap_items(items: list[Item], max_width: float) -> list[list[Item]]:
         if it.kind == "space" and not line:
             continue
         if line and x + it.width > max_width and not it.no_start():
-            carry: list[Item] = []
-            while line and line[-1].no_end():
-                carry.insert(0, line.pop())
-            lines.append(line)
-            line = [*carry, it]
-            x = sum(i.width for i in line)
+            flushed, line, x = _flush_overflow_line(line, it)
+            lines.append(flushed)
             continue
         line.append(it)
         x += it.width

@@ -295,6 +295,49 @@ class DictionaryDb:
             conn.close()
         return row
 
+    def _load_term_bank(
+        self, conn: sqlite3.Connection, zf: zipfile.ZipFile, name: str, did: int, rid: int
+    ) -> int:
+        from overlay.app.wordlists import read_json_bank
+
+        bank = read_json_bank(zf, name)  # tolerant of wrong-CRC Yomitan zips (data intact)
+        if bank is None:
+            return rid
+        rows, keys = [], []
+        for e in bank:  # [term, reading, defTags, rules, score, glossary[], seq, termTags]
+            rid += 1
+            term, reading = e[0], e[1] or e[0]
+            rows.append((did, rid, term, reading, json.dumps(e[5], ensure_ascii=False), e[2]))
+            keys.append((did, term, rid))
+            if reading != term:
+                keys.append((did, reading, rid))
+        conn.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?)", rows)
+        conn.executemany("INSERT INTO keys VALUES(?,?,?)", keys)
+        return rid
+
+    def _load_kanji_bank(
+        self, conn: sqlite3.Connection, zf: zipfile.ZipFile, name: str, did: int
+    ) -> None:
+        from overlay.app.wordlists import read_json_bank
+
+        bank = read_json_bank(zf, name)  # [char, onyomi, kunyomi, tags, meanings[], stats{}]
+        if bank is None:
+            return
+        krows = [
+            (
+                did,
+                e[0],
+                e[1] or "",
+                e[2] or "",
+                e[3] or "",
+                json.dumps(e[4] if len(e) > 4 else [], ensure_ascii=False),
+                json.dumps(e[5] if len(e) > 5 else {}, ensure_ascii=False),
+            )
+            for e in bank
+            if e and isinstance(e[0], str)
+        ]
+        conn.executemany("INSERT OR IGNORE INTO kanji VALUES(?,?,?,?,?,?,?)", krows)
+
     def _load_dict_banks(
         self,
         conn: sqlite3.Connection,
@@ -302,8 +345,6 @@ class DictionaryDb:
         did: int,
         on_bank: Callable[[int, int], None] | None,
     ) -> None:
-        from overlay.app.wordlists import read_json_bank
-
         names = sorted(zf.namelist())
         term_banks = [n for n in names if n.startswith("term_bank") and n.endswith(".json")]
         kanji_banks = [n for n in names if n.startswith("kanji_bank") and n.endswith(".json")]
@@ -311,43 +352,15 @@ class DictionaryDb:
         done = 0
         rid = 0
         for name in term_banks:
-            bank = read_json_bank(zf, name)  # tolerant of wrong-CRC Yomitan zips (data intact)
+            rid = self._load_term_bank(conn, zf, name, did, rid)
             done += 1
             if on_bank:
                 on_bank(done, total)
-            if bank is None:
-                continue
-            rows, keys = [], []
-            for e in bank:  # [term, reading, defTags, rules, score, glossary[], seq, termTags]
-                rid += 1
-                term, reading = e[0], e[1] or e[0]
-                rows.append((did, rid, term, reading, json.dumps(e[5], ensure_ascii=False), e[2]))
-                keys.append((did, term, rid))
-                if reading != term:
-                    keys.append((did, reading, rid))
-            conn.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?)", rows)
-            conn.executemany("INSERT INTO keys VALUES(?,?,?)", keys)
-        for name in kanji_banks:  # [char, onyomi, kunyomi, tags, meanings[], stats{}]
-            bank = read_json_bank(zf, name)
+        for name in kanji_banks:
+            self._load_kanji_bank(conn, zf, name, did)
             done += 1
             if on_bank:
                 on_bank(done, total)
-            if bank is None:
-                continue
-            krows = [
-                (
-                    did,
-                    e[0],
-                    e[1] or "",
-                    e[2] or "",
-                    e[3] or "",
-                    json.dumps(e[4] if len(e) > 4 else [], ensure_ascii=False),
-                    json.dumps(e[5] if len(e) > 5 else {}, ensure_ascii=False),
-                )
-                for e in bank
-                if e and isinstance(e[0], str)
-            ]
-            conn.executemany("INSERT OR IGNORE INTO kanji VALUES(?,?,?,?,?,?,?)", krows)
         conn.executemany(
             "INSERT INTO tags VALUES(?,?,?,?)",
             [(did, code, name, order) for code, name, order in _extract_tags(zf)],
