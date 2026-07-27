@@ -7,53 +7,125 @@ logs.
 
 ## [Unreleased]
 
-### Performance
-
-- **Startup: the frequency dictionary loads ~3.6× less.** The banded coloring scorer can't distinguish
-  ranks past its `top_x` cap (10k — `FreqDict.band` returns `None` beyond it), so `FreqDict.from_db`
-  now filters `rank <= top_x` instead of loading the whole table. On JPDBv2 (279k rows, ~10k
-  band-eligible) `load_freq_dict` drops 306→84 ms, behaviour-identical for every rank that can color.
-- **Startup: the Anki known-word set is cached in the consolidated SQLite DB.** It's served from the
-  cache (~4 ms) and reconciled against Anki in the background by note **mod-time diff** — only changed
-  notes are re-fetched — so the ~190 ms IO-bound AnkiConnect `notesInfo` load leaves the critical path
-  after the first launch. External edits/adds/deletes converge on the next refresh; a config-signature
-  guard forces a full rebuild if the configured "known" fields change.
-- **Startup: dependency loading is hoisted to overlap mpv's launch.** `begin_deps_build` starts
-  `build_reader_deps` before mpv launches (a `Future` consumed by `load_deps_async`), so the ~85 ms
-  build hides in mpv's launch/connect dead time. Time-to-video is unaffected — mpv is a separate
-  process and its launch is never blocked on the build (run mode).
+## [0.8.0] - 2026-07-28
 
 ### Added
 
-- **Telemetry spans/counters** (`otel_metrics.py`): a `cpu_ms` attribute on **every** span (a large
-  `wall − cpu_ms` gap means the thread was stalled on the GIL/a lock/IO, not doing work);
-  `tooltip_show` (labeled `kind=cold|warm`), `prefetch_decode`, `finish_tail` (`executor=thread|process`),
-  `anki_mine`, and a `panel_cache.evictions` counter; the previously-registered-but-unwired
-  `cold_first_paint_overshoot` counter now actually fires.
-- **`[perf].prefetch_workers` is a real config knob.** `0` (default) auto-sizes to a flat 4 on a
-  free-threaded build / 2 on a GIL build (replacing an opaque `min(8, cores-2)` formula); a positive
-  value pins it on both builds. It's mainly a memory knob — each worker is persistent and holds its own
-  SQLite page cache + FreeType face cache.
+- **`--mpv-arg`** — repeatable raw mpv flag passthrough on `run` (SubMiner's `-a/--args` precedent).
+  Wins over our own overridable defaults (`--slang`, `--sub-visibility`, `--osd-level`, `--loop-file`,
+  `--start`, ...) since mpv is last-flag-wins, but never over `--input-ipc-server`/`--log-file`/the
+  anti-duplicate `--script-opts` marker, which we always append last.
+- **Prefetch lookahead now works on embedded subtitle tracks**, not just external/jimaku files. The
+  currently-selected mpv track is resolved (`app/embedded_subs.py`): an external/jimaku track reads
+  its path straight off `track-list`'s `external-filename`; an embedded track (baked into the video
+  container) is extracted once via `ffmpeg -map 0:<ff-index> -c:s srt` and cached alongside jimaku's
+  own fetched-sub cache (keyed by video name+size+track, so a rewatch reuses it). Both `run` and
+  `attach` now share this one path — `attach` previously never built a lookahead index at all, even
+  for external files.
+- **Telemetry: three new spans covering seek-to-paint latency** (`otel_metrics.py`): `cue_redraw`
+  (wraps `set_subtitle` end-to-end — tokenize/score/render/upload), `subtitle_render` (isolates the PIL
+  `render_subtitle` call inside it), and `sub_text_reconcile` (the poll-loop's mpv-driven redraw,
+  sibling to the pre-existing `sub_seek` span for the Alt+←/→/↓ instant-nav path). `sub_seek`'s span
+  now also covers the render it triggers, so it nests `cue_redraw`→`subtitle_render`/`upload` as
+  children sharing one `trace_id` — previously every span got its own random `trace_id`, so a
+  `trace.json` export had no causal chain at all connecting a seek to the draw it caused.
+- **Telemetry: full span coverage of background dep loading and the per-cue draw path** —
+  `dictdb_open`/`anki_ensure_running`/`build_dict_set`/`load_freq_dict`/`load_jlpt_dict`/
+  `build_mining`/`warm_tokenizer` (`reader_deps.py`) and `teardown_tip`/`hide_preview`/
+  `tokenize_line`/`score_line` (nested inside `cue_redraw`, `controller.py`), plus
+  `anki_http_call`/`anki_json_parse`/`anki_known_extract` (`wordlists.py`, per AnkiConnect action).
+  Built to pin down exactly where load-deps/first-cue-color latency went; the tokenizer-contention
+  fix above was found and verified through this instrumentation, not guesswork.
 
 ### Changed
 
-- **Telemetry traces rotate per session.** Each run writes `trace-<UTC>.json` and the newest 10 are
-  kept; `report`, `doctor`, and `telemetry status` read the newest. Kept one-recording-per-file (a
-  Chrome-trace document has a single clock/thread-id space, so appending sessions would overlay them);
-  UTC timestamps so lexical order stays chronological across DST.
-- **Telemetry capture is set up per reader session** (`run`/`attach`), no longer globally for every CLI
-  command.
+- **Startup console noise reduced.** The `dictionaries:`/`frequency:`/`pitch:` title dump collapsed
+  to one line with counts and the settings file path (full titles still land in the structured log).
+  Telemetry now prints an explicit startup line when it's actually enabled — pointing at
+  `saitenka-overlay telemetry disable` instead of telling you to hand-edit `overlay.toml`.
+- **Background dep loading (`build_reader_deps`) is now parallelized** across a small thread pool
+  instead of one strictly sequential background thread — Anki launch/poll, dict-title resolution, the
+  JLPT table load, the frequency-dict load, the known-words fetch, and the mining `Anki()` object all
+  fan out respecting their actual dependencies, turning the load's wall time from their *sum* into
+  their *max*. **`run` mode now actually uses it** — it previously kept its own separate, sequential
+  copy of this exact logic (`cli_run.py`'s `_resolve_dict_set`/`_build_scorer`/`_build_run_deps`),
+  so the parallelization above was silently inert for `run` until this copy was deleted in favor of
+  delegating to the shared implementation (only the CLI-only bits — the plain `--known word1,word2`
+  fallback list, and this command's console feedback lines — stayed as thin wrappers). Coloring/
+  tooltips/mining land sooner after playback starts. `build_reader_deps`'s return value is unchanged;
+  its signature grew optional `known_words`/`on_anki_unreachable`/`on_known_words_error` params to
+  support that delegation.
+- **fugashi's first-ever `tokenize()` call (MeCab tagger/dictionary setup) is now pre-warmed on its
+  own thread, as early as possible in `run`/`attach`** (before mpv even launches/connects). Measured:
+  ~13ms in isolation, but ~600ms (46x) when it happened to run concurrently with the background dep
+  thread pool — genuine free-threading contention (not GIL-reactivation, not general system load; both
+  ruled out with isolated same-conditions timing), and mutual: it slowed the dep-loading threads down
+  by a similar factor while they slowed it down. Warming it on its own thread, overlapping mpv's own
+  launch/connect dead time, means the real first subtitle line's `tokenize()` call is already-warm
+  and fast, and the dep-loading threads never contend with it in the first place.
+- **`KnownWords.from_ankiconnect` no longer chunks `notesInfo` into 500-note batches** — one call per
+  deck with every note id, matching SubMiner's own AnkiConnect client (no batching there either;
+  AnkiConnect has no documented limit on `notes`). This was measured as the actual dominant cost in
+  background dep loading for a real known-words deck (~1.8s of sequential round-trips) — dominating
+  regardless of how well the freq/JLPT loads above parallelize alongside it. (An intermediate fix that
+  fanned the chunked calls out over threads was reverted in favor of this simpler one call.)
+- **A word's dictionary lookup now issues ONE query across every dictionary instead of one per
+  (dict, form).** `entry_for` fanned out ~27 SQLite point queries per word decode (3 forms —
+  lemma/surface/reading — × 9 dicts), which dominated a telemetry trace at ~90% of all spans. Every
+  dictionary lives in the one consolidated DB scoped by `dict_id`, so a single `IN`-list query
+  (`_batch_exact`) fetches them all at once and reassembles per-dict **byte-identically** (`ORDER BY
+  e.id` pins the row order). Colliding forms are also de-duplicated — for any uninflected word
+  `lemma == surface`, so the identical query was re-run ~26% of the time. Per-decode lookup queries
+  drop 27→1.
 
 ### Fixed
 
-- **`report`/`doctor` no longer clobber the session's telemetry trace.** Being global, telemetry setup
-  ran for these one-shot commands too, standing up the trace writer against the just-written
-  `trace.json` and truncating it on the writer's first counter sample.
-- **The `N prefetch worker(s)` startup banner shows the real count.** In run/attach mode deps (and thus
-  workers) load asynchronously, so the banner printed at `run()` start always saw `0`; it's now emitted
-  once, after prefetch actually starts.
-- Removed the dead `Reader._show_tooltip_impl` delegate and fixed a stale `_panel_key` call that broke
-  `examples/bench_responsiveness.py --timeline`.
+- **`scan_delay` (dwell before a nested/scan popup opens, and the cooldown after scrolling the base
+  tooltip) was never read from `overlay.toml`** — stuck at its 0.25s default regardless of config in
+  both `run` and `attach` modes. Now wired and documented in `overlay.example.toml`.
+- **The `N prefetch worker(s)` runtime line was console-only** (a bare `print`), so it never reached
+  `overlay.log` or a `saitenka-overlay report` bundle — made diagnosing "0 prefetch workers" reports
+  impossible from a bundle alone. Now also logged.
+- **A globally-installed `saitenka.lua` plugin (`install-plugin`, for the ATTACH-from-Finder workflow)
+  double-attached onto `run` mode's own mpv instance.** `--no-config` suppresses `mpv.conf`/
+  `input.conf` but NOT mpv's script autoload, and `saitenka.lua`'s `spawn_overlay()` reuses whatever
+  `input-ipc-server` is already set — `run` mode passes its own explicitly, so a plugin installed for
+  the attach workflow would spawn a second, redundant `saitenka-overlay attach` onto `run`'s socket:
+  two independent `Reader`/telemetry instances driving one mpv (doubled IPC traffic/CPU, and the
+  actual cause of `telemetry/trace.json` corruption on some sessions — two OS processes writing the
+  same file with no cross-process lock). Fixed with a handshake: `run` now launches mpv with
+  `--script-opts=saitenka-managed=yes`; `saitenka.lua` checks it and no-ops instead of double-attaching.
+  Requires re-running `install-plugin` to pick up the fix if you already have the plugin installed.
+- **Alt+←/→/↓ instant-nav could silently lose its `_nav_idx` chaining hint on every press**, degrading
+  next/next/next to per-press text matching instead of index-based chaining. Right after `sub_nav()`
+  renders the target cue and sets `_nav_idx`, the caller also fires mpv's own native `sub-seek` behind
+  it to catch the video up; that native seek transiently re-reports the PRE-nav cue's text before
+  landing on the real target. The settle-guard only swallowed an *empty* mid-seek blip, so this
+  non-empty "revert" value was adopted, silently resetting `_nav_idx` back to -1 via `set_subtitle`
+  even though the render was already correct. `sub_nav()` now records the pre-nav text and the
+  settle-guard swallows either transient value, while still adopting any genuinely different mpv
+  correction.
+- **mpv crashing natively (e.g. a GPU-driver SIGSEGV) was indistinguishable from a clean quit** in
+  `overlay.log`/report bundles — both just look like `mpv IPC reader: EOF ... mpv closed the pipe`.
+  `run` mode's shutdown now checks `proc.returncode` and logs a warning naming the signal (or nonzero
+  status) when mpv didn't exit cleanly.
+- **Engaged prefetch (paused, or the cursor resting over the video) pre-rendered the *whole* panel for
+  every content word on the line** — so a single pathological monolingual entry cost up to ~2.8s on a
+  background worker and backed the prefetch queue up under real use. A hover defers the entry's tail
+  via the finish queue regardless, so the speculative full render was wasted work: engaged prefetch
+  now renders only the viewport-first head, exactly as a hover's own first paint does.
+
+### Development
+
+- **Head-prefetch renders are now traced** (`prefetch_decode` `kind="head_ahead"`), distinct from the
+  engaged current-line `kind="head"`; they previously folded into anonymous `render` spans, invisible
+  in a trace.
+- **`poe timeline-bench-banded`** reproduces the shipped config (`head_prefetch_lookahead=1`,
+  `prefetch_lookahead=2`, banded render), and the timeline bench now engages on hover cues so it
+  exercises the engaged-render path a real session hits; `poe timeline-bench` runs under `PYTHON_GIL=0`
+  so the prefetch workers are measured truly free-threaded, not on the GIL-reactivated fallback.
+- **A non-hermetic telemetry test** read the real user cache dir for `trace_exists` and failed whenever
+  a real session had already written a trace; it now isolates `SAITENKA_CACHE_DIR`.
 
 ## [0.7.0] - 2026-07-27
 
