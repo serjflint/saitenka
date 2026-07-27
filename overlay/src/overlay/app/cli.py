@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
 from datetime import UTC
 from pathlib import Path
@@ -34,6 +35,7 @@ from overlay.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC041
 from overlay.app.cli_run import jimaku_should_fetch as jimaku_should_fetch  # noqa: PLC0414
 from overlay.app.cli_run import run_impl
 from overlay.app.config import TooltipOptions, config_path, load_config
+from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.paths import cache_dir
 
 log = logging.getLogger(__name__)
@@ -259,6 +261,16 @@ def run(
             "(0 = instant)"
         ),
     ] = 0.15,
+    mpv_arg: Annotated[
+        list[str] | None,
+        cyclopts.Parameter(
+            negative=(),
+            help="extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own "
+            "defaults (force-window/slang/sub-visibility/osd-level/loop-file/start) — mpv is "
+            "last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate "
+            "script-opts marker, which we always set last",
+        ),
+    ] = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
     return run_impl(
@@ -302,6 +314,7 @@ def run(
         prefetch=prefetch,
         auto_translate=auto_translate,
         hover_switch_delay=hover_switch_delay,
+        mpv_arg=mpv_arg,
     )
 
 
@@ -857,6 +870,13 @@ def attach(
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
+    from overlay.app.reader_deps import warm_tokenizer
+
+    # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
+    # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of
+    # landing on the critical path later.
+    threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
+
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
@@ -948,6 +968,7 @@ def attach(
             tip_max_frac=cfg.get("tip_height", _tt.tip_max_frac),
             nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
             show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
+            scan_delay=cfg.get("scan_delay", _tt.scan_delay),
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
@@ -964,12 +985,15 @@ def attach(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
             prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
+            head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
+            head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
         ),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
-    if sub_file:  # index an explicit external sub so Alt+←/→/↓ render the target line instantly
-        reader.load_sub_index(sub_file)  # (embedded/jimaku tracks: plain sub-seek for now)
+    # index whatever track mpv ends up with (external/jimaku path, or an embedded track extracted
+    # via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
+    build_sub_index_for_current_track(reader)
     reader.load_deps_async(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "
@@ -1021,9 +1045,14 @@ def _setup_telemetry() -> None:
     """Opt-in only: no-op unless ``[telemetry] enabled = true`` in config. See
     :mod:`overlay.app.telemetry`."""
     from overlay.app.config import load_config, resolve_telemetry
-    from overlay.app.telemetry import configure
+    from overlay.app.telemetry import configure, is_enabled
 
     configure(resolve_telemetry(load_config()))
+    if is_enabled():
+        print(
+            "[saitenka] telemetry: enabled (captures usage/perf data) "
+            "— run `saitenka-overlay telemetry disable` to turn off"
+        )
 
 
 def main() -> None:  # pragma: no cover — live-run entry point

@@ -274,20 +274,43 @@ class KnownWords:
         reading_fields=_READING_FIELDS,
     ) -> KnownWords:
         """Build the known set from Anki notes, mirroring SubMiner's decks→fields config. Requested
-        fields that don't exist on a note are skipped; furigana fields yield both surface and reading."""
+        fields that don't exist on a note are skipped; furigana fields yield both surface and reading.
+
+        One ``notesInfo`` call per deck with ALL its note ids — SubMiner's own AnkiConnect client
+        (`anki-integration.ts`) does the same, no batching. An earlier version of this code chunked
+        into 500-note ``notesInfo`` calls fanned out over threads, measured as THE dominant cost in
+        background dep loading (~1.8s with a real ~4600-word deck) — but the chunking itself was the
+        bug: AnkiConnect has no documented limit on `notes`, and concurrent HTTP calls into Anki's
+        single-process backend likely serialize there anyway, so threading bought nothing but
+        complexity. One call removes the per-chunk round-trip overhead entirely.
+
+        Traced in three stages (``anki_http_call``/``anki_json_parse``/``anki_known_extract``) to
+        separate network+Anki-server-side assembly time from our own JSON-parse and field-extraction
+        time — added to settle exactly this question before reaching for a faster parser (msgspec) or
+        a query-shrinking change, rather than guessing which one actually dominates."""
         import urllib.request
+
+        from overlay import otel_metrics
 
         def call(action, **params):
             body = json.dumps({"action": action, "version": 6, "params": params}).encode()
             req = urllib.request.Request(host, body, {"Content-Type": "application/json"})  # noqa: S310  # HTTPS frequency-list download - fixed scheme
-            with urllib.request.urlopen(req, timeout=10) as r:  # noqa: S310  # HTTPS frequency-list download - fixed scheme
-                return json.loads(r.read()).get("result")
+            with (
+                otel_metrics.traced("anki_http_call", action=action),
+                urllib.request.urlopen(req, timeout=10) as r,  # noqa: S310  # HTTPS frequency-list download - fixed scheme
+            ):
+                raw = r.read()
+            with otel_metrics.traced("anki_json_parse", action=action):
+                return json.loads(raw).get("result")
 
         words: set[str] = set()
         for deck, fields in decks.items():
             ids = call("findNotes", query=f'deck:"{deck}"') or []
-            for chunk in (ids[i : i + 500] for i in range(0, len(ids), 500)):
-                for note in call("notesInfo", notes=chunk) or []:
+            if not ids:
+                continue
+            notes = call("notesInfo", notes=ids) or []
+            with otel_metrics.traced("anki_known_extract", deck=deck, notes=str(len(notes))):
+                for note in notes:
                     nf = note.get("fields", {})
                     for fname in list(fields) + list(reading_fields):
                         words.update(_field_forms(nf.get(fname, {}).get("value", "")))
