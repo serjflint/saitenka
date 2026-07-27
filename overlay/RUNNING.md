@@ -147,7 +147,10 @@ uv run python examples/mpv_reader.py show.mkv --jimaku --jimaku-key YOUR_KEY --c
 
 Useful flags: `--fullscreen`, `--no-audio-play` (don't auto-play the mined clip),
 `--known "私,本,経"` (manual known set instead of Anki), `--mine-deck` / `--mine-model`,
-`--use-config` (load your real mpv config instead of the isolated `--no-config` default).
+`--use-config` (load your real mpv config instead of the isolated `--no-config` default),
+`--mpv-arg` (repeatable — pass a raw extra mpv flag through, e.g. `--mpv-arg --volume=80`; wins over
+our own overridable defaults like `--slang`/`--osd-level`, but never over the IPC socket/log-file/
+anti-duplicate script-opts flags we always set last).
 
 ## 7. Cleanup (mining writes **real** cards)
 

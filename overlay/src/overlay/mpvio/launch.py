@@ -24,14 +24,19 @@ def build_mpv_argv(
     en_sub_path: str | os.PathLike | None = None,
     use_config: bool = True,
     fullscreen: bool = False,
+    extra_args: list[str] | None = None,
 ) -> list[str]:
     """The mpv command line for ``run``: IPC server + logging + window/subtitle flags. Subtitle files
     are inserted just before the video arg (so they load as tracks, EN as the 2nd → secondary), and
-    ``--no-config`` / ``--fullscreen`` go right after the binary."""
+    ``--no-config`` / ``--fullscreen`` go right after the binary.
+
+    ``extra_args`` (SubMiner's ``-a/--args`` precedent) land after our own overridable defaults so a
+    matching flag wins there (mpv is last-flag-wins), but before the socket/script-opts/log-file flags
+    below — those three always win regardless of ``extra_args``: the Reader connects to the exact
+    ``sock`` path, `report`/crashlog bundle the log from the fixed ``mpv_log`` path, and the script-opts
+    marker prevents a globally-installed saitenka.lua from double-attaching (see the comment there)."""
     cmd = [
         str(mpv_bin),
-        f"--input-ipc-server={sock}",
-        f"--log-file={mpv_log}",
         "--force-window=yes",
         "--keep-open=yes",
         f"--slang={slang}",
@@ -39,12 +44,26 @@ def build_mpv_argv(
         "--osd-level=0",
         "--pause" if screenshot else "--loop-file=inf",
         f"--start={start}",
-        str(video_path),
     ]
+    cmd.extend(extra_args or [])
+    cmd.extend(
+        [
+            f"--input-ipc-server={sock}",
+            # A globally-installed saitenka.lua (from `install-plugin`, for the ATTACH workflow) still
+            # autoloads under mpv's own script-autoload — `--no-config` doesn't suppress that. It reuses
+            # whatever input-ipc-server is already set (see saitenka.lua's ensure_socket()), so without
+            # this marker it would spawn a SECOND `saitenka-overlay attach` onto the socket `run` mode
+            # already owns: two independent Reader/telemetry instances driving one mpv. This script-opt
+            # is the handshake — saitenka.lua's spawn_overlay() checks it and no-ops when set.
+            "--script-opts=saitenka-managed=yes",
+            f"--log-file={mpv_log}",
+        ]
+    )
     if sub_path:
-        cmd.insert(-1, f"--sub-file={sub_path}")
+        cmd.append(f"--sub-file={sub_path}")
     if en_sub_path:
-        cmd.insert(-1, f"--sub-file={en_sub_path}")
+        cmd.append(f"--sub-file={en_sub_path}")
+    cmd.append(str(video_path))
     if sys.platform == "win32":
         # Windows d3d11 (the default GPU context) uses FLIP-MODEL presentation, which does NOT
         # re-present the window while paused — so an `overlay-add` (a new/updated subtitle or tooltip)
