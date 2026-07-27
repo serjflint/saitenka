@@ -122,7 +122,12 @@ class PerfOptions:
     """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
 
     poll_interval: float = 0.025  # main loop tick — trades CPU usage against input latency
-    prefetch_workers: int = 2  # constrained-parallel (GIL build) tooltip-warming worker count
+    # Tooltip-warming worker threads (persistent, whole session). Mostly a RAM knob: each holds its own
+    # per-thread SQLite page cache (~[dictdb].cache_size_kib, 32 MiB default) + a per-thread FreeType
+    # face cache + (free-threaded) its own allocator arena, so RSS scales ~linearly with the count.
+    # 0 = auto (a flat 4 free-threaded where render parallelizes; 2 on a GIL build where extra workers
+    # only contend); a positive value pins it explicitly on BOTH builds — lower it to cap RAM.
+    prefetch_workers: int = 0
     prefetch_lookahead: int = (
         0  # upcoming subtitle cues to WARM ahead of the current line (0 = only
     )

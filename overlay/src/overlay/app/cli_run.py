@@ -26,6 +26,24 @@ log = logging.getLogger(__name__)
 DEMO_LINE = "門前の小僧習わぬ経を読む"
 
 
+def setup_session_telemetry(cfg: dict) -> None:
+    """Stand up telemetry capture for THIS reader session (opt-in via ``[telemetry].enabled``). Scoped
+    to run/attach on purpose — NOT ``cli.main`` — because a one-shot utility command (``report`` /
+    ``doctor``) would otherwise start the CTF writer thread against the session's ``trace.json`` and
+    truncate it on the writer's first counter sample (found live: a ``report`` right after a run
+    clobbered a 1122-span trace down to one fresh-process counter row). Those commands only READ the
+    on-disk trace, so they need no capture pipeline."""
+    from overlay.app.config import resolve_telemetry
+    from overlay.app.telemetry import configure, is_enabled
+
+    configure(resolve_telemetry(cfg))
+    if is_enabled():
+        print(  # user-facing opt-in notice
+            "[saitenka] telemetry: enabled (captures usage/perf data) "
+            "— run `saitenka-overlay telemetry disable` to turn off"
+        )
+
+
 def _log_mpv_exit(code: int | None) -> None:
     """mpv's own crashes (e.g. a GPU-driver SIGSEGV) look identical to a clean quit from our side —
     the IPC socket just drops either way (``mpv IPC reader: EOF ... mpv closed the pipe``). Check the
@@ -554,7 +572,12 @@ def run_impl(
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
     from overlay.app.controller import Reader
-    from overlay.app.reader_deps import warm_tokenizer
+    from overlay.app.reader_deps import begin_deps_build, warm_tokenizer
+
+    cfg = load_config(config)
+    setup_session_telemetry(
+        cfg
+    )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
 
     # Fire this as early as possible — before mpv even launches — so fugashi's slow first-ever
     # tokenize() call (see warm_tokenizer's docstring) overlaps mpv's own launch/connect dead time
@@ -573,8 +596,6 @@ def run_impl(
             file=sys.stderr,
         )
         return 2
-
-    cfg = load_config(config)
 
     # resolve dict/freq/pitch lists: explicit CLI flags win, else fall back to the config file.
     # These are dictionary TITLES resolved against the consolidated DB — never built here.
@@ -606,6 +627,13 @@ def run_impl(
             freq_titles=freq_titles,
             pitch_titles=pitch_titles,
         )
+
+    # Hoist the dep build ahead of mpv launch (interactive path only; demo/screenshot build synchronously
+    # below because they force-hover the instant mpv is up). The build touches no mpv IPC, so starting it
+    # HERE overlaps mpv's launch/connect dead time (~0.2-0.9s measured) — the ~85ms build is fully hidden
+    # and mpv's video is never delayed (separate process). load_deps_async consumes this once the reader
+    # exists; without the hoist the build only started after connect, sitting idle through that whole window.
+    deps_future = None if (demo_word or screenshot) else begin_deps_build(cfg, _build_deps)
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
     sub_path, en_sub_path = _resolve_subtitles(
@@ -668,7 +696,9 @@ def run_impl(
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)
-        reader.load_deps_async(cfg, build=_build_deps)
+        reader.load_deps_async(
+            cfg, prebuilt=deps_future
+        )  # the build has been running since pre-launch
 
     try:
         _execute_reader_session(

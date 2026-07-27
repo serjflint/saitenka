@@ -44,10 +44,18 @@ sub_text_reconcile_duration_ms: Histogram | None = None
 # re-render + OSD upload) for one wheel tick or TIP_UP/DOWN keypress — its duration IS the
 # scroll-to-photon latency a user would feel as stutter.
 scroll_frame_duration_ms: Histogram | None = None
+# Hover → tooltip-drawn latency: wraps show_tooltip end-to-end (panel_for head render + place +
+# blit), the headline "does the tip feel instant?" number. Labeled kind=cold|warm — a cold hover
+# builds the panel, a warm one is a cache hit + upload. Symmetric with scroll_frame/sub_seek, which
+# already have their own end-to-end wrapper; the base-tooltip show was the one hot path that didn't.
+show_tooltip_duration_ms: Histogram | None = None
 
 # Counters.
 panel_cache_hits: Counter | None = None
 panel_cache_misses: Counter | None = None
+panel_cache_evictions: Counter | None = (
+    None  # LRU entries dropped — thrash driver under a small cap
+)
 dict_cache_hits: Counter | None = None
 dict_cache_misses: Counter | None = None
 dropped_telemetry_spans: Counter | None = None
@@ -61,6 +69,11 @@ scroll_frame_jank: Counter | None = None  # scroll frames slower than SCROLL_JAN
 # ~one frame at 60Hz. The tail (p95/p99 jank-frame rate), not the mean, is what a user perceives
 # as scroll stutter — see scroll_frame_jank.
 SCROLL_JANK_THRESHOLD_MS = 16.0
+
+# A cold hover slower than this feels laggy (the perceptible-lag threshold; well above one frame
+# because a cold paint legitimately builds the panel). cold_first_paint_overshoot counts base-tooltip
+# shows that a viewport-first head render was supposed to keep under it but didn't — see show_tooltip.
+COLD_FIRST_PAINT_BUDGET_MS = 100.0
 
 # Gauges (prefetch queue depth is push-updated by the caller; gil_enabled is observed on read).
 prefetch_queue_depth: UpDownCounter | None = None
@@ -76,6 +89,7 @@ _ALL_HISTOGRAM_NAMES = (
     "saitenka.subtitle_render.duration_ms",
     "saitenka.sub_text_reconcile.duration_ms",
     "saitenka.scroll_frame.duration_ms",
+    "saitenka.show_tooltip.duration_ms",
 )
 
 
@@ -140,7 +154,16 @@ def traced(name: str, **attributes: str) -> Generator[None]:
         span.set_attribute("thread.id", threading.get_native_id())
         for k, v in attributes.items():
             span.set_attribute(k, v)
-        yield
+        # Per-thread CPU time across the span. wall (the span's dur) ≫ cpu_ms ⇒ the thread was
+        # descheduled inside the span — GIL contention, a lock, or I/O wait — not doing work. This is
+        # what disambiguates a genuinely-slow span from one merely stalled behind other threads: the
+        # startup dep-load's freq-dict span reads ~470ms wall but ~290ms cpu once fugashi re-enables
+        # the GIL, so ~180ms of it is contention, not freq work (invisible without this).
+        cpu0 = time.thread_time()
+        try:
+            yield
+        finally:
+            span.set_attribute("cpu_ms", round((time.thread_time() - cpu0) * 1000.0, 3))
 
 
 @contextmanager
@@ -195,8 +218,9 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global render_duration_ms, upload_duration_ms, hit_test_duration_ms
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
-    global scroll_frame_duration_ms
-    global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
+    global scroll_frame_duration_ms, show_tooltip_duration_ms
+    global panel_cache_hits, panel_cache_misses, panel_cache_evictions
+    global dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -241,8 +265,16 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             unit="ms",
             description="scroll-input to redraw-finished latency for one wheel tick / TIP_UP-DOWN",
         )
+        show_tooltip_duration_ms = meter.create_histogram(
+            "saitenka.show_tooltip.duration_ms",
+            unit="ms",
+            description="hover to base-tooltip-drawn latency (labeled kind=cold|warm)",
+        )
         panel_cache_hits = meter.create_counter("saitenka.panel_cache.hits")
         panel_cache_misses = meter.create_counter("saitenka.panel_cache.misses")
+        panel_cache_evictions = meter.create_counter(
+            "saitenka.panel_cache.evictions", description="LRU panels dropped over the cap"
+        )
         dict_cache_hits = meter.create_counter("saitenka.dict_cache.hits")
         dict_cache_misses = meter.create_counter("saitenka.dict_cache.misses")
         dropped_telemetry_spans = meter.create_counter("saitenka.telemetry.dropped_spans")
@@ -273,8 +305,9 @@ def unregister() -> None:
     global render_duration_ms, upload_duration_ms, hit_test_duration_ms
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
-    global scroll_frame_duration_ms
-    global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
+    global scroll_frame_duration_ms, show_tooltip_duration_ms
+    global panel_cache_hits, panel_cache_misses, panel_cache_evictions
+    global dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -290,8 +323,10 @@ def unregister() -> None:
         subtitle_render_duration_ms = None
         sub_text_reconcile_duration_ms = None
         scroll_frame_duration_ms = None
+        show_tooltip_duration_ms = None
         panel_cache_hits = None
         panel_cache_misses = None
+        panel_cache_evictions = None
         dict_cache_hits = None
         dict_cache_misses = None
         dropped_telemetry_spans = None

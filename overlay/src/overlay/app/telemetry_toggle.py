@@ -76,20 +76,20 @@ def telemetry_state() -> TelemetryState:
     """Compose the config flag, the installed-extra check, and the ``OTEL_SDK_DISABLED`` kill switch
     into whether telemetry is *effectively* recording, plus where its trace lands."""
     from overlay.app.config import load_config, resolve_telemetry
-    from overlay.app.telemetry import export_dir
+    from overlay.app.telemetry import export_dir, latest_trace
 
     cfg = load_config()
     config_enabled = _config_enabled(cfg)
     kill = os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in ("true", "1")
     installed = telemetry_installed()
     exp = export_dir(resolve_telemetry(cfg))
-    trace = exp / "trace.json"
+    latest = latest_trace(exp)  # traces rotate (timestamped per session) — report the newest
     return TelemetryState(
         config_enabled=config_enabled,
         extra_installed=installed,
         kill_switch=kill,
         effective=config_enabled and installed and not kill,
         export_dir=exp,
-        trace_path=trace,
-        trace_exists=trace.exists(),
+        trace_path=latest or exp,  # the newest trace file, or the dir itself when none exist yet
+        trace_exists=latest is not None,
     )

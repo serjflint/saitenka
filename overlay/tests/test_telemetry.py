@@ -110,8 +110,8 @@ def test_end_to_end_span_reaches_the_ctf_trace_file(tmp_path):
         pass
     telemetry.shutdown()
 
-    trace_path = export / "trace.json"
-    assert trace_path.exists()
+    trace_path = telemetry.latest_trace(export)  # timestamped per-session file
+    assert trace_path is not None and trace_path.exists()
     data = json.loads(trace_path.read_text())
     assert any(e["name"] == "load_deps_async" for e in data["traceEvents"])
 
@@ -170,20 +170,34 @@ def test_configure_writes_counter_tracks_into_the_trace_file(tmp_path):
 
     export = tmp_path / "telemetry"
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
-    trace_path = export / "trace.json"
 
     for _ in range(60):
-        if trace_path.exists():
+        trace_path = telemetry.latest_trace(export)  # timestamped per-session file
+        if trace_path is not None and trace_path.exists():
             data = json.loads(trace_path.read_text())
             if any(e["ph"] == "C" for e in data["traceEvents"]):
                 break
         time_mod.sleep(0.1)
     else:
-        raise AssertionError("no counter event landed in trace.json within 6s")
+        raise AssertionError("no counter event landed in the trace within 6s")
 
     counter_names = {e["name"] for e in data["traceEvents"] if e["ph"] == "C"}
     assert "runtime.gil_enabled" in counter_names
     assert "telemetry.dropped_spans" in counter_names
+
+
+def test_trace_rotation_prunes_oldest_and_latest_trace_picks_newest(tmp_path):
+    """Per-session traces are timestamped; latest_trace serves the newest (for report/doctor/status),
+    and _rotate_traces keeps the newest keep-1 so the incoming session brings the total to keep."""
+    for ts in ("20260101-000001", "20260101-000002", "20260101-000003"):
+        (tmp_path / f"trace-{ts}.json").write_text("{}")
+    assert telemetry.latest_trace(tmp_path).name == "trace-20260101-000003.json"
+    telemetry._rotate_traces(tmp_path, keep=2)  # keep newest 1 (a new session will make 2)
+    assert sorted(p.name for p in tmp_path.glob("trace-*.json")) == ["trace-20260101-000003.json"]
+
+
+def test_latest_trace_is_none_when_no_trace_yet(tmp_path):
+    assert telemetry.latest_trace(tmp_path) is None
 
 
 def test_active_gate_defaults_off_and_toggles():

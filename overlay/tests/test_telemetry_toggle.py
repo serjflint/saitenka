@@ -60,7 +60,9 @@ def test_telemetry_state_reflects_config_flag(tmp_path, monkeypatch):
     monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
     st = telemetry_state()
     assert st.config_enabled is True
-    assert st.trace_path.name == "trace.json"
+    assert (
+        st.trace_exists is False
+    )  # no session has written a trace into this hermetic export dir yet
     # extra is installed in the dev env (via [full]); effective tracks config ∧ extra ∧ ¬killswitch.
     assert st.effective is (st.config_enabled and st.extra_installed and not st.kill_switch)
 

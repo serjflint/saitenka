@@ -10,7 +10,6 @@ new owner — and are called from thin delegating methods on
 from __future__ import annotations
 
 import logging
-import os
 import queue
 import threading
 from dataclasses import dataclass
@@ -25,6 +24,15 @@ if TYPE_CHECKING:
     from overlay.app.popups import TipPanel
 
 log = logging.getLogger(__name__)
+
+# Auto (``[perf].prefetch_workers = 0``) worker counts — flat, sane per-build defaults rather than a
+# cpu-count formula: render parallelism plateaus by ~4 (see the render-parallelism notes) and each
+# worker costs real RAM, so a bigger number buys idle-warming coverage we almost never need. Override
+# with a positive ``prefetch_workers`` to pin/cap it.
+_AUTO_WORKERS_FREE_THREADED = (
+    4  # free-threaded: renders in parallel, 4 pairs with the render pool width
+)
+_AUTO_WORKERS_GIL = 2  # a GIL build can't render in parallel — extra workers only contend
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,22 +86,24 @@ class FinishItem:
 
 
 def prefetch_worker_count(reader: Reader) -> int:
-    """GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
-    ~3.8x on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
+    """An explicit ``[perf].prefetch_workers`` (>0) pins the count on both builds; ``0`` (auto) picks a
+    flat per-build default (``_AUTO_WORKERS_FREE_THREADED`` / ``_AUTO_WORKERS_GIL``). Each worker is
+    PERSISTENT and carries real per-thread RAM (SQLite page cache + FreeType faces + the free-threaded
+    allocator arena), so this is primarily a RAM/coverage knob — see PerfOptions.
 
     ``gil_disabled()`` is only trustworthy AFTER fugashi has loaded — it wraps a C extension that
     hasn't declared free-threaded safety and silently re-enables the GIL on first use, not at import
     (``tokenize.py``). This is called from ``start_prefetch()`` at the very top of ``run()``, before
     any subtitle line has ever been tokenized, so without this warm-up it always sees the pre-fugashi
-    state — spawning up to 8 workers on a free-threaded build that loses the GIL moments later anyway,
-    paying the free-threaded allocator's per-thread-arena memory tax (see
-    ``vibe/hot-path-idle-spreading-plan.md``) for parallelism that never actually happens. Force the
-    load now (its one-time cost lands at startup instead of on the first real subtitle line either
-    way) so this reflects the GIL state that will actually hold for the session."""
+    state — spawning the free-threaded worker count on a build that loses the GIL moments later anyway,
+    paying the allocator's per-thread-arena memory tax (see ``vibe/hot-path-idle-spreading-plan.md``)
+    for parallelism that never actually happens. Force the load now (its one-time cost lands at startup
+    instead of on the first real subtitle line either way) so this reflects the GIL state that will
+    actually hold for the session."""
     tokenize("")
-    if gil_disabled():
-        return min(8, max(2, (os.cpu_count() or 4) - 2))
-    return reader.prefetch_workers
+    if reader.prefetch_workers > 0:  # explicit [perf].prefetch_workers pins it on BOTH builds
+        return reader.prefetch_workers
+    return _AUTO_WORKERS_FREE_THREADED if gil_disabled() else _AUTO_WORKERS_GIL
 
 
 def start_prefetch(reader: Reader) -> None:
@@ -115,7 +125,12 @@ def _try_finish_job(reader: Reader) -> bool:
     except queue.Empty:
         return False
     try:
-        fin.panel.finish()
+        # The deferred tail: finish() fans the panel's body rows across the shared pool (threads when
+        # free-threaded, a process pool on a GIL build — parallel.pick_executor). executor mirrors that
+        # choice so the trace shows which one ran; on the process path wall ≫ cpu_ms here is the
+        # pickle/IPC tax the pool costs, the parent thread just waiting on the futures.
+        with otel_metrics.traced("finish_tail", executor="thread" if gil_disabled() else "process"):
+            fin.panel.finish()
     except Exception:
         log.debug("finish job failed", exc_info=True)
         return True
@@ -129,12 +144,15 @@ def _try_finish_job(reader: Reader) -> bool:
 def _run_item(reader: Reader, item: PrefetchItem) -> None:
     """A FULL panel render when the user's engaged, else a cheap dict-only WARM (decode+cache the
     glossary into ``Dictionary._entry_cache``, no layout) so a later hover/render skips the decode."""
-    if item.full:
-        # item.mined came from the main thread — never call _is_mined/card_for from a worker
-        # (jamdict is not thread-safe on free-threaded builds).
-        reader._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
-    elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
-        reader.dict_set.entry_for(item.token, item.inflected)
+    # Idle-warming span: how much idle budget the worker actually spends warming upcoming words —
+    # the live counterpart to what --timeline measures out-of-band (worker keep-ahead margin).
+    with otel_metrics.traced("prefetch_decode", kind="full" if item.full else "warm"):
+        if item.full:
+            # item.mined came from the main thread — never call _is_mined/card_for from a worker
+            # (jamdict is not thread-safe on free-threaded builds).
+            reader._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
+        elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
+            reader.dict_set.entry_for(item.token, item.inflected)
 
 
 def _try_prefetch_item(reader: Reader) -> None:

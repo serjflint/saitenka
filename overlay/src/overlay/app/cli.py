@@ -893,6 +893,9 @@ def attach(
     from overlay.mpvio.ipc import MpvIPC
 
     cfg = load_config(config)
+    from overlay.app.cli_run import setup_session_telemetry
+
+    setup_session_telemetry(cfg)  # capture is per reader session, not global (see cli.main note)
     sock = socket or cfg.get("mpv_socket")
     if not sock:
         print(
@@ -1045,25 +1048,12 @@ def _harden_runtime() -> None:  # pragma: no cover — process-global startup si
     augment_path()
 
 
-def _setup_telemetry() -> None:
-    """Opt-in only: no-op unless ``[telemetry] enabled = true`` in config. See
-    :mod:`overlay.app.telemetry`."""
-    from overlay.app.config import load_config, resolve_telemetry
-    from overlay.app.telemetry import configure, is_enabled
-
-    configure(resolve_telemetry(load_config()))
-    if is_enabled():
-        print(
-            "[saitenka] telemetry: enabled (captures usage/perf data) "
-            "— run `saitenka-overlay telemetry disable` to turn off"
-        )
-
-
 def main() -> None:  # pragma: no cover — live-run entry point
     try:
         _ensure_free_threaded()
         _setup_logging()
-        _setup_telemetry()
+        # Telemetry CAPTURE is stood up per reader session (run/attach → cli_run.setup_session_telemetry),
+        # NOT here — a one-shot command like `report` would otherwise truncate the session's trace.json.
         _harden_runtime()
         from overlay.app.crashlog import install as install_crash_handlers
         from overlay.app.signals import install as install_shutdown_signals

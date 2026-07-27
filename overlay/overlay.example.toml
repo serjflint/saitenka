@@ -40,7 +40,9 @@
 
 # ── Background work (prefetch & polling) ─────────────────────────────────────────────────────────
 # prefetch = true            # warm the current line's tooltips on idle CPU so the first hover is instant
-# prefetch_workers = 2       # tooltip-warming worker threads (auto-scales higher on free-threaded builds)
+# prefetch_workers = 0       # tooltip-warming worker threads. 0 = auto (4 free-threaded, 2 on GIL). Each
+#                            # is persistent + holds ~cache_size_kib of SQLite cache + font faces, so it's
+#                            # mainly a RAM knob: set a positive number to pin/cap it.
 # prefetch_lookahead = 0     # ALSO warm this many UPCOMING cues (dict-only decode) so the first hover
 #                            # after the line advances / an Alt+→ is already decoded. Needs an external
 #                            # sub index (embedded/jimaku tracks have none → no-op). Try 1–3. Cheap —

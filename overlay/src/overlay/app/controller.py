@@ -205,6 +205,10 @@ class Reader:
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
+        self._tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
+        self._runtime_announced = (
+            False  # the runtime banner prints once, after prefetch actually starts
+        )
         self._stop = threading.Event()
         self._prefetch_threads: list[threading.Thread] = []
         # translation reveal: manual toggle (`t`), or auto-reveal on hover when opted in.
@@ -606,9 +610,6 @@ class Reader:
     def _show_tooltip(self, index: int) -> None:
         tooltip.show_tooltip(self, index)
 
-    def _show_tooltip_impl(self, index: int) -> None:
-        tooltip.show_tooltip_impl(self, index)
-
     def _place_panel(
         self, full_w: int, wx: float, wy: float, wh: float, view_h: int
     ) -> tuple[int, int]:
@@ -752,10 +753,12 @@ class Reader:
         if idx is None:
             self._toast("no word to mine", "warn")
             return
-        self._miner.mine_token(self.tokens[idx])
+        with otel_metrics.traced("anki_mine", source="base"):
+            self._miner.mine_token(self.tokens[idx])
 
     def _mine_token(self, tok) -> None:
-        self._miner.mine_token(tok)
+        with otel_metrics.traced("anki_mine", source="nested"):
+            self._miner.mine_token(tok)
 
     def _mark_mined(self, expression: str) -> None:
         miner_ui.mark_mined(self, expression)
@@ -1037,14 +1040,27 @@ class Reader:
         subnav.reconcile_sub_text(self, text)
 
     # --- progressive dep loading --------------------------------------------------------------
-    def load_deps_async(self, cfg: dict, build=None) -> None:
-        reader_deps.load_deps_async(self, cfg, build)
+    def load_deps_async(self, cfg: dict, build=None, *, prebuilt=None) -> None:
+        reader_deps.load_deps_async(self, cfg, build, prebuilt=prebuilt)
 
     def _apply_deps(self, deps: dict) -> None:
         reader_deps.apply_deps(self, deps)
 
     def _draw_loading(self) -> None:
         reader_deps.draw_loading(self)
+
+    def _announce_runtime(self) -> None:
+        """Print the runtime banner exactly once, from wherever prefetch actually finishes starting
+        (sync: run(); async: apply_deps after start_prefetch). Reports the LIVE worker count — the old
+        run()-time print always showed 0 because async deps hadn't spawned the workers yet."""
+        if self._runtime_announced:
+            return
+        self._runtime_announced = True
+        mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
+        print(  # noqa: T201  # user-facing banner; log.info alone won't show — console handler is WARNING-level (logsetup.py)
+            f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)"
+        )
+        log.info("runtime: %s, %d prefetch worker(s)", mode, len(self._prefetch_threads))
 
     def run(self, interval: float | None = None) -> None:
         interval = interval if interval is not None else self.poll_interval
@@ -1055,11 +1071,12 @@ class Reader:
         self._seed_mined()
         self.start_prefetch()
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
-        mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
-        print(  # noqa: T201  # user-facing banner line; log.info alone won't show — console handler is WARNING-level (logsetup.py)
-            f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)"
-        )
-        log.info("runtime: %s, %d prefetch worker(s)", mode, len(self._prefetch_threads))
+        # In run/attach the deps (and thus prefetch workers) load ASYNC — dict_set is still None here,
+        # so start_prefetch above was a no-op and the worker count is 0. Defer the banner to when
+        # prefetch actually starts (apply_deps → _announce_runtime); only announce now on the sync path
+        # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
+        if self.dict_set is not None:
+            self._announce_runtime()
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
         self._stall_warned = False
         while self.poll_once():

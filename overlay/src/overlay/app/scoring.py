@@ -104,6 +104,14 @@ def mark_n_plus_one(tokens: list[Token], known: list[bool], min_words: int = 3) 
     return targets
 
 
+# The banded coloring only distinguishes ranks up to here (band() returns None past it), so a rank
+# beyond it never colors a word. Single-sourced because reader_deps caps the FreqDict LOAD at the same
+# value — loading rarer ranks is pure startup cost for zero coloring effect (JPDBv2: 279k rows, only
+# ~10k ≤ this). If 'single' freq_mode is ever wired to config, the load cap must go conditional (single
+# colors on ANY presence, so it needs the full table) — see reader_deps._load_freq_dict.
+FREQ_BAND_TOP_X = 10000
+
+
 @dataclass
 class Scorer:
     known: KnownWords
@@ -115,7 +123,7 @@ class Scorer:
     enable_freq: bool = True
     enable_jlpt: bool = True
     freq_mode: str = "banded"  # 'banded' | 'single'
-    freq_top_x: int = 10000
+    freq_top_x: int = FREQ_BAND_TOP_X
     min_sentence_words: int = 3
     # FSRS knownness snapshot — gives the forgotten tint when set.
     fsrs_snap: KnownSnap | None = None

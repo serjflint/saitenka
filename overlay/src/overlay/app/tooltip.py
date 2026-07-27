@@ -603,6 +603,8 @@ def panel_cache_setdefault(reader: Reader, key: PanelKey, st: TipPanel) -> TipPa
     # Evict least-recently-used entries until we are at the limit.
     while len(reader._panel_cache) >= reader.panel_cache_max:
         reader._panel_cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
+        if otel_metrics.panel_cache_evictions is not None:
+            otel_metrics.panel_cache_evictions.add(1)
     reader._panel_cache[key] = st
     return st
 
@@ -611,8 +613,30 @@ def panel_cache_setdefault(reader: Reader, key: PanelKey, st: TipPanel) -> TipPa
 
 
 def show_tooltip(reader: Reader, index: int) -> None:
-    with timed("show_tooltip"):
+    # "tooltip_show" is the end-to-end hover→drawn span (symmetric with scroll_frame/sub_seek); the
+    # perf ring buffer stays for doctor/crashlog. Metrics recorded outside the spans so the kind
+    # label (cold vs warm) — only known after impl builds/hits the panel — can split the histogram.
+    start = time.perf_counter()
+    with otel_metrics.traced("tooltip_show"), timed("show_tooltip"):
         show_tooltip_impl(reader, index)
+    _record_show_metrics(reader, (time.perf_counter() - start) * 1000.0)
+
+
+def _record_show_metrics(reader: Reader, elapsed_ms: float) -> None:
+    """Live percentiles + the cold-first-paint overshoot count for one base-tooltip show. The
+    overshoot counter fires only on a COLD show past the budget — a warm cache-hit show over budget
+    isn't a first-paint miss, so it must not pollute the signal viewport-first rendering is judged by."""
+    cold = reader._tip_show_cold
+    if otel_metrics.show_tooltip_duration_ms is not None:
+        otel_metrics.show_tooltip_duration_ms.record(
+            elapsed_ms, {"kind": "cold" if cold else "warm"}
+        )
+    if (
+        cold
+        and elapsed_ms > otel_metrics.COLD_FIRST_PAINT_BUDGET_MS
+        and otel_metrics.cold_first_paint_overshoot is not None
+    ):
+        otel_metrics.cold_first_paint_overshoot.add(1)
 
 
 def show_tooltip_impl(reader: Reader, index: int) -> None:
@@ -625,6 +649,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     # Without a worker (prefetch off) finish synchronously so the panel is never left partial.
     mined = is_mined(reader, tok)
     key = panel_key(reader, tok, inflected, mined=mined)
+    reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
     st = panel_for(
         reader, tok, inflected, min_h=cap, finish=not reader._finish_available(), mined=mined
     )
