@@ -142,15 +142,22 @@ def _try_finish_job(reader: Reader) -> bool:
 
 
 def _run_item(reader: Reader, item: PrefetchItem) -> None:
-    """A FULL panel render when the user's engaged, else a cheap dict-only WARM (decode+cache the
-    glossary into ``Dictionary._entry_cache``, no layout) so a later hover/render skips the decode."""
+    """A viewport-first HEAD render when the user's engaged (a hover is imminent), else a cheap
+    dict-only WARM (decode+cache the glossary into ``Dictionary._entry_cache``, no layout) so a
+    later hover/render skips the decode."""
     # Idle-warming span: how much idle budget the worker actually spends warming upcoming words —
     # the live counterpart to what --timeline measures out-of-band (worker keep-ahead margin).
-    with otel_metrics.traced("prefetch_decode", kind="full" if item.full else "warm"):
+    with otel_metrics.traced("prefetch_decode", kind="head" if item.full else "warm"):
         if item.full:
+            # Head-first, NOT the whole panel: a real hover defers the tail via the finish queue
+            # anyway, so pre-rendering the full body of every engaged content word just saturates the
+            # worker on pathological entries (seconds-long renders → queue backlog, hovers land cold).
+            # Same viewport cap + panel_for()/cache path a hover uses, so the warmed head is a hit.
             # item.mined came from the main thread — never call _is_mined/card_for from a worker
             # (jamdict is not thread-safe on free-threaded builds).
-            reader._panel_for(item.token, item.inflected, finish=True, mined=item.mined)
+            reader._panel_for(
+                item.token, item.inflected, min_h=reader._tip_cap(), finish=False, mined=item.mined
+            )
         elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
             reader.dict_set.entry_for(item.token, item.inflected)
 
@@ -185,9 +192,12 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
     try:
         # Same viewport cap + same panel_for()/panel_cache path a real hover uses — written into the
         # SAME cache, so a later hover is an ordinary cache hit (see HeadPrefetchItem docstring).
-        reader._panel_for(
-            item.token, item.inflected, min_h=reader._tip_cap(), finish=False, mined=item.mined
-        )
+        # kind="head_ahead" distinguishes the speculative lookahead render from the engaged current
+        # line's kind="head" — without a span here it was invisible, folding into anonymous `render`.
+        with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
+            reader._panel_for(
+                item.token, item.inflected, min_h=reader._tip_cap(), finish=False, mined=item.mined
+            )
         reader._head_built += 1
     except Exception:
         log.debug(
@@ -230,8 +240,8 @@ def _candidates(reader: Reader) -> list[tuple[int, int, Token]]:
 
 def update_prefetch(reader: Reader) -> None:
     """Queue the current line's content words for background work every time the line (or engagement)
-    changes — *engaged* (paused OR the cursor over the video) gets a FULL render (a hover is
-    imminent); otherwise a cheap dict-only WARM (``full=False``): the video is just playing, but
+    changes — *engaged* (paused OR the cursor over the video) gets a viewport-first HEAD render (a
+    hover is imminent); otherwise a cheap dict-only WARM (``full=False``): the video is just playing, but
     that's exactly the idle time to pay the JSON-decode cost. N+1 words go first. On any change bump
     the generation so in-flight renders are dropped; tokens pass by value (frozen), so a line change
     can't make a worker read stale state.
