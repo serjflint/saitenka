@@ -167,3 +167,111 @@ def test_from_ankiconnect_uses_entry_and_furigana(monkeypatch):
     kw = KnownWords.from_ankiconnect({"Saitenka::Known": ["Entry", "Expression", "Word"]})
     assert kw.is_known("お孫さん")  # via Entry
     assert kw.is_known("おまごさん")  # reading recovered from EntryFurigana
+
+
+def test_known_cache_is_cache_first_and_diff_refreshes_by_modtime(monkeypatch):
+    """The SQLite cache serves the known set instantly; refresh re-fetches ONLY notes whose Anki
+    mod-time changed (not the whole deck), and a config-signature change invalidates the cache."""
+    import dicthelp
+
+    from overlay.app import wordlists as wl
+
+    state = {1: (10, "人"), 2: (10, "時間")}  # note_id -> (mod, Entry value)
+    calls: list[tuple] = []
+
+    def fake_ac(_host, action, **p):
+        calls.append((action, tuple(p.get("notes", ())) or None))
+        if action == "findNotes":
+            return list(state)
+        if action == "notesModTime":
+            return [{"noteId": i, "mod": state[i][0]} for i in p["notes"]]
+        if action == "notesInfo":
+            return [{"noteId": i, "fields": {"Entry": {"value": state[i][1]}}} for i in p["notes"]]
+        return None
+
+    monkeypatch.setattr(wl, "_ankiconnect", fake_ac)
+    db = dicthelp.db()
+    decks = {"D": ["Entry"]}
+
+    assert KnownWords.from_cache(db, decks) is None  # empty cache → miss
+    assert wl.refresh_known_cache(db, decks).words == {"人", "時間"}  # full load populates it
+    assert KnownWords.from_cache(db, decks).words == {"人", "時間"}  # now an instant hit
+
+    state[2] = (11, "時刻")  # edit only note 2
+    calls.clear()
+    assert wl.refresh_known_cache(db, decks).words == {"人", "時刻"}
+    assert [c for c in calls if c[0] == "notesInfo"] == [("notesInfo", (2,))]  # subset: note 2 only
+    assert KnownWords.from_cache(db, decks).words == {"人", "時刻"}  # cache reflects the edit
+
+    assert KnownWords.from_cache(db, {"D": ["Entry", "Meaning"]}) is None  # signature change → miss
+
+
+def test_known_cache_reconciles_external_anki_edits_additions_and_deletions(monkeypatch):
+    """Anki is edited OUTSIDE the overlay (Anki desktop, another tool). The mod-time diff must pick up
+    every kind of external change on the next refresh — an edited note's new value, a brand-new note,
+    and a deleted note's removal — while re-fetching ONLY the touched notes, and the cache must reflect
+    the reconciled set. This is the durability that matters: the cache never goes permanently stale."""
+    import dicthelp
+
+    from overlay.app import wordlists as wl
+
+    state = {1: (10, "人"), 2: (10, "時間"), 3: (10, "猫")}  # note_id -> (mod, Entry value)
+    calls: list[tuple] = []
+
+    def fake_ac(_host, action, **p):
+        calls.append((action, tuple(p.get("notes", ())) or None))
+        if action == "findNotes":
+            return list(state)
+        if action == "notesModTime":
+            return [{"noteId": i, "mod": state[i][0]} for i in p["notes"]]
+        if action == "notesInfo":
+            return [{"noteId": i, "fields": {"Entry": {"value": state[i][1]}}} for i in p["notes"]]
+        return None
+
+    monkeypatch.setattr(wl, "_ankiconnect", fake_ac)
+    db = dicthelp.db()
+    decks = {"D": ["Entry"]}
+    assert wl.refresh_known_cache(db, decks).words == {"人", "時間", "猫"}  # initial build
+
+    # --- external mutations, all outside the overlay ---
+    state[1] = (11, "人間")  # EDIT note 1 (mod bumped by Anki on any field change)
+    state[4] = (10, "犬")  # ADD note 4
+    del state[3]  # DELETE note 3
+
+    calls.clear()
+    reconciled = wl.refresh_known_cache(db, decks)
+    assert reconciled.words == {"人間", "時間", "犬"}  # edit applied, add included, delete dropped
+    fetched = sorted(nid for c in calls if c[0] == "notesInfo" for nid in (c[1] or ()))
+    assert fetched == [1, 4]  # ONLY the edited + added notes re-fetched; untouched note 2 was not
+    assert KnownWords.from_cache(db, decks).words == {"人間", "時間", "犬"}  # durably in the cache
+
+
+def test_known_cache_and_its_invalidation_are_durable_across_a_db_reopen(tmp_path, monkeypatch):
+    """The cache exists to survive process restarts, so both the hit AND the signature invalidation
+    must persist on disk — a fresh DictionaryDb (i.e. the next launch) reads the same rows/signature,
+    never a stale hit under a config it wasn't built for."""
+    from overlay.app import wordlists as wl
+    from overlay.app.dictdb import DictionaryDb
+
+    state = {1: (10, "人"), 2: (10, "時間")}
+
+    def fake_ac(_host, action, **p):
+        if action == "findNotes":
+            return list(state)
+        if action == "notesModTime":
+            return [{"noteId": i, "mod": state[i][0]} for i in p["notes"]]
+        if action == "notesInfo":
+            return [{"noteId": i, "fields": {"Entry": {"value": state[i][1]}}} for i in p["notes"]]
+        return None
+
+    monkeypatch.setattr(wl, "_ankiconnect", fake_ac)
+    path = tmp_path / "consolidated.sqlite"
+    wl.refresh_known_cache(
+        DictionaryDb.open(path), {"D": ["Entry"]}
+    )  # build + persist, then drop it
+
+    reopened = DictionaryDb.open(path)  # a fresh instance = the next launch reading off disk
+    assert KnownWords.from_cache(reopened, {"D": ["Entry"]}).words == {"人", "時間"}  # durable hit
+    # invalidation is durable too: the same on-disk cache must NOT satisfy a changed field config,
+    # even though its rows are physically present — the signature stored on disk no longer matches.
+    assert KnownWords.from_cache(reopened, {"D": ["Entry", "Meaning"]}) is None

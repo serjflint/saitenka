@@ -866,7 +866,7 @@ def run_timeline(
             # the same main-thread-only path) so this check reflects the REAL cache panel_for() reads.
             mined = reader._is_mined(tok)
             key = reader._panel_key(
-                tok, reader._inflected_surface(idx), mined, reader.show_dict_tabs
+                tok, reader._inflected_surface(idx), mined=mined, tabs=reader.show_dict_tabs
             )
             panel_already_warm = key in reader._panel_cache
             hovers += 1

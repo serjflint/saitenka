@@ -18,6 +18,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import Future
 from typing import TYPE_CHECKING
 
 from overlay import otel_metrics
@@ -85,36 +86,70 @@ def _build_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_ti
     return dict_set, freq_rows
 
 
-def _load_known_words(known_cfg, *, fallback_words=(), on_error=None):
-    """``fallback_words`` is ``run``'s plain ``--known word1,word2`` list (``attach`` has no such
-    flag, so it's empty there); ``on_error`` lets ``run`` print a console note instead of the
-    default log-only warning on an AnkiConnect failure."""
-    from overlay.app.wordlists import KnownWords
+def _spawn_known_refresh(db, known_cfg) -> None:
+    """Background: reconcile the known-word cache against Anki (subset mod-time diff) so the NEXT launch
+    reads a current set off disk. Fire-and-forget — a failure (Anki down) leaves the cache as-is; this
+    session already colored from it. Daemon so it never holds up shutdown."""
+    from overlay.app.wordlists import refresh_known_cache
 
-    if known_cfg:
+    def _refresh() -> None:
         try:
-            return KnownWords.from_ankiconnect(known_cfg)
-        except (  # Anki closed / AnkiConnect down — color by freq+JLPT only
-            OSError,
-            http.client.HTTPException,
-            json.JSONDecodeError,
-            AttributeError,
-        ) as e:
-            if on_error is not None:
-                on_error(e)
-            else:
-                log.warning("known-word load from Anki failed; coloring without a known set")
+            refresh_known_cache(db, known_cfg)
+        except Exception:
+            log.debug("background known-word cache refresh failed", exc_info=True)
+
+    threading.Thread(target=_refresh, name="saitenka-known-refresh", daemon=True).start()
+
+
+def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
+    """Cache-first: serve the last-known set from our SQLite cache (~1 ms) and reconcile in the
+    background, so the ~190 ms IO-bound AnkiConnect load is off the startup critical path. A cache miss
+    (first launch / changed config) falls back to a blocking full load that populates the cache.
+
+    ``fallback_words`` is ``run``'s plain ``--known word1,word2`` list (``attach`` has none);
+    ``on_error`` lets ``run`` print a console note instead of the default log-only Anki-failure warning."""
+    from overlay.app.wordlists import KnownWords, refresh_known_cache
+
+    if not known_cfg:
+        return KnownWords.from_set(fallback_words)
+    try:
+        cached = KnownWords.from_cache(db, known_cfg)
+    except Exception:
+        log.debug("known-word cache read failed; doing a full load", exc_info=True)
+        cached = None
+    if cached is not None:
+        _spawn_known_refresh(
+            db, known_cfg
+        )  # freshen the cache for next launch, off the critical path
+        return cached
+    try:  # cache miss: full load NOW (populates the cache + signature for next time)
+        return refresh_known_cache(db, known_cfg)
+    except (  # Anki closed / AnkiConnect down / malformed reply — color by freq+JLPT only
+        OSError,
+        http.client.HTTPException,
+        json.JSONDecodeError,
+        AttributeError,
+        KeyError,
+        TypeError,
+    ) as e:
+        if on_error is not None:
+            on_error(e)
+        else:
+            log.warning("known-word load from Anki failed; coloring without a known set")
     return KnownWords.from_set(fallback_words)
 
 
 def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
+    from overlay.app.scoring import FREQ_BAND_TOP_X
     from overlay.app.wordlists import FreqDict
 
     with otel_metrics.traced("load_freq_dict"):
         # freq_rows is set iff we resolved dict sources above; the coloring band uses the first freq.
         if freq_rows is None:
             freq_rows, _ = db.resolve(freq_titles)
-        return FreqDict.from_db(db, freq_rows[0]) if freq_rows else None
+        # Cap at the band's top_x: rarer ranks can't color a word (banded freq_mode), so loading them
+        # is ~200ms of dead startup work on a big freq like JPDBv2 — the dep-load critical path.
+        return FreqDict.from_db(db, freq_rows[0], top_x=FREQ_BAND_TOP_X) if freq_rows else None
 
 
 def _load_jlpt_dict(db):
@@ -201,6 +236,7 @@ def build_reader_deps(
         kw_fut = (
             ex.submit(
                 _load_known_words,
+                db,
                 known_cfg,
                 fallback_words=fallback_words,
                 on_error=on_known_words_error,
@@ -241,43 +277,50 @@ def warm_tokenizer() -> None:
         tokenize(" ")
 
 
-def load_deps_async(reader: Reader, cfg: dict, build=None) -> None:
-    """Load coloring/dict/mining collaborators on a BACKGROUND thread (dicts/scorer/anki — none
-    touch the mpv IPC), then hand them to the poll loop, which injects them on the main thread.
-    Plain subs draw meanwhile; a spinner shows until the deps land.
+def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
+    """Start the dep build (coloring/dict/mining collaborators — none touch the mpv IPC) on its OWN
+    thread and return a Future for the result. This is the HOISTABLE half of progressive startup:
+    ``run`` calls it BEFORE launching mpv so the CPU/IO build overlaps mpv's launch/connect dead time
+    (same trick as :func:`warm_tokenizer`), then hands the Future to :func:`load_deps_async` once the
+    reader exists.
 
-    ``build`` is a zero-arg callable returning ``(scorer, anki, mine_cfg, dict_set)``; it defaults
-    to ``build_reader_deps(cfg)`` (attach/plugin mode). ``run`` passes its own closure so it can
-    honour CLI flags (``--dict/--freq/--anki-decks/--mine`` …) while still loading progressively.
-    The one rule: the builder must NOT touch the mpv IPC (it runs off the main thread).
+    ``build`` is a zero-arg callable returning ``(scorer, anki, mine_cfg, dict_set)``; defaults to
+    ``build_reader_deps(cfg)`` (attach/plugin mode). ``run`` passes its own closure to honour CLI flags
+    (``--dict/--freq/--anki-decks/--mine`` …). The one rule: the builder must NOT touch the mpv IPC.
+    The Future resolves to the deps dict, or ``{}`` if the build raised (stay subs-only) — it never
+    rejects, so a consumer's ``result()`` can't fault."""
+    fut: Future[dict] = Future()
 
-    Callers should have already fired :func:`warm_tokenizer` on its own thread, as early as possible
-    (ideally before mpv launches) — NOT from here, which by this point is already well past mpv
-    launch/connect and would put it back on the critical path instead of hiding it in dead time."""
-    reader._loading = True
-
-    if build is None:
-
-        def _default_build():
-            return build_reader_deps(cfg)
-
-        build = _default_build
-
-    def _load() -> None:
+    def _run() -> None:
         try:
             with otel_metrics.traced("load_deps_async"):
-                scorer, anki, mine_cfg, dict_set = build()
-            reader._pending_deps = {
-                "scorer": scorer,
-                "anki": anki,
-                "mine_cfg": mine_cfg,
-                "dict_set": dict_set,
-            }
+                scorer, anki, mine_cfg, dict_set = build() if build else build_reader_deps(cfg)
+            fut.set_result(
+                {"scorer": scorer, "anki": anki, "mine_cfg": mine_cfg, "dict_set": dict_set}
+            )
         except Exception:
             log.warning("background dep load failed — staying subs-only", exc_info=True)
-            reader._pending_deps = {}  # signal "done" so the spinner stops
+            fut.set_result({})  # signal "done" so the spinner stops
 
-    threading.Thread(target=_load, name="saitenka-deps", daemon=True).start()
+    threading.Thread(target=_run, name="saitenka-deps", daemon=True).start()
+    return fut
+
+
+def load_deps_async(
+    reader: Reader, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
+) -> None:
+    """Wire a background dep build into the reader: when it lands, the poll loop injects it on the main
+    thread (:func:`apply_deps`). Plain subs draw meanwhile; a spinner shows until it lands.
+
+    ``prebuilt`` is a Future from a HOISTED :func:`begin_deps_build` (``run`` starts the build before
+    mpv launches so it overlaps launch dead time); without it the build starts now (attach/plugin mode,
+    already well past mpv connect). The done-callback sets ``_pending_deps`` from the build thread — the
+    same cross-thread hand-off to the poll loop the previous inline version used.
+
+    Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
+    reader._loading = True
+    fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
+    fut.add_done_callback(lambda f: setattr(reader, "_pending_deps", f.result()))
 
 
 def apply_deps(reader: Reader, deps: dict) -> None:
@@ -293,6 +336,7 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     if reader.anki:
         reader._seed_mined()  # ⊕→✓ from past mining
     reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
+    reader._announce_runtime()  # workers are up now — print the banner with the real count (once)
 
 
 def draw_loading(reader: Reader) -> None:

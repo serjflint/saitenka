@@ -95,3 +95,33 @@ def test_load_deps_async_uses_a_custom_build():
     }
     r._apply_deps(r._pending_deps)  # main-thread injection
     assert r.scorer == "SCORER" and r._loading is False
+
+
+def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
+    """The run-mode hoist: begin_deps_build starts the build BEFORE mpv launches; load_deps_async then
+    consumes that Future (it must NOT build a second time) and publishes the result for the poll loop."""
+    import time
+
+    from util import FakeIPC
+
+    from overlay.app import reader_deps as rd
+    from overlay.app.controller import Reader
+
+    built = {"n": 0}
+
+    def _build():
+        built["n"] += 1
+        return "SCORER", None, None, None
+
+    fut = rd.begin_deps_build({}, _build)  # hoisted: runs before the reader exists
+    r = Reader(FakeIPC())
+    r.ov = _RecOv()
+    r.load_deps_async({}, prebuilt=fut)  # consume the in-flight build, don't restart it
+    for _ in range(300):
+        if r._pending_deps is not None:
+            break
+        time.sleep(0.01)
+    assert (
+        built["n"] == 1
+    )  # built exactly once — by begin_deps_build, not re-run by load_deps_async
+    assert r._pending_deps == {"scorer": "SCORER", "anki": None, "mine_cfg": None, "dict_set": None}

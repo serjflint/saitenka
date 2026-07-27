@@ -77,14 +77,43 @@ def test_dict_set_built_from_db_titles_and_warns_on_missing(tmp_path, capsys):
     assert "not imported" in capsys.readouterr().err  # the missing title was warned
 
 
+def test_freqdict_load_caps_at_top_x_and_drops_the_uncolorable_tail(tmp_path):
+    """The banded scorer can't color a rank past its cap (band() returns None), so from_db(top_x=…)
+    must not load those rows — a startup win that must stay behavior-identical for ranks within the
+    cap. A rank beyond the cap looks up as None (uncolored), exactly as a full load + band() would."""
+    import dicthelp
+
+    from overlay.app.scoring import FREQ_BAND_TOP_X
+    from overlay.app.wordlists import FreqDict
+
+    f = dicthelp.meta_zip(
+        tmp_path / "f.zip",
+        "Freq",
+        "freq",
+        [["近い", 5], ["稀語", FREQ_BAND_TOP_X + 500]],  # one within cap, one past it
+    )
+    db = dicthelp.db()
+    row = db.import_zip(f, imported_at=dicthelp.AT)
+
+    capped = FreqDict.from_db(db, row, top_x=FREQ_BAND_TOP_X)
+    assert capped.rank("近い") == 5  # within cap → loaded, colors normally
+    assert capped.rank("稀語") is None  # past cap → not loaded, same as band() returning None
+
+    full = FreqDict.from_db(
+        db, row
+    )  # None cap → full ranking still available for a single-mode caller
+    assert full.rank("稀語") == FREQ_BAND_TOP_X + 500
+
+
 def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
     import overlay.app.scoring as scoring_mod
     import overlay.app.wordlists as wl
 
-    def boom(_cfg):
+    def boom(*_a, **_k):
         raise ConnectionError("down")
 
-    monkeypatch.setattr(wl.KnownWords, "from_ankiconnect", staticmethod(boom))
+    # cache-first path: empty cache → miss → the blocking refresh_known_cache raises (Anki down)
+    monkeypatch.setattr(wl, "refresh_known_cache", boom)
     monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
     monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
     monkeypatch.setattr(scoring_mod, "Scorer", lambda known, **_kw: {"known": known})
