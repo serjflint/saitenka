@@ -311,7 +311,15 @@ cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --c
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between
 # synthetic cues, so it's slower than the other benches; not folded into `bench`/`poe all`.
-timeline-bench = "uv run --extra full python examples/bench_responsiveness.py --timeline"
+# PYTHON_GIL=0 so the prefetch workers run truly free-threaded (fugashi is main-thread-only here, so
+# no MeCab races) — without it fugashi re-enables the GIL and worker scaling collapses to ~2, halving
+# decode stall (48%→19%) and inflating the finish_tail tail measured for the idle-warming path.
+timeline-bench = { shell = "PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline" }
+# Reproduces the SHIPPED/real config (overlay.toml: head_prefetch_lookahead=1, prefetch_lookahead=2)
+# with the banded (windowed) render path on (SAITENKA_BANDED=1 flips reader._banded, no config file) —
+# the only bench that mirrors a live session's hover-warmth + worker keep-ahead. Use it to measure the
+# engaged head-first render fix against the report baseline (2.8s full renders → queue-11 backlog).
+timeline-bench-banded = { shell = "SAITENKA_BANDED=1 PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline --timeline-head-prefetch 1 --timeline-lookahead 2" }
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
 smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's

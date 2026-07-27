@@ -20,16 +20,6 @@
     ]
   },
   {
-    "path": "src/overlay/app/dictionary.py",
-    "file_name": "dictionary.py",
-    "functions": [
-      {
-        "name": "Dictionary::lookup",
-        "complexity": 16
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/doctor.py",
     "file_name": "doctor.py",
     "functions": [

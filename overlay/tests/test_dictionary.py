@@ -187,6 +187,66 @@ def test_entry_for_with_many_dicts_preserves_order_and_content(tmp_path):
     assert [d.content[0] for d in entry.defs] == [f"cat ({i})" for i in range(6)]
 
 
+def test_batch_exact_reassembles_identically_to_per_dict_lookup(tmp_path):
+    """_batch_exact runs ONE query for every dict; feeding its rows back through
+    lookup(rows_by_key=...) must reproduce exactly what each dict's own per-form point queries
+    returned — same entries, same order — across a colliding form (lemma==surface) and a reading
+    key shared by three homophone terms."""
+    a = _make_dict(
+        tmp_path / "a.zip",
+        "A",
+        [["取る", "とる", ["take"]], ["撮る", "とる", ["photograph"]], ["採る", "とる", ["adopt"]]],
+    )
+    b = _make_dict(tmp_path / "b.zip", "B", [["取る", "とる", ["grasp"]]])
+    c = _make_dict(tmp_path / "c.zip", "C", [["猫", "ねこ", ["cat"]]])  # no 取る/とる key at all
+    ds = dicthelp.load_set([a, b, c])
+    forms = ("取る", "取る", "とる")  # lemma==surface duplicate + the reading key three terms share
+    batched = ds._batch_exact(forms)
+    for d in ds.dicts:
+        expected = [(h.term, h.reading, h.raw_glossary) for h in d.lookup(*forms)]
+        via_batch = d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
+        assert [(h.term, h.reading, h.raw_glossary) for h in via_batch] == expected, d.title
+    # exact-term (取る) first, then the reading-only homophones in stable id order
+    hits = ds.dicts[0].lookup(*forms, rows_by_key=batched[ds.dicts[0].dict_id])
+    assert [h.term for h in hits] == ["取る", "撮る", "採る"]
+
+
+def test_batch_exact_buckets_rows_by_dict_and_key_and_skips_absent(tmp_path):
+    """The single query's rows are grouped {dict_id: {key: rows}}: every matching key present, and a
+    dict with no hit contributes no bucket at all (so lookup(rows_by_key={}) → [])."""
+    a = _make_dict(tmp_path / "a.zip", "A", [["読む", "よむ", ["read"]]])
+    b = _make_dict(tmp_path / "b.zip", "B", [["本", "ほん", ["book"]]])
+    ds = dicthelp.load_set([a, b])
+    a_id, b_id = ds.dicts[0].dict_id, ds.dicts[1].dict_id
+    batched = ds._batch_exact(("読む", "読む", "よむ"))
+    assert set(batched) == {a_id}  # only A had a matching row
+    assert set(batched[a_id]) == {"読む", "よむ"}  # keyed by BOTH the term and the reading
+    assert ds.dicts[1].lookup("読む", "よむ", rows_by_key=batched.get(b_id, {})) == []
+
+
+def test_entry_for_batches_into_one_query_not_one_per_dict(tmp_path, monkeypatch):
+    """entry_for's exact definitions come from the single _batch_exact query — the per-dict point
+    query (Dictionary._fetch) is never called, even with several dicts."""
+    from overlay.app.dictionary import Dictionary
+
+    paths = [
+        _make_dict(tmp_path / f"d{i}.zip", f"D{i}", [["猫", "ねこ", [f"cat{i}"]]]) for i in range(4)
+    ]
+    ds = dicthelp.load_set(paths)
+    fetched: list[str] = []
+    orig = Dictionary._fetch
+
+    def _spy(self, *a, **k):
+        fetched.append(self.title)
+        return orig(self, *a, **k)
+
+    monkeypatch.setattr(Dictionary, "_fetch", _spy)
+    tok = next(t for t in tokenize("猫がいる") if t.surface == "猫")
+    entry = ds.entry_for(tok)
+    assert [d.dict_name for d in entry.defs] == [f"D{i}" for i in range(4)]  # all 4 dicts present
+    assert fetched == []  # ...assembled from ONE batched query, zero per-dict fetches
+
+
 def test_card_for_uses_user_dictionary(tmp_path):
     """Dict-first mining: the mined card's expression / reading / glossary come from the user's dict."""
     d = _make_dict(tmp_path / "cf.zip", "TestDict", [["読む", "よむ", ["to read", "to peruse"]]])

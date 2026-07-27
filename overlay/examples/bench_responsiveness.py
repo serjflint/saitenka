@@ -850,6 +850,12 @@ def run_timeline(
             for j in range(i + 1, min(len(cues), i + 1 + lookahead)):
                 for lemma in _content_lemmas(cues[j].text):
                     first_enqueued_at.setdefault(lemma, now)
+            # Engagement realism: on the cues we'll hover, model the cursor resting over the video
+            # (what a real hover carries — pause_on_tooltip pauses + mouse-over-video), so
+            # update_prefetch renders the CURRENT line's words as engaged HEADS (prefetch_decode
+            # kind="head") — the path a real session (see the report) spends most prefetch time on.
+            # Passive (mouse-away) cues stay decode-only WARM, matching idle watching.
+            reader._mouse_in = i % hover_every == 0
             reader._update_prefetch()
             time.sleep(dwell_s)  # idle: the real background prefetch threads run during this window
             if head_prefetch > 0:
