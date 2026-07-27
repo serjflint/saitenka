@@ -14,10 +14,6 @@
     "file_name": "cli_run.py",
     "functions": [
       {
-        "name": "_resolve_dict_set",
-        "complexity": 19
-      },
-      {
         "name": "_resolve_subtitles",
         "complexity": 23
       },
@@ -124,6 +120,16 @@
       {
         "name": "lookup_entry",
         "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/app/prefetch.py",
+    "file_name": "prefetch.py",
+    "functions": [
+      {
+        "name": "_enqueue_head_prefetch",
+        "complexity": 20
       }
     ]
   },
@@ -236,6 +242,16 @@
       {
         "name": "panel_rows",
         "complexity": 31
+      }
+    ]
+  },
+  {
+    "path": "src/overlay/render/banded.py",
+    "file_name": "banded.py",
+    "functions": [
+      {
+        "name": "WindowedPanel::_render_ahead_parallel",
+        "complexity": 39
       }
     ]
   },

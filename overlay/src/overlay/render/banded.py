@@ -19,14 +19,22 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
-from overlay.parallel import is_free_threaded
+from overlay.parallel import shared_executor
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from concurrent.futures import Future
+    from typing import Any
 
+    from overlay.body_block import BodyRenderArgs
     from overlay.model import RGBA, LinkBox, ScanBox, Theme
     from overlay.panel import Row
     from overlay.render.window import OffsetTable
+
+# The def-body block renderer (overlay.body_block.render_body_block) is injected by the caller
+# (app/tooltip.py, which builds WindowedPanel) rather than imported here: body_block.py itself
+# depends on render.document, so a module-level import here would cycle back through .render at the
+# package level. See WindowedPanel's render_block_fn param.
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +146,7 @@ class WindowedPanel:
         seed_height: int = 200,
         max_cached_blocks: int | None = None,
         compress: bool = False,
+        render_block_fn: Callable[[BodyRenderArgs, int | None], tuple] | None = None,
     ):
         from overlay.model import _DEFAULT_THEME
         from overlay.render.window import LazyOffsets
@@ -148,6 +157,10 @@ class WindowedPanel:
         self._rows = list(rows)
         self._cap = max_cached_blocks  # LRU pixel-cache cap (None = keep exactly visible±overscan)
         self._compress = compress
+        # Injected, not imported: overlay.body_block depends on render.document, so a module-level
+        # import of render_body_block here would cycle back through .render at the package level.
+        # Only needed for the GIL-build process-pool path in _render_ahead_parallel.
+        self._render_block_fn = render_block_fn
         gaps = [r.gap if r.gap is not None else self.theme.gap for r in self._rows]
         self._offsets = LazyOffsets(
             gaps, self.theme.margin + top_reserve, self.theme.margin, seed_height=seed_height
@@ -260,14 +273,16 @@ class WindowedPanel:
         """Pre-render up to ``max_blocks`` blocks just beyond the visible window in the scroll
         ``direction`` (+1 down / -1 up), so a subsequent scroll composites them with no hot-path render.
 
-        On a free-threaded build the blocks render **concurrently on a thread pool** and each is cached
-        the instant it lands (``as_completed`` → progressive paint), with zero copy — a block ``Image``
-        is a shared-memory reference. ``should_cancel`` is checked between completions (mirrors the
-        prefetch generation bump on a word switch) and cancels not-yet-started renders. On a GIL build
-        this renders **sequentially** (threads would serialise on the GIL for no gain). Note this uses a
-        thread pool directly, NOT ``pick_executor``: the engine's row thunks (closures over the entry)
-        and shared cache aren't picklable, so a process pool — ``pick_executor``'s GIL fallback — can't
-        drive it. Threads-or-sequential is the only viable shape here. Returns how many blocks rendered."""
+        Runs on the process-wide shared pool (:func:`overlay.parallel.shared_executor`, sized
+        ``workers``): on a free-threaded build that's threads — each block is cached the instant it
+        lands (``as_completed`` → progressive paint) with zero copy, a shared-memory reference. On a
+        GIL build threads would serialise for *worse* than serial (measured — pure overhead, zero
+        parallelism), so this uses a process pool instead for the def-body blocks specifically
+        (``Row.body_args`` — plain picklable data, see ``panel.BodyRenderArgs``/``render_body_block``);
+        rows without ``body_args`` (header/freq/reading/def-head — cheap chip/flow layout, not
+        FreeType-bound, and not picklable) render inline first, not worth parallelizing either way.
+        ``should_cancel`` is checked between completions (mirrors the prefetch generation bump on a
+        word switch) and cancels not-yet-started renders. Returns how many blocks rendered."""
         with self._lock:
             self._grow_prefix(scroll + view_h + overscan)
             table = self._offsets.estimated_table()
@@ -276,7 +291,7 @@ class WindowedPanel:
             order = list(range(end, min(end + max_blocks, self.count)))
         else:
             order = list(range(start - 1, max(-1, start - 1 - max_blocks), -1))
-        if is_free_threaded() and workers > 1 and len(order) > 1:
+        if workers > 1 and len(order) > 1:
             return self._render_ahead_parallel(order, workers, should_cancel)
         rendered = 0
         for i in order:
@@ -290,24 +305,65 @@ class WindowedPanel:
     def _render_ahead_parallel(
         self, order: list[int], workers: int, should_cancel: Callable[[], bool] | None
     ) -> int:
-        """Render ``order``'s not-yet-cached blocks on a thread pool, caching each as it completes."""
+        """Render ``order``'s not-yet-cached blocks on the shared pool, caching each as it completes.
+
+        Dispatch is decided from the ACTUAL executor :func:`~overlay.parallel.shared_executor` hands
+        back (``isinstance(ex, ThreadPoolExecutor)``), not a second independent
+        ``is_free_threaded()`` call — the two must never disagree (a bound method submitted to a real
+        process pool dies with an opaque ``PicklingError``), and deriving it from the object in hand
+        makes that structurally impossible instead of merely unlikely."""
         with self._lock:
             todo = [i for i in order if i not in self._blocks]
         if not todo:
             return 0
         rendered = 0
-        with ThreadPoolExecutor(
-            max_workers=workers
-        ) as ex:  # threads only: shared cache, no pickling
+        ex = shared_executor(workers)
+        threaded = isinstance(ex, ThreadPoolExecutor)
+        # Future's result type differs by branch (RenderedBlock vs. render_body_block's raw 4-tuple)
+        # but both land in the SAME dict for one unified as_completed() loop below (branched again
+        # there via `threaded`) — Any is the honest type, not a mypy workaround.
+        futures: dict[Future[Any], int]
+        if threaded:
             futures = {ex.submit(self._render_pixels, i): i for i in todo}
-            for fut in as_completed(futures):
+        else:
+            fn = self._render_block_fn
+            inline = (
+                todo
+                if fn is None  # no injected renderer (e.g. a caller that never set it) — degrade
+                else [i for i in todo if self._rows[i].body_args is None]  # cheap rows: not
+            )  # picklable, not FreeType-bound — just render them, whether or not a pool is available
+            poolable = (
+                [] if fn is None else [i for i in todo if self._rows[i].body_args is not None]
+            )
+            for i in inline:
                 if should_cancel is not None and should_cancel():
-                    for f in futures:
-                        f.cancel()  # drop not-yet-started renders; in-flight ones finish and are ignored
-                    break
+                    return rendered
+                with self._lock:
+                    self._store(self._render_pixels(i))
+                rendered += 1
+            if not poolable:
+                return rendered
+            assert fn is not None  # poolable is only non-empty when fn is set
+            futures = {}
+            for i in poolable:
+                body_args = self._rows[i].body_args
+                assert body_args is not None  # poolable was filtered on this above
+                futures[ex.submit(fn, body_args, None)] = i
+        for fut in as_completed(futures):
+            if should_cancel is not None and should_cancel():
+                for f in futures:
+                    f.cancel()  # drop not-yet-started renders; in-flight ones finish and are ignored
+                break
+            i = futures[fut]
+            if threaded:
                 with self._lock:
                     self._store(fut.result())  # progressive: cache each block as it lands
-                rendered += 1
+            else:
+                img, scan, links, _complete = fut.result()
+                row = self._rows[i]
+                with self._lock:
+                    self._store(RenderedBlock(i, row.x, img, scan, links))
+            rendered += 1
         return rendered
 
     def skeleton_frame(

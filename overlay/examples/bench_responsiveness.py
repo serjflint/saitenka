@@ -22,11 +22,13 @@ import os
 import statistics
 import sys
 import sysconfig
+import threading
 import time
 from pathlib import Path
 
 from overlay.app.config import load_config
 from overlay.app.controller import Reader
+from overlay.app.sub_index import SubCue, SubIndex
 from overlay.app.tokenize import Token, tokenize
 from overlay.mpvio.osd import to_bgra, to_bgra_array
 from overlay.panel import Definition, Entry, LazyPanel, panel_rows
@@ -233,6 +235,44 @@ def _pathological_corpus(ds, per_dict: int = 3) -> list[tuple[str, str, str]]:
             seen.add(term)
             corpus.append(("hand-picked", term, reading))
     return corpus
+
+
+def _load_vocab_words() -> list[list[str]]:
+    """Raw ``[surface, lemma, reading, pos]`` rows from ``examples/vocab.json`` (608 unique content
+    words from one real Nippon Sangoku episode) — the shared corpus for ``--timeline``'s cues and,
+    with ``--timeline-head-prefetch``, its synthetic known-word set."""
+    return json.loads(Path(__file__).with_name("vocab.json").read_text(encoding="utf-8"))
+
+
+def _timeline_cues(
+    words: list[list[str]], cue_words: int, max_cues: int, dwell_s: float
+) -> list[SubCue]:
+    """Synthetic subtitle cues built from the REAL episode vocabulary, grouped into short cue-sized
+    chunks in original appearance order. Not grammatical sentences — just concatenated surfaces the
+    real tokenizer re-segments — but real per-episode word content and frequency distribution, unlike
+    an isolated word list (``--vocab``) or a hand-picked heavy-word churn (``--stress``)."""
+    groups = [words[i : i + cue_words] for i in range(0, len(words), cue_words)]
+    if max_cues > 0:
+        groups = groups[:max_cues]
+    return [
+        SubCue(start=i * dwell_s, end=(i + 1) * dwell_s, text="".join(w[0] for w in g))
+        for i, g in enumerate(groups)
+    ]
+
+
+def _timeline_scorer(words: list[list[str]]):
+    """A :class:`~overlay.app.scoring.Scorer` for ``--timeline-head-prefetch``: marks every 8th
+    vocabulary word as the lone "unknown" one and the rest ``known``, so ``mark_n_plus_one``'s
+    exactly-one-unknown-content-word rule can actually fire on our punctuation-less synthetic cues
+    (a real subtitle line has sentence breaks; ours doesn't) — a realistic mostly-known viewer with
+    occasional n+1 gaps, not "nothing is known" (which would never trigger n+1 at all) or "everything
+    is content" (which would trigger it on almost every word). ``min_sentence_words=1`` because our
+    cues are short chunks, not real multi-clause sentences."""
+    from overlay.app.scoring import Scorer
+    from overlay.app.wordlists import KnownWords
+
+    known = {w[0] for i, w in enumerate(words) if i % 8 != 0}
+    return Scorer(known=KnownWords(known), min_sentence_words=1)
 
 
 def _cold_reader(ds):
@@ -720,6 +760,221 @@ def run_windowed(reps: int, rt: dict, require_ft: bool, json_path: str | None = 
     return gil_rc
 
 
+def run_timeline(
+    rt: dict,
+    require_ft: bool = False,
+    json_path: str | None = None,
+    cue_words: int = 4,
+    max_cues: int = 80,
+    dwell_s: float = 0.3,
+    hover_every: int = 4,
+    lookahead: int = 3,
+    head_prefetch: int = 0,
+) -> int:
+    """The idle-dominated ground truth (``vibe/hot-path-idle-spreading-plan.md`` Stage 1). Real usage
+    is neither continuous churn (``--stress``) nor raw render throughput (``--vocab``) — it's mostly
+    idle (video plays, mouse doesn't move) punctuated by occasional hovers, with a background worker
+    warming the current + upcoming lines during the idle gaps. Advances real ``SubCue``s built from
+    the actual episode vocabulary on a real clock (``time.sleep`` between cues, so the real prefetch
+    threads get real wall-clock idle time), and reports hover latency split by whether the background
+    worker had already decoded the word (idle-warm) or not (cold, decoded synchronously on hover),
+    plus the worker's keep-ahead margin: how long warming actually took vs. the idle budget it had.
+
+    ``head_prefetch > 0`` also enables the EXPERIMENTAL selective head-prefetch prototype
+    (``PerfOptions.head_prefetch_lookahead``) and additionally splits hover latency by whether the
+    PANEL (not just the dictionary decode) was already warm, plus RSS growth — the transient-memory
+    concern that prototype's own review flagged."""
+    ds, tag = _load_dict_set()
+    if ds is None:
+        print("timeline benchmark needs the real dict set (overlay.toml) — nothing to measure")
+        return 1
+    vocab_words = _load_vocab_words()
+    cues = _timeline_cues(vocab_words, cue_words, max_cues, dwell_s)
+    if not cues:
+        print("no cues built — check examples/vocab.json")
+        return 1
+
+    # Ground truth for "was this word already decoded when we hovered it?": wrap the SAME instance
+    # method the real hover path (main thread) and the real prefetch workers (background threads)
+    # both call — no production code touched, and it sees every decode from either side.
+    warm_lock = threading.Lock()
+    warmed_at: dict[str, float] = {}
+    orig_entry_for = ds.entry_for
+
+    def traced_entry_for(token, inflected=None):
+        result = orig_entry_for(token, inflected)
+        with warm_lock:
+            warmed_at.setdefault(token.lemma, time.monotonic())
+        return result
+
+    ds.entry_for = traced_entry_for
+
+    scorer = _timeline_scorer(vocab_words) if head_prefetch > 0 else None
+    reader = Reader(
+        FakeIPC(),
+        dict_set=ds,
+        scorer=scorer,
+        prefetch=True,
+        prefetch_lookahead=lookahead,
+        head_prefetch_lookahead=head_prefetch,
+    )
+    reader.osd = OSD
+    reader._finish_available = lambda: True
+    reader._sub_index = SubIndex(cues)
+    reader.start_prefetch()
+
+    from overlay.app.controller import SKIP_POS
+
+    def _content_lemmas(text: str) -> list[str]:
+        return [
+            t.lemma
+            for t in tokenize(text)
+            if t.is_content and t.pos not in SKIP_POS and t.surface.strip()
+        ]
+
+    first_enqueued_at: dict[str, float] = {}  # lemma -> when it FIRST became "upcoming" (lookahead)
+    warm_ms: list[float] = []  # hover latency, word already decoded before the hover
+    cold_ms: list[float] = []  # hover latency, decode happened synchronously during the hover
+    lead_ms: list[float] = []  # enqueued-as-upcoming -> actually decoded, for words later hovered
+    render_warm_ms: list[float] = []  # hover latency, panel_cache ALREADY had this word's panel
+    render_cold_ms: list[float] = []  # hover latency, panel had to be built (head render) on hover
+    misses = 0  # hovered while still cold, despite lookahead having reached the word already
+    hovers = 0
+    rss_base = _rss_mb() if head_prefetch > 0 else 0.0
+    rss_peak = rss_base
+
+    try:
+        for i, cue in enumerate(cues):
+            reader.set_subtitle(cue.text)
+            now = time.monotonic()
+            for j in range(i + 1, min(len(cues), i + 1 + lookahead)):
+                for lemma in _content_lemmas(cues[j].text):
+                    first_enqueued_at.setdefault(lemma, now)
+            reader._update_prefetch()
+            time.sleep(dwell_s)  # idle: the real background prefetch threads run during this window
+            if head_prefetch > 0:
+                rss_peak = max(rss_peak, _rss_mb())
+
+            idxs = _content_indices(reader)
+            if not idxs or i % hover_every != 0:
+                continue
+            idx = idxs[0]
+            tok = reader.tokens[idx]
+            lemma = tok.lemma
+            was_warm = lemma in warmed_at
+            # Mirror how panel_for() itself resolves the key (tabs = reader.show_dict_tabs, mined via
+            # the same main-thread-only path) so this check reflects the REAL cache panel_for() reads.
+            mined = reader._is_mined(tok)
+            key = reader._panel_key(
+                tok, reader._inflected_surface(idx), mined, reader.show_dict_tabs
+            )
+            panel_already_warm = key in reader._panel_cache
+            hovers += 1
+            t0 = time.perf_counter()
+            reader.set_hover(idx)
+            dt = (time.perf_counter() - t0) * 1000.0
+            (warm_ms if was_warm else cold_ms).append(dt)
+            if head_prefetch > 0:
+                (render_warm_ms if panel_already_warm else render_cold_ms).append(dt)
+            enq = first_enqueued_at.get(lemma)
+            if was_warm and enq is not None:
+                lead_ms.append((warmed_at[lemma] - enq) * 1000.0)
+            elif not was_warm and enq is not None:
+                misses += 1  # the worker had idle time to warm it but hadn't finished yet
+            reader.set_hover(-1)
+    finally:
+        reader._stop.set()
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    idle_budget_ms = lookahead * dwell_s * 1000.0
+    print(f"\nSaitenka overlay — TIMELINE: idle-paced session   ({tag})")
+    print(format_runtime(rt))
+    print(
+        f"{len(cues)} cues × {dwell_s * 1000:.0f}ms dwell   lookahead: {lookahead} cues "
+        f"({idle_budget_ms:.0f}ms idle budget)   hovers: {hovers} (every {hover_every}th cue)\n"
+    )
+
+    def prow(label: str, samples: list[float]) -> dict:
+        if not samples:
+            print(f"{label:44} n/a (no samples)")
+            return {}
+        m = _stats(samples)
+        print(f"{label:44} {m['p50']:7.1f} {m['p95']:7.1f} {m['max']:7.1f} {m['n']:5d}n   (ms)")
+        return m
+
+    hdr = f"{'metric':44} {'p50':>7} {'p95':>7} {'max':>7} {'n':>6}"
+    print(hdr)
+    print("-" * len(hdr))
+    m_warm = prow("hover latency — idle-warm (word pre-decoded)", warm_ms)
+    m_cold = prow("hover latency — cold (decoded on hover)", cold_ms)
+    m_lead = prow("worker lead time (enqueued -> decoded)", lead_ms)
+    print("-" * len(hdr))
+    print(
+        f"misses: {misses}/{hovers} hovers landed cold despite lookahead coverage "
+        f"(worker fell behind the {idle_budget_ms:.0f}ms idle budget)"
+    )
+    print(
+        "\nwarm = the background worker already decoded this word during idle before the hover; "
+        "cold = first decode happened synchronously on hover (no lookahead coverage, or the worker "
+        "hadn't gotten to it yet — see misses). lead time is the real wall-clock cost of Stage 2's "
+        "idle-warming against a REAL idle window, not a synthetic one — a lead time close to or over "
+        "the idle budget means the worker is not keeping ahead at this dwell/lookahead setting."
+    )
+    head_json: dict = {}
+    if head_prefetch > 0:
+        print("-" * len(hdr))
+        m_render_warm = prow(
+            "hover latency — PANEL already warm (head prerendered)", render_warm_ms
+        )
+        m_render_cold = prow("hover latency — PANEL cold (head rendered on hover)", render_cold_ms)
+        print("-" * len(hdr))
+        rss_growth = rss_peak - rss_base
+        print(
+            f"head-prefetch lookahead: {head_prefetch} cues   speculative heads built: "
+            f"{reader._head_built}   RSS: base {rss_base:.0f}MB -> peak {rss_peak:.0f}MB "
+            f"(+{rss_growth:.0f}MB)"
+        )
+        print(
+            "\nPANEL-warm = panel_cache already held this word's rendered head before the hover (the "
+            "hover is upload-only); PANEL-cold = the same head render a normal cold hover would pay, "
+            "just not idle-warmed. Compare PANEL-warm's p50 against the idle-warm (decode-only) row "
+            "above — the gap between them is what this prototype is trying to close. RSS growth is "
+            "the transient-memory cost flagged when this was proposed; a growth wildly out of line "
+            "with the retained panel_cache size (see the report's panel_cache.bytes gauge) would mean "
+            "the queue's maxsize isn't bounding concurrent work as intended."
+        )
+        head_json = {
+            "head_prefetch_lookahead": head_prefetch,
+            "heads_built": reader._head_built,
+            "render_warm": m_render_warm,
+            "render_cold": m_render_cold,
+            "rss_base_mb": rss_base,
+            "rss_peak_mb": rss_peak,
+        }
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {
+                    "runtime": rt,
+                    "tag": tag,
+                    "cues": len(cues),
+                    "dwell_ms": dwell_s * 1000.0,
+                    "lookahead": lookahead,
+                    "hovers": hovers,
+                    "misses": misses,
+                    "warm": m_warm,
+                    "cold": m_cold,
+                    "lead": m_lead,
+                    **head_json,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote timeline baseline → {json_path}")
+    return gil_rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--reps", type=int, default=10)
@@ -781,6 +1036,53 @@ def main() -> int:
     ap.add_argument(
         "--max-rss-mb", type=float, help="stress: fail if peak resident memory exceeds this (MB)"
     )
+    ap.add_argument(
+        "--timeline",
+        action="store_true",
+        help="idle-paced session over the real episode vocabulary (examples/vocab.json): real-time "
+        "dwell between cues, the real background prefetch worker warming during the idle gaps, "
+        "occasional hovers — reports hover latency split idle-warm vs cold, and the worker's "
+        "keep-ahead margin. The felt-experience ground truth; --stress is the eviction/leak ceiling",
+    )
+    ap.add_argument(
+        "--timeline-cues",
+        type=int,
+        default=80,
+        help="--timeline: number of synthetic cues (0 = all)",
+    )
+    ap.add_argument(
+        "--timeline-cue-words",
+        type=int,
+        default=4,
+        help="--timeline: vocab words per synthetic cue",
+    )
+    ap.add_argument(
+        "--timeline-dwell-s",
+        type=float,
+        default=0.3,
+        help="--timeline: real seconds each cue stays up (real subtitle pacing is ~2-4s; lower here "
+        "keeps the bench fast while still giving the worker a real idle window)",
+    )
+    ap.add_argument(
+        "--timeline-hover-every",
+        type=int,
+        default=4,
+        help="--timeline: inject a hover on every Nth cue (occasional, not every cue)",
+    )
+    ap.add_argument(
+        "--timeline-lookahead",
+        type=int,
+        default=3,
+        help="--timeline: cues the background worker warms ahead of the current one",
+    )
+    ap.add_argument(
+        "--timeline-head-prefetch",
+        type=int,
+        default=0,
+        help="--timeline: EXPERIMENTAL — also enable selective head-prefetch (PerfOptions."
+        "head_prefetch_lookahead) for this many upcoming cues (0 = off, the default/shipped "
+        "behavior); splits hover latency by PANEL warmth (not just decode) and reports RSS growth",
+    )
     args = ap.parse_args()
 
     # Snapshot the runtime; the GIL state is re-read AFTER the workload (finalize_runtime), because
@@ -788,6 +1090,18 @@ def main() -> int:
     # miss exactly the regression --require-ft is meant to catch.
     rt = runtime_info()
 
+    if args.timeline:
+        return run_timeline(
+            rt,
+            args.require_ft,
+            args.json,
+            cue_words=args.timeline_cue_words,
+            max_cues=args.timeline_cues,
+            dwell_s=args.timeline_dwell_s,
+            hover_every=args.timeline_hover_every,
+            lookahead=args.timeline_lookahead,
+            head_prefetch=args.timeline_head_prefetch,
+        )
     if args.stress:
         return run_stress(
             args.reps, rt, args.require_ft, args.json, args.max_frame_ms, args.max_rss_mb
@@ -1011,5 +1325,27 @@ def main() -> int:
     return gil_rc
 
 
+def _ensure_free_threaded() -> None:
+    """Force the GIL OFF before fugashi's C extension loads, same rationale and mechanism as
+    ``overlay.app.cli._ensure_free_threaded`` (not reused directly — that one re-execs into
+    ``-m overlay.app.cli``, this one re-execs THIS script). Without this, every free-threaded-build
+    bench run silently measures "GIL auto-reenabled by fugashi" instead of genuine free-threading —
+    found the hard way: worker lead time and RSS both come out very different once this is forced
+    (PYTHON_GIL=0 only takes effect if set before the interpreter finishes starting, hence re-exec,
+    not a post-hoc ``os.environ`` write)."""
+    if sysconfig.get_config_var("Py_GIL_DISABLED") and os.environ.get("PYTHON_GIL") != "0":
+        os.environ["PYTHON_GIL"] = "0"
+        argv = [sys.executable, os.path.abspath(__file__), *sys.argv[1:]]
+        if sys.platform == "win32":
+            import subprocess
+
+            try:
+                sys.exit(subprocess.run(argv, check=False).returncode)
+            except KeyboardInterrupt:
+                sys.exit(130)
+        os.execv(sys.executable, argv)
+
+
 if __name__ == "__main__":
+    _ensure_free_threaded()
     raise SystemExit(main())

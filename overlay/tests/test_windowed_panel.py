@@ -70,12 +70,17 @@ def _full_height(entry: Entry) -> int:
 
 def test_construction_walks_no_content(monkeypatch):
     # The deferred-thunk contract: building rows + the WindowedPanel must not walk any def body.
+    # walk() is called from overlay.body_block.render_body_block (extracted so render/banded.py's
+    # process-pool path can call it without panel.py's closures), not from overlay.panel directly.
+    import overlay.body_block as BB
     import overlay.panel as P
 
     calls = [0]
-    orig = P.walk
+    orig = BB.walk
     monkeypatch.setattr(
-        P, "walk", lambda node, base=None: (calls.__setitem__(0, calls[0] + 1), orig(node, base))[1]
+        BB,
+        "walk",
+        lambda node, base=None: (calls.__setitem__(0, calls[0] + 1), orig(node, base))[1],
     )
     wp = WindowedPanel(P.panel_rows(_tall_entry(8), WIDTH), WIDTH)
     assert wp.count == 1 + 2 * 8  # header + (name chip + body) per def

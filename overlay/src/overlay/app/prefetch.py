@@ -50,6 +50,23 @@ class PrefetchItem:
 
 
 @dataclass(frozen=True, slots=True)
+class HeadPrefetchItem:
+    """EXPERIMENTAL (prototype) — a selective speculative HEAD render for an upcoming word: the SAME
+    viewport-capped head a real hover would render (``panel_for(..., finish=False)``), not a whole
+    ``finish()``, and not a separate cache — it's written straight into ``reader._panel_cache`` via
+    the exact path a real hover reads, so a later hover is a plain cache hit with no promotion/
+    key-matching logic to get wrong. Only enqueued for words the priority function judges worth the
+    extra render cost over plain decode-warming (see ``_head_priority``); selectivity is the actual
+    RAM/CPU cap, not just the queue's ``maxsize``. ``mined`` is resolved on the main thread (jamdict is
+    not worker-safe), same contract as :class:`PrefetchItem`."""
+
+    gen: int
+    token: Token
+    inflected: str
+    mined: bool
+
+
+@dataclass(frozen=True, slots=True)
 class FinishItem:
     """High-priority job: finish the deferred tail of the panel the user is looking at RIGHT NOW.
 
@@ -61,8 +78,19 @@ class FinishItem:
 
 
 def prefetch_worker_count(reader: Reader) -> int:
-    # GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
-    # ~3.8× on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
+    """GIL-free (3.14t + PYTHON_GIL=0): Pillow render scales ~linearly → use more workers (measured
+    ~3.8x on 4 cores). Standard GIL build: extra workers just contend, so keep the configured count.
+
+    ``gil_disabled()`` is only trustworthy AFTER fugashi has loaded — it wraps a C extension that
+    hasn't declared free-threaded safety and silently re-enables the GIL on first use, not at import
+    (``tokenize.py``). This is called from ``start_prefetch()`` at the very top of ``run()``, before
+    any subtitle line has ever been tokenized, so without this warm-up it always sees the pre-fugashi
+    state — spawning up to 8 workers on a free-threaded build that loses the GIL moments later anyway,
+    paying the free-threaded allocator's per-thread-arena memory tax (see
+    ``vibe/hot-path-idle-spreading-plan.md``) for parallelism that never actually happens. Force the
+    load now (its one-time cost lands at startup instead of on the first real subtitle line either
+    way) so this reflects the GIL state that will actually hold for the session."""
+    tokenize("")
     if gil_disabled():
         return min(8, max(2, (os.cpu_count() or 4) - 2))
     return reader.prefetch_workers
@@ -126,9 +154,35 @@ def _try_prefetch_item(reader: Reader) -> None:
         )  # a bad word must never kill the worker
 
 
+def _try_head_prefetch_item(reader: Reader) -> bool:
+    """EXPERIMENTAL — one queued speculative head-render, if any; ``True`` when handled (so the
+    worker loops before the plain decode-warm queue: a render job is worth doing ahead of a cheap
+    decode, but never outranks a real :class:`FinishItem` for the on-screen tooltip)."""
+    try:
+        _priority, _seq, item = reader._head_prefetch_q.get_nowait()
+    except queue.Empty:
+        return False
+    if reader._stop.is_set() or item.gen != reader._prefetch_gen:
+        return True  # cancelled (line changed / resumed / seek) — still "handled", keep looping
+    try:
+        # Same viewport cap + same panel_for()/panel_cache path a real hover uses — written into the
+        # SAME cache, so a later hover is an ordinary cache hit (see HeadPrefetchItem docstring).
+        reader._panel_for(
+            item.token, item.inflected, min_h=reader._tip_cap(), finish=False, mined=item.mined
+        )
+        reader._head_built += 1
+    except Exception:
+        log.debug(
+            "head prefetch render failed for %r", item.token.surface, exc_info=True
+        )  # a bad/pathological word must never kill the worker
+    return True
+
+
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
         if _try_finish_job(reader):
+            continue
+        if _try_head_prefetch_item(reader):
             continue
         _try_prefetch_item(reader)
 
@@ -182,6 +236,8 @@ def update_prefetch(reader: Reader) -> None:
         )
     if reader.prefetch_lookahead > 0:
         _enqueue_lookahead(reader, gen, {t.lemma for _, _, t in cands})
+    if reader.head_prefetch_lookahead > 0:
+        _enqueue_head_prefetch(reader, gen, {t.lemma for _, _, t in cands})
 
 
 def _enqueue_lookahead(reader: Reader, gen: int, seen: set[str]) -> None:
@@ -196,6 +252,62 @@ def _enqueue_lookahead(reader: Reader, gen: int, seen: set[str]) -> None:
                 continue
             seen.add(t.lemma)
             _enqueue(reader, PrefetchItem(gen, t, inflected_in(toks, i), mined=False, full=False))
+
+
+def _head_priority(tag: str) -> int | None:
+    """EXPERIMENTAL — lower sorts first; ``None`` means "not worth a render job at all," which is the
+    real RAM/CPU cap on this feature (selectivity, not just the queue's ``maxsize``). n+1/forgotten
+    (the word the system already expects to be looked up) first, then rarer frequency bands; already-
+    ``known`` words are excluded outright — see :class:`overlay.app.scoring.Scorer` for the tag
+    vocabulary (``'n+1' | 'known' | 'forgotten' | 'freq-N' | 'base'``, ``+'/jlpt-Nx'``).
+
+    Known blind spot: a word absent from the frequency list entirely (arguably the RAREST case) tags
+    ``'base'`` — identical to a word that's merely low-signal — so it's excluded here rather than
+    risking treating an ordinary word as high-priority. Good enough for a prototype; a real ranking
+    would read ``Scorer.freq.rank()`` directly instead of the coloring tag string."""
+    base = tag.split("/", 1)[0]
+    if base in ("n+1", "forgotten"):
+        return 0
+    if base.startswith("freq-"):
+        band = int(base.split("-", 1)[1])
+        return 1 + (5 - band)  # rarer (higher band) sorts first
+    return None  # 'known' or 'base' (no strong signal) — plain decode-warming is enough
+
+
+def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
+    """EXPERIMENTAL (prototype) — speculative HEAD render for a SELECTIVE subset of the next
+    ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
+    render cost over plain decode-warming, in priority order, bounded by the queue's ``maxsize`` (the
+    transient-RSS cap — panel_cache's LRU only bounds RETAINED size). Needs a scorer for the n+1/
+    known/freq signal; a no-op without one (or without a sub index, like ``_enqueue_lookahead``)."""
+    if reader.scorer is None:
+        return
+    for text in upcoming_cue_texts(reader, reader.head_prefetch_lookahead):
+        toks = tokenize(text)
+        styles = reader.scorer.score_line(toks)
+        for i, t in enumerate(toks):
+            if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
+                continue
+            seen.add(t.lemma)
+            priority = _head_priority(styles[i].tag)
+            if priority is None:
+                continue
+            if reader._is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
+                continue
+            # tabs MUST match how panel_for() itself resolves it (reader.show_dict_tabs, since
+            # _try_head_prefetch_item calls panel_for without an explicit tabs=) or this dedup check
+            # would miss the panel_for() build's real cache key and always look like a miss.
+            key = reader._panel_key(
+                t, inflected_in(toks, i), mined=False, tabs=reader.show_dict_tabs
+            )
+            if key in reader._panel_cache:
+                continue  # already warm (hovered earlier, or a prior speculative render)
+            reader._head_seq += 1
+            entry = HeadPrefetchItem(gen, t, inflected_in(toks, i), mined=False)
+            try:
+                reader._head_prefetch_q.put_nowait((priority, reader._head_seq, entry))
+            except queue.Full:
+                return  # at capacity — drop the rest; decode-only warming still covers them
 
 
 def upcoming_cue_texts(reader: Reader, n: int) -> list[str]:

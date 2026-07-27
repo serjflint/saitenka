@@ -130,6 +130,22 @@ class PerfOptions:
     # so the first hover after the line advances (or an Alt+→ nav) is already warm. Needs an external
     # sub index — embedded/jimaku tracks have none, so it's a no-op there.
 
+    # EXPERIMENTAL (prototype, off by default) — see vibe/hot-path-idle-spreading-plan.md Stage 4 and
+    # examples/bench_responsiveness.py --timeline --head-prefetch. Speculatively renders the SAME
+    # viewport-capped head a real hover would (via the same panel_for()/panel_cache path — a cache
+    # hit at hover time, no separate cache tier or key-matching logic needed), for a WORTHWHILE subset
+    # of upcoming words — n+1 / forgotten / rare-frequency-band, explicitly excluding already-known or
+    # already-mined words — instead of only decode-warming them. Selectivity IS the RAM/CPU cap: most
+    # upcoming words never get a render job at all, only the ones worth the extra cost over plain
+    # decode. Needs a sub index + a scorer (for the n+1/known/freq signal); a no-op without either.
+    head_prefetch_lookahead: int = 0  # upcoming cues to consider for head pre-render (0 = off);
+    # deliberately a SEPARATE, shallower knob than prefetch_lookahead — render jobs cost far more
+    # than decode-only warm jobs, so this should stay shorter-range even when lookahead is generous
+    head_prefetch_queue_max: int = (
+        24  # bounds in-flight/queued render jobs — the transient-RSS cap:
+    )
+    # panel_cache's LRU bounds RETAINED size, not concurrently-building PIL objects in flight
+
 
 @dataclass(frozen=True)
 class ReaderOptions:

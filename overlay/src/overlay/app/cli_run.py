@@ -13,15 +13,44 @@ import logging
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 from overlay.app.config import config_path, load_config
+from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.paths import cache_dir
 
 log = logging.getLogger(__name__)
 
 DEMO_LINE = "門前の小僧習わぬ経を読む"
+
+
+def _log_mpv_exit(code: int | None) -> None:
+    """mpv's own crashes (e.g. a GPU-driver SIGSEGV) look identical to a clean quit from our side —
+    the IPC socket just drops either way (``mpv IPC reader: EOF ... mpv closed the pipe``). Check the
+    real exit code (``proc.returncode``) so a crash shows up in overlay.log/report instead of reading
+    as a normal quit. No-op if we had to force-kill it (``kill_process_tree`` above) — that exit is
+    ours, not mpv's."""
+    if code is None or code == 0:
+        return
+    if code < 0:
+        import signal
+
+        try:
+            name = signal.Signals(-code).name
+        except ValueError:
+            name = str(-code)
+        log.warning(
+            "mpv exited abnormally: killed by signal %d (%s) — see ~/Library/Logs/"
+            "DiagnosticReports (macOS) for a native crash report",
+            -code,
+            name,
+        )
+    else:
+        log.warning("mpv exited with non-zero status %d", code)
+
+
 DEMO_LINE_EN = "A shop-boy at the temple gate recites sutras he was never taught."
 
 
@@ -168,6 +197,7 @@ def _launch_mpv_and_connect(
     en_sub_path,
     use_config: bool,
     fullscreen: bool,
+    mpv_arg: list[str] | None = None,
 ) -> tuple:
     """Find + launch mpv and connect its IPC socket. Returns ``(None, None)`` (having already
     printed the reason) when mpv can't be found or its IPC never comes up."""
@@ -201,6 +231,7 @@ def _launch_mpv_and_connect(
         en_sub_path=en_sub_path,
         use_config=use_config,
         fullscreen=fullscreen,
+        extra_args=mpv_arg,
     )
     print("launching:", " ".join(cmd))
     log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
@@ -257,6 +288,7 @@ def _build_run_options(
             nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
             pause_on_tooltip=pause_on_tooltip,
             hover_switch_delay=hover_switch_delay,
+            scan_delay=cfg.get("scan_delay", _tt.scan_delay),
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             # off by default; on if EITHER --dict-tabs is passed or the config enables it
@@ -275,107 +307,11 @@ def _build_run_options(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
             prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
+            head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
+            head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
         ),
         prefetch=prefetch,
     )
-
-
-def _ensure_anki_if_needed(mine: bool, known_cfg) -> None:
-    """Anki-backed features — mining, and known-word coloring from a deck — need Anki running.
-    Start it for the user (like ``attach`` does) instead of crashing on a refused connection; warn
-    and degrade (coloring → freq+JLPT, mining unavailable) if it can't be reached."""
-    if not (mine or known_cfg):
-        return
-    from overlay.app.anki import ensure_anki_running
-
-    if not ensure_anki_running():
-        print(
-            "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect "
-            "add-on). Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
-            file=sys.stderr,
-        )
-
-
-def _build_mine_collaborators(
-    mine: bool, mine_deck: str, mine_model: str, mine_key: str, mine_all_key: str
-):
-    if not mine:
-        log.info("mining disabled (no [mine] config / --no-mine)")
-        return None, None
-    from overlay.app.anki import Anki, MineConfig
-
-    anki = Anki()
-    mine_conf = MineConfig(deck=mine_deck, model=mine_model)
-    print(
-        f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
-        f"→ {mine_deck} ({mine_model})"
-    )
-    log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
-    return anki, mine_conf
-
-
-def _resolve_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_titles: list[str]):
-    """Resolve dict/freq/pitch TITLES against the consolidated DB (imported once by `import`); a
-    title with no imported dictionary is warned and skipped — nothing is built here. Returns
-    ``(dict_set, freq_rows)`` — ``freq_rows`` is reused by the scorer so it isn't re-resolved."""
-    dict_set = None
-    freq_rows: list = []
-    if not (dict_titles or freq_titles or pitch_titles):
-        return dict_set, freq_rows
-
-    from overlay.app.dictionary import _MISSING_HINT, DictionarySet
-
-    d_rows, dmiss = db.resolve(dict_titles)
-    freq_rows, fmiss = db.resolve(freq_titles)
-    p_rows, pmiss = db.resolve(pitch_titles)
-    for kind, miss in (("dict", dmiss), ("freq", fmiss), ("pitch", pmiss)):
-        if miss:
-            print(
-                f"{kind}(s) not imported, skipped: {', '.join(repr(m) for m in miss)}. "
-                f"{_MISSING_HINT}",
-                file=sys.stderr,
-            )
-    if d_rows or freq_rows or p_rows:
-        dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows)
-        print("dictionaries:", [d.title for d in dict_set.dicts])
-        if dict_set.freqs:
-            print("frequency:", [f.title for f in dict_set.freqs])
-        if dict_set.pitches:
-            print("pitch:", [p.title for p in dict_set.pitches])
-        log.info(
-            "dictionaries loaded: %d defn, %d freq, %d pitch",
-            len(dict_set.dicts),
-            len(dict_set.freqs),
-            len(dict_set.pitches),
-        )
-    return dict_set, freq_rows
-
-
-def _build_scorer(
-    db, freq_rows: list, *, color: bool, known: str, known_cfg, freq_titles: list[str]
-):
-    if not (color or known or known_cfg or freq_titles):
-        return None
-    from overlay.app.scoring import Scorer
-    from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
-
-    if known_cfg:
-        try:
-            kw = KnownWords.from_ankiconnect(known_cfg)
-        except Exception as e:  # Anki still closed / AnkiConnect down — don't crash the run
-            print(
-                f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only",
-                file=sys.stderr,
-            )
-            kw = KnownWords.from_set([w for w in known.split(",") if w])
-    else:
-        kw = KnownWords.from_set([w for w in known.split(",") if w])
-    if not freq_rows:  # scorer may be on without a dict set (coloring-only run)
-        freq_rows, _ = db.resolve(freq_titles)
-    fd = FreqDict.from_db(db, freq_rows[0]) if freq_rows else None
-    scorer = Scorer(known=kw, freq=fd, jlpt=JlptDict.load(db))
-    print(f"coloring on — known:{len(kw.words)} freq:{bool(fd)} jlpt:on")
-    return scorer
 
 
 def _build_run_deps(
@@ -395,16 +331,69 @@ def _build_run_deps(
     """Build the coloring/dict/mining collaborators. This is the slow part (the first-run
     dictionary cache build is 25-66s per dict), so ``run_impl`` defers calling this to a BACKGROUND
     thread (see ``reader.load_deps_async``) unless a demo/screenshot needs it synchronously. Must
-    NOT touch the mpv IPC (it can run off the main thread)."""
-    from overlay.app.dictdb import DictionaryDb
+    NOT touch the mpv IPC (it can run off the main thread).
 
-    _ensure_anki_if_needed(mine, known_cfg)
-    anki, mine_conf = _build_mine_collaborators(mine, mine_deck, mine_model, mine_key, mine_all_key)
-    db = DictionaryDb.open()
-    dict_set, freq_rows = _resolve_dict_set(db, dict_titles, freq_titles, pitch_titles)
-    scorer = _build_scorer(
-        db, freq_rows, color=color, known=known, known_cfg=known_cfg, freq_titles=freq_titles
+    Delegates to :func:`reader_deps.build_reader_deps` — the parallelized (ThreadPoolExecutor)
+    implementation `attach` already uses — instead of keeping a second, sequential copy of the same
+    dict/freq/JLPT/known-words/mining logic (a prior copy here silently drifted out of sync with
+    `attach`'s, undoing an optimization made only on that side). Only the CLI-specific bits stay
+    here: the plain ``--known word1,word2`` fallback list and this command's console feedback
+    lines, both threaded through as callbacks/post-processing rather than duplicating the logic
+    that produces them."""
+    from overlay.app import reader_deps
+
+    def _on_anki_unreachable() -> None:
+        print(
+            "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect "
+            "add-on). Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
+            file=sys.stderr,
+        )
+
+    def _on_known_words_error(e: Exception) -> None:
+        print(
+            f"known-word load from Anki failed ({e}) — coloring by freq+JLPT only", file=sys.stderr
+        )
+
+    effective_cfg = {
+        "dicts": dict_titles,
+        "freq": freq_titles,
+        "pitch": pitch_titles,
+        "known": known_cfg,
+        "mine": {"deck": mine_deck, "model": mine_model} if mine else {},
+    }
+    scorer, anki, mine_conf, dict_set = reader_deps.build_reader_deps(
+        effective_cfg,
+        color=color,
+        mine=mine,
+        known_words=known,
+        on_anki_unreachable=_on_anki_unreachable,
+        on_known_words_error=_on_known_words_error,
     )
+
+    if not mine:
+        log.info("mining disabled (no [mine] config / --no-mine)")
+    elif anki is not None:
+        print(
+            f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
+            f"→ {mine_deck} ({mine_model})"
+        )
+        log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
+
+    if dict_set is not None:
+        print(
+            f"dictionaries: {len(dict_set.dicts)} defn, {len(dict_set.freqs)} freq, "
+            f"{len(dict_set.pitches)} pitch — see {config_path()} to change"
+        )
+        log.info(
+            "dictionaries loaded: %d defn, %d freq, %d pitch",
+            len(dict_set.dicts),
+            len(dict_set.freqs),
+            len(dict_set.pitches),
+        )
+
+    if scorer is not None:
+        print(f"coloring on — known:{len(scorer.known.words)} freq:{bool(scorer.freq)} jlpt:on")
+
     return scorer, anki, mine_conf, dict_set
 
 
@@ -508,9 +497,16 @@ def run_impl(
     prefetch: bool,
     auto_translate: bool,
     hover_switch_delay: float,
+    mpv_arg: list[str] | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
     from overlay.app.controller import Reader
+    from overlay.app.reader_deps import warm_tokenizer
+
+    # Fire this as early as possible — before mpv even launches — so fugashi's slow first-ever
+    # tokenize() call (see warm_tokenizer's docstring) overlaps mpv's own launch/connect dead time
+    # instead of landing on the critical path later.
+    threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
 
     # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
     # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka-overlay install`. Don't hand it to
@@ -585,6 +581,7 @@ def run_impl(
         en_sub_path=en_sub_path,
         use_config=use_config,
         fullscreen=fullscreen,
+        mpv_arg=mpv_arg,
     )
     if ipc is None:
         return 2
@@ -615,8 +612,9 @@ def run_impl(
         )
     else:
         reader = Reader(ipc, options=opts)  # deps injected asynchronously below
-        if sub_path:  # index the external sub so Alt+←/→/↓ can render the target line instantly
-            reader.load_sub_index(sub_path)
+        # index whatever track mpv ends up with (external/jimaku path, or an embedded track
+        # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
+        build_sub_index_for_current_track(reader)
         reader.load_deps_async(cfg, build=_build_deps)
 
     try:
@@ -646,4 +644,6 @@ def run_impl(
             from overlay.app.procutil import kill_process_tree
 
             kill_process_tree(proc)  # mpv didn't quit → kill it + any children (no orphans)
+        else:
+            _log_mpv_exit(proc.returncode)  # only meaningful for a self-exit, not our force-kill
     return 0

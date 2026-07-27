@@ -45,27 +45,37 @@ def test_render_ahead_prefetches_the_next_blocks_downward():
 
 
 def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
-    # The free-threaded (thread-pool + as_completed) and GIL (sequential) paths must cache the SAME
-    # blocks and preserve pixel parity — the progressive _store path can't drift from _ensure_block.
-    import overlay.render.banded as B
+    # The free-threaded (thread-pool) and GIL (process-pool, def-body blocks only) paths must cache
+    # the SAME blocks and preserve pixel parity — the progressive _store path can't drift from
+    # _ensure_block. Dispatch is derived from the executor shared_executor() ACTUALLY returns (see
+    # banded.py's _render_ahead_parallel), so simulate each build by patching
+    # overlay.parallel.is_free_threaded (what shared_executor's own pick_executor() call reads) and
+    # forcing a fresh pool per iteration — a stale pool from a differently-configured earlier test
+    # must never leak in (that mismatch used to crash with an opaque PicklingError).
+    import overlay.parallel as PA
+    from overlay.body_block import render_body_block
 
     entry = _entry(20)
     ref = render_panel(entry, width=WIDTH)
     results = {}
-    for ft in (True, False):
-        monkeypatch.setattr(B, "is_free_threaded", lambda ft=ft: ft)
-        wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
-        wp.viewport(0, 260)  # cache the head
-        n = wp.render_ahead(0, 260, direction=1, max_blocks=6, workers=4)
-        results[ft] = (n, wp.measured)
-        # the pre-rendered ahead blocks composite pixel-identically to the one-shot crop
-        win = wp.viewport(0, 260)
-        assert (
-            np.abs(
-                np.asarray(win, np.int16) - np.asarray(ref.crop((0, 0, WIDTH, 260)), np.int16)
-            ).max()
-            == 0
-        )
+    try:
+        for ft in (True, False):
+            PA.shutdown_shared_executor()
+            monkeypatch.setattr(PA, "is_free_threaded", lambda ft=ft: ft)
+            wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, render_block_fn=render_body_block)
+            wp.viewport(0, 260)  # cache the head
+            n = wp.render_ahead(0, 260, direction=1, max_blocks=6, workers=2)
+            results[ft] = (n, wp.measured)
+            # the pre-rendered ahead blocks composite pixel-identically to the one-shot crop
+            win = wp.viewport(0, 260)
+            assert (
+                np.abs(
+                    np.asarray(win, np.int16) - np.asarray(ref.crop((0, 0, WIDTH, 260)), np.int16)
+                ).max()
+                == 0
+            )
+    finally:
+        PA.shutdown_shared_executor()
     assert results[True] == results[False]  # same block count + measured prefix either way
 
 
