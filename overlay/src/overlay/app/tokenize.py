@@ -60,6 +60,19 @@ def _all_hira(s: str) -> bool:
     return bool(s) and all(0x3040 <= ord(c) <= 0x309F for c in s)
 
 
+def _match_furigana_run(tokens: list[Token], start: int, reading: str) -> tuple[int, bool]:
+    """From `start`, accumulate a hiragana run and check whether it matches `reading` exactly at
+    some prefix boundary. Returns ``(end_index, matched)``."""
+    n = len(tokens)
+    acc, k = "", start
+    while k < n and _all_hira(tokens[k].surface) and len(acc) < len(reading):
+        acc += tokens[k].surface
+        k += 1
+        if acc == reading:
+            return k, True
+    return k, False
+
+
 def strip_inline_furigana(tokens: list[Token]) -> list[Token]:
     """Drop Amazon-style inline furigana: a kanji run immediately followed by hiragana that spells its
     reading (龍門光英りゅうもんみつひで → 龍門光英). Matches the reading as an exact token-boundary prefix
@@ -72,14 +85,9 @@ def strip_inline_furigana(tokens: list[Token]) -> list[Token]:
             while j < n and _has_kanji(tokens[j].surface):
                 j += 1
             reading = "".join(t.reading for t in tokens[i:j])
-            acc, k = "", j
-            while k < n and _all_hira(tokens[k].surface) and len(acc) < len(reading):
-                acc += tokens[k].surface
-                k += 1
-                if acc == reading:
-                    break
+            k, matched = _match_furigana_run(tokens, j, reading)
             out.extend(tokens[i:j])
-            i = k if (acc == reading and len(reading) >= 2) else j
+            i = k if (matched and len(reading) >= 2) else j
             continue
         out.append(tokens[i])
         i += 1
@@ -99,6 +107,25 @@ _AUX_HEAD = {"動詞", "形容詞"}  # an auxiliary after て/で is a verb (い
 # OR an adjective (ほしい/よい): ～てほしい, ～てよかった
 
 
+def _scan_conjugation_tail(tokens: list[Token], i: int) -> int:
+    """From ``tokens[i+1]``, extend the conjugation tail (auxiliaries chained via て/で after the
+    head at `i`). Returns the tail's end index (exclusive)."""
+    n = len(tokens)
+    j, prev_te = i + 1, False
+    while j < n:
+        nx = tokens[j]
+        if nx.pos == "助動詞":
+            prev_te = nx.surface in _TE
+        elif nx.pos == "助詞" and nx.pos2 == "接続助詞" and nx.surface in _TE:
+            prev_te = True
+        elif nx.pos in _AUX_HEAD and nx.pos2 == "非自立可能" and prev_te:
+            prev_te = False  # auxiliary verb いる/しまう/… or adjective ほしい after て/で
+        else:
+            break
+        j += 1
+    return j
+
+
 def merge_inflected(tokens: list[Token]) -> list[Token]:
     """Merge a verb/adjective with its whole conjugation tail into ONE token, so hovering selects the
     full inflected word like Yomitan (習わ+ぬ → 習わぬ, 聞こえ+て+た → 聞こえてた, 食べ+て+いる → 食べている,
@@ -113,18 +140,7 @@ def merge_inflected(tokens: list[Token]) -> list[Token]:
             out.append(t)
             i += 1
             continue
-        j, prev_te = i + 1, False
-        while j < n:
-            nx = tokens[j]
-            if nx.pos == "助動詞":
-                prev_te = nx.surface in _TE
-            elif nx.pos == "助詞" and nx.pos2 == "接続助詞" and nx.surface in _TE:
-                prev_te = True
-            elif nx.pos in _AUX_HEAD and nx.pos2 == "非自立可能" and prev_te:
-                prev_te = False  # auxiliary verb いる/しまう/… or adjective ほしい after て/で
-            else:
-                break
-            j += 1
+        j = _scan_conjugation_tail(tokens, i)
         if j > i + 1:
             g = tokens[i:j]
             out.append(

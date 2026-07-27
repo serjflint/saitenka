@@ -155,6 +155,18 @@ def _glossary_to_nodes(glossary: list) -> list:
     return nodes
 
 
+def _search_result_nodes(items: list[tuple[str, str, str]]) -> list:
+    li_nodes: list = []
+    for term, reading, gloss in items:
+        li: list = [{"tag": "a", "href": f"?query={term}", "content": term}]
+        if reading and reading != term:
+            li.append(f"【{reading}】")
+        if gloss:
+            li.append({"tag": "span", "style": {"color": "#6a6a6a"}, "content": f" — {gloss}"})
+        li_nodes.append({"tag": "li", "content": li})
+    return li_nodes
+
+
 class Dictionary:
     """A read-only view of one imported dictionary inside the consolidated DB (scoped by ``dict_id``)."""
 
@@ -215,6 +227,22 @@ class Dictionary:
         out.sort()
         return [n for _, n in out]
 
+    def _entry_from_row(self, row) -> DictEntry:
+        eid = row[0]
+        cached = self._entry_cache.get(eid)
+        if cached is not None:
+            self._entry_cache.move_to_end(eid)
+            if otel_metrics.dict_cache_hits is not None:
+                otel_metrics.dict_cache_hits.add(1)
+            return cached
+        if otel_metrics.dict_cache_misses is not None:
+            otel_metrics.dict_cache_misses.add(1)
+        entry = DictEntry(row[1], row[2], msgspec_json.decode(row[3]), row[4], raw_glossary=row[3])
+        self._entry_cache[eid] = entry
+        if len(self._entry_cache) > self._entry_cache_max:
+            self._entry_cache.popitem(last=False)
+        return entry
+
     def lookup(
         self, *forms: str | None, wildcard: bool = False, limit: int = 50
     ) -> list[DictEntry]:
@@ -256,22 +284,7 @@ class Dictionary:
                 if eid in seen:
                     continue
                 seen.add(eid)
-                cached = self._entry_cache.get(eid)
-                if cached is not None:
-                    self._entry_cache.move_to_end(eid)
-                    out.append(cached)
-                    if otel_metrics.dict_cache_hits is not None:
-                        otel_metrics.dict_cache_hits.add(1)
-                else:
-                    if otel_metrics.dict_cache_misses is not None:
-                        otel_metrics.dict_cache_misses.add(1)
-                    entry = DictEntry(
-                        row[1], row[2], msgspec_json.decode(row[3]), row[4], raw_glossary=row[3]
-                    )
-                    self._entry_cache[eid] = entry
-                    if len(self._entry_cache) > self._entry_cache_max:
-                        self._entry_cache.popitem(last=False)
-                    out.append(entry)
+                out.append(self._entry_from_row(row))
                 if wildcard and len(out) >= limit:
                     break
         # Rank exact-term (headword) matches above reading-only ones, like Yomitan — so a common
@@ -337,6 +350,29 @@ class DictionarySet:
         ``dict_cache.size`` gauge (each dict's ``_entry_cache`` is bounded by ``entry_cache_max``)."""
         return sum(len(d._entry_cache) for d in self.dicts)
 
+    @staticmethod
+    def _kanji_freqs(stats: dict) -> list[Freq]:
+        stats = dict(stats)
+        freqs: list[Freq] = []
+        strokes = stats.pop("strokes", None)
+        if strokes:
+            freqs.append(Freq("画数", str(strokes), (96, 125, 175, 255)))
+        freqs.extend(Freq(name, str(val), FREQ_COLOR) for name, val in sorted(stats.items())[:6])
+        return freqs
+
+    @staticmethod
+    def _kanji_nodes(k: dict) -> list:
+        nodes: list = []
+        if k["onyomi"]:
+            nodes.append({"tag": "div", "content": [f"音　{k['onyomi']}"]})
+        if k["kunyomi"]:
+            nodes.append({"tag": "div", "content": [f"訓　{k['kunyomi']}"]})
+        if k["meanings"]:
+            nodes.append(
+                {"tag": "ol", "content": [{"tag": "li", "content": m} for m in k["meanings"]]}
+            )
+        return nodes
+
     def kanji_for(self, char: str) -> Entry | None:
         """A panel :class:`Entry` for one kanji, from the first dict whose kanji_bank has it: big
         glyph headword, 音/訓 reading rows + numbered meanings in the def body, stroke count and
@@ -345,23 +381,8 @@ class DictionarySet:
             k = d.kanji_lookup(char)
             if k is None:
                 continue
-            stats = dict(k["stats"])
-            freqs: list[Freq] = []
-            strokes = stats.pop("strokes", None)
-            if strokes:
-                freqs.append(Freq("画数", str(strokes), (96, 125, 175, 255)))
-            freqs.extend(
-                Freq(name, str(val), FREQ_COLOR) for name, val in sorted(stats.items())[:6]
-            )
-            nodes: list = []
-            if k["onyomi"]:
-                nodes.append({"tag": "div", "content": [f"音　{k['onyomi']}"]})
-            if k["kunyomi"]:
-                nodes.append({"tag": "div", "content": [f"訓　{k['kunyomi']}"]})
-            if k["meanings"]:
-                nodes.append(
-                    {"tag": "ol", "content": [{"tag": "li", "content": m} for m in k["meanings"]]}
-                )
+            freqs = self._kanji_freqs(k["stats"])
+            nodes = self._kanji_nodes(k)
             kun = (k["kunyomi"].split() or [""])[0].split(".")[0]
             return Entry(
                 headword=[char],
@@ -408,14 +429,7 @@ class DictionarySet:
             expression=token.lemma or token.surface, reading=token.reading, glossary_html=""
         )
 
-    def search(self, pattern: str, limit: int = 30) -> Entry:
-        """Wildcard/prefix/suffix search across the dictionaries → a results :class:`Entry` that
-        lists each matching headword as a **clickable** link: drilling into a result opens that
-        exact term. ``pattern`` uses GLOB wildcards (``*``/``?``); a bare term prefix-matches via
-        ``term*``."""
-        glob = _to_glob(pattern)
-        if not any(c in glob for c in "*?"):
-            glob = glob + "*"  # a bare query → prefix search
+    def _collect_search_hits(self, glob: str, limit: int) -> list[tuple[str, str, str]]:
         seen: set[tuple[str, str]] = set()
         items: list[tuple[str, str, str]] = []  # (term, reading, gloss)
         for d in self.dicts:
@@ -429,14 +443,18 @@ class DictionarySet:
                     break
             if len(items) >= limit:
                 break
-        li_nodes: list = []
-        for term, reading, gloss in items:
-            li: list = [{"tag": "a", "href": f"?query={term}", "content": term}]
-            if reading and reading != term:
-                li.append(f"【{reading}】")
-            if gloss:
-                li.append({"tag": "span", "style": {"color": "#6a6a6a"}, "content": f" — {gloss}"})
-            li_nodes.append({"tag": "li", "content": li})
+        return items
+
+    def search(self, pattern: str, limit: int = 30) -> Entry:
+        """Wildcard/prefix/suffix search across the dictionaries → a results :class:`Entry` that
+        lists each matching headword as a **clickable** link: drilling into a result opens that
+        exact term. ``pattern`` uses GLOB wildcards (``*``/``?``); a bare term prefix-matches via
+        ``term*``."""
+        glob = _to_glob(pattern)
+        if not any(c in glob for c in "*?"):
+            glob = glob + "*"  # a bare query → prefix search
+        items = self._collect_search_hits(glob, limit)
+        li_nodes = _search_result_nodes(items)
         content = (
             [{"tag": "ul", "content": li_nodes}] if li_nodes else ["（一致する語がありません）"]
         )

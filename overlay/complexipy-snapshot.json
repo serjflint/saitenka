@@ -10,50 +10,12 @@
     ]
   },
   {
-    "path": "src/overlay/app/cli_run.py",
-    "file_name": "cli_run.py",
-    "functions": [
-      {
-        "name": "_resolve_subtitles",
-        "complexity": 23
-      },
-      {
-        "name": "_execute_reader_session",
-        "complexity": 35
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/config.py",
-    "file_name": "config.py",
-    "functions": [
-      {
-        "name": "ReaderOptions::with_overrides",
-        "complexity": 16
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/controller.py",
-    "file_name": "controller.py",
-    "functions": [
-      {
-        "name": "Reader::_handle",
-        "complexity": 23
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/dictdb.py",
     "file_name": "dictdb.py",
     "functions": [
       {
         "name": "_read_term_meta",
         "complexity": 19
-      },
-      {
-        "name": "DictionaryDb::_load_dict_banks",
-        "complexity": 36
       }
     ]
   },
@@ -62,16 +24,8 @@
     "file_name": "dictionary.py",
     "functions": [
       {
-        "name": "DictionarySet::kanji_for",
-        "complexity": 16
-      },
-      {
-        "name": "DictionarySet::search",
-        "complexity": 19
-      },
-      {
         "name": "Dictionary::lookup",
-        "complexity": 32
+        "complexity": 16
       }
     ]
   },
@@ -80,76 +34,8 @@
     "file_name": "doctor.py",
     "functions": [
       {
-        "name": "check_dict_db",
-        "complexity": 16
-      },
-      {
         "name": "print_report",
         "complexity": 17
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/fsrs.py",
-    "file_name": "fsrs.py",
-    "functions": [
-      {
-        "name": "_extract_term_reading",
-        "complexity": 20
-      },
-      {
-        "name": "_build_card_info",
-        "complexity": 24
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/jimaku.py",
-    "file_name": "jimaku.py",
-    "functions": [
-      {
-        "name": "JimakuClient::_get",
-        "complexity": 17
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/lookup.py",
-    "file_name": "lookup.py",
-    "functions": [
-      {
-        "name": "lookup_entry",
-        "complexity": 17
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/prefetch.py",
-    "file_name": "prefetch.py",
-    "functions": [
-      {
-        "name": "_enqueue_head_prefetch",
-        "complexity": 20
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/report.py",
-    "file_name": "report.py",
-    "functions": [
-      {
-        "name": "collect",
-        "complexity": 30
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/scoring.py",
-    "file_name": "scoring.py",
-    "functions": [
-      {
-        "name": "Scorer::_style",
-        "complexity": 18
       }
     ]
   },
@@ -160,10 +46,6 @@
       {
         "name": "_offer_anki",
         "complexity": 16
-      },
-      {
-        "name": "install_plan",
-        "complexity": 16
       }
     ]
   },
@@ -172,12 +54,8 @@
     "file_name": "sub_index.py",
     "functions": [
       {
-        "name": "SubIndex::locate",
-        "complexity": 27
-      },
-      {
         "name": "parse_ass",
-        "complexity": 27
+        "complexity": 18
       }
     ]
   },
@@ -192,46 +70,12 @@
     ]
   },
   {
-    "path": "src/overlay/app/tokenize.py",
-    "file_name": "tokenize.py",
-    "functions": [
-      {
-        "name": "merge_inflected",
-        "complexity": 22
-      },
-      {
-        "name": "strip_inline_furigana",
-        "complexity": 22
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/wordlists.py",
-    "file_name": "wordlists.py",
-    "functions": [
-      {
-        "name": "FreqSource::display",
-        "complexity": 26
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/yomitan_db_import.py",
     "file_name": "yomitan_db_import.py",
     "functions": [
       {
         "name": "import_database",
-        "complexity": 28
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/app/yomitan_import.py",
-    "file_name": "yomitan_import.py",
-    "functions": [
-      {
-        "name": "run_import",
-        "complexity": 18
+        "complexity": 17
       }
     ]
   },
@@ -251,37 +95,7 @@
     "functions": [
       {
         "name": "WindowedPanel::_render_ahead_parallel",
-        "complexity": 39
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/render/document.py",
-    "file_name": "document.py",
-    "functions": [
-      {
-        "name": "_render_blocks",
-        "complexity": 18
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/render/flow.py",
-    "file_name": "flow.py",
-    "functions": [
-      {
-        "name": "wrap_items",
-        "complexity": 17
-      }
-    ]
-  },
-  {
-    "path": "src/overlay/render/layout.py",
-    "file_name": "layout.py",
-    "functions": [
-      {
-        "name": "wrap",
-        "complexity": 18
+        "complexity": 19
       }
     ]
   },
@@ -290,12 +104,12 @@
     "file_name": "walk.py",
     "functions": [
       {
-        "name": "_parse_color",
-        "complexity": 19
+        "name": "_Walker::_emit_inline",
+        "complexity": 18
       },
       {
-        "name": "_Walker::_emit_inline",
-        "complexity": 48
+        "name": "_parse_color",
+        "complexity": 19
       }
     ]
   }

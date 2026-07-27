@@ -169,6 +169,71 @@ class _Walker:
             self.blocks.append(self.cur)
         self.cur = Block()
 
+    def _emit_ruby(self, node: dict, style: Style) -> None:
+        base, reading = _ruby_parts(node)
+        self.cur.flow.append(ruby(base, reading, _apply_style(node, style)))
+
+    def _emit_img(self, style: Style) -> None:
+        h = max(12, style.size)
+        self.cur.flow.append(ImgBox(width=round(h * 1.6), height=h, label="▢"))
+
+    def _emit_link(self, node: dict, style: Style) -> None:
+        # Visually distinguish the two link kinds: an INTERNAL cross-ref keeps the blue +
+        # underline (clickable → opens a related-note nested tooltip) and carries its target
+        # term; an EXTERNAL source-attribution link is muted gray + NOT
+        # underlined, so it doesn't read as clickable.
+        query = link_query(node.get("href"), _text_of(node.get("content")))
+        if query:
+            astyle = _apply_style(node, style)  # blue + underline
+        else:
+            astyle = _apply_style(node, style).with_(underline=False, color=_LINK_EXTERNAL)
+        start = len(self.cur.flow)
+        self._emit_inline(node.get("content"), astyle)
+        if query:
+            for i in range(start, len(self.cur.flow)):
+                seg = self.cur.flow[i]
+                if isinstance(seg, Span):
+                    self.cur.flow[i] = replace(seg, href=query)
+
+    def _chip_for(self, node: dict, style: Style) -> ChipBox | None:
+        st = node.get("style") or {}
+        label = _text_of(node.get("content"))
+        chip_label = label.strip()
+        # A short filled/bordered leaf → a chip: POS tags like `noun`/`no-adj` (filled pill,
+        # backgroundColor + white text, borderRadius, no borderColor) or labels like 逆引き
+        # (transparent + border). Long bordered content (example sentences) must flow and keep
+        # its ruby, so recurse instead. Honour backgroundColor — dropping it left white-on-white
+        # text in an empty box. A whitespace-only styled span (some dicts' accent/marker spacers) is
+        # NOT a chip — gating on the stripped label avoids the stray empty pill.
+        has_bg = any(k in st for k in _BG_KEYS)
+        has_border = any(k in st for k in _BORDER_KEYS)
+        if not (
+            (has_bg or has_border or "borderRadius" in st)
+            and 0 < len(chip_label) <= 12
+            and "\n" not in label
+        ):
+            return None
+        from overlay.draw.chip import ChipStyle
+
+        cstyle = _apply_style(node, style)
+        bg = (
+            _parse_color(st.get("backgroundColor") or st.get("background"), (0, 0, 0, 0))
+            if has_bg
+            else (0, 0, 0, 0)
+        )
+        border = _parse_color(st.get("borderColor"), (150, 150, 150, 255)) if has_border else None
+        return ChipBox(
+            chip_label,
+            ChipStyle(
+                size=cstyle.size,
+                weight=cstyle.weight,
+                fg=cstyle.color,
+                bg=bg,
+                border=border,
+                pad_v=1,
+            ),
+        )
+
     def _emit_inline(self, node, style: Style) -> None:
         if node is None:
             return
@@ -186,73 +251,17 @@ class _Walker:
                 self.cur.flow.append(Span("\n", style))
                 return
             if tag == "ruby":
-                base, reading = _ruby_parts(node)
-                self.cur.flow.append(ruby(base, reading, _apply_style(node, style)))
+                self._emit_ruby(node, style)
                 return
             if tag == "img":
-                h = max(12, style.size)
-                self.cur.flow.append(ImgBox(width=round(h * 1.6), height=h, label="▢"))
+                self._emit_img(style)
                 return
             if tag == "a":
-                # Visually distinguish the two link kinds: an INTERNAL cross-ref keeps the blue +
-                # underline (clickable → opens a related-note nested tooltip) and carries its target
-                # term; an EXTERNAL source-attribution link is muted gray + NOT
-                # underlined, so it doesn't read as clickable.
-                query = link_query(node.get("href"), _text_of(node.get("content")))
-                if query:
-                    astyle = _apply_style(node, style)  # blue + underline
-                else:
-                    astyle = _apply_style(node, style).with_(underline=False, color=_LINK_EXTERNAL)
-                start = len(self.cur.flow)
-                self._emit_inline(node.get("content"), astyle)
-                if query:
-                    for i in range(start, len(self.cur.flow)):
-                        seg = self.cur.flow[i]
-                        if isinstance(seg, Span):
-                            self.cur.flow[i] = replace(seg, href=query)
+                self._emit_link(node, style)
                 return
-            st = node.get("style") or {}
-            label = _text_of(node.get("content"))
-            chip_label = label.strip()
-            # A short filled/bordered leaf → a chip: POS tags like `noun`/`no-adj` (filled pill,
-            # backgroundColor + white text, borderRadius, no borderColor) or labels like 逆引き
-            # (transparent + border). Long bordered content (example sentences) must flow and keep
-            # its ruby, so recurse instead. Honour backgroundColor — dropping it left white-on-white
-            # text in an empty box. A whitespace-only styled span (some dicts' accent/marker spacers) is
-            # NOT a chip — gating on the stripped label avoids the stray empty pill.
-            has_bg = any(k in st for k in _BG_KEYS)
-            has_border = any(k in st for k in _BORDER_KEYS)
-            if (
-                (has_bg or has_border or "borderRadius" in st)
-                and 0 < len(chip_label) <= 12
-                and "\n" not in label
-            ):
-                from overlay.draw.chip import ChipStyle
-
-                cstyle = _apply_style(node, style)
-                bg = (
-                    _parse_color(st.get("backgroundColor") or st.get("background"), (0, 0, 0, 0))
-                    if has_bg
-                    else (0, 0, 0, 0)
-                )
-                border = (
-                    _parse_color(st.get("borderColor"), (150, 150, 150, 255))
-                    if has_border
-                    else None
-                )
-                self.cur.flow.append(
-                    ChipBox(
-                        chip_label,
-                        ChipStyle(
-                            size=cstyle.size,
-                            weight=cstyle.weight,
-                            fg=cstyle.color,
-                            bg=bg,
-                            border=border,
-                            pad_v=1,
-                        ),
-                    )
-                )
+            chip = self._chip_for(node, style)
+            if chip is not None:
+                self.cur.flow.append(chip)
                 return
             # inline style-carrying / unknown tag → recurse
             self._emit_inline(node.get("content"), _apply_style(node, style))

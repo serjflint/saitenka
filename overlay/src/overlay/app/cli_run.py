@@ -115,6 +115,49 @@ def _prepare_video(video: str | None, width: int, height: int, seconds: float) -
     return tmp, video_path, dur
 
 
+def _resolve_jimaku_subs(
+    video_path: Path,
+    jimaku_title: str | None,
+    episode: int | None,
+    tmp: Path,
+    jimaku_key: str | None,
+    jimaku_cfg: dict,
+    resync: bool,
+) -> Path | None:
+    from overlay.app.jimaku import (
+        JimakuClient,
+        JimakuError,
+        cached_subs,
+        parse_filename,
+        store_subs,
+    )
+
+    title, ep = parse_filename(video_path)
+    title = jimaku_title or title
+    ep = episode if episode is not None else ep
+    hit = cached_subs(video_path, title, ep) if video_path.exists() else None
+    if hit:
+        print("jimaku: using cached subs", hit.name)
+        log.info("jimaku cache hit: %s", hit)
+        return hit
+    print(f"jimaku: fetching subs for {title!r} ep {ep}…")
+    try:
+        sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
+        print("jimaku: got", sub_path.name)
+        if resync and video_path.exists():
+            from overlay.app.resync import maybe_resync
+
+            print("jimaku: resyncing…")
+            sub_path = maybe_resync(video_path, sub_path, enabled=True)
+            print("jimaku: resync →", sub_path.name)
+        if video_path.exists():  # cache the finished (synced) sub for the next rewatch
+            sub_path = store_subs(video_path, title, ep, sub_path)
+        return sub_path
+    except JimakuError as e:
+        print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
+        return None
+
+
 def _resolve_subtitles(
     cfg: dict,
     video: str | None,
@@ -146,37 +189,9 @@ def _resolve_subtitles(
     if sub_file:
         sub_path = Path(sub_file).expanduser()
     elif jimaku_on:
-        from overlay.app.jimaku import (
-            JimakuClient,
-            JimakuError,
-            cached_subs,
-            parse_filename,
-            store_subs,
+        sub_path = _resolve_jimaku_subs(
+            video_path, jimaku_title, episode, tmp, jimaku_key, jimaku_cfg, resync
         )
-
-        title, ep = parse_filename(video_path)
-        title = jimaku_title or title
-        ep = episode if episode is not None else ep
-        hit = cached_subs(video_path, title, ep) if video_path.exists() else None
-        if hit:
-            print("jimaku: using cached subs", hit.name)
-            sub_path = hit
-            log.info("jimaku cache hit: %s", hit)
-        else:
-            print(f"jimaku: fetching subs for {title!r} ep {ep}…")
-            try:
-                sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
-                print("jimaku: got", sub_path.name)
-                if resync and video_path.exists():
-                    from overlay.app.resync import maybe_resync
-
-                    print("jimaku: resyncing…")
-                    sub_path = maybe_resync(video_path, sub_path, enabled=True)
-                    print("jimaku: resync →", sub_path.name)
-                if video_path.exists():  # cache the finished (synced) sub for the next rewatch
-                    sub_path = store_subs(video_path, title, ep, sub_path)
-            except JimakuError as e:
-                print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
     elif not video:
         sub_path = tmp / "line.srt"
         _make_srt(sub_path, dur, DEMO_LINE)
@@ -397,6 +412,50 @@ def _build_run_deps(
     return scorer, anki, mine_conf, dict_set
 
 
+def _wait_for_subtitle_text(reader, ipc, video: str | None) -> str:
+    """Sample sub-text; on a real file with nothing showing yet, hop forward via sub-seek until one
+    lands (or 80 tries elapse). Falls back to DEMO_LINE if nothing ever appears."""
+    reader.refresh_osd()
+    text = reader._get("sub-text") or ""
+    if not text and video:  # real file: hop to the next subtitle cue
+        for _ in range(80):
+            ipc.command("sub-seek", 1)
+            time.sleep(0.12)
+            text = reader._get("sub-text") or ""
+            if text:
+                break
+    return text or DEMO_LINE
+
+
+def _run_demo_actions(
+    reader,
+    ipc,
+    *,
+    demo_scroll: int,
+    demo_translate: bool,
+    mine: bool,
+    bulk: bool,
+    screenshot: str | None,
+    seconds: float,
+) -> None:
+    for _ in range(demo_scroll):
+        reader._scroll_tip(round(reader.osd[1] * 0.12))
+    if demo_translate:
+        reader._setup_secondary()
+        reader.toggle_translation()
+        time.sleep(0.3)
+    if mine:
+        (reader.bulk_mine if bulk else reader.mine_current)()
+        time.sleep(0.5)
+    if screenshot:
+        time.sleep(0.4)
+        r = ipc.command("screenshot-to-file", screenshot, "window")
+        print("screenshot:", r, "->", screenshot)
+        time.sleep(0.3)
+    else:
+        time.sleep(seconds)
+
+
 def _execute_reader_session(
     reader,
     ipc,
@@ -413,16 +472,7 @@ def _execute_reader_session(
 ) -> None:
     if demo_word or screenshot:
         time.sleep(0.8)
-        reader.refresh_osd()
-        text = reader._get("sub-text") or ""
-        if not text and video:  # real file: hop to the next subtitle cue
-            for _ in range(80):
-                ipc.command("sub-seek", 1)
-                time.sleep(0.12)
-                text = reader._get("sub-text") or ""
-                if text:
-                    break
-        text = text or DEMO_LINE
+        text = _wait_for_subtitle_text(reader, ipc, video)
         print("sub-text:", repr(text))
         reader.set_subtitle(text)
         target = demo_word or "読む"
@@ -431,22 +481,16 @@ def _execute_reader_session(
             idx = next((i for i, t in enumerate(reader.tokens) if t.is_content), 0)
         print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
         reader.set_hover(idx)
-        for _ in range(demo_scroll):
-            reader._scroll_tip(round(reader.osd[1] * 0.12))
-        if demo_translate:
-            reader._setup_secondary()
-            reader.toggle_translation()
-            time.sleep(0.3)
-        if mine:
-            (reader.bulk_mine if bulk else reader.mine_current)()
-            time.sleep(0.5)
-        if screenshot:
-            time.sleep(0.4)
-            r = ipc.command("screenshot-to-file", screenshot, "window")
-            print("screenshot:", r, "->", screenshot)
-            time.sleep(0.3)
-        else:
-            time.sleep(seconds)
+        _run_demo_actions(
+            reader,
+            ipc,
+            demo_scroll=demo_scroll,
+            demo_translate=demo_translate,
+            mine=mine,
+            bulk=bulk,
+            screenshot=screenshot,
+            seconds=seconds,
+        )
     else:
         print(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "

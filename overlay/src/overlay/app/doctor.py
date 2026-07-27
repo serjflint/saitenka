@@ -170,45 +170,31 @@ def check_config() -> Check:
     return Check("config", "ok", f"config parses ({p})")
 
 
-def check_dict_db() -> list[Check]:
-    """Report the consolidated dictionary DB: which dictionaries are imported, and whether every title
-    the config references actually resolves (dictionaries are imported once by ``saitenka-overlay
-    import`` — a configured-but-unimported title is a clear failure, not a silent empty lookup)."""
-    from overlay.app.dictdb import DictionaryDb, db_path
-
-    cfg = load_config()
-    configured = {kind: list(cfg.get(kind) or []) for kind in ("dicts", "freq", "pitch")}
-    any_configured = any(configured.values())
-    db_file = db_path()
-    checks: list[Check] = []
-
-    if not db_file.exists():
-        if any_configured:
-            return [
-                Check(
-                    "dict-db",
-                    "fail",
-                    "config lists dictionaries but none are imported yet — run "
-                    f"`saitenka-overlay import <dir-with-zips>` (no DB at {db_file})",
-                )
-            ]
-        if _jmdict_available():
-            return [Check("dict-db", "warn", "no dictionaries imported (JMdict fallback only)")]
+def _no_db_checks(db_file, any_configured: bool) -> list[Check]:
+    if any_configured:
         return [
             Check(
                 "dict-db",
-                "warn",
-                "no dictionaries imported and no JMdict fallback installed — tooltips and mined cards "
-                "will have no glosses. Import Yomitan dicts (`saitenka-overlay import <dir>`), or add "
-                "the fallback: reinstall with the `jmdict` extra.",
+                "fail",
+                "config lists dictionaries but none are imported yet — run "
+                f"`saitenka-overlay import <dir-with-zips>` (no DB at {db_file})",
             )
         ]
+    if _jmdict_available():
+        return [Check("dict-db", "warn", "no dictionaries imported (JMdict fallback only)")]
+    return [
+        Check(
+            "dict-db",
+            "warn",
+            "no dictionaries imported and no JMdict fallback installed — tooltips and mined cards "
+            "will have no glosses. Import Yomitan dicts (`saitenka-overlay import <dir>`), or add "
+            "the fallback: reinstall with the `jmdict` extra.",
+        )
+    ]
 
-    db = DictionaryDb.open()
-    imported = {
-        r.title: r for r in db.list_dictionaries() if r.import_order >= 0
-    }  # hide system dicts
-    checks.append(Check("dict-db", "ok", f"{len(imported)} dictionary/ies imported in {db_file}"))
+
+def _title_checks(configured: dict[str, list[str]], imported: dict) -> list[Check]:
+    checks: list[Check] = []
     for kind, titles in configured.items():
         for title in titles:
             if title in imported:
@@ -221,6 +207,29 @@ def check_dict_db() -> list[Check]:
                         f"{kind} not imported: {title!r} — run `saitenka-overlay import <dir>`",
                     )
                 )
+    return checks
+
+
+def check_dict_db() -> list[Check]:
+    """Report the consolidated dictionary DB: which dictionaries are imported, and whether every title
+    the config references actually resolves (dictionaries are imported once by ``saitenka-overlay
+    import`` — a configured-but-unimported title is a clear failure, not a silent empty lookup)."""
+    from overlay.app.dictdb import DictionaryDb, db_path
+
+    cfg = load_config()
+    configured = {kind: list(cfg.get(kind) or []) for kind in ("dicts", "freq", "pitch")}
+    any_configured = any(configured.values())
+    db_file = db_path()
+
+    if not db_file.exists():
+        return _no_db_checks(db_file, any_configured)
+
+    db = DictionaryDb.open()
+    imported = {
+        r.title: r for r in db.list_dictionaries() if r.import_order >= 0
+    }  # hide system dicts
+    checks = [Check("dict-db", "ok", f"{len(imported)} dictionary/ies imported in {db_file}")]
+    checks += _title_checks(configured, imported)
     return checks
 
 

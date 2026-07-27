@@ -274,6 +274,25 @@ def _head_priority(tag: str) -> int | None:
     return None  # 'known' or 'base' (no strong signal) — plain decode-warming is enough
 
 
+def _head_prefetch_candidate(
+    reader: Reader, gen: int, toks: list[Token], i: int, t: Token, styles
+) -> tuple[int, HeadPrefetchItem] | None:
+    """Is token `t` (at index `i`) worth a speculative head-render? None if not — either
+    :func:`_head_priority` says no, it's already mined, or it's already warm in the panel cache."""
+    priority = _head_priority(styles[i].tag)
+    if priority is None:
+        return None
+    if reader._is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
+        return None
+    # tabs MUST match how panel_for() itself resolves it (reader.show_dict_tabs, since
+    # _try_head_prefetch_item calls panel_for without an explicit tabs=) or this dedup check
+    # would miss the panel_for() build's real cache key and always look like a miss.
+    key = reader._panel_key(t, inflected_in(toks, i), mined=False, tabs=reader.show_dict_tabs)
+    if key in reader._panel_cache:
+        return None  # already warm (hovered earlier, or a prior speculative render)
+    return priority, HeadPrefetchItem(gen, t, inflected_in(toks, i), mined=False)
+
+
 def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
     """EXPERIMENTAL (prototype) — speculative HEAD render for a SELECTIVE subset of the next
     ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
@@ -289,21 +308,11 @@ def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
             if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
                 continue
             seen.add(t.lemma)
-            priority = _head_priority(styles[i].tag)
-            if priority is None:
+            candidate = _head_prefetch_candidate(reader, gen, toks, i, t, styles)
+            if candidate is None:
                 continue
-            if reader._is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
-                continue
-            # tabs MUST match how panel_for() itself resolves it (reader.show_dict_tabs, since
-            # _try_head_prefetch_item calls panel_for without an explicit tabs=) or this dedup check
-            # would miss the panel_for() build's real cache key and always look like a miss.
-            key = reader._panel_key(
-                t, inflected_in(toks, i), mined=False, tabs=reader.show_dict_tabs
-            )
-            if key in reader._panel_cache:
-                continue  # already warm (hovered earlier, or a prior speculative render)
+            priority, entry = candidate
             reader._head_seq += 1
-            entry = HeadPrefetchItem(gen, t, inflected_in(toks, i), mined=False)
             try:
                 reader._head_prefetch_q.put_nowait((priority, reader._head_seq, entry))
             except queue.Full:

@@ -227,35 +227,51 @@ def find_settings_export() -> str | None:
     return str(max(found, key=lambda p: p.stat().st_mtime)) if found else None
 
 
+def _resolve_settings_path(settings_path: str | None) -> str | None:
+    """Given path, found export, interactive prompt, or None (caller reports failure)."""
+    if settings_path:
+        return settings_path
+    settings_path = find_settings_export()
+    if settings_path:
+        print(f"using {settings_path}")
+        return settings_path
+    if sys.stdin.isatty():
+        # Interactive: don't skip past silently — ask for the path and WAIT.
+        entered = (
+            input(
+                "Yomitan settings export not found. Enter its path (Yomitan → Settings → Backup → "
+                "Export Settings), or press Enter to skip: "
+            )
+            .strip()
+            .strip("\"'")
+        )
+        if not entered:
+            print("import skipped — run `saitenka-overlay import-settings <settings.json>` later")
+            return None
+        return str(Path(entered).expanduser())
+    print("no settings export given and none found — pass the path explicitly")
+    return None
+
+
+def _match_and_report(enabled: list[str], scan_dirs: list[str]) -> dict[str, str]:
+    matches, missing = match_scan_dirs(enabled, list(scan_dirs))
+    print(f"matched {len(matches)} zip(s) in {len(scan_dirs)} scan dir(s)")
+    if missing:
+        print("no zip found for (supply a --scan-dir that contains them):")
+        for t in missing:
+            print(f"  - {t}")
+    return matches
+
+
 def run_import(
     settings_path: str | None, scan_dirs: list[str] | None, confirm
 ) -> int:  # pragma: no cover — interactive glue; the pieces above are unit-tested
     """CLI entry: parse → match → propose → write via the shared confirm+backup sink."""
     from overlay.app.init_wizard import write_config
 
+    settings_path = _resolve_settings_path(settings_path)
     if not settings_path:
-        settings_path = find_settings_export()
-        if settings_path:
-            print(f"using {settings_path}")
-        elif sys.stdin.isatty():
-            # Interactive: don't skip past silently — ask for the path and WAIT.
-            entered = (
-                input(
-                    "Yomitan settings export not found. Enter its path (Yomitan → Settings → Backup → "
-                    "Export Settings), or press Enter to skip: "
-                )
-                .strip()
-                .strip("\"'")
-            )
-            if not entered:
-                print(
-                    "import skipped — run `saitenka-overlay import-settings <settings.json>` later"
-                )
-                return 1
-            settings_path = str(Path(entered).expanduser())
-        else:
-            print("no settings export given and none found — pass the path explicitly")
-            return 1
+        return 1
 
     settings = parse_settings(settings_path)
     enabled = [d.name for d in settings.dictionaries if d.enabled]
@@ -267,12 +283,7 @@ def run_import(
             "they can be imported, e.g. `import-settings <settings.json> --scan-dir ~/yomitan`"
         )
         return 1
-    matches, missing = match_scan_dirs(enabled, list(scan_dirs))
-    print(f"matched {len(matches)} zip(s) in {len(scan_dirs)} scan dir(s)")
-    if missing:
-        print("no zip found for (supply a --scan-dir that contains them):")
-        for t in missing:
-            print(f"  - {t}")
+    matches = _match_and_report(enabled, scan_dirs)
     if not matches:
         return 1
 

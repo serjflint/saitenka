@@ -88,26 +88,28 @@ def _manager_command(manager: str, tool: str) -> list[str]:
 _WINGET_IDS = {"mpv": "mpv.net", "ffmpeg": "Gyan.FFmpeg"}
 
 
-def install_plan(tools: list[str]) -> InstallPlan:
-    """Decide how to install ``tools`` on this OS (never auto-install on Linux)."""
-    system = platform.system()
-    if system == "Darwin":
-        if shutil.which("brew"):
-            return InstallPlan("brew", [_manager_command("brew", t) for t in tools])
-        return InstallPlan(
-            None,
-            hint="Homebrew not found — install it from https://brew.sh, then re-run `setup`.",
-        )
-    if system == "Windows":
-        for mgr in _WINDOWS_MANAGERS:
-            if shutil.which(mgr):
-                return InstallPlan(mgr, [_manager_command(mgr, t) for t in tools])
-        return InstallPlan(
-            None,
-            hint="No package manager found — install winget (ships with Windows 11), choco, or "
-            "scoop, then re-run `setup`.",
-        )
-    # Linux and everything else: print copy-paste hints, never auto-install.
+def _darwin_plan(tools: list[str]) -> InstallPlan:
+    if shutil.which("brew"):
+        return InstallPlan("brew", [_manager_command("brew", t) for t in tools])
+    return InstallPlan(
+        None,
+        hint="Homebrew not found — install it from https://brew.sh, then re-run `setup`.",
+    )
+
+
+def _windows_plan(tools: list[str]) -> InstallPlan:
+    for mgr in _WINDOWS_MANAGERS:
+        if shutil.which(mgr):
+            return InstallPlan(mgr, [_manager_command(mgr, t) for t in tools])
+    return InstallPlan(
+        None,
+        hint="No package manager found — install winget (ships with Windows 11), choco, or "
+        "scoop, then re-run `setup`.",
+    )
+
+
+def _linux_hint(tools: list[str]) -> InstallPlan:
+    # Print copy-paste hints, never auto-install.
     joined = " ".join(tools)
     return InstallPlan(
         None,
@@ -118,6 +120,16 @@ def install_plan(tools: list[str]) -> InstallPlan:
             f"  Arch:           sudo pacman -S {joined}"
         ),
     )
+
+
+def install_plan(tools: list[str]) -> InstallPlan:
+    """Decide how to install ``tools`` on this OS (never auto-install on Linux)."""
+    system = platform.system()
+    if system == "Darwin":
+        return _darwin_plan(tools)
+    if system == "Windows":
+        return _windows_plan(tools)
+    return _linux_hint(tools)
 
 
 def do_install(tools: list[str], dry_run: bool, confirm: Confirm) -> int:

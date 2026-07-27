@@ -112,16 +112,31 @@ def _pick(entries, reading: str, surface: str, lemma: str):
     return max(entries, key=score)
 
 
-@lru_cache(maxsize=512)
-def lookup_entry(surface: str, lemma: str, reading: str, pos: str) -> Entry:
-    pos_en = POS_EN.get(pos, pos or "word")
+def _resolve_entries(surface: str, lemma: str):
     try:
         result = _lookup(lemma) if lemma else None
         entries = result.entries if result else []
         if not entries and surface != lemma:
             entries = (_lookup(surface).entries) or []
+        return entries
     except Exception:
-        entries = []
+        return []
+
+
+def _build_defs(e) -> list[Definition]:
+    li = []
+    for s in e.senses[:8]:
+        glosses = "; ".join(str(g) for g in s.gloss)
+        if glosses:
+            li.append({"tag": "li", "content": glosses})
+    content = {"tag": "ol", "content": li} if li else ["（語義なし）"]
+    return [Definition("JMdict", content)]
+
+
+@lru_cache(maxsize=512)
+def lookup_entry(surface: str, lemma: str, reading: str, pos: str) -> Entry:
+    pos_en = POS_EN.get(pos, pos or "word")
+    entries = _resolve_entries(surface, lemma)
 
     if not entries:
         # no dictionary hit (often a particle) — minimal tooltip
@@ -138,13 +153,7 @@ def lookup_entry(surface: str, lemma: str, reading: str, pos: str) -> Entry:
     sense_pos_first = list(e.senses[0].pos) if e.senses else []
     tags = _tags(pos_en, sense_pos_first)
 
-    li = []
-    for s in e.senses[:8]:
-        glosses = "; ".join(str(g) for g in s.gloss)
-        if glosses:
-            li.append({"tag": "li", "content": glosses})
-    content = {"tag": "ol", "content": li} if li else ["（語義なし）"]
-    return Entry(headword=head, tags=tags, defs=[Definition("JMdict", content)])
+    return Entry(headword=head, tags=tags, defs=_build_defs(e))
 
 
 def entry_for(token: Token) -> Entry:

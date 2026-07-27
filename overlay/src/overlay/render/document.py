@@ -29,6 +29,32 @@ def _marker(block: Block) -> str:
     return "・"
 
 
+def _render_block(
+    b: Block,
+    width: int,
+    padding: int,
+    indent_px: int,
+    gutter_px: int,
+    remaining: int | None,
+    scan_out: list[ScanBox] | None,
+    link_out: list[LinkBox] | None,
+    clipped_out: list | None,
+) -> tuple[tuple[int, Image.Image, str, int, list[ScanBox], list[LinkBox]], int]:
+    """Render one block's flow (capped at ``remaining``). Returns ``(row, image_height)``."""
+    indent = padding + b.indent * indent_px
+    gutter = gutter_px if b.kind == "list-item" else 0
+    content_w = max(10, width - indent - gutter - padding)
+    fb = FlowBlock(width=content_w, padding=0, background=(0, 0, 0, 0))
+    local: list[ScanBox] | None = [] if scan_out is not None else None
+    llocal: list[LinkBox] | None = [] if link_out is not None else None
+    img = render_flow(
+        b.flow, fb, scan_out=local, link_out=llocal, max_height=remaining, clipped_out=clipped_out
+    )
+    baseline = first_baseline(b.flow, fb)  # align marker to real first-line baseline
+    row = (indent + gutter, img, _marker(b), baseline, local or [], llocal or [])
+    return row, img.height
+
+
 def _render_blocks(
     blocks: list[Block],
     width: int,
@@ -50,24 +76,12 @@ def _render_blocks(
             if clipped_out is not None:
                 clipped_out.append(True)
             break
-        indent = padding + b.indent * indent_px
-        gutter = gutter_px if b.kind == "list-item" else 0
-        content_w = max(10, width - indent - gutter - padding)
-        fb = FlowBlock(width=content_w, padding=0, background=(0, 0, 0, 0))
-        local: list[ScanBox] | None = [] if scan_out is not None else None
-        llocal: list[LinkBox] | None = [] if link_out is not None else None
-        img = render_flow(
-            b.flow,
-            fb,
-            scan_out=local,
-            link_out=llocal,
-            max_height=remaining,
-            clipped_out=clipped_out,
+        row, h = _render_block(
+            b, width, padding, indent_px, gutter_px, remaining, scan_out, link_out, clipped_out
         )
         if remaining is not None:
-            remaining -= img.height + gap
-        baseline = first_baseline(b.flow, fb)  # align marker to real first-line baseline
-        rendered.append((indent + gutter, img, _marker(b), baseline, local or [], llocal or []))
+            remaining -= h + gap
+        rendered.append(row)
     return rendered
 
 
