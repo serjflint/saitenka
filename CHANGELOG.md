@@ -7,6 +7,99 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`--mpv-arg`** — repeatable raw mpv flag passthrough on `run` (SubMiner's `-a/--args` precedent).
+  Wins over our own overridable defaults (`--slang`, `--sub-visibility`, `--osd-level`, `--loop-file`,
+  `--start`, ...) since mpv is last-flag-wins, but never over `--input-ipc-server`/`--log-file`/the
+  anti-duplicate `--script-opts` marker, which we always append last.
+- **Prefetch lookahead now works on embedded subtitle tracks**, not just external/jimaku files. The
+  currently-selected mpv track is resolved (`app/embedded_subs.py`): an external/jimaku track reads
+  its path straight off `track-list`'s `external-filename`; an embedded track (baked into the video
+  container) is extracted once via `ffmpeg -map 0:<ff-index> -c:s srt` and cached alongside jimaku's
+  own fetched-sub cache (keyed by video name+size+track, so a rewatch reuses it). Both `run` and
+  `attach` now share this one path — `attach` previously never built a lookahead index at all, even
+  for external files.
+- **Telemetry: three new spans covering seek-to-paint latency** (`otel_metrics.py`): `cue_redraw`
+  (wraps `set_subtitle` end-to-end — tokenize/score/render/upload), `subtitle_render` (isolates the PIL
+  `render_subtitle` call inside it), and `sub_text_reconcile` (the poll-loop's mpv-driven redraw,
+  sibling to the pre-existing `sub_seek` span for the Alt+←/→/↓ instant-nav path). `sub_seek`'s span
+  now also covers the render it triggers, so it nests `cue_redraw`→`subtitle_render`/`upload` as
+  children sharing one `trace_id` — previously every span got its own random `trace_id`, so a
+  `trace.json` export had no causal chain at all connecting a seek to the draw it caused.
+- **Telemetry: full span coverage of background dep loading and the per-cue draw path** —
+  `dictdb_open`/`anki_ensure_running`/`build_dict_set`/`load_freq_dict`/`load_jlpt_dict`/
+  `build_mining`/`warm_tokenizer` (`reader_deps.py`) and `teardown_tip`/`hide_preview`/
+  `tokenize_line`/`score_line` (nested inside `cue_redraw`, `controller.py`), plus
+  `anki_http_call`/`anki_json_parse`/`anki_known_extract` (`wordlists.py`, per AnkiConnect action).
+  Built to pin down exactly where load-deps/first-cue-color latency went; the tokenizer-contention
+  fix above was found and verified through this instrumentation, not guesswork.
+
+### Changed
+
+- **Startup console noise reduced.** The `dictionaries:`/`frequency:`/`pitch:` title dump collapsed
+  to one line with counts and the settings file path (full titles still land in the structured log).
+  Telemetry now prints an explicit startup line when it's actually enabled — pointing at
+  `saitenka-overlay telemetry disable` instead of telling you to hand-edit `overlay.toml`.
+- **Background dep loading (`build_reader_deps`) is now parallelized** across a small thread pool
+  instead of one strictly sequential background thread — Anki launch/poll, dict-title resolution, the
+  JLPT table load, the frequency-dict load, the known-words fetch, and the mining `Anki()` object all
+  fan out respecting their actual dependencies, turning the load's wall time from their *sum* into
+  their *max*. **`run` mode now actually uses it** — it previously kept its own separate, sequential
+  copy of this exact logic (`cli_run.py`'s `_resolve_dict_set`/`_build_scorer`/`_build_run_deps`),
+  so the parallelization above was silently inert for `run` until this copy was deleted in favor of
+  delegating to the shared implementation (only the CLI-only bits — the plain `--known word1,word2`
+  fallback list, and this command's console feedback lines — stayed as thin wrappers). Coloring/
+  tooltips/mining land sooner after playback starts. `build_reader_deps`'s return value is unchanged;
+  its signature grew optional `known_words`/`on_anki_unreachable`/`on_known_words_error` params to
+  support that delegation.
+- **fugashi's first-ever `tokenize()` call (MeCab tagger/dictionary setup) is now pre-warmed on its
+  own thread, as early as possible in `run`/`attach`** (before mpv even launches/connects). Measured:
+  ~13ms in isolation, but ~600ms (46x) when it happened to run concurrently with the background dep
+  thread pool — genuine free-threading contention (not GIL-reactivation, not general system load; both
+  ruled out with isolated same-conditions timing), and mutual: it slowed the dep-loading threads down
+  by a similar factor while they slowed it down. Warming it on its own thread, overlapping mpv's own
+  launch/connect dead time, means the real first subtitle line's `tokenize()` call is already-warm
+  and fast, and the dep-loading threads never contend with it in the first place.
+- **`KnownWords.from_ankiconnect` no longer chunks `notesInfo` into 500-note batches** — one call per
+  deck with every note id, matching SubMiner's own AnkiConnect client (no batching there either;
+  AnkiConnect has no documented limit on `notes`). This was measured as the actual dominant cost in
+  background dep loading for a real known-words deck (~1.8s of sequential round-trips) — dominating
+  regardless of how well the freq/JLPT loads above parallelize alongside it. (An intermediate fix that
+  fanned the chunked calls out over threads was reverted in favor of this simpler one call.)
+
+### Fixed
+
+- **`scan_delay` (dwell before a nested/scan popup opens, and the cooldown after scrolling the base
+  tooltip) was never read from `overlay.toml`** — stuck at its 0.25s default regardless of config in
+  both `run` and `attach` modes. Now wired and documented in `overlay.example.toml`.
+- **The `N prefetch worker(s)` runtime line was console-only** (a bare `print`), so it never reached
+  `overlay.log` or a `saitenka-overlay report` bundle — made diagnosing "0 prefetch workers" reports
+  impossible from a bundle alone. Now also logged.
+- **A globally-installed `saitenka.lua` plugin (`install-plugin`, for the ATTACH-from-Finder workflow)
+  double-attached onto `run` mode's own mpv instance.** `--no-config` suppresses `mpv.conf`/
+  `input.conf` but NOT mpv's script autoload, and `saitenka.lua`'s `spawn_overlay()` reuses whatever
+  `input-ipc-server` is already set — `run` mode passes its own explicitly, so a plugin installed for
+  the attach workflow would spawn a second, redundant `saitenka-overlay attach` onto `run`'s socket:
+  two independent `Reader`/telemetry instances driving one mpv (doubled IPC traffic/CPU, and the
+  actual cause of `telemetry/trace.json` corruption on some sessions — two OS processes writing the
+  same file with no cross-process lock). Fixed with a handshake: `run` now launches mpv with
+  `--script-opts=saitenka-managed=yes`; `saitenka.lua` checks it and no-ops instead of double-attaching.
+  Requires re-running `install-plugin` to pick up the fix if you already have the plugin installed.
+- **Alt+←/→/↓ instant-nav could silently lose its `_nav_idx` chaining hint on every press**, degrading
+  next/next/next to per-press text matching instead of index-based chaining. Right after `sub_nav()`
+  renders the target cue and sets `_nav_idx`, the caller also fires mpv's own native `sub-seek` behind
+  it to catch the video up; that native seek transiently re-reports the PRE-nav cue's text before
+  landing on the real target. The settle-guard only swallowed an *empty* mid-seek blip, so this
+  non-empty "revert" value was adopted, silently resetting `_nav_idx` back to -1 via `set_subtitle`
+  even though the render was already correct. `sub_nav()` now records the pre-nav text and the
+  settle-guard swallows either transient value, while still adopting any genuinely different mpv
+  correction.
+- **mpv crashing natively (e.g. a GPU-driver SIGSEGV) was indistinguishable from a clean quit** in
+  `overlay.log`/report bundles — both just look like `mpv IPC reader: EOF ... mpv closed the pipe`.
+  `run` mode's shutdown now checks `proc.returncode` and logs a warning naming the signal (or nonzero
+  status) when mpv didn't exit cleanly.
+
 ## [0.6.0] - 2026-07-26
 
 ### Added
