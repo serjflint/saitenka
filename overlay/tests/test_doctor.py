@@ -361,7 +361,7 @@ def test_telemetry_check_enabled_no_trace_yet(tmp_path, monkeypatch):
 def test_telemetry_check_enabled_with_trace_file(tmp_path, monkeypatch):
     export = tmp_path / "telemetry"
     export.mkdir()
-    (export / "trace.json").write_text('{"traceEvents": []}')
+    (export / "trace-20260101-000000.json").write_text('{"traceEvents": []}')  # a rotated trace
     cfg = tmp_path / "overlay.toml"
     cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export}"\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))

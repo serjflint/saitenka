@@ -150,6 +150,20 @@ class _FakeTraceModule:
         return self.tracer
 
 
+def test_traced_stamps_cpu_ms_so_wall_vs_cpu_reveals_a_stall(monkeypatch):
+    """wall (the span dur) ≫ cpu_ms ⇒ the thread was descheduled (GIL contention / lock / I/O),
+    not working — the one signal that told genuinely-CPU-bound freq load apart from GIL-stalled
+    startup. A fake trace module keeps this off OTel's set-once global provider."""
+    fake = _FakeTraceModule()
+    monkeypatch.setattr(otel_metrics, "_trace_available", True)
+    monkeypatch.setattr(otel_metrics, "_trace_module", fake)
+    with otel_metrics.traced("x"):
+        pass
+    attrs = fake.tracer.spans[0].attributes
+    assert "cpu_ms" in attrs
+    assert isinstance(attrs["cpu_ms"], float)
+
+
 def test_traced_stamps_the_real_native_thread_id(monkeypatch):
     """otel_export._span_to_ctf_event reads this attribute back for the CTF "tid" field — without
     it, independently-started spans (no parent-child relationship, so different random trace_ids)
@@ -181,6 +195,41 @@ def test_instrumented_records_both_the_histogram_and_a_span():
         pass
     snap = otel_metrics.snapshot()
     assert snap["saitenka.render.duration_ms"]["count"] == 1
+
+
+@pytest.mark.usefixtures("registered")
+def test_show_tooltip_histogram_records_with_a_kind_label():
+    otel_metrics.show_tooltip_duration_ms.record(30.0, {"kind": "cold"})
+    otel_metrics.show_tooltip_duration_ms.record(1.0, {"kind": "warm"})
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.show_tooltip.duration_ms"]["count"] == 2
+
+
+@pytest.mark.usefixtures("registered")
+def test_panel_cache_evictions_counter_is_registered_and_records():
+    otel_metrics.panel_cache_evictions.add(4)
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.panel_cache.evictions"]["value"] == 4
+
+
+@pytest.mark.usefixtures("registered")
+def test_record_show_metrics_bumps_overshoot_only_for_a_cold_over_budget_show():
+    """A cold show past the budget is a first-paint miss; a warm show over budget (or a cold show
+    under it) is not — the counter must fire on exactly the first case so the signal isn't polluted."""
+    from types import SimpleNamespace
+
+    from overlay.app import tooltip
+
+    over = otel_metrics.COLD_FIRST_PAINT_BUDGET_MS + 1
+    under = otel_metrics.COLD_FIRST_PAINT_BUDGET_MS - 1
+    tooltip._record_show_metrics(SimpleNamespace(_tip_show_cold=True), over)  # counts
+    tooltip._record_show_metrics(SimpleNamespace(_tip_show_cold=False), over)  # warm → no count
+    tooltip._record_show_metrics(
+        SimpleNamespace(_tip_show_cold=True), under
+    )  # fast cold → no count
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.render.cold_first_paint_overshoot"]["value"] == 1
+    assert snap["saitenka.show_tooltip.duration_ms"]["count"] == 3  # every show recorded regardless
 
 
 @pytest.mark.usefixtures("registered")

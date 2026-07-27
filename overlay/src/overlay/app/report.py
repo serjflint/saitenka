@@ -203,12 +203,14 @@ def _collect_telemetry() -> dict[str, str]:
     in-memory metrics snapshot of a session that has already exited (metrics stay pull-based /
     process-local by design, see otel_metrics.snapshot)."""
     from overlay.app.config import load_config, resolve_telemetry
-    from overlay.app.telemetry import export_dir
+    from overlay.app.telemetry import export_dir, latest_trace
 
-    trace_path = export_dir(resolve_telemetry(load_config())) / "trace.json"
-    if not trace_path.exists():
+    trace_path = latest_trace(
+        export_dir(resolve_telemetry(load_config()))
+    )  # newest per-session trace
+    if trace_path is None or not trace_path.exists():
         return {}
-    return {
+    return {  # stable member name inside the zip, regardless of the on-disk timestamped filename
         "telemetry/trace.json": redact(trace_path.read_text(encoding="utf-8", errors="replace"))
     }
 

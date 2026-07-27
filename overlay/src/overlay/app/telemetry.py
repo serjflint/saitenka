@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, final
 
 from overlay.app.paths import cache_dir
+
+#: Per-session trace rotation: each run writes its own ``trace-<timestamp>.json`` (a CTF doc is one
+#: recording — appending sessions into one file overlays their clocks/thread-ids), and the newest N are
+#: kept so history survives without unbounded growth. report/doctor/status read the newest via
+#: :func:`latest_trace`.
+_KEEP_TRACES = 10
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -60,6 +67,7 @@ _SAMPLED_COUNTERS = (
     "saitenka.prefetch.queue_depth",
     "saitenka.panel_cache.hits",
     "saitenka.panel_cache.misses",
+    "saitenka.panel_cache.evictions",
     "saitenka.dict_cache.hits",
     "saitenka.dict_cache.misses",
     "saitenka.osd.paused_draw",
@@ -75,6 +83,24 @@ span_gate = ActiveGate()
 
 def export_dir(options: TelemetryOptions) -> Path:
     return Path(options.export_dir) if options.export_dir else cache_dir() / "telemetry"
+
+
+def latest_trace(out_dir: Path) -> Path | None:
+    """The most recent per-session CTF trace in *out_dir* (report/doctor/status read this), or None if
+    none yet. Timestamped names sort chronologically, so the lexical max is the newest."""
+    traces = sorted(out_dir.glob("trace-*.json"))
+    return traces[-1] if traces else None
+
+
+def _rotate_traces(out_dir: Path, keep: int) -> None:
+    """Prune the oldest per-session traces before a new session starts, keeping the newest ``keep``-1
+    so the session about to begin brings the total to at most ``keep``."""
+    existing = sorted(out_dir.glob("trace-*.json"))
+    for old in existing[: max(0, len(existing) - (keep - 1))]:
+        try:
+            old.unlink()
+        except OSError:
+            log.debug("could not prune old trace %s", old, exc_info=True)
 
 
 def is_enabled() -> bool:
@@ -154,12 +180,18 @@ def configure(options: TelemetryOptions) -> None:
 
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
+        _rotate_traces(
+            out_dir, _KEEP_TRACES
+        )  # prune old sessions, then start THIS one's own fresh file
+        # UTC (not local): latest_trace/_rotate_traces rely on lexical sort == chronological order, which
+        # local time breaks at DST fall-back (01:00-02:00 repeats). The trailing Z marks it unambiguous.
+        trace_path = out_dir / f"trace-{time.strftime('%Y%m%d-%H%M%SZ', time.gmtime())}.json"
 
         tp = TracerProvider()
         # One processor owns the queue, the writer thread, and the file. sample_fn wires the curated
-        # counters (below) as CTF "counter" tracks in the SAME trace.json the spans go into — Perfetto
+        # counters (below) as CTF "counter" tracks in the SAME trace file the spans go into — Perfetto
         # graphs them next to the spans, time-correlated, no separate metrics-visualization stack.
-        processor = CTFSpanProcessor(out_dir / "trace.json", span_gate, sample_fn=_sample_counters)
+        processor = CTFSpanProcessor(trace_path, span_gate, sample_fn=_sample_counters)
         tp.add_span_processor(processor)
         # TelemetryOptions.enabled is the actual opt-in switch; the gate defaulting off would mean
         # enabling telemetry produces logs + metrics but NO trace ever, since nothing else flips it —

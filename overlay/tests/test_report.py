@@ -91,7 +91,7 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
     tel_dir = tmp_path / "telemetry"
     tel_dir.mkdir()
     home = str(Path.home())
-    (tel_dir / "trace.json").write_text(
+    (tel_dir / "trace-20260101-000000.json").write_text(  # a rotated per-session trace
         '{"traceEvents": [{"name": "op", "args": {"dict": "' + home + '/mydict"}}]}'
     )
     cfg.write_text(cfg.read_text() + f'\n[telemetry]\nenabled = true\nexport_dir = "{tel_dir}"\n')

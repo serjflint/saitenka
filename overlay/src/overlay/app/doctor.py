@@ -546,17 +546,19 @@ def check_telemetry() -> Check:
     :func:`overlay.otel_metrics.snapshot`); it reports config state + the on-disk CTF trace
     file the live session wrote, if telemetry was enabled for it."""
     from overlay.app.config import load_config, resolve_telemetry
-    from overlay.app.telemetry import export_dir
+    from overlay.app.telemetry import export_dir, latest_trace
 
     opts = resolve_telemetry(load_config())
     if not opts.enabled:
         return Check("telemetry", "ok", "disabled ([telemetry] enabled = false)")
-    trace_path = export_dir(opts) / "trace.json"
-    if not trace_path.exists():
+    trace_path = latest_trace(
+        export_dir(opts)
+    )  # newest per-session trace (they rotate, timestamped)
+    if trace_path is None:
         return Check(
             "telemetry",
             "ok",
-            f"enabled, no trace yet at {trace_path} (nothing recorded this session, or the "
+            f"enabled, no trace yet in {export_dir(opts)} (nothing recorded this session, or the "
             "'telemetry' extra isn't installed)",
         )
     st = trace_path.stat()
