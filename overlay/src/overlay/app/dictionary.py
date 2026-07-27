@@ -243,55 +243,83 @@ class Dictionary:
             self._entry_cache.popitem(last=False)
         return entry
 
+    # ORDER BY e.id makes row order deterministic so DictionarySet._batch_exact (one IN-list query
+    # for every dict at once) reassembles byte-identically to these per-(dict,form) point queries.
+    _EXACT_Q = (
+        "SELECT e.id, e.term, e.reading, e.glossary, e.tags FROM keys k "
+        "JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
+        "WHERE k.dict_id = ? AND k.key = ? ORDER BY e.id"
+    )
+    # Wildcard forms GLOB the key column, capping DISTINCT entry ids (a term keys itself twice — by
+    # term AND reading — so a raw key LIMIT would under-count entries after dedup).
+    _GLOB_Q = (
+        "SELECT e.id, e.term, e.reading, e.glossary, e.tags FROM entries e "
+        "WHERE e.dict_id = ? AND e.id IN "
+        "(SELECT DISTINCT id FROM keys WHERE dict_id = ? AND key GLOB ? LIMIT ?)"
+    )
+
     def lookup(
-        self, *forms: str | None, wildcard: bool = False, limit: int = 50
+        self,
+        *forms: str | None,
+        wildcard: bool = False,
+        limit: int = 50,
+        rows_by_key: dict[str, list] | None = None,
     ) -> list[DictEntry]:
         """Look terms/readings up in this dictionary. With ``wildcard`` the forms are GLOB patterns
         (``*`` = any run, ``?`` = one char; fullwidth ＊/？ normalised) capped at ``limit`` rows — a
-        prefix pattern (``たべ*``) uses the key index; a leading-wildcard suffix scan is
-        LIMIT-bounded."""
+        prefix pattern (``たべ*``) uses the key index; a leading-wildcard suffix scan is LIMIT-bounded.
+
+        ``rows_by_key`` (from :meth:`DictionarySet._batch_exact`) supplies rows already fetched for
+        this dict in one whole-set query, so the exact path issues zero SQL here — the assembly below
+        is identical either way."""
         formset = {f for f in forms if f}
         seen: set[int] = set()
         out: list[DictEntry] = []
-        conn = self.db._conn()
-        did = self.dict_id
-        # Wildcard forms GLOB the key column, capping DISTINCT entry ids (a term keys itself twice —
-        # by term AND reading — so a raw key LIMIT would under-count entries after dedup).
-        exact_q = (
-            "SELECT e.id, e.term, e.reading, e.glossary, e.tags FROM keys k "
-            "JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
-            "WHERE k.dict_id = ? AND k.key = ?"
-        )
-        glob_q = (
-            "SELECT e.id, e.term, e.reading, e.glossary, e.tags FROM entries e "
-            "WHERE e.dict_id = ? AND e.id IN "
-            "(SELECT DISTINCT id FROM keys WHERE dict_id = ? AND key GLOB ? LIMIT ?)"
-        )
-        for f in forms:
-            if not f:
-                continue
-            with otel_metrics.instrumented(
-                otel_metrics.dict_sql_duration_ms, "dict_sql", dict=self.title
-            ):
-                cursor = (
-                    conn.execute(glob_q, (did, did, _to_glob(f), limit))
-                    if wildcard
-                    else conn.execute(exact_q, (did, f))
-                )
-                rows = cursor.fetchall()
-            for row in rows:
-                eid = row[0]
-                if eid in seen:
-                    continue
-                seen.add(eid)
-                out.append(self._entry_from_row(row))
-                if wildcard and len(out) >= limit:
-                    break
+        # dict.fromkeys dedups while keeping order: forms=(lemma, surface, reading) collide (lemma==
+        # surface for any uninflected word), and the identical query/rows must not be processed twice.
+        for f in dict.fromkeys(x for x in forms if x):
+            rows = (
+                rows_by_key.get(f, ())
+                if rows_by_key is not None
+                else self._fetch(f, wildcard=wildcard, limit=limit)
+            )
+            if self._collect(rows, seen, out, wildcard=wildcard, limit=limit):
+                break  # wildcard limit reached
         # Rank exact-term (headword) matches above reading-only ones, like Yomitan — so a common
         # particle の (term=の) wins over an obscure kanji that merely *reads* の (箆/の). Stable, so
         # dict order and same-rank ties are preserved.
         out.sort(key=lambda e: e.term not in formset)
         return out
+
+    def _collect(
+        self, rows, seen: set[int], out: list[DictEntry], *, wildcard: bool, limit: int
+    ) -> bool:
+        """Append each not-yet-``seen`` row's entry to *out*; return True once the wildcard ``limit``
+        is reached (the caller stops iterating forms)."""
+        for row in rows:
+            eid = row[0]
+            if eid in seen:
+                continue
+            seen.add(eid)
+            out.append(self._entry_from_row(row))
+            if wildcard and len(out) >= limit:
+                return True
+        return False
+
+    def _fetch(self, form: str, *, wildcard: bool, limit: int) -> list:
+        """One SQLite lookup for a single form (the ``dict_sql`` span site). The batched exact path
+        (see :meth:`DictionarySet._batch_exact`) bypasses this entirely."""
+        conn = self.db._conn()
+        did = self.dict_id
+        with otel_metrics.instrumented(
+            otel_metrics.dict_sql_duration_ms, "dict_sql", dict=self.title
+        ):
+            cursor = (
+                conn.execute(self._GLOB_Q, (did, did, _to_glob(form), limit))
+                if wildcard
+                else conn.execute(self._EXACT_Q, (did, form))
+            )
+            return cursor.fetchall()
 
 
 @dataclass
@@ -478,6 +506,32 @@ class DictionarySet:
                 pills.append(Freq(ps.title, disp, PITCH_COLOR))
         return pills
 
+    def _batch_exact(self, forms: tuple[str, ...]) -> dict[int, dict[str, list]]:
+        """One IN-list query across ALL dicts for the exact forms → ``{dict_id: {key: rows}}``,
+        replacing 3 forms × N dicts point queries (all dicts share the one consolidated DB, scoped by
+        ``dict_id``) with a single index scan. Each dict's rows are shaped exactly as its own
+        :meth:`Dictionary._fetch` returns, so ``lookup(rows_by_key=...)`` reassembles byte-identically.
+        Exact path only — wildcard keeps its per-dict LIMIT (a global SQL LIMIT can't cap per dict)."""
+        keys = [
+            f for f in dict.fromkeys(forms) if f
+        ]  # dedup, order-preserving (lemma > surface > reading)
+        if not self.dicts or not keys:
+            return {}
+        dids = [d.dict_id for d in self.dicts]
+        din, kin = ",".join("?" * len(dids)), ",".join("?" * len(keys))
+        query = (
+            "SELECT k.dict_id, k.key, e.id, e.term, e.reading, e.glossary, e.tags "  # noqa: S608 — only bind-placeholder counts (din/kin) interpolated; every value is parameterized
+            "FROM keys k JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
+            f"WHERE k.dict_id IN ({din}) AND k.key IN ({kin}) ORDER BY e.id"
+        )
+        conn = self.dicts[0].db._conn()
+        with otel_metrics.instrumented(otel_metrics.dict_sql_duration_ms, "dict_sql"):
+            rows = conn.execute(query, (*dids, *keys)).fetchall()
+        out: dict[int, dict[str, list]] = {}
+        for r in rows:  # r = (dict_id, key, e.id, e.term, e.reading, e.glossary, e.tags)
+            out.setdefault(r[0], {}).setdefault(r[1], []).append(r[2:])
+        return out
+
     def _dict_defs(
         self, forms: tuple[str, str, str], termforms: set[str], default_reading: str
     ) -> tuple[list[Definition], str | None, str]:
@@ -491,8 +545,9 @@ class DictionarySet:
         headword = None
         reading = default_reading
         defs: list[Definition] = []
+        batched = self._batch_exact(forms)  # one query for every dict, not 3 forms × N dicts
         for d in self.dicts:
-            hits = d.lookup(*forms)
+            hits = d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
             if not hits:
                 continue
             hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
