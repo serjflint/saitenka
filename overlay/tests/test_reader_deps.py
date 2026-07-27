@@ -12,7 +12,7 @@ from overlay.app import reader_deps
 @pytest.fixture(autouse=True)
 def _no_anki_launch(monkeypatch):
     """Never launch/poll real Anki from build_reader_deps in tests."""
-    monkeypatch.setattr(anki_mod, "ensure_anki_running", lambda *a, **k: True)
+    monkeypatch.setattr(anki_mod, "ensure_anki_running", lambda *_a, **_k: True)
 
 
 def test_empty_config_yields_no_deps():
@@ -51,9 +51,9 @@ def test_color_builds_scorer_even_without_known(monkeypatch):
     monkeypatch.setattr(
         wl.KnownWords, "from_set", staticmethod(lambda words: f"known:{len(words)}")
     )
-    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda db: "JLPT"))
+    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
     monkeypatch.setattr(
-        scoring_mod, "Scorer", lambda known, freq, jlpt: {"known": known, "jlpt": jlpt}
+        scoring_mod, "Scorer", lambda known, jlpt, **_kw: {"known": known, "jlpt": jlpt}
     )
     scorer, _, _, _ = reader_deps.build_reader_deps({}, color=True)
     assert scorer == {"known": "known:0", "jlpt": "JLPT"}
@@ -85,8 +85,8 @@ def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
         raise ConnectionError("down")
 
     monkeypatch.setattr(wl.KnownWords, "from_ankiconnect", staticmethod(boom))
-    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda words: "empty-known"))
-    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda db: "JLPT"))
-    monkeypatch.setattr(scoring_mod, "Scorer", lambda known, freq, jlpt: {"known": known})
+    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
+    monkeypatch.setattr(wl.JlptDict, "load", staticmethod(lambda _db: "JLPT"))
+    monkeypatch.setattr(scoring_mod, "Scorer", lambda known, **_kw: {"known": known})
     scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
     assert scorer == {"known": "empty-known"}  # degraded, not crashed

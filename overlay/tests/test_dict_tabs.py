@@ -17,7 +17,7 @@ TIP_KEYS = {"LEFT", "RIGHT", "UP", "DOWN", "ESC"}
 class _MultiDS:
     """Three dictionary sections, each tall enough to scroll to."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         para = "とても長い定義の本文でありスクロールが必要になるほど縦に伸びます。" * 4
         return Entry(
             headword=[tok.surface],
@@ -95,7 +95,7 @@ def test_tooltip_shows_tabs_for_multi_dict_entry(monkeypatch):
 
 def test_single_dict_entry_has_no_tabs(monkeypatch):
     class _OneDS:
-        def entry_for(self, tok, inflected=None):
+        def entry_for(self, tok, _inflected=None):
             return Entry(headword=[tok.surface], defs=[Definition("MonoC", ["短い。"])])
 
     r = _shown(monkeypatch, _reader(_OneDS()))
@@ -188,13 +188,13 @@ def test_add_button_gated_on_live_anki(monkeypatch):
     r.anki = object()  # mining configured
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     # Anki closed → ⊕ not shown / not hittable
-    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: False)
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *_a, **_k: False)
     r._anki_cache = (0.0, False)
     assert r._anki_ok() is False
     r.set_hover(0)
     assert r._hit_header_add(999, 999) is False
     # Anki reopened → the live check flips (past the TTL) so the ⊕ comes back
-    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: True)
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *_a, **_k: True)
     r._anki_cache = (0.0, False)  # force a re-check rather than wait out the ~3s TTL
     assert r._anki_ok() is True
 
@@ -224,7 +224,7 @@ def test_speaker_gated_off_without_tts(monkeypatch):
 
 def test_single_dict_reserves_nothing(monkeypatch):
     class _OneDS:
-        def entry_for(self, tok, inflected=None):
+        def entry_for(self, tok, _inflected=None):
             return Entry(headword=[tok.surface], defs=[Definition("MonoC", ["短い。"])])
 
     r = _shown(monkeypatch, _reader(_OneDS()))

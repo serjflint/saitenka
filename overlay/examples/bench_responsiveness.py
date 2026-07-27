@@ -78,7 +78,7 @@ def _stats(samples: list[float]) -> dict:
     cv (stdev/mean) = run-to-run stability — a metric with high cv can't be regression-gated because
     the noise swamps the signal."""
     s = sorted(samples)
-    p = lambda q: s[min(len(s) - 1, int(q * len(s)))]  # noqa: E731
+    p = lambda q: s[min(len(s) - 1, int(q * len(s)))]
     mean = statistics.fmean(s)
     stdev = statistics.stdev(s) if len(s) > 1 else 0.0
     return {
@@ -189,7 +189,7 @@ def _load_dict_set():
 class _SyntheticDS:
     """Fallback when no real dicts are configured: a tall multi-section CJK entry."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         para = "とても長い定義の本文でありスクロールが必要になるほど縦に伸びる説明文です。" * 3
         return Entry(
             headword=tok.surface,
@@ -1335,7 +1335,7 @@ def _ensure_free_threaded() -> None:
     not a post-hoc ``os.environ`` write)."""
     if sysconfig.get_config_var("Py_GIL_DISABLED") and os.environ.get("PYTHON_GIL") != "0":
         os.environ["PYTHON_GIL"] = "0"
-        argv = [sys.executable, os.path.abspath(__file__), *sys.argv[1:]]
+        argv = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
         if sys.platform == "win32":
             import subprocess
 

@@ -24,7 +24,7 @@ class _RecOv:
         self.shown: list = []
         self.hidden: list = []
 
-    def show(self, img, x=0, y=0, oid=None):
+    def show(self, _img, *_a, oid=None, **_kw):
         self.shown.append(oid)
 
     def hide(self, oid):
@@ -63,7 +63,7 @@ def test_apply_deps_stops_the_spinner():
     assert OverlayId.LOADING in r.ov.hidden
 
 
-def test_load_deps_async_uses_a_custom_build(monkeypatch):
+def test_load_deps_async_uses_a_custom_build():
     """#16: `run` passes its own CLI-flag-aware builder; load_deps_async must call THAT (not the
     config-only build_reader_deps) and publish its result for the poll loop to inject."""
     import time

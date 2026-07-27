@@ -29,7 +29,7 @@ def setup_secondary(reader: Reader) -> int | None:
     if pick is None:
         return None
     reader.ipc.command("set_property", "secondary-sid", pick["id"])
-    reader.ipc.command("set_property", "secondary-sub-visibility", False)
+    reader.ipc.command("set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
     return pick["id"]
 
 

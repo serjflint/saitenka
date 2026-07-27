@@ -132,7 +132,7 @@ def install_plan(tools: list[str]) -> InstallPlan:
     return _linux_hint(tools)
 
 
-def do_install(tools: list[str], dry_run: bool, confirm: Confirm) -> int:
+def do_install(tools: list[str], *, dry_run: bool, confirm: Confirm) -> int:
     """Install the MISSING subset of ``tools``. Returns the count that was (or would be) installed."""
     todo = missing_tools(tools)
     if not todo:
@@ -299,7 +299,9 @@ def default_known_deck(decks: list[str], sizes: dict[str, int]) -> str:
 def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, needs live AnkiConnect
     """Configure the Anki KNOWN-words deck (drives coloring) + the MINING deck/model over AnkiConnect.
     Skips cleanly when Anki isn't reachable — the config's ``[known]``/``[mine]`` can be set later."""
-    from overlay.app.anki import Anki, anki_reachable
+    import json
+
+    from overlay.app.anki import Anki, AnkiError, anki_reachable
     from overlay.app.config import load_config
     from overlay.app.init_wizard import write_config
 
@@ -314,7 +316,7 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
     try:
         decks = sorted(anki._call("deckNames") or [])
         models = sorted(anki._call("modelNames") or [])
-    except Exception:
+    except (AnkiError, json.JSONDecodeError):
         print("  couldn't query AnkiConnect (decks/models) — skipping")
         return
 
@@ -398,7 +400,7 @@ def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
     return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
 
 
-def run_setup(yes: bool, dry_run: bool) -> int:
+def run_setup(*, yes: bool, dry_run: bool) -> int:
     """Full wizard: inventory → install → doctor → init → import → plugin."""
     confirm: Confirm = (lambda _p: True) if yes else _ask
     print("saitenka-overlay setup")

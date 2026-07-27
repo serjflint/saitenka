@@ -96,7 +96,9 @@ def open_nested(reader: Reader, tok, inflected, wx: float, wy: float, wh: float,
     """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
     Shared by scan-hover and a clicked cross-reference link."""
     mined = reader._is_mined(tok)
-    key = reader._panel_key(tok, inflected, mined, tabs=False)  # nested: no tab strip / reserve
+    key = reader._panel_key(
+        tok, inflected, mined=mined, tabs=False
+    )  # nested: no tab strip / reserve
     st = reader._panel_for(
         tok,
         inflected,

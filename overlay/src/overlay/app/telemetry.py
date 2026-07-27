@@ -43,7 +43,7 @@ class ActiveGate:
     def __bool__(self) -> bool:
         return self._on
 
-    def set(self, value: bool) -> None:
+    def set(self, *, value: bool) -> None:
         self._on = value
 
 
@@ -166,7 +166,7 @@ def configure(options: TelemetryOptions) -> None:
         # confirmed live via a real `run --demo-word` session before this line was added. The gate
         # stays around for a future dynamic on/off (a doctor/keybind hook toggling capture without a
         # restart), not as a second "are we actually enabled" switch.
-        span_gate.set(True)
+        span_gate.set(value=True)
         reader = InMemoryMetricReader()  # pull-based: read on demand via otel_metrics.snapshot()
         mp = MeterProvider(metric_readers=[reader])
         trace.set_tracer_provider(tp)
@@ -202,4 +202,4 @@ def shutdown() -> None:
         _meter_provider = None
         _span_processor = None
         set_gauge_provider(None)  # drop the Reader's cache-gauge closure with the providers
-        span_gate.set(False)
+        span_gate.set(value=False)

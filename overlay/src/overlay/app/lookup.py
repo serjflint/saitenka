@@ -119,7 +119,7 @@ def _resolve_entries(surface: str, lemma: str):
         if not entries and surface != lemma:
             entries = (_lookup(surface).entries) or []
         return entries
-    except Exception:
+    except Exception:  # noqa: BLE001  # missing-jamdict (ImportError) + any lookup failure degrade to no entries, see _jam()
         return []
 
 
@@ -176,7 +176,7 @@ def card_data(surface: str, lemma: str, reading: str) -> CardData:
         entries = (_lookup(lemma).entries if lemma else []) or (
             _lookup(surface).entries if surface != lemma else []
         )
-    except Exception:
+    except Exception:  # noqa: BLE001  # missing-jamdict (ImportError) + any lookup failure degrade to no entries, see _jam()
         entries = []
     if not entries:
         return CardData(expression=lemma or surface, reading=reading, glossary_html="")

@@ -92,7 +92,7 @@ def shared_executor(
         return _shared
 
 
-def shutdown_shared_executor(wait: bool = True) -> None:
+def shutdown_shared_executor(*, wait: bool = True) -> None:
     global _shared, _shared_is_ft
     with _shared_lock:
         if _shared is not None:

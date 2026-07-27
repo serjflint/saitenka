@@ -86,7 +86,7 @@ def test_timespan_padding():
 def test_clip_audio_builds_ffmpeg(monkeypatch):
     calls = {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd, **_kw):
         calls["cmd"] = cmd
 
     monkeypatch.setattr("overlay.app.media.subprocess.run", fake_run)
@@ -153,25 +153,25 @@ class _FakeAnki:
         self.added = []
         self.stored = []
 
-    def find_notes(self, query):
+    def find_notes(self, _query):
         return self.existing
 
-    def notes_info(self, ids):
+    def notes_info(self, _ids):
         return []
 
-    def can_add(self, note):
+    def can_add(self, _note):
         return True
 
     def add_note(self, note):
         self.added.append(note)
         return 1
 
-    def store_media(self, name, path):
+    def store_media(self, name, _path):
         self.stored.append(name)
         return name
 
 
-def test_mine_token_adds_note_with_fields(monkeypatch, tmp_path):
+def test_mine_token_adds_note_with_fields(monkeypatch):
     from util import FakeIPC
 
     from overlay.app.controller import Reader
@@ -183,9 +183,11 @@ def test_mine_token_adds_note_with_fields(monkeypatch, tmp_path):
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
-    monkeypatch.setattr(r._miner, "capture_media", lambda base, video: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
     shown = []
-    monkeypatch.setattr(r, "_preview_mined", lambda card, tok, video: shown.append(card.expression))
+    monkeypatch.setattr(
+        r, "_preview_mined", lambda card, _tok, _video: shown.append(card.expression)
+    )
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
     assert len(anki.added) == 1
@@ -207,7 +209,7 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     r.set_subtitle("本を読む")
     previewed = []
     monkeypatch.setattr(
-        r, "_preview_existing", lambda nid, card, status: previewed.append((nid, status))
+        r, "_preview_existing", lambda nid, _card, status: previewed.append((nid, status))
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -259,10 +261,10 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda base, video: ("", ""))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("", ""))
     toasts = []
-    monkeypatch.setattr(r, "_toast", lambda text, kind="ok", seconds=2.8: toasts.append(text))
-    monkeypatch.setattr(r, "_mark_mined", lambda expr: None)  # skip the view refresh
+    monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
+    monkeypatch.setattr(r, "_mark_mined", lambda _expr: None)  # skip the view refresh
     r.bulk_mine()
     assert len(anki.added) >= 1  # 本 and 読む are unknown content words
     assert any("mined" in t for t in toasts)
@@ -295,8 +297,8 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda base, video: ("", ""))
-    monkeypatch.setattr(r, "_preview_mined", lambda card, tok, video: None)
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("", ""))
+    monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
     assert len(anki.added) == 1

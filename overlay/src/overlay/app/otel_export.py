@@ -184,7 +184,7 @@ class CTFSpanProcessor(SpanProcessor):
         except OSError:
             log.debug("CTF write failed", exc_info=True)
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, _timeout_millis: int = 30000) -> bool:
         """Drain + write synchronously on the calling thread. Airtight only against a stopped writer
         (:meth:`shutdown` joins first); while the writer runs it may hold a just-``get``'d span outside
         the lock, so a racing force_flush can write later spans first — a harmless ts reorder Perfetto

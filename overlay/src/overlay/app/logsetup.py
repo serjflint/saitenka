@@ -32,7 +32,9 @@ def _json_dumps(obj: EventDict, **_kw: Any) -> str:
     return msgspec.json.encode(obj).decode("utf-8")
 
 
-def _redact_event_dict(logger: WrappedLogger, method_name: str, event_dict: EventDict) -> EventDict:
+def _redact_event_dict(
+    _logger: WrappedLogger, _method_name: str, event_dict: EventDict
+) -> EventDict:
     """Redact secrets + home/username from every string value (not just ``event``) — extra
     kwargs on a log call (``log.warning("fetch failed", url=url)``) are just as leak-prone."""
     for k, v in event_dict.items():

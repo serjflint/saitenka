@@ -15,7 +15,7 @@ from overlay.panel import Definition, Entry
 
 
 class _FakeDS:
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         para = "とても長い定義の本文で" * 8  # tall + dense → scrollable, yields scan cells
         return Entry(
             headword=[tok.surface],
@@ -23,7 +23,7 @@ class _FakeDS:
             defs=[Definition(f"辞書{i}", [para]) for i in range(3)],
         )
 
-    def has_term(self, *forms):
+    def has_term(self, *_forms):
         return True
 
 

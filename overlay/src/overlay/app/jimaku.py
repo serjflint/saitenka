@@ -122,6 +122,7 @@ def keychain_get() -> str | None:
     except keyring.errors.KeyringError:
         return None
     except Exception:  # pragma: no cover — keyring import/backend selection edge cases
+        log.debug("keyring backend unavailable", exc_info=True)
         return None
 
 
@@ -137,7 +138,8 @@ def keychain_set(key: str) -> bool:
         return True
     except keyring.errors.KeyringError:
         return False
-    except Exception:  # pragma: no cover
+    except Exception:  # pragma: no cover — keyring import/backend selection edge cases
+        log.debug("keyring backend unavailable", exc_info=True)
         return False
 
 
@@ -219,7 +221,7 @@ def _ssl_context():
         import certifi
 
         return ssl.create_default_context(cafile=certifi.where())
-    except Exception:  # pragma: no cover — certifi is a declared dep
+    except ImportError:  # pragma: no cover — certifi is a declared dep
         return ssl.create_default_context()
 
 
@@ -247,7 +249,9 @@ class JimakuClient:
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         if q:
             url += "?" + q
-        req = urllib.request.Request(url, headers={"Authorization": self.api_key})  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+        req = urllib.request.Request(  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+            url, headers={"Authorization": self.api_key}
+        )
         # Retry transient failures (429 / 5xx / network) with backoff; client errors (400/401/404) are
         # raised immediately with jimaku's error body (retrying them can't help).
         for attempt in stamina.retry_context(
@@ -255,7 +259,9 @@ class JimakuClient:
         ):
             with attempt:
                 try:
-                    with urllib.request.urlopen(req, timeout=20, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+                    with urllib.request.urlopen(  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+                        req, timeout=20, context=_ssl_context()
+                    ) as r:
                         return json.loads(r.read())
                 except urllib.error.HTTPError as e:  # 400/401/404 client · 429/5xx transient
                     raise self._http_error_exc(e, path) from e
@@ -268,7 +274,7 @@ class JimakuClient:
                     ) from e
         raise JimakuError(f"jimaku request to {path} failed after retries")  # unreachable
 
-    def search(self, query: str, anime: bool = True) -> list[dict]:
+    def search(self, query: str, *, anime: bool = True) -> list[dict]:
         return self._get("/entries/search", query=query, anime=str(anime).lower())
 
     def files(self, entry_id: int, episode: int | None = None) -> list[JimakuFile]:
@@ -277,8 +283,12 @@ class JimakuClient:
 
     def download(self, jf: JimakuFile, dest_dir: str | Path) -> Path:
         dest = Path(dest_dir) / jf.name
-        req = urllib.request.Request(jf.url, headers={"Authorization": self.api_key})  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as r:  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+        req = urllib.request.Request(  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+            jf.url, headers={"Authorization": self.api_key}
+        )
+        with urllib.request.urlopen(  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
+            req, timeout=60, context=_ssl_context()
+        ) as r:
             dest.write_bytes(r.read())
         return dest
 

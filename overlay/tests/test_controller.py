@@ -252,12 +252,12 @@ def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
     monkeypatch.setattr(trace_api, "_TRACER_PROVIDER", None)
     monkeypatch.setattr(trace_api, "_TRACER_PROVIDER_SET_ONCE", Once())
     set_tracer_provider(provider)
-    span_gate.set(True)
+    span_gate.set(value=True)
     try:
         r._handle(_msg_for(ipc, "Alt+RIGHT"))
         processor.force_flush()
     finally:
-        span_gate.set(False)
+        span_gate.set(value=False)
         provider.shutdown()
 
     import json
@@ -466,7 +466,7 @@ def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     seen = []
     monkeypatch.setattr(r, "set_hover", lambda i: (seen.append(i), setattr(r, "hover", i)))
     # word 0 near (5,5), word 1 near (5,50); tooltip is off elsewhere
-    monkeypatch.setattr(r, "_hit", lambda x, y: 0 if y < 10 else (1 if y < 60 else -1))
+    monkeypatch.setattr(r, "_hit", lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1))
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
 
@@ -493,7 +493,7 @@ def test_transit_over_word_does_not_switch(monkeypatch):
     r.tokens = ["a", "b"]
     r._tip_rect = (100, 100, 80, 60)
     monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
-    monkeypatch.setattr(r, "_hit", lambda x, y: 0 if y < 10 else (1 if y < 60 else -1))
+    monkeypatch.setattr(r, "_hit", lambda _x, y: 0 if y < 10 else (1 if y < 60 else -1))
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
 
@@ -566,7 +566,7 @@ def test_panel_cache_avoids_rerender_on_revisit():
     calls = []
 
     class FakeDS:
-        def entry_for(self, tok, inflected=None):
+        def entry_for(self, tok, _inflected=None):
             calls.append(tok.surface)
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
@@ -594,7 +594,7 @@ def test_panel_cache_records_otel_render_and_cache_metrics():
     from overlay.panel import Definition, Entry
 
     class FakeDS:
-        def entry_for(self, tok, inflected=None):
+        def entry_for(self, tok, _inflected=None):
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = Reader(FakeIPC(), dict_set=FakeDS())
@@ -619,7 +619,7 @@ def test_panel_cache_records_otel_render_and_cache_metrics():
 
 
 class _FakeDS:
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         from overlay.panel import Definition, Entry
 
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
@@ -729,7 +729,7 @@ def test_hover_off_window_still_lingers(monkeypatch):
 class _TallDS:
     """A dictionary entry far taller than one viewport — several long def bodies."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         from overlay.panel import Definition, Entry
 
         para = "とても長い定義の本文でありスクロールが必要になるほど縦に伸びます。" * 6
@@ -739,7 +739,7 @@ class _TallDS:
             defs=[Definition(f"辞書{i}", [para]) for i in range(6)],
         )
 
-    def has_term(self, *forms):
+    def has_term(self, *_forms):
         return True  # the def body is all dictionary words → a body click doesn't fall to kanji
 
 
@@ -866,7 +866,7 @@ def test_header_add_button_absent_without_anki(monkeypatch):
 class _ScanDS:
     """A dictionary entry with a CJK (monolingual) body, so the panel carries scan hitboxes."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         from overlay.panel import Definition, Entry
 
         return Entry(
@@ -1040,7 +1040,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
 class _LinkDS:
     """A dictionary entry whose def body contains an internal <a> cross-reference to 見る."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         from overlay.panel import Definition, Entry
 
         body = ["同義語は", {"tag": "a", "href": "?query=見る", "content": "見る"}, "。"]
@@ -1085,13 +1085,13 @@ def test_click_cross_reference_opens_target_in_nested(monkeypatch):
 class _WildcardDS:
     """A def body whose cross-reference is a WILDCARD, plus a search() that returns clickable results."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         from overlay.panel import Definition, Entry
 
         body = ["類語は", {"tag": "a", "href": "?query=食べ*", "content": "食べ…"}, "など。"]
         return Entry(headword=tok.surface, reading="みる", defs=[Definition("MonoA", body)])
 
-    def search(self, pattern, limit=30):
+    def search(self, pattern, _limit=30):
         from overlay.panel import Definition, Entry
 
         li = [
@@ -1138,7 +1138,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     ipc = FakeIPC()
 
     class _ExternalDS:
-        def entry_for(self, tok, inflected=None):
+        def entry_for(self, tok, _inflected=None):
             from overlay.panel import Definition, Entry
 
             body = [
@@ -1282,10 +1282,12 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: None)
+    monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
     r.set_hover(0)
     shots = []
-    monkeypatch.setattr(r.ov, "show_bgra", lambda bgra, x, y, oid: shots.append((oid, bgra.copy())))
+    monkeypatch.setattr(
+        r.ov, "show_bgra", lambda bgra, _x, _y, oid: shots.append((oid, bgra.copy()))
+    )
     tx, ty, tw, _th = r._tip_rect
     ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + 5}
     r.copy_click()
@@ -1301,7 +1303,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
 # --- card preview: click-to-play audio, image zoom toggle, ✕ close, and the ⊕→✓ mined state --------
 
 
-def _preview_reader(ipc, with_audio=True, with_image=True):
+def _preview_reader(ipc, *, with_audio=True, with_image=True):
     from PIL import Image as PILImage
 
     from overlay.app.card_preview import PreviewData
@@ -1401,10 +1403,10 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
 def test_seed_mined_preloads_deck_expressions():
     # a word mined in a past session (already in the deck) should be pre-marked so ⊕ shows ✓
     class FakeAnki:
-        def find_notes(self, query):
+        def find_notes(self, _query):
             return [11, 22]
 
-        def notes_info(self, ids):
+        def notes_info(self, _ids):
             return [
                 {"fields": {"Expression": {"value": "奉書"}}},
                 {"fields": {"Expression": {"value": "<b>通り</b>"}}},
@@ -1438,7 +1440,7 @@ def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     r = _auto_trans_reader(ipc)
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     shown = []
-    monkeypatch.setattr(r.ov, "show", lambda img, x, y, oid: shown.append(oid))
+    monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
     r.set_hover(0)
@@ -1461,7 +1463,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     shown = []
-    monkeypatch.setattr(r.ov, "show", lambda img, x, y, oid: shown.append(oid))
+    monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
     r.set_hover(0)
     assert OverlayId.TRANS not in shown  # translation stays on the manual `t` key
 
@@ -1578,7 +1580,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
         def __init__(self):
             self.calls = 0
 
-        def entry_for(self, tok, inflected=None):
+        def entry_for(self, tok, _inflected=None):
             self.calls += 1
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
@@ -1623,15 +1625,11 @@ def test_capture_media_failure_shows_toast(monkeypatch):
     # Patch screenshot and clip_audio to always raise (capture lives in app/miner.py since 8d).
     import overlay.app.miner as _M
 
-    monkeypatch.setattr(
-        _M, "screenshot", lambda ipc, p: (_ for _ in ()).throw(OSError("snap failed"))
-    )
-    monkeypatch.setattr(
-        _M, "clip_audio", lambda v, s, p: (_ for _ in ()).throw(OSError("clip failed"))
-    )
+    monkeypatch.setattr(_M, "screenshot", lambda *_a: (_ for _ in ()).throw(OSError("snap failed")))
+    monkeypatch.setattr(_M, "clip_audio", lambda *_a: (_ for _ in ()).throw(OSError("clip failed")))
     toasts = []
     monkeypatch.setattr(
-        r, "_toast", lambda text, kind="ok", seconds=2.8: toasts.append((text, kind))
+        r, "_toast", lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind))
     )
 
     pic, audio = r._capture_media("test_base", "/fake/video.mkv")
@@ -1693,7 +1691,7 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
 # --- Stage 2: P2 trio fixes -----------------------------------------------------------------------
 
 
-def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup(monkeypatch):
+def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
     """_entry_for must not mutate the lru_cached Entry returned by entry_for / dict_set.entry_for.
     Two calls with a JLPT-level token must yield exactly ONE pill each time, not accumulate.
     Uses a dict_set whose entry_for IS lru_cached (same object returned each call) to expose mutation."""
@@ -1704,8 +1702,8 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup(monkeypatch):
     from overlay.panel import Entry as _Entry
 
     class _CachedDS:
-        @functools.cache  # noqa: B019 — the test NEEDS a same-object cache to expose Entry mutation
-        def entry_for(self, surface, inflected=None):
+        @functools.cache  # noqa: B019  # test-local fake, GC'd with the test — no leak risk
+        def entry_for(self, surface, _inflected=None):
             return _Entry(headword=surface, defs=[Definition("D", ["x"])], freqs=[])
 
     r = Reader(

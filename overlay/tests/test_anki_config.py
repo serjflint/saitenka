@@ -38,7 +38,7 @@ def test_anki_client_reads_config_and_injects_key(monkeypatch, tmp_path):
         def __exit__(self, *a):
             return False
 
-    def _fake_urlopen(req, timeout=0):
+    def _fake_urlopen(req, **_kwargs):
         sent["url"] = req.full_url
         sent["body"] = json.loads(req.data.decode())
         return _Resp()

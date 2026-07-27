@@ -61,7 +61,12 @@ def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
 
 
 def jimaku_should_fetch(
-    explicit_flag: bool, cfg_fetch: bool, video: str | None, slang: str = "ja,jpn,jp", probe=None
+    *,
+    explicit_flag: bool,
+    cfg_fetch: bool,
+    video: str | None,
+    slang: str = "ja,jpn,jp",
+    probe=None,
 ) -> bool:
     """Decide whether ``run`` fetches jimaku. Explicit ``--jimaku`` always wins. Config-driven fetch
     (``[jimaku].fetch``) fires ONLY when the file has no embedded JP subtitle track — so a global
@@ -122,6 +127,7 @@ def _resolve_jimaku_subs(
     tmp: Path,
     jimaku_key: str | None,
     jimaku_cfg: dict,
+    *,
     resync: bool,
 ) -> Path | None:
     from overlay.app.jimaku import (
@@ -180,7 +186,10 @@ def _resolve_subtitles(
     _jm = cfg.get("jimaku")
     jimaku_cfg = _jm if isinstance(_jm, dict) else {}
     jimaku_on = jimaku_should_fetch(
-        jimaku, bool(jimaku_cfg.get("fetch")), str(video_path) if video else None, slang
+        explicit_flag=jimaku,
+        cfg_fetch=bool(jimaku_cfg.get("fetch")),
+        video=str(video_path) if video else None,
+        slang=slang,
     )
     log.info(
         "jimaku fetch: %s (flag=%s cfg_fetch=%s)", jimaku_on, jimaku, bool(jimaku_cfg.get("fetch"))
@@ -190,7 +199,7 @@ def _resolve_subtitles(
         sub_path = Path(sub_file).expanduser()
     elif jimaku_on:
         sub_path = _resolve_jimaku_subs(
-            video_path, jimaku_title, episode, tmp, jimaku_key, jimaku_cfg, resync
+            video_path, jimaku_title, episode, tmp, jimaku_key, jimaku_cfg, resync=resync
         )
     elif not video:
         sub_path = tmp / "line.srt"

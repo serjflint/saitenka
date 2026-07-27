@@ -82,13 +82,13 @@ def test_ensure_jimaku_fetches_when_no_jp_track(tmp_path, monkeypatch):
         def __init__(self, key=None):
             pass
 
-        def fetch(self, title, ep, dest):
+        def fetch(self, _title, _ep, _dest):
             return fetched
 
     import overlay.app.jimaku as jm
 
     monkeypatch.setattr(jm, "JimakuClient", FakeClient)
-    monkeypatch.setattr(jm, "parse_filename", lambda p: ("Nippon Sangoku", 9))
+    monkeypatch.setattr(jm, "parse_filename", lambda _p: ("Nippon Sangoku", 9))
     # resync off so we don't shell out
     msg = subselect.ensure_jp_subs(ipc, jimaku=True, resync=False)
     assert "jimaku: added fetched.ja.srt" in msg and "ep 9" in msg
@@ -105,13 +105,13 @@ def _stub_jimaku(monkeypatch, tmp_path, *, ok=True):
         def __init__(self, key=None):
             pass
 
-        def fetch(self, title, ep, dest):
+        def fetch(self, _title, _ep, _dest):
             if not ok:
                 raise jm.JimakuError("not found")
             return fetched
 
     monkeypatch.setattr(jm, "JimakuClient", FakeClient)
-    monkeypatch.setattr(jm, "parse_filename", lambda p: ("Nippon Sangoku", 9))
+    monkeypatch.setattr(jm, "parse_filename", lambda _p: ("Nippon Sangoku", 9))
     return fetched
 
 

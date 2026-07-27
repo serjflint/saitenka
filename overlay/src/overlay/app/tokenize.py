@@ -173,7 +173,7 @@ def inflected_in(tokens: list[Token], index: int) -> str:
     return s
 
 
-def tokenize(line: str, strip_furigana: bool = True, merge: bool = True) -> list[Token]:
+def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> list[Token]:
     tokens: list[Token] = []
     idx = 0
     # Hold _TAG_LOCK across the full parse AND feature attribute reads: fugashi's C extension has

@@ -16,7 +16,7 @@ import signal
 log = logging.getLogger(__name__)
 
 
-def _raise_keyboard_interrupt(signum, frame):  # pragma: no cover — delivered by the OS
+def _raise_keyboard_interrupt(_signum, _frame):  # pragma: no cover — delivered by the OS
     raise KeyboardInterrupt
 
 

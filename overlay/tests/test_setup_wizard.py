@@ -37,7 +37,7 @@ def test_windows_prefers_winget_then_choco_then_scoop(monkeypatch):
 
 def test_linux_prints_hints_no_autoinstall(monkeypatch):
     monkeypatch.setattr(sw.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(sw.shutil, "which", lambda n: None)
+    monkeypatch.setattr(sw.shutil, "which", lambda _n: None)
     plan = sw.install_plan(["mpv", "ffmpeg"])
     assert plan.manager is None  # Linux: never auto-install
     assert plan.commands == []
@@ -46,7 +46,7 @@ def test_linux_prints_hints_no_autoinstall(monkeypatch):
 
 def test_no_manager_available(monkeypatch):
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(sw.shutil, "which", lambda n: None)
+    monkeypatch.setattr(sw.shutil, "which", lambda _n: None)
     plan = sw.install_plan(["mpv"])
     assert plan.manager is None
     assert plan.hint  # tells the user how to get brew
@@ -72,10 +72,10 @@ def test_present_mpv_routes_through_find_mpv(monkeypatch):
     winget-crash loop when mpv is installed off-PATH."""
     from overlay.mpvio import discover
 
-    monkeypatch.setattr(sw.shutil, "which", lambda n: None)  # nothing on PATH
-    monkeypatch.setattr(discover, "find_mpv", lambda config_path=None: "C:\\mpv\\mpv.exe")
+    monkeypatch.setattr(sw.shutil, "which", lambda _n: None)  # nothing on PATH
+    monkeypatch.setattr(discover, "find_mpv", lambda _config_path=None: "C:\\mpv\\mpv.exe")
     assert sw._present("mpv") is True
-    monkeypatch.setattr(discover, "find_mpv", lambda config_path=None: None)
+    monkeypatch.setattr(discover, "find_mpv", lambda _config_path=None: None)
     assert sw._present("mpv") is False
 
 
@@ -84,7 +84,7 @@ def test_present_mpv_routes_through_find_mpv(monkeypatch):
 
 def test_run_install_dry_run_executes_nothing(monkeypatch):
     calls = []
-    monkeypatch.setattr(sw, "_present", lambda t: False)  # force both tools "missing"
+    monkeypatch.setattr(sw, "_present", lambda _t: False)  # force both tools "missing"
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
@@ -95,7 +95,7 @@ def test_run_install_dry_run_executes_nothing(monkeypatch):
 
 def test_run_install_declined_executes_nothing(monkeypatch):
     calls = []
-    monkeypatch.setattr(sw, "_present", lambda t: False)
+    monkeypatch.setattr(sw, "_present", lambda _t: False)
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
@@ -106,7 +106,7 @@ def test_run_install_declined_executes_nothing(monkeypatch):
 
 def test_run_install_confirmed_invokes_manager(monkeypatch):
     calls = []
-    monkeypatch.setattr(sw, "_present", lambda t: False)
+    monkeypatch.setattr(sw, "_present", lambda _t: False)
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: calls.append(cmd))
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
@@ -117,7 +117,7 @@ def test_run_install_confirmed_invokes_manager(monkeypatch):
 def test_do_install_continues_and_survives_a_failed_manager(monkeypatch):
     """A package manager exiting non-zero (winget already-installed / declined) must NOT crash setup —
     the other tools still install and the count reflects only the successes."""
-    monkeypatch.setattr(sw, "_present", lambda t: False)
+    monkeypatch.setattr(sw, "_present", lambda _t: False)
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(sw.shutil, "which", lambda n: "/bin/brew" if n == "brew" else None)
 
@@ -134,7 +134,7 @@ def test_do_install_continues_and_survives_a_failed_manager(monkeypatch):
 def test_full_wizard_resumable_skips_satisfied(monkeypatch):
     """Everything already present → the wizard installs nothing and still reaches doctor/init."""
     monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(sw, "_present", lambda t: True)  # all tools present
+    monkeypatch.setattr(sw, "_present", lambda _t: True)  # all tools present
     installs = []
     monkeypatch.setattr(sw, "_run_cmd", lambda cmd: installs.append(cmd))
     ran = {"doctor": False, "init": False}
@@ -144,10 +144,14 @@ def test_full_wizard_resumable_skips_satisfied(monkeypatch):
         return SimpleNamespace(exit_code=0)
 
     monkeypatch.setattr(sw, "_run_doctor", _fake_doctor)
-    monkeypatch.setattr(sw, "_run_init", lambda confirm: ran.__setitem__("init", True))
-    monkeypatch.setattr(sw, "_offer_anki", lambda confirm: None)
-    monkeypatch.setattr(sw, "_offer_import", lambda confirm: None)
-    monkeypatch.setattr(sw, "_offer_plugin", lambda confirm: None)
+    monkeypatch.setattr(
+        sw,
+        "_run_init",
+        lambda _confirm: ran.__setitem__("init", True),  # noqa: FBT003  # dict.__setitem__'s own signature
+    )
+    monkeypatch.setattr(sw, "_offer_anki", lambda _confirm: None)
+    monkeypatch.setattr(sw, "_offer_import", lambda _confirm: None)
+    monkeypatch.setattr(sw, "_offer_plugin", lambda _confirm: None)
     rc = sw.run_setup(yes=True, dry_run=False)
     assert rc == 0
     assert installs == []  # nothing to install

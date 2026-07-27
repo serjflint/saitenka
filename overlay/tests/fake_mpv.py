@@ -16,6 +16,7 @@ import json
 import socket
 import sys
 import time
+from pathlib import Path
 
 
 def main() -> int:
@@ -26,7 +27,7 @@ def main() -> int:
 
     log = _opt("--fake-log=")
     if log:
-        with open(log, "w", encoding="utf-8") as f:
+        with Path(log).open("w", encoding="utf-8") as f:
             json.dump(argv, f)
 
     sock_path = _opt("--input-ipc-server=")

@@ -121,7 +121,7 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     toasts = []
-    monkeypatch.setattr(r, "_toast", lambda text, kind="ok", seconds=2.8: toasts.append(text))
+    monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
     assert r._nest.state is None
     r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
@@ -148,7 +148,7 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     sb = next(b for b in r._tip_state.lazy.scan_boxes if b.text.startswith("本"))
     # make the term lookup miss so the fallback triggers (本 has no term entry in this fixture… it
     # actually might tokenize to 本 with a lemma the dict lacks — force the miss deterministically)
-    monkeypatch.setattr(type(ds), "has_term", lambda self, *forms: False)
+    monkeypatch.setattr(type(ds), "has_term", lambda _self, *_forms: False)
     sx, sy = r._tip_xy
     ipc = r.ipc
     ipc.props["mouse-pos"] = {

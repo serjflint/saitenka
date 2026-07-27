@@ -55,7 +55,7 @@ def test_export_dir_defaults_to_cache_dir(monkeypatch, tmp_path):
     assert telemetry.export_dir(TelemetryOptions()) == tmp_path / "telemetry"
 
 
-def test_missing_extra_stays_disabled(monkeypatch, tmp_path, caplog):
+def test_missing_extra_stays_disabled(monkeypatch, tmp_path):
     """Simulate the observability extra not being installed: opentelemetry imports fail inside
     configure(), and telemetry must stay fully off rather than raise."""
     real_import = __import__
@@ -148,7 +148,7 @@ def test_sample_counters_includes_registered_state_gauges(monkeypatch):
     assert values["dict_cache.size"] == 9.0
 
 
-def test_gauge_provider_exception_never_breaks_a_sample(monkeypatch):
+def test_gauge_provider_exception_never_breaks_a_sample():
     def _boom():
         raise RuntimeError("cache read failed")
 
@@ -189,7 +189,7 @@ def test_configure_writes_counter_tracks_into_the_trace_file(tmp_path):
 def test_active_gate_defaults_off_and_toggles():
     gate = telemetry.ActiveGate()
     assert bool(gate) is False
-    gate.set(True)
+    gate.set(value=True)
     assert bool(gate) is True
-    gate.set(False)
+    gate.set(value=False)
     assert bool(gate) is False

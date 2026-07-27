@@ -104,7 +104,7 @@ def test_embedded_track_reuses_cached_extraction_without_re_extracting(tmp_path,
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
 
-    def boom(*a, **kw):
+    def boom(*_a, **_kw):
         raise AssertionError("should not re-extract when the cache already has this track")
 
     monkeypatch.setattr(es, "extract_embedded_track", boom)
@@ -118,7 +118,7 @@ def test_embedded_extraction_failure_leaves_index_unset(tmp_path, monkeypatch):
     video = tmp_path / "ep.mkv"
     video.write_bytes(b"x")
     monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: tmp_path / "cache")
-    monkeypatch.setattr(es, "extract_embedded_track", lambda *a, **kw: False)
+    monkeypatch.setattr(es, "extract_embedded_track", lambda *_a, **_kw: False)
 
     reader = FakeReader(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
     es.build_sub_index_for_current_track(reader)

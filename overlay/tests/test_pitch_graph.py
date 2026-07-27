@@ -108,7 +108,7 @@ def test_entry_carries_pitch_accents(tmp_path):
     assert any(f.value == "ほんめい [0]" for f in e.freqs)
 
 
-def test_panel_renders_pitch_graph_row(tmp_path):
+def test_panel_renders_pitch_graph_row():
     """An entry WITH pitches renders taller than the same entry without (the graph row), and the
     no-pitch panel is unchanged — existing goldens stay byte-identical."""
     from overlay.panel import Definition, Entry, render_panel

@@ -13,6 +13,8 @@ pattern) with thin delegating methods on Reader.
 
 from __future__ import annotations
 
+import http.client
+import json
 import logging
 import threading
 import time
@@ -33,7 +35,7 @@ log = logging.getLogger(__name__)
 _DEPS_DAG_WIDTH = 4
 
 
-def _maybe_start_anki(mine: bool, mc: dict, known_cfg, *, on_unreachable=None) -> None:
+def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -> None:
     """If mining or Anki-backed coloring is configured, try to start Anki for the user (warn, never
     block) so they don't have to remember to launch it before playing. ``on_unreachable`` lets an
     interactive caller (``run``) print a console note instead of the default log-only warning
@@ -92,7 +94,12 @@ def _load_known_words(known_cfg, *, fallback_words=(), on_error=None):
     if known_cfg:
         try:
             return KnownWords.from_ankiconnect(known_cfg)
-        except Exception as e:  # Anki closed / AnkiConnect down — color by freq+JLPT only
+        except (  # Anki closed / AnkiConnect down — color by freq+JLPT only
+            OSError,
+            http.client.HTTPException,
+            json.JSONDecodeError,
+            AttributeError,
+        ) as e:
             if on_error is not None:
                 on_error(e)
             else:
@@ -117,7 +124,7 @@ def _load_jlpt_dict(db):
         return JlptDict.load(db)
 
 
-def _build_mining(mine: bool, mc: dict):
+def _build_mining(mc: dict, *, mine: bool):
     if not (mine and mc):
         return None, None
     with otel_metrics.traced("build_mining"):
@@ -130,7 +137,9 @@ def _build_mining(mine: bool, mc: dict):
             )
             return anki, mine_conf
         except Exception:  # never let mining setup block attach
-            log.warning("mining setup failed (Anki closed?); attach continues without mining")
+            log.warning(
+                "mining setup failed (Anki closed?); attach continues without mining", exc_info=True
+            )
             return None, None
 
 
@@ -180,7 +189,7 @@ def build_reader_deps(
     # wait on that future before their own submit.
     with ThreadPoolExecutor(max_workers=_DEPS_DAG_WIDTH, thread_name_prefix="saitenka-deps") as ex:
         anki_ready = ex.submit(
-            _maybe_start_anki, mine, mc, known_cfg, on_unreachable=on_anki_unreachable
+            _maybe_start_anki, mc, known_cfg, mine=mine, on_unreachable=on_anki_unreachable
         )
         dictset_fut = ex.submit(_build_dict_set, db, dict_titles, freq_titles, pitch_titles)
         jlpt_fut = ex.submit(_load_jlpt_dict, db) if want_scorer else None
@@ -199,7 +208,7 @@ def build_reader_deps(
             if want_scorer
             else None
         )
-        mining_fut = ex.submit(_build_mining, mine, mc)
+        mining_fut = ex.submit(_build_mining, mc, mine=mine)
 
         scorer = None
         if want_scorer:

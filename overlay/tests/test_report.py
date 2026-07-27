@@ -40,10 +40,10 @@ def _hermetic(monkeypatch, tmp_path):
         def to_json(self):
             return {"summary": {"ok": 1, "warn": 0, "fail": 0}, "checks": []}
 
-    monkeypatch.setattr(report, "_first_line", lambda *c: "mpv v0.40.0")
+    monkeypatch.setattr(report, "_first_line", lambda *_c: "mpv v0.40.0")
     import overlay.app.doctor as doc
 
-    monkeypatch.setattr(doc, "run_checks", lambda *a, **k: _Rep())
+    monkeypatch.setattr(doc, "run_checks", lambda *_a, **_k: _Rep())
     return cfg
 
 

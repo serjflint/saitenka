@@ -141,9 +141,20 @@ select = [
     # new, security / correctness — high signal, low noise (mostly manual, but small) ──────────────
     "S",       # flake8-bandit — the SAST gate (graduated from the standalone `sec` task)
     "N",       # pep8-naming
-    "ASYNC", "DTZ", "LOG", "G", "PT", "SLOT", "YTT", "EXE", "T10", "INT",
+    "ASYNC", "DTZ", "LOG", "G", "PT", "SLOT", "YTT", "EXE", "T10", "T20", "INT",
     # pylint — the logic/error rules; count/style cousins pruned in `ignore` ───────────────────────
     "PLE", "PLW", "PLC", "PLR",
+    # 2026-07-27 sweep — readability/maintainability worth the one-time churn ─────────────────────
+    "A",       # flake8-builtins — no shadowing id/type/list/etc.
+    "RSE",     # flake8-raise — no unnecessary parens on raise (fix)
+    "FIX",     # flake8-fixme — no TODO/FIXME/XXX left in the tree; track work in issues instead
+    "TD",      # flake8-todos — same intent as FIX, format/completeness of any TODO that does land
+    "ERA",     # eradicate — commented-out code
+    "PTH",     # flake8-use-pathlib — os.path → pathlib (fix)
+    "BLE",     # flake8-blind-except — no bare `except Exception` swallowing a real error
+    "ARG",     # flake8-unused-arguments — dead parameters
+    "Q",       # flake8-quotes — quote consistency (formatter already enforces this; belt+suspenders)
+    "FBT",     # flake8-boolean-trap — no un-named boolean positional args
 ]
 # Each entry prunes a noisy sub-rule of a SELECTED category (a category we don't want just isn't
 # selected above — no ignore needed for it).
@@ -179,14 +190,27 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # cyclopts binds flags via Parameter(...) calls in parameter defaults — that IS its API shape.
-"src/overlay/app/cli.py" = ["B008"]
+# T201: cli.py + cli_run.py are the CLI entrypoint/runtime-banner surface — print() IS the UX,
+# mirrors sgconfig/rules/no-print-in-lib.yml's `ignores:` (which cli_run.py should join too).
+"src/overlay/app/cli.py" = ["B008", "T201"]
+"src/overlay/app/cli_run.py" = ["T201"]
+# T201: interactive first-run wizards — print() is the prompt UX, matches no-print-in-lib.yml.
+"src/overlay/app/init_wizard.py" = ["T201"]
+"src/overlay/app/setup_wizard.py" = ["T201"]
 # Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
 # hoisting five one-use constants would only add indirection.
 "src/overlay/app/scoring.py" = ["RUF009"]
 # GPL-3.0 chokepoint: only these two modules may import the optional saitenka_deinflect add-on.
 # Defense-in-depth alongside the .importlinter gpl-chokepoint contract.
 "src/overlay/app/dictionary.py" = ["TID251"]
-"src/overlay/app/doctor.py" = ["TID251"]
+# T201: doctor is a user-invoked diagnostic subcommand — print() IS its report output.
+"src/overlay/app/doctor.py" = ["TID251", "T201"]
+# T201: user-invoked import subcommand — print() reports progress/results to the terminal.
+"src/overlay/app/yomitan_import.py" = ["T201"]
+# T201: pre-logging bootstrap — runs before configure_logging() attaches handlers, so log.*
+# has nowhere to go yet; matches no-print-in-lib.yml.
+"src/overlay/app/reader_deps.py" = ["T201"]
+"src/overlay/app/crashlog.py" = ["T201"]
 # media.py dispatches on sys.platform with a `return` per branch; the explicit `else` is a DELIBERATE
 # mypy platform-narrowing guard (without it, mypy flags the fall-through as unreachable on the build
 # host). RET's else-after-return "simplification" fights that guard, so opt those rules out here.
@@ -206,7 +230,10 @@ ignore = [
                # IS the check; explicit check= would be noise. (In src/, PLW1510 now gates: every call
                # carries an explicit check=False after the 2026-07-25 sweep.)
 ]
-"examples/**" = ["T201", "S", "INP001"]  # demo scripts: print() is the output, security/init noise N/A
+"examples/**" = ["T201", "S", "INP001", "BLE001", "E731", "FBT001", "FBT002", "FBT003"]  # demo/bench
+# scripts: print() is the output, security/init noise N/A, terse blind-except/lambda-assign is
+# normal for ad-hoc benchmarking harnesses that must never crash mid-run and don't need named
+# helpers, and positional bool flags calling internal-only helpers don't warrant keyword ceremony.
 # NOTE: security suppressions in `src/` are DELIBERATELY per-line `# noqa: S…  # reason` at each
 # site (see anki.py/jimaku.py/wordlists.py/crashlog.py/fsrs.py/dictdb.py/doctor.py), not centralized
 # here — a per-line noqa is more precise (a NEW unsafe occurrence in the same file still fails) and

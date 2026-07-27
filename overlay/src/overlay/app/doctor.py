@@ -16,6 +16,7 @@ hermetic in tests (no network, no real files).
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import shutil
@@ -165,12 +166,12 @@ def check_config() -> Check:
         return Check("config", "warn", f"no config at {p} — run `saitenka-overlay init`")
     try:
         load_config()
-    except Exception as e:  # pragma: no cover — load_config already swallows parse errors
+    except Exception as e:  # noqa: BLE001  # pragma: no cover — load_config already swallows parse errors; defensive only
         return Check("config", "fail", f"config parse error: {e}")
     return Check("config", "ok", f"config parses ({p})")
 
 
-def _no_db_checks(db_file, any_configured: bool) -> list[Check]:
+def _no_db_checks(db_file, *, any_configured: bool) -> list[Check]:
     if any_configured:
         return [
             Check(
@@ -222,7 +223,7 @@ def check_dict_db() -> list[Check]:
     db_file = db_path()
 
     if not db_file.exists():
-        return _no_db_checks(db_file, any_configured)
+        return _no_db_checks(db_file, any_configured=any_configured)
 
     db = DictionaryDb.open()
     imported = {
@@ -285,7 +286,7 @@ def check_fonts() -> Check:
         from overlay import fonts
 
         missing = [f for f in fonts.FONT_FILES if not (fonts.ASSETS / f).exists()]
-    except Exception as e:  # pragma: no cover — import failure would already fail elsewhere
+    except (ImportError, OSError) as e:  # pragma: no cover — import failure fails elsewhere first
         return Check("fonts", "fail", f"font module import failed: {e}")
     if missing:
         return Check("fonts", "fail", f"vendored fonts missing: {missing}")
@@ -317,7 +318,7 @@ def check_anki(deck: str, model: str) -> Check:
     host, _ = resolve_anki()
     try:
         ver = _anki_call("version")
-    except Exception:
+    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
         return Check(
             "anki",
             "warn",
@@ -332,7 +333,7 @@ def check_anki(deck: str, model: str) -> Check:
             return Check("anki", "warn", f"{detail}, but mine deck {deck!r} not found")
         if model not in models:
             return Check("anki", "warn", f"{detail}, but note type {model!r} not found")
-    except Exception:
+    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
         return Check("anki", "warn", f"{detail}, but couldn't list decks/models")
     return Check("anki", "ok", f"{detail}; deck+model present")
 
@@ -648,7 +649,9 @@ def check_mpv_socket() -> Check:
     sock = load_config().get("mpv_socket")
     if sock:
         return Check("mpv-socket", "ok", f"mpv_socket set ({sock}) — bare `attach` connects here")
-    hint = "\\\\.\\pipe\\mpvsocket" if sys.platform == "win32" else "/tmp/mpv-socket"  # noqa: S108  # doc hint string, not a temp file we create
+    hint = (
+        "\\\\.\\pipe\\mpvsocket" if sys.platform == "win32" else "/tmp/mpv-socket"  # noqa: S108  # doc hint string, not a temp file we create
+    )
     return Check(
         "mpv-socket",
         "ok",

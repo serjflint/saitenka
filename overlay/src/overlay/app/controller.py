@@ -401,7 +401,7 @@ class Reader:
         self._tab_bgra, self._tab_h, self._tab_active = None, 0, -1
         self._unbind_tip_keys()
         if self._paused_by_tip:
-            self.ipc.command("set_property", "pause", False)
+            self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
             self._paused_by_tip = False
         self._sync_auto_translation()
 
@@ -531,9 +531,9 @@ class Reader:
         tooltip.on_click(self)
 
     def _panel_key(
-        self, tok, inflected, mined: bool = False, tabs: bool = True
+        self, tok, inflected, *, mined: bool = False, tabs: bool = True
     ) -> tooltip.PanelKey:
-        return tooltip.panel_key(self, tok, inflected, mined, tabs)
+        return tooltip.panel_key(self, tok, inflected, mined=mined, tabs=tabs)
 
     def _is_mined(self, tok) -> bool:
         return tooltip.is_mined(self, tok)
@@ -559,11 +559,12 @@ class Reader:
         tok,
         inflected=None,
         min_h: int | None = None,
+        *,
         finish: bool = False,
         mined: bool | None = None,
         tabs: bool | None = None,
     ):
-        return tooltip.panel_for(self, tok, inflected, min_h, finish, mined, tabs)
+        return tooltip.panel_for(self, tok, inflected, min_h, finish=finish, mined=mined, tabs=tabs)
 
     def _panel_cache_setdefault(self, key, st) -> TipPanel:
         return tooltip.panel_cache_setdefault(self, key, st)
@@ -1055,7 +1056,9 @@ class Reader:
         self.start_prefetch()
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
-        print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
+        print(  # noqa: T201  # user-facing banner line; log.info alone won't show — console handler is WARNING-level (logsetup.py)
+            f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)"
+        )
         log.info("runtime: %s, %d prefetch worker(s)", mode, len(self._prefetch_threads))
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
         self._stall_warned = False

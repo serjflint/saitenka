@@ -31,7 +31,7 @@ try:
     from saitenka_deinflect import inflection_chain
 except ImportError:  # pragma: no cover — exercised via the deinflect-absent path
 
-    def inflection_chain(surface: str, *targets: str) -> list[str]:
+    def inflection_chain(surface: str, *targets: str) -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)
         return []
 
 

@@ -49,7 +49,7 @@ def test_prune_keeps_only_the_most_recent(monkeypatch, tmp_path):
 
 def test_excepthook_writes_report_but_ignores_keyboard_interrupt(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(sys, "__excepthook__", lambda *a: None)  # swallow the re-raise to stderr
+    monkeypatch.setattr(sys, "__excepthook__", lambda *_a: None)  # swallow the re-raise to stderr
     # KeyboardInterrupt is not a crash → no report
     crashlog._excepthook(KeyboardInterrupt, KeyboardInterrupt(), None)
     assert not list(crashlog.crash_dir().glob("crash-*.log"))
@@ -84,10 +84,10 @@ def test_report_bundle_includes_crash_logs(monkeypatch, tmp_path):
         def to_json(self):
             return {"summary": {}, "checks": []}
 
-    monkeypatch.setattr(doc, "run_checks", lambda *a, **k: _Rep())
+    monkeypatch.setattr(doc, "run_checks", lambda *_a, **_k: _Rep())
     from overlay.app import report
 
-    monkeypatch.setattr(report, "_first_line", lambda *c: "mpv v0.40.0")
+    monkeypatch.setattr(report, "_first_line", lambda *_c: "mpv v0.40.0")
     members = report.collect(include_log=False)
     assert any(name.startswith("crashes/crash-") for name in members)
 

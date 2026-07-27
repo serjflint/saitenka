@@ -37,7 +37,7 @@ def _real_many_homograph_entry(width: int) -> tuple[Entry, str] | None:
         ds = DictionarySet.from_db(
             db, dict_titles, list(cfg.get("freq") or []), list(cfg.get("pitch") or [])
         )
-    except Exception:  # DB file missing / unreadable on this machine → integration skip
+    except Exception:  # noqa: BLE001  # DB file missing / unreadable on this machine → integration skip
         return None
     best: tuple[Entry, str] | None = None
     best_h = 0

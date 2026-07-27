@@ -438,7 +438,7 @@ class WindowedPanel:
         ``content = (mx - sx, my - sy + scroll)``."""
         from overlay.model import ScanBox
 
-        hit = self._hit_block(content_x, content_y)
+        hit = self._hit_block(content_y)
         if hit is None:
             return None
         g, top = hit
@@ -453,7 +453,7 @@ class WindowedPanel:
         :meth:`scan_hit`)."""
         from overlay.model import LinkBox
 
-        hit = self._hit_block(content_x, content_y)
+        hit = self._hit_block(content_y)
         if hit is None:
             return None
         g, top = hit
@@ -463,7 +463,7 @@ class WindowedPanel:
                 return LinkBox(lb.query, bx, by, lb.w, lb.h)
         return None
 
-    def _hit_block(self, content_x: int, content_y: int) -> tuple[BlockGeom, int] | None:
+    def _hit_block(self, content_y: int) -> tuple[BlockGeom, int] | None:
         """The retained block containing ``content_y`` and its panel-space top, or ``None`` (in a
         gap/margin, or over a not-yet-rendered block whose geometry is unknown)."""
         with self._lock:

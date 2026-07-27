@@ -98,6 +98,7 @@ def _revision_of(zf: zipfile.ZipFile) -> str:
     try:
         return str(json.loads(zf.read("index.json")).get("revision", "") or "")
     except Exception:
+        log.debug("index.json revision read failed", exc_info=True)
         return ""
 
 
@@ -390,7 +391,10 @@ class DictionaryDb:
             return
         did = row[0]
         for table in ("entries", "keys", "kanji", "term_meta", "tags"):
-            conn.execute(f"DELETE FROM {table} WHERE dict_id=?", (did,))  # noqa: S608  # table name is an internal constant; the value is parameterized with ?
+            conn.execute(
+                f"DELETE FROM {table} WHERE dict_id=?",  # noqa: S608  # table name is an internal constant; the value is parameterized with ?
+                (did,),
+            )
         conn.execute("DELETE FROM dictionaries WHERE id=?", (did,))
 
     def drop(self, title: str) -> bool:

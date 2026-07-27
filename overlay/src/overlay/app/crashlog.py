@@ -143,7 +143,7 @@ def _excepthook(exc_type, exc_value, exc_tb) -> None:
     tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     try:
         _notify(write_report("main-thread", tb))
-    except Exception:  # never let crash handling itself crash  # noqa: S110
+    except Exception:  # noqa: S110, BLE001  # crash-in-crash-handler must not propagate
         pass
     sys.__excepthook__(exc_type, exc_value, exc_tb)  # preserve the stderr traceback + exit code
 
@@ -155,7 +155,7 @@ def _thread_excepthook(args) -> None:
     name = getattr(args.thread, "name", None)
     try:
         _notify(write_report("thread", tb, thread=name))
-    except Exception:  # noqa: S110
+    except Exception:  # noqa: S110, BLE001  # crash-in-crash-handler must not propagate
         pass
 
 
@@ -168,9 +168,9 @@ def install() -> None:
     try:
         d = crash_dir()
         d.mkdir(parents=True, exist_ok=True)
-        _fault_fp = open(d / "faulthandler.log", "a", encoding="utf-8")  # noqa: SIM115 — process-lifetime
+        _fault_fp = (d / "faulthandler.log").open("a", encoding="utf-8")
         faulthandler.enable(file=_fault_fp)
-    except Exception:  # pragma: no cover — faulthandler unavailable / unwritable dir  # noqa: S110
+    except Exception:  # noqa: S110, BLE001  # pragma: no cover — unwritable dir; crash handling itself must not crash
         pass
     sys.excepthook = _excepthook
     threading.excepthook = _thread_excepthook

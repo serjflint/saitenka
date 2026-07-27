@@ -75,7 +75,7 @@ def fetch_jimaku(
 
         sub_path = maybe_resync(Path(video), sub_path, enabled=True)
     _add_and_select(ipc, sub_path)
-    ipc.command("set_property", "sub-visibility", False)
+    ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
     return True, f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
 
 
@@ -98,7 +98,7 @@ def ensure_jp_subs(
     a human-readable status line for the CLI to print."""
     if sub_file:
         _add_and_select(ipc, Path(sub_file).expanduser())
-        ipc.command("set_property", "sub-visibility", False)
+        ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
         return f"using sub file {Path(sub_file).name}"
 
     if jimaku and jimaku_force:
@@ -115,7 +115,7 @@ def ensure_jp_subs(
 
     sid = select_sub_track(ipc, slang)
     if sid is not None:
-        ipc.command("set_property", "sub-visibility", False)
+        ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
         return f"selected JP subtitle track sid={sid}"
 
     if not jimaku:

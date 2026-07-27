@@ -82,7 +82,7 @@ def _kanji_meta_entry(v: dict) -> list:
 
 
 def _tag_bank_entry(v: dict) -> list:
-    # tag_bank: [name, category, order, notes, score]
+    # tag_bank entry order: name, category, order, notes, score.
     return [
         v.get("name", ""),
         v.get("category") or "",
@@ -161,7 +161,7 @@ class _DictWriter:
 def read_header(src: str | Path) -> tuple[list[dict], int]:
     """Return ``(tables, total_rows)`` from the export header, validating the dexie format. Reads only
     the first ~kilobytes (``formatName`` and ``data.tables`` are at the front)."""
-    with open(src, "rb") as f:
+    with Path(src).open("rb") as f:
         try:
             fmt = next(ijson.items(f, "formatName"))
         except (StopIteration, ijson.JSONError) as e:
@@ -170,7 +170,7 @@ def read_header(src: str | Path) -> tuple[list[dict], int]:
             ) from e
     if fmt != "dexie":
         raise YomitanDbImportError(f"{src}: unsupported export format {fmt!r} (expected 'dexie')")
-    with open(src, "rb") as f:
+    with Path(src).open("rb") as f:
         try:
             tables = next(ijson.items(f, "data.tables"))
         except (StopIteration, ijson.JSONError) as e:
@@ -221,7 +221,7 @@ def import_database(
         return w
 
     try:
-        with open(src, "rb") as f:
+        with Path(src).open("rb") as f:
             ptr = 0
             for idx, row in enumerate(ijson.items(f, "data.data.item.rows.item")):
                 while ptr + 1 < len(bounds) and idx >= bounds[ptr + 1][0]:

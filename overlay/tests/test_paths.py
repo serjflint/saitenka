@@ -43,7 +43,7 @@ def test_pick_legacy_used_when_it_exists_and_native_does_not(monkeypatch, tmp_pa
     assert paths._pick("SAITENKA_UNSET_XYZ", native, legacy) == legacy
 
 
-def test_pick_native_used_for_fresh_install(monkeypatch, tmp_path):
+def test_pick_native_used_for_fresh_install(tmp_path):
     native = tmp_path / "native"  # neither exists → idiomatic native
     legacy = tmp_path / "legacy"
     assert paths._pick("SAITENKA_UNSET_XYZ", native, legacy) == native
@@ -105,7 +105,7 @@ def test_atomic_write_text_lf_and_creates_parent(tmp_path):
 def test_find_tool_falls_back_to_bin_dirs(monkeypatch, tmp_path):
     import overlay.mpvio.discover as disc
 
-    monkeypatch.setattr(disc.shutil, "which", lambda n: None)
+    monkeypatch.setattr(disc.shutil, "which", lambda _n: None)
     fake = tmp_path / ("ffmpeg.exe" if disc.os.name == "nt" else "ffmpeg")
     fake.write_text("#!/bin/sh\n")
     fake.chmod(0o755)

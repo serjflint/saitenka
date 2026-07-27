@@ -20,7 +20,7 @@ def test_atomic_write_is_crash_safe(fs, monkeypatch):
     target = Path("/data/overlay.toml")
     fs.create_file(str(target), contents="original\n")
 
-    def _boom(*a, **k):
+    def _boom(*_a, **_k):
         raise OSError("simulated crash before replace")
 
     monkeypatch.setattr(os, "replace", _boom)
@@ -31,7 +31,8 @@ def test_atomic_write_is_crash_safe(fs, monkeypatch):
     assert list(Path("/data").glob(".*.tmp")) == []  # temp cleaned up on failure
 
 
-def test_atomic_write_round_trips_in_memory(fs):
+@pytest.mark.usefixtures("fs")
+def test_atomic_write_round_trips_in_memory():
     p = Path("/x/y/z.txt")
     paths.atomic_write_text(p, "a\nb\n")
     assert p.read_bytes() == b"a\nb\n"

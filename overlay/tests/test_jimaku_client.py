@@ -33,7 +33,7 @@ class _FakeResp:
 
 
 def _fake_urlopen(payload, seen: list | None = None):
-    def _open(req, timeout=None, context=None):
+    def _open(req, **_kwargs):
         if seen is not None:
             seen.append(req.full_url)
         return _FakeResp(json.dumps(payload).encode())
@@ -42,7 +42,7 @@ def _fake_urlopen(payload, seen: list | None = None):
 
 
 def _raising_urlopen(exc: Exception):
-    def _open(req, timeout=None, context=None):
+    def _open(_req, **_kwargs):
         raise exc
 
     return _open
@@ -76,7 +76,7 @@ def test_get_builds_url_and_drops_none_params(monkeypatch):
 def test_get_sends_authorization_header(monkeypatch):
     captured: dict = {}
 
-    def _open(req, timeout=None, context=None):
+    def _open(req, **_kwargs):
         captured["auth"] = req.get_header("Authorization")
         return _FakeResp(b"{}")
 
@@ -92,7 +92,7 @@ def test_get_sends_authorization_header(monkeypatch):
 def test_get_client_error_raises_immediately_not_retried(monkeypatch, code):
     calls = {"n": 0}
 
-    def _open(req, timeout=None, context=None):
+    def _open(_req, **_kwargs):
         calls["n"] += 1
         raise _http_error(code, b'{"error":"nope"}')
 
@@ -114,7 +114,7 @@ def test_get_401_names_the_key_command(monkeypatch):
 def test_get_transient_http_is_retried_then_raises_retryable(monkeypatch, code):
     calls = {"n": 0}
 
-    def _open(req, timeout=None, context=None):
+    def _open(_req, **_kwargs):
         calls["n"] += 1
         raise _http_error(code)
 
@@ -187,7 +187,7 @@ def test_files_maps_to_jimakufile(monkeypatch):
 
 
 def test_download_writes_bytes_to_dest(monkeypatch, tmp_path):
-    _patch_urlopen(monkeypatch, lambda req, timeout=None, context=None: _FakeResp(b"SRTDATA"))
+    _patch_urlopen(monkeypatch, lambda _req, **_kwargs: _FakeResp(b"SRTDATA"))
     jf = jimaku.JimakuFile("show-01.srt", "https://j/file")
     dest = _client().download(jf, tmp_path)
     assert dest == tmp_path / "show-01.srt"
@@ -207,27 +207,29 @@ def test_fetch_picks_episode_match_srt_over_ass(monkeypatch, tmp_path):
     ]
     picked: dict = {}
     monkeypatch.setattr(
-        jimaku.JimakuClient, "search", lambda self, title: [{"id": 3, "name": title}]
+        jimaku.JimakuClient, "search", lambda _self, title: [{"id": 3, "name": title}]
     )
-    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda self, eid, ep: files)
+    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda _self, _eid, _ep: files)
     monkeypatch.setattr(
         jimaku.JimakuClient,
         "download",
-        lambda self, jf, d: picked.setdefault("jf", jf) or tmp_path / jf.name,
+        lambda _self, jf, _d: picked.setdefault("jf", jf) or tmp_path / jf.name,
     )
     _client().fetch("Show", 1, tmp_path)
     assert picked["jf"].url == "u-srt"
 
 
 def test_fetch_no_entries_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr(jimaku.JimakuClient, "search", lambda self, title: [])
+    monkeypatch.setattr(jimaku.JimakuClient, "search", lambda _self, _title: [])
     with pytest.raises(jimaku.JimakuError, match="no jimaku entry"):
         _client().fetch("Nope", 1, tmp_path)
 
 
 def test_fetch_no_files_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr(jimaku.JimakuClient, "search", lambda self, title: [{"id": 1, "name": "X"}])
-    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda self, eid, ep: [])
+    monkeypatch.setattr(
+        jimaku.JimakuClient, "search", lambda _self, _title: [{"id": 1, "name": "X"}]
+    )
+    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda _self, _eid, _ep: [])
     with pytest.raises(jimaku.JimakuError, match="no files"):
         _client().fetch("X", 5, tmp_path)
 
@@ -235,7 +237,7 @@ def test_fetch_no_files_raises(monkeypatch, tmp_path):
 # --- small helpers --------------------------------------------------------------------------------
 
 
-def test_subs_cache_key_survives_unstattable_video(monkeypatch, tmp_path):
+def test_subs_cache_key_survives_unstattable_video(tmp_path):
     """A video whose size can't be read (gone/permission) falls back to size 0, still a stable key."""
     key = jimaku.subs_cache_key(tmp_path / "missing.mkv", "Show", 1)
     assert key.endswith("-0.srt")

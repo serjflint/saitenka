@@ -154,7 +154,7 @@ def test_from_ankiconnect_uses_entry_and_furigana(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    def fake_urlopen(req, timeout=0):
+    def fake_urlopen(req, **_kwargs):
         import json as _json
 
         body = _json.loads(req.data)

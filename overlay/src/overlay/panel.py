@@ -104,7 +104,7 @@ _ICON_GAP = 10
 
 
 def header_add_rect(
-    width: int, theme: Theme = _DEFAULT_THEME, top_reserve: int = 0, speak_button: bool = True
+    width: int, theme: Theme = _DEFAULT_THEME, top_reserve: int = 0, *, speak_button: bool = True
 ) -> tuple[int, int, int, int]:
     """Panel-space (x, y, w, h) of the header ⊕ add-to-Anki button. Sits just left of the 🔊 speaker
     when it's shown, else takes the speaker's rightmost slot (so hiding TTS doesn't leave a gap).
@@ -169,6 +169,7 @@ def panel_rows(
     entry: Entry,
     width: int = 384,
     theme: Theme = _DEFAULT_THEME,
+    *,
     add_button: bool = False,
     mined: bool = False,
     speak_button: bool = True,
@@ -655,10 +656,11 @@ def render_panel(
     theme: Theme = _DEFAULT_THEME,
     max_height: int | None = None,
     scroll_y: int = 0,
+    *,
     add_button: bool = False,
     mined: bool = False,
 ) -> Image.Image:
-    rows = panel_rows(entry, width, theme, add_button, mined)
+    rows = panel_rows(entry, width, theme, add_button=add_button, mined=mined)
     rendered = [(r.x, r.render()[0]) for r in rows]
     gaps = [theme.gap if r.gap is None else r.gap for r in rows]
     canvas = compose_panel(rendered, width, theme, gaps)
