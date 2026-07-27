@@ -31,6 +31,7 @@ from overlay.panel import (
     header_add_rect,
     header_speaker_rect,
     panel_rows,
+    render_body_block,
     render_tab_row,
     tab_strip_height,
 )
@@ -484,7 +485,16 @@ def _build_panel(
 ) -> TipPanel:
     if otel_metrics.panel_cache_misses is not None:
         otel_metrics.panel_cache_misses.add(1)
-    with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render"):
+    # kind: nested popups build tabs=False; during_scroll flags a render triggered by the
+    # scan-hit-test recomputing which cell is under a STATIONARY cursor after content moved under
+    # it — i.e. a nested popup opening (or switching word) as a side effect of scrolling the base
+    # tooltip, in the same poll tick as a scroll_frame, not from the user moving the mouse.
+    with otel_metrics.instrumented(
+        otel_metrics.render_duration_ms,
+        "render",
+        kind="base" if tabs else "nested",
+        during_scroll="1" if reader._scrolled_this_tick else "0",
+    ):
         entry = entry_for_tok(reader, tok, inflected)
         # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it clears
         # the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for this
@@ -520,6 +530,9 @@ def _build_panel(
                 ),
                 reader.tip_width,
                 top_reserve=reserve,
+                # Injected, not imported by banded.py itself — overlay.body_block depends on
+                # render.document, so a module-level import inside render/ would cycle.
+                render_block_fn=render_body_block,
             )
         return st
 

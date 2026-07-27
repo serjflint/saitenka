@@ -9,25 +9,33 @@ image the controller composites over mpv video in a single surface.
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import Executor, Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
+from overlay.body_block import BodyRenderArgs, SCNode, render_body_block
 from overlay.draw.chip import ChipStyle
 from overlay.draw.icons import check, dot, plus, speaker
 from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme
-from overlay.render.document import GUTTER_PX, INDENT_PX, render_document
+from overlay.parallel import shared_executor
+from overlay.render.document import GUTTER_PX, INDENT_PX
 from overlay.render.flow import ChipBox, ImgBox, render_flow
 from overlay.render.layout import Block as FlowBlock
-from overlay.sc.walk import inline_flow, walk
+from overlay.sc.walk import inline_flow
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 # Theme + _DEFAULT_THEME moved to overlay.model (value types, no render deps) to break the
 # render↔panel cycle; re-exported here so ``from overlay.panel import Theme`` keeps working.
+# BodyRenderArgs/SCNode/render_body_block live in the TOP-LEVEL overlay.body_block for the same
+# reason (render/banded.py needs render_body_block; sc.walk already imports from render.flow, so a
+# copy inside the render/ package would cycle); re-exported here so ``from overlay.panel import
+# BodyRenderArgs`` keeps working.
 
 
 @dataclass
@@ -35,10 +43,6 @@ class Freq:
     name: str
     value: str
     color: RGBA
-
-
-# A structured-content node (Yomitan SC): plain text, a tag dict, or a list of nodes.
-type SCNode = str | dict | list
 
 
 @dataclass
@@ -156,6 +160,9 @@ class Row:
     render_capped: (
         Callable[[int], tuple[Image.Image, list[ScanBox], list[LinkBox], bool]] | None
     ) = None
+    # Set only on def-body rows — lets a process-pool worker render this block from plain data
+    # instead of the (unpicklable) closures above. See BodyRenderArgs/render_body_block.
+    body_args: BodyRenderArgs | None = None
 
 
 def panel_rows(
@@ -304,49 +311,29 @@ def panel_rows(
         # walked blocks with the same 3px inter-block gap, so the composed full panel is
         # byte-identical.
         body_w = content_w - theme.body_indent
+        body_args = BodyRenderArgs(
+            content=d.content,
+            body_style=body_style,
+            body_w=body_w,
+            gap_px=theme.px(3),
+            indent_px=theme.px(INDENT_PX),
+            gutter_px=theme.px(GUTTER_PX),
+        )
 
-        def _def_body(d, body_w):  # explicit params — no loop-variable closure (B023)
+        def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)
             def thunk():
-                scan: list[ScanBox] = []  # per-char hitboxes → nested scanning
-                links: list[LinkBox] = []  # per-link hitboxes → clickable cross-refs
-                img = render_document(
-                    walk(d.content, body_style),
-                    width=body_w,
-                    base=body_style,
-                    padding=0,
-                    gap=theme.px(3),
-                    indent_px=theme.px(INDENT_PX),
-                    gutter_px=theme.px(GUTTER_PX),
-                    background=(0, 0, 0, 0),
-                    scan_out=scan,
-                    link_out=links,
-                )
+                img, scan, links, _complete = render_body_block(args)
                 return img, scan, links
 
             def capped(max_h: int):
-                scan: list[ScanBox] = []
-                links: list[LinkBox] = []
-                clipped: list = []
-                img = render_document(
-                    walk(d.content, body_style),
-                    width=body_w,
-                    base=body_style,
-                    padding=0,
-                    gap=theme.px(3),
-                    indent_px=theme.px(INDENT_PX),
-                    gutter_px=theme.px(GUTTER_PX),
-                    background=(0, 0, 0, 0),
-                    scan_out=scan,
-                    link_out=links,
-                    max_height=max_h,
-                    clipped_out=clipped,
-                )
-                return img, scan, links, not clipped
+                return render_body_block(args, max_h)
 
             return thunk, capped
 
-        body_thunk, body_capped = _def_body(d, body_w)
-        rows.append(Row(m + theme.body_indent, body_thunk, render_capped=body_capped))
+        body_thunk, body_capped = _def_body(body_args)
+        rows.append(
+            Row(m + theme.body_indent, body_thunk, render_capped=body_capped, body_args=body_args)
+        )
 
     return rows
 
@@ -487,6 +474,10 @@ class LazyPanel:
         self.scan_boxes: list[ScanBox] = []  # panel-space hitboxes for the rendered rows
         self.link_boxes: list[LinkBox] = []  # panel-space clickable link regions
         self._offsets_frozen: list[tuple[str, int]] | None = None  # cached at release_rows()
+        # render_to() is called from both the main-thread hover path and a prefetch worker on the
+        # same panel key (popups.py's "single-writer per key" assumption isn't airtight — a re-hover
+        # can race a still-running finish()); guards _pending/_rendered/_partial against concurrent pop.
+        self._lock = threading.Lock()
 
     @property
     def complete(self) -> bool:
@@ -556,11 +547,15 @@ class LazyPanel:
 
     def render_to(self, min_height: int) -> Image.Image:
         """Render rows until the composed panel is at least ``min_height`` px tall (or all rows are
-        done), then compose. Idempotent enough for concurrent callers — each renders what's left.
+        done), then compose. Safe for concurrent callers (lock-serialized) — each renders what's left.
 
         If the next row supports bounded raster (a def-body block) and the remaining budget is
         smaller than the row, only the covering strip is rasterised now and the row stays pending
         — cold first paint is O(viewport) even when the first def body is one enormous block."""
+        with self._lock:
+            return self._render_to_locked(min_height)
+
+    def _render_to_locked(self, min_height: int) -> Image.Image:
         self._partial = None
         while self._pending and self._height() < min_height:
             row = self._pending[0]
@@ -569,7 +564,7 @@ class LazyPanel:
                 remaining = min_height - self._height()
                 img, scan, links, complete = row.render_capped(remaining)
                 if not complete:
-                    self._partial = (row.x, img, scan, links, gap)  # head strip; row stays pending
+                    self._partial = (row.x, img, scan, links, gap)  # head strip; stays pending
                     break
                 self._pending.pop(0)
                 self._rendered.append((row.x, img, scan, links, gap))
@@ -581,8 +576,77 @@ class LazyPanel:
             self._row_sections.append(row.section)
         return self._compose()
 
-    def finish(self) -> Image.Image:
-        return self.render_to(1 << 30)
+    def finish(self, workers: int = 4) -> Image.Image:
+        """Render every remaining row and compose the complete panel. Gated on the count of
+        *poolable* rows (``body_args`` set — the FreeType-bound def bodies, the only expensive
+        work here), not raw row count: a typical 1-2-dict panel's header/chip rows are microseconds
+        each and not worth dispatch overhead. ``>= 2`` poolable rows fans out to the process-wide
+        :func:`~overlay.parallel.shared_executor` (see :meth:`_finish_parallel`) instead of
+        rendering serially on the calling thread — the same pool
+        :meth:`~overlay.render.banded.WindowedPanel.render_ahead` already uses for scroll-ahead
+        blocks. This is what ``app/prefetch.py``'s engaged (``full=True``) worker jobs land in: a
+        several-second multi-dict ``finish()`` no longer burns entirely on one prefetch thread."""
+        with self._lock:
+            pending = list(self._pending)
+            poolable = sum(1 for row in pending if row.body_args is not None)
+            if poolable <= 1:
+                return self._render_to_locked(1 << 30)
+            return self._finish_parallel(pending, workers)
+
+    def _finish_parallel(self, pending: list[Row], workers: int) -> Image.Image:
+        """Render ``pending`` (>1 poolable rows, all currently pending — called with ``self._lock``
+        held, so no other renderer can race ``_pending``/``_rendered``) concurrently: threads on a
+        free-threaded build (row thunks are closures, fine for threads, zero copy), a process pool on
+        a GIL build for the picklable ``body_args`` rows only — cheap header/freq/reading rows aren't
+        FreeType-bound and aren't picklable, so they still render inline. Mirrors
+        ``WindowedPanel._render_ahead_parallel``'s dispatch."""
+        self._partial = None
+        ex = shared_executor(workers)
+        results = (
+            self._finish_threaded(ex, pending)
+            if isinstance(ex, ThreadPoolExecutor)
+            else self._finish_pooled(ex, pending)
+        )
+        for row, result in zip(pending, results, strict=True):
+            assert result is not None
+            img, scan, links = result
+            gap = row.gap if row.gap is not None else self.theme.gap
+            self._rendered.append((row.x, img, scan, links, gap))
+            self._row_sections.append(row.section)
+        self._pending = []
+        return self._compose()
+
+    @staticmethod
+    def _finish_threaded(
+        ex: ThreadPoolExecutor, pending: list[Row]
+    ) -> list[tuple[Image.Image, list[ScanBox], list[LinkBox]] | None]:
+        results: list[tuple[Image.Image, list[ScanBox], list[LinkBox]] | None] = [None] * len(
+            pending
+        )
+        thread_futures: dict[Future[tuple[Image.Image, list[ScanBox], list[LinkBox]]], int] = {
+            ex.submit(row.render): i for i, row in enumerate(pending)
+        }
+        for fut in as_completed(thread_futures):
+            results[thread_futures[fut]] = fut.result()
+        return results
+
+    @staticmethod
+    def _finish_pooled(
+        ex: Executor, pending: list[Row]
+    ) -> list[tuple[Image.Image, list[ScanBox], list[LinkBox]] | None]:
+        results: list[tuple[Image.Image, list[ScanBox], list[LinkBox]] | None] = [None] * len(
+            pending
+        )
+        pool_futures: dict[Future[tuple[Image.Image, list[ScanBox], list[LinkBox], bool]], int] = {}
+        for i, row in enumerate(pending):
+            if row.body_args is not None:
+                pool_futures[ex.submit(render_body_block, row.body_args)] = i
+            else:
+                results[i] = row.render()
+        for pfut in as_completed(pool_futures):
+            img, scan, links, _complete = pfut.result()
+            results[pool_futures[pfut]] = (img, scan, links)
+        return results
 
 
 def render_panel(

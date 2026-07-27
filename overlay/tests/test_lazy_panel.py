@@ -103,16 +103,19 @@ def _huge_single_block_entry(n_senses: int = 200) -> Entry:
 def test_panel_rows_defers_walk_to_render(monkeypatch):
     # Stage 6: building rows must not walk ANY def content (the SC-walk of a huge 取る-class def
     # costs 200+ ms — measured), and the head must walk only the defs the viewport shows.
+    # walk() is called from overlay.body_block.render_body_block (extracted so render/banded.py's
+    # process-pool path can call it without panel.py's closures), not from overlay.panel directly.
+    import overlay.body_block as BB
     import overlay.panel as P
 
     calls = [0]
-    orig = P.walk
+    orig = BB.walk
 
     def counting(node, base=None):
         calls[0] += 1
         return orig(node, base)
 
-    monkeypatch.setattr(P, "walk", counting)
+    monkeypatch.setattr(BB, "walk", counting)
     rows = P.panel_rows(_tall_entry(6), WIDTH)
     assert calls[0] == 0, "panel_rows walked def content at build time"
     LazyPanel(rows, WIDTH).render_to(300)
@@ -151,11 +154,22 @@ def test_partial_head_scan_boxes_stay_inside_the_strip():
         assert sb.y >= 0 and sb.y + sb.h <= head.height
 
 
-def test_thunks_run_at_most_once_each():
+def test_thunks_run_at_most_once_each(monkeypatch):
     # Rows render through TWO seams since Stage 6: the full thunk (``render``) and the bounded
     # strip (``render_capped`` — full when it doesn't clip). Contract: every row is FULLY rendered
     # exactly once across head + finish; at most one bounded partial strip is rendered extra (the
     # boundary row of the head, re-rendered fully by finish).
+    #
+    # Pinned to the free-threaded (thread-pool) shared_executor branch: a GIL-build finish() calls
+    # ``render_body_block(row.body_args)`` directly for def-body rows (the whole point of the
+    # picklable-args split — a process pool can't cross a closure) instead of through ``row.render``,
+    # which this test's per-row monkeypatch can't see. See
+    # test_windowed_prefetch.test_parallel_and_sequential_render_ahead_agree for the same pin.
+    import overlay.parallel as PA
+
+    monkeypatch.setattr(PA, "is_free_threaded", lambda: True)
+    PA.shutdown_shared_executor()
+
     full, partial = [0], [0]
 
     def _count_render(_orig):
@@ -179,12 +193,15 @@ def test_thunks_run_at_most_once_each():
         if r.render_capped is not None:
             r.render_capped = _count_capped(r.render_capped)
     lp = LazyPanel(rows, WIDTH)
-    lp.render_to(300)
-    head_full = full[0]
-    assert head_full < len(rows)  # a cold hover does NOT render every row
-    lp.finish()
-    assert full[0] == len(rows)  # each row fully rendered exactly once overall
-    assert partial[0] <= 1  # ≤ one bounded strip (the head's boundary row)
+    try:
+        lp.render_to(300)
+        head_full = full[0]
+        assert head_full < len(rows)  # a cold hover does NOT render every row
+        lp.finish()
+        assert full[0] == len(rows)  # each row fully rendered exactly once overall
+        assert partial[0] <= 1  # ≤ one bounded strip (the head's boundary row)
+    finally:
+        PA.shutdown_shared_executor()
 
 
 def test_finish_is_pixel_identical_to_render_panel():
@@ -196,6 +213,47 @@ def test_finish_is_pixel_identical_to_render_panel():
     assert streamed.size == oneshot.size
     diff = np.abs(np.asarray(streamed, np.int16) - np.asarray(oneshot, np.int16))
     assert diff.max() == 0  # streaming in two passes composes byte-for-byte the same panel
+
+
+def test_finish_dispatches_to_shared_executor_on_both_builds(monkeypatch):
+    # LazyPanel.finish() fans multi-row panels out to overlay.parallel.shared_executor — threads on
+    # a free-threaded build, a process pool (def-body rows only) on a GIL build. Same dispatch
+    # WindowedPanel.render_ahead already uses; simulate both builds like
+    # test_windowed_prefetch.test_parallel_and_sequential_render_ahead_agree.
+    import overlay.parallel as PA
+
+    e = _tall_entry(6)
+    oneshot = render_panel(e, width=WIDTH)
+    try:
+        for ft in (True, False):
+            PA.shutdown_shared_executor()
+            monkeypatch.setattr(PA, "is_free_threaded", lambda ft=ft: ft)
+            lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
+            full = lp.finish()
+            assert lp.complete
+            assert full.size == oneshot.size
+            diff = np.abs(np.asarray(full, np.int16) - np.asarray(oneshot, np.int16))
+            assert diff.max() == 0
+    finally:
+        PA.shutdown_shared_executor()
+
+
+def test_finish_with_a_single_pending_row_skips_the_pool(monkeypatch):
+    # A defless entry's rows are just the header (panel_rows: 1 + 2*n_defs) — one pending row is
+    # not worth dispatch overhead, so finish() must take the plain serial path and never touch
+    # shared_executor.
+    import overlay.panel as P
+
+    calls = []
+
+    def _tracked_shared_executor(*_a, **_k):
+        calls.append(1)
+
+    monkeypatch.setattr(P, "shared_executor", _tracked_shared_executor)
+    e = Entry(headword=["本"], defs=[])
+    lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
+    lp.finish()
+    assert not calls
 
 
 def test_add_button_draws_only_inside_header_add_rect():
