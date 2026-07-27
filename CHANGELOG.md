@@ -7,6 +7,54 @@ logs.
 
 ## [Unreleased]
 
+### Performance
+
+- **Startup: the frequency dictionary loads ~3.6× less.** The banded coloring scorer can't distinguish
+  ranks past its `top_x` cap (10k — `FreqDict.band` returns `None` beyond it), so `FreqDict.from_db`
+  now filters `rank <= top_x` instead of loading the whole table. On JPDBv2 (279k rows, ~10k
+  band-eligible) `load_freq_dict` drops 306→84 ms, behaviour-identical for every rank that can color.
+- **Startup: the Anki known-word set is cached in the consolidated SQLite DB.** It's served from the
+  cache (~4 ms) and reconciled against Anki in the background by note **mod-time diff** — only changed
+  notes are re-fetched — so the ~190 ms IO-bound AnkiConnect `notesInfo` load leaves the critical path
+  after the first launch. External edits/adds/deletes converge on the next refresh; a config-signature
+  guard forces a full rebuild if the configured "known" fields change.
+- **Startup: dependency loading is hoisted to overlap mpv's launch.** `begin_deps_build` starts
+  `build_reader_deps` before mpv launches (a `Future` consumed by `load_deps_async`), so the ~85 ms
+  build hides in mpv's launch/connect dead time. Time-to-video is unaffected — mpv is a separate
+  process and its launch is never blocked on the build (run mode).
+
+### Added
+
+- **Telemetry spans/counters** (`otel_metrics.py`): a `cpu_ms` attribute on **every** span (a large
+  `wall − cpu_ms` gap means the thread was stalled on the GIL/a lock/IO, not doing work);
+  `tooltip_show` (labeled `kind=cold|warm`), `prefetch_decode`, `finish_tail` (`executor=thread|process`),
+  `anki_mine`, and a `panel_cache.evictions` counter; the previously-registered-but-unwired
+  `cold_first_paint_overshoot` counter now actually fires.
+- **`[perf].prefetch_workers` is a real config knob.** `0` (default) auto-sizes to a flat 4 on a
+  free-threaded build / 2 on a GIL build (replacing an opaque `min(8, cores-2)` formula); a positive
+  value pins it on both builds. It's mainly a memory knob — each worker is persistent and holds its own
+  SQLite page cache + FreeType face cache.
+
+### Changed
+
+- **Telemetry traces rotate per session.** Each run writes `trace-<UTC>.json` and the newest 10 are
+  kept; `report`, `doctor`, and `telemetry status` read the newest. Kept one-recording-per-file (a
+  Chrome-trace document has a single clock/thread-id space, so appending sessions would overlay them);
+  UTC timestamps so lexical order stays chronological across DST.
+- **Telemetry capture is set up per reader session** (`run`/`attach`), no longer globally for every CLI
+  command.
+
+### Fixed
+
+- **`report`/`doctor` no longer clobber the session's telemetry trace.** Being global, telemetry setup
+  ran for these one-shot commands too, standing up the trace writer against the just-written
+  `trace.json` and truncating it on the writer's first counter sample.
+- **The `N prefetch worker(s)` startup banner shows the real count.** In run/attach mode deps (and thus
+  workers) load asynchronously, so the banner printed at `run()` start always saw `0`; it's now emitted
+  once, after prefetch actually starts.
+- Removed the dead `Reader._show_tooltip_impl` delegate and fixed a stale `_panel_key` call that broke
+  `examples/bench_responsiveness.py --timeline`.
+
 ## [0.7.0] - 2026-07-27
 
 ### Added
