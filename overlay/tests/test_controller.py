@@ -212,6 +212,80 @@ def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
         r._handle(_msg_for(ipc, "Alt+RIGHT"))
         snap = otel_metrics.snapshot()
         assert snap["saitenka.sub_seek.duration_ms"]["count"] == 1
+        # cue_redraw fires from set_subtitle nested inside the sub_seek span above (the initial
+        # "いち" render happened before telemetry was registered, so isn't counted here).
+        assert snap["saitenka.cue_redraw.duration_ms"]["count"] == 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
+    """The instant-nav keypress → drawn latency must be readable as ONE trace: sub_seek is the
+    parent, cue_redraw (set_subtitle) nests inside it as a child sharing the same trace_id — that
+    parent/child link is what makes seek-to-paint latency reconstructable from a trace.json export,
+    instead of two spans with unrelated random trace_ids."""
+    import opentelemetry.trace as trace_api
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.trace import set_tracer_provider
+    from opentelemetry.util._once import Once
+
+    from overlay.app.otel_export import CTFSpanProcessor
+    from overlay.app.telemetry import span_gate
+
+    r, ipc = _reader_with_index(monkeypatch)
+    ipc.props["sub-text"] = "いち"
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+
+    trace_path = tmp_path / "trace.json"
+    processor = CTFSpanProcessor(trace_path, span_gate, start_thread=False)
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    # The global TracerProvider is a real OTel "set once per process" latch (see
+    # test_telemetry.py's _reset_providers docstring) — an earlier test in the same whole-suite run
+    # (poe test-ft / poe cov, both single-process) may have already latched a DIFFERENT provider, in
+    # which case set_tracer_provider below would silently no-op and production code (which reads the
+    # global via trace.get_tracer(), not a locally-held reference) would trace into that other
+    # provider instead of this test's own trace_path. Reset the private latch so this test is
+    # order-independent; monkeypatch restores it after the test.
+    monkeypatch.setattr(trace_api, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(trace_api, "_TRACER_PROVIDER_SET_ONCE", Once())
+    set_tracer_provider(provider)
+    span_gate.set(True)
+    try:
+        r._handle(_msg_for(ipc, "Alt+RIGHT"))
+        processor.force_flush()
+    finally:
+        span_gate.set(False)
+        provider.shutdown()
+
+    import json
+
+    events = json.loads(trace_path.read_text())["traceEvents"]
+    spans = {e["name"]: e for e in events if e.get("ph") == "X"}
+    assert "sub_seek" in spans
+    assert "cue_redraw" in spans
+    assert spans["sub_seek"]["args"]["trace_id"] == spans["cue_redraw"]["args"]["trace_id"]
+
+
+def test_reconcile_records_otel_sub_text_reconcile_metric(monkeypatch):
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay import otel_metrics
+
+    r, _ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        r._reconcile_sub_text("に")  # a genuine mpv-driven change, not a no-op/settle-guard swallow
+        snap = otel_metrics.snapshot()
+        assert snap["saitenka.sub_text_reconcile.duration_ms"]["count"] == 1
+        assert snap["saitenka.cue_redraw.duration_ms"]["count"] == 1
     finally:
         otel_metrics.unregister()
         provider.shutdown()
@@ -251,6 +325,24 @@ def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     r._sub_settle_until = 0.0  # window already expired
     r._reconcile_sub_text("")
     assert r.sub_text == ""
+
+
+def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
+    """Found via a real-mpv smoke test: right after a nav render, mpv's own native sub-seek (fired
+    behind it to catch the video up) can transiently re-report the cue we just navigated AWAY from —
+    not just an empty blip. Naively adopting it would revert the render AND silently reset _nav_idx
+    (any set_subtitle call does), breaking next/next/next chaining even though the render was already
+    correct at the real target."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")  # cue 1
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.sub_text == "に" and r._nav_idx == 1  # rendered target, chaining hint set
+    r._reconcile_sub_text("いち")  # mpv transiently re-reports the pre-nav cue mid-seek
+    assert r.sub_text == "に"  # swallowed — no revert flash
+    assert r._nav_idx == 1  # and, unlike a real set_subtitle call, chaining survives
+    r._reconcile_sub_text("に")  # mpv settles on the matching (already-rendered) cue
+    assert r.sub_text == "に" and r._nav_idx == 1  # a no-op match — still doesn't reset the hint
 
 
 def test_reader_has_subtitle_state_before_any_cue():

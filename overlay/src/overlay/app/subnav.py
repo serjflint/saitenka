@@ -45,6 +45,9 @@ def sub_nav(reader: Reader, delta: int) -> bool:
     idx = reader._sub_index
     if idx is None or len(idx) == 0:
         return False
+    # Span covers locate/target AND the render it triggers below — set_subtitle's own "cue_redraw"
+    # span nests inside this one, so the span's total duration IS the keypress → drawn latency for
+    # the instant-nav path.
     with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek"):
         sub_start = _get_float(reader, "sub-start")
         time_pos = _get_float(reader, "time-pos")
@@ -63,23 +66,42 @@ def sub_nav(reader: Reader, delta: int) -> bool:
         if not inside and time_pos is not None:
             inside = c.start <= time_pos < c.end
         tgt = idx.target(current, delta, inside=inside)
-    if tgt < 0:
-        return False  # out of range / ambiguous → let mpv's sub-seek handle it
-    reader.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
-    reader._nav_idx = tgt
-    # Guard the reconcile: mpv's sub-text briefly reads empty mid-seek; ignoring that avoids a blank
-    # flicker before it settles on the real (matching) cue text. ~1s covers a slow seek.
-    reader._sub_settle_until = time.monotonic() + 1.0
+        if tgt < 0:
+            return False  # out of range / ambiguous → let mpv's sub-seek handle it
+        # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
+        # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
+        # before landing on the real target; reconcile below must not mistake that for a correction.
+        reader._nav_prev_text = reader.sub_text
+        reader.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
+        reader._nav_idx = tgt
+        # Guard the reconcile: mpv's sub-text briefly reads empty (or the pre-nav cue) mid-seek;
+        # ignoring that avoids reverting the render before it settles. ~1s covers a slow seek.
+        reader._sub_settle_until = time.monotonic() + 1.0
     return True
 
 
 def reconcile_sub_text(reader: Reader, text: str) -> None:
     """Poll-loop hook: adopt mpv's current ``sub-text`` when it changed. mpv is the source of truth
-    (it corrects the line if our instant-nav index guessed wrong), EXCEPT for the empty blip mpv
-    emits mid-seek right after a manual sub-nav — swallow that within the settle window so the
-    overlay doesn't flash blank before the real cue text lands."""
+    (it corrects the line if our instant-nav index guessed wrong), EXCEPT for two transient values
+    mpv emits mid-seek right after a manual sub-nav: an empty blip, and mpv re-reporting the PRE-nav
+    cue's text before it catches up to the real target (confirmed live: a real ``sub-seek`` fired
+    from inside the target cue's own span briefly re-reports the cue we just navigated AWAY from).
+    Naively adopting either would flash the wrong text and — worse — silently reset ``_nav_idx``
+    (any ``set_subtitle`` call does), breaking next/next/next chaining even though the render was
+    already correct. Swallow both within the settle window."""
     if text == reader.sub_text:
         return
-    if text.strip() or time.monotonic() >= reader._sub_settle_until:
+    within_settle = time.monotonic() < reader._sub_settle_until
+    if within_settle and (not text.strip() or text == reader._nav_prev_text):
+        return
+    # Only spans an actual cue change (guarded above), not every poll tick — sibling to sub_nav's
+    # "sub_seek" span, but for changes mpv itself drove (native sub-seek key bound in the lua
+    # script, or a normal cue advance during playback) rather than our own instant-nav.
+    # set_subtitle's "cue_redraw" span nests inside, so this span's duration is the best proxy this
+    # process has for "mpv-observed sub-text change → overlay drawn" — it can't see when the seek
+    # command itself was issued (that's mpv-internal / lua-side).
+    with otel_metrics.instrumented(
+        otel_metrics.sub_text_reconcile_duration_ms, "sub_text_reconcile"
+    ):
         reader.set_subtitle(text)
-        reader._sub_settle_until = 0.0
+    reader._sub_settle_until = 0.0

@@ -181,6 +181,17 @@ class Reader:
         self.prefetch_lookahead = (
             o.perf.prefetch_lookahead
         )  # cues to warm ahead of the current line
+        # EXPERIMENTAL head-prefetch (prototype, off by default — see config.py PerfOptions):
+        # speculatively renders the SAME viewport-capped head a real hover would, via the SAME
+        # panel_for()/panel_cache path, for a SELECTIVE subset of upcoming words (n+1/forgotten/
+        # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
+        # is a plain panel_cache hit with no new key-matching logic to get wrong.
+        self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
+        self._head_prefetch_q: queue.PriorityQueue = queue.PriorityQueue(
+            maxsize=o.perf.head_prefetch_queue_max
+        )
+        self._head_seq = 0  # tie-breaker so priority-queue items never compare HeadPrefetchItems
+        self._head_built = 0  # a speculative head-render job actually ran to completion
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -192,6 +203,8 @@ class Reader:
         self._prefetch_key: tuple[str, bool] | None = None
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
+        self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
+        # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
         self._stop = threading.Event()
         self._prefetch_threads: list[threading.Thread] = []
         # translation reveal: manual toggle (`t`), or auto-reveal on hover when opted in.
@@ -298,6 +311,7 @@ class Reader:
         self._sub_index: SubIndex | None = None
         self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
         self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
+        self._nav_prev_text = ""  # the cue text showing right before a nav render (see reconcile)
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
@@ -395,16 +409,26 @@ class Reader:
         # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
         # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
         log.debug("sub-text change: %d chars, paused=%s", len(text.strip()), self._prop("pause"))
+        # Seek-to-paint chain: this span covers everything below (teardown/tokenize/score/render/
+        # upload) for one cue. Nests as a child of sub_nav's "sub_seek" span for the instant-nav
+        # (Alt+←/→/↓) path, or of "sub_text_reconcile" for an mpv-driven change (native sub-seek /
+        # normal cue advance) — either way, its duration IS the "seek command → drawn" latency.
+        with otel_metrics.instrumented(otel_metrics.cue_redraw_duration_ms, "cue_redraw"):
+            self._set_subtitle_inner(text)
+
+    def _set_subtitle_inner(self, text: str) -> None:
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
         # early-return (index == self.hover) would skip teardown if hover is already -1 but
         # tip state is present (e.g. _show_tooltip was called directly without set_hover).
-        self._teardown_tip()
+        with otel_metrics.traced("teardown_tip"):
+            self._teardown_tip()
         self.hover = -1
         self.sub_text = text
         self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
-        self._hide_preview()  # a new cue → dismiss the last card preview
+        with otel_metrics.traced("hide_preview"):
+            self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
             self.lines, self.tokens, self.boxes = [], [], []
             self.ov.hide(SUB_ID)
@@ -412,20 +436,23 @@ class Reader:
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = text.replace("\\N", "\n").replace("\r", "")
-        self.lines = [tokenize(ln) for ln in norm.split("\n") if ln.strip()]
+        with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
+            self.lines = [tokenize(ln) for ln in norm.split("\n") if ln.strip()]
         self.tokens = [t for line in self.lines for t in line]
         # score the whole cue (N+1 splits by sentence punctuation across lines); warms lookup cache
-        self.styles = self.scorer.score_line(self.tokens) if self.scorer else None
+        with otel_metrics.traced("score_line"):
+            self.styles = self.scorer.score_line(self.tokens) if self.scorer else None
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
-        sr = render_subtitle(
-            self.lines,
-            self.osd[0],
-            size=self.sub_size,
-            hover=self.hover if self.hover >= 0 else None,
-            styles=self.styles,
-        )
+        with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
+            sr = render_subtitle(
+                self.lines,
+                self.osd[0],
+                size=self.sub_size,
+                hover=self.hover if self.hover >= 0 else None,
+                styles=self.styles,
+            )
         self.boxes = sr.boxes
         ox = (self.osd[0] - sr.image.width) // 2
         oy = self.osd[1] - sr.image.height - self.bottom_margin
@@ -643,7 +670,17 @@ class Reader:
         nested_popup.refresh_nested_full(self)
 
     def _scroll_tip(self, delta: int) -> None:
-        tooltip.scroll_tip(self, delta)
+        # event → redraw-finished latency for one scroll tick: nests the downstream "render"
+        # (banded block-cache miss) and "upload" (OSD blit) spans, so a scroll-frame trace_id
+        # groups the whole chain instead of leaving "upload" as an orphaned, unrelated span.
+        self._scrolled_this_tick = True
+        with otel_metrics.instrumented_jank(
+            otel_metrics.scroll_frame_duration_ms,
+            otel_metrics.scroll_frame_jank,
+            otel_metrics.SCROLL_JANK_THRESHOLD_MS,
+            "scroll_frame",
+        ):
+            tooltip.scroll_tip(self, delta)
 
     def _scroll_nested(self, delta: int) -> None:
         nested_popup.scroll_nested(self, delta)
@@ -881,6 +918,7 @@ class Reader:
     def poll_once(self) -> bool:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
+            self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
             self._flush_paused_nudge()
             ops_before = self.ov.ops
@@ -1038,6 +1076,7 @@ class Reader:
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
         print(f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)")
+        log.info("runtime: %s, %d prefetch worker(s)", mode, len(self._prefetch_threads))
         self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
         self._stall_warned = False
         while self.poll_once():

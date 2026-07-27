@@ -33,6 +33,17 @@ hit_test_duration_ms: Histogram | None = None
 dict_sql_duration_ms: Histogram | None = None
 ipc_roundtrip_ms: Histogram | None = None
 sub_seek_duration_ms: Histogram | None = None
+# Seek-to-paint chain: cue_redraw wraps set_subtitle end-to-end (tokenize/score/render/upload);
+# subtitle_render isolates the PIL render_subtitle() call inside it; sub_text_reconcile wraps the
+# poll-loop's mpv-driven redraw (native sub-seek / normal cue advance), sibling to sub_nav's own
+# sub_seek span for the instant-nav (Alt+←/→/↓) path.
+cue_redraw_duration_ms: Histogram | None = None
+subtitle_render_duration_ms: Histogram | None = None
+sub_text_reconcile_duration_ms: Histogram | None = None
+# Scroll-input → redraw-finished chain: wraps controller._scroll_tip end-to-end (banded/blit
+# re-render + OSD upload) for one wheel tick or TIP_UP/DOWN keypress — its duration IS the
+# scroll-to-photon latency a user would feel as stutter.
+scroll_frame_duration_ms: Histogram | None = None
 
 # Counters.
 panel_cache_hits: Counter | None = None
@@ -45,6 +56,11 @@ osd_paused_draw: Counter | None = (
     None  # overlay draws that landed while paused (the #8172 bug window)
 )
 osd_paused_nudge: Counter | None = None  # paused-OSD re-flushes issued to un-throttle mpv
+scroll_frame_jank: Counter | None = None  # scroll frames slower than SCROLL_JANK_THRESHOLD_MS
+
+# ~one frame at 60Hz. The tail (p95/p99 jank-frame rate), not the mean, is what a user perceives
+# as scroll stutter — see scroll_frame_jank.
+SCROLL_JANK_THRESHOLD_MS = 16.0
 
 # Gauges (prefetch queue depth is push-updated by the caller; gil_enabled is observed on read).
 prefetch_queue_depth: UpDownCounter | None = None
@@ -56,6 +72,10 @@ _ALL_HISTOGRAM_NAMES = (
     "saitenka.dict_sql.duration_ms",
     "saitenka.ipc.roundtrip_ms",
     "saitenka.sub_seek.duration_ms",
+    "saitenka.cue_redraw.duration_ms",
+    "saitenka.subtitle_render.duration_ms",
+    "saitenka.sub_text_reconcile.duration_ms",
+    "saitenka.scroll_frame.duration_ms",
 )
 
 
@@ -134,6 +154,34 @@ def instrumented(histogram: Histogram | None, span_name: str, **attributes: str)
         yield
 
 
+@contextmanager
+def instrumented_jank(
+    histogram: Histogram | None,
+    jank_counter: Counter | None,
+    jank_threshold_ms: float,
+    span_name: str,
+    **attributes: str,
+) -> Generator[None]:
+    """:func:`instrumented` plus a jank counter bump when the block runs past *jank_threshold_ms* —
+    for interactive paths (e.g. scroll) where the tail, not the mean, is what a user perceives as
+    stutter. Both instruments share one timer so a jank frame's duration always matches what the
+    histogram recorded for it."""
+    if histogram is None and jank_counter is None:
+        with traced(span_name, **attributes):
+            yield
+        return
+    start = time.perf_counter()
+    with traced(span_name, **attributes):
+        try:
+            yield
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            if histogram is not None:
+                histogram.record(elapsed_ms, attributes or None)
+            if jank_counter is not None and elapsed_ms > jank_threshold_ms:
+                jank_counter.add(1, attributes or None)
+
+
 def _gil_enabled_callback(_options):
     from opentelemetry.metrics import Observation
 
@@ -146,9 +194,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global _reader
     global render_duration_ms, upload_duration_ms, hit_test_duration_ms
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
+    global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
+    global scroll_frame_duration_ms
     global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
-    global osd_paused_draw, osd_paused_nudge
+    global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
     with _lock:
         _reader = reader
@@ -170,6 +220,27 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         sub_seek_duration_ms = meter.create_histogram(
             "saitenka.sub_seek.duration_ms", unit="ms", description="subtitle-index seek time"
         )
+        cue_redraw_duration_ms = meter.create_histogram(
+            "saitenka.cue_redraw.duration_ms",
+            unit="ms",
+            description="set_subtitle end-to-end: tokenize/score/render/upload for one cue",
+        )
+        subtitle_render_duration_ms = meter.create_histogram(
+            "saitenka.subtitle_render.duration_ms",
+            unit="ms",
+            description="render_subtitle() PIL layout+draw time for one cue",
+        )
+        sub_text_reconcile_duration_ms = meter.create_histogram(
+            "saitenka.sub_text_reconcile.duration_ms",
+            unit="ms",
+            description="poll-loop redraw latency for an mpv-driven sub-text change (native "
+            "sub-seek / normal cue advance), sibling to sub_seek for the instant-nav path",
+        )
+        scroll_frame_duration_ms = meter.create_histogram(
+            "saitenka.scroll_frame.duration_ms",
+            unit="ms",
+            description="scroll-input to redraw-finished latency for one wheel tick / TIP_UP-DOWN",
+        )
         panel_cache_hits = meter.create_counter("saitenka.panel_cache.hits")
         panel_cache_misses = meter.create_counter("saitenka.panel_cache.misses")
         dict_cache_hits = meter.create_counter("saitenka.dict_cache.hits")
@@ -185,6 +256,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.osd.paused_nudge",
             description="paused-OSD re-flushes issued (mpv #8172 workaround)",
         )
+        scroll_frame_jank = meter.create_counter(
+            "saitenka.scroll_frame.jank",
+            description=f"scroll frames slower than {SCROLL_JANK_THRESHOLD_MS:.0f}ms",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -197,9 +272,11 @@ def unregister() -> None:
     global _reader
     global render_duration_ms, upload_duration_ms, hit_test_duration_ms
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
+    global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
+    global scroll_frame_duration_ms
     global panel_cache_hits, panel_cache_misses, dict_cache_hits, dict_cache_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
-    global osd_paused_draw, osd_paused_nudge
+    global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
     with _lock:
         _reader = None
@@ -209,6 +286,10 @@ def unregister() -> None:
         dict_sql_duration_ms = None
         ipc_roundtrip_ms = None
         sub_seek_duration_ms = None
+        cue_redraw_duration_ms = None
+        subtitle_render_duration_ms = None
+        sub_text_reconcile_duration_ms = None
+        scroll_frame_duration_ms = None
         panel_cache_hits = None
         panel_cache_misses = None
         dict_cache_hits = None
@@ -217,6 +298,7 @@ def unregister() -> None:
         cold_first_paint_overshoot = None
         osd_paused_draw = None
         osd_paused_nudge = None
+        scroll_frame_jank = None
         prefetch_queue_depth = None
 
 
