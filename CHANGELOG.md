@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-27
+
 ### Added
 
 - **`--mpv-arg`** — repeatable raw mpv flag passthrough on `run` (SubMiner's `-a/--args` precedent).
