@@ -233,12 +233,13 @@ enabled = true
 # export_dir = "~/custom/telemetry"  # default: ~/.cache/saitenka-overlay/telemetry
 ```
 
-A session with telemetry enabled writes a Chrome Trace Format file to
-`~/.cache/saitenka-overlay/telemetry/trace.json` — open it directly in `chrome://tracing` or
-[Perfetto](https://ui.perfetto.dev/). Metrics (render/upload/hit-test/dict-SQL/IPC/sub-seek
-histograms, cache hit-miss counters, `gil_enabled`) are pull-based and process-local — they don't
-persist to disk on their own; `doctor` reports the trace file's presence/size, and `report` bundles
-it (redacted) if one exists. `$OTEL_SDK_DISABLED=true` force-disables telemetry even if the config
+Each session with telemetry enabled writes its own Chrome Trace Format file to
+`~/.cache/saitenka-overlay/telemetry/trace-<UTC>.json` (the newest 10 are kept) — open it directly in
+`chrome://tracing` or [Perfetto](https://ui.perfetto.dev/). Every span carries a `cpu_ms` attribute:
+`wall ≫ cpu_ms` means the thread was stalled (GIL/lock/IO), not working. Metrics
+(render/upload/hit-test/dict-SQL/IPC/sub-seek histograms, cache hit-miss counters, `gil_enabled`) are
+pull-based and process-local — they don't persist to disk on their own; `doctor` and `telemetry
+status` report the newest trace's presence/size, and `report` bundles it (redacted) if one exists. `$OTEL_SDK_DISABLED=true` force-disables telemetry even if the config
 says `enabled = true` (the standard OTel kill switch). See the "Telemetry" section of
 [ROADMAP.md](../ROADMAP.md) for the full design — non-goal: standing up a backend, the default path
 is local-file-only, no gRPC/OTLP.
