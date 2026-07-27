@@ -10,12 +10,14 @@ zoom / play), and re-rendering an already-open tooltip or nested popup once a wo
 from __future__ import annotations
 
 import io
+import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
+from overlay.app.anki import AnkiError
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.media import audio_duration, play_audio
 from overlay.app.overlay_ids import OverlayId
@@ -61,7 +63,7 @@ def rerender_nested(reader: Reader) -> None:
     mined = reader._is_mined(tok)
     st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), finish=True, mined=mined)
     reader._nest.state = st
-    reader._nest.key = reader._panel_key(tok, tok.surface, mined)
+    reader._nest.key = reader._panel_key(tok, tok.surface, mined=mined)
     reader._nest.bgra = st.bgra()  # decompress the cached panel into the nested scroll buffer
     reader._render_nested_view()
 
@@ -133,7 +135,7 @@ def media_image(reader: Reader, name):
     try:
         data = reader.anki.retrieve_media(name)
         return Image.open(io.BytesIO(data)) if data else None
-    except Exception:
+    except (OSError, AnkiError, json.JSONDecodeError):
         return None
 
 
@@ -147,7 +149,7 @@ def media_tempfile(reader: Reader, name):
         p = reader._tmp / name
         p.write_bytes(data)
         return p
-    except Exception:
+    except (OSError, AnkiError, json.JSONDecodeError):
         return None
 
 

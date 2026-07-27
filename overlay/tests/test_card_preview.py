@@ -80,7 +80,7 @@ def test_play_audio_builds_command(monkeypatch):
     from overlay.app import media
 
     calls = {}
-    monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **kw: calls.__setitem__("cmd", cmd))
+    monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **_kw: calls.__setitem__("cmd", cmd))
     monkeypatch.setattr(media.sys, "platform", "darwin")
     media.play_audio("/x.mp3")
     assert calls["cmd"] == ["afplay", "/x.mp3"]

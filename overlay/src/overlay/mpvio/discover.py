@@ -116,7 +116,7 @@ def _windows_registry_mpv() -> str | None:
 def _is_exe(p: Path) -> bool:
     # os.access(X_OK) is unreliable for .exe on Windows (it doesn't model the exec bit); an existing
     # regular file is enough there.
-    return os.path.isfile(p) and (os.name == "nt" or os.access(p, os.X_OK))
+    return Path(p).is_file() and (os.name == "nt" or os.access(p, os.X_OK))
 
 
 # Standard bin dirs a GUI-launched process (Finder/Dock/Explorer) does NOT get on PATH, but where the

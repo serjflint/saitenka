@@ -10,6 +10,7 @@ out; secrets are removed; dictionaries / Anki / video / third-party script bodie
 from __future__ import annotations
 
 import json
+import logging
 import platform
 import re
 import subprocess
@@ -19,6 +20,8 @@ import zipfile
 from pathlib import Path
 
 from overlay.version import overlay_version as _overlay_version
+
+log = logging.getLogger(__name__)
 
 # Scrub ``key = "..."`` / ``token: ...`` / ``Authorization: Bearer <tok>`` style secrets from any text.
 # The ``(?:bearer|token)\s+`` skip is why ``Authorization: Bearer <tok>`` redacts the TOKEN, not the
@@ -42,7 +45,7 @@ def _scrub_home(text: str) -> str:
     out = text.replace(str(Path.home()), "<HOME>")
     try:
         user = getpass.getuser()
-    except Exception:  # pragma: no cover — getuser can raise if no login name is resolvable
+    except OSError:  # pragma: no cover — getuser can raise if no login name is resolvable
         user = ""
     if user:
         out = re.sub(rf"(?<!\w){re.escape(user)}(?!\w)", "<USER>", out)
@@ -108,6 +111,7 @@ def _collect_doctor() -> dict[str, str]:
     try:
         return {"doctor.json": json.dumps(run_checks().to_json(), ensure_ascii=False, indent=2)}
     except Exception as e:  # never let a doctor hiccup abort the bundle
+        log.warning("doctor check failed while building report bundle", exc_info=True)
         return {"doctor.json": json.dumps({"error": str(e)})}
 
 
@@ -170,6 +174,7 @@ def _collect_dict_inventory() -> dict[str, str]:
             rows = DictionaryDb.open().list_dictionaries()
             inv += [f"  [{r.kind}] {r.title}" for r in rows] or ["  (empty)"]
         except Exception:  # pragma: no cover — diagnostics must never raise
+            log.debug("dictionary inventory read failed", exc_info=True)
             inv += ["  (unreadable)"]
     else:
         inv += ["  (none — run `saitenka-overlay import`)"]

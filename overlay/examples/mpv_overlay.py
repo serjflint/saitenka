@@ -14,7 +14,6 @@ overlay. Use ``--fullscreen`` and press ``f`` in mpv to confirm the panel surviv
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 import tempfile
@@ -107,7 +106,7 @@ def main() -> int:
             r = ipc.command("screenshot-to-file", args.screenshot, "window")
             print("screenshot reply:", r)
             time.sleep(0.3)
-            print("wrote", args.screenshot, "exists:", os.path.exists(args.screenshot))
+            print("wrote", args.screenshot, "exists:", Path(args.screenshot).exists())
         else:
             print(f"panel is up for {args.seconds}s — press 'f' in mpv to test fullscreen.")
             time.sleep(args.seconds)
@@ -116,7 +115,7 @@ def main() -> int:
             ov.close()
             ipc.command("quit")
             ipc.close()
-        except Exception:
+        except Exception:  # best-effort teardown - never let cleanup mask the run's result
             pass
         try:
             proc.wait(timeout=5)

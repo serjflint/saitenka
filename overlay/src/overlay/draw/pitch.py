@@ -63,11 +63,11 @@ def render_pitch_graph(
     img = Image.new("RGBA", (w, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    def xy(i: int, high: bool) -> tuple[int, int]:
+    def xy(i: int, *, high: bool) -> tuple[int, int]:
         return edge + i * step, y_hi if high else y_lo
 
-    pts = [xy(i, h) for i, h in enumerate(highs)]
-    pts.append(xy(n, particle_high))  # the following-particle dot
+    pts = [xy(i, high=h) for i, h in enumerate(highs)]
+    pts.append(xy(n, high=particle_high))  # the following-particle dot
     for a, b in itertools.pairwise(pts):  # adjacent dots connected by the H/L contour
         draw.line([a, b], fill=color, width=lw)
     for p in pts[:-1]:

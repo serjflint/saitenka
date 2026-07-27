@@ -84,7 +84,7 @@ def rss_mb() -> float | None:
         return None
     try:
         return float(psutil.Process().memory_info().rss) / 1e6
-    except Exception:  # pragma: no cover — never let a diagnostic reading crash the caller
+    except (psutil.Error, OSError):  # pragma: no cover — process gone/inaccessible mid-read
         return None
 
 

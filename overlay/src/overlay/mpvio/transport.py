@@ -10,6 +10,7 @@ background reader thread; ``read`` returns ``b""`` at EOF (the peer closed).
 from __future__ import annotations
 
 import socket
+from pathlib import Path
 from typing import BinaryIO, Protocol, runtime_checkable
 
 
@@ -64,9 +65,9 @@ class NamedPipeTransport:
         self._pipe = pipe
 
     @classmethod
-    def dial(cls, path: str, timeout: float) -> NamedPipeTransport:
+    def dial(cls, path: str, _timeout: float) -> NamedPipeTransport:
         # timeout unused (open() doesn't block-dial like connect()); kept for a uniform dial() signature.
-        return cls(open(path, "r+b", buffering=0))
+        return cls(Path(path).open("r+b", buffering=0))
 
     def read(self, n: int) -> bytes:
         return self._pipe.read(n) or b""

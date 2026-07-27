@@ -6,9 +6,9 @@ from overlay.app import anki as anki_mod
 
 
 def test_ensure_returns_immediately_when_reachable(monkeypatch):
-    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: True)
     launched = []
-    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda *a, **k: launched.append(a))
+    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda *a, **_k: launched.append(a))
     assert anki_mod.ensure_anki_running() is True
     assert launched == []  # already up → no launch attempt
 
@@ -16,21 +16,21 @@ def test_ensure_returns_immediately_when_reachable(monkeypatch):
 def test_ensure_launches_when_down_then_comes_up(monkeypatch):
     calls = {"n": 0, "launched": None}
 
-    def reachable(*a, **k):  # down on the pre-check, up on the first poll
+    def reachable(*_a, **_k):  # down on the pre-check, up on the first poll
         calls["n"] += 1
         return calls["n"] >= 2
 
     monkeypatch.setattr(anki_mod, "anki_reachable", reachable)
-    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda cmd, **k: calls.update(launched=cmd))
+    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda cmd, **_k: calls.update(launched=cmd))
     monkeypatch.setattr(anki_mod.time, "sleep", lambda _s: None)
     assert anki_mod.ensure_anki_running(wait=5) is True
     assert calls["launched"][0] in ("open", "cmd", "anki")  # platform launch command
 
 
 def test_ensure_returns_false_when_launch_fails(monkeypatch):
-    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *a, **k: False)
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
 
-    def boom(*a, **k):
+    def boom(*_a, **_k):
         raise OSError("no such app")
 
     monkeypatch.setattr(anki_mod.subprocess, "Popen", boom)

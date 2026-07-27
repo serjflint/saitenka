@@ -9,6 +9,7 @@ psutil isn't importable.
 from __future__ import annotations
 
 import logging
+import subprocess
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def _fallback(proc, timeout: float) -> None:
     try:
         proc.terminate()
         proc.wait(timeout=timeout)
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         try:
             proc.kill()
         except Exception:  # pragma: no cover

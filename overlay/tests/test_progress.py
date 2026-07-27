@@ -31,7 +31,7 @@ def test_format_bar_truncates_long_name():
 
 
 class _Fake(io.StringIO):
-    def __init__(self, tty: bool):
+    def __init__(self, *, tty: bool):
         super().__init__()
         self._tty = tty
 
@@ -40,7 +40,7 @@ class _Fake(io.StringIO):
 
 
 def test_buildbar_draws_on_tty():
-    tty = _Fake(True)
+    tty = _Fake(tty=True)
     bar = progress.BuildBar(out=tty)
     bar.update(0, 4, "D")  # 0 done → working on the 1st of 4
     assert tty.getvalue().startswith("\r") and "1/4" in tty.getvalue()
@@ -49,7 +49,7 @@ def test_buildbar_draws_on_tty():
 
 
 def test_buildbar_silent_when_not_a_tty():
-    notty = _Fake(False)
+    notty = _Fake(tty=False)
     bar = progress.BuildBar(out=notty)
     bar.update(1, 4, "D")
     bar.close()

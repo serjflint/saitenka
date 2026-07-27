@@ -38,7 +38,7 @@ def _crc_lenient():
     pitch-accent dicts) write wrong/zero CRCs even though the deflate data is perfectly intact;
     Python's strict check would otherwise reject them. Scoped + restored, single-threaded use."""
     orig = zipfile.ZipExtFile._update_crc  # type: ignore[attr-defined]  # deliberate
-    zipfile.ZipExtFile._update_crc = lambda self, *_: None  # type: ignore[attr-defined]  # patched sig takes the data chunk; ignored
+    zipfile.ZipExtFile._update_crc = lambda _self, *_: None  # type: ignore[attr-defined]  # patched sig takes the data chunk; ignored
     try:
         yield
     finally:
@@ -208,7 +208,7 @@ class PitchSource:
         self.dict_id = row.id
         self.title = row.title
 
-    def accents(self, forms, reading: str | None = None) -> tuple[str, list[int]] | None:
+    def accents(self, forms, _reading: str | None = None) -> tuple[str, list[int]] | None:
         """Raw (reading, positions) for the first matching form — the pitch-graph input. Matches by
         term OR reading (a pitch dict is keyed by both)."""
         conn = self.db._conn()
@@ -301,10 +301,14 @@ class KnownWords:
 
         def call(action, **params):
             body = json.dumps({"action": action, "version": 6, "params": params}).encode()
-            req = urllib.request.Request(host, body, {"Content-Type": "application/json"})  # noqa: S310  # HTTPS frequency-list download - fixed scheme
+            req = urllib.request.Request(  # noqa: S310  # HTTPS frequency-list download - fixed scheme
+                host, body, {"Content-Type": "application/json"}
+            )
             with (
                 otel_metrics.traced("anki_http_call", action=action),
-                urllib.request.urlopen(req, timeout=10) as r,  # noqa: S310  # HTTPS frequency-list download - fixed scheme
+                urllib.request.urlopen(  # noqa: S310  # HTTPS frequency-list download - fixed scheme
+                    req, timeout=10
+                ) as r,
             ):
                 raw = r.read()
             with otel_metrics.traced("anki_json_parse", action=action):

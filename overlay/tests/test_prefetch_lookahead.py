@@ -39,7 +39,7 @@ class _FakeDS:
     def __init__(self):
         self.warmed = []
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         self.warmed.append(tok.surface)
         return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 

@@ -22,11 +22,11 @@ def _patch_find_mpv(monkeypatch, result):
     # not shutil.which — otherwise the host's real Homebrew mpv leaks in via the candidate list.
     import overlay.mpvio.discover as disc
 
-    monkeypatch.setattr(disc, "find_mpv", lambda *a, **k: result)
+    monkeypatch.setattr(disc, "find_mpv", lambda *_a, **_k: result)
 
 
 def test_mpv_check_pass(monkeypatch):
-    monkeypatch.setattr(doc, "_run", lambda *a, **k: "mpv 0.38.0\n")
+    monkeypatch.setattr(doc, "_run", lambda *_a, **_k: "mpv 0.38.0\n")
     _patch_find_mpv(monkeypatch, "/usr/bin/mpv")
     c = doc.check_mpv()
     assert c.status == "ok"
@@ -34,7 +34,7 @@ def test_mpv_check_pass(monkeypatch):
 
 
 def test_mpv_check_too_old(monkeypatch):
-    monkeypatch.setattr(doc, "_run", lambda *a, **k: "mpv 0.35.0\n")
+    monkeypatch.setattr(doc, "_run", lambda *_a, **_k: "mpv 0.35.0\n")
     _patch_find_mpv(monkeypatch, "/usr/bin/mpv")
     c = doc.check_mpv()
     assert c.status == "fail"
@@ -51,7 +51,7 @@ def test_mpv_check_missing(monkeypatch):
 def test_mpv_check_mpvnet_unparseable_version(monkeypatch):
     # mpv.net's --version string doesn't match the `mpv vX.Y` regex; treat a responding binary as
     # present (warn), not missing.
-    monkeypatch.setattr(doc, "_run", lambda *a, **k: "mpv.net v7.1.2.0\n")
+    monkeypatch.setattr(doc, "_run", lambda *_a, **_k: "mpv.net v7.1.2.0\n")
     _patch_find_mpv(monkeypatch, r"C:\\Users\\x\\mpv.net\\mpvnet.exe")
     c = doc.check_mpv()
     assert c.status == "warn"
@@ -59,9 +59,9 @@ def test_mpv_check_mpvnet_unparseable_version(monkeypatch):
 
 
 def test_ffmpeg_check_needs_aac(monkeypatch):
-    monkeypatch.setattr(doc.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(doc.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
-        doc, "_run", lambda *a, **k: " A....D libmp3lame  MP3\n V....D libx264  H.264\n"
+        doc, "_run", lambda *_a, **_k: " A....D libmp3lame  MP3\n V....D libx264  H.264\n"
     )
     c = doc.check_ffmpeg()
     assert c.status == "warn"  # no aac encoder → mining audio won't encode
@@ -69,8 +69,8 @@ def test_ffmpeg_check_needs_aac(monkeypatch):
 
 
 def test_ffmpeg_check_ok(monkeypatch):
-    monkeypatch.setattr(doc.shutil, "which", lambda name: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(doc, "_run", lambda *a, **k: " A....D aac  AAC (Advanced Audio Coding)\n")
+    monkeypatch.setattr(doc.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(doc, "_run", lambda *_a, **_k: " A....D aac  AAC (Advanced Audio Coding)\n")
     c = doc.check_ffmpeg()
     assert c.status == "ok"
 
@@ -117,13 +117,13 @@ def test_legacy_files_check_warns_when_present(monkeypatch, tmp_path):
 
 
 def test_anki_check_reachable(monkeypatch):
-    monkeypatch.setattr(doc, "_anki_call", lambda action, **kw: 6 if action == "version" else [])
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: 6 if action == "version" else [])
     c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
     assert c.status in ("ok", "warn")
 
 
 def test_anki_check_unreachable(monkeypatch):
-    def boom(action, **kw):
+    def boom(_action, **_kw):
         raise OSError("connection refused")
 
     monkeypatch.setattr(doc, "_anki_call", boom)
@@ -143,7 +143,7 @@ def test_check_tts_reports_availability_with_platform_hint(monkeypatch):
     assert "espeak" in doc.check_tts().detail
 
 
-def test_free_threading_check(monkeypatch):
+def test_free_threading_check():
     # On any interpreter the check must classify itself without error.
     c = doc.check_free_threading()
     assert c.status in ("ok", "warn")
@@ -377,7 +377,7 @@ def test_recent_errors_tails_log(tmp_path, monkeypatch):
     assert "boom" in c.detail
 
 
-def test_run_all_checks_and_json(monkeypatch):
+def test_run_all_checks_and_json():
     # Force every check into a known shape via a stub list; ensure summary + json serialise.
     fake = [doc.Check("mpv", "ok", "ok"), doc.Check("anki", "warn", "meh")]
     report = doc.Report(fake)

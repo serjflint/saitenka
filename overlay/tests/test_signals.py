@@ -20,7 +20,7 @@ def test_install_registers_termination_handlers(monkeypatch):
 
 
 def test_install_is_noop_when_signal_unsupported(monkeypatch):
-    def _boom(sig, handler):
+    def _boom(_sig, _handler):
         raise ValueError("signal only works in main thread")
 
     monkeypatch.setattr(signal, "signal", _boom)

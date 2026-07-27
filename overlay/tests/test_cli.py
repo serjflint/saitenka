@@ -228,10 +228,18 @@ def test_jimaku_should_fetch_decision():
     from overlay.app.cli import jimaku_should_fetch as f
 
     assert (
-        f(True, False, "v.mkv", probe=lambda v, s: True) is True
+        f(explicit_flag=True, cfg_fetch=False, video="v.mkv", probe=lambda _v, _s: True) is True
     )  # --jimaku wins over embedded JP
-    assert f(True, True, None) is False  # no video → never
-    assert f(False, True, "v.mkv", probe=lambda v, s: False) is True  # config + no JP track → fetch
-    assert f(False, True, "v.mkv", probe=lambda v, s: True) is False  # config + JP track → skip
-    assert f(False, True, "v.mkv", probe=lambda v, s: None) is True  # config + can't probe → fetch
-    assert f(False, False, "v.mkv", probe=lambda v, s: False) is False  # neither → never
+    assert f(explicit_flag=True, cfg_fetch=True, video=None) is False  # no video → never
+    assert (
+        f(explicit_flag=False, cfg_fetch=True, video="v.mkv", probe=lambda _v, _s: False) is True
+    )  # config + no JP track → fetch
+    assert (
+        f(explicit_flag=False, cfg_fetch=True, video="v.mkv", probe=lambda _v, _s: True) is False
+    )  # config + JP track → skip
+    assert (
+        f(explicit_flag=False, cfg_fetch=True, video="v.mkv", probe=lambda _v, _s: None) is True
+    )  # config + can't probe → fetch
+    assert (
+        f(explicit_flag=False, cfg_fetch=False, video="v.mkv", probe=lambda _v, _s: False) is False
+    )  # neither → never

@@ -40,7 +40,7 @@ class TestCommandConstruction:
 
         commands_run: list[list[str]] = []
 
-        def fake_run(cmd, **kwargs):
+        def fake_run(cmd, **_kwargs):
             commands_run.append(list(cmd))
             return MagicMock(returncode=0)
 
@@ -65,7 +65,7 @@ class TestCommandConstruction:
 
         commands_run: list[list[str]] = []
 
-        def fake_run(cmd, **kwargs):
+        def fake_run(cmd, **_kwargs):
             commands_run.append(list(cmd))
             return MagicMock(returncode=0)
 

@@ -13,7 +13,7 @@ def test_subminer_running_true_on_pgrep_hit(monkeypatch):
     class R:
         returncode = 0
 
-    monkeypatch.setattr(conflicts.subprocess, "run", lambda *a, **k: R())
+    monkeypatch.setattr(conflicts.subprocess, "run", lambda *_a, **_k: R())
     assert conflicts.subminer_running() is True
 
 
@@ -23,7 +23,7 @@ def test_subminer_running_false_on_pgrep_miss(monkeypatch):
     class R:
         returncode = 1
 
-    monkeypatch.setattr(conflicts.subprocess, "run", lambda *a, **k: R())
+    monkeypatch.setattr(conflicts.subprocess, "run", lambda *_a, **_k: R())
     assert conflicts.subminer_running() is False
 
 

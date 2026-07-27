@@ -37,7 +37,7 @@ def _make_span(**extra_attrs):
 def _on_gate(**kwargs) -> tuple[CTFSpanProcessor, ActiveGate]:
     """A processor with the gate already on and no writer thread — the deterministic test setup."""
     gate = ActiveGate()
-    gate.set(True)
+    gate.set(value=True)
     return CTFSpanProcessor(kwargs.pop("path"), gate, start_thread=False, **kwargs), gate
 
 
@@ -192,7 +192,7 @@ def test_writer_survives_a_failing_sample_fn(tmp_path):
 def test_live_writer_thread_exports_a_span(tmp_path):
     path = tmp_path / "trace.json"
     gate = ActiveGate()
-    gate.set(True)
+    gate.set(value=True)
     proc = CTFSpanProcessor(path, gate, interval=0.05)
     try:
         proc.on_end(_make_span())
@@ -208,7 +208,7 @@ def test_live_writer_thread_exports_a_span(tmp_path):
 def test_live_writer_thread_samples_counters_periodically(tmp_path):
     path = tmp_path / "trace.json"
     gate = ActiveGate()
-    gate.set(True)
+    gate.set(value=True)
     proc = CTFSpanProcessor(path, gate, sample_fn=lambda: {"a": 1.0}, interval=0.05)
     try:
         for _ in range(100):
@@ -226,7 +226,7 @@ def test_live_writer_thread_samples_counters_periodically(tmp_path):
 def test_shutdown_flushes_the_tail(tmp_path):
     path = tmp_path / "trace.json"
     gate = ActiveGate()
-    gate.set(True)
+    gate.set(value=True)
     proc = CTFSpanProcessor(path, gate, interval=5.0)  # long interval: rely on shutdown to flush
     proc.on_end(_make_span())
     proc.shutdown()

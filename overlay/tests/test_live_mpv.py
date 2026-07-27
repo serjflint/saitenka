@@ -28,7 +28,7 @@ DEMO_LINE = "門前の小僧習わぬ経を読む"
 class _MiniDS:
     """A trivial dict so a tooltip renders — L3 is about the input path / alignment, not content."""
 
-    def entry_for(self, tok, inflected=None):
+    def entry_for(self, tok, _inflected=None):
         from overlay.panel import Definition, Entry
 
         return Entry(
@@ -37,7 +37,7 @@ class _MiniDS:
             defs=[Definition("D", ["to read"])],
         )
 
-    def has_term(self, *forms):
+    def has_term(self, *_forms):
         return True
 
 
@@ -135,7 +135,7 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
             if ipc is not None:
                 ipc.command("quit")
                 ipc.close()
-        except Exception:
+        except Exception:  # noqa: BLE001  # best-effort teardown - never let cleanup fail the test's own assertions
             pass
         proc.terminate()
         try:

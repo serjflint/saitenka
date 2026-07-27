@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import pytest  # noqa: E402
+import pytest  # noqa: E402  # must come after the sys.path setup above
 
-import overlay.app.dictdb as _dictdb  # noqa: E402
+import overlay.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
 
 # Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
 # Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 .venv-cx), so default test
@@ -39,7 +39,7 @@ def _anki_reachable(monkeypatch):
     """Default: AnkiConnect answers, so the ⊕ button shows when mining is configured (existing tests
     assume it) and _anki_ok() stays hermetic — no real localhost:8765 ping. Tests for the Anki-closed
     case patch ``overlay.app.anki.anki_reachable`` to return False."""
-    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *a, **k: True)
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *_a, **_k: True)
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +59,7 @@ def _isolate_keyring():
     try:
         import keyring
         from keyring.backends import fail
-    except Exception:  # keyring not importable → nothing to isolate
+    except ImportError:  # keyring not importable → nothing to isolate
         yield
         return
     prev = keyring.get_keyring()

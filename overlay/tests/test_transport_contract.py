@@ -118,7 +118,7 @@ def make_link(request):
     def factory() -> _Link:
         if request.param == "socketpair":
             client, server = socket.socketpair()
-            server.setblocking(False)
+            server.setblocking(False)  # noqa: FBT003  # socket.setblocking's own stdlib signature
             transport = UnixSocketTransport(client)
             buf = bytearray()
 

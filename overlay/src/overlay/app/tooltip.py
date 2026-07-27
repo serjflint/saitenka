@@ -86,7 +86,7 @@ def update_hover(reader: Reader) -> None:
             update_hover_impl(reader)
 
 
-def _hover_targets(reader: Reader, mx: float, my: float, inside: bool):
+def _hover_targets(reader: Reader, mx: float, my: float, *, inside: bool):
     """Which of (subtitle word, base tooltip, nested popup) the cursor is currently over."""
     over_word = reader._hit(mx, my) if (inside and reader.tokens) else -1
     over_tip = inside and reader._tip_rect is not None and reader._in_rect(reader._tip_rect, mx, my)
@@ -120,7 +120,7 @@ def _linger_nested(reader: Reader) -> None:
 
 
 def _update_nested_hover(
-    reader: Reader, mx: float, my: float, over_tip: bool, over_nest: bool
+    reader: Reader, mx: float, my: float, *, over_tip: bool, over_nest: bool
 ) -> None:
     """Scan a word inside the tooltip; keep its popup alive while engaged. A cross-reference LINK is
     click-to-open, NOT hover-scan — so scrolling past / reading a link doesn't spawn scan popups
@@ -165,7 +165,7 @@ def _linger_word_hover(reader: Reader) -> None:
         reader._hide_at = 0.0
 
 
-def _update_word_hover(reader: Reader, over_word: int, over_tip: bool, over_nest: bool) -> None:
+def _update_word_hover(reader: Reader, over_word: int, *, over_tip: bool, over_nest: bool) -> None:
     """Base tooltip: also kept alive while the cursor is on the nested popup."""
     if over_word >= 0:
         _switch_word_hover(reader, over_word)
@@ -183,9 +183,9 @@ def update_hover_impl(reader: Reader) -> None:
     reader._mouse_in = inside  # engagement signal for prefetch
     mx, my = mp.get("x", -1), mp.get("y", -1)
     reader._last_mouse = (mx, my)
-    over_word, over_tip, over_nest = _hover_targets(reader, mx, my, inside)
-    _update_nested_hover(reader, mx, my, over_tip, over_nest)
-    _update_word_hover(reader, over_word, over_tip, over_nest)
+    over_word, over_tip, over_nest = _hover_targets(reader, mx, my, inside=inside)
+    _update_nested_hover(reader, mx, my, over_tip=over_tip, over_nest=over_nest)
+    _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
 
 
 def set_hover(reader: Reader, index: int) -> None:
@@ -386,7 +386,9 @@ def on_click(reader: Reader) -> None:
 # --- panel building ----------------------------------------------------------------------------
 
 
-def panel_key(reader: Reader, tok, inflected, mined: bool = False, tabs: bool = True) -> PanelKey:
+def panel_key(
+    reader: Reader, tok, inflected, *, mined: bool = False, tabs: bool = True
+) -> PanelKey:
     # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
     # ``tabs`` distinguishes the base build (with the dict-tab reserve) from a nested build (none),
     # so the same word shown in both places doesn't share the wrong reserve.
@@ -409,7 +411,7 @@ def is_mined(reader: Reader, tok) -> bool:
         return False
     try:
         return card_for(tok).expression in reader._mined
-    except Exception:
+    except Exception:  # noqa: BLE001  # render hot path - any lookup hiccup just hides the mined mark
         return False
 
 
@@ -481,7 +483,7 @@ def finish_available(reader: Reader) -> bool:
 
 
 def _build_panel(
-    reader: Reader, key: PanelKey, tok, inflected, mined: bool, tabs: bool
+    reader: Reader, _key: PanelKey, tok, inflected, *, mined: bool, tabs: bool
 ) -> TipPanel:
     if otel_metrics.panel_cache_misses is not None:
         otel_metrics.panel_cache_misses.add(1)
@@ -538,11 +540,11 @@ def _build_panel(
 
 
 def _panel_cache_get(
-    reader: Reader, key: PanelKey, tok, inflected, mined: bool, tabs: bool
+    reader: Reader, key: PanelKey, tok, inflected, *, mined: bool, tabs: bool
 ) -> TipPanel:
     st = reader._panel_cache.get(key)
     if st is None:
-        st = _build_panel(reader, key, tok, inflected, mined, tabs)
+        st = _build_panel(reader, key, tok, inflected, mined=mined, tabs=tabs)
         with reader._cache_lock:
             st = panel_cache_setdefault(reader, key, st)
     else:
@@ -562,6 +564,7 @@ def panel_for(
     tok,
     inflected=None,
     min_h: int | None = None,
+    *,
     finish: bool = False,
     mined: bool | None = None,
     tabs: bool | None = None,
@@ -581,8 +584,8 @@ def panel_for(
         mined = is_mined(reader, tok)
     if tabs is None:
         tabs = reader.show_dict_tabs
-    key = panel_key(reader, tok, inflected, mined, tabs)
-    st = _panel_cache_get(reader, key, tok, inflected, mined, tabs)
+    key = panel_key(reader, tok, inflected, mined=mined, tabs=tabs)
+    st = _panel_cache_get(reader, key, tok, inflected, mined=mined, tabs=tabs)
     if finish:
         st.finish()
     else:
@@ -621,7 +624,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     # Viewport-first: paint only the head that fills the viewport now; a worker renders the tail.
     # Without a worker (prefetch off) finish synchronously so the panel is never left partial.
     mined = is_mined(reader, tok)
-    key = panel_key(reader, tok, inflected, mined)
+    key = panel_key(reader, tok, inflected, mined=mined)
     st = panel_for(
         reader, tok, inflected, min_h=cap, finish=not reader._finish_available(), mined=mined
     )
@@ -646,7 +649,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     if not st.complete:
         reader._finish_q.put(FinishItem(st, key))  # worker fills the tail → _tip_dirty → refresh
     if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
-        reader.ipc.command("set_property", "pause", True)  # freeze the frame while you read
+        reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format; freeze the frame while you read
         reader._paused_by_tip = True
 
 

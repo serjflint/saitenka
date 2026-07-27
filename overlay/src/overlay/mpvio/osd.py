@@ -41,7 +41,7 @@ _PREMUL_LUT = (
 _PREMUL_FLAT = np.ascontiguousarray(_PREMUL_LUT.ravel())
 
 
-def to_bgra_array(img: Image.Image, premultiply: bool = True) -> np.ndarray:
+def to_bgra_array(img: Image.Image, *, premultiply: bool = True) -> np.ndarray:
     """RGBA image → a contiguous premultiplied **BGRA** array (H, W, 4) for mpv's ``overlay-add``.
 
     Exposed so callers can convert a tall panel ONCE and then upload scrolled viewport *slices* of it
@@ -55,9 +55,9 @@ def to_bgra_array(img: Image.Image, premultiply: bool = True) -> np.ndarray:
     return np.ascontiguousarray(arr[:, :, [2, 1, 0, 3]])
 
 
-def to_bgra(img: Image.Image, premultiply: bool = True) -> tuple[bytes, int, int, int]:
+def to_bgra(img: Image.Image, *, premultiply: bool = True) -> tuple[bytes, int, int, int]:
     """Convert an RGBA image to the (data, w, h, stride) mpv's ``overlay-add bgra`` expects."""
-    bgra = to_bgra_array(img, premultiply)
+    bgra = to_bgra_array(img, premultiply=premultiply)
     return bgra.tobytes(), img.width, img.height, img.width * 4
 
 
@@ -81,7 +81,7 @@ class Overlay:
     def _tempfile(self, oid: int) -> Path:
         path = self._files.get(oid)
         if path is None:
-            fd = tempfile.NamedTemporaryFile(  # noqa: SIM115 — delete=False: the PATH outlives the
+            fd = tempfile.NamedTemporaryFile(  # noqa: SIM115  # path is process-lifetime, reused across calls
                 prefix=f"saitenka-osd-{oid}-",
                 suffix=".bgra",  # handle (mpv re-reads it)
                 delete=False,

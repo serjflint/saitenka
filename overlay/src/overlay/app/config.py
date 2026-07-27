@@ -36,7 +36,7 @@ def load_config(override: str | os.PathLike | None = None) -> dict:
     if not p.exists():
         return {}
     try:
-        with open(p, "rb") as f:
+        with p.open("rb") as f:
             return tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return {}

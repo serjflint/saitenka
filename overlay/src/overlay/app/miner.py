@@ -7,8 +7,10 @@ here. Composition: the Miner reaches collaborators (ipc, anki, tokens, toasts) t
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -33,7 +35,7 @@ def source_meta(video) -> tuple[str, int | None]:
         from overlay.app.jimaku import parse_filename
 
         return parse_filename(video)
-    except Exception:
+    except (TypeError, ValueError, OSError):
         return "", None
 
 
@@ -136,7 +138,8 @@ class Miner:
             screenshot(r.ipc, jpg)
             pic = r.anki.store_media(f"{base}.jpg", jpg)
             r._last_jpg = jpg
-        except Exception as e:
+        except (OSError, AnkiError, json.JSONDecodeError) as e:
+            log.debug("screenshot capture failed", exc_info=True)
             pic_err = e
         try:
             span = current_timespan(r.ipc)
@@ -145,7 +148,8 @@ class Miner:
                 clip_audio(video, span, aud)
                 audio = r.anki.store_media(f"{base}.m4a", aud)
                 r._last_audio = aud
-        except Exception as e:
+        except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:
+            log.debug("audio capture failed", exc_info=True)
             audio_err = e
         if pic_err and audio_err:
             r._toast("media capture failed (no image/audio on card)", "warn")
@@ -202,6 +206,7 @@ class Miner:
         except AnkiError as e:
             r._toast(f"mine failed: {e}", "err")
         except Exception as e:  # never let a mine crash the loop
+            log.exception("mine_token failed")
             r._toast(f"mine error: {e}", "err")
 
     def bulk_mine(self) -> None:

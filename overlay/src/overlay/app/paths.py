@@ -88,7 +88,7 @@ def atomic_write_text(
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, p)
+        Path(tmp).replace(p)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

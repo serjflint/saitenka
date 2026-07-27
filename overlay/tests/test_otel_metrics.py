@@ -23,14 +23,16 @@ def test_snapshot_empty_before_register():
     assert otel_metrics.snapshot() == {}
 
 
-def test_snapshot_reports_counter_value(registered):
+@pytest.mark.usefixtures("registered")
+def test_snapshot_reports_counter_value():
     otel_metrics.panel_cache_hits.add(3)
     otel_metrics.panel_cache_hits.add(2)
     snap = otel_metrics.snapshot()
     assert snap["saitenka.panel_cache.hits"]["value"] == 5
 
 
-def test_snapshot_reports_histogram_percentiles(registered):
+@pytest.mark.usefixtures("registered")
+def test_snapshot_reports_histogram_percentiles():
     for ms in (1, 2, 5, 10, 50, 100, 500):
         otel_metrics.render_duration_ms.record(ms)
     snap = otel_metrics.snapshot()
@@ -42,12 +44,14 @@ def test_snapshot_reports_histogram_percentiles(registered):
     assert hist["p50"] <= hist["p95"] <= hist["p99"]
 
 
-def test_snapshot_reports_gil_enabled_gauge(registered):
+@pytest.mark.usefixtures("registered")
+def test_snapshot_reports_gil_enabled_gauge():
     snap = otel_metrics.snapshot()
     assert snap["saitenka.runtime.gil_enabled"]["value"] in (0, 1)
 
 
-def test_unregister_resets_instruments_to_none(registered):
+@pytest.mark.usefixtures("registered")
+def test_unregister_resets_instruments_to_none():
     assert otel_metrics.render_duration_ms is not None
     otel_metrics.unregister()
     assert otel_metrics.render_duration_ms is None
@@ -67,14 +71,16 @@ def test_timed_is_a_noop_when_histogram_is_none():
     assert ran
 
 
-def test_timed_records_duration_and_attributes(registered):
+@pytest.mark.usefixtures("registered")
+def test_timed_records_duration_and_attributes():
     with otel_metrics.timed(otel_metrics.dict_sql_duration_ms, dict="Jitendex"):
         pass
     snap = otel_metrics.snapshot()
     assert snap["saitenka.dict_sql.duration_ms"]["count"] == 1
 
 
-def test_timed_records_even_on_exception(registered):
+@pytest.mark.usefixtures("registered")
+def test_timed_records_even_on_exception():
     with pytest.raises(ValueError), otel_metrics.timed(otel_metrics.render_duration_ms):
         raise ValueError("boom")
     snap = otel_metrics.snapshot()
@@ -104,7 +110,8 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     assert ran
 
 
-def test_traced_creates_a_real_span_when_telemetry_is_configured(registered):
+@pytest.mark.usefixtures("registered")
+def test_traced_creates_a_real_span_when_telemetry_is_configured():
     with otel_metrics.traced("my-span", foo="bar"):
         pass
     # the fixture's provider has no exporter attached — this just proves start_as_current_span
@@ -129,7 +136,7 @@ class _FakeTracer:
     def __init__(self):
         self.spans = []
 
-    def start_as_current_span(self, name):
+    def start_as_current_span(self, _name):
         span = _FakeSpan()
         self.spans.append(span)
         return span
@@ -168,14 +175,16 @@ def test_instrumented_is_a_noop_when_histogram_is_none():
     assert ran
 
 
-def test_instrumented_records_both_the_histogram_and_a_span(registered):
+@pytest.mark.usefixtures("registered")
+def test_instrumented_records_both_the_histogram_and_a_span():
     with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render", dict="X"):
         pass
     snap = otel_metrics.snapshot()
     assert snap["saitenka.render.duration_ms"]["count"] == 1
 
 
-def test_snapshot_sums_a_labeled_histogram_across_every_label(registered):
+@pytest.mark.usefixtures("registered")
+def test_snapshot_sums_a_labeled_histogram_across_every_label():
     """Regression: dict_sql_duration_ms is recorded with a per-dict `dict=<title>` attribute, which
     OTel fans out into one data point PER distinct label — `_summarize_metric` used to read only
     `points[-1]`, silently reporting one dict's count/sum instead of the total across all of them

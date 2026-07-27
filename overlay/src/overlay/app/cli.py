@@ -31,8 +31,10 @@ import cyclopts
 from overlay import __version__
 
 # _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from overlay.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414
-from overlay.app.cli_run import jimaku_should_fetch as jimaku_should_fetch  # noqa: PLC0414
+from overlay.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
+from overlay.app.cli_run import (
+    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
+)
 from overlay.app.cli_run import run_impl
 from overlay.app.config import TooltipOptions, config_path, load_config
 from overlay.app.embedded_subs import build_sub_index_for_current_track
@@ -352,8 +354,10 @@ def doctor(
 def _print_telemetry_status(st) -> None:  # pragma: no cover — presentation; state fn is unit-tested
     from overlay.app.telemetry_toggle import INSTALL_HINT
 
-    on = lambda b: "on" if b else "off"  # noqa: E731
-    print(f"config [telemetry] enabled : {on(st.config_enabled)}")
+    def on(*, enabled: bool) -> str:
+        return "on" if enabled else "off"
+
+    print(f"config [telemetry] enabled : {on(enabled=st.config_enabled)}")
     print(f"telemetry extra installed  : {'yes' if st.extra_installed else 'no'}")
     if st.kill_switch:
         print("OTEL_SDK_DISABLED          : ACTIVE — forces telemetry off regardless of config")
@@ -398,7 +402,7 @@ def telemetry(
 
     enabled = action == "enable"
     verb = "enabled" if enabled else "disabled"
-    changed, backup = set_enabled(enabled)
+    changed, backup = set_enabled(enabled=enabled)
     if changed:
         print(f"telemetry {verb} in {config_path()}")
         if backup:

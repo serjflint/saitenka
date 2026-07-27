@@ -49,7 +49,7 @@ def test_keychain_returns_false_none_when_no_backend(monkeypatch):
     """No keyring backend (headless Linux) → set() is False, get() is None → caller falls back."""
     import keyring
 
-    def _boom(*a, **k):
+    def _boom(*_a, **_k):
         raise keyring.errors.NoKeyringError("no backend")
 
     monkeypatch.setattr(keyring, "set_password", _boom)
@@ -78,7 +78,7 @@ def test_store_key_falls_back_to_config_without_keyring(monkeypatch, tmp_path):
     cfg = tmp_path / "overlay.toml"
     cfg.write_text('slang = "ja"\n\n[mine]\nkey = "Ctrl+m"\n')  # a pre-existing table must survive
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
-    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda k: False)  # no backend
+    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda _k: False)  # no backend
 
     method, _ = init_wizard.store_jimaku_key("MYKEY123")
     assert method == "config"
@@ -96,7 +96,7 @@ def test_store_key_uses_keyring_when_available(monkeypatch, tmp_path):
 
     cfg = tmp_path / "overlay.toml"
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
-    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda k: True)
+    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda _k: True)
     method, _ = init_wizard.store_jimaku_key("K")
     assert method == "keyring"
     loaded = load_config()

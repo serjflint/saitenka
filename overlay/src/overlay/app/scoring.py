@@ -145,7 +145,7 @@ class Scorer:
             if self.enable_n_plus_one
             else set()
         )
-        return [self._style(t, known[i], i in n1) for i, t in enumerate(tokens)]
+        return [self._style(t, is_known=known[i], is_n1=i in n1) for i, t in enumerate(tokens)]
 
     def _style_n1(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
         # N+1 needs no `content` gate — mark_n_plus_one already excludes function words.
@@ -180,7 +180,7 @@ class Scorer:
 
     _STYLE_RULES: ClassVar = (_style_n1, _style_known, _style_forgotten, _style_freq)
 
-    def _style(self, t: Token, is_known: bool, is_n1: bool) -> TokenStyle:
+    def _style(self, t: Token, *, is_known: bool, is_n1: bool) -> TokenStyle:
         p = self.palette
         content = _is_content(t)
         level = (

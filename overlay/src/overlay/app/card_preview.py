@@ -84,7 +84,7 @@ def _audio_chip(pv: PreviewData, size: int = 20) -> Image.Image:
 
 
 def render_card_preview(
-    pv: PreviewData, width: int = 460, theme: Theme = _DEFAULT_THEME, zoom: bool = False
+    pv: PreviewData, width: int = 460, theme: Theme = _DEFAULT_THEME, *, zoom: bool = False
 ) -> PreviewRender:
     m, cw = theme.margin, width - 2 * theme.margin
     close = theme.px(CLOSE)  # ✕ button, scaled with the window like the tooltip

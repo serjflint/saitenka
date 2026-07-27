@@ -14,7 +14,7 @@ from overlay.app import doctor as doc
 from overlay.app.logsetup import _redact_event_dict, configure_logging
 
 
-def _configure(tmp_path, monkeypatch):
+def _configure(tmp_path):
     """Fresh root logger per test — configure_logging is idempotent (returns early once handlers
     are attached), so each test needs its own unhandled "overlay" logger."""
     root = logging.getLogger("overlay")
@@ -39,8 +39,8 @@ def test_redaction_processor_scrubs_secret_from_event_dict(secret):
     assert "<redacted>" in event_dict["event"] and "<redacted>" in event_dict["url"]
 
 
-def test_stdlib_bridge_preserves_level_and_message(tmp_path, monkeypatch):
-    log_path = _configure(tmp_path, monkeypatch)
+def test_stdlib_bridge_preserves_level_and_message(tmp_path):
+    log_path = _configure(tmp_path)
     log = logging.getLogger("overlay.test")
     log.error("boom happened")
 
@@ -48,11 +48,11 @@ def test_stdlib_bridge_preserves_level_and_message(tmp_path, monkeypatch):
     assert record["level"] == "error"
 
 
-def test_exception_info_lands_in_json(tmp_path, monkeypatch):
-    log_path = _configure(tmp_path, monkeypatch)
+def test_exception_info_lands_in_json(tmp_path):
+    log_path = _configure(tmp_path)
     log = logging.getLogger("overlay.test")
     try:
-        1 / 0  # noqa: B018 - deliberately triggers ZeroDivisionError for exc_info capture
+        1 / 0  # noqa: B018  # deliberately raises, to exercise exc_info capture
     except ZeroDivisionError:
         log.exception("failed")
 
@@ -61,7 +61,7 @@ def test_exception_info_lands_in_json(tmp_path, monkeypatch):
 
 
 def test_doctor_recent_errors_tails_json_log(tmp_path, monkeypatch):
-    log_path = _configure(tmp_path, monkeypatch)
+    log_path = _configure(tmp_path)
     log = logging.getLogger("overlay.test")
     log.warning("fetch failed")
     log.error("auth failed")

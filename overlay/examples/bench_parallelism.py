@@ -76,12 +76,12 @@ def _subinterpreter_probe() -> str:
     """Try PEP 734 sub-interpreters; return why they're unusable here (PIL won't import)."""
     try:
         from concurrent import interpreters
-    except Exception as e:
+    except ImportError as e:
         return f"no stdlib concurrent.interpreters ({type(e).__name__})"
     interp = interpreters.create()
     try:
         interp.exec("from PIL import Image")
-    except Exception as e:
+    except Exception as e:  # sub-interpreter exec surfaces PIL's import failure as an opaque cross-interpreter error
         msg = str(e).splitlines()[-1] if str(e) else type(e).__name__
         return f"UNSUPPORTED — {msg[:90]}"
     finally:

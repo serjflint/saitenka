@@ -8,6 +8,7 @@ an existing Expression before adding, so mining can't silently duplicate.
 from __future__ import annotations
 
 import html
+import http.client
 import json
 import logging
 import subprocess
@@ -56,11 +57,15 @@ def anki_reachable(
     """True if AnkiConnect answers a version ping. Host/key resolve from config when not given."""
     if host is None:
         host, api_key = resolve_anki()
-    req = urllib.request.Request(host, _ping_body(api_key), {"Content-Type": "application/json"})  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+    req = urllib.request.Request(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+        host, _ping_body(api_key), {"Content-Type": "application/json"}
+    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+        with urllib.request.urlopen(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+            req, timeout=timeout
+        ) as r:
             return b'"result"' in r.read()
-    except Exception:
+    except (OSError, http.client.HTTPException):
         return False
 
 
@@ -139,13 +144,17 @@ class Anki:
         if self.api_key:
             payload["key"] = self.api_key  # AnkiConnect apiKey → request body
         body = json.dumps(payload).encode()
-        req = urllib.request.Request(self.host, body, {"Content-Type": "application/json"})  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+        req = urllib.request.Request(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+            self.host, body, {"Content-Type": "application/json"}
+        )
         for attempt in stamina.retry_context(
             on=_AnkiRetryable, attempts=2, wait_initial=0.3, wait_max=1.0
         ):
             with attempt:
                 try:
-                    with urllib.request.urlopen(req, timeout=20) as r:  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+                    with urllib.request.urlopen(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+                        req, timeout=20
+                    ) as r:
                         res = json.loads(r.read())
                 except OSError as e:  # connection refused / timeout — transient, retry once
                     raise _AnkiRetryable(f"AnkiConnect unreachable at {self.host}: {e}") from e

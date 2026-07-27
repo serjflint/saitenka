@@ -39,6 +39,7 @@ def _config_enabled(cfg: dict) -> bool:
 
 
 def set_enabled(
+    *,
     enabled: bool,
     confirm: Callable[[str], bool] = lambda _p: True,
     dest: str | os.PathLike | None = None,

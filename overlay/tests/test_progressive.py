@@ -30,7 +30,7 @@ def test_apply_deps_injects_and_stops_loading():
 def test_load_deps_async_marks_loading(monkeypatch):
     import overlay.app.reader_deps as rd
 
-    monkeypatch.setattr(rd, "build_reader_deps", lambda cfg, **k: (None, None, None, None))
+    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     r = Reader(FakeIPC())
     r.load_deps_async({})
     assert r._loading is True  # spinner shows until the poll loop injects

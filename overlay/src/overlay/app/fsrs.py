@@ -214,7 +214,7 @@ def _parse_card_json(data: str | None) -> tuple[float | None, float | None]:
     try:
         j = json.loads(data)
         return j.get("s"), j.get("decay")
-    except Exception:  # best-effort parse - fall back to a default
+    except (json.JSONDecodeError, AttributeError):  # best-effort parse - fall back to a default
         return None, None
 
 
@@ -273,8 +273,8 @@ def _read_field_names(con: sqlite3.Connection) -> dict[int, list[str]]:
             "SELECT ntid, ord, name FROM fields ORDER BY ntid, ord"
         ):
             field_names.setdefault(ntid, []).append(name.lower())
-    except Exception:  # noqa: S110  # best-effort parse - fall back to a default
-        pass  # older schema or missing table — fall back
+    except sqlite3.Error:  # older schema or missing table — fall back
+        pass
     return field_names
 
 

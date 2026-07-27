@@ -44,17 +44,17 @@ def test_tts_available_windows_needs_ja_voice(monkeypatch):
 def test_tts_available_linux_needs_espeak(monkeypatch):
     media.tts_available.cache_clear()
     monkeypatch.setattr(media.sys, "platform", "linux")
-    monkeypatch.setattr(media.shutil, "which", lambda n: "/usr/bin/espeak")
+    monkeypatch.setattr(media.shutil, "which", lambda _n: "/usr/bin/espeak")
     assert media.tts_available() is True
     media.tts_available.cache_clear()
-    monkeypatch.setattr(media.shutil, "which", lambda n: None)
+    monkeypatch.setattr(media.shutil, "which", lambda _n: None)
     assert media.tts_available() is False
     media.tts_available.cache_clear()
 
 
 def test_speak_empty_is_noop(monkeypatch):
     calls: list = []
-    monkeypatch.setattr(media.subprocess, "Popen", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(media.subprocess, "Popen", lambda *a, **_k: calls.append(a))
     media.speak("")
     assert calls == []  # empty text spawns nothing
 
@@ -81,6 +81,6 @@ def test_play_cmd_falls_back_to_ffplay_without_mpv(monkeypatch):
 def test_speak_spawns_the_command(monkeypatch):
     calls: list = []
     monkeypatch.setattr(media.sys, "platform", "darwin")
-    monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **k: calls.append(cmd))
+    monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **_k: calls.append(cmd))
     media.speak("ねこ", voice="Kyoko")
     assert calls == [["say", "-v", "Kyoko", "ねこ"]]

@@ -18,16 +18,16 @@ from overlay.mpvio.osd import Overlay
 
 
 def test_discover_prefers_path(monkeypatch):
-    monkeypatch.setattr(discover.shutil, "which", lambda name: "/usr/local/bin/mpv")
+    monkeypatch.setattr(discover.shutil, "which", lambda _name: "/usr/local/bin/mpv")
     assert discover.find_mpv() == "/usr/local/bin/mpv"
 
 
 def test_discover_falls_back_to_known_locations(monkeypatch):
-    monkeypatch.setattr(discover.shutil, "which", lambda name: None)
+    monkeypatch.setattr(discover.shutil, "which", lambda _name: None)
     fake = Path("/Applications/mpv.app/Contents/MacOS/mpv")
     monkeypatch.setattr(discover, "_CANDIDATES", [fake])
     monkeypatch.setattr(discover.os.path, "isfile", lambda p: str(p) == str(fake))
-    monkeypatch.setattr(discover.os, "access", lambda p, mode: True)
+    monkeypatch.setattr(discover.os, "access", lambda _p, _mode: True)
     assert discover.find_mpv() == str(fake)
 
 
@@ -35,12 +35,12 @@ def test_discover_respects_config_mpv_path(monkeypatch, tmp_path):
     mpv = tmp_path / "mympv"
     mpv.write_text("#!/bin/sh\n")
     mpv.chmod(0o755)
-    monkeypatch.setattr(discover.shutil, "which", lambda name: None)
+    monkeypatch.setattr(discover.shutil, "which", lambda _name: None)
     assert discover.find_mpv(config_path=str(mpv)) == str(mpv)
 
 
 def test_discover_returns_none_when_absent(monkeypatch):
-    monkeypatch.setattr(discover.shutil, "which", lambda name: None)
+    monkeypatch.setattr(discover.shutil, "which", lambda _name: None)
     monkeypatch.setattr(discover, "_CANDIDATES", [])
     assert discover.find_mpv() is None
 
@@ -82,12 +82,12 @@ class _RecIPC:
     def __init__(self):
         self.commands: list = []
 
-    def command(self, *args, **kw):
+    def command(self, *args, **_kw):
         self.commands.append(args)
         return {"data": None}
 
 
-def test_overlay_id_base_offsets_overlay_ids(tmp_path, monkeypatch):
+def test_overlay_id_base_offsets_overlay_ids():
     """With id_base=10, an overlay op for logical oid 2 must physically address 11 (10 + 2 - 1),
     so a coexisting script owning 1..6 is not clobbered. Default base 1 = no offset (unchanged)."""
     import numpy as np

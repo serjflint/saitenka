@@ -145,7 +145,7 @@ def test_concurrent_worker_and_main_stay_consistent():
             while not stop.is_set():
                 wp.render_ahead(s, vh, direction=1, max_blocks=2)
                 s = (s + 80) % max(1, total - vh)
-        except BaseException as e:  # surface any thread crash to the test assertion
+        except BaseException as e:  # noqa: BLE001  # surface any thread crash (incl. SystemExit) to the test assertion
             errors.append(e)
 
     t = threading.Thread(target=worker, daemon=True)

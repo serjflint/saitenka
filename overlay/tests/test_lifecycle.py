@@ -31,7 +31,9 @@ def test_reinstall_command_pypi_and_github_forms():
 
 
 def test_reinstall_attempts_ordering_by_source_and_ref():
-    specs = lambda plan: [c[-1] for c in plan]  # noqa: E731
+    def specs(plan):
+        return [c[-1] for c in plan]
+
     auto = lc.reinstall_attempts(["deinflect"], github_ref="v0.5.0")  # PyPI first, then GitHub@tag
     assert len(auto) == 2 and "git+" not in specs(auto)[0]
     assert (
@@ -56,11 +58,11 @@ def test_latest_release_tag_parses_api_or_returns_none(monkeypatch):
     monkeypatch.setattr(
         urllib.request,
         "urlopen",
-        lambda *a, **k: _Resp(json.dumps({"tag_name": "v0.5.0"}).encode()),
+        lambda *_a, **_k: _Resp(json.dumps({"tag_name": "v0.5.0"}).encode()),
     )
     assert lc.latest_release_tag() == "v0.5.0"
 
-    def _boom(*a, **k):
+    def _boom(*_a, **_k):
         raise OSError("offline")
 
     monkeypatch.setattr(urllib.request, "urlopen", _boom)

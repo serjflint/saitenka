@@ -107,7 +107,7 @@ class ChipBox:
     def descent(self) -> int:
         return self.sprite.height - self.sprite.baseline
 
-    def draw(self, img: Image.Image, draw: ImageDraw.ImageDraw, x: float, baseline: float) -> None:
+    def draw(self, img: Image.Image, _draw: ImageDraw.ImageDraw, x: float, baseline: float) -> None:
         img.alpha_composite(self.sprite.image, (round(x), round(baseline - self.sprite.baseline)))
 
 

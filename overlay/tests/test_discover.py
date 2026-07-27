@@ -23,7 +23,7 @@ def test_registry_app_paths_finds_off_path_mpv(tmp_path, monkeypatch):
     exe.chmod(0o755)
 
     # Only the HKCU App Paths entry for mpv.exe resolves; everything else is a miss.
-    def _reg(root, subkey, name=""):
+    def _reg(root, subkey, _name=""):
         if root == "HKCU" and subkey.endswith(r"App Paths\mpv.exe"):
             return f'"{exe}"'  # installers often store the path quoted
         return None
@@ -37,7 +37,7 @@ def test_registry_default_handler_only_trusts_known_mpv_binary(tmp_path, monkeyp
     exe.write_text("")
     exe.chmod(0o755)
 
-    def _reg(root, subkey, name=""):
+    def _reg(_root, subkey, _name=""):
         if "App Paths" in subkey:
             return None  # nothing under App Paths → fall through to the default handler
         if subkey.endswith(r"FileExts\.mkv\UserChoice"):
@@ -51,7 +51,7 @@ def test_registry_default_handler_only_trusts_known_mpv_binary(tmp_path, monkeyp
 
 
 def test_registry_default_handler_rejects_non_mpv_player(monkeypatch):
-    def _reg(root, subkey, name=""):
+    def _reg(_root, subkey, _name=""):
         if "App Paths" in subkey:
             return None
         if subkey.endswith(r"FileExts\.mkv\UserChoice"):
@@ -65,5 +65,5 @@ def test_registry_default_handler_rejects_non_mpv_player(monkeypatch):
 
 
 def test_registry_probe_is_noop_when_nothing_matches(monkeypatch):
-    monkeypatch.setattr(d, "_reg_value", lambda *a, **k: None)
+    monkeypatch.setattr(d, "_reg_value", lambda *_a, **_k: None)
     assert d._windows_registry_mpv() is None

@@ -236,7 +236,7 @@ class SubIndex:
                 return found
         return -1
 
-    def target(self, current: int, delta: int, inside: bool = True) -> int:
+    def target(self, current: int, delta: int, *, inside: bool = True) -> int:
         """The cue index reached by stepping ``delta`` (-1 prev / 0 replay / +1 next) from
         ``current`` (as returned by :meth:`locate`), or -1 when out of range.
 
