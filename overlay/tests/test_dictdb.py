@@ -25,10 +25,14 @@ def _term_zip(path, title, entries, *, kanji=(), tags=()):
     return str(path)
 
 
-def _meta_zip(path, title, mode, entries):
-    """entries: [term, data]. Writes a term_meta_bank zip (freq or pitch)."""
+def _meta_zip(path, title, mode, entries, *, frequency_mode=None):
+    """entries: [term, data]. Writes a term_meta_bank zip (freq or pitch). ``frequency_mode`` sets
+    index.json's ``frequencyMode`` (e.g. ``"occurrence-based"``)."""
+    index = {"title": title, "format": 3}
+    if frequency_mode is not None:
+        index["frequencyMode"] = frequency_mode
     with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
+        zf.writestr("index.json", json.dumps(index))
         bank = [[t, mode, data] for t, data in entries]
         zf.writestr("term_meta_bank_1.json", json.dumps(bank, ensure_ascii=False))
     return str(path)
@@ -246,3 +250,103 @@ def test_import_freq_or_pitch_reanalyzes_term_meta(tmp_path):
         db._conn().execute("SELECT count(*) FROM sqlite_stat1 WHERE tbl='term_meta'").fetchone()[0]
     )
     assert stat > 0  # ANALYZE ran and recorded stats for term_meta's indexes
+
+
+# --- frequency value parsing (SubMiner-parity edge cases) --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (8912, 8912),  # plain int
+        (8912.0, 8912),  # float
+        ("8912", 8912),  # numeric string
+        ("118,121", 118),  # grouped "rank, occurrences" → LEADING rank, not 118121
+        ("118, 121", 118),  # same, with a space
+        ("  73 ", 73),  # surrounding whitespace
+        ("N5", None),  # non-numeric → no rank (never a crash)
+        (True, None),  # bool is not rank 1
+        (None, None),
+    ],
+)
+def test_coerce_rank(value, expected):
+    from overlay.app.dictdb import _coerce_rank
+
+    assert _coerce_rank(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (8912, (None, 8912, None)),
+        ({"reading": "ほんめい", "frequency": 8912}, ("ほんめい", 8912, None)),
+        ({"value": 4073, "displayValue": "4073㋕"}, (None, 4073, "4073㋕")),
+        # grouped display packed into value as a string → leading rank wins, no crash downstream
+        ({"value": "118,121"}, (None, 118, None)),
+        ({"frequency": {"value": -1, "displayValue": "N5"}}, (None, -1, "N5")),  # JLPT sentinel
+    ],
+)
+def test_parse_freq_entry_shapes(data, expected):
+    from overlay.app.dictdb import _parse_freq_entry
+
+    assert _parse_freq_entry(data) == expected
+
+
+def _ranks(db, dict_id):
+    return dict(
+        db._conn()
+        .execute("SELECT term, rank FROM term_meta WHERE dict_id=? AND mode='freq'", (dict_id,))
+        .fetchall()
+    )
+
+
+def test_occurrence_based_freq_is_converted_to_rank(tmp_path):
+    """An occurrence-based dict stores COUNTS (higher = more frequent). Import must convert them to
+    ranks (most-frequent = 1) so the banded scorer colors them the right way round, not inverted."""
+    fz = _meta_zip(
+        tmp_path / "occ.zip",
+        "OccFreq",
+        "freq",
+        [
+            ["猫", {"reading": "ねこ", "frequency": 500}],  # rarest count → highest rank
+            ["犬", {"reading": "いぬ", "frequency": 9000}],  # most common → rank 1
+            ["鳥", {"reading": "とり", "frequency": 3000}],
+        ],
+        frequency_mode="occurrence-based",
+    )
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    row = db.import_zip(fz, imported_at=AT)
+    assert _ranks(db, row.id) == {"犬": 1, "鳥": 2, "猫": 3}
+
+
+def test_occurrence_based_preserves_count_in_display(tmp_path):
+    """The derived rank drives coloring, but the tooltip should still show the real occurrence count —
+    kept in ``disp`` when the dict gave no explicit displayValue."""
+    fz = _meta_zip(
+        tmp_path / "occ2.zip",
+        "OccFreq2",
+        "freq",
+        [["犬", {"reading": "いぬ", "frequency": 9000}]],
+        frequency_mode="occurrence-based",
+    )
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    row = db.import_zip(fz, imported_at=AT)
+    rank, disp = (
+        db._conn()
+        .execute("SELECT rank, disp FROM term_meta WHERE dict_id=? AND term='犬'", (row.id,))
+        .fetchone()
+    )
+    assert (rank, disp) == (1, "9000")
+
+
+def test_rank_based_freq_is_left_as_is(tmp_path):
+    """The default (rank-based) path must NOT remap — a rank of 8912 stays 8912."""
+    fz = _meta_zip(
+        tmp_path / "rank.zip",
+        "RankFreq",
+        "freq",
+        [["本命", {"reading": "ほんめい", "frequency": 8912}]],
+    )
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    row = db.import_zip(fz, imported_at=AT)
+    assert _ranks(db, row.id) == {"本命": 8912}

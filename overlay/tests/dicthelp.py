@@ -26,10 +26,14 @@ def term_zip(path, title, entries):
     return str(path)
 
 
-def meta_zip(path, title, mode, entries):
-    """Write a minimal Yomitan term_meta_bank zip. ``entries``: [term, data]; ``mode``: freq|pitch."""
+def meta_zip(path, title, mode, entries, *, frequency_mode=None):
+    """Write a minimal Yomitan term_meta_bank zip. ``entries``: [term, data]; ``mode``: freq|pitch.
+    ``frequency_mode`` sets index.json's ``frequencyMode`` (e.g. ``"occurrence-based"``)."""
+    index = {"title": title, "format": 3}
+    if frequency_mode is not None:
+        index["frequencyMode"] = frequency_mode
     with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
+        zf.writestr("index.json", json.dumps(index))
         bank = [[t, mode, data] for t, data in entries]
         zf.writestr("term_meta_bank_1.json", json.dumps(bank, ensure_ascii=False))
     return str(path)
