@@ -7,6 +7,37 @@ logs.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-28
+
+### Changed
+
+- **Renamed the distribution `saitenka-overlay` → `saitenka`** (and the GPL add-on
+  `saitenka-overlay-deinflect` → `saitenka-deinflect`), now that the project is published to PyPI. The
+  CLI command is `saitenka`; the default mined-note Anki tag and the jimaku keychain service also moved
+  to `saitenka`. The import package stays `overlay`. **Breaking:** reinstall as `saitenka` (e.g.
+  `uv tool install 'saitenka[full]'`) and update anything that invoked `saitenka-overlay`. Migrate
+  existing mined notes with `uv run tools/anki_retag.py`, and re-run `saitenka set-jimaku-key` once (the
+  keychain service moved, so the old key isn't found under the new name).
+
+### Added
+
+- **Continuous integration (GitHub Actions).** `ci.yml` runs the full `poe all` gate on Linux plus a
+  Python matrix (3.13 · 3.14 · 3.14t · 3.15 · 3.15t); `e2e.yml` exercises the real per-OS transport on
+  Linux/macOS/Windows.
+- **Publishing to PyPI.** `saitenka` is installable from PyPI; a version tag triggers `release.yml`,
+  which publishes a GitHub Release (the self-contained bundle) and the wheel/sdist to PyPI via OIDC
+  **Trusted Publishing** — no stored tokens.
+
+### Fixed
+
+- Test-suite portability the new Linux CI surfaced: macOS-only mpv-discovery / SubMiner-detection tests,
+  a cross-FreeType tolerance for golden images, and a free-threading data race in a render-counter test.
+
+### Build
+
+- `libcst` moved to an opt-in `codemod` dependency group, and a lean `test` group added, so the CI test
+  matrix (and new-interpreter legs like 3.15t) is not blocked building native dev tools it never runs.
+
 ## [0.8.0] - 2026-07-28
 
 ### Added
