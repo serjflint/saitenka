@@ -16,6 +16,8 @@ from functools import lru_cache
 # main-thread-only in the app, but this lock makes it safe even if called concurrently.
 _TAG_LOCK = threading.Lock()
 
+_KANA_PUNCT = frozenset({0x30A0, 0x30FB})  # ゠ double-hyphen, ・ nakaguro — separators, not kana
+
 CONTENT_POS = {"名詞", "動詞", "形容詞", "副詞", "形状詞", "連体詞", "感動詞"}
 SKIP_POS = {"補助記号", "記号", "空白"}  # symbol / punctuation / whitespace — never worth a tooltip
 AUX_POS = {"助動詞"}  # trailing tokens glued to the verb/adj surface for the inflection chain
@@ -41,7 +43,13 @@ class Token:
 
     @property
     def is_kana_only(self) -> bool:
-        return all(0x3040 <= ord(c) <= 0x30FF for c in self.surface)
+        # Kana LETTERS only (hiragana/katakana incl. ー prolonged mark). Katakana punctuation — ・
+        # (0x30FB nakaguro) and ゠ (0x30A0 double-hyphen) — sit inside the block but are separators,
+        # not kana, so a name like ジョン・スミス isn't mistaken for a kana-only word and dropped from
+        # N+1 candidacy.
+        return bool(self.surface) and all(
+            0x3040 <= ord(c) <= 0x30FF and ord(c) not in _KANA_PUNCT for c in self.surface
+        )
 
 
 def kata_to_hira(s: str) -> str:
@@ -98,7 +106,7 @@ def strip_inline_furigana(tokens: list[Token]) -> list[Token]:
 def _tagger():
     import fugashi
 
-    return fugashi.Tagger()  # pyright: ignore[reportAttributeAccessIssue]  # no stubs
+    return fugashi.Tagger()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # no stubs
 
 
 _HEAD_POS = {"動詞", "形容詞", "形状詞"}  # can start a conjugation chain

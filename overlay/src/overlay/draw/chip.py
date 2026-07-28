@@ -64,7 +64,7 @@ def _render_two_tone(name: str, cs: ChipStyle) -> Sprite:
     name_seg_w = round(name_w) + 2 * pad_h
     total_w = name_seg_w + round(val_w) + 2 * pad_h
 
-    img = Image.new("RGBA", (total_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # float h: int() would shift golden geometry
+    img = Image.new("RGBA", (total_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float h: int() would shift golden geometry
     draw = ImageDraw.Draw(img)
     # whole pill: light value fill + a colored border (the value segment reads as bordered)
     draw.rounded_rectangle(
@@ -79,7 +79,7 @@ def _render_two_tone(name: str, cs: ChipStyle) -> Sprite:
     )
     draw_inline(img, draw, pad_h, baseline, [Span(name, name_style)])
     draw_inline(img, draw, name_seg_w + pad_h, baseline, [Span(cs.value or "", val_style)])
-    return Sprite(img, baseline)  # type: ignore[arg-type]  # float baseline is drawn as-is
+    return Sprite(img, baseline)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float baseline is drawn as-is
 
 
 def render_chip(text: str, cs: ChipStyle) -> Sprite:
@@ -100,7 +100,7 @@ def render_chip(text: str, cs: ChipStyle) -> Sprite:
     baseline = -top + pad_v
     pill_w = round(text_w) + 2 * pad_h
 
-    img = Image.new("RGBA", (pill_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # float h: see above
+    img = Image.new("RGBA", (pill_w, pill_h), (0, 0, 0, 0))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float h: see above
     draw = ImageDraw.Draw(img)
     if cs.bg[3] > 0 or cs.border is not None:
         draw.rounded_rectangle(
@@ -111,4 +111,4 @@ def render_chip(text: str, cs: ChipStyle) -> Sprite:
             width=cs.border_w if cs.border else 1,
         )
     draw_inline(img, draw, pad_h, baseline, [Span(text, style)])
-    return Sprite(img, baseline)  # type: ignore[arg-type]  # float baseline is drawn as-is
+    return Sprite(img, baseline)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # float baseline is drawn as-is

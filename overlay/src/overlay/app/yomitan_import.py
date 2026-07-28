@@ -224,7 +224,8 @@ def find_settings_export() -> str | None:
     the repo's ``yomitan/`` dir, then home. Returns its path, or None if none is found."""
     dirs = [Path.home() / "Downloads", Path.home() / "Documents/Japanese/yomitan", Path.home()]
     found = [p for d in dirs for p in d.glob(SETTINGS_GLOB)]
-    return str(max(found, key=lambda p: p.stat().st_mtime)) if found else None
+    # ty widens the max() key-lambda param to `object` (inference limit); mypy/pyright infer Path fine.
+    return str(max(found, key=lambda p: p.stat().st_mtime)) if found else None  # ty: ignore[unresolved-attribute]
 
 
 def _resolve_settings_path(settings_path: str | None) -> str | None:

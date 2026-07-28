@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 import zipfile
@@ -108,23 +109,54 @@ def _revision_of(zf: zipfile.ZipFile) -> str:
         return ""
 
 
+def _is_occurrence_based(zf: zipfile.ZipFile) -> bool:
+    """True when index.json declares ``frequencyMode: "occurrence-based"`` — the freq *value* is then an
+    occurrence COUNT (higher = more frequent), not a rank. Left untouched, the banded scorer (which
+    assumes rank semantics: 1 = most frequent) would colour such a dict inverted, so the count is
+    converted to a rank at import — see :func:`_apply_occurrence_ranks`. Yomitan's default is
+    ``rank-based``."""
+    try:
+        return json.loads(zf.read("index.json")).get("frequencyMode") == "occurrence-based"
+    except Exception:
+        log.debug("index.json frequencyMode read failed", exc_info=True)
+        return False
+
+
+_LEADING_INT = re.compile(r"\s*(-?\d+)")
+
+
+def _coerce_rank(v) -> int | None:
+    """A freq value → int rank, tolerating the shapes seen in the wild. A *string* value takes the
+    LEADING integer (``"118,121"`` → ``118``), never the comma-stripped concatenation ``118121`` — a
+    grouped ``"rank, occurrences"`` display means the rank is the first number (the bug SubMiner fixed).
+    ``bool`` is rejected (``True`` is not rank 1); non-numeric → ``None`` (no colour, never a crash)."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str) and (m := _LEADING_INT.match(v)):
+        return int(m.group(1))
+    return None
+
+
 def _parse_freq_entry(
     data,
 ) -> tuple[str | None, int | None, str | None]:
     """``(reading, rank, disp)`` from a freq term_meta value — plain int, ``{"value"/
     "displayValue"}``, ``{"reading","frequency"}``, or the JLPT
-    ``{"frequency": {"value": -1, "displayValue": "N5"}}`` form."""
+    ``{"frequency": {"value": -1, "displayValue": "N5"}}`` form. ``rank`` is always an ``int``/``None``
+    (never a raw string) so the coloring hot path can compare it — see :func:`_coerce_rank`."""
     reading, rank, disp = None, None, None
-    if isinstance(data, (int, float)):
-        rank = int(data)
+    if isinstance(data, (int, float, str)):
+        rank = _coerce_rank(data)
     elif isinstance(data, dict):
         reading = data.get("reading")
         fval = data.get("frequency", data)
         if isinstance(fval, dict):
-            rank = fval.get("value")
+            rank = _coerce_rank(fval.get("value"))
             disp = fval.get("displayValue")
-        elif isinstance(fval, (int, float)):
-            rank = int(fval)
+        else:
+            rank = _coerce_rank(fval)
     return reading, rank, disp
 
 
@@ -171,6 +203,36 @@ def _read_term_meta(
                     continue
                 reading, positions_json = parsed
                 yield term, "pitch", reading, None, None, positions_json
+
+
+def _apply_occurrence_ranks(
+    rows: list[tuple[str, str, str | None, int | None, str | None, str | None]],
+) -> list[tuple[str, str, str | None, int | None, str | None, str | None]]:
+    """Convert occurrence COUNTS to 1-based dense ranks (most-frequent = 1) for an occurrence-based freq
+    dict, so the banded scorer — which assumes rank semantics — colours it correctly instead of
+    inverted. The original count is preserved in ``disp`` (when the dict gave no explicit displayValue),
+    so the tooltip still shows the real frequency, not the derived rank. Pitch rows and non-positive
+    ranks (e.g. the JLPT ``-1`` sentinel) pass through untouched."""
+    counts = sorted(
+        {r[3] for r in rows if r[1] == "freq" and isinstance(r[3], int) and r[3] > 0}, reverse=True
+    )
+    rank_of = {c: i + 1 for i, c in enumerate(counts)}
+    out: list[tuple[str, str, str | None, int | None, str | None, str | None]] = []
+    for term, mode, reading, rank, disp, positions in rows:
+        if mode == "freq" and isinstance(rank, int) and rank > 0:
+            out.append(
+                (
+                    term,
+                    mode,
+                    reading,
+                    rank_of[rank],
+                    disp if disp is not None else str(rank),
+                    positions,
+                )
+            )
+        else:
+            out.append((term, mode, reading, rank, disp, positions))
+    return out
 
 
 def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int]]:
@@ -351,7 +413,9 @@ class DictionaryDb:
                 if kind == "dict":
                     self._load_dict_banks(conn, zf, did, on_bank)
                 else:  # 'freq' | 'pitch'
-                    self._load_meta_banks(conn, zf, did, on_bank)
+                    self._load_meta_banks(
+                        conn, zf, did, on_bank, occurrence_based=_is_occurrence_based(zf)
+                    )
             if kind != "dict":
                 # Keep term_meta's query-planner stats fresh after every freq/pitch import — see
                 # _ensure_schema's one-time catch-up for the reasoning (PitchSource.accents needs
@@ -440,12 +504,17 @@ class DictionaryDb:
         zf: zipfile.ZipFile,
         did: int,
         on_bank: Callable[[int, int], None] | None,
+        *,
+        occurrence_based: bool = False,
     ) -> None:
         if on_bank:
             on_bank(0, 1)
+        rows = list(_read_term_meta(zf))
+        if occurrence_based:
+            rows = _apply_occurrence_ranks(rows)
         conn.executemany(
             "INSERT INTO term_meta VALUES(?,?,?,?,?,?,?)",
-            [(did, *rest) for rest in _read_term_meta(zf)],
+            [(did, *rest) for rest in rows],
         )
         if on_bank:
             on_bank(1, 1)

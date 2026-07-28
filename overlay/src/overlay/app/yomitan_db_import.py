@@ -116,6 +116,8 @@ def _index_json(meta: dict) -> str:
     }
     if "sequenced" in meta:
         idx["sequenced"] = bool(meta["sequenced"])
+    if meta.get("frequencyMode"):  # preserve so occurrence-based freq dicts re-import correctly
+        idx["frequencyMode"] = meta["frequencyMode"]
     return json.dumps(idx, ensure_ascii=False)
 
 

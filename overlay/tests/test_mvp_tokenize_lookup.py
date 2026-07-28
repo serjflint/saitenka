@@ -1,9 +1,33 @@
 """MVP: tokenizer (lemma/reading), furigana alignment, and JMdict → Entry adapter."""
 
+import pytest
+
 from overlay.app.lookup import entry_for, furigana
-from overlay.app.tokenize import tokenize
+from overlay.app.tokenize import Token, tokenize
 
 LINE = "門前の小僧習わぬ経を読む"
+
+
+def _tok(surface: str) -> Token:
+    return Token(surface, surface, "", "名詞", 0, len(surface))
+
+
+@pytest.mark.parametrize(
+    ("surface", "kana_only"),
+    [
+        ("そう", True),  # hiragana
+        ("コーヒー", True),  # katakana incl. ー prolonged mark
+        ("読む", False),  # has kanji
+        (
+            "ジョン・スミス",
+            False,
+        ),  # ・ nakaguro is a separator, not kana — must not read as kana-only
+        ("A", False),  # latin
+        ("", False),  # empty is not a kana word
+    ],
+)
+def test_is_kana_only_excludes_katakana_punctuation(surface, kana_only):
+    assert _tok(surface).is_kana_only is kana_only
 
 
 def test_tokenize_surfaces_and_lemmas():
