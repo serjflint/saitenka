@@ -27,6 +27,7 @@ overlay/fullscreen breakage that plagues external overlays.
 - [How it works](#how-it-works)
 - [Features](#features)
 - [How it compares](#how-it-compares)
+- [Where it fits in your setup](#where-it-fits-in-your-setup)
 - [Quick start](#quick-start)
 - [What's in the repo](#whats-in-the-repo)
 - [Requirements](#requirements)
@@ -119,6 +120,51 @@ trade-offs, not a scoreboard.
 Short version: reach for **SubMiner** if you want the widest set of turn-key integrations and a packaged
 desktop app; reach for **Saitenka** if you want a fast, single-surface, FSRS-grounded engine that draws
 straight into mpv.
+
+## Where it fits in your setup
+
+Saitenka is the **study layer at the mpv playback point**. It doesn't acquire, organize, serve, or track
+your library — it composes with the tools that do, rather than replacing them. If you already run a
+media-server rig, this is the division of labor:
+
+| Pipeline stage | Common tools | Saitenka |
+|---|---|:---:|
+| Acquire episodes | [Sonarr](https://sonarr.tv/) (PVR — monitors RSS, grabs + renames) · [Taiga](https://taiga.moe/) (RSS/torrent feeds, Windows) · Usenet/torrent clients | — |
+| Identify & organize the files | [Shoko](https://shokoanime.com/) (AniDB hashing) + Shokofin | — |
+| Serve & stream the library | [Jellyfin](https://jellyfin.org/) · Plex · Emby | — |
+| **Play the file** | **[mpv](https://mpv.io/)** | ✅ **attaches here** |
+| Color words · dictionary · mine | **Saitenka** | ✅ its whole job |
+| Spaced repetition | [Anki](https://apps.ankiweb.net/) + FSRS | ✅ mines in via AnkiConnect |
+| Track list · discover · scrobble | [Taiga](https://taiga.moe/) (Windows) · [Trackma](https://github.com/z411/trackma) (cross-platform) | runs alongside |
+
+**The one hard rule:** Saitenka draws into a **real, local mpv** process — over its IPC socket, with the
+auto-start plugin. It rides the *player*, not the *server*, so it works with a Jellyfin/Shoko library only
+when you play the file in mpv (open it directly, or hand off to mpv as an external player where your client
+supports it). Watching *inside* a Jellyfin/Plex client — web, TV, or phone — is out of reach, because those
+aren't mpv.
+
+**Composes cleanly with:**
+
+- **A Jellyfin + Shoko + Sonarr library.** Let them acquire, identify (AniDB), and organize; point mpv at
+  the resulting local file and the overlay just works. Shoko's AniDB-accurate filenames also keep
+  downstream filename-based tools happy.
+- **A list tracker / downloader.** Taiga (Windows) and Trackma (cross-platform) do more than scrobble —
+  they manage your anime *list*, offer a seasonal discovery browser ranked by AniList/MAL/Kitsu scores,
+  and Taiga even auto-downloads new episodes via RSS/torrent feeds. None of that overlaps Saitenka: their
+  local mpv detection (Trackma's inotify / MPRIS / win32; Taiga's Anisthesia) sees the *same* mpv instance
+  the overlay is attached to, so one playthrough both mines vocab **and** scrobbles your progress — no
+  integration wiring, they just observe the same player. (In a Shoko rig, Shokofin can sync watched-state
+  to your lists on its own, no separate tracker needed.)
+- **Anki + AnkiConnect · Yomitan dictionaries · jimaku.cc** — its actual dependencies (see
+  [Requirements](#requirements)).
+
+**Deliberately out of scope** — reach for a broader tool like SubMiner if you need these: built-in AniList
+progress, a Jellyfin/media-server client, a media launcher, and cross-machine stats sync. Saitenka defers
+these to the dedicated tools above and stays a single-purpose mpv engine (the plain `❌` rows above).
+
+**Not there *yet*, but [on the roadmap](https://github.com/serjflint/saitenka/issues):** an immersion
+stats dashboard, extra subtitle sources, mined-audio loudness normalization, and a hosted docs site (the
+`❌*` rows above).
 
 ## Quick start
 
