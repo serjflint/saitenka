@@ -89,19 +89,25 @@ jobs:
           enable-cache: true
           working-directory: overlay
 
-      - name: Sync
+      # Only the lean `test` group — not the full dev toolchain — so a new-interpreter leg (3.15t) isn't
+      # blocked building native dev tools it never runs (memray/py-spy/…). The gate job exercises the
+      # canonical `poe test`; here we invoke pytest directly (poe isn't in the test group), mirroring the
+      # `test` / `test-ft` marker sets in pyproject's [tool.poe.tasks].
+      - name: Sync (test group only)
         working-directory: overlay
         run: |
           uv python install
-          uv sync --locked --extra full
+          uv sync --locked --extra full --no-default-groups --group test
 
       - name: Tests
         working-directory: overlay
-        run: uv run poe test
+        run: uv run --no-sync pytest -q -n auto -m "not (slow or integration or requires_display or e2e)"
 
       # test-ft (PYTHON_GIL=0) is only meaningful on a free-threaded build; on a GIL interpreter the
       # env var is a no-op, so skip it there rather than run a misleadingly-labelled "FT" pass.
       - name: Tests (free-threaded)
         if: endsWith(matrix.python, 't')
         working-directory: overlay
-        run: uv run poe test-ft
+        env:
+          PYTHON_GIL: "0"
+        run: uv run --no-sync pytest -q -n auto -m "not slow"

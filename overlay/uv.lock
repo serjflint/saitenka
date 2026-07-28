@@ -1652,6 +1652,16 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
 ]
+test = [
+    { name = "dirty-equals" },
+    { name = "hypothesis" },
+    { name = "pyfakefs" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-randomly" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1707,6 +1717,16 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16" },
     { name = "ty", specifier = ">=0.0.61" },
+]
+test = [
+    { name = "dirty-equals", specifier = ">=0.11" },
+    { name = "hypothesis", specifier = ">=6.157.2" },
+    { name = "pyfakefs", specifier = ">=6.2.0" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "pytest-randomly", specifier = ">=4.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
 
 [[package]]

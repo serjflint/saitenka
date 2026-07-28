@@ -67,20 +67,26 @@ saitenka-deinflect = { path = "../deinflect", editable = true }
 # `uv sync` (incl. the CI test matrix) fail to even create the env on 3.15+. Isolated here so the default
 # dev env stays lean and forward-compatible; author codemods with `uv run --group codemod <script>`.
 codemod = ["libcst>=1.8.6"]
-dev = [
+# Minimal deps to RUN the suite. The CI test matrix installs ONLY this group
+# (`--no-default-groups --group test`), so new-interpreter legs (e.g. 3.15t) aren't blocked building the
+# heavy native dev tools they never use (memray/py-spy/mypy/ruff/…, which lack free-threaded wheels).
+test = [
     "hypothesis>=6.157.2",
-    "mypy>=2.3.0",
-    "playwright>=1.61.0",
-    "poethepoet>=0.48.0",
-    "pyrefly>=1.1.1",
     "pytest>=8.0",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=4.1.0",
     "pytest-xdist>=3.8.0",
     "pytest-timeout>=2.4.0",
     "dirty-equals>=0.11",
-    "ty>=0.0.61",
     "pyfakefs>=6.2.0",
+]
+dev = [
+    { include-group = "test" },
+    "mypy>=2.3.0",
+    "playwright>=1.61.0",
+    "poethepoet>=0.48.0",
+    "pyrefly>=1.1.1",
+    "ty>=0.0.61",
     "basedpyright>=1.39",
     "py-spy>=0.4.2",
     "memray>=1.19.3",
