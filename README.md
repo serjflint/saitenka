@@ -148,15 +148,34 @@ aren't mpv.
 - **A Jellyfin + Shoko + Sonarr library.** Let them acquire, identify (AniDB), and organize; point mpv at
   the resulting local file and the overlay just works. Shoko's AniDB-accurate filenames also keep
   downstream filename-based tools happy.
-- **A list tracker / downloader.** Taiga (Windows) and Trackma (cross-platform) do more than scrobble —
-  they manage your anime *list*, offer a seasonal discovery browser ranked by AniList/MAL/Kitsu scores,
-  and Taiga even auto-downloads new episodes via RSS/torrent feeds. None of that overlaps Saitenka: their
-  local mpv detection (Trackma's inotify / MPRIS / win32; Taiga's Anisthesia) sees the *same* mpv instance
-  the overlay is attached to, so one playthrough both mines vocab **and** scrobbles your progress — no
-  integration wiring, they just observe the same player. (In a Shoko rig, Shokofin can sync watched-state
-  to your lists on its own, no separate tracker needed.)
+- **A list-driven watch loop.** Taiga (Windows) and Trackma (cross-platform) do more than scrobble — one
+  tracking list drives the whole loop. Taiga in particular auto-downloads *only* the airing episodes of
+  shows you're watching (RSS feeds filtered by watch-status + episode-availability, handed to qBittorrent),
+  so there's a single source of truth and no separate download queue to reconcile. None of that overlaps
+  Saitenka: their local mpv detection (Trackma's inotify / MPRIS / win32; Taiga's Anisthesia) sees the
+  *same* mpv instance the overlay is attached to, so one playthrough both mines vocab **and** scrobbles
+  your progress — no wiring, they just observe the same player. (In a Shoko rig, Shokofin syncs
+  watched-state to your lists itself — no separate tracker needed.)
 - **Anki + AnkiConnect · Yomitan dictionaries · jimaku.cc** — its actual dependencies (see
   [Requirements](#requirements)).
+
+**Picking the watch-loop tool that pairs with it.** Saitenka doesn't compete in this space — these are the
+tools you run *alongside* it to track progress and get episodes onto disk. They trade off differently:
+
+| | [Taiga](https://taiga.moe/) | [Trackma](https://github.com/z411/trackma) | [Sonarr](https://sonarr.tv/) |
+|---|:---:|:---:|:---:|
+| Platforms | Windows | Linux · macOS · Windows | Linux · macOS · Windows |
+| Scrobble progress → AniList/MAL/… | ✅ | ✅ | ❌ |
+| Downloads episodes | ✅ from your watch-list → qBittorrent | ❌ | ✅ own series monitoring (can import your list) |
+| Detects playback in local mpv | ✅ (Windows only) | ✅ inotify / MPRIS / win32 | ❌ |
+| Polls Plex/Jellyfin "now playing" | ❌ browser tab only | ✅ Plex · Jellyfin · Kodi | — |
+| Season discovery browser | ✅ | ❌ | ❌ |
+| Footprint | desktop app | desktop app · TUI · CLI | background daemon + web UI |
+
+Rough guide: **Taiga** is the most unified single-list loop but is Windows-only; **Trackma** is
+cross-platform tracking + scrobble (with Plex/Jellyfin now-playing backends) but doesn't download;
+**Sonarr** is cross-platform, powerful list-driven downloading, but a separate always-on system that
+doesn't track your watch progress. (All three are GPLv3.)
 
 **Deliberately out of scope** — reach for a broader tool like SubMiner if you need these: built-in AniList
 progress, a Jellyfin/media-server client, a media launcher, and cross-machine stats sync. Saitenka defers
