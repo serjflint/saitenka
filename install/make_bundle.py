@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build ONE shareable self-contained bundle: ``saitenka-overlay-<ver>.zip`` (Stage 17b).
+"""Build ONE shareable self-contained bundle: ``saitenka-<ver>.zip`` (Stage 17b).
 
 The zip contains the wheel (built with ``uv build`` — assets ride inside it via importlib.resources),
 both bootstrap installers, and a short INSTALL.txt. A friend unzips it and runs the installer for
@@ -35,7 +35,7 @@ wheel next to it (with the JMdict English fallback, plus the GPL-3.0 deinflect a
 chains — shipped as source in this bundle, so the install is GPL-3.0), and launches the setup wizard.
 Then just:
 
-  saitenka-overlay <video.mkv>
+  saitenka <video.mkv>
 
 To preview without changing anything:  bash overlay-install.sh --dry-run
 """
@@ -88,7 +88,7 @@ def make_bundle(out_dir: Path | None = None) -> Path:
         shutil.copy2(INSTALL_DIR / stub, staging / stub)
     (staging / "INSTALL.txt").write_text(INSTALL_TXT, encoding="utf-8")
 
-    zip_path = out_dir / f"saitenka-overlay-{_version()}.zip"
+    zip_path = out_dir / f"saitenka-{_version()}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in sorted(staging.iterdir()):
             if f.name.startswith("."):  # drop uv build's stray dist/.gitignore etc.
@@ -99,7 +99,7 @@ def make_bundle(out_dir: Path | None = None) -> Path:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="build the shareable saitenka-overlay bundle")
+    ap = argparse.ArgumentParser(description="build the shareable saitenka bundle")
     ap.add_argument("--out", type=Path, default=None, help="output dir (default: <repo>/dist)")
     args = ap.parse_args()
     zip_path = make_bundle(args.out)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# saitenka-overlay bootstrap (macOS / Linux) — Stage 17b.
+# saitenka bootstrap (macOS / Linux) — Stage 17b.
 # The ONLY job the shell does: get `uv`, install the overlay from the wheel next to this script, then
 # hand off to the Python `setup` wizard (which owns all real logic). Non-destructive; --dry-run prints.
 set -euo pipefail
@@ -24,9 +24,9 @@ fi
 # mirrors the checkout installers' [full].
 # shellcheck disable=SC2012  # ls -t picks the newest by mtime (BSD find lacks -printf); our own
 # wheel/sdist filenames are controlled — no whitespace/newline surprises for ls to mishandle.
-WHEEL="$(ls -t "$SELF_DIR"/saitenka_overlay-*.whl 2>/dev/null | head -1 || true)"
+WHEEL="$(ls -t "$SELF_DIR"/saitenka-*.whl 2>/dev/null | head -1 || true)"
 # shellcheck disable=SC2012  # (same rationale) controlled sdist filename, ls -t = newest by mtime
-DEINFLECT="$(ls -t "$SELF_DIR"/saitenka_overlay_deinflect-*.tar.gz 2>/dev/null | head -1 || true)"
+DEINFLECT="$(ls -t "$SELF_DIR"/saitenka_deinflect-*.tar.gz 2>/dev/null | head -1 || true)"
 if [ -z "${WHEEL:-}" ]; then
   echo "[saitenka] no overlay wheel found next to this installer — is the bundle intact?" >&2
   # under --dry-run this is just a preview outside a bundle; don't hard-fail
@@ -43,7 +43,7 @@ fi
 
 # 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin).
 if $DRY_RUN; then
-  echo "DRY: saitenka-overlay setup --dry-run"
+  echo "DRY: saitenka setup --dry-run"
 else
-  exec saitenka-overlay setup
+  exec saitenka setup
 fi

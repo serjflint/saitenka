@@ -20,7 +20,7 @@ from overlay.app.config import load_config  # noqa: E402  # must come after the 
 _cfg = load_config()
 pytestmark = pytest.mark.skipif(
     not _cfg.get("dicts") or not _dictdb.default_db_path().exists(),
-    reason="no imported dictionary DB (run `saitenka-overlay import` — see overlay.example.toml)",
+    reason="no imported dictionary DB (run `saitenka import` — see overlay.example.toml)",
 )
 
 

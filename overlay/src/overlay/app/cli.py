@@ -101,10 +101,10 @@ _cfg = load_config()
 _mine_cfg = _cfg.get("mine", {}) if isinstance(_cfg.get("mine"), dict) else {}
 
 app = cyclopts.App(
-    name="saitenka-overlay",
+    name="saitenka",
     help="Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict tooltip, mining.",
     # Pin the version explicitly — cyclopts otherwise resolves it from the `overlay` import package's
-    # metadata, which has no distribution (the dist is `saitenka-overlay`), so `--version` printed 0.0.0.
+    # metadata, which has no distribution (the dist is `saitenka`), so `--version` printed 0.0.0.
     version=__version__,
     config=cyclopts.config.Toml(
         config_path(), must_exist=False, use_commands_as_keys=False, allow_unknown=True
@@ -417,7 +417,7 @@ def telemetry(
     elif enabled:
         print(f"  trace → {st.trace_path}")
         print(
-            "  use the overlay (watch + hover a while), then `saitenka-overlay report` to bundle it"
+            "  use the overlay (watch + hover a while), then `saitenka report` to bundle it"
         )
     elif st.extra_installed:
         print(
@@ -539,7 +539,7 @@ def jimaku_check(
 
     key, src = resolve_jimaku_key()
     if not key:
-        print("jimaku key: NOT configured — run `saitenka-overlay set-jimaku-key`", file=sys.stderr)
+        print("jimaku key: NOT configured — run `saitenka set-jimaku-key`", file=sys.stderr)
         return 1
     print(f"jimaku key: found (from {src}), {len(key)} chars")
     try:
@@ -676,7 +676,7 @@ def install_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin op
     dest = do_install()
     print(f"installed {dest}")
     print(
-        "mpv will now spawn `saitenka-overlay attach <socket>` on file-loaded, from any launcher."
+        "mpv will now spawn `saitenka attach <socket>` on file-loaded, from any launcher."
     )
     return 0
 
@@ -761,7 +761,7 @@ def uninstall(
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; the removal logic is unit-tested in test_lifecycle
     """Delete saitenka's config, dictionaries, cache/logs, crash reports and mpv plugin. Leaves mpv and
-    ffmpeg installed. Does NOT remove the saitenka-overlay binary itself — the last line tells you how."""
+    ffmpeg installed. Does NOT remove the saitenka binary itself — the last line tells you how."""
     from overlay.app.lifecycle import uninstall as do_uninstall
 
     confirm = (
@@ -776,7 +776,7 @@ def uninstall(
         for d in removed:
             print(f"  removed {d}")
     print("mpv / ffmpeg left untouched.")
-    print("To remove the app itself:  uv tool uninstall saitenka-overlay")
+    print("To remove the app itself:  uv tool uninstall saitenka")
     return 0
 
 
@@ -1018,7 +1018,7 @@ def attach(
     return 0
 
 
-# `saitenka-overlay <video> …` (no subcommand) behaves like `run` — the legacy invocation shape.
+# `saitenka <video> …` (no subcommand) behaves like `run` — the legacy invocation shape.
 app.default(run)
 
 

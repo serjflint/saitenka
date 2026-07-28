@@ -1,6 +1,6 @@
-# saitenka-overlay-deinflect (GPL-3.0)
+# saitenka-deinflect (GPL-3.0)
 
-Optional Japanese **deinflection chain** for [saitenka-overlay](../overlay) — the
+Optional Japanese **deinflection chain** for [saitenka](../overlay) — the
 🧩 `-て « -いる « -た` breakdown Yomitan shows under a headword.
 
 > **License: GPL-3.0-or-later.** This package is a derivative work of
@@ -13,7 +13,7 @@ Optional Japanese **deinflection chain** for [saitenka-overlay](../overlay) — 
 ## Install (opt-in)
 
 ```bash
-uv pip install saitenka-overlay[deinflect]        # once both are published
+uv pip install saitenka[deinflect]        # once both are published
 # or, from this checkout:
 uv pip install ./deinflect
 ```

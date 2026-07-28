@@ -21,18 +21,18 @@ _BIN_LINE_RE = re.compile(r"^local SAITENKA_BIN = .*$", re.MULTILINE)
 
 
 def resolve_overlay_bin() -> str:
-    """Absolute path to the ``saitenka-overlay`` executable, for baking into the plugin.
+    """Absolute path to the ``saitenka`` executable, for baking into the plugin.
 
     A Finder/Dock-launched mpv inherits only launchd's minimal PATH (no ~/.local/bin, no Homebrew
     bin), so the bare command name wouldn't resolve. Prefer PATH lookup; fall back to the console
     script next to the running interpreter; last resort, the bare name."""
-    found = shutil.which("saitenka-overlay")
+    found = shutil.which("saitenka")
     if found:
         return found
-    candidate = Path(sys.executable).with_name("saitenka-overlay")
+    candidate = Path(sys.executable).with_name("saitenka")
     if candidate.exists():
         return str(candidate)
-    return "saitenka-overlay"
+    return "saitenka"
 
 
 def _bake_bin(text: str, bin_path: str) -> str:

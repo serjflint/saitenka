@@ -212,13 +212,13 @@ def test_resolve_names_flag_wins_over_config():
 
 def test_version_is_wired_to_package_metadata():
     """`--version` printed 0.0.0 because cyclopts couldn't resolve the `overlay` import package to the
-    `saitenka-overlay` distribution — now pinned via overlay.__version__."""
+    `saitenka` distribution — now pinned via overlay.__version__."""
     from importlib.metadata import version
 
     import overlay
     from overlay.app.cli import app
 
-    assert overlay.__version__ == version("saitenka-overlay")
+    assert overlay.__version__ == version("saitenka")
     assert app.version not in (None, "", "0.0.0")
 
 

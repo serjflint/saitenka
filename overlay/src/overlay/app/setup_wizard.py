@@ -1,4 +1,4 @@
-"""``saitenka-overlay setup`` — the interactive install wizard.
+"""``saitenka setup`` — the interactive install wizard.
 
 All installer logic lives HERE, in Python — the shell stubs only bootstrap uv and hand off. The
 wizard composes the setup pieces in order: inventory (✓/✗) → install mpv+ffmpeg → ``doctor`` →
@@ -403,7 +403,7 @@ def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
 def run_setup(*, yes: bool, dry_run: bool) -> int:
     """Full wizard: inventory → install → doctor → init → import → plugin."""
     confirm: Confirm = (lambda _p: True) if yes else _ask
-    print("saitenka-overlay setup")
+    print("saitenka setup")
 
     # Only surface the tooling inventory when something actually needs installing. When everything's
     # present (the common re-run) the installer's own Discovery already listed these and the Doctor
@@ -432,11 +432,11 @@ def run_setup(*, yes: bool, dry_run: bool) -> int:
     report = _run_doctor()
     if report.exit_code == 0:
         print(
-            f"\nSetup complete {_OK} - run `saitenka-overlay <video>`, or just open a video in mpv."
+            f"\nSetup complete {_OK} - run `saitenka <video>`, or just open a video in mpv."
         )
     else:
         print(
-            "\nSetup finished with problems (see [x]/! above). Fix them, re-run `saitenka-overlay doctor`,"
-            " or send `saitenka-overlay report` if you need help."
+            "\nSetup finished with problems (see [x]/! above). Fix them, re-run `saitenka doctor`,"
+            " or send `saitenka report` if you need help."
         )
     return 0

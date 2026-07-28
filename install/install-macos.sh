@@ -77,7 +77,7 @@ if ! have uv; then
 fi
 
 # ── 2. Install / update the overlay from THIS checkout ──────────────────────
-# uv puts tool binaries (saitenka-overlay) in ~/.local/bin; ensure THIS session sees it so the setup
+# uv puts tool binaries (saitenka) in ~/.local/bin; ensure THIS session sees it so the setup
 # handoff below resolves even when uv was already on PATH (e.g. brew-installed) and didn't add it.
 export PATH="$HOME/.local/bin:$PATH"
 # FULL experience via the `[full]` extra (JMdict fallback + GPL-3.0 deinflect inflection chains) when
@@ -85,7 +85,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # `[full]` is GPL-3.0 (see ../LICENSING.md); a wheel/bundle install without deinflect/ stays Apache-2.0.
 if [ -d "$REPO/deinflect" ]; then extra=full; log "including GPL-3.0 deinflect add-on (inflection chains)"
 else extra=jmdict; warn "no deinflect/ in this checkout — installing [jmdict] only (no inflection chains)"; fi
-log "Installing/updating saitenka-overlay[$extra] from $REPO/overlay"
+log "Installing/updating saitenka[$extra] from $REPO/overlay"
 run uv tool install --reinstall --quiet "$REPO/overlay[$extra]"
 
 # ── 3. Dev/authoring extras (--dev only): repo + vault tooling ──────────────
@@ -103,12 +103,12 @@ fi
 # Hand off to `setup` (prompts to install the mpv plugin, store the jimaku key, import Yomitan dicts,
 # relocate protected dicts) instead of leaving them as manual chores. Confirm-first and resumable;
 # --yes passes --yes. The summary below then reflects whatever setup configured.
-if have saitenka-overlay; then
+if have saitenka; then
   log "Guided setup (mpv plugin / jimaku key / dictionaries)…"
   setup_args=(setup); $YES && setup_args+=(--yes); $DRY_RUN && setup_args+=(--dry-run)
-  saitenka-overlay "${setup_args[@]}" || warn "setup reported issues — re-run any time: saitenka-overlay setup"
+  saitenka "${setup_args[@]}" || warn "setup reported issues — re-run any time: saitenka setup"
 else
-  warn "saitenka-overlay isn't on PATH this session — open a NEW terminal and run: saitenka-overlay setup"
+  warn "saitenka isn't on PATH this session — open a NEW terminal and run: saitenka setup"
 fi
 
 log "Done."
@@ -123,7 +123,7 @@ addon() { # code  name  note
 # jimaku key is "present" if it resolves from the env or the Keychain (the recommended stores).
 jimaku_present() {
   [ -n "${JIMAKU_API_KEY:-}" ] && return 0
-  security find-generic-password -s saitenka-overlay -a jimaku -w >/dev/null 2>&1 && return 0
+  security find-generic-password -s saitenka -a jimaku -w >/dev/null 2>&1 && return 0
   # set-jimaku-key writes [jimaku] to the config (fetch=true) even when the key lives in the Keychain.
   [ -f "$CONFIG" ] && grep -qE '^[[:space:]]*\[jimaku\]' "$CONFIG"
 }
@@ -142,7 +142,7 @@ echo "Next steps:"
 if [ -f "$HOME/.config/mpv/scripts/saitenka.lua" ]; then
   printf '  1. mpv plugin:  \033[32m✓\033[0m installed (auto-starts the overlay on any mpv launch)\n'
 else
-  echo "  1. mpv plugin not installed — re-run  saitenka-overlay setup  (or:  saitenka-overlay install-plugin)"
+  echo "  1. mpv plugin not installed — re-run  saitenka setup  (or:  saitenka install-plugin)"
 fi
 echo "  2. Anki add-ons (Tools → Add-ons → Get Add-ons):"
 addon 2055492159 AnkiConnect    "mining + FSRS coloring"
@@ -150,18 +150,18 @@ addon 759844606  "FSRS Helper"  "better scheduling"
 addon 1771074083 "Review Heatmap" "streak view"
 if dicts_present; then
   # shellcheck disable=SC2016  # the backticks are intentional literal markdown emphasis shown to the
-  # user (see `saitenka-overlay doctor`), NOT a command substitution — single quotes are correct here
-  printf '  3. Dictionaries:  \033[32m✓\033[0m imported into the database (see `saitenka-overlay doctor`)\n'
+  # user (see `saitenka doctor`), NOT a command substitution — single quotes are correct here
+  printf '  3. Dictionaries:  \033[32m✓\033[0m imported into the database (see `saitenka doctor`)\n'
 else
-  echo "  3. Dictionaries: run  saitenka-overlay import <folder of your Yomitan .zip dicts>"
+  echo "  3. Dictionaries: run  saitenka import <folder of your Yomitan .zip dicts>"
   echo "     (imports them once into the consolidated database and fills the config with their titles)."
   echo "       config: $CONFIG"
-  echo "     Have a Yomitan settings export? saitenka-overlay import-settings <export.json> --scan-dir <folder>"
+  echo "     Have a Yomitan settings export? saitenka import-settings <export.json> --scan-dir <folder>"
 fi
 if jimaku_present; then
   printf '  4. jimaku key for auto-subs:  \033[32m✓\033[0m already set\n'
 else
-  echo "  4. jimaku key for auto-subs (optional):  saitenka-overlay set-jimaku-key"
+  echo "  4. jimaku key for auto-subs (optional):  saitenka set-jimaku-key"
 fi
 $DEV && cat <<'EOF'
 

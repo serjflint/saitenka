@@ -1,7 +1,7 @@
 """Stage 17a install-test: the built wheel must carry its assets and run when installed standalone.
 
 Builds a wheel with ``uv build``, installs it into a throwaway ``uv venv`` (isolated from the source
-tree), and checks (a) ``saitenka-overlay --help`` works and (b) the bundled assets load via
+tree), and checks (a) ``saitenka --help`` works and (b) the bundled assets load via
 ``importlib.resources`` from the INSTALLED package — proving N3 packaging. Slow + disk-hungry, so it
 is opt-in (``SAITENKA_INSTALL_TEST=1``) and always cleans up its wheel + venv.
 """
@@ -59,12 +59,12 @@ def test_wheel_installs_and_assets_load():
         )
 
         # 3. --help works from the installed console script (run OUTSIDE the source tree)
-        script = venv / ("Scripts" if sys.platform == "win32" else "bin") / "saitenka-overlay"
+        script = venv / ("Scripts" if sys.platform == "win32" else "bin") / "saitenka"
         out = subprocess.run(
             [str(script), "--help"], cwd=work, capture_output=True, text=True, timeout=120
         )
         assert out.returncode == 0, out.stderr
-        assert "saitenka-overlay" in out.stdout
+        assert "saitenka" in out.stdout
 
         # 4. assets load from the INSTALLED package (importlib.resources), not the source tree
         smoke = (

@@ -1,7 +1,7 @@
 """Stage 17b: bundle builder + bootstrap-stub parse checks.
 
 The stubs are dumb (~30 lines): get uv, install the wheel next to them, hand off to
-`saitenka-overlay setup`. We parse-check them (``bash -n`` / shellcheck / ``pwsh``) where the
+`saitenka setup`. We parse-check them (``bash -n`` / shellcheck / ``pwsh``) where the
 interpreter exists, and smoke the bundle builder's pure helpers. The full wheel build is gated behind
 ``SAITENKA_INSTALL_TEST=1`` (slow + disk-hungry), same as the install-test.
 """
@@ -36,8 +36,8 @@ def test_stub_files_exist_and_reference_setup():
     sh = SH_STUB.read_text()
     ps1 = PS1_STUB.read_text()
     # the shell only bootstraps uv + installs the wheel + hands off to the Python wizard
-    assert "uv tool install" in sh and "saitenka-overlay setup" in sh
-    assert "uv tool install" in ps1 and "saitenka-overlay setup" in ps1
+    assert "uv tool install" in sh and "saitenka setup" in sh
+    assert "uv tool install" in ps1 and "saitenka setup" in ps1
     # dry-run path exists in both
     assert "--dry-run" in sh
     assert "DryRun" in ps1
@@ -76,7 +76,7 @@ def test_ps1_stub_parses_if_pwsh_available():
 def test_bundle_helpers():
     mb = _load_make_bundle()
     assert mb._version()  # reads overlay/pyproject.toml
-    assert "saitenka-overlay setup" in mb.INSTALL_TXT or "setup" in mb.INSTALL_TXT
+    assert "saitenka setup" in mb.INSTALL_TXT or "setup" in mb.INSTALL_TXT
     assert "bash overlay-install.sh" in mb.INSTALL_TXT
 
 

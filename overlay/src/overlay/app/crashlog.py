@@ -7,7 +7,7 @@
    the interpreter is corrupted.
 
 Privacy (Crashpad/Sentry/GDPR practice): crash reports are written **locally only and NEVER uploaded** —
-collection is separated from transmission, so the user chooses to share via ``saitenka-overlay report``
+collection is separated from transmission, so the user chooses to share via ``saitenka report``
 (which bundles them). Secrets in argv / the log tail are redacted first, and old reports are pruned.
 """
 
@@ -98,7 +98,7 @@ def write_report(kind: str, tb_text: str, thread: str | None = None) -> Path:
     ts = time.strftime("%Y%m%d-%H%M%S")
     path = d / f"crash-{ts}{('-' + thread) if thread else ''}.log"
     header = [
-        f"saitenka-overlay {__version__} — crash ({kind})",
+        f"saitenka {__version__} — crash ({kind})",
         f"time: {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
         f"platform: {platform.platform()}",
         f"python: {sys.version.split()[0]}",
@@ -131,7 +131,7 @@ def _prune(d: Path) -> None:
 def _notify(path: Path) -> None:  # pragma: no cover — stderr side effect
     print(
         f"\nsaitenka crashed — details saved to {path}\n"
-        "Please run `saitenka-overlay report` to bundle it for a bug report (nothing is uploaded).",
+        "Please run `saitenka report` to bundle it for a bug report (nothing is uploaded).",
         file=sys.stderr,
     )
 

@@ -1581,7 +1581,7 @@ wheels = [
 ]
 
 [[package]]
-name = "saitenka-overlay"
+name = "saitenka"
 version = "0.8.0"
 source = { editable = "." }
 dependencies = [
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [package.optional-dependencies]
 deinflect = [
-    { name = "saitenka-overlay-deinflect" },
+    { name = "saitenka-deinflect" },
 ]
 full = [
     { name = "jamdict" },
@@ -1614,7 +1614,7 @@ full = [
     { name = "jamdict-data-fix", marker = "sys_platform == 'win32'" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
-    { name = "saitenka-overlay-deinflect" },
+    { name = "saitenka-deinflect" },
 ]
 jmdict = [
     { name = "jamdict" },
@@ -1671,10 +1671,10 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "rich", specifier = ">=14.0" },
-    { name = "saitenka-overlay", extras = ["deinflect"], marker = "extra == 'full'" },
-    { name = "saitenka-overlay", extras = ["jmdict"], marker = "extra == 'full'" },
-    { name = "saitenka-overlay", extras = ["telemetry"], marker = "extra == 'full'" },
-    { name = "saitenka-overlay-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
+    { name = "saitenka", extras = ["deinflect"], marker = "extra == 'full'" },
+    { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
+    { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
+    { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "tomlkit", specifier = ">=0.15.1" },
@@ -1708,7 +1708,7 @@ dev = [
 ]
 
 [[package]]
-name = "saitenka-overlay-deinflect"
+name = "saitenka-deinflect"
 version = "0.1.0"
 source = { editable = "../deinflect" }
 

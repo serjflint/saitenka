@@ -27,7 +27,7 @@ def _tb() -> str:
 
 def test_write_report_captures_traceback_and_redacts_command(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(sys, "argv", ["saitenka-overlay", "run", "--jimaku-key", "SECRETKEY123"])
+    monkeypatch.setattr(sys, "argv", ["saitenka", "run", "--jimaku-key", "SECRETKEY123"])
     p = crashlog.write_report("main-thread", _tb())
     text = p.read_text(encoding="utf-8")
     assert "ValueError: kaboom" in text

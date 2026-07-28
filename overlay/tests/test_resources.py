@@ -23,7 +23,7 @@ def test_wordlist_zip_resolves():
 def test_lua_resolves():
     p = resources.asset("saitenka.lua")
     assert p.exists()
-    assert "saitenka-overlay" in p.read_text(encoding="utf-8")
+    assert "saitenka" in p.read_text(encoding="utf-8")
 
 
 def test_existing_loaders_use_the_resolver():

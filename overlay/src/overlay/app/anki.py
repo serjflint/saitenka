@@ -113,7 +113,7 @@ class _AnkiRetryable(AnkiError):
 class MineConfig:
     deck: str = "Saitenka::Mining"
     model: str = "Lapis"
-    tags: tuple[str, ...] = ("saitenka-overlay",)
+    tags: tuple[str, ...] = ("saitenka",)
     # logical name -> real field on the note type (Lapis defaults)
     fields: dict = field(
         default_factory=lambda: {

@@ -135,7 +135,7 @@ def test_install_plugin_backs_up_existing(tmp_path):
     backups = list((scripts.parent / "saitenka-backups").glob("saitenka.lua.*.bak"))
     assert backups and "OLD" in backups[0].read_text()
     assert not list(scripts.glob("*.bak"))  # nothing mpv-loadable left behind
-    assert "saitenka-overlay" in dest.read_text()
+    assert "saitenka" in dest.read_text()
 
 
 def test_uninstall_plugin_backs_up_then_removes(tmp_path):

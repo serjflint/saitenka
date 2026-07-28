@@ -154,7 +154,7 @@ def smoke_test(zip_path: Path, expected_version: str) -> None:
         if len(wheels) != 1:
             raise RuntimeError(f"expected exactly one wheel in the bundle, found {wheels}")
         out = run(
-            ["uvx", "--from", str(wheels[0]), "saitenka-overlay", "--version"],
+            ["uvx", "--from", str(wheels[0]), "saitenka", "--version"],
             cwd=tmp_path,
             capture=True,
         ).stdout.strip()

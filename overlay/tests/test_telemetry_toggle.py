@@ -93,4 +93,4 @@ def test_disabled_config_reports_not_effective(tmp_path, monkeypatch):
 def test_telemetry_installed_true_in_dev_env():
     # The dev/test env installs [full], which includes the telemetry extra.
     assert telemetry_installed() is True
-    assert telemetry_toggle.INSTALL_HINT.endswith("saitenka-overlay[telemetry]'")
+    assert telemetry_toggle.INSTALL_HINT.endswith("saitenka[telemetry]'")

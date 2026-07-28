@@ -191,7 +191,7 @@ def build_reader_deps(
     coloring/underlines/pills/tooltips; ``anki`` + ``mine_conf`` power mining.
 
     ``cfg``'s ``dicts``/``freq``/``pitch`` are dictionary **titles** resolved against the consolidated
-    :class:`~overlay.app.dictdb.DictionaryDb` — imported once by ``saitenka-overlay import``, never built
+    :class:`~overlay.app.dictdb.DictionaryDb` — imported once by ``saitenka import``, never built
     here. A configured title with no imported dictionary is warned and skipped.
 
     ``known_words`` is ``run``'s plain ``--known word1,word2`` CLI flag (a fallback known-set when

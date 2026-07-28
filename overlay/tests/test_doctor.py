@@ -1,4 +1,4 @@
-"""Stage 14: `saitenka-overlay doctor` health check + `init` first-run wizard.
+"""Stage 14: `saitenka doctor` health check + `init` first-run wizard.
 
 Doctor is a set of pure, individually-mockable checks returning ``Check(name, status, detail)``
 (status ✓ ok / ! warn / ✗ fail) plus a printer and a ``--json`` mode. It WARNS, never modifies.
@@ -207,7 +207,7 @@ def test_plugin_broken_attach_flag_fails(tmp_path, monkeypatch):
 
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    (scripts / "saitenka.lua").write_text("args = { 'saitenka-overlay', '--attach', sock }\n")
+    (scripts / "saitenka.lua").write_text("args = { 'saitenka', '--attach', sock }\n")
     monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
     assert c.status == "fail" and "install-plugin" in c.detail
@@ -218,7 +218,7 @@ def test_plugin_installed_with_baked_path_is_ok(tmp_path, monkeypatch):
 
     scripts = tmp_path / "scripts"
     # a real install bakes the absolute overlay-bin path → doctor sees it as correct
-    bin_path = tmp_path / "bin" / "saitenka-overlay"
+    bin_path = tmp_path / "bin" / "saitenka"
     bin_path.parent.mkdir()
     bin_path.write_text("#!/bin/sh\n")
     monkeypatch.setattr(plugin, "resolve_overlay_bin", lambda: str(bin_path))
@@ -235,7 +235,7 @@ def test_plugin_bare_bin_fails(tmp_path, monkeypatch):
     scripts.mkdir()
     # correct `attach` form but a BARE bin name — a Finder-launched mpv can't resolve it
     (scripts / "saitenka.lua").write_text(
-        "local SAITENKA_BIN = 'saitenka-overlay'\nargs = { SAITENKA_BIN, 'attach', sock }\n"
+        "local SAITENKA_BIN = 'saitenka'\nargs = { SAITENKA_BIN, 'attach', sock }\n"
     )
     monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
@@ -248,7 +248,7 @@ def test_plugin_baked_path_gone_warns(tmp_path, monkeypatch):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "saitenka.lua").write_text(
-        "local SAITENKA_BIN = [[/nope/saitenka-overlay]]\nargs = { SAITENKA_BIN, 'attach', sock }\n"
+        "local SAITENKA_BIN = [[/nope/saitenka]]\nargs = { SAITENKA_BIN, 'attach', sock }\n"
     )
     monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: [scripts])
     c = doc.check_plugin()
