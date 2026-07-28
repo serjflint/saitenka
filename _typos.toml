@@ -7,3 +7,4 @@ entrie = "entrie"             # deliberate `entrie(s)` pluralisation in CLI outp
 mis = "mis"                   # appears in compounds/prefixes, not a standalone typo
 certifi = "certifi"           # the package name, not "certify"
 PN = "PN"                     # proper-noun pos tag / notation, not "ON"
+Hime = "Hime"                 # TsukiHime — a subtitle source's proper name, not "Him"
