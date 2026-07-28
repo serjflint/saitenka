@@ -15,7 +15,7 @@ BASE = Style(size=26)
 
 
 def _load(name):
-    return json.loads((FIX / name).read_text())["content"]
+    return json.loads((FIX / name).read_text(encoding="utf-8"))["content"]
 
 
 def test_ruby_fixture_produces_ruby_inlines():

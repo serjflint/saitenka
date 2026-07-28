@@ -44,6 +44,10 @@ def test_stub_files_exist_and_reference_setup():
 
 
 def test_sh_stub_parses_with_bash():
+    if os.name == "nt":
+        # The .sh installer targets POSIX; whatever `bash` a Windows runner has (Git Bash / WSL shim)
+        # mangles the stub's output encoding and mis-parses it. The .ps1 stub is the Windows path.
+        pytest.skip("shell installer is POSIX-only; Windows uses overlay-install.ps1")
     if not shutil.which("bash"):
         pytest.skip("bash not available")
     out = subprocess.run(["bash", "-n", str(SH_STUB)], capture_output=True, text=True)

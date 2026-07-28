@@ -9,7 +9,10 @@ the recorded overlay-add commands.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 from overlay.mpvio import discover
 from overlay.mpvio.osd import Overlay
@@ -49,6 +52,11 @@ def test_discover_returns_none_when_absent(monkeypatch):
 # --- attach handshake (shared socket, multiple clients) --------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="AF_UNIX socket sharing is POSIX-only; the Windows named-pipe path is covered by "
+    "test_plugin.test_named_pipe_roundtrip",
+)
 def test_two_clients_share_one_socket():
     """mpv accepts many concurrent IPC clients; our attach must coexist with another (animecards/
     mpv_websocket). Verify two MpvIPC clients handshake against one fake server on the same socket."""
@@ -121,7 +129,7 @@ def test_install_plugin_writes_lua_into_fake_scripts_dir(tmp_path):
     assert "'--attach'" not in lua
     # SAITENKA_BIN is baked to an ABSOLUTE path (bare name wouldn't resolve under a GUI mpv's PATH).
     m = re.search(r"SAITENKA_BIN = \[\[(.*?)\]\]", lua)
-    assert m and m.group(1).startswith("/")
+    assert m and Path(m.group(1)).is_absolute()  # "/..." on POSIX, "D:\\..." on Windows
 
 
 def test_install_plugin_backs_up_existing(tmp_path):

@@ -11,15 +11,17 @@ from overlay.app.config import (
 )
 
 
-def test_load_config_and_expand_paths(tmp_path):
+def test_load_config_and_expand_paths(tmp_path, monkeypatch):
+    # $HOME is POSIX-only; set it so the var also expands on Windows (Path.home() there uses USERPROFILE).
+    monkeypatch.setenv("HOME", str(Path.home()))
     p = tmp_path / "overlay.toml"
     p.write_text('slang = "ja"\ndicts = ["~/a.zip", "$HOME/b.zip"]\n[mine]\ndeck = "D"\n')
     cfg = load_config(p)
     assert cfg["slang"] == "ja"
     assert cfg["mine"]["deck"] == "D"
-    home = str(Path.home())
     ex = expand_paths(cfg["dicts"])
-    assert ex == [f"{home}/a.zip", f"{home}/b.zip"]  # ~ and $HOME both expanded
+    # native separators (backslash on Windows) — ~ and $HOME both expanded
+    assert ex == [str(Path.home() / "a.zip"), str(Path.home() / "b.zip")]
 
 
 def test_missing_config_is_empty(tmp_path):

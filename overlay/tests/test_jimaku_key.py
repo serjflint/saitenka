@@ -123,11 +123,11 @@ def test_subs_cache_roundtrip(monkeypatch, tmp_path):
     video = tmp_path / "[Erai] Show - 01.mkv"
     video.write_bytes(b"x" * 100)
     src = tmp_path / "dl.srt"
-    src.write_text("1\n00:00:01,000 --> 00:00:02,000\nねこ\n")
+    src.write_text("1\n00:00:01,000 --> 00:00:02,000\nねこ\n", encoding="utf-8")
 
     assert jimaku.cached_subs(video, "Show", 1) is None  # miss before store
     dest = jimaku.store_subs(video, "Show", 1, src)
-    assert dest.exists() and dest.read_text() == src.read_text()
+    assert dest.exists() and dest.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
     assert jimaku.cached_subs(video, "Show", 1) == dest  # rewatch → hit
     assert jimaku.cached_subs(video, "Show", 2) is None  # different episode misses
     video.write_bytes(b"x" * 200)  # re-encode changes the size

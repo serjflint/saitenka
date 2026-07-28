@@ -352,7 +352,8 @@ def test_telemetry_check_enabled_no_trace_yet(tmp_path, monkeypatch):
     export = (
         tmp_path / "tel"
     )  # isolate the export dir (empty) so a real ~/.cache trace can't leak in
-    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export}"\n')
+    # .as_posix(): a Windows path's backslashes are TOML string escapes ("\U"/"\t") → parse failure.
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export.as_posix()}"\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     c = doc.check_telemetry()
     assert c.status == "ok" and "no trace yet" in c.detail
@@ -363,7 +364,8 @@ def test_telemetry_check_enabled_with_trace_file(tmp_path, monkeypatch):
     export.mkdir()
     (export / "trace-20260101-000000.json").write_text('{"traceEvents": []}')  # a rotated trace
     cfg = tmp_path / "overlay.toml"
-    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export}"\n')
+    # .as_posix(): a Windows path's backslashes are TOML string escapes ("\U"/"\t") → parse failure.
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{export.as_posix()}"\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     c = doc.check_telemetry()
     assert c.status == "ok" and "last trace" in c.detail and "KiB" in c.detail

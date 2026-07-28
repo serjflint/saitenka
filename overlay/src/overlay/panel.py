@@ -73,7 +73,7 @@ def _hex(s: str) -> RGBA:
 
 
 def load_entry(path: str | Path) -> Entry:
-    data = json.loads(Path(path).read_text())
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     return Entry(
         headword=data["headword"],
         tags=[t["text"] for t in data.get("tags", [])],
