@@ -103,7 +103,8 @@ trade-offs, not a scoreboard.
 | Grounded / local-first (readings never from an LLM) | ✅ | ✅ |
 | jimaku.cc subtitle fetch | ✅ | ✅ |
 | Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ❌* | ✅ |
-| AniList progress · Jellyfin · media launcher (fzf/rofi) | ❌ | ✅ |
+| AniList **progress scrobbling** | ❌ | ✅ |
+| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ |
 | Immersion **stats dashboard** | ❌* | ✅ |
 | Cross-machine stats/history **sync** | ❌ | ✅ |
 | Mined-audio loudness normalization | ❌* | ✅ |
