@@ -7,7 +7,7 @@ import pytest
 
 from overlay.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
 from overlay.app.tokenize import tokenize
-from overlay.app.wordlists import FreqDict, KnownWords
+from overlay.app.wordlists import FreqDict, KnownForm, KnownWords
 
 PAL = Palette()
 
@@ -43,8 +43,27 @@ def test_freq_banding_math():
 def test_known_words_reading_fallback():
     kw = KnownWords.from_set(["読む", "ほん"])
     assert kw.is_known("読む")
-    assert kw.is_known("誰も知らない", "ほん")  # matches on reading form
+    assert kw.is_known("誰も知らない", "ほん")  # matches on the lemma-slot known form
     assert not kw.is_known("知らない語")
+
+
+def test_known_words_reject_same_spelling_different_reading():
+    """A card teaching 床/ゆか must NOT mark a subtitle 床 read とこ as known — the homograph guard.
+    The correct reading still matches, and a kanji card resurfaces when written in kana."""
+    kw = KnownWords.from_forms([KnownForm("床", "ゆか"), KnownForm("孫", "まご")])
+    assert not kw.is_known("床", "床", "とこ")  # same kanji, different reading → not this word
+    assert kw.is_known("床", "床", "ゆか")  # the taught reading matches
+    assert kw.is_known(
+        "まご", "まご", "まご"
+    )  # kana token resurfaces the kanji card via its reading
+    assert kw.is_known("床")  # no token reading to disambiguate → best-effort surface match holds
+
+
+def test_known_words_surface_only_card_still_matches():
+    """A card with no reading field can't disambiguate, so it keeps the best-effort surface match."""
+    kw = KnownWords.from_set(["床"])
+    assert kw.is_known("床", "床", "とこ")
+    assert kw.is_known("床", "床", "ゆか")
 
 
 # --- N+1 algorithm --------------------------------------------------------------------------------
@@ -112,17 +131,14 @@ def test_jlpt_underline_is_additive(jlpt):
 # --- KnownWords from Anki: furigana fields + missing-field tolerance -------------------------------
 
 
-def test_field_forms_parses_furigana():
-    from overlay.app.wordlists import _field_forms
+def test_field_parse_splits_furigana():
+    from overlay.app.wordlists import _field_parse
 
-    # Kanji Study 'EntryFurigana' → both plain surface and reading
-    assert set(_field_forms("お 孫[まご]さん")) == {"お孫さん", "おまごさん"}
-    assert _field_forms("通[とお]り") == ["とおり"] or set(_field_forms("通[とお]り")) == {
-        "通り",
-        "とおり",
-    }
-    assert _field_forms("<b>奉書</b>") == ["奉書"]  # HTML stripped, no brackets
-    assert _field_forms("   ") == []
+    # Kanji Study 'EntryFurigana' → (plain surface, reading)
+    assert _field_parse("お 孫[まご]さん") == ("お孫さん", "おまごさん")
+    assert _field_parse("通[とお]り") == ("通り", "とおり")
+    assert _field_parse("<b>奉書</b>") == ("奉書", None)  # HTML stripped, no brackets
+    assert _field_parse("   ") == ("", None)
 
 
 def test_from_ankiconnect_uses_entry_and_furigana(monkeypatch):

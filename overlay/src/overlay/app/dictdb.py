@@ -256,10 +256,14 @@ class DictionaryDb:
 
     # --- Anki known-word cache (startup perf; see wordlists / reader_deps) --------------------
 
-    def known_cache_read(self, decks: Sequence[str]) -> dict[str, dict[int, tuple[int, list[str]]]]:
-        """``{deck: {note_id: (mod, [words])}}`` from the persistent cache — the last-known extracted
-        word forms per note, for an instant startup load. A deck with no cached rows maps to ``{}``."""
-        out: dict[str, dict[int, tuple[int, list[str]]]] = {d: {} for d in decks}
+    def known_cache_read(
+        self, decks: Sequence[str]
+    ) -> dict[str, dict[int, tuple[int, list[list[str]]]]]:
+        """``{deck: {note_id: (mod, [[surface, reading]])}}`` from the persistent cache — the last-known
+        extracted forms per note, for an instant startup load. A deck with no cached rows maps to ``{}``.
+        The payload shape is opaque here (JSON round-trip); :mod:`wordlists` owns its meaning + format
+        version."""
+        out: dict[str, dict[int, tuple[int, list[list[str]]]]] = {d: {} for d in decks}
         if not decks:
             return out
         placeholders = ",".join("?" * len(decks))
@@ -273,10 +277,10 @@ class DictionaryDb:
     def known_cache_write(
         self,
         deck: str,
-        upserts: Sequence[tuple[int, int, list[str]]],
+        upserts: Sequence[tuple[int, int, list[list[str]]]],
         deleted_ids: Sequence[int] = (),
     ) -> None:
-        """Apply one deck's diff (``upserts`` = ``(note_id, mod, [words])``; ``deleted_ids`` gone from
+        """Apply one deck's diff (``upserts`` = ``(note_id, mod, [[surface, reading]])``; ``deleted_ids`` gone from
         Anki) in a single transaction. Runs on the background refresh thread — a fresh RW connection
         keeps it off the per-thread RO lookup conns; ``timeout`` rides out a concurrent lookup's lock."""
         conn = sqlite3.connect(self.path, timeout=10)

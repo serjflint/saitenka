@@ -3,6 +3,7 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)
 ![Built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-blue.svg)
 
 Saitenka turns **mpv** into an immersion workstation: Japanese subtitles get **FSRS-aware word
 coloring**, hovering a word opens a **Yomitan-style multi-dictionary tooltip**, and one key **mines**
@@ -25,6 +26,7 @@ overlay/fullscreen breakage that plagues external overlays.
 - [Why](#why)
 - [How it works](#how-it-works)
 - [Features](#features)
+- [How it compares](#how-it-compares)
 - [Quick start](#quick-start)
 - [What's in the repo](#whats-in-the-repo)
 - [Requirements](#requirements)
@@ -81,54 +83,83 @@ Saitenka solves three problems:
   export (streamed, so a multi-GB export never loads into memory).
 - A `doctor` command that checks the whole environment and a one-command `setup` wizard.
 
+## How it compares
+
+Saitenka and **[SubMiner](https://github.com/ksyasuda/SubMiner)** solve the same problem — mine Japanese
+vocabulary from video without a browser texthooker — from opposite ends. Saitenka is a **grounded,
+FSRS-driven engine composited inside mpv**; SubMiner is a **feature-broad Electron app** with a large
+integration surface and turn-key desktop installers. They optimize different things, so this is a map of
+trade-offs, not a scoreboard.
+
+| Capability | 再点火 Saitenka | SubMiner |
+|---|:---:|:---:|
+| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ |
+| Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ |
+| One-key **+ bulk Anki mining** (audio, screenshot, reading, freq) | ✅ | ✅ |
+| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ |
+| **N+1** sentence targeting | ✅ | ✅ |
+| **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ |
+| Grounded / local-first (readings never from an LLM) | ✅ | ✅ |
+| jimaku.cc subtitle fetch | ✅ | ✅ |
+| Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ◐ | ✅ |
+| AniList progress · Jellyfin · media launcher (fzf/rofi) | ❌ | ✅ |
+| Immersion **stats dashboard** | ◐ | ✅ |
+| Cross-machine stats/history **sync** | ❌ | ✅ |
+| Mined-audio loudness normalization | ◐ | ✅ |
+| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ |
+| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ |
+| Native desktop packages (AppImage · DMG · AUR · winget) | ◐ | ✅ |
+| Hosted **docs site** | ◐ | ✅ |
+| Core license | Apache-2.0 | GPL-3.0 |
+| Linux · macOS · Windows | ✅ | ✅ |
+
+<sub>✅ yes · ◐ partial or [on the roadmap](https://github.com/serjflint/saitenka/issues) · ❌ no / out of scope</sub>
+
+Short version: reach for **SubMiner** if you want the widest set of turn-key integrations and a packaged
+desktop app; reach for **Saitenka** if you want a fast, single-surface, FSRS-grounded engine that draws
+straight into mpv.
+
 ## Quick start
 
-**1. Install [uv](https://docs.astral.sh/uv/)** (it provides Python + all dependencies — no system
-Python needed). These follow uv's [official install guide](https://docs.astral.sh/uv/getting-started/installation/):
+**1. Install from the latest release** — no clone, no prerequisites; the bundled installer fetches
+everything, `uv` included.
+
+1. Download **`saitenka-overlay-<version>.zip`** from the
+   [latest release](https://github.com/serjflint/saitenka/releases/latest) and unzip it.
+2. From inside the unzipped folder, run the installer for your OS:
 
 ```bash
 # macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
+bash overlay-install.sh                 # add --dry-run to preview without changing anything
 ```
 
 ```powershell
-# Windows (PowerShell) — upstream's standalone installer (self-updates via `uv self update`)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# …or via a package manager
-winget install --id=astral-sh.uv -e   # or: scoop install main/uv
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File overlay-install.ps1
 ```
 
-**2. Install Saitenka and let it set everything up.** The `setup` wizard installs mpv + ffmpeg, writes
-your config, and installs the mpv plugin so **every future mpv launch auto-starts the overlay**:
+The installer bootstraps `uv`, installs the overlay (with the inflection add-on), then hands off to the
+`setup` wizard, which installs **mpv + ffmpeg** (or prints your distro's install command) and the mpv
+plugin so **every future mpv launch auto-starts the overlay**.
+
+**2. Watch.** Open any video in mpv — the overlay attaches automatically. Or launch a file directly:
 
 ```bash
-# macOS / Linux
-git clone https://github.com/serjflint/saitenka.git
-cd saitenka
-bash install/install-macos.sh          # bootstraps uv, installs the tool, runs `setup`
+saitenka-overlay run video.mkv          # hover a word → tooltip; Ctrl+m → mine
 ```
 
-```powershell
-# Windows (PowerShell) — clone, then run the bundled installer
-git clone https://github.com/serjflint/saitenka.git
-cd saitenka
-powershell -ExecutionPolicy Bypass -File install\install-windows.ps1
-```
-
-On **Linux**, install uv (above), then from the clone run `uv tool install './overlay[full]' &&
-saitenka-overlay setup` — `setup` prints your distro's `mpv`/`ffmpeg` install command (apt / dnf / pacman).
-
-Prefer to drive it yourself? From the cloned checkout above, run `uv tool install './overlay[full]'`, then:
+**3. Update & maintain.** Once installed, the tool self-updates from the latest release — no
+re-download, and your extras are preserved:
 
 ```bash
-saitenka-overlay setup          # full-auto: inventory → install mpv/ffmpeg → config → plugin
-saitenka-overlay doctor         # re-check the environment any time
-saitenka-overlay install-plugin # (re)install just the auto-start mpv plugin
+saitenka-overlay reinstall              # pull the latest release, keeping your extras (--yes to skip the prompt)
+saitenka-overlay doctor                 # re-check the whole environment any time
+saitenka-overlay setup                  # re-run the setup wizard (mpv/ffmpeg, config, plugin)
+saitenka-overlay install-plugin         # (re)install just the auto-start mpv plugin
 ```
 
-**Feature extras.** `saitenka-overlay` installs as a lean core; opt into optional features with extras
-(what the installers use is `[full]`):
+**Feature extras.** The bundle installs the full feature set; `reinstall` keeps whatever you have. To
+change the set, `uv tool install --reinstall 'saitenka-overlay[<extra>]'`:
 
 | Extra | Adds | License |
 |------|------|--------|
@@ -139,13 +170,6 @@ saitenka-overlay install-plugin # (re)install just the auto-start mpv plugin
 
 Mining prefers *your* dictionaries, so `[jmdict]` is only a fallback. `[deinflect]`/`[full]` pull the
 GPL-3.0 add-on — a `[full]` install is therefore GPL-3.0 (see [LICENSING.md](LICENSING.md)).
-
-**3. Watch.** With the plugin installed, open any video in mpv — the overlay attaches automatically.
-Or launch a file directly:
-
-```bash
-saitenka-overlay run video.mkv          # hover a word → tooltip; Ctrl+m → mine
-```
 
 Full run/test walkthrough: **[`overlay/RUNNING.md`](overlay/RUNNING.md)**. Feature tour:
 **[`overlay/README.md`](overlay/README.md)**.
