@@ -1,6 +1,6 @@
 # Tag-triggered release: build ONCE, then publish to two places from the same artifacts —
 #   1. a GitHub Release carrying the self-contained bundle zip (wheel + GPL deinflect sdist + installers)
-#   2. PyPI, the Apache-2.0 `saitenka` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
+#   2. PyPI, the `saitenka` + GPL `saitenka-deinflect` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
 # The build↔publish split is a supply-chain best practice: the publish jobs do nothing but upload the
 # already-built artifacts, so nothing can tamper with them in between.
 #
@@ -9,10 +9,10 @@
 # `git push origin vX.Y.Z`. Do NOT also run `release-publish --publish`, or the Release double-creates.
 #
 # ONE-TIME SETUP (cannot live in code) — Trusted Publishing needs NO token/password and is unaffected
-# by your account 2FA; instead register a publisher on EACH site (same repo + workflow, distinct env):
-#   • PyPI     → project `saitenka` → Settings → Publishing → add GitHub Actions publisher:
-#                repo `serjflint/saitenka`, workflow `release.yml`, environment `pypi`
-#   • TestPyPI → same, but environment `testpypi` (test.pypi.org)
+# by your account 2FA; register a publisher for BOTH projects on BOTH sites (same repo + workflow;
+# env `pypi` on pypi.org, env `testpypi` on test.pypi.org). Four registrations total:
+#   • project `saitenka`            → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
+#   • project `saitenka-deinflect`  → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
 # For the very first upload on each, create a "pending publisher" before the project exists.
 #
 # Two publish paths: a manual run (workflow_dispatch) does a TestPyPI dry-run; pushing a v* tag does the
@@ -50,11 +50,14 @@ jobs:
           uv python install
           uv sync --locked --extra full
 
-      # PyPI dists: the Apache-2.0 overlay wheel + sdist ONLY (gh-action-pypi-publish uploads the whole
-      # dir, so it must contain nothing else). The GPL deinflect add-on is conveyed as source in the
-      # bundle zip below; publishing it to PyPI would be a SEPARATE package + trusted publisher.
+      # PyPI dists: BOTH packages into one dir — the Apache-2.0 `saitenka` and the GPL-3.0
+      # `saitenka-deinflect` add-on (so `saitenka[deinflect]`/`[full]` resolve from PyPI). Each has its
+      # own trusted publisher (same repo/workflow/env), so one publish call authorizes both per-file.
+      # The GPL sdist is the Corresponding Source; the wheel is a pure-Python convenience alongside it.
       - name: Build PyPI dists
-        run: uv build overlay --out-dir dist-pypi
+        run: |
+          uv build overlay --out-dir dist-pypi
+          uv build deinflect --out-dir dist-pypi
 
       - name: Build GitHub-Release bundle (→ dist/saitenka-<ver>.zip)
         working-directory: overlay
@@ -119,6 +122,9 @@ jobs:
         with:
           packages-dir: dist-pypi/
           repository-url: https://test.pypi.org/legacy/
+          # deinflect changes rarely, so its version is often already uploaded — skip it instead of
+          # failing the whole publish when only `saitenka` bumped.
+          skip-existing: true
 
   pypi:
     name: Publish to PyPI
@@ -138,3 +144,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           packages-dir: dist-pypi/
+          # deinflect changes rarely, so its version is often already uploaded — skip it instead of
+          # failing the whole publish when only `saitenka` bumped.
+          skip-existing: true
