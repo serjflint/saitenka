@@ -99,9 +99,12 @@ jobs:
           uv python install
           uv sync --locked --extra full --no-default-groups --group test
 
+      # --ignore the memray memory test: it's slow (never runs here) but pytest still COLLECTS it, and
+      # its `limit_memory` marker comes from pytest-memray, which the lean test group omits → strict
+      # markers would error at collection. The gate (full dev) collects and runs it normally.
       - name: Tests
         working-directory: overlay
-        run: uv run --no-sync pytest -q -n auto -m "not (slow or integration or requires_display or e2e)"
+        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or integration or requires_display or e2e)"
 
       # test-ft (PYTHON_GIL=0) is only meaningful on a free-threaded build; on a GIL interpreter the
       # env var is a no-op, so skip it there rather than run a misleadingly-labelled "FT" pass.
@@ -110,4 +113,4 @@ jobs:
         working-directory: overlay
         env:
           PYTHON_GIL: "0"
-        run: uv run --no-sync pytest -q -n auto -m "not slow"
+        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not slow"
