@@ -245,7 +245,7 @@ def test_out_of_range_rank_falls_through_to_base():
 def test_forgotten_word_gets_the_forgotten_tint():
     """An FSRS 'forgotten' content word (not known, not N+1) resurfaces with the forgotten colour,
     between known and unknown."""
-    snap = KnownSnap(_states={"本": "forgotten"})
+    snap = KnownSnap.of({"本": "forgotten"})
     sc = Scorer(
         known=KnownWords.from_set([]),
         fsrs_snap=snap,
@@ -260,7 +260,7 @@ def test_forgotten_word_gets_the_forgotten_tint():
 
 def test_fsrs_known_beats_forgotten_and_freq():
     """A word the snapshot marks 'known' takes the known colour even with a freq dict present."""
-    snap = KnownSnap(_states={"本": "known"})
+    snap = KnownSnap.of({"本": "known"})
     sc = Scorer(
         known=KnownWords.from_set([]),
         fsrs_snap=snap,

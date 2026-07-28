@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC
 from typing import TYPE_CHECKING
 
+from overlay.app.tokenize import _has_kanji, kata_to_hira
 from overlay.resources import asset
 
 if TYPE_CHECKING:
@@ -258,28 +259,37 @@ _READING_FIELDS = (
 )
 
 
-def _field_forms(raw: str) -> list[str]:
-    """Word forms a note field contributes to the known set: HTML stripped, and if it's Anki furigana
-    (``お 孫[まご]さん``) both the plain surface (お孫さん) and the reading (おまごさん)."""
+def _field_parse(raw: str) -> tuple[str, str | None]:
+    """The (surface, reading) one note field contributes: HTML stripped; Anki furigana
+    (``お 孫[まご]さん``) splits into surface (お孫さん) + reading (おまごさん); a plain value is a bare
+    surface with no reading."""
     val = _HTML_TAG.sub("", raw).strip()
     if not val:
-        return []
+        return "", None
     if "[" in val and "]" in val:
         surface = re.sub(r"\[[^\]]*\]", "", val).replace(" ", "")
         reading = _FURI.sub(lambda m: m.group(2), val).replace(" ", "")
-        return [w for w in {surface, reading} if w]
-    return [val]
+        return surface, (reading or None)
+    return val, None
 
 
 #: meta-table key holding the config signature the cache was built under — a change (different decks or
-#: fields) means the stored `words` were extracted by a different rule, so the cache must fully rebuild.
+#: fields) means the stored payload was extracted by a different rule, so the cache must fully rebuild.
 _KNOWN_SIG_KEY = "anki_known_sig"
+
+#: Bumped when the cached per-note payload shape changes, so an old-format cache invalidates via the
+#: signature and rebuilds. v2 = ``[surface, reading]`` pairs (was v1 flat word strings).
+_KNOWN_CACHE_FORMAT = 2
 
 
 def _known_signature(decks: dict[str, list[str]]) -> str:
-    """Stable short hash of the decks→fields config. The extracted forms depend on WHICH fields are
-    read, so this gates cache reuse (see :meth:`KnownWords.from_cache` / :func:`refresh_known_cache`)."""
-    payload = json.dumps({d: sorted(f) for d, f in sorted(decks.items())}, ensure_ascii=False)
+    """Stable short hash of the decks→fields config + payload format. The extracted forms depend on
+    WHICH fields are read (and the payload shape), so this gates cache reuse (see
+    :meth:`KnownWords.from_cache` / :func:`refresh_known_cache`)."""
+    payload = json.dumps(
+        {"fmt": _KNOWN_CACHE_FORMAT, "decks": {d: sorted(f) for d, f in sorted(decks.items())}},
+        ensure_ascii=False,
+    )
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -305,41 +315,134 @@ def _ankiconnect(host: str, action: str, **params):
         return json.loads(raw).get("result")
 
 
-def _extract_forms(note: dict, fields, reading_fields) -> list[str]:
-    """The known-word forms one note contributes — its configured fields plus any furigana/reading
-    field, each run through :func:`_field_forms` (HTML strip + furigana surface/reading split)."""
+@dataclass(frozen=True, slots=True)
+class KnownForm:
+    """One (surface, reading) a card teaches. ``reading`` is hiragana, or ``""`` when the card gave no
+    reading (surface-only — can't disambiguate a homograph). ``surface`` is ``""`` for a reading-only
+    note (kana-only match). Serialised to the cache as a compact ``[surface, reading]`` row."""
+
+    surface: str
+    reading: str
+
+    def as_row(self) -> list[str]:
+        return [self.surface, self.reading]
+
+
+def _extract_forms(note: dict, fields, reading_fields) -> list[KnownForm]:
+    """The :class:`KnownForm`s one note contributes to the known set. Surface fields give the written
+    form (a furigana surface field also yields its reading); reading fields give the reading. Every
+    surface is paired with every reading (a note is one word), readings folded to hiragana so they
+    compare against a token's reading. This pairing is what lets coloring reject a same-spelling /
+    different-reading homograph — see :meth:`KnownWords.is_known`."""
     nf = note.get("fields", {})
-    out: list[str] = []
-    for fname in list(fields) + list(reading_fields):
-        out.extend(_field_forms(nf.get(fname, {}).get("value", "")))
-    return out
+    surfaces: list[str] = []
+    readings: list[str] = []
+    for fname in fields:
+        surface, reading = _field_parse(nf.get(fname, {}).get("value", ""))
+        if surface:
+            surfaces.append(surface)
+        if reading:
+            readings.append(reading)
+    for fname in reading_fields:
+        surface, reading = _field_parse(nf.get(fname, {}).get("value", ""))
+        got = reading or surface  # a reading field's plain value IS the reading
+        if got:
+            readings.append(got)
+    readings = [kata_to_hira(r) for r in readings]
+
+    forms: list[KnownForm] = []
+    seen: set[tuple[str, str]] = set()
+    for s, r in _form_combos(surfaces, readings):
+        if (s or r) and (s, r) not in seen:
+            seen.add((s, r))
+            forms.append(KnownForm(s, r))
+    return forms
+
+
+def _form_combos(surfaces: list[str], readings: list[str]):
+    """Yield (surface, reading) combinations: cross every surface with every reading; a surface with no
+    reading yields ``(surface, "")``; a reading with no surface yields ``("", reading)``."""
+    if surfaces and readings:
+        for s in surfaces:
+            for r in readings:
+                yield s, r
+    elif surfaces:
+        for s in surfaces:
+            yield s, ""
+    else:
+        for r in readings:
+            yield "", r
 
 
 @dataclass
 class KnownWords:
-    words: set[str]
+    """Reading-aware known set. ``by_surface`` maps each written surface to the readings the user's
+    cards teach for it (``""`` = a card gave no reading); ``readings`` is every taught reading, for
+    kana-only tokens. Matching keys on BOTH surface and reading, so a kanji token whose card teaches a
+    *different* reading (床 とこ vs a known 床/ゆか card) is not falsely marked known."""
 
-    def is_known(self, *forms: str | None) -> bool:
-        return any(f in self.words for f in forms if f)
+    by_surface: dict[str, set[str]]
+    readings: set[str]
+
+    @property
+    def words(self) -> set[str]:
+        """Every known form (surfaces + readings) — the flat view for counts/diagnostics."""
+        return set(self.by_surface) | self.readings
+
+    def is_known(
+        self, surface: str | None, lemma: str | None = None, reading: str | None = None
+    ) -> bool:
+        read = kata_to_hira(reading) if reading else ""
+        return self._surface_hit(surface, lemma, read) or self._kana_hit(surface, read)
+
+    def _surface_hit(self, surface: str | None, lemma: str | None, read: str) -> bool:
+        """A surface/lemma spelling is known and its taught readings are consistent with ``read``. A
+        spelling taught only with a *different* reading is a same-spelling homograph — skipped, not
+        matched (the bug this fix closes)."""
+        for spelling in (surface, lemma):
+            taught = self.by_surface.get(spelling) if spelling else None
+            if taught is not None and (not read or "" in taught or read in taught):
+                return True
+        return False
+
+    def _kana_hit(self, surface: str | None, read: str) -> bool:
+        """A kana-only token (no competing kanji identity) matches any taught reading, so a kanji card
+        resurfaces when its word appears written in kana."""
+        if not surface or _has_kanji(surface):
+            return False
+        return bool(read and read in self.readings) or surface in self.readings
+
+    @classmethod
+    def from_forms(cls, forms) -> KnownWords:
+        by_surface: dict[str, set[str]] = {}
+        readings: set[str] = set()
+        for f in forms:
+            if f.surface:
+                by_surface.setdefault(f.surface, set()).add(f.reading)
+            if f.reading:
+                readings.add(f.reading)
+        return cls(by_surface, readings)
 
     @classmethod
     def from_cache(cls, db: DictionaryDb, decks: dict[str, list[str]]) -> KnownWords | None:
         """Build the known set from the persistent SQLite cache for an instant startup (~1 ms vs the
         ~190 ms AnkiConnect load). Returns ``None`` on a miss — an empty cache or a config signature
-        that no longer matches (fields changed) — so the caller falls back to a full load."""
+        that no longer matches (fields or payload format changed) — so the caller falls back to a full
+        load."""
         if db.meta_get(_KNOWN_SIG_KEY) != _known_signature(decks):
             return None
-        words: set[str] = set()
+        forms: list[KnownForm] = []
         seen_row = False
         for per_deck in db.known_cache_read(list(decks)).values():
-            for _mod, forms in per_deck.values():
+            for _mod, note_rows in per_deck.values():
                 seen_row = True
-                words.update(forms)
-        return cls(words) if seen_row else None
+                forms.extend(KnownForm(*row) for row in note_rows)
+        return cls.from_forms(forms) if seen_row else None
 
     @classmethod
     def from_set(cls, it) -> KnownWords:
-        return cls({w.strip() for w in it if w and w.strip()})
+        """Known set from bare surface forms (no reading info) — the offline/testing fallback."""
+        return cls.from_forms(KnownForm(w.strip(), "") for w in it if w and w.strip())
 
     @classmethod
     def from_ankiconnect(
@@ -357,7 +460,7 @@ class KnownWords:
         (``anki_http_call`` IO / ``anki_json_parse`` CPU / ``anki_known_extract`` CPU)."""
         from overlay import otel_metrics
 
-        words: set[str] = set()
+        forms: list[KnownForm] = []
         for deck, fields in decks.items():
             ids = _ankiconnect(host, "findNotes", query=f'deck:"{deck}"') or []
             if not ids:
@@ -365,14 +468,14 @@ class KnownWords:
             notes = _ankiconnect(host, "notesInfo", notes=ids) or []
             with otel_metrics.traced("anki_known_extract", deck=deck, notes=str(len(notes))):
                 for note in notes:
-                    words.update(_extract_forms(note, fields, reading_fields))
-        return cls(words)
+                    forms.extend(_extract_forms(note, fields, reading_fields))
+        return cls.from_forms(forms)
 
 
 def _fetch_forms(
     host: str, deck: str, ids: list[int], fields, reading_fields
-) -> dict[int, list[str]]:
-    """``{note_id: [forms]}`` for a subset of note ids — the only heavy (``notesInfo``) call, made
+) -> dict[int, list[KnownForm]]:
+    """``{note_id: [KnownForm]}`` for a subset of note ids — the only heavy (``notesInfo``) call, made
     solely for the changed notes the diff selected."""
     from overlay import otel_metrics
 
@@ -383,10 +486,11 @@ def _fetch_forms(
 
 def _refresh_deck(
     db: DictionaryDb, deck: str, fields, host: str, reading_fields, *, force_full: bool
-) -> set[str]:
+) -> list[KnownForm]:
     """Reconcile one deck's cache against Anki by note mod-time, re-fetching only changed notes, and
-    return its known-word set. ``force_full`` (empty/stale cache) treats every note as changed."""
-    cached = db.known_cache_read([deck])[deck]  # {note_id: (mod, forms)}
+    return its :class:`KnownForm`s. ``force_full`` (empty/stale cache) treats every note as changed, so
+    no old-format cached payload is ever read back."""
+    cached = db.known_cache_read([deck])[deck]  # {note_id: (mod, [[surface, reading]])}
     ids = _ankiconnect(host, "findNotes", query=f'deck:"{deck}"') or []
     mods = {n["noteId"]: n["mod"] for n in (_ankiconnect(host, "notesModTime", notes=ids) or [])}
     changed = (
@@ -394,11 +498,24 @@ def _refresh_deck(
     )
     deleted = [i for i in cached if i not in mods]
     fetched = _fetch_forms(host, deck, changed, fields, reading_fields) if changed else {}
-    db.known_cache_write(deck, [(i, mods.get(i, 0), f) for i, f in fetched.items()], deleted)
-    words: set[str] = set()
-    for i in ids:  # merge freshly-fetched forms with untouched cached ones
-        words.update(fetched[i] if i in fetched else (cached.get(i) or (0, []))[1])
-    return words
+    db.known_cache_write(
+        deck,
+        [(i, mods.get(i, 0), [f.as_row() for f in forms]) for i, forms in fetched.items()],
+        deleted,
+    )
+    return _merge_forms(ids, fetched, cached)
+
+
+def _merge_forms(ids, fetched, cached) -> list[KnownForm]:
+    """Freshly-fetched forms for changed notes + the untouched cached forms for the rest, in deck
+    order. Cached rows are ``[surface, reading]`` lists (JSON round-trip) → back to :class:`KnownForm`."""
+    out: list[KnownForm] = []
+    for i in ids:
+        if i in fetched:
+            out.extend(fetched[i])
+        else:
+            out.extend(KnownForm(*row) for row in (cached.get(i) or (0, []))[1])
+    return out
 
 
 def refresh_known_cache(
@@ -412,8 +529,8 @@ def refresh_known_cache(
     cache, and return the fresh set. Its own RW connection makes it safe to run on a background thread."""
     sig = _known_signature(decks)
     force_full = db.meta_get(_KNOWN_SIG_KEY) != sig
-    words: set[str] = set()
+    forms: list[KnownForm] = []
     for deck, fields in decks.items():
-        words |= _refresh_deck(db, deck, fields, host, reading_fields, force_full=force_full)
+        forms.extend(_refresh_deck(db, deck, fields, host, reading_fields, force_full=force_full))
     db.meta_set(_KNOWN_SIG_KEY, sig)
-    return KnownWords(words)
+    return KnownWords.from_forms(forms)

@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from overlay.app.tokenize import _has_kanji, kata_to_hira
+
 if TYPE_CHECKING:
     from overlay.panel import Freq
 
@@ -138,25 +140,61 @@ def _wordlike(t: str) -> bool:
 
 @dataclass
 class KnownSnap:
-    """Read-only knownness snapshot: word → state (known / forgotten / learning / None)."""
+    """Read-only reading-aware knownness snapshot. ``by_surface`` maps each written surface to the
+    ``{reading|"" : state}`` its cards teach; ``readings`` maps each reading to its best state, for
+    kana-only tokens. Matching keys on BOTH surface and reading, so a kanji token whose card teaches a
+    *different* reading (床 とこ vs a known 床/ゆか card) doesn't inherit its state."""
 
-    _states: dict[str, str]  # word → "known" | "forgotten" | "young" | "learning"
+    by_surface: dict[str, dict[str, str]]  # surface -> {reading|"" : state}
+    readings: dict[str, str]  # reading -> best state
 
-    def state(self, *forms: str | None) -> str | None:
-        """State for the best-matching form, or None if not in the snapshot."""
-        for f in forms:
-            if f and f in self._states:
-                return self._states[f]
+    def state(
+        self, surface: str | None, lemma: str | None = None, reading: str | None = None
+    ) -> str | None:
+        """State for the best-matching (surface, reading), or None if not in the snapshot."""
+        read = kata_to_hira(reading) if reading else ""
+        return self._surface_state(surface, lemma, read) or self._kana_state(surface, read)
+
+    def _surface_state(self, surface: str | None, lemma: str | None, read: str) -> str | None:
+        """State of the matching surface/lemma spelling; a spelling taught only with a *different*
+        reading is a same-spelling homograph — skipped, so it doesn't inherit the state."""
+        for spelling in (surface, lemma):
+            taught = self.by_surface.get(spelling) if spelling else None
+            if not taught:
+                continue
+            if read and read in taught:
+                return taught[read]
+            if not read:
+                return _best_state(taught.values())
+            if "" in taught:
+                return taught[""]
         return None
 
-    def is_known(self, *forms: str | None) -> bool:
-        return self.state(*forms) == "known"
+    def _kana_state(self, surface: str | None, read: str) -> str | None:
+        """A kana-only token matches any taught reading (kana↔kanji)."""
+        if not surface or _has_kanji(surface):
+            return None
+        if read and read in self.readings:
+            return self.readings[read]
+        return self.readings.get(surface)
 
-    def is_forgotten(self, *forms: str | None) -> bool:
-        return self.state(*forms) == "forgotten"
+    def is_known(
+        self, surface: str | None, lemma: str | None = None, reading: str | None = None
+    ) -> bool:
+        return self.state(surface, lemma, reading) == "known"
+
+    def is_forgotten(
+        self, surface: str | None, lemma: str | None = None, reading: str | None = None
+    ) -> bool:
+        return self.state(surface, lemma, reading) == "forgotten"
+
+    @classmethod
+    def of(cls, word_states: dict[str, str]) -> KnownSnap:
+        """Build from bare word→state (no reading pairing) — the empty snap and tests."""
+        return cls({w: {"": st} for w, st in word_states.items()}, {})
 
 
-_EMPTY_SNAP = KnownSnap(_states={})
+_EMPTY_SNAP = KnownSnap({}, {})
 
 
 # ---------------------------------------------------------------------------
@@ -319,12 +357,24 @@ def _record_state(states: dict[str, str], key: str, st: str) -> None:
         states[key] = st
 
 
+def _best_state(states) -> str | None:
+    """Highest-priority state among the readings taught for one surface (used when a token gives no
+    reading to disambiguate). known > forgotten > young > learning."""
+    best: str | None = None
+    for st in states:
+        if best is None or _STATE_PRIORITY.get(st, 0) > _STATE_PRIORITY.get(best, 0):
+            best = st
+    return best
+
+
 def _build_states(
     con: sqlite3.Connection, card_info: dict[int, dict], field_names: dict[int, list[str]]
-) -> dict[str, str]:
-    """word → best state, scanning every note whose best card isn't "new". Both the term and (if
-    distinct) its reading are recorded, so either form resolves via :meth:`KnownSnap.state`."""
-    states: dict[str, str] = {}
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """(by_surface, readings), scanning every note whose best card isn't "new". The term is keyed to
+    its taught reading (``""`` when none) so a same-spelling homograph with a different reading doesn't
+    inherit the state; the reading is also indexed on its own for kana-only tokens."""
+    by_surface: dict[str, dict[str, str]] = {}
+    readings: dict[str, str] = {}
     for nid, mid, flds in con.execute("SELECT id, mid, flds FROM notes"):
         info = card_info.get(nid)
         if info is None or info["st"] == "new":
@@ -335,10 +385,11 @@ def _build_states(
             continue
 
         st = info["st"]
-        _record_state(states, term, st)
-        if reading and reading != term:
-            _record_state(states, reading, st)
-    return states
+        reading = kata_to_hira(reading) if reading else ""
+        _record_state(by_surface.setdefault(term, {}), reading, st)
+        if reading:
+            _record_state(readings, reading, st)
+    return by_surface, readings
 
 
 def _read(
@@ -359,8 +410,8 @@ def _read(
         decay_override=decay_override,
     )
     field_names = _read_field_names(con)
-    states = _build_states(con, card_info, field_names)
-    return KnownSnap(_states=states)
+    by_surface, readings = _build_states(con, card_info, field_names)
+    return KnownSnap(by_surface, readings)
 
 
 # ---------------------------------------------------------------------------

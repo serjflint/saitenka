@@ -20,8 +20,22 @@ if TYPE_CHECKING:
 
 RGBA = tuple[int, int, int, int]
 
-# Function-word POS excluded from coloring / N+1 (particles, aux, symbols, whitespace).
-FUNCTION_POS = {"助詞", "助動詞", "補助記号", "記号", "空白", "接続詞", "接頭辞"}
+# POS excluded from coloring / N+1 — grammatical/affixal tokens that aren't standalone vocabulary:
+# particles, auxiliaries (incl. れる/られる), symbols, whitespace, conjunctions, prefixes, and — added
+# to stop them consuming the single N+1 slot — suffixes (接尾辞: honorific さん, counter 個) and bare
+# interjections (感動詞: ああ, えっ). A suffix's pos2 (名詞的) can't tell さん from a counter, so the
+# exclusion is by pos1.
+FUNCTION_POS = {
+    "助詞",
+    "助動詞",
+    "補助記号",
+    "記号",
+    "空白",
+    "接続詞",
+    "接頭辞",
+    "接尾辞",
+    "感動詞",
+}
 SENT_BOUNDARY = set("。？！?!…")
 
 
@@ -132,10 +146,10 @@ class Scorer:
         """True when the word is in KnownWords OR in the FSRS snapshot as 'known'."""
         if not self.enable_known:
             return False
-        if self.known.is_known(t.lemma, t.surface, t.reading):
+        if self.known.is_known(t.surface, t.lemma, t.reading):
             return True
         if self.fsrs_snap is not None:
-            return self.fsrs_snap.is_known(t.lemma, t.surface, t.reading)
+            return self.fsrs_snap.is_known(t.surface, t.lemma, t.reading)
         return False
 
     def _is_forgotten(self, t: Token) -> bool:
@@ -143,7 +157,7 @@ class Scorer:
         return (
             self.fsrs_snap is not None
             and self.enable_known
-            and self.fsrs_snap.is_forgotten(t.lemma, t.surface, t.reading)
+            and self.fsrs_snap.is_forgotten(t.surface, t.lemma, t.reading)
         )
 
     def score_line(self, tokens: list[Token]) -> list[TokenStyle]:
