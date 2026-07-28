@@ -20,6 +20,20 @@ from PIL import Image
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
 
+# Goldens are blessed on macOS (canonical, committed at golden/<name>). Text-heavy panels can render a
+# pixel wider under a different FreeType (e.g. Linux CI), which the MAE diff can't absorb once the size
+# differs — so a platform may carry an override at golden/<plat>/<name>. Reads prefer the override and
+# fall back to canonical; `SAITENKA_UPDATE_GOLDEN=1` on a non-canonical platform writes the override.
+_PLATFORM_DIR = {"linux": "linux", "win32": "windows"}.get(sys.platform)  # None on darwin (canonical)
+
+
+def _golden_target(name: str) -> Path:
+    if _PLATFORM_DIR is not None:
+        override = GOLDEN_DIR / _PLATFORM_DIR / name
+        if override.exists() or UPDATE:
+            return override
+    return GOLDEN_DIR / name
+
 
 def bgra_to_image(bgra: np.ndarray) -> Image.Image:
     """Un-premultiply a premultiplied-BGRA array back to an RGBA image, for goldens on cached panels
@@ -41,18 +55,34 @@ def mae(a: Image.Image, b: Image.Image) -> float:
 
 
 def assert_golden(img: Image.Image, name: str, tol: float = 2.0) -> None:
-    """Compare ``img`` to ``tests/golden/<name>`` within mean-abs-error ``tol`` (or update it)."""
-    path = GOLDEN_DIR / name
+    """Compare ``img`` to the golden for ``name`` within mean-abs-error ``tol`` (or update it).
+
+    Strict (size-exact + ``tol``) on the canonical platform or against an exact per-platform override —
+    that's the behavior-review gate. When a non-canonical platform falls back to a canonical golden, a
+    differently-built bundled FreeType shifts text by ≤1px and nudges anti-aliasing, so we allow a 1px
+    size slack (compare the common box) and a relaxed tolerance rather than fail on sub-pixel drift."""
+    path = _golden_target(name)
     if UPDATE or not path.exists():
-        GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         img.save(path)
         if not UPDATE:
             raise AssertionError(f"golden {name} was missing — created it; re-run to verify")
         return
     golden = Image.open(path)
-    assert img.size == golden.size, f"{name}: size {img.size} != golden {golden.size}"
-    err = mae(img, golden)
-    assert err <= tol, f"{name}: mean-abs-error {err:.3f} exceeds tol {tol}"
+    strict = _PLATFORM_DIR is None or path.parent.name == _PLATFORM_DIR
+    if strict:
+        assert img.size == golden.size, f"{name}: size {img.size} != golden {golden.size}"
+        err = mae(img, golden)
+        assert err <= tol, f"{name}: mean-abs-error {err:.3f} exceeds tol {tol}"
+        return
+    assert abs(img.width - golden.width) <= 1 and abs(img.height - golden.height) <= 1, (
+        f"{name}: size {img.size} vs canonical {golden.size} differs by more than 1px"
+    )
+    w, h = min(img.width, golden.width), min(img.height, golden.height)
+    box = (0, 0, w, h)
+    err = mae(img.crop(box), golden.crop(box))
+    limit = max(tol, 4.0)
+    assert err <= limit, f"{name}: cross-platform mean-abs-error {err:.3f} exceeds {limit}"
 
 
 def validate_ctf_document(data: dict) -> None:
