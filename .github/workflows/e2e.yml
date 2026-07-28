@@ -27,6 +27,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # e2e exercises real per-OS transport (named pipe / unix socket), not free-threading — so pin to
+      # 3.13 where fugashi ships prebuilt wheels on all three OSes. This avoids building fugashi from
+      # source against system MeCab (painful/absent on Windows). The 3.14t coverage lives in ci.yml.
+      UV_PYTHON: "3.13"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

@@ -26,6 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # fugashi (the tokenizer) has no free-threaded 3.14t wheel, so uv builds it from sdist against
+      # system MeCab. Without libmecab-dev the build fails "Have you installed MeCab?".
+      - name: Install MeCab (fugashi build dep)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+
       # Non-Python binaries `poe all` shells out to: lychee (links task). shellcheck (shell task) and
       # node (unused by `all`) ship on the runner; typos (spell) rides `uvx`.
       - name: Install lychee
@@ -74,6 +79,9 @@ jobs:
       UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install MeCab (fugashi build dep)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
 
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
