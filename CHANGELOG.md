@@ -7,6 +7,14 @@ logs.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-28
+
+### Fixed
+
+- **`saitenka[deinflect]` / `saitenka[full]` now resolve from PyPI.** The GPL `saitenka-deinflect`
+  add-on is published to PyPI alongside `saitenka`, so `uv tool install 'saitenka[full]'` works from the
+  index (previously the extra was unsatisfiable — the add-on shipped only inside the release bundle).
+
 ## [0.9.0] - 2026-07-28
 
 ### Changed
