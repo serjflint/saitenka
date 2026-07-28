@@ -1,0 +1,136 @@
+# Tag-triggered release: build ONCE, then publish to two places from the same artifacts —
+#   1. a GitHub Release carrying the self-contained bundle zip (wheel + GPL deinflect sdist + installers)
+#   2. PyPI, the Apache-2.0 `saitenka` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
+# The build↔publish split is a supply-chain best practice: the publish jobs do nothing but upload the
+# already-built artifacts, so nothing can tamper with them in between.
+#
+# IMPORTANT — supersedes `poe release-publish`'s `gh release create`: pushing a v* tag is now the sole
+# release trigger. Flow: `poe release-prepare` (bump/changelog/gate/build/commit) → merge PR →
+# `git push origin vX.Y.Z`. Do NOT also run `release-publish --publish`, or the Release double-creates.
+#
+# ONE-TIME SETUP (cannot live in code) — Trusted Publishing needs NO token/password and is unaffected
+# by your account 2FA; instead register a publisher on EACH site (same repo + workflow, distinct env):
+#   • PyPI     → project `saitenka` → Settings → Publishing → add GitHub Actions publisher:
+#                repo `serjflint/saitenka`, workflow `release.yml`, environment `pypi`
+#   • TestPyPI → same, but environment `testpypi` (test.pypi.org)
+# For the very first upload on each, create a "pending publisher" before the project exists.
+#
+# Two publish paths: a manual run (workflow_dispatch) does a TestPyPI dry-run; pushing a v* tag does the
+# real GitHub Release + PyPI publish.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # manual TestPyPI dry-run of the current commit
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build artifacts
+    runs-on: ubuntu-latest # bundle is py3-none-any — OS-independent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      # PyPI dists: the Apache-2.0 overlay wheel + sdist ONLY (gh-action-pypi-publish uploads the whole
+      # dir, so it must contain nothing else). The GPL deinflect add-on is conveyed as source in the
+      # bundle zip below; publishing it to PyPI would be a SEPARATE package + trusted publisher.
+      - name: Build PyPI dists
+        run: uv build overlay --out-dir dist-pypi
+
+      - name: Build GitHub-Release bundle (→ dist/saitenka-<ver>.zip)
+        working-directory: overlay
+        run: uv run poe bundle
+
+      - name: Checksum + release notes
+        run: |
+          (cd dist && shasum -a 256 saitenka-*.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v v="$ver" '
+            $0 ~ "^## \\[" v "\\]" {grab=1; next}
+            grab && /^## \[/ {exit}
+            grab {print}
+          ' CHANGELOG.md > dist/RELEASE_BODY.md
+          [ -s dist/RELEASE_BODY.md ] || echo "Release $ver" > dist/RELEASE_BODY.md
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-dist
+          path: |
+            dist/
+            dist-pypi/
+
+  github-release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') # tag only, never the manual dry-run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release + upload assets
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-dist
+      - name: Publish
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          files: |
+            dist/saitenka-*.zip
+            dist/SHA256SUMS.txt
+          body_path: dist/RELEASE_BODY.md
+          draft: false # "ok on tag" — publish immediately; the human gate is deciding to push the tag
+          prerelease: ${{ contains(github.ref_name, '-') }} # v0.8.0-rc1 etc.
+
+  testpypi:
+    name: Publish to TestPyPI (dry-run)
+    needs: build
+    if: github.event_name == 'workflow_dispatch' # manual only
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/saitenka
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-dist
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist-pypi/
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') # tag only
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/saitenka
+    permissions:
+      id-token: write # mandatory for OIDC Trusted Publishing (no API token stored)
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist-pypi/

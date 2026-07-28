@@ -1,0 +1,99 @@
+# Fast dev gate — Linux only. `poe all` is the sim/fast tier (windows_sim + pyfakefs OSType.WINDOWS
+# emulate per-OS behaviour in-process), so a Win/mac runner would re-run identical mocked paths for no
+# extra signal. Real per-OS execution lives in e2e.yml. Public repo ⇒ GitHub-hosted runners are free.
+#
+# Two jobs: `gate` runs the full 14-task gate once on the pinned interpreter (3.14t); `tests` re-runs
+# just the suite across the interpreter matrix (lint/types/arch are version-insensitive — no point ×5).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: poe all (Linux, 3.14t)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Non-Python binaries `poe all` shells out to: lychee (links task). shellcheck (shell task) and
+      # node (unused by `all`) ship on the runner; typos (spell) rides `uvx`.
+      - name: Install lychee
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2
+        with:
+          tool: lychee
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      # ast-grep (invariants gate) — the PyPI dist ships the `ast-grep` binary; expose uv's tool bin.
+      - name: Install ast-grep
+        run: |
+          uv tool install ast-grep-cli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Sync (free-threaded 3.14t per .python-version, full extras)
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      - name: Dev gate
+        working-directory: overlay
+        run: uv run poe all
+
+  tests:
+    name: tests (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14", "3.14t"]
+        include:
+          # 3.15 is still prerelease — let uv fetch it if published, but don't fail the run if it isn't.
+          - python: "3.15"
+            experimental: true
+          - python: "3.15t"
+            experimental: true
+    env:
+      # Overrides the repo's 3.14+freethreaded pin so `uv sync`/`uv run` both target the matrix leg.
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      - name: Tests
+        working-directory: overlay
+        run: uv run poe test
+
+      # test-ft (PYTHON_GIL=0) is only meaningful on a free-threaded build; on a GIL interpreter the
+      # env var is a no-op, so skip it there rather than run a misleadingly-labelled "FT" pass.
+      - name: Tests (free-threaded)
+        if: endsWith(matrix.python, 't')
+        working-directory: overlay
+        run: uv run poe test-ft
