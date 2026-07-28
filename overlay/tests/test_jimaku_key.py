@@ -41,7 +41,7 @@ def test_keychain_roundtrip_via_keyring(monkeypatch):
     monkeypatch.setattr(keyring, "set_password", lambda s, u, p: store.__setitem__((s, u), p))
     monkeypatch.setattr(keyring, "get_password", lambda s, u: store.get((s, u)))
     assert jimaku.keychain_set("mykey") is True
-    assert store[("saitenka-overlay", "jimaku")] == "mykey"
+    assert store[("saitenka", "jimaku")] == "mykey"
     assert jimaku.keychain_get() == "mykey"
 
 

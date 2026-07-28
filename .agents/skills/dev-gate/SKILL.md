@@ -9,7 +9,7 @@ description: >-
   authoring a test (use the write-test skill); NOT for release/publish (see RELEASING.md);
   NOT for mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks").
 metadata:
-  project: saitenka-overlay
+  project: saitenka
 ---
 
 # dev-gate

@@ -26,8 +26,9 @@ def test_discover_falls_back_to_known_locations(monkeypatch):
     monkeypatch.setattr(discover.shutil, "which", lambda _name: None)
     fake = Path("/Applications/mpv.app/Contents/MacOS/mpv")
     monkeypatch.setattr(discover, "_CANDIDATES", [fake])
-    monkeypatch.setattr(discover.os.path, "isfile", lambda p: str(p) == str(fake))
-    monkeypatch.setattr(discover.os, "access", lambda _p, _mode: True)
+    # Patch the seam find_mpv actually uses (_is_exe → Path.is_file), so the test doesn't depend on
+    # the fake path really existing on the host — it does on a dev Mac, not on a Linux CI runner.
+    monkeypatch.setattr(discover, "_is_exe", lambda p: str(p) == str(fake))
     assert discover.find_mpv() == str(fake)
 
 
@@ -135,7 +136,7 @@ def test_install_plugin_backs_up_existing(tmp_path):
     backups = list((scripts.parent / "saitenka-backups").glob("saitenka.lua.*.bak"))
     assert backups and "OLD" in backups[0].read_text()
     assert not list(scripts.glob("*.bak"))  # nothing mpv-loadable left behind
-    assert "saitenka-overlay" in dest.read_text()
+    assert "saitenka" in dest.read_text()
 
 
 def test_uninstall_plugin_backs_up_then_removes(tmp_path):

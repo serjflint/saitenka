@@ -52,7 +52,7 @@ def build_mpv_argv(
             # A globally-installed saitenka.lua (from `install-plugin`, for the ATTACH workflow) still
             # autoloads under mpv's own script-autoload — `--no-config` doesn't suppress that. It reuses
             # whatever input-ipc-server is already set (see saitenka.lua's ensure_socket()), so without
-            # this marker it would spawn a SECOND `saitenka-overlay attach` onto the socket `run` mode
+            # this marker it would spawn a SECOND `saitenka attach` onto the socket `run` mode
             # already owns: two independent Reader/telemetry instances driving one mpv. This script-opt
             # is the handshake — saitenka.lua's spawn_overlay() checks it and no-ops when set.
             "--script-opts=saitenka-managed=yes",

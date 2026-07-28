@@ -28,7 +28,7 @@ holding your Yomitan `.zip` dictionaries; it classifies each (definition / frequ
 it, and fills `dicts`/`freq`/`pitch` in your config with their **titles**:
 
 ```bash
-saitenka-overlay import ~/yomitan-dicts        # build the DB + register the titles in the config
+saitenka import ~/yomitan-dicts        # build the DB + register the titles in the config
 ```
 
 The source zips are read **in place** — no copy is kept, so you can delete or move them afterwards.
@@ -38,7 +38,7 @@ live alongside the titles in **`~/.config/saitenka/overlay.toml`** (see `overlay
 
 With that in place the full run is just the video path — every `--dict/--freq/--pitch/--anki-decks`
 default comes from the config (an explicit CLI flag still overrides it). Nothing is rebuilt at play
-time; `run`/`attach` only open the DB. `saitenka-overlay doctor` lists what's imported.
+time; `run`/`attach` only open the DB. `saitenka doctor` lists what's imported.
 
 ### Migrating from an older (zip-path) config
 
@@ -47,7 +47,7 @@ on every launch (the `copy-dicts` era). To move to the consolidated DB, just run
 the folder those zips already live in:
 
 ```bash
-saitenka-overlay import ~/yomitan-dicts    # builds the DB and rewrites the config to titles
+saitenka import ~/yomitan-dicts    # builds the DB and rewrites the config to titles
 ```
 
 That's the whole migration — `import` overwrites the old path entries with the imported **titles**, so
@@ -134,7 +134,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 
 ```bash
 # embedded JP subs (most anime rips): the file path is the positional arg
-# (--dict takes an imported dictionary TITLE; run `saitenka-overlay import <dir>` first)
+# (--dict takes an imported dictionary TITLE; run `saitenka import <dir>` first)
 uv run python examples/mpv_reader.py /path/to/anime.mkv --color --mine \
   --dict "Your Dictionary Title"
 
@@ -154,14 +154,14 @@ anti-duplicate script-opts flags we always set last).
 
 ## 7. Cleanup (mining writes **real** cards)
 
-Mined cards go to **`Saitenka::Mining`** (Lapis) tagged **`saitenka-overlay`** — they're real, kept by
-default. To review or remove test cards: Anki → Browse → search `tag:saitenka-overlay`. To wipe them
+Mined cards go to **`Saitenka::Mining`** (Lapis) tagged **`saitenka`** — they're real, kept by
+default. To review or remove test cards: Anki → Browse → search `tag:saitenka`. To wipe them
 from a terminal:
 
 ```bash
-curl -s 127.0.0.1:8765 -d '{"action":"guiBrowse","version":6,"params":{"query":"tag:saitenka-overlay"}}'
+curl -s 127.0.0.1:8765 -d '{"action":"guiBrowse","version":6,"params":{"query":"tag:saitenka"}}'
 # …then delete in the Browser, or scripted:
-IDS=$(curl -s 127.0.0.1:8765 -d '{"action":"findNotes","version":6,"params":{"query":"tag:saitenka-overlay"}}' | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin)['result']))")
+IDS=$(curl -s 127.0.0.1:8765 -d '{"action":"findNotes","version":6,"params":{"query":"tag:saitenka"}}' | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin)['result']))")
 curl -s 127.0.0.1:8765 -d "{\"action\":\"deleteNotes\",\"version\":6,\"params\":{\"notes\":$IDS}}"
 ```
 
@@ -173,11 +173,11 @@ over, which sidesteps the SubMiner-vs-animecards socket fight).
 
 ```bash
 # attach to a running mpv (its mpv.conf has input-ipc-server=/tmp/mpv-socket, or pass the path):
-uv run saitenka-overlay attach /tmp/mpv-socket
+uv run saitenka attach /tmp/mpv-socket
 
 # plugin mode: install a one-file user-script so ANY mpv launch spawns the overlay automatically
-uv run saitenka-overlay install-plugin     # writes ~/.config/mpv/scripts/saitenka.lua (backs up first)
-uv run saitenka-overlay uninstall-plugin   # removes it (backs up first)
+uv run saitenka install-plugin     # writes ~/.config/mpv/scripts/saitenka.lua (backs up first)
+uv run saitenka uninstall-plugin   # removes it (backs up first)
 ```
 
 `doctor` reports whether `mpv.conf` sets `input-ipc-server` and which known tool uses that socket.
@@ -205,7 +205,7 @@ pre-push gate. The full task-by-task breakdown, how to read a failure, the advis
 tier, and the free-threaded / 3.13-pinned-env traps live in the `dev-gate` skill
 (`.agents/skills/dev-gate/`) — consult it rather than this table, which drifts.
 
-Logs: the overlay writes a rotating **JSON-lines** debug log to `~/.cache/saitenka-overlay/overlay.log`
+Logs: the overlay writes a rotating **JSON-lines** debug log to `~/.cache/saitenka/overlay.log`
 (DEBUG in the file, human-readable WARNING+ to stderr) — silent failures land there, not in a black
 hole. Each line is a redacted JSON object (`{"event": "...", "level": "...", "timestamp": "..."}`),
 so it's `jq`-able; `doctor`'s "recent errors" section and `report`'s bundle both read it as-is.
@@ -218,10 +218,10 @@ independent switches: the `telemetry` extra (the OTel SDK) and the `[telemetry] 
 Install the extra, then flip the flag with the CLI (no hand-editing needed):
 
 ```
-uv tool install --reinstall 'saitenka-overlay[telemetry]'   # or add to an existing [full] install
-saitenka-overlay telemetry enable      # sets [telemetry] enabled = true (backs up your config)
-saitenka-overlay telemetry status      # both switches + where the trace lands + last trace
-saitenka-overlay telemetry disable     # flips it back off
+uv tool install --reinstall 'saitenka[telemetry]'   # or add to an existing [full] install
+saitenka telemetry enable      # sets [telemetry] enabled = true (backs up your config)
+saitenka telemetry status      # both switches + where the trace lands + last trace
+saitenka telemetry disable     # flips it back off
 ```
 
 `enable` warns you (with the exact install command) if the extra is missing, since the flag alone
@@ -230,11 +230,11 @@ won't record without it. Equivalent manual edit in `overlay.toml` if you prefer:
 ```toml
 [telemetry]
 enabled = true
-# export_dir = "~/custom/telemetry"  # default: ~/.cache/saitenka-overlay/telemetry
+# export_dir = "~/custom/telemetry"  # default: ~/.cache/saitenka/telemetry
 ```
 
 Each session with telemetry enabled writes its own Chrome Trace Format file to
-`~/.cache/saitenka-overlay/telemetry/trace-<UTC>.json` (the newest 10 are kept) — open it directly in
+`~/.cache/saitenka/telemetry/trace-<UTC>.json` (the newest 10 are kept) — open it directly in
 `chrome://tracing` or [Perfetto](https://ui.perfetto.dev/). Every span carries a `cpu_ms` attribute:
 `wall ≫ cpu_ms` means the thread was stalled (GIL/lock/IO), not working. Metrics
 (render/upload/hit-test/dict-SQL/IPC/sub-seek histograms, cache hit-miss counters, `gil_enabled`) are

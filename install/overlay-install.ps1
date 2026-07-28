@@ -1,4 +1,4 @@
-# saitenka-overlay bootstrap (Windows) — Stage 17b.
+# saitenka bootstrap (Windows) — Stage 17b.
 # The ONLY job the shell does: get `uv`, install the overlay from the wheel next to this script, then
 # hand off to the Python `setup` wizard (which owns all real logic). Non-destructive; -DryRun prints.
 param([switch]$DryRun)
@@ -25,21 +25,21 @@ if (-not (Have 'uv')) {
 }
 
 # uv installs tools into %USERPROFILE%\.local\bin, which is NOT on PATH in this session. Prepend it
-# ALWAYS (not only when we just installed uv) so the `saitenka-overlay setup` handoff below resolves
-# even when uv was already present — otherwise: "saitenka-overlay is not recognized".
+# ALWAYS (not only when we just installed uv) so the `saitenka setup` handoff below resolves
+# even when uv was already present — otherwise: "saitenka is not recognized".
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 
 # 2. install the overlay from the wheel next to this stub, WITH the JMdict fallback extra ([jmdict],
 # resolved from PyPI). The GPL-3.0 deinflect add-on (inflection chains) isn't on PyPI, so it rides in
 # the bundle as an SDIST (source — GPLv3's Corresponding Source) and installs via --with. Together this
 # mirrors the checkout installers' [full].
-$wheel = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay-*.whl' |
+$wheel = Get-ChildItem -Path $SelfDir -Filter 'saitenka-*.whl' |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $wheel) {
     Write-Error '[saitenka] no overlay wheel found next to this installer - is the bundle intact?'
     exit 1
 }
-$dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_overlay_deinflect-*.tar.gz' |
+$dein = Get-ChildItem -Path $SelfDir -Filter 'saitenka_deinflect-*.tar.gz' |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $withArgs = @()
 if ($dein) { Write-Host "[saitenka] including GPL-3.0 deinflect add-on, from source ($($dein.Name))"; $withArgs = @('--with', $dein.FullName) }
@@ -56,8 +56,8 @@ else { uv tool install --python $pyVer --reinstall $spec @withArgs }
 
 # 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin). Resolve the exe
 # explicitly — the freshly-installed tool may still not be on PATH in this session on some setups.
-$exe = (Get-Command saitenka-overlay -ErrorAction SilentlyContinue).Source
-if (-not $exe) { $exe = "$env:USERPROFILE\.local\bin\saitenka-overlay.exe" }
+$exe = (Get-Command saitenka -ErrorAction SilentlyContinue).Source
+if (-not $exe) { $exe = "$env:USERPROFILE\.local\bin\saitenka.exe" }
 if ($DryRun) { Write-Host "DRY: $exe setup --dry-run" }
 elseif (Test-Path $exe) { & $exe setup }
-else { uv tool run --from saitenka-overlay saitenka-overlay setup }
+else { uv tool run --from saitenka saitenka setup }

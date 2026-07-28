@@ -1,4 +1,4 @@
-"""``saitenka-overlay import-settings`` — map a Yomitan settings export onto our config.
+"""``saitenka import-settings`` — map a Yomitan settings export onto our config.
 
 Reads a Yomitan **settings export** — the small file from Yomitan → Settings → Backup, NOT the
 multi-GB collection/dictionary export. We refuse anything over ``MAX_SETTINGS_BYTES`` (a settings
@@ -247,7 +247,7 @@ def _resolve_settings_path(settings_path: str | None) -> str | None:
             .strip("\"'")
         )
         if not entered:
-            print("import skipped — run `saitenka-overlay import-settings <settings.json>` later")
+            print("import skipped — run `saitenka import-settings <settings.json>` later")
             return None
         return str(Path(entered).expanduser())
     print("no settings export given and none found — pass the path explicitly")

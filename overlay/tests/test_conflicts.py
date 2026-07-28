@@ -8,7 +8,9 @@ from overlay.app import doctor as doc
 
 
 def test_subminer_running_true_on_pgrep_hit(monkeypatch):
-    monkeypatch.setattr(conflicts.sys, "platform", "darwin")
+    # subminer_running() branches on the import-time _PLATFORM alias, not live sys.platform — patch it
+    # so the pgrep path is exercised on any host (else this passes only where _PLATFORM=='darwin').
+    monkeypatch.setattr(conflicts, "_PLATFORM", "darwin")
 
     class R:
         returncode = 0
@@ -18,7 +20,7 @@ def test_subminer_running_true_on_pgrep_hit(monkeypatch):
 
 
 def test_subminer_running_false_on_pgrep_miss(monkeypatch):
-    monkeypatch.setattr(conflicts.sys, "platform", "darwin")
+    monkeypatch.setattr(conflicts, "_PLATFORM", "darwin")
 
     class R:
         returncode = 1

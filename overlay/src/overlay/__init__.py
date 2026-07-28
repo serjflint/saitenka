@@ -4,8 +4,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 from overlay import fonts, render
 
-try:  # the distribution is `saitenka-overlay`; the import package is `overlay`
-    __version__ = version("saitenka-overlay")
+try:  # the distribution is `saitenka`; the import package is `overlay`
+    __version__ = version("saitenka")
 except PackageNotFoundError:  # pragma: no cover — source tree without an installed dist
     __version__ = "0+unknown"
 

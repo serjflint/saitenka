@@ -42,7 +42,7 @@ logs.
 - **Startup console noise reduced.** The `dictionaries:`/`frequency:`/`pitch:` title dump collapsed
   to one line with counts and the settings file path (full titles still land in the structured log).
   Telemetry now prints an explicit startup line when it's actually enabled — pointing at
-  `saitenka-overlay telemetry disable` instead of telling you to hand-edit `overlay.toml`.
+  `saitenka telemetry disable` instead of telling you to hand-edit `overlay.toml`.
 - **Background dep loading (`build_reader_deps`) is now parallelized** across a small thread pool
   instead of one strictly sequential background thread — Anki launch/poll, dict-title resolution, the
   JLPT table load, the frequency-dict load, the known-words fetch, and the mining `Anki()` object all
@@ -84,13 +84,13 @@ logs.
   tooltip) was never read from `overlay.toml`** — stuck at its 0.25s default regardless of config in
   both `run` and `attach` modes. Now wired and documented in `overlay.example.toml`.
 - **The `N prefetch worker(s)` runtime line was console-only** (a bare `print`), so it never reached
-  `overlay.log` or a `saitenka-overlay report` bundle — made diagnosing "0 prefetch workers" reports
+  `overlay.log` or a `saitenka report` bundle — made diagnosing "0 prefetch workers" reports
   impossible from a bundle alone. Now also logged.
 - **A globally-installed `saitenka.lua` plugin (`install-plugin`, for the ATTACH-from-Finder workflow)
   double-attached onto `run` mode's own mpv instance.** `--no-config` suppresses `mpv.conf`/
   `input.conf` but NOT mpv's script autoload, and `saitenka.lua`'s `spawn_overlay()` reuses whatever
   `input-ipc-server` is already set — `run` mode passes its own explicitly, so a plugin installed for
-  the attach workflow would spawn a second, redundant `saitenka-overlay attach` onto `run`'s socket:
+  the attach workflow would spawn a second, redundant `saitenka attach` onto `run`'s socket:
   two independent `Reader`/telemetry instances driving one mpv (doubled IPC traffic/CPU, and the
   actual cause of `telemetry/trace.json` corruption on some sessions — two OS processes writing the
   same file with no cross-process lock). Fixed with a handshake: `run` now launches mpv with
@@ -162,7 +162,7 @@ logs.
 - **Startup console noise reduced.** The `dictionaries:`/`frequency:`/`pitch:` title dump collapsed
   to one line with counts and the settings file path (full titles still land in the structured log).
   Telemetry now prints an explicit startup line when it's actually enabled — pointing at
-  `saitenka-overlay telemetry disable` instead of telling you to hand-edit `overlay.toml`.
+  `saitenka telemetry disable` instead of telling you to hand-edit `overlay.toml`.
 - **Background dep loading (`build_reader_deps`) is now parallelized** across a small thread pool
   instead of one strictly sequential background thread — Anki launch/poll, dict-title resolution, the
   JLPT table load, the frequency-dict load, the known-words fetch, and the mining `Anki()` object all
@@ -196,13 +196,13 @@ logs.
   tooltip) was never read from `overlay.toml`** — stuck at its 0.25s default regardless of config in
   both `run` and `attach` modes. Now wired and documented in `overlay.example.toml`.
 - **The `N prefetch worker(s)` runtime line was console-only** (a bare `print`), so it never reached
-  `overlay.log` or a `saitenka-overlay report` bundle — made diagnosing "0 prefetch workers" reports
+  `overlay.log` or a `saitenka report` bundle — made diagnosing "0 prefetch workers" reports
   impossible from a bundle alone. Now also logged.
 - **A globally-installed `saitenka.lua` plugin (`install-plugin`, for the ATTACH-from-Finder workflow)
   double-attached onto `run` mode's own mpv instance.** `--no-config` suppresses `mpv.conf`/
   `input.conf` but NOT mpv's script autoload, and `saitenka.lua`'s `spawn_overlay()` reuses whatever
   `input-ipc-server` is already set — `run` mode passes its own explicitly, so a plugin installed for
-  the attach workflow would spawn a second, redundant `saitenka-overlay attach` onto `run`'s socket:
+  the attach workflow would spawn a second, redundant `saitenka attach` onto `run`'s socket:
   two independent `Reader`/telemetry instances driving one mpv (doubled IPC traffic/CPU, and the
   actual cause of `telemetry/trace.json` corruption on some sessions — two OS processes writing the
   same file with no cross-process lock). Fixed with a handshake: `run` now launches mpv with
@@ -226,7 +226,7 @@ logs.
 
 ### Added
 
-- **`saitenka-overlay telemetry enable|disable|status`** — flip `[telemetry] enabled` without
+- **`saitenka telemetry enable|disable|status`** — flip `[telemetry] enabled` without
   hand-editing `overlay.toml` (comment-preserving, backs up the prior file), plus a `status` readout
   of both switches (config flag + whether the `telemetry` extra is installed), the export dir, and
   the last trace. `enable` prints the install command if the extra is missing.
@@ -258,7 +258,7 @@ logs.
 ### Changed
 
 - **Renamed the optional `observability` extra to `telemetry`** for consistency with the
-  `[telemetry]` config table and the new command — install as `saitenka-overlay[telemetry]`
+  `[telemetry]` config table and the new command — install as `saitenka[telemetry]`
   (the old `[observability]` name no longer resolves; `[full]` is unaffected).
 - **Collapsed the trace write-pipeline** into a single `CTFSpanProcessor` (one bounded queue, one
   writer thread) from three classes / two queues / three threads. Fixes an O(n²) full-file rewrite
@@ -365,7 +365,7 @@ logs.
 
 ### Added
 
-- **`saitenka-overlay import <dir>`** — build your Yomitan dictionaries into the consolidated database in
+- **`saitenka import <dir>`** — build your Yomitan dictionaries into the consolidated database in
   one step and register them in the config by title. Accepts `.zip` files and/or folders; source zips are
   read **in place** (no copy kept), so you can delete them afterwards.
 - **The tooltip and card preview scale with the window** (mpv's OSD model) — their contents (fonts,

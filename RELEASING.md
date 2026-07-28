@@ -1,7 +1,7 @@
 # Releasing Saitenka
 
 Releases are cut **manually from macOS** (CI is deferred — see `ROADMAP.md`). The distributable is a
-single `dist/saitenka-overlay-<ver>.zip` (wheel + GPL `deinflect` sdist + installers), published as a
+single `dist/saitenka-<ver>.zip` (wheel + GPL `deinflect` sdist + installers), published as a
 **GitHub Release**. This file is the source of truth for the human steps — `install/release.py`
 automates them (see "Automated" below) but the review gates it can't remove (curating the changelog,
 merging the PR, publishing the Release) still happen exactly where they're described here.
@@ -48,14 +48,14 @@ wrap `uv run install/release.py prepare|publish --help` for the full set.
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
-3. **Build** the bundle: `uv run install/make_bundle.py` → `dist/saitenka-overlay-X.Y.Z.zip`.
-4. **Checksums:** `cd dist && shasum -a 256 saitenka-overlay-X.Y.Z.zip > SHA256SUMS`.
+3. **Build** the bundle: `uv run install/make_bundle.py` → `dist/saitenka-X.Y.Z.zip`.
+4. **Checksums:** `cd dist && shasum -a 256 saitenka-X.Y.Z.zip > SHA256SUMS`.
    (Integrity only — GPG/Sigstore is intentionally skipped until a downstream packager needs it.)
 5. **Smoke-test the artifact, not the tree** — extract the zip in a temp dir and run the *built wheel* in
    an isolated env:
    ```sh
-   cd $(mktemp -d) && unzip -q <repo>/dist/saitenka-overlay-X.Y.Z.zip
-   uvx --from ./saitenka_overlay-X.Y.Z-py3-none-any.whl saitenka-overlay --version   # → X.Y.Z
+   cd $(mktemp -d) && unzip -q <repo>/dist/saitenka-X.Y.Z.zip
+   uvx --from ./saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
    ```
    This catches packaging breakage (missing data files, entry point, deps) that `poe all` can't.
 6. **Gate:** `uv run poe all` green; update any version-referenced docs.
@@ -74,7 +74,7 @@ wrap `uv run install/release.py prepare|publish --help` for the full set.
    ```sh
    gh release create vX.Y.Z --draft --title "X.Y.Z" \
      --notes-file <(sed -n '/## \[X.Y.Z\]/,/## \[/p' CHANGELOG.md | sed '$d') \
-     dist/saitenka-overlay-X.Y.Z.zip dist/SHA256SUMS
+     dist/saitenka-X.Y.Z.zip dist/SHA256SUMS
    ```
    Verify the draft (assets present, notes correct), then **publish** (`gh release edit vX.Y.Z --draft=false`).
 10. **Post-release:** confirm `## [Unreleased]` is empty on top and tags == `pyproject.toml`.
@@ -87,7 +87,7 @@ wrap `uv run install/release.py prepare|publish --help` for the full set.
   `[X.Y.Z]: .../compare/v<prev>..vX.Y.Z` under the placeholder comment.
 - **Release candidates:** tag `vX.Y.Z-rc1`, publish as a **pre-release**, smoke-test, then cut `vX.Y.Z`
   from the same commit.
-- **PyPI (optional, deferred):** to make `uvx saitenka-overlay` work, publish only the Apache-2.0 core
+- **PyPI (optional, deferred):** to make `uvx saitenka` work, publish only the Apache-2.0 core
   wheel (`uv publish` from `overlay/`), keeping the GPL `deinflect` add-on an opt-in extra so the license
   boundary stays clean. GitHub Releases remain the primary channel (bundle + installers for non-Python
   users).

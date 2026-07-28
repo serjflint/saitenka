@@ -42,7 +42,7 @@ KEY_MIN_LEN = 20
 PASTE_HINT = (
     "Note: this HIDDEN prompt won't accept Ctrl+V (it captures one control char). Right-click to "
     "paste, or use Ctrl+Shift+V in Windows Terminal. You can also cancel and pass the key on the "
-    "normal command line, where Ctrl+V works: saitenka-overlay set-jimaku-key <key>"
+    "normal command line, where Ctrl+V works: saitenka set-jimaku-key <key>"
 )
 
 
@@ -80,7 +80,7 @@ def prompt_for_key(getpass_fn, input_fn=input, out=print, tries=3) -> str:  # pr
 
 
 # OS secret-store coordinates for the jimaku key (keyring service/username).
-KEYCHAIN_SERVICE = "saitenka-overlay"
+KEYCHAIN_SERVICE = "saitenka"
 KEYCHAIN_ACCOUNT = "jimaku"
 
 
@@ -231,7 +231,7 @@ class JimakuClient:
         self.base = base
         if not self.api_key:
             raise JimakuError(
-                "no jimaku API key — run `saitenka-overlay set-jimaku-key` (stored in the OS secret "
+                "no jimaku API key — run `saitenka set-jimaku-key` (stored in the OS secret "
                 "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
             )
 
@@ -241,7 +241,7 @@ class JimakuClient:
         detail = _http_error_detail(e)
         if e.code == 429 or e.code >= 500:
             return _JimakuRetryable(f"jimaku {e.code} for {path}: {e.reason}{detail}")
-        hint = "  (check your API key: `saitenka-overlay set-jimaku-key`)" if e.code == 401 else ""
+        hint = "  (check your API key: `saitenka set-jimaku-key`)" if e.code == 401 else ""
         return JimakuError(f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}")
 
     def _get(self, path: str, **params):
@@ -270,7 +270,7 @@ class JimakuClient:
                 except ValueError as e:  # illegal Authorization header — a stray char in the key
                     raise JimakuError(
                         f"jimaku request build failed for {path}: {e} — re-set the key with "
-                        "`saitenka-overlay set-jimaku-key`"
+                        "`saitenka set-jimaku-key`"
                     ) from e
         raise JimakuError(f"jimaku request to {path} failed after retries")  # unreachable
 

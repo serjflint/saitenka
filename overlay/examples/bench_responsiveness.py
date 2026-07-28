@@ -170,7 +170,7 @@ def discover_pathological(db, dict_id: int, n: int = 5) -> list[tuple[str, str, 
 
 def _load_dict_set():
     """Resolve the configured dict/freq/pitch **titles** against the consolidated DB (built once by
-    ``saitenka-overlay import`` — see ``app/config.py``, dicts are titles, not zip paths)."""
+    ``saitenka import`` — see ``app/config.py``, dicts are titles, not zip paths)."""
     cfg = load_config()
     dict_titles = list(cfg.get("dicts") or [])
     if not dict_titles:

@@ -1,15 +1,15 @@
 -- saitenka.lua — mpv user-script that launches the Saitenka overlay in ATTACH mode (Stage 16).
 --
--- Installed by `saitenka-overlay install-plugin` into ~/.config/mpv/scripts/ (removable with
+-- Installed by `saitenka install-plugin` into ~/.config/mpv/scripts/ (removable with
 -- uninstall-plugin). On mpv start it ensures an IPC socket exists (creating a per-instance one via
--- the input-ipc-server client option if unset) and spawns `saitenka-overlay attach <socket>` as a
+-- the input-ipc-server client option if unset) and spawns `saitenka attach <socket>` as a
 -- detached subprocess pointing at THIS mpv's own socket. mpv then works normally from ANY launcher;
 -- we JOIN the socket rather than take it over (mpv allows many concurrent IPC clients).
 
--- Absolute path to the saitenka-overlay executable. `install-plugin` rewrites this line to the
+-- Absolute path to the saitenka executable. `install-plugin` rewrites this line to the
 -- resolved path, because a Finder/Dock-launched mpv does NOT inherit ~/.local/bin (or Homebrew's
 -- bin) on PATH — a bare command name would fail to spawn. Left as the bare name when run unresolved.
-local SAITENKA_BIN = 'saitenka-overlay'
+local SAITENKA_BIN = 'saitenka'
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
@@ -35,7 +35,7 @@ local spawned = false
 
 local function spawn_overlay()
     if spawned then return end
-    -- `saitenka-overlay run` launches its own mpv with `--script-opts=saitenka-managed=yes` and
+    -- `saitenka run` launches its own mpv with `--script-opts=saitenka-managed=yes` and
     -- already has a Reader attached over IPC — without this check we'd autoload here too (script
     -- autoload isn't affected by run mode's `--no-config`) and double-attach onto the same socket:
     -- two independent Controller/Reader instances both drawing OSD and writing telemetry.

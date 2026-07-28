@@ -80,9 +80,9 @@ elseif(Confirm 'Install Anki now (needed for mining + FSRS coloring)?'){ Pkg 'An
 else { Log "skipped Anki - install later from https://apps.ankiweb.net, then re-run" }
 
 # --- 2. Install / update the overlay from THIS checkout ----------------------
-# uv drops tool binaries (saitenka-overlay.exe) into %USERPROFILE%\.local\bin. A shell that's already
+# uv drops tool binaries (saitenka.exe) into %USERPROFILE%\.local\bin. A shell that's already
 # open won't have it on PATH, so prepend it for THIS session - otherwise the install below and the
-# next-steps `saitenka-overlay ...` commands would fail with "not recognized". New terminals: uv
+# next-steps `saitenka ...` commands would fail with "not recognized". New terminals: uv
 # registers this dir persistently, but you must open a fresh terminal (or run `uv tool update-shell`)
 # for it to take effect outside this installer.
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
@@ -90,7 +90,7 @@ $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 # inflection chains) when the deinflect source is present in this checkout; otherwise `[jmdict]` (full
 # minus the add-on). `[full]` is GPL-3.0 (see ../LICENSING.md); a wheel/bundle install with no
 # deinflect\ stays Apache-2.0. On Windows `[jmdict]` pulls jamdict-data-fix, which builds cleanly (the
-# plain `saitenka-overlay` has no jamdict-data at all — that upstream sdist is what failed here).
+# plain `saitenka` has no jamdict-data at all — that upstream sdist is what failed here).
 if(Test-Path (Join-Path $Repo 'deinflect')){ $extra = 'full'; Log "including GPL-3.0 deinflect add-on (inflection chains)" }
 else { $extra = 'jmdict'; Warn "no deinflect\ in this checkout - installing [jmdict] only (no inflection chains)" }
 # Pick the Python: fugashi (the MeCab tokenizer) has no free-threaded Windows wheel, so 3.14t needs a
@@ -111,7 +111,7 @@ else {
 # stderr), so the "Failed to build ..." block the outcome section points at is unaffected.
 $installArgs = @('tool','install','--python',$pyVer,'--reinstall','--quiet',"$Repo\overlay[$extra]")
 if(Have uv){
-  Log "Installing/updating saitenka-overlay[$extra] from $Repo\overlay"
+  Log "Installing/updating saitenka[$extra] from $Repo\overlay"
   if($DryRun){ Write-Host "  DRY: uv $($installArgs -join ' ')" }
   else {
     & uv @installArgs
@@ -145,11 +145,11 @@ if($Dev){
 # powershell -ExecutionPolicy Bypass -File install\doctor-windows.ps1)
 if($OverlayFailed){
   Write-Host ""
-  Write-Host "[saitenka] INSTALL DID NOT COMPLETE - saitenka-overlay is not installed." -ForegroundColor Red
+  Write-Host "[saitenka] INSTALL DID NOT COMPLETE - saitenka is not installed." -ForegroundColor Red
   Write-Host "How to report this so it can be fixed:" -ForegroundColor Yellow
   Write-Host "  1. Copy the error above - the 'Failed to build ...' block is the cause."
   if($LogPath){ Write-Host "     A full log was saved here (attach it):  $LogPath" }
-  if(Have saitenka-overlay){ Write-Host "  2. Run  saitenka-overlay report  and attach the zip it writes (secrets are redacted)." }
+  if(Have saitenka){ Write-Host "  2. Run  saitenka report  and attach the zip it writes (secrets are redacted)." }
   else { Write-Host "  2. Also include your Windows version and the output of:  uv --version" }
   Write-Host "  3. Open an issue:  https://github.com/serjflint/saitenka/issues"
   if($LogPath){ try { Stop-Transcript | Out-Null } catch {} }
@@ -161,14 +161,14 @@ if($OverlayFailed){
 # prompts to install the mpv plugin (auto-launch overlay on any mpv), store your jimaku key, and
 # import your Yomitan dictionaries. Confirm-first and resumable; -Yes passes --yes. The summary below
 # then reflects whatever setup configured.
-if(Have saitenka-overlay){
+if(Have saitenka){
   $setupArgs = @('setup')
   if($Yes){ $setupArgs += '--yes' }
   if($DryRun){ $setupArgs += '--dry-run' }
   Log "Guided setup (mpv plugin / jimaku key / dictionaries)..."
-  & saitenka-overlay @setupArgs
+  & saitenka @setupArgs
 } else {
-  Warn "saitenka-overlay isn't on PATH this session - open a NEW terminal and run:  saitenka-overlay setup"
+  Warn "saitenka isn't on PATH this session - open a NEW terminal and run:  saitenka setup"
 }
 
 Log "Done."
@@ -199,25 +199,25 @@ Write-Host "Next steps:"
 $PluginDirs = @((Join-Path $env:APPDATA 'mpv\scripts\saitenka.lua'), (Join-Path $env:APPDATA 'mpv.net\scripts\saitenka.lua'))
 if($PluginDirs | Where-Object { Test-Path $_ }){ Write-Host "  1. mpv plugin:  [x] installed (auto-starts the overlay on any mpv launch)" -ForegroundColor Green }
 else {
-  Write-Host "  1. mpv plugin not installed - re-run  saitenka-overlay setup  (or:  saitenka-overlay install-plugin)"
+  Write-Host "  1. mpv plugin not installed - re-run  saitenka setup  (or:  saitenka install-plugin)"
 }
 Write-Host "  2. Anki add-ons (Tools -> Add-ons -> Get Add-ons):"
 AddonLine '2055492159' 'AnkiConnect'    'mining + FSRS coloring'
 AddonLine '759844606'  'FSRS Helper'    'better scheduling'
 AddonLine '1771074083' 'Review Heatmap' 'streak view'
-if(DictsPresent){ Write-Host "  3. Dictionaries:  [x] imported into the database (see saitenka-overlay doctor)" -ForegroundColor Green }
+if(DictsPresent){ Write-Host "  3. Dictionaries:  [x] imported into the database (see saitenka doctor)" -ForegroundColor Green }
 else {
-  Write-Host "  3. Dictionaries: run  saitenka-overlay import <folder of your Yomitan .zip dicts>"
+  Write-Host "  3. Dictionaries: run  saitenka import <folder of your Yomitan .zip dicts>"
   Write-Host "     (imports them once into the consolidated database and fills the config with their titles)."
   Write-Host "       config: $Cfg"
-  Write-Host "     Have a Yomitan settings export? saitenka-overlay import-settings <export.json> --scan-dir <folder>"
+  Write-Host "     Have a Yomitan settings export? saitenka import-settings <export.json> --scan-dir <folder>"
 }
 # jimaku is "set up" if the env var is set OR the config has a [jimaku] table (set-jimaku-key writes
 # [jimaku].fetch=true even when the key itself lives in the Credential Locker, which a shell can't read).
 $jimakuSet = [bool]$env:JIMAKU_API_KEY -or ((Test-Path $Cfg) -and (Select-String -Path $Cfg -Pattern '^\s*\[jimaku\]' -Quiet))
 if($jimakuSet){ Write-Host "  4. jimaku auto-subs:  [x] configured" -ForegroundColor Green }
 else {
-  Write-Host "  4. jimaku auto-subs (optional): run  saitenka-overlay set-jimaku-key"
+  Write-Host "  4. jimaku auto-subs (optional): run  saitenka set-jimaku-key"
   Write-Host "     (stores the key + enables fetch for files with no JP track; skip if done in setup above)"
 }
 if($Dev){ Write-Host "`nDev/authoring: open this folder in Obsidian (start at notes\), Anki MCP for Claude Code via /mcp." }

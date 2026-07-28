@@ -1,4 +1,4 @@
-"""``saitenka-overlay report`` — a single timestamped diagnostics zip for bug reports.
+"""``saitenka report`` — a single timestamped diagnostics zip for bug reports.
 
 Replaces pasting a terminal transcript by hand. It is **user-invoked, local-only (never uploaded),
 and redacted**: API keys are scrubbed, a MANIFEST lists exactly what's inside, and the CLI tells you to
@@ -92,7 +92,7 @@ def _collect_versions() -> dict[str, str]:
         "versions.txt": (
             "\n".join(
                 [
-                    f"saitenka-overlay: {_overlay_version()}",
+                    f"saitenka: {_overlay_version()}",
                     f"python: {sys.version.split()[0]} — {_gil_state()}",
                     f"platform: {platform.platform()}",
                     f"mpv: {_first_line(mpv, '--version') if mpv else 'NOT FOUND'}",
@@ -177,7 +177,7 @@ def _collect_dict_inventory() -> dict[str, str]:
             log.debug("dictionary inventory read failed", exc_info=True)
             inv += ["  (unreadable)"]
     else:
-        inv += ["  (none — run `saitenka-overlay import`)"]
+        inv += ["  (none — run `saitenka import`)"]
     arts = legacy_dict_artifacts()
     if arts:
         inv += ["[legacy — unused, safe to delete]"]
@@ -249,7 +249,7 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
 
 def _manifest(members: dict[str, str], *, include_log: bool) -> str:
     lines = [
-        f"saitenka-overlay {_overlay_version()} diagnostics bundle",
+        f"saitenka {_overlay_version()} diagnostics bundle",
         f"generated: {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
         "",
         "PRIVACY — read before sharing:",

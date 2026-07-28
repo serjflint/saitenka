@@ -9,29 +9,29 @@ import pytest
 from overlay.app.plugin import _bake_bin
 from overlay.mpvio.ipc import default_ipc_path
 
-_LUA = "-- header comment\nlocal SAITENKA_BIN = 'saitenka-overlay'\nlocal mp = require 'mp'\n"
+_LUA = "-- header comment\nlocal SAITENKA_BIN = 'saitenka'\nlocal mp = require 'mp'\n"
 
 
 def test_bake_bin_windows_path_does_not_crash_on_backslash_escape():
     """A Windows exe path used as an ``re.sub`` REPLACEMENT STRING makes \\U/\\g look like escapes →
     ``re.PatternError: bad escape \\U`` (the real install-plugin/setup crash). The callable form must
     insert the path verbatim inside a lua ``[[...]]`` literal."""
-    binp = r"C:\Users\LeoDu\.local\bin\saitenka-overlay.exe"
+    binp = r"C:\Users\LeoDu\.local\bin\saitenka.exe"
     out = _bake_bin(_LUA, binp)
     assert f"local SAITENKA_BIN = [[{binp}]]" in out
-    assert "'saitenka-overlay'" not in out  # the bare declaration was replaced
+    assert "'saitenka'" not in out  # the bare declaration was replaced
 
 
 def test_bake_bin_handles_pathological_escape_segments():
-    for binp in (r"C:\Users\g\Umlaut\x\n", r"D:\3.Japanese\bin\saitenka-overlay.exe"):
+    for binp in (r"C:\Users\g\Umlaut\x\n", r"D:\3.Japanese\bin\saitenka.exe"):
         out = _bake_bin(_LUA, binp)  # must not raise
         assert f"[[{binp}]]" in out
 
 
 def test_bake_bin_rewrites_only_the_first_declaration():
     doubled = _LUA + "local SAITENKA_BIN = 'x'\n"
-    out = _bake_bin(doubled, "/abs/saitenka-overlay")
-    assert out.count("local SAITENKA_BIN = [[/abs/saitenka-overlay]]") == 1
+    out = _bake_bin(doubled, "/abs/saitenka")
+    assert out.count("local SAITENKA_BIN = [[/abs/saitenka]]") == 1
 
 
 @pytest.mark.windows_sim

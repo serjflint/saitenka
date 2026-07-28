@@ -10,8 +10,8 @@
 #     once a [table] header appears, every later key belongs to it — so keep all flat keys at the top.
 #
 # Dictionaries are imported ONCE into a consolidated DB (~/.local/share/saitenka/dictionaries.sqlite) by
-# `saitenka-overlay import <dir-with-zips>`; the lists below are dictionary TITLES resolved against that
-# DB (not file paths). Run `saitenka-overlay doctor` to see what's imported and `import` to fill them in.
+# `saitenka import <dir-with-zips>`; the lists below are dictionary TITLES resolved against that
+# DB (not file paths). Run `saitenka doctor` to see what's imported and `import` to fill them in.
 
 # ── Subtitles & languages ────────────────────────────────────────────────────────────────────────
 # slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
@@ -116,7 +116,7 @@ preview_key = "p"
 # ── [jimaku] jimaku.cc subtitle fetch for attach/plugin mode ─────────────────────────────────────
 # `attach` first selects an embedded JP track; only when the file has NO Japanese subs does it fetch
 # from jimaku (safe to leave on). Key resolution: this `key` > $JIMAKU_API_KEY > macOS Keychain. Prefer
-# the Keychain (`saitenka-overlay set-jimaku-key`) — a GUI-launched mpv can read it; a shell env var and
+# the Keychain (`saitenka set-jimaku-key`) — a GUI-launched mpv can read it; a shell env var and
 # a plaintext key here it cannot (or should not).
 [jimaku]
 enabled = true
@@ -125,7 +125,7 @@ resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) �
 # force = true      # prefer jimaku OVER the embedded JP track (mistimed/wrong baked-in subs)
 
 # ── [telemetry] Runtime tracing/metrics (OpenTelemetry) — OFF by default ─────────────────────────
-# Requires the `telemetry` extra (`saitenka-overlay[telemetry]`) even when enabled here. Local-only: a
+# Requires the `telemetry` extra (`saitenka[telemetry]`) even when enabled here. Local-only: a
 # Chrome Trace Format file under the cache dir, no backend/gRPC. See RUNNING.md "Telemetry".
 # [telemetry]
 # enabled = true

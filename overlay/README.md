@@ -131,7 +131,7 @@ deduped, then cleaned up.
 ### Multi-dictionary tooltip (Yomitan-style, ordered)
 
 Import any **Yomitan term-bank** dictionaries (bilingual and/or monolingual — whichever you have) once
-with `saitenka-overlay import <dir>`; they build into a single **consolidated database**
+with `saitenka import <dir>`; they build into a single **consolidated database**
 (`~/.local/share/saitenka/dictionaries.sqlite`, the Yomitan model). Then `--dict "Title A" --dict
 "Title B" …` (or the config lists) shows the word across all of them, **in order**, each as its own
 section with the dict-name pill and rich structured content (ruby examples, notes, cross-refs). Runtime
@@ -145,7 +145,7 @@ ja,jpn,jp`) and the embedded EN track as mpv's *secondary* sub (hidden). Press `
 line for the current cue above the JP subtitle — the professional translation on demand, not by default.
 
 ```bash
-saitenka-overlay import ~/yomitan-dicts   # once: build the DB, register the titles in the config
+saitenka import ~/yomitan-dicts   # once: build the DB, register the titles in the config
 uv run python examples/mpv_reader.py episode.mkv --color \
   --anki-decks '{"Saitenka::Known":["Entry"]}' --mine \
   --dict "Bilingual Dict" \
@@ -166,7 +166,7 @@ goldens) is the spec that escalation must match.
 No PyPI or public repo needed. Build one shareable archive and send it:
 
 ```bash
-uv run poe bundle                        # → dist/saitenka-overlay-<ver>.zip
+uv run poe bundle                        # → dist/saitenka-<ver>.zip
 ```
 
 The zip carries the wheel (all fonts/wordlists/lua/data ride inside it via `importlib.resources`),
@@ -178,7 +178,7 @@ powershell -ExecutionPolicy Bypass -File overlay-install.ps1   # Windows
 ```
 
 The stub's only job is to get `uv`, `uv tool install ./<wheel>`, and hand off to
-`saitenka-overlay setup` — an interactive Python wizard that inventories the box, installs mpv +
+`saitenka setup` — an interactive Python wizard that inventories the box, installs mpv +
 ffmpeg (macOS `brew`; Windows winget→choco→scoop; Linux prints copy-paste hints), runs `doctor`,
 writes the config (`init`), and offers `import-settings` + `install-plugin`. Every step is
 confirm-first, `--yes`/`--dry-run` are honoured, and it is resumable (re-runs skip satisfied steps).

@@ -1,4 +1,4 @@
-"""Stage 17b: the `saitenka-overlay setup` wizard — installer logic in Python, not shell.
+"""Stage 17b: the `saitenka setup` wizard — installer logic in Python, not shell.
 
 Fully unit-tested with MOCKED package managers and fake home dirs; the shell stubs only bootstrap uv
 and hand off to this. Non-destructive: inventory-first, confirm-first, ``--yes``/``--dry-run``,

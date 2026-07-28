@@ -48,7 +48,9 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   exact and far cheaper than grep-and-read.
 - **Mechanical edits go through a codemod.** For repo-wide renames/moves or splitting a big module
   (`app/controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
-  rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched.
+  rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
+  lives in the opt-in `codemod` dependency group (its pyo3 build has no free-threaded 3.15t wheel, so it's
+  kept out of the default `dev` env): run codemods with `uv run --group codemod <script>`.
 - **Extract behind a stable seam.** Move logic into a new module as functions taking the host
   (`def f(reader: Reader)`) and leave thin delegating methods, so the public API is unchanged and both
   mypy and basedpyright stay green (a `self: Subclass` mixin trips mypy's supertype rule). Repoint any

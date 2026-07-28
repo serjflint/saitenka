@@ -1,5 +1,5 @@
 [project]
-name = "saitenka-overlay"
+name = "saitenka"
 version = "0.8.0"
 description = "Rich-text + ruby renderer for the native in-mpv Yomitan overlay (Saitenka)"
 readme = "README.md"
@@ -27,7 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 # GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
 # core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
-deinflect = ["saitenka-overlay-deinflect"]
+deinflect = ["saitenka-deinflect"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
 # default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
@@ -49,34 +49,44 @@ telemetry = [
     "opentelemetry-sdk>=1.44.0",
 ]
 # Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
-# exists only so `saitenka-overlay[minimal]` reads as a deliberate choice. `full` pulls every optional
+# exists only so `saitenka[minimal]` reads as a deliberate choice. `full` pulls every optional
 # feature and is what the checkout installers install. Note `full` includes the GPL-3.0 `deinflect`
 # add-on, so a `full` install is GPL-3.0, not Apache-2.0 (see ../LICENSING.md).
 minimal = []
-full = ["saitenka-overlay[deinflect]", "saitenka-overlay[jmdict]", "saitenka-overlay[telemetry]"]
+full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
 
 [project.scripts]
-saitenka-overlay = "overlay.app.cli:main"
+saitenka = "overlay.app.cli:main"
 
 [tool.uv.sources]
-saitenka-overlay-deinflect = { path = "../deinflect", editable = true }
+saitenka-deinflect = { path = "../deinflect", editable = true }
 
 [dependency-groups]
-dev = [
+# libcst is a codemod-authoring tool (see AGENTS.md "Refactoring") — nothing in src/tests/gate imports
+# it. Its pyo3 native build has no free-threaded 3.15t wheel yet, and keeping it in `dev` made every
+# `uv sync` (incl. the CI test matrix) fail to even create the env on 3.15+. Isolated here so the default
+# dev env stays lean and forward-compatible; author codemods with `uv run --group codemod <script>`.
+codemod = ["libcst>=1.8.6"]
+# Minimal deps to RUN the suite. The CI test matrix installs ONLY this group
+# (`--no-default-groups --group test`), so new-interpreter legs (e.g. 3.15t) aren't blocked building the
+# heavy native dev tools they never use (memray/py-spy/mypy/ruff/…, which lack free-threaded wheels).
+test = [
     "hypothesis>=6.157.2",
-    "mypy>=2.3.0",
-    "playwright>=1.61.0",
-    "poethepoet>=0.48.0",
-    "pyrefly>=1.1.1",
     "pytest>=8.0",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=4.1.0",
     "pytest-xdist>=3.8.0",
     "pytest-timeout>=2.4.0",
     "dirty-equals>=0.11",
-    "ty>=0.0.61",
     "pyfakefs>=6.2.0",
-    "libcst>=1.8.6",
+]
+dev = [
+    { include-group = "test" },
+    "mypy>=2.3.0",
+    "playwright>=1.61.0",
+    "poethepoet>=0.48.0",
+    "pyrefly>=1.1.1",
+    "ty>=0.0.61",
     "basedpyright>=1.39",
     "py-spy>=0.4.2",
     "memray>=1.19.3",
@@ -268,8 +278,8 @@ DEP002 = [
     "unidic-lite",      # runtime dictionary data loaded implicitly by fugashi (never imported)
     "jamdict-data",     # CC BY-SA DB loaded by jamdict at runtime (never imported)
     "jamdict-data-fix", # Windows drop-in for jamdict-data (never imported)
-    "saitenka-overlay", # self-reference from the `full`/`minimal` convenience extras
-    "saitenka-overlay-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
+    "saitenka", # self-reference from the `full`/`minimal` convenience extras
+    "saitenka-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
     "filelock",         # declared ahead of use for the planned Windows mandatory-lock work (ROADMAP.md
                         # "real Windows kernel" residue); not yet imported. Remove IF that work is dropped.
 ]
@@ -453,12 +463,12 @@ repowise-mlx-serve = { shell = "mlx_lm.server --model mlx-community/Qwen2.5-Code
 repowise-doc-gen = { shell = "cd .. && OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_API_KEY=not-needed repowise init --provider openai --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --embedder mock --concurrency 1 -y overlay" }
 repowise-doc-update = { shell = "cd .. && OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_API_KEY=not-needed repowise update --provider openai --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --embedder mock --concurrency 1 overlay" }
 # GATE (in `all`) — dependency license boundary. The ONLY copyleft in our graph must be our own
-# deliberate GPL-3.0 add-on (saitenka-overlay-deinflect); ANY other GPL/AGPL/LGPL is a transitive leak
+# deliberate GPL-3.0 add-on (saitenka-deinflect); ANY other GPL/AGPL/LGPL is a transitive leak
 # into the Apache-2.0-clean core and fails. Complements the import-linter GPL chokepoint (code boundary)
 # and ruff TID251 (import boundary) with a dependency-graph boundary. If a benign LGPL dep ever appears,
 # add it to --ignore-packages with a note (ratchet), don't drop the check. pip-licenses reads installed
 # metadata → needs the full env. See ../LICENSING.md.
-licenses = { shell = "uv run --extra full --with pip-licenses pip-licenses --partial-match --fail-on 'GPL' --ignore-packages saitenka-overlay-deinflect" }
+licenses = { shell = "uv run --extra full --with pip-licenses pip-licenses --partial-match --fail-on 'GPL' --ignore-packages saitenka-deinflect" }
 # GATE (in `all`) — shell installer static analysis (shellcheck, standalone binary: brew install
 # shellcheck). The install/*.sh scripts run on users' machines, so correctness matters. Clean at
 # default severity after the 2026-07-25 nit sweep (SC2043/SC2012 fixed, SC2016/SC2329 reasoned-disabled).

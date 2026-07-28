@@ -171,7 +171,7 @@ def configure(options: TelemetryOptions) -> None:
         except ImportError:
             log.warning(
                 "telemetry.enabled=true but the 'telemetry' extra isn't installed "
-                "(uv tool install --reinstall 'saitenka-overlay[telemetry]') — telemetry stays off"
+                "(uv tool install --reinstall 'saitenka[telemetry]') — telemetry stays off"
             )
             return
 

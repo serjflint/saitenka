@@ -1,4 +1,4 @@
-"""``saitenka-overlay init`` — first-run wizard.
+"""``saitenka init`` — first-run wizard.
 
 Runs auto-discovery (Yomitan import + mpv discovery), proposes a config, and writes the
 platform-native ``overlay.toml`` (see :func:`config.config_path`) ONLY on confirm — backing up an existing file first,
@@ -48,7 +48,7 @@ def dumps_toml(proposal: dict) -> str:
     """A minimal deterministic TOML writer. Scalars/lists first, then nested ``dict`` values as
     ``[table]`` sections — so merging onto a config with ``[mine]``/``[jimaku]``/``[known]`` tables
     round-trips instead of raising ``TypeError`` (or silently dropping the tables)."""
-    lines = ["# Saitenka overlay settings — written by `saitenka-overlay init`.", ""]
+    lines = ["# Saitenka overlay settings — written by `saitenka init`.", ""]
     tables: list[tuple[str, dict]] = []
     for k, v in proposal.items():
         if isinstance(v, dict):
@@ -164,7 +164,7 @@ def run_init() -> int:  # pragma: no cover — interactive wizard, exercised liv
     from overlay.app.doctor import run_checks
     from overlay.mpvio.discover import find_mpv
 
-    print("saitenka-overlay init — first-run setup")
+    print("saitenka init — first-run setup")
     mpv = find_mpv()
     print(f"  mpv: {mpv or 'not found — install it (see doctor)'}")
     proposal = dict(DEFAULT_CONFIG)

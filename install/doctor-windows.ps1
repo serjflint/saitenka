@@ -1,6 +1,6 @@
 <#
   Saitenka doctor - Windows. Read-only health check for the overlay. Changes NOTHING.
-  The overlay's own `saitenka-overlay doctor` is the source of truth (mpv/ffmpeg, config, dicts,
+  The overlay's own `saitenka doctor` is the source of truth (mpv/ffmpeg, config, dicts,
   AnkiConnect, plugin, SubMiner conflict, jimaku key, sub-auto); this wrapper adds the shell-level
   toolchain check and hands off to it. Exit 0 = healthy, 1 = failures.
     Usage:  powershell -ExecutionPolicy Bypass -File doctor-windows.ps1
@@ -23,12 +23,12 @@ Write-Host ("`nSummary (toolchain): {0} ok / {1} warn / {2} fail" -f $pass,$warn
 # Hand off to the overlay's own doctor (the authoritative, unit-tested checks). --summary collapses
 # its passing checks to a count; warnings/failures still print in full.
 $ov = 1
-if(Have saitenka-overlay){
-  HDR "Overlay (saitenka-overlay doctor)"
-  & saitenka-overlay doctor --summary
+if(Have saitenka){
+  HDR "Overlay (saitenka doctor)"
+  & saitenka doctor --summary
   $ov = $LASTEXITCODE
 } else {
-  ER "saitenka-overlay not installed - run install\install-windows.ps1"
+  ER "saitenka not installed - run install\install-windows.ps1"
 }
 
 # The overlay doctor already prints its own Healthy/Problems verdict; only add one here when the

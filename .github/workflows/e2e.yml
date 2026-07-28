@@ -1,0 +1,67 @@
+# Cross-platform EXECUTION surface — the tiers the fast gate (ci.yml) can't give real signal for.
+# On each real OS it runs the `integration` boundary (real subprocess + socket, fake-mpv binary) and
+# the default suite (so windows_sim paths execute for real on Windows, not simulated). The GUI tier
+# (requires_display / e2e / live real-mpv) only runs on Linux under Xvfb — headless Windows/macOS
+# runners can't host an mpv window reliably. Occasional by design: manual + weekly + pre-release tag.
+name: E2E
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Mon 06:00 UTC
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # e2e exercises real per-OS transport (named pipe / unix socket), not free-threading — so pin to
+      # 3.13 where fugashi ships prebuilt wheels on all three OSes. This avoids building fugashi from
+      # source against system MeCab (painful/absent on Windows). The 3.14t coverage lives in ci.yml.
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      # Real per-OS boundary, no GUI: integration (real socket/subprocess) + windows_sim executing on
+      # the real kernel. This is the leg that catches the named-pipe / Scripts-vs-bin class Linux can't.
+      - name: Real-boundary + per-OS suite
+        working-directory: overlay
+        run: uv run --extra full pytest -q -m "not (slow or requires_display or e2e or live)"
+
+      # Linux only: real mpv window under Xvfb — the L3 live smoke (mouse-pos → OSD coord mapping).
+      - name: Install mpv + Xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mpv xvfb
+
+      # `poe smoke-live` = SAITENKA_LIVE=1 PYTHON_GIL=0 pytest -p no:xdist tests/test_live_mpv.py.
+      # The live test is selected by that env-gated skipif + path, not a marker, so target it the same
+      # way the local task does rather than a `-m` expression (which would match zero tests).
+      - name: GUI tier (Linux/Xvfb, real mpv)
+        if: runner.os == 'Linux'
+        working-directory: overlay
+        run: xvfb-run -a uv run poe smoke-live

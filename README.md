@@ -101,19 +101,20 @@ trade-offs, not a scoreboard.
 | **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ |
 | Grounded / local-first (readings never from an LLM) | ✅ | ✅ |
 | jimaku.cc subtitle fetch | ✅ | ✅ |
-| Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ◐ | ✅ |
+| Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ❌* | ✅ |
 | AniList progress · Jellyfin · media launcher (fzf/rofi) | ❌ | ✅ |
-| Immersion **stats dashboard** | ◐ | ✅ |
+| Immersion **stats dashboard** | ❌* | ✅ |
 | Cross-machine stats/history **sync** | ❌ | ✅ |
-| Mined-audio loudness normalization | ◐ | ✅ |
+| Mined-audio loudness normalization | ❌* | ✅ |
 | Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ |
 | Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ |
-| Native desktop packages (AppImage · DMG · AUR · winget) | ◐ | ✅ |
-| Hosted **docs site** | ◐ | ✅ |
+| One-command installer (`setup` wizard · `uv tool` · venv scripts) | ✅ | ✅ |
+| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ |
+| Hosted **docs site** | ❌* | ✅ |
 | Core license | Apache-2.0 | GPL-3.0 |
 | Linux · macOS · Windows | ✅ | ✅ |
 
-<sub>✅ yes · ◐ partial or [on the roadmap](https://github.com/serjflint/saitenka/issues) · ❌ no / out of scope</sub>
+<sub>✅ yes · ❌ no / out of scope · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
 
 Short version: reach for **SubMiner** if you want the widest set of turn-key integrations and a packaged
 desktop app; reach for **Saitenka** if you want a fast, single-surface, FSRS-grounded engine that draws
@@ -124,7 +125,7 @@ straight into mpv.
 **1. Install from the latest release** — no clone, no prerequisites; the bundled installer fetches
 everything, `uv` included.
 
-1. Download **`saitenka-overlay-<version>.zip`** from the
+1. Download **`saitenka-<version>.zip`** from the
    [latest release](https://github.com/serjflint/saitenka/releases/latest) and unzip it.
 2. From inside the unzipped folder, run the installer for your OS:
 
@@ -145,21 +146,21 @@ plugin so **every future mpv launch auto-starts the overlay**.
 **2. Watch.** Open any video in mpv — the overlay attaches automatically. Or launch a file directly:
 
 ```bash
-saitenka-overlay run video.mkv          # hover a word → tooltip; Ctrl+m → mine
+saitenka run video.mkv          # hover a word → tooltip; Ctrl+m → mine
 ```
 
 **3. Update & maintain.** Once installed, the tool self-updates from the latest release — no
 re-download, and your extras are preserved:
 
 ```bash
-saitenka-overlay reinstall              # pull the latest release, keeping your extras (--yes to skip the prompt)
-saitenka-overlay doctor                 # re-check the whole environment any time
-saitenka-overlay setup                  # re-run the setup wizard (mpv/ffmpeg, config, plugin)
-saitenka-overlay install-plugin         # (re)install just the auto-start mpv plugin
+saitenka reinstall              # pull the latest release, keeping your extras (--yes to skip the prompt)
+saitenka doctor                 # re-check the whole environment any time
+saitenka setup                  # re-run the setup wizard (mpv/ffmpeg, config, plugin)
+saitenka install-plugin         # (re)install just the auto-start mpv plugin
 ```
 
 **Feature extras.** The bundle installs the full feature set; `reinstall` keeps whatever you have. To
-change the set, `uv tool install --reinstall 'saitenka-overlay[<extra>]'`:
+change the set, `uv tool install --reinstall 'saitenka[<extra>]'`:
 
 | Extra | Adds | License |
 |------|------|--------|
@@ -176,14 +177,14 @@ Full run/test walkthrough: **[`overlay/RUNNING.md`](overlay/RUNNING.md)**. Featu
 
 ## What's in the repo
 
-- **[`overlay/`](overlay/)** — the in-mpv overlay (`saitenka-overlay`): colored subtitles, hover
+- **[`overlay/`](overlay/)** — the in-mpv overlay (`saitenka`): colored subtitles, hover
   tooltip, mining, English reveal, jimaku fetch, dictionary import, `doctor`/`setup`.
 - **[`tools/`](tools/)** — the Anki/FSRS deck engine: FSRS-based dictionary ranking, field
   normalization, provenance annotation, deck building, refile-by-review-state, anime chooser.
   Frequency dictionaries are user-supplied (`tools/freq/` or `--freq-dir` / `$SAITENKA_FREQ_DIR`).
 - **[`install/`](install/)** — cross-platform installers (macOS / Windows / Linux), the `doctor` health
   check, and `make_bundle.py`, which builds a single self-contained zip you can hand to a friend.
-- **[`deinflect/`](deinflect/)** — *optional* **GPL-3.0** add-on (`saitenka-overlay-deinflect`): the
+- **[`deinflect/`](deinflect/)** — *optional* **GPL-3.0** add-on (`saitenka-deinflect`): the
   Yomitan-derived inflection-chain display (🧩 `-て « -いる « -た`). Kept separate so the core stays
   Apache-2.0; the overlay runs fine without it. See [LICENSING.md](LICENSING.md).
 

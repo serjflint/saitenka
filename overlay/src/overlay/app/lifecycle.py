@@ -3,7 +3,7 @@
 Two operations the CLI wraps:
 
 * **reinstall** — ``uv tool install --reinstall`` *replaces* the extras set, so a bare
-  ``saitenka-overlay`` silently drops ``[full]``/``[deinflect]`` (the friend lost the deinflect add-on
+  ``saitenka`` silently drops ``[full]``/``[deinflect]`` (the friend lost the deinflect add-on
   this way). We detect the currently-installed extras from importable marker packages and reinstall
   WITH them — non-destructive.
 * **uninstall** — remove saitenka's config / dict DB / cache (logs, telemetry) / crash reports and the
@@ -47,14 +47,14 @@ def reinstall_command(
     extras: list[str], *, source: str = "pypi", ref: str | None = None
 ) -> list[str]:
     """A ``uv tool install --reinstall`` command that keeps the given extras. ``source``:
-    ``"pypi"`` → ``saitenka-overlay[extras]`` (once published); ``"github"`` → the same package pulled
+    ``"pypi"`` → ``saitenka[extras]`` (once published); ``"github"`` → the same package pulled
     from GitHub (latest on the default branch, or a ``ref`` tag/branch), which always works and carries
     the GPL ``deinflect`` add-on from the repo's ``deinflect/`` subdirectory. Pure — unit-tested."""
     es = f"[{','.join(sorted(extras))}]" if extras else ""
     if source == "github":
-        spec = f"saitenka-overlay{es} @ {_GIT_URL}{f'@{ref}' if ref else ''}#subdirectory=overlay"
+        spec = f"saitenka{es} @ {_GIT_URL}{f'@{ref}' if ref else ''}#subdirectory=overlay"
     else:
-        spec = f"saitenka-overlay{es}"
+        spec = f"saitenka{es}"
     return ["uv", "tool", "install", "--reinstall", spec]
 
 

@@ -11,7 +11,7 @@ description: >-
   mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks"); NOT for
   other repos.
 metadata:
-  project: saitenka-overlay
+  project: saitenka
 ---
 
 # write-test
@@ -58,7 +58,7 @@ file's style — read a sibling test first.
   assert note == IsPartialDict(
       modelName="Lapis",
       fields=IsPartialDict(Expression="読む", MiscInfo=IsStr(regex=r"ep\d+ · \d+:\d+")),
-      tags=Contains("saitenka-overlay"),
+      tags=Contains("saitenka"),
   )
   ```
 

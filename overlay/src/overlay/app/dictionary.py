@@ -8,7 +8,7 @@ content walker + panel renderer draw the dict-name pills and rich glossaries.
 
 Term-bank v3 entry: ``[term, reading, defTags, rules, score, glossary[], sequence, termTags]``. A glossary
 item is a plain string or ``{"type": "structured-content", "content": <node>}`` (also ``image``/``text``).
-The dictionary form comes from the tokenizer lemma; the optional ``saitenka-overlay-deinflect``
+The dictionary form comes from the tokenizer lemma; the optional ``saitenka-deinflect``
 add-on (GPL-3.0, Yomitan-derived) supplies the inflection chain when installed.
 """
 
@@ -54,8 +54,8 @@ class DictionaryError(RuntimeError):
 
 _MISSING_HINT = (
     "These are dictionary TITLES with no imported dictionary. Import the source .zip files first: "
-    "`saitenka-overlay import <dir-with-zips>` (or `import-settings <settings.json> --scan-dir <dir>`), "
-    "then they resolve by title. Run `saitenka-overlay doctor` to see what's imported."
+    "`saitenka import <dir-with-zips>` (or `import-settings <settings.json> --scan-dir <dir>`), "
+    "then they resolve by title. Run `saitenka doctor` to see what's imported."
 )
 
 # Fanning `Dictionary.lookup()` out across a thread pool in `entry_for` (one dict per worker) was

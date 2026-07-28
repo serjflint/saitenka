@@ -17,13 +17,13 @@ def test_detect_extras_reads_importable_markers(monkeypatch):
 def test_reinstall_command_pypi_and_github_forms():
     assert (
         lc.reinstall_command(["telemetry", "deinflect"])[-1]
-        == "saitenka-overlay[deinflect,telemetry]"
+        == "saitenka[deinflect,telemetry]"
     )
-    assert lc.reinstall_command([])[-1] == "saitenka-overlay"  # bare when nothing installed
+    assert lc.reinstall_command([])[-1] == "saitenka"  # bare when nothing installed
     gh = lc.reinstall_command(["deinflect"], source="github", ref="v0.5.0")[-1]
     assert (
         gh
-        == "saitenka-overlay[deinflect] @ git+https://github.com/serjflint/saitenka.git@v0.5.0#subdirectory=overlay"
+        == "saitenka[deinflect] @ git+https://github.com/serjflint/saitenka.git@v0.5.0#subdirectory=overlay"
     )
     assert (
         "@v" not in lc.reinstall_command([], source="github")[-1]
@@ -39,7 +39,7 @@ def test_reinstall_attempts_ordering_by_source_and_ref():
     assert (
         "@v0.5.0#subdirectory=overlay" in specs(auto)[1]
     )  # github attempt targets the release tag
-    assert specs(lc.reinstall_attempts([], source="pypi")) == ["saitenka-overlay"]  # PyPI only
+    assert specs(lc.reinstall_attempts([], source="pypi")) == ["saitenka"]  # PyPI only
     assert len(lc.reinstall_attempts([], source="github")) == 1  # forced GitHub only
 
 

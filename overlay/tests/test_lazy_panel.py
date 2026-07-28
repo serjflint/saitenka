@@ -1,5 +1,7 @@
 """N1: viewport-first panel rendering — render the visible top, defer the rest."""
 
+import threading
+
 import numpy as np
 
 from overlay.panel import (
@@ -171,10 +173,15 @@ def test_thunks_run_at_most_once_each(monkeypatch):
     PA.shutdown_shared_executor()
 
     full, partial = [0], [0]
+    # These thunks run concurrently on the forced free-threaded executor, so the instrumentation
+    # counters need a lock — a bare ``full[0] += 1`` is a non-atomic read-modify-write and loses
+    # increments under nogil (the count came out 12 vs 13 on CI). Only the counter is guarded.
+    count_lock = threading.Lock()
 
     def _count_render(_orig):
         def thunk():
-            full[0] += 1
+            with count_lock:
+                full[0] += 1
             return _orig()
 
         return thunk
@@ -182,7 +189,8 @@ def test_thunks_run_at_most_once_each(monkeypatch):
     def _count_capped(_orig):
         def capped(max_h):
             img, scan, links, complete = _orig(max_h)
-            (full if complete else partial)[0] += 1
+            with count_lock:
+                (full if complete else partial)[0] += 1
             return img, scan, links, complete
 
         return capped

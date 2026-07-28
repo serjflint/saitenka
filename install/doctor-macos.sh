@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Saitenka doctor — read-only health check for the overlay on macOS. Changes NOTHING.
-# The overlay's own `saitenka-overlay doctor` is the source of truth (mpv/ffmpeg, config, dicts,
+# The overlay's own `saitenka doctor` is the source of truth (mpv/ffmpeg, config, dicts,
 # AnkiConnect, plugin, jimaku key, sub-auto); this wrapper adds the shell-level toolchain check and
 # hands off to it. Exit 0 = healthy, 1 = failures.
 #   Usage:  bash doctor-macos.sh
@@ -8,8 +8,9 @@ set -uo pipefail
 
 pass=0; warn=0; fail=0
 ok(){ printf '  \033[32m✓\033[0m %s\n' "$*"; pass=$((pass+1)); }
-# shellcheck disable=SC2329  # reserved warning path — symmetric with ok()/er(); the `warn` count it
-# feeds is printed in the Summary line. Kept for the first toolchain soft-fail check that needs it.
+# shellcheck disable=SC2329,SC2317  # reserved warning path — symmetric with ok()/er(); the `warn`
+# count it feeds is printed in the Summary line. Kept for the first toolchain soft-fail check that needs
+# it. SC2317 (newer shellcheck on CI) also flags its body as unreachable since it's intentionally unused.
 wn(){ printf '  \033[33m!\033[0m %s\n' "$*"; warn=$((warn+1)); }
 er(){ printf '  \033[31m✗\033[0m %s\n' "$*"; fail=$((fail+1)); }
 hdr(){ printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -26,11 +27,11 @@ printf '\n\033[1mSummary (toolchain):\033[0m \033[32m%d ok\033[0m · \033[33m%d 
 
 # Hand off to the overlay's own doctor (the authoritative, unit-tested checks). --summary collapses
 # its passing checks to a count; warnings/failures still print in full.
-if have saitenka-overlay; then
-  hdr "Overlay (saitenka-overlay doctor)"
-  saitenka-overlay doctor --summary; ov=$?
+if have saitenka; then
+  hdr "Overlay (saitenka doctor)"
+  saitenka doctor --summary; ov=$?
 else
-  er "saitenka-overlay not installed — run install/install-macos.sh"; ov=1
+  er "saitenka not installed — run install/install-macos.sh"; ov=1
 fi
 
 # The overlay doctor already prints its own Healthy/Problems verdict; only add one here when the

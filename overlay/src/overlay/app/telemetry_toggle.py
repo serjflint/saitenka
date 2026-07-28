@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 #: The exact command that installs the runtime dependency the config flag needs.
-INSTALL_HINT = "uv tool install --reinstall 'saitenka-overlay[telemetry]'"
+INSTALL_HINT = "uv tool install --reinstall 'saitenka[telemetry]'"
 
 
 def telemetry_installed() -> bool:

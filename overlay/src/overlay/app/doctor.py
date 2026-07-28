@@ -1,4 +1,4 @@
-"""``saitenka-overlay doctor`` — read-only health check.
+"""``saitenka doctor`` — read-only health check.
 
 Mirrors the ✓/!/✗ inventory style of ``install/doctor-*.sh`` and the SubMiner doctors, but for the
 overlay's own runtime: mpv ≥ 0.37 (overlay-add BGRA), ffmpeg + aac encoder, the config parses, every
@@ -163,7 +163,7 @@ def check_ffmpeg() -> Check:
 def check_config() -> Check:
     p = config_path()
     if not p.exists():
-        return Check("config", "warn", f"no config at {p} — run `saitenka-overlay init`")
+        return Check("config", "warn", f"no config at {p} — run `saitenka init`")
     try:
         load_config()
     except Exception as e:  # noqa: BLE001  # pragma: no cover — load_config already swallows parse errors; defensive only
@@ -178,7 +178,7 @@ def _no_db_checks(db_file, *, any_configured: bool) -> list[Check]:
                 "dict-db",
                 "fail",
                 "config lists dictionaries but none are imported yet — run "
-                f"`saitenka-overlay import <dir-with-zips>` (no DB at {db_file})",
+                f"`saitenka import <dir-with-zips>` (no DB at {db_file})",
             )
         ]
     if _jmdict_available():
@@ -188,7 +188,7 @@ def _no_db_checks(db_file, *, any_configured: bool) -> list[Check]:
             "dict-db",
             "warn",
             "no dictionaries imported and no JMdict fallback installed — tooltips and mined cards "
-            "will have no glosses. Import Yomitan dicts (`saitenka-overlay import <dir>`), or add "
+            "will have no glosses. Import Yomitan dicts (`saitenka import <dir>`), or add "
             "the fallback: reinstall with the `jmdict` extra.",
         )
     ]
@@ -205,7 +205,7 @@ def _title_checks(configured: dict[str, list[str]], imported: dict) -> list[Chec
                     Check(
                         kind,
                         "fail",
-                        f"{kind} not imported: {title!r} — run `saitenka-overlay import <dir>`",
+                        f"{kind} not imported: {title!r} — run `saitenka import <dir>`",
                     )
                 )
     return checks
@@ -213,7 +213,7 @@ def _title_checks(configured: dict[str, list[str]], imported: dict) -> list[Chec
 
 def check_dict_db() -> list[Check]:
     """Report the consolidated dictionary DB: which dictionaries are imported, and whether every title
-    the config references actually resolves (dictionaries are imported once by ``saitenka-overlay
+    the config references actually resolves (dictionaries are imported once by ``saitenka
     import`` — a configured-but-unimported title is a clear failure, not a silent empty lookup)."""
     from overlay.app.dictdb import DictionaryDb, db_path
 
@@ -376,7 +376,7 @@ def check_free_threading() -> Check:
             "free-threading",
             "warn",
             "not a free-threaded (3.14t) build — render won't parallelise (~3.8× lost). Reinstall on "
-            "3.14t: `uv tool install --python 3.14+freethreaded --reinstall 'saitenka-overlay[full]'`",
+            "3.14t: `uv tool install --python 3.14+freethreaded --reinstall 'saitenka[full]'`",
         )
     if not gil_off:
         return Check(
@@ -430,7 +430,7 @@ def check_plugin() -> Check:
             "plugin",
             "fail",
             f"installed {LUA_NAME} uses the broken `--attach` form (mpv spawns a process that dies) "
-            "— re-run `saitenka-overlay install-plugin`",
+            "— re-run `saitenka install-plugin`",
         )
     m = re.search(r"SAITENKA_BIN\s*=\s*(?:\[\[(.*?)\]\]|'([^']*)')", installed)
     binp = (m.group(1) or m.group(2)) if m else None
@@ -439,7 +439,7 @@ def check_plugin() -> Check:
             "plugin",
             "fail",
             f"installed {LUA_NAME} spawns a bare `{binp or '?'}` — a Finder-launched mpv can't "
-            "resolve it on its PATH; re-run `saitenka-overlay install-plugin` to bake the abs path",
+            "resolve it on its PATH; re-run `saitenka install-plugin` to bake the abs path",
         )
     if not Path(binp).exists():
         return Check(
@@ -465,7 +465,7 @@ def check_jimaku() -> Check:
         return Check(
             "jimaku",
             "warn",
-            "jimaku enabled but no API key — run `saitenka-overlay set-jimaku-key` (Keychain, "
+            "jimaku enabled but no API key — run `saitenka set-jimaku-key` (Keychain, "
             "readable by plugin-mode mpv)",
         )
     if src == "env":
@@ -516,7 +516,7 @@ def check_crashes() -> Check:
         "crashes",
         "warn",
         f"{len(reports)} crash report(s) captured; latest {reports[-1].name} — run "
-        "`saitenka-overlay report` to bundle them",
+        "`saitenka report` to bundle them",
     )
 
 
@@ -596,7 +596,7 @@ def check_deinflect() -> Check:
             "deinflect",
             "warn",
             "deinflect add-on not installed → no inflection chips. Enable it with "
-            "`uv tool install 'saitenka-overlay[deinflect]'` (GPL-3.0) or `[full]`",
+            "`uv tool install 'saitenka[deinflect]'` (GPL-3.0) or `[full]`",
         )
     return Check("deinflect", "ok", "deinflect add-on installed → inflection chips enabled")
 
@@ -609,7 +609,7 @@ def check_version() -> Check:
     without cross-referencing versions.txt."""
     from overlay.version import overlay_version as _overlay_version
 
-    return Check("version", "ok", f"saitenka-overlay {_overlay_version()}")
+    return Check("version", "ok", f"saitenka {_overlay_version()}")
 
 
 def check_windows() -> Check:
@@ -729,4 +729,4 @@ def print_report(
     else:
         print("Problems found - see [x] above" if _WIN else "Problems found — see ✗ above ❌")
     if report.exit_code != 0:
-        print("Tip: `saitenka-overlay report` bundles this + logs into a zip for a bug report.")
+        print("Tip: `saitenka report` bundles this + logs into a zip for a bug report.")

@@ -1,4 +1,4 @@
-saitenka-overlay-deinflect
+saitenka-deinflect
 ==========================
 
 This package is a derivative work of **Yomitan** (https://github.com/yomidevs/yomitan),
@@ -16,5 +16,5 @@ Derived components:
         (regenerate with `overlay/compare/dump_transforms.mjs`).
 
 Because this package is licensed GPL-3.0-or-later, any distribution that combines it
-with the (Apache-2.0) saitenka-overlay core is, as a whole, governed by the GPL-3.0.
+with the (Apache-2.0) saitenka core is, as a whole, governed by the GPL-3.0.
 See LICENSE for the full license text.

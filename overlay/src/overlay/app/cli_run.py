@@ -40,7 +40,7 @@ def setup_session_telemetry(cfg: dict) -> None:
     if is_enabled():
         print(  # user-facing opt-in notice
             "[saitenka] telemetry: enabled (captures usage/perf data) "
-            "— run `saitenka-overlay telemetry disable` to turn off"
+            "— run `saitenka telemetry disable` to turn off"
         )
 
 
@@ -250,7 +250,7 @@ def _launch_mpv_and_connect(
     if not mpv_bin:
         print(
             "mpv not found — install it (Windows: `winget install shinchiro.mpv`; macOS: "
-            "`brew install mpv`), or set `mpv_path` in overlay.toml. Run `saitenka-overlay doctor`.",
+            "`brew install mpv`), or set `mpv_path` in overlay.toml. Run `saitenka doctor`.",
             file=sys.stderr,
         )
         return None, None
@@ -585,12 +585,12 @@ def run_impl(
     threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
 
     # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
-    # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka-overlay install`. Don't hand it to
+    # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka install`. Don't hand it to
     # mpv as a filename (the cryptic "Failed to recognize file format"); show the commands instead.
     if video and "://" not in video and not Path(video).expanduser().exists():
         print(
             f"no such file: {video!r}\n"
-            "If you meant a command, run `saitenka-overlay --help` — e.g. `setup`/`install` "
+            "If you meant a command, run `saitenka --help` — e.g. `setup`/`install` "
             "(configure options), `doctor` (health check), `install-plugin`, `import-settings`, "
             "`import-dictionaries`, `attach`.",
             file=sys.stderr,
@@ -607,7 +607,7 @@ def run_impl(
     if not (color or known_cfg or known or dict_titles or mine):
         print(
             "[hint] bare demo: no coloring, no monolingual dicts, no mining. Configure it once with\n"
-            "       `saitenka-overlay setup`, or edit your config (see overlay.example.toml):\n"
+            "       `saitenka setup`, or edit your config (see overlay.example.toml):\n"
             f"       {config_path()}\n"
             '       …or pass --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
             "       --mine  (see RUNNING.md §3)."

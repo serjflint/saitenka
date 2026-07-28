@@ -43,7 +43,7 @@ def test_build_note_maps_lapis_fields():
     assert f["MiscInfo"] == "ep10 · 10:03"
     assert f["IsSentenceCard"] == "1"
     assert note["options"]["allowDuplicate"] is False
-    assert "saitenka-overlay" in note["tags"]
+    assert "saitenka" in note["tags"]
 
 
 def test_build_note_writes_frequency_fields():
@@ -63,7 +63,7 @@ def test_build_note_merges_source_tags():
         "s",
         tags=["saitenka::mined", "saitenka::source::Nippon_Sangoku", "saitenka::ep::10"],
     )
-    assert "saitenka-overlay" in note["tags"]  # static tool tag kept
+    assert "saitenka" in note["tags"]  # static tool tag kept
     assert "saitenka::source::Nippon_Sangoku" in note["tags"]  # + per-card source/episode
     assert "saitenka::ep::10" in note["tags"]
     assert len(note["tags"]) == len(set(note["tags"]))  # deduped

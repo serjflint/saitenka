@@ -7,7 +7,7 @@ and shouldn't have its settings parsed by mpv's own config loader. Precedence: b
 this file < explicit CLI flags. Point elsewhere with ``$SAITENKA_CONFIG`` or ``--config``.
 
 ``dicts`` / ``freq`` / ``pitch`` hold dictionary **titles**, resolved against the consolidated
-:class:`~overlay.app.dictdb.DictionaryDb` (``data_dir()/dictionaries.sqlite``) that ``saitenka-overlay
+:class:`~overlay.app.dictdb.DictionaryDb` (``data_dir()/dictionaries.sqlite``) that ``saitenka
 import`` builds once — not file paths.
 """
 

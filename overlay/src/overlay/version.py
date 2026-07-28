@@ -13,6 +13,6 @@ from importlib.metadata import PackageNotFoundError, version
 
 def overlay_version() -> str:
     try:
-        return version("saitenka-overlay")
+        return version("saitenka")
     except PackageNotFoundError:  # pragma: no cover — source checkout without an installed dist
         return "0+unknown"

@@ -2,7 +2,7 @@
 
 ## What this is
 
-`saitenka-overlay` renders Yomitan `structured-content` (styled CJK text with ruby/furigana) as an
+`saitenka` renders Yomitan `structured-content` (styled CJK text with ruby/furigana) as an
 image, composited directly into mpv's own OSD surface via `overlay-add` — one surface, no second
 window, so it survives fullscreen and sidesteps the Windows airspace/MPO bugs a second window would
 hit. Beyond the renderer, the codebase bolts a full reader onto mpv: subtitle draw with per-word
