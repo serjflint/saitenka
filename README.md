@@ -101,19 +101,20 @@ trade-offs, not a scoreboard.
 | **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ |
 | Grounded / local-first (readings never from an LLM) | ✅ | ✅ |
 | jimaku.cc subtitle fetch | ✅ | ✅ |
-| Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ◐ | ✅ |
+| Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ❌* | ✅ |
 | AniList progress · Jellyfin · media launcher (fzf/rofi) | ❌ | ✅ |
-| Immersion **stats dashboard** | ◐ | ✅ |
+| Immersion **stats dashboard** | ❌* | ✅ |
 | Cross-machine stats/history **sync** | ❌ | ✅ |
-| Mined-audio loudness normalization | ◐ | ✅ |
+| Mined-audio loudness normalization | ❌* | ✅ |
 | Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ |
 | Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ |
-| Native desktop packages (AppImage · DMG · AUR · winget) | ◐ | ✅ |
-| Hosted **docs site** | ◐ | ✅ |
+| One-command installer (`setup` wizard · `uv tool` · venv scripts) | ✅ | ✅ |
+| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ |
+| Hosted **docs site** | ❌* | ✅ |
 | Core license | Apache-2.0 | GPL-3.0 |
 | Linux · macOS · Windows | ✅ | ✅ |
 
-<sub>✅ yes · ◐ partial or [on the roadmap](https://github.com/serjflint/saitenka/issues) · ❌ no / out of scope</sub>
+<sub>✅ yes · ❌ no / out of scope · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
 
 Short version: reach for **SubMiner** if you want the widest set of turn-key integrations and a packaged
 desktop app; reach for **Saitenka** if you want a fast, single-surface, FSRS-grounded engine that draws
