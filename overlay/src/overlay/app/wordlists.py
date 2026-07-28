@@ -39,12 +39,12 @@ def _crc_lenient():
     """Temporarily disable zipfile CRC-32 validation. Some Yomitan dict exporters (notably certain
     pitch-accent dicts) write wrong/zero CRCs even though the deflate data is perfectly intact;
     Python's strict check would otherwise reject them. Scoped + restored, single-threaded use."""
-    orig = zipfile.ZipExtFile._update_crc  # type: ignore[attr-defined]  # deliberate
-    zipfile.ZipExtFile._update_crc = lambda _self, *_: None  # type: ignore[attr-defined]  # patched sig takes the data chunk; ignored
+    orig = zipfile.ZipExtFile._update_crc  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # deliberate
+    zipfile.ZipExtFile._update_crc = lambda _self, *_: None  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # patched sig takes the data chunk; ignored
     try:
         yield
     finally:
-        zipfile.ZipExtFile._update_crc = orig  # type: ignore[attr-defined]  # restore
+        zipfile.ZipExtFile._update_crc = orig  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # restore
 
 
 def read_json_bank(zf: zipfile.ZipFile, name: str):
