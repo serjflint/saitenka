@@ -1627,13 +1627,15 @@ telemetry = [
 ]
 
 [package.dev-dependencies]
+codemod = [
+    { name = "libcst" },
+]
 dev = [
     { name = "basedpyright" },
     { name = "complexipy" },
     { name = "dirty-equals" },
     { name = "hypothesis" },
     { name = "import-linter" },
-    { name = "libcst" },
     { name = "memray" },
     { name = "mypy" },
     { name = "playwright" },
@@ -1683,13 +1685,13 @@ requires-dist = [
 provides-extras = ["deinflect", "jmdict", "telemetry", "minimal", "full"]
 
 [package.metadata.requires-dev]
+codemod = [{ name = "libcst", specifier = ">=1.8.6" }]
 dev = [
     { name = "basedpyright", specifier = ">=1.39" },
     { name = "complexipy", specifier = ">=6.2.0" },
     { name = "dirty-equals", specifier = ">=0.11" },
     { name = "hypothesis", specifier = ">=6.157.2" },
     { name = "import-linter", specifier = ">=2.13" },
-    { name = "libcst", specifier = ">=1.8.6" },
     { name = "memray", specifier = ">=1.19.3" },
     { name = "mypy", specifier = ">=2.3.0" },
     { name = "playwright", specifier = ">=1.61.0" },
