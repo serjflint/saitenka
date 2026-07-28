@@ -62,7 +62,9 @@ def test_named_pipe_roundtrip():  # pragma: no cover — Windows-gated smoke
         h = _winapi.CreateNamedPipe(
             name,
             _winapi.PIPE_ACCESS_DUPLEX,
-            _winapi.PIPE_TYPE_BYTE | _winapi.PIPE_READMODE_BYTE | _winapi.PIPE_WAIT,
+            # byte type + byte read-mode are both 0x0 and CPython's _winapi doesn't expose the BYTE
+            # constants (only the MESSAGE ones); PIPE_WAIT alone is the byte-mode blocking pipe we want.
+            _winapi.PIPE_WAIT,
             1,
             65536,
             65536,

@@ -75,6 +75,7 @@ def test_cli_flag_inventory_matches_mpv_reader():
         [sys.executable, "-m", "overlay.app.cli", "run", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",  # child emits UTF-8; Windows would otherwise decode as cp1252 and crash
         timeout=60,
     )
     assert out.returncode == 0, out.stderr
@@ -88,6 +89,7 @@ def test_cli_has_subcommand_skeleton():
         [sys.executable, "-m", "overlay.app.cli", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",  # child emits UTF-8; Windows would otherwise decode as cp1252 and crash
         timeout=60,
     )
     assert out.returncode == 0, out.stderr

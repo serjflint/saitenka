@@ -71,7 +71,7 @@ def test_rust_backend_reserved():
     free-threading requirement so the GIL stays off."""
     readme = SRC.parent.parent / "rust" / "README.md"
     assert readme.exists(), "rust/README.md missing"
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
     assert "cosmic-text" in text
     assert "free-threading" in text or "free-threaded" in text
 

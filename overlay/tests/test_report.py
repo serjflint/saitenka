@@ -94,7 +94,10 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
     (tel_dir / "trace-20260101-000000.json").write_text(  # a rotated per-session trace
         '{"traceEvents": [{"name": "op", "args": {"dict": "' + home + '/mydict"}}]}'
     )
-    cfg.write_text(cfg.read_text() + f'\n[telemetry]\nenabled = true\nexport_dir = "{tel_dir}"\n')
+    # .as_posix(): a Windows path's backslashes are TOML string escapes → the table would fail to parse.
+    cfg.write_text(
+        cfg.read_text() + f'\n[telemetry]\nenabled = true\nexport_dir = "{tel_dir.as_posix()}"\n'
+    )
 
     members = report.collect(include_log=True)
     assert "telemetry/trace.json" in members

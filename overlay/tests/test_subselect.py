@@ -64,7 +64,7 @@ def test_ensure_no_jp_without_jimaku_reports_gap():
 
 def test_ensure_sub_file_is_added_and_selected(tmp_path):
     sub = tmp_path / "ep.ja.srt"
-    sub.write_text("1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n")
+    sub.write_text("1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n", encoding="utf-8")
     ipc = FakeIPC(tracks=[EN])
     msg = subselect.ensure_jp_subs(ipc, sub_file=str(sub))
     assert "ep.ja.srt" in msg
