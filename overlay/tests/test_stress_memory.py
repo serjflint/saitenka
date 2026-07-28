@@ -15,6 +15,12 @@ comes from at this synthetic scale vs. a real dict corpus.
 from __future__ import annotations
 
 import pytest
+
+# memray/pytest-memray have no Windows wheel and are marker-gated off win32, so the `limit_memory`
+# marker below is unregistered there — under `--strict-markers` that fails collection even though this
+# module is `slow`-deselected. Skip the whole module when the plugin is absent.
+pytest.importorskip("pytest_memray")
+
 from test_stress import PANEL_CACHE_MAX, _churn, _reader
 
 pytestmark = pytest.mark.slow

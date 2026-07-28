@@ -89,8 +89,11 @@ dev = [
     "ty>=0.0.61",
     "basedpyright>=1.39",
     "py-spy>=0.4.2",
-    "memray>=1.19.3",
-    "pytest-memray>=1.9.0",
+    # memray has no Windows support (native build needs libbacktrace/pkg-config); its memory-regression
+    # test (`poe stress-memory`) is a Linux/macOS dev+CI concern, so keep it off win32 — else `uv sync`
+    # on the Windows E2E leg fails building it from sdist.
+    "memray>=1.19.3; sys_platform != 'win32'",
+    "pytest-memray>=1.9.0; sys_platform != 'win32'",
     "import-linter>=2.13",
     "complexipy>=6.2.0",
     "ruff>=0.16",
@@ -333,7 +336,9 @@ timeline-bench = { shell = "PYTHON_GIL=0 uv run --extra full python examples/ben
 # engaged head-first render fix against the report baseline (2.8s full renders → queue-11 backlog).
 timeline-bench-banded = { shell = "SAITENKA_BANDED=1 PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline --timeline-head-prefetch 1 --timeline-lookahead 2" }
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
-smoke-live = { shell = "SAITENKA_LIVE=1 PYTHON_GIL=0 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
+# No PYTHON_GIL=0 — the smoke tests input→OSD mapping, not free-threading, and forcing the GIL off is a
+# fatal `config_read_gil` error on a non-free-threaded interpreter (the E2E leg pins 3.13 for fugashi wheels).
+smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
