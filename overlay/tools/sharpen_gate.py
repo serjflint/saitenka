@@ -1,16 +1,16 @@
-"""Deterministic anti-lobotomization gate for the test-healing (Sharpen) loop.
+"""Deterministic anti-lobotomization gate for the sharpen (Sharpen) loop.
 
 A green suite proves *nothing* about a quality edit — that's the loop's whole reason to exist. So a
 proposed test edit clears two deterministic checks (no LLM) before it can reach the human gate:
 
   A. Efficacy / no-lobotomy — the touched module's mutation score must NOT drop. Implemented as a
-     targeted cosmic-ray replay: every mutant the heal *claims* is now killed (earned kill), and a
+     targeted cosmic-ray replay: every mutant the sharpen *claims* is now killed (earned kill), and a
      no-regression sample of previously-killed mutants must all stay killed. A drop = the edit
      weakened the suite's bug-catching while staying green = a lobotomy = BOUNCE.
 
   B. Anti-cheat (static, AST) — the edit must not fake the kill. Bounces a removed / weakened /
      trivially-true assertion, or an expected value read from the code under test (a change-detector
-     in disguise). Purely additive heals pass A vacuously on B; a lobotomy trips both.
+     in disguise). Purely additive sharpens pass A vacuously on B; a lobotomy trips both.
 
 Replay primitive: ``cosmic-ray apply <module> <operator> <occurrence>`` mutates the module in place
 by the exact (operator, occurrence) coordinate stored in a prior campaign's session DB; we run the
@@ -83,7 +83,7 @@ def replay_is_killed(module: Path, m: Mutant, test_cmd: list[str], *, cwd: Path)
 
 @dataclass
 class EfficacyReport:
-    earned: list[Mutant]  # target survivors the healed suite now kills
+    earned: list[Mutant]  # target survivors the sharpened suite now kills
     unearned: list[Mutant]  # target survivors still surviving (likely equivalent)
     regressed: list[Mutant]  # previously-killed mutants that now survive — a LOBOTOMY
     checked_control: int
@@ -94,7 +94,7 @@ class EfficacyReport:
 
     @property
     def ok(self) -> bool:
-        # No previously-killed mutant may survive (score must not drop) AND the heal must earn
+        # No previously-killed mutant may survive (score must not drop) AND the sharpen must earn
         # at least one new kill (else it's a zero-value edit — Goodhart bait).
         return not self.score_dropped and bool(self.earned)
 
@@ -194,7 +194,7 @@ def anticheat_diff(before_src: str, after_src: str, cut_module: str = "") -> lis
 
 
 def git_show(ref: str, path: Path, *, cwd: Path) -> str:
-    """A file's contents at a git ref (the heal's 'before'), or '' if it didn't exist there."""
+    """A file's contents at a git ref (the sharpen's 'before'), or '' if it didn't exist there."""
     proc = subprocess.run(
         ["git", "show", f"{ref}:{path}"], cwd=cwd, capture_output=True, text=True, check=False
     )

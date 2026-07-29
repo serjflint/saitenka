@@ -1,9 +1,9 @@
-"""Read/write library for the test-healing ledger (`.ledger.healing.jsonl`, repo top level).
+"""Read/write library for the sharpen ledger (`.ledger.sharpen.jsonl`, repo top level).
 
 The loop's durable memory: which module was audited, at what content-hash, under which toolset. Triage
-reads it to skip healed-and-unchanged modules and grow-filed gaps; an audit appends one record. The key
+reads it to skip sharpened-and-unchanged modules and grow-filed gaps; an audit appends one record. The key
 is a **content-hash** (`source_sha` over the module's bytes + its mapped test files' bytes), not mtime,
-so a healed verdict survives clones/CI. See `.agents/test-healing/SPEC.md` → *Ledger*.
+so a sharpened verdict survives clones/CI. See `.agents/sharpen/SPEC.md` → *Ledger*.
 
 Module keys are relative to `src/overlay/` — e.g. `app/sub_index.py` — matching the existing records.
 """
@@ -25,7 +25,7 @@ UNSEEN = "unseen"  # never audited → prime candidate
 STALE_SHA = "stale-sha"  # audited, but module/tests changed since → re-audit
 STALE_TOOLSET = "stale-toolset"  # toolset_version bumped → whole ledger re-audits
 IN_PROGRESS = "in-progress"  # audited, unchanged, work explicitly left undone
-HEALED_CURRENT = "healed-current"  # healed, unchanged, current toolset → SKIP
+SHARPENED_CURRENT = "sharpened-current"  # sharpened, unchanged, current toolset → SKIP
 DRY_RUN = "dry-run"  # recorded as a dry-run (no valid review) → re-selectable
 
 
@@ -110,8 +110,8 @@ class Ledger:
         if rec["source_sha"] != source_sha(root, module_key, test_files):
             return STALE_SHA
         state = rec.get("state")
-        if state == "healed":
-            return HEALED_CURRENT
+        if state == "sharpened":
+            return SHARPENED_CURRENT
         if state == "dry-run":
             return DRY_RUN
         return IN_PROGRESS
