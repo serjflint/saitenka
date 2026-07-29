@@ -149,6 +149,22 @@ irreducible.
 The veto criteria are not assumed complete — extend them as the loop's self-reflection or the human
 surfaces new failure modes.
 
+### Fidelity (enforced, not trusted)
+
+The review only works if it is **actually adversarial** — one context cannot refute itself. So this is a
+hard rule, structurally enforced, not a discipline:
+
+- **Isolated subagents are mandatory.** Author, skeptic, and (on disagreement) judge are **separate agent
+  invocations with independent context**. The skeptic prompt contains only *what / why / diff* — never
+  the author's reasoning. The loop runs as a **Workflow** where these are distinct `agent()` calls, so
+  the harness enforces isolation; a human "playing all roles" in one context is **not a valid review**.
+- **Evidence over trust.** Every iteration records a `review` provenance block in the ledger: the author
+  and skeptic agent ids (which must differ), the judge id or `consensus`, and the verdict. No block, or
+  `author == skeptic`, means the review didn't happen.
+- **No fidelity ⇒ no ship.** An iteration without a valid `review` block is a **`dry-run`**: it MUST NOT
+  open a PR and MUST record `state: dry-run` (never `healed`/`in-progress`). The PR step checks for the
+  block first. A dry-run is fine for *exploration*; it just can't reach the human gate as if reviewed.
+
 ## Grow hand-off — filing an uncovered risk
 
 When a **non-equivalent** mutant survives that *no edit to existing tests can kill*, that's a genuine
@@ -172,7 +188,8 @@ record carries a global `toolset_version`. One record per module audit:
   "audited": "<iso>", "source_sha": "<hash of module + its tests>",
   "toolset_version": 3,
   "axes": { "survival": 0.0, "conformance": 0, "brittleness": 0, "redundancy": "advisory:2" },
-  "state": "healed | in-progress | blocked-on-bug",
+  "state": "healed | in-progress | blocked-on-bug | dry-run",
+  "review": { "author": "<agent-id>", "skeptic": "<agent-id, ≠author>", "judge": "consensus", "verdict": "UPHELD" },
   "decisions": ["tightened test_mine to assert the note payload, not _cache"],
   "left-undone": ["3 equivalent survivors (str|None under __future__) — unkillable"],
   "axes-not-applied": ["crosshair — z3 env not built this run; TODO"] }
@@ -180,7 +197,9 @@ record carries a global `toolset_version`. One record per module audit:
 
 **Healed** = clean on the three gating axes: **Efficacy** (no non-equivalent survivors, or all filed as
 Grow issues) · **Conformance** (zero violations) · **Brittleness** (no witnesses). **Redundancy** is
-advisory — recorded, never a heal-blocker. A healed module is skipped until:
+advisory — recorded, never a heal-blocker. Any shippable state (`healed`/`in-progress`) additionally
+requires a valid `review` block (see *Fidelity*); without one the state is `dry-run`. A healed module is
+skipped until:
 - its **`source_sha` changes** — a SHA-256 (hex) over the module's bytes concatenated with its mapped
   test file(s)' bytes; content-hash, not mtime, so it survives clones/CI (mtime was fine for the
   in-process Anki cache but isn't portable for a committed ledger), **or**
@@ -212,6 +231,32 @@ slow instruments never join it.
 The maintainer approves every merge. The loop's entire job is to arrive at that gate with a small,
 single-module, evidence-backed proposal that survived an adversarial internal review — so approval is
 a *reading*, not an investigation.
+
+## Deferred instruments — plan
+
+Deferred for a stated reason, not forgotten; a later run or the outer reflection picks them up. Build
+order follows yield-on-this-suite. Detailed step plans go to `vibe/` when a build actually starts.
+
+1. **Conformance: private-monkeypatch-target** (ast-grep, ~½ day). Flag `monkeypatch.setattr` whose
+   target is a **private** production symbol — the 2-arg string form (`"pkg.mod._priv"`) and the 3-arg
+   form (`(obj, "_priv", …)`). This is the real coupling signal hiding among the ~666 *legitimate*
+   monkeypatch seams (raw count is fine; a private target is the smell). Needs string-arg regex + the
+   3-arg shape + planted rule-tests. **Highest-yield next rule.**
+2. **Conformance: mis-levelled test** (ast-grep, ~½ day). Flag a real socket / subprocess /
+   uncontrolled-fs / wall-clock call in a test carrying **no** `integration`/`live`/`e2e` marker.
+   Deferred because it needs careful marker-absence matching (decorator-aware `not inside`) — a naive
+   rule flags legitimately-marked tests. Scope by **marker**, not a `tests/unit/` dir (this suite has none).
+3. **Brittleness probe** (Axis 3, ~1 week — the R1-deep recipe in the research note). Build with the
+   **`rename-private-attribute`** operator, **not** `rename-local` (verified ~0 yield here — this suite
+   has no `locals`/frame observation; its coupling is in private *attributes*). LibCST transformer in a
+   pinned-3.13 env; TBE → Hypothesis-diff → CrossHair oracle; pytest full-failure capture; N×-seed
+   flimsiness intersection; classifier → the R2 cause ids. **Build trigger:** the loop hits a Conformance
+   finding it can't adjudicate by inspection (i.e. *hidden* coupling) — not the explicit private-attr
+   coupling the lint already nails (the audit showed the probe is redundant there).
+4. **Redundancy** (Axis 4, ~1 day, advisory only). cosmic-ray records no kill-matrix, so approximate with
+   a **coverage-overlap** pass (`coverage.py` per-test line sets → identical/subset clusters) as a
+   *flag-only* candidate list — **never auto-prune** (equivalent-mutant blind spots; tests double as
+   regression / documentation guards).
 
 ---
 
