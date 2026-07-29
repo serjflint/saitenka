@@ -1,0 +1,25 @@
+id: test-monkeypatch-private-target
+language: python
+severity: warning
+message: >-
+  monkeypatch of a PRIVATE production symbol (`_name`) — coupling to internals. The raw monkeypatch
+  count is fine (it's the sanctioned seam); only a private TARGET is the smell. Repoint at a public
+  seam / the symbol's real lookup site; if none exists that's an ARCHITECTURE signal → Grow/refactor,
+  not a test-by-test rewrite.
+note: >-
+  Axis 2 (Conformance) → cause R2-PRIVATE (monkeypatch variant). The actionable coupling hiding among
+  the ~666 legit monkeypatch seams: a private target. Both forms — 2-arg `setattr("pkg.mod._priv", v)`
+  and 3-arg `setattr(obj, "_priv", v)`. Dunders (`__x__`) are excluded, matching test-assert-private-attr.
+files:
+  - "tests/**/*.py"
+rule:
+  any:
+    # 3-arg: monkeypatch.setattr(obj, "_priv", value[, raising=…]) — private attr NAME
+    - pattern: $M.setattr($OBJ, $NAME, $$$)
+    # 2-arg dotted-string: monkeypatch.setattr("pkg.mod._priv", value) — private tail in TARGET
+    - pattern: $M.setattr($TARGET, $VAL)
+constraints:
+  NAME:
+    regex: '^["'']_[A-Za-z0-9]'
+  TARGET:
+    regex: '\._[A-Za-z0-9]'
