@@ -1,0 +1,25 @@
+id: test-session-mutable-fixture
+valid:
+  # function scope (default) — no cross-test sharing
+  - |
+    @pytest.fixture
+    def cache():
+        return {}
+  # session scope but not a literal mutable — a constructed client is fine
+  - |
+    @pytest.fixture(scope="session")
+    def client():
+        return make_client()
+invalid:
+  - |
+    @pytest.fixture(scope="session")
+    def cache():
+        return {}
+  - |
+    @pytest.fixture(scope="module")
+    def items():
+        return []
+  - |
+    @pytest.fixture(scope="session")
+    def seen():
+        yield set()

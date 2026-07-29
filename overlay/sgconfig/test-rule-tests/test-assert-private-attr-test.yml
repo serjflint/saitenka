@@ -1,0 +1,18 @@
+id: test-assert-private-attr
+valid:
+  # public observable behaviour
+  - assert account.balance == 100
+  # private access in arrange, not in the assertion — fine
+  - |
+    def test_x():
+        cached = obj._cache
+        assert lookup(cached) == "hit"
+  # dunder is not the single-underscore private smell
+  - assert obj.__class__ is Foo
+invalid:
+  # asserting internal state directly
+  - assert account._balance == 100
+  - assert renderer._style is expected
+  - assert widget._ready
+  # nested private on the left of a comparison
+  - assert parser._tokens[0] == "x"

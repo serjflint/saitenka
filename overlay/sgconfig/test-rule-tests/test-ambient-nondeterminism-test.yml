@@ -1,0 +1,16 @@
+id: test-ambient-nondeterminism
+valid:
+  # seeded RNG is deterministic — allowed
+  - |
+    def test_choose():
+        rng = random.Random(0)
+        assert choose(rng) == "x"
+  # injected clock, not stdlib entropy
+  - ts = clock.now()
+  # monotonic timer for a timeout deadline is a legit idiom, not a value smell
+  - deadline = time.monotonic() + 2.0
+invalid:
+  - x = random.randint(0, 10)
+  - now = datetime.now()
+  - t = time.time()
+  - token = uuid.uuid4()

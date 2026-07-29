@@ -1,0 +1,16 @@
+id: test-env-mutation
+language: python
+severity: warning
+message: >-
+  Direct os.environ / putenv mutation leaks process state across tests (and races under free-threading)
+  — use monkeypatch.setenv/delenv, which pytest restores automatically. Reads of os.environ are fine.
+note: Axis 2 (Conformance) → non-determinism / cross-test state.
+files:
+  - "tests/**/*.py"
+rule:
+  any:
+    - pattern: os.environ[$K] = $V
+    - pattern: del os.environ[$K]
+    - pattern: os.environ.update($$$)
+    - pattern: os.putenv($$$)
+    - pattern: os.unsetenv($$$)

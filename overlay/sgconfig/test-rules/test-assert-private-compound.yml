@@ -1,0 +1,23 @@
+id: test-assert-private-compound
+language: python
+severity: warning
+message: >-
+  A private-attribute check bundled into a compound assertion (`assert public and x._priv`). If the
+  public half already proves the behaviour, drop the private half (over-fit redundancy); otherwise split
+  the multi-fact assert. This is the ACTIONABLE subset of `test-assert-private-attr` (which is a metric):
+  it excludes the lone `assert x._priv` that is usually a load-bearing white-box seam.
+note: Axis 2 (Conformance) → cause R2-PRIVATE (bundled/redundant). Triage — drop the redundant half, or split.
+files:
+  - "tests/**/*.py"
+rule:
+  kind: assert_statement
+  all:
+    - has:
+        kind: boolean_operator
+        stopBy: end
+    - has:
+        kind: attribute
+        stopBy: end
+        has:
+          field: attribute
+          regex: "^_[A-Za-z0-9]"

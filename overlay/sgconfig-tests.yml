@@ -1,0 +1,9 @@
+# ast-grep test-code lint (`poe test-lint`) — the test-healing loop's Conformance instrument
+# (.agents/test-healing/SPEC.md, Axis 2). SEPARATE from sgconfig.yml/`poe invariants` on purpose: these
+# rules scan tests/, are advisory (all `warning` → never fail a gate), and are NOT in `poe all`. They
+# measure test↔implementation coupling; a clean subset may graduate to the gate later. Planted +/-
+# tests (`poe test-lint-test`) keep a rule from rotting into a no-op.
+ruleDirs:
+  - sgconfig/test-rules
+testConfigs:
+  - testDir: sgconfig/test-rule-tests

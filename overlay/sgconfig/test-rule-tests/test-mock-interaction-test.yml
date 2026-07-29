@@ -1,0 +1,12 @@
+id: test-mock-interaction
+valid:
+  # asserting observable result, not interaction
+  - assert result == expected
+  # configuring a double is fine — only *asserting* interaction is the smell
+  - mock.return_value = 5
+invalid:
+  - mock.assert_called_once()
+  - client.send.assert_called_with("ja")
+  - fake.assert_not_called()
+  - assert runner.call_count == 1
+  - assert m.mock_calls == [call.open()]

@@ -1,0 +1,21 @@
+id: test-mock-interaction
+language: python
+severity: warning
+message: >-
+  Interaction assertion (`.assert_called*` / `.call_count` / `.mock_calls`) couples the test to call
+  topology, not observable behaviour — the mockist smell this classicist suite avoids (~9 mock uses).
+  Assert the resulting state/return instead.
+note: Axis 2 (Conformance) → cause R2-INTERACT.
+files:
+  - "tests/**/*.py"
+rule:
+  any:
+    - pattern: $M.assert_called()
+    - pattern: $M.assert_called_once()
+    - pattern: $M.assert_called_with($$$)
+    - pattern: $M.assert_called_once_with($$$)
+    - pattern: $M.assert_any_call($$$)
+    - pattern: $M.assert_has_calls($$$)
+    - pattern: $M.assert_not_called()
+    - pattern: $M.call_count
+    - pattern: $M.mock_calls

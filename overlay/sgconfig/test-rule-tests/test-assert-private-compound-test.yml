@@ -1,0 +1,12 @@
+id: test-assert-private-compound
+valid:
+  # compound but no private attr — nothing to unbundle
+  - assert account.balance == 100 and account.currency == "JPY"
+  # lone private-attr assert — belongs to the metric rule, NOT this actionable one
+  - assert r._nest.state is not None
+invalid:
+  # private flag bundled with the public IPC observable that already proves it → drop the flag
+  - assert r._paused_by_tip and ("set_property", "pause", True) in ipc.commands
+  # public + private bundled in one act → split or drop
+  - assert r.hover == 0 and r._hide_at == 0.0
+  - assert r.sub_text == "に" and r._nav_idx == 1

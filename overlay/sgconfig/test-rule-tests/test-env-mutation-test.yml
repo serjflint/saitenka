@@ -1,0 +1,12 @@
+id: test-env-mutation
+valid:
+  # the sanctioned seam — pytest restores it
+  - monkeypatch.setenv("LANG", "ja_JP.UTF-8")
+  # reading the environment is fine
+  - assert os.environ["LANG"] == "ja_JP.UTF-8"
+invalid:
+  - os.environ["LANG"] = "ja_JP.UTF-8"
+  - del os.environ["LANG"]
+  - 'os.environ.update({"TZ": "UTC"})'
+  - os.putenv("LANG", "ja")
+  - os.unsetenv("LANG")

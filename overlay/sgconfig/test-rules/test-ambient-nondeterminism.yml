@@ -1,0 +1,23 @@
+id: test-ambient-nondeterminism
+language: python
+severity: warning
+message: >-
+  Ambient wall-clock/randomness in a test is non-deterministic — inject the clock (monkeypatch) or use
+  a seeded RNG / Hypothesis. `random.Random(seed)` is fine, and `time.monotonic()` for a timeout deadline
+  is NOT flagged (it's a timer, not the wall clock); bare wall-clock/entropy fed into values is the smell.
+note: Axis 2 (Conformance) → determinism invariant. pytest-randomly stays on to surface order coupling.
+files:
+  - "tests/**/*.py"
+rule:
+  any:
+    - pattern: time.time()
+    - pattern: datetime.now($$$)
+    - pattern: datetime.datetime.now($$$)
+    - pattern: datetime.utcnow()
+    - pattern: datetime.datetime.utcnow()
+    - pattern: random.random()
+    - pattern: random.randint($$$)
+    - pattern: random.choice($$$)
+    - pattern: random.shuffle($$$)
+    - pattern: random.sample($$$)
+    - pattern: uuid.uuid4()

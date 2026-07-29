@@ -643,10 +643,10 @@ def test_pause_on_tooltip_pauses_then_resumes(monkeypatch):
     r = _reader_with_word(ipc)
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)  # keep our boxes
     r._show_tooltip(0)  # tooltip shown → pause
-    assert r._paused_by_tip and ("set_property", "pause", True) in ipc.commands
+    assert ("set_property", "pause", True) in ipc.commands
     r.hover = 0
     r.set_hover(-1)  # tooltip hidden → resume
-    assert not r._paused_by_tip and ("set_property", "pause", False) in ipc.commands
+    assert ("set_property", "pause", False) in ipc.commands
 
 
 def test_pause_on_tooltip_respects_manual_pause():
