@@ -1,5 +1,9 @@
 # Sharpen Loop — process spec
 
+> New here? Read [`GUIDE.md`](GUIDE.md) first — a self-contained explainer (mutation + property testing
+> background, worked example, rationale, references) for a reader who knows only plain `pytest`. This
+> file is the terse process spec the loop executes against.
+
 A deliberate, idle-time loop that **sharpens the existing test suite** — finds and fixes bugs *in the
 tests themselves* (wrong architecture, scope, abstraction level, cohesion; over/under-assertion) and
 files genuinely-uncovered behaviour as issues for a separate Grow effort. It runs at rest, proposes
@@ -338,9 +342,8 @@ order follows yield-on-this-suite. Detailed step plans go to `vibe/` when a buil
 
 ## Research
 
-The prompts and full results (5 papers read at file level + a file-grounded GitHub survey) live in the
-Saitenka-Vault note `_source/sharpen-research.md` (2026-07). The durable conclusions are already
-folded into this spec; the load-bearing ones:
+The research (5 papers read at file level + a file-grounded GitHub survey, 2026-07) is distilled here; the
+durable conclusions are already folded into this spec — the load-bearing ones:
 
 - **Brittleness (Axis 3) is genuinely under-tooled** — no turn-key Python tool exists; you build the
   contract-preserving-variant probe above. The equivalence oracle (TBE → Hypothesis-diff → CrossHair)
