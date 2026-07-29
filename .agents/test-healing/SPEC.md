@@ -155,6 +155,17 @@ Not "N mutants died." The body states **what** (diff) and **why a human should c
 Plus the four-axis **before/after** table and, if a code fix rode along, that fix called out
 **separately** so the merge decision is clean.
 
+**Classify the finding's disposition** — exactly one, stated up front, so the human knows whether any
+runtime behaviour is at stake. The discriminator is *pass-on-pristine*: assertions green on unmutated
+code ⇒ the behaviour was already right, so this is coverage; red ⇒ a real bug to file or fix.
+- **coverage-only** — the added/sharpened assertions pin *already-correct* behaviour; **no production
+  change**. The default Sharpen outcome (mirrors ledger `state: healed`/`in-progress`).
+- **issue-filed** — a real defect, or a non-equivalent survivor no test edit can kill, was found but
+  **not** fixed here: link the issue, give severity, and say whether the assertion is withheld
+  (green-trunk) or landed `xfail` (mirrors `grow-filed` / `state: blocked-on-bug`).
+- **fix-included** — a source fix rode along, called out **separately** from the test per *Source
+  bugs* (mirrors the source-bug branch).
+
 ## Review architecture
 
 Two tiers — objective is cheap and deterministic; the debate is spent only where judgment is
