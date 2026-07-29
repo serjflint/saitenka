@@ -15,10 +15,7 @@ def test_detect_extras_reads_importable_markers(monkeypatch):
 
 
 def test_reinstall_command_pypi_and_github_forms():
-    assert (
-        lc.reinstall_command(["telemetry", "deinflect"])[-1]
-        == "saitenka[deinflect,telemetry]"
-    )
+    assert lc.reinstall_command(["telemetry", "deinflect"])[-1] == "saitenka[deinflect,telemetry]"
     assert lc.reinstall_command([])[-1] == "saitenka"  # bare when nothing installed
     gh = lc.reinstall_command(["deinflect"], source="github", ref="v0.5.0")[-1]
     assert (

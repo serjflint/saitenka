@@ -1,0 +1,11 @@
+# Pre-commit hooks, run via prek (https://github.com/j178/prek): install once with `uvx prek install`.
+# This is the fast commit-time gate; the full pre-push gate is `uv run poe all` (see AGENTS.md).
+repos:
+  - repo: local
+    hooks:
+      - id: poe-lint
+        name: poe lint (ruff check --fix + format)
+        entry: uv run poe lint
+        language: system
+        types: [python]
+        pass_filenames: false # poe lint globs src/tests/examples itself

@@ -431,9 +431,7 @@ def run_setup(*, yes: bool, dry_run: bool) -> int:
     print("\nDoctor:")
     report = _run_doctor()
     if report.exit_code == 0:
-        print(
-            f"\nSetup complete {_OK} - run `saitenka <video>`, or just open a video in mpv."
-        )
+        print(f"\nSetup complete {_OK} - run `saitenka <video>`, or just open a video in mpv.")
     else:
         print(
             "\nSetup finished with problems (see [x]/! above). Fix them, re-run `saitenka doctor`,"
