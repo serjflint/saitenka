@@ -1,5 +1,9 @@
 # Sharpen Loop — process spec
 
+> New here? Read [`GUIDE.md`](GUIDE.md) first — a self-contained explainer (mutation + property testing
+> background, worked example, rationale, references) for a reader who knows only plain `pytest`. This
+> file is the terse process spec the loop executes against.
+
 A deliberate, idle-time loop that **sharpens the existing test suite** — finds and fixes bugs *in the
 tests themselves* (wrong architecture, scope, abstraction level, cohesion; over/under-assertion) and
 files genuinely-uncovered behaviour as issues for a separate Grow effort. It runs at rest, proposes
