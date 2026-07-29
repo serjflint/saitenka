@@ -102,19 +102,40 @@ fight in-flight work (see the commit-around-parallel-work discipline).
 
 ## The cycle (one module per run)
 
-1. **Select** a module via triage; skip if ledger-healed and source-hash unchanged (see *Ledger*).
-2. **Measure** all four axes → the *before* snapshot.
+1. **Select** a module via triage; skip if ledger-healed and source-hash unchanged (see *Ledger*), or if
+   its real fix is already an open Grow issue (`grow-filed`, see *Grow hand-off*).
+2. **Measure** all four axes → the *before* snapshot, against a **known-green baseline**: any in-scope
+   test red or flaky *before* the edit is quarantined and recorded, never folded into an axis number — a
+   poisoned before/after bounces good work or passes a regression (the Brittleness N×-seed distrust, extended
+   to Efficacy and Redundancy). Read each instrument's **structured output** (cosmic-ray session DB,
+   `test-lint --json`), never its console summary — scraped stdout silently diverges from reality.
 3. **Propose** — the author agent emits a **named, deduplicated proposal list**, each item
    `{target test · axis · change · rationale}` (tighten to observable behaviour, fix level/marker, merge
-   redundant tests, harden an existing test to kill a non-equivalent survivor). The gates below run
-   **per proposal**, so a single controversial item can be dropped without losing the rest.
-4. **Objective gate** (deterministic, no agent) — re-measure; **bounce the proposal** if any regressed:
-   Efficacy dropped · a *new* Conformance violation appeared · a contract-preserving variant now kills a
-   test that it didn't before (brittleness up — the classic false-improvement).
+   redundant tests, harden an existing test to kill a non-equivalent survivor). It gets the **minimum
+   decisive context** — the surviving mutant, the failing witness, the target test file, the relevant
+   rubric — not a whole-module/repo dump (broad context ~doubles cost for no measurable gain; the
+   witness + prior attempt carried into a retry is the one high-value context). Heal-retries are **capped
+   at ~3** (the first attempt succeeds ~95 % of the time it ever will; past ~3 returns collapse and cost
+   blows up); an un-killable / un-sharpenable proposal is a **terminal outcome** recorded to `left-undone`
+   / `blocked-on-bug`, never a spin. The gates below run **per proposal**, so a single controversial item
+   can be dropped without losing the rest.
+4. **Objective gate** (deterministic, no agent) — re-measure on the step-2 known-green baseline; **bounce
+   the proposal** if any regressed: Efficacy dropped · a *new* Conformance violation appeared · a
+   contract-preserving variant now kills a test it didn't before (brittleness up). **And bounce these
+   anti-cheat checks even when the whole suite stays green** — a green suite proves nothing about a
+   *quality* edit, which is the loop's entire reason to exist:
+   - an **assertion removed, weakened, or made trivially true** (`assert True`);
+   - a *new* assertion introduced **solely to pass the gate**;
+   - an **asserted value changed to match observed output**;
+   - an **expected value derived from the code under test** (a literal equal to a constant read from the
+     module under test — a change-detector in disguise; also a Conformance-lint candidate).
 5. **Subjective gate** (see *Review architecture*) — is the benefit real and plainly explainable, or
    over-fitting in disguise?
 6. **Source-bug branch** (see *Source bugs*) if a sharpened test went red on a real defect.
-7. **PR** — one module, the surviving proposals, evidence-carrying body (see *PR body*). Human merges.
+7. **PR** — only if the surviving proposals clear a **"worth a human's attention" bar** (a real bug
+   caught, coupling removed, a non-equivalent survivor killed); bundle or suppress lone cosmetic
+   conformance nits rather than one PR per nit — the single-maintainer gate has finite throughput. One
+   module, evidence-carrying body (see *PR body*). Human merges.
 8. **Record** the outcome in the ledger, including *what was deliberately left undone and why*.
 
 ### Source bugs (green-trunk policy)
@@ -146,8 +167,18 @@ irreducible.
   is DROP** and move to the next module. (Verification is easier than generation, so a Sonnet judge on
   a well-framed disagreement is sound and cheap.)
 
-The veto criteria are not assumed complete — extend them as the loop's self-reflection or the human
-surfaces new failure modes.
+Seed the skeptic's veto list with the auto-test defects prior art hit repeatedly (each applies to a
+*heal*, not just a generated test):
+- **passes but adds nothing** — the edit neither kills a non-equivalent survivor nor tightens an
+  observable behaviour (the anti-Goodhart core: a green, zero-value edit);
+- **over-production** — several near-duplicate tests where one parametrised test is clearer;
+- **change-detector-in-disguise** — the sharpened assertion pins an implementation detail or derives its
+  expected value from the code under test (also a deterministic Objective-gate bounce, above);
+- **implementation leakage in the test** — internal names, absolute line numbers, or tooling-provenance
+  markers in the test body; prefer a semantic, line-number-free coverage note.
+
+The veto criteria are not otherwise assumed complete — extend them as the loop's self-reflection or the
+human surfaces new failure modes.
 
 ### Fidelity (enforced, not trusted)
 
@@ -165,7 +196,30 @@ hard rule, structurally enforced, not a discipline:
   open a PR and MUST record `state: dry-run` (never `healed`/`in-progress`). The PR step checks for the
   block first. A dry-run is fine for *exploration*; it just can't reach the human gate as if reviewed.
 
+**Why isolation, and its limit (grounded — SycEval, FAccT 2025, arXiv:2502.08177).** LLMs are sycophantic
+in ~58% of challenged answers and the bias **persists** (78.5%) across a chain — so an independent skeptic
+is justified and iterative debate-to-consensus is a trap (default-drop is right). But **isolation alone is
+not the fix and can backfire**: SycEval found *preemptive* framing (a claim presented without the model's
+own prior context — which is exactly our isolated skeptic) produced *higher* and more *regressive*
+agreement (61.75% vs 56.52%; regressive 8.13% vs 3.54% on math). Consequences, now rules:
+- **Frame the skeptic as adversarial refutation grounded in the artifact, not adjudication of the
+  author's rationale.** Give it the diff + a task ("construct a bug this misses; default REFUTED on
+  doubt") and make it reason from the *code* — this is what caught the author's mis-citation in the first
+  real run.
+- **Rationales cite evidence, never authority.** SycEval: *citation*-backed rebuttals maximised
+  *regressive* sycophancy (flipping to wrong) — so a PR rationale leaning on citations/authorities makes
+  the skeptic *more* likely to wave a bad change through. Cite mutants/tests, not sources.
+- **Residual risk default-drop can't catch:** if author and skeptic *both* sycophantically agree on a bad
+  change, it ships to the human. The merge gate is the only backstop for mutual sycophancy — which is why
+  it stays.
+
 ## Grow hand-off — filing an uncovered risk
+
+**Grow is the majority output, not the exception.** Most "test problems" are missing behaviour or a
+missing public observation seam (this suite's inner-audit: 83/92 hits) — fixable only by a new test or a
+code refactor, never by editing an existing test. A filed Grow issue is a **primary result** of a run,
+not a failure to heal. Once filed, the gap is **filed-and-skip** (parallel to `source_sha`): triage must
+not re-select a module whose real fix is an open Grow issue — record the id in the ledger's `grow-filed`.
 
 When a **non-equivalent** mutant survives that *no edit to existing tests can kill*, that's a genuine
 coverage gap — Grow's job. Sharpen **files an issue and stays in scope**, written the way a senior QA
@@ -192,8 +246,13 @@ record carries a global `toolset_version`. One record per module audit:
   "review": { "author": "<agent-id>", "skeptic": "<agent-id, ≠author>", "judge": "consensus", "verdict": "UPHELD" },
   "decisions": ["tightened test_mine to assert the note payload, not _cache"],
   "left-undone": ["3 equivalent survivors (str|None under __future__) — unkillable"],
+  "grow-filed": ["#43"],
   "axes-not-applied": ["crosshair — z3 env not built this run; TODO"] }
 ```
+
+`grow-filed` lists the Grow issue ids a run handed off; triage skips a module while its gap is open
+(filed-and-skip, parallel to `source_sha` — see *Grow hand-off*). Terminal un-killable / un-sharpenable
+outcomes land in `left-undone`; a real defect that blocked a heal sets `state: blocked-on-bug`.
 
 **Healed** = clean on the three gating axes: **Efficacy** (no non-equivalent survivors, or all filed as
 Grow issues) · **Conformance** (zero violations) · **Brittleness** (no witnesses). **Redundancy** is
@@ -218,6 +277,9 @@ recently-changed modules first.
   tooling and the `poe` stack. A **meaningful** extension **bumps `toolset_version`** and invalidates
   the whole ledger — this includes **adding or removing an axis** (a new measurement dimension is a
   technique change) as well as a new *kind* of test or a new tool. Rewording a rule does **not**.
+  **No axis, instrument, or context source is added on plausibility** — only after a **frozen-baseline
+  A/B** (pin a revision, run with and without, keep it only if it moves a signal). The `toolset_version`
+  bump follows a *proven* change, never a hoped-for one.
 
 ## Cadence & cost
 
@@ -257,13 +319,16 @@ order follows yield-on-this-suite. Detailed step plans go to `vibe/` when a buil
    a **coverage-overlap** pass (`coverage.py` per-test line sets → identical/subset clusters) as a
    *flag-only* candidate list — **never auto-prune** (equivalent-mutant blind spots; tests double as
    regression / documentation guards).
+5. **Conformance: expected-value-from-code-under-test** (ast-grep). Flag a test literal equal to a
+   constant read from the module under test — asserting the code against itself, a change-detector in
+   disguise. Pairs with the Objective-gate anti-cheat bounce of the same name.
 
 ---
 
 ## Research
 
-The prompts that shaped the four instruments and the full results live in the Saitenka-Vault note
-`_source/test-healing-research.md` (Gemini deep research, 2026-07). The durable conclusions are already
+The prompts and full results (5 papers read at file level + a file-grounded GitHub survey) live in the
+Saitenka-Vault note `_source/test-healing-research.md` (2026-07). The durable conclusions are already
 folded into this spec; the load-bearing ones:
 
 - **Brittleness (Axis 3) is genuinely under-tooled** — no turn-key Python tool exists; you build the
@@ -276,3 +341,15 @@ folded into this spec; the load-bearing ones:
 - **Redundancy (Axis 4) is a negative result** — cosmic-ray stores no per-test kill-matrix (killed/
   survived only, `pytest -x` first-killer), so it's advisory, and *flag never auto-prune* regardless
   (equivalent mutants make zero-kill tests look redundant when they're regression/documentation guards).
+- **Prior art & recalibrated novelty (grounded).** The closest existing artifact is `Jott2121/crucible`
+  (fetched firsthand) — it assembles the *Efficacy + adversarial-critic + anti-cheat + receipts +
+  frozen-baseline-A/B* core, **independently validating those parts of this spec**; study its
+  `skills/`/`docs/` when building Efficacy, the PR-body receipts, and the outer-reflection A/B. But it is
+  **Grow-flavoured** (writes new tests to kill mutants) with **no** Conformance/Brittleness/Redundancy
+  axes, no ledger, no Sharpen focus. Two categories are **confirmed unbuilt anywhere** (papers + 3 GitHub
+  hunts + direct search): the **behaviour-preserving-transform brittleness probe** (Axis 3) and a
+  **source-hash-idempotent ledger bot**. So this loop's defensible novelty is *not* "mutation + critic"
+  (that exists) — it is **Sharpen-refactoring of existing tests across four axes, with the brittleness
+  probe and the ledger, integrated.** Reuse map: DSpot (`PitMutantScoreSelector` — mutation-selection),
+  UTRefactor (DSL heal-recipes), citypaul/trailofbits configs ("test behaviour not implementation, verify
+  with mutation") for the AGENTS-level rules.
