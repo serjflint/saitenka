@@ -24,7 +24,9 @@ UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
 # pixel wider under a different FreeType (e.g. Linux CI), which the MAE diff can't absorb once the size
 # differs — so a platform may carry an override at golden/<plat>/<name>. Reads prefer the override and
 # fall back to canonical; `SAITENKA_UPDATE_GOLDEN=1` on a non-canonical platform writes the override.
-_PLATFORM_DIR = {"linux": "linux", "win32": "windows"}.get(sys.platform)  # None on darwin (canonical)
+_PLATFORM_DIR = {"linux": "linux", "win32": "windows"}.get(
+    sys.platform
+)  # None on darwin (canonical)
 
 
 def _golden_target(name: str) -> Path:

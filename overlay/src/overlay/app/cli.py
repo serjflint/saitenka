@@ -416,9 +416,7 @@ def telemetry(
         print(f"    {INSTALL_HINT}")
     elif enabled:
         print(f"  trace → {st.trace_path}")
-        print(
-            "  use the overlay (watch + hover a while), then `saitenka report` to bundle it"
-        )
+        print("  use the overlay (watch + hover a while), then `saitenka report` to bundle it")
     elif st.extra_installed:
         print(
             "  (the 'telemetry' extra stays installed — uninstall separately if you want it gone)"
@@ -675,9 +673,7 @@ def install_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin op
 
     dest = do_install()
     print(f"installed {dest}")
-    print(
-        "mpv will now spawn `saitenka attach <socket>` on file-loaded, from any launcher."
-    )
+    print("mpv will now spawn `saitenka attach <socket>` on file-loaded, from any launcher.")
     return 0
 
 
