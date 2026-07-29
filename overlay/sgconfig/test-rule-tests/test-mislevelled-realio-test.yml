@@ -1,0 +1,40 @@
+id: test-mislevelled-realio
+valid:
+  # marked integration → real subprocess is legitimately levelled
+  - |
+    @pytest.mark.integration
+    def test_real_spawn():
+        subprocess.run(["mpv", "x"])
+  # marked live → real socket is fine
+  - |
+    @pytest.mark.live
+    def test_socket():
+        s = socket.create_connection(("h", 1))
+  # default-tier test through a fake — no real I/O at all
+  - |
+    def test_via_fake():
+        server = FakeMpvServer()
+        assert server.handle("x") == "ok"
+  # module/helper-level spawn (not inside a test function) — the fakes' own plumbing
+  - |
+    class FakeServer:
+        def start(self):
+            subprocess.Popen(["mpv"])
+invalid:
+  # default-tier test spawning a real subprocess
+  - |
+    def test_spawns_real():
+        subprocess.run(["mpv", "--version"])
+  # default-tier test opening a real socket
+  - |
+    def test_opens_socket():
+        s = socket.socket()
+  # default-tier test blocking on the wall clock
+  - |
+    def test_waits():
+        time.sleep(0.5)
+  # a non-tier marker (parametrize) does not excuse real I/O
+  - |
+    @pytest.mark.parametrize("n", [1, 2])
+    def test_param_spawn(n):
+        subprocess.check_output(["mpv", str(n)])
