@@ -4,8 +4,8 @@
 what the Sharpen loop is, why it exists, how the pieces work, and the reasoning behind each choice.
 
 This is the *reader's guide*. The terse, agent-facing process spec is [`SPEC.md`](SPEC.md); the audit
-trail is `.ledger.sharpen.jsonl`; the research this rests on is
-`Saitenka-Vault/_source/sharpen-research.md`. If you only have five minutes, read the **Abstract** and
+trail is `.ledger.sharpen.jsonl`; the research this rests on is summarized in **References** below. If you only have five minutes, read the **Abstract**
+and
 **Example** sections.
 
 
@@ -294,7 +294,7 @@ test used to kill, most now survive → **score dropped → BOUNCE**. That is th
 
 ## Prior art and novelty
 
-A deliberate GitHub + literature survey (recorded in `sharpen-research.md`) asked: does this already
+A deliberate GitHub + literature survey (recorded in our internal research notes) asked: does this already
 exist? Findings:
 
 - **Closest artifact — `Jott2121/crucible`** (MIT, weekend repo): mutation-not-coverage + adversarial
@@ -330,8 +330,8 @@ human gate with worth-it, one-module, evidence-carrying proposals.
 
 ## References
 
-Peer-reviewed and first-party sources this loop rests on (full survey with verification notes in
-`Saitenka-Vault/_source/sharpen-research.md`):
+Peer-reviewed and first-party sources this loop rests on (from an internal survey of the literature
++ a GitHub artifact hunt):
 
 - **UTRefactor** — LLM + tsDetect + DSL refactoring of test smells (Java). arXiv:2409.16739 (FSE 2025).
   *The closest existing system; lacks the efficacy gate.*
