@@ -1,0 +1,41 @@
+id: test-mislevelled-realio
+language: python
+severity: warning
+message: >-
+  Real subprocess / socket / time.sleep in a DEFAULT-tier test (no integration/live/e2e/requires_display
+  marker) — mis-levelled. Per AGENTS.md, anything crossing a subprocess/socket/display is `integration`
+  or `live` and goes through the existing fakes (FakeMpvServer/FakeTransport), never real I/O. Move the
+  marker onto the test, or route the boundary through a `Fake*`.
+note: >-
+  Axis 2 (Conformance) → mis-levelled / non-deterministic. Complements test-ambient-nondeterminism
+  (which owns wall-clock/entropy *values*); this owns real *I/O* + blocking sleep. Decorator-scoped:
+  a module-level `pytestmark` tier is a known blind spot (flag verified by inspection, not a bounce).
+files:
+  - "tests/**/*.py"
+rule:
+  all:
+    - any:
+        - pattern: subprocess.run($$$)
+        - pattern: subprocess.Popen($$$)
+        - pattern: subprocess.call($$$)
+        - pattern: subprocess.check_call($$$)
+        - pattern: subprocess.check_output($$$)
+        - pattern: socket.socket($$$)
+        - pattern: socket.create_connection($$$)
+        - pattern: time.sleep($$$)
+    # …directly inside a test function…
+    - inside:
+        kind: function_definition
+        stopBy: end
+        has:
+          field: name
+          regex: "^test_"
+    # …that carries no tier marker (per-decorator; module-level pytestmark is the known blind spot).
+    - not:
+        inside:
+          kind: decorated_definition
+          stopBy: end
+          has:
+            kind: decorator
+            stopBy: end
+            regex: "integration|live|e2e|requires_display|slow|windows_sim"
