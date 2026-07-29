@@ -1,4 +1,4 @@
-# Test-Healing Loop — process spec
+# Sharpen Loop — process spec
 
 A deliberate, idle-time loop that **sharpens the existing test suite** — finds and fixes bugs *in the
 tests themselves* (wrong architecture, scope, abstraction level, cohesion; over/under-assertion) and
@@ -97,12 +97,12 @@ maintainer + agents), so recency is a *selection* signal, not a cost: **start fr
 changed and not yet covered by the ledger** (see *Ledger*), then descend the composite. The largest
 multi-purpose test files score worst on cohesion and surface first.
 
-Never point the loop at a module with an **open feature branch touching it** — heal at rest, don't
+Never point the loop at a module with an **open feature branch touching it** — sharpen at rest, don't
 fight in-flight work (see the commit-around-parallel-work discipline).
 
 ## The cycle (one module per run)
 
-1. **Select** a module via triage; skip if ledger-healed and source-hash unchanged (see *Ledger*), or if
+1. **Select** a module via triage; skip if ledger-sharpened and source-hash unchanged (see *Ledger*), or if
    its real fix is already an open Grow issue (`grow-filed`, see *Grow hand-off*).
 2. **Measure** all four axes → the *before* snapshot, against a **known-green baseline**: any in-scope
    test red or flaky *before* the edit is quarantined and recorded, never folded into an axis number — a
@@ -114,7 +114,7 @@ fight in-flight work (see the commit-around-parallel-work discipline).
    redundant tests, harden an existing test to kill a non-equivalent survivor). It gets the **minimum
    decisive context** — the surviving mutant, the failing witness, the target test file, the relevant
    rubric — not a whole-module/repo dump (broad context ~doubles cost for no measurable gain; the
-   witness + prior attempt carried into a retry is the one high-value context). Heal-retries are **capped
+   witness + prior attempt carried into a retry is the one high-value context). Sharpen-retries are **capped
    at ~3** (the first attempt succeeds ~95 % of the time it ever will; past ~3 returns collapse and cost
    blows up); an un-killable / un-sharpenable proposal is a **terminal outcome** recorded to `left-undone`
    / `blocked-on-bug`, never a spin. The gates below run **per proposal**, so a single controversial item
@@ -159,7 +159,7 @@ Plus the four-axis **before/after** table and, if a code fix rode along, that fi
 runtime behaviour is at stake. The discriminator is *pass-on-pristine*: assertions green on unmutated
 code ⇒ the behaviour was already right, so this is coverage; red ⇒ a real bug to file or fix.
 - **coverage-only** — the added/sharpened assertions pin *already-correct* behaviour; **no production
-  change**. The default Sharpen outcome (mirrors ledger `state: healed`/`in-progress`).
+  change**. The default Sharpen outcome (mirrors ledger `state: sharpened`/`in-progress`).
 - **issue-filed** — a real defect, or a non-equivalent survivor no test edit can kill, was found but
   **not** fixed here: link the issue, give severity, and say whether the assertion is withheld
   (green-trunk) or landed `xfail` (mirrors `grow-filed` / `state: blocked-on-bug`).
@@ -179,7 +179,7 @@ irreducible.
   a well-framed disagreement is sound and cheap.)
 
 Seed the skeptic's veto list with the auto-test defects prior art hit repeatedly (each applies to a
-*heal*, not just a generated test):
+*sharpen*, not just a generated test):
 - **passes but adds nothing** — the edit neither kills a non-equivalent survivor nor tightens an
   observable behaviour (the anti-Goodhart core: a green, zero-value edit);
 - **over-production** — several near-duplicate tests where one parametrised test is clearer;
@@ -204,7 +204,7 @@ hard rule, structurally enforced, not a discipline:
   and skeptic agent ids (which must differ), the judge id or `consensus`, and the verdict. No block, or
   `author == skeptic`, means the review didn't happen.
 - **No fidelity ⇒ no ship.** An iteration without a valid `review` block is a **`dry-run`**: it MUST NOT
-  open a PR and MUST record `state: dry-run` (never `healed`/`in-progress`). The PR step checks for the
+  open a PR and MUST record `state: dry-run` (never `sharpened`/`in-progress`). The PR step checks for the
   block first. A dry-run is fine for *exploration*; it just can't reach the human gate as if reviewed.
 
 **Why isolation, and its limit (grounded — SycEval, FAccT 2025, arXiv:2502.08177).** LLMs are sycophantic
@@ -229,7 +229,7 @@ agreement (61.75% vs 56.52%; regressive 8.13% vs 3.54% on math). Consequences, n
 **Grow is the majority output, not the exception.** Most "test problems" are missing behaviour or a
 missing public observation seam (this suite's inner-audit: 83/92 hits) — fixable only by a new test or a
 code refactor, never by editing an existing test. A filed Grow issue is a **primary result** of a run,
-not a failure to heal. Once filed, the gap is **filed-and-skip** (parallel to `source_sha`): triage must
+not a failure to sharpen. Once filed, the gap is **filed-and-skip** (parallel to `source_sha`): triage must
 not re-select a module whose real fix is an open Grow issue — record the id in the ledger's `grow-filed`.
 
 When a **non-equivalent** mutant survives that *no edit to existing tests can kill*, that's a genuine
@@ -243,9 +243,9 @@ writes a defect:
 - **Level + kind proposed** — "property test, boundary oracle."
 - **Severity = user-impact × likelihood**, so the backlog self-orders.
 
-## Ledger — `.ledger.healing.jsonl` (repo top level, committed)
+## Ledger — `.ledger.sharpen.jsonl` (repo top level, committed)
 
-Durable across cron runs; a PR cites it ("module X healed 3 weeks ago, source unchanged"). Header
+Durable across cron runs; a PR cites it ("module X sharpened 3 weeks ago, source unchanged"). Header
 record carries a global `toolset_version`. One record per module audit:
 
 ```jsonc
@@ -253,7 +253,7 @@ record carries a global `toolset_version`. One record per module audit:
   "audited": "<iso>", "source_sha": "<hash of module + its tests>",
   "toolset_version": 3,
   "axes": { "survival": 0.0, "conformance": 0, "brittleness": 0, "redundancy": "advisory:2" },
-  "state": "healed | in-progress | blocked-on-bug | dry-run",
+  "state": "sharpened | in-progress | blocked-on-bug | dry-run",
   "review": { "author": "<agent-id>", "skeptic": "<agent-id, ≠author>", "judge": "consensus", "verdict": "UPHELD" },
   "decisions": ["tightened test_mine to assert the note payload, not _cache"],
   "left-undone": ["3 equivalent survivors (str|None under __future__) — unkillable"],
@@ -263,12 +263,12 @@ record carries a global `toolset_version`. One record per module audit:
 
 `grow-filed` lists the Grow issue ids a run handed off; triage skips a module while its gap is open
 (filed-and-skip, parallel to `source_sha` — see *Grow hand-off*). Terminal un-killable / un-sharpenable
-outcomes land in `left-undone`; a real defect that blocked a heal sets `state: blocked-on-bug`.
+outcomes land in `left-undone`; a real defect that blocked a sharpen sets `state: blocked-on-bug`.
 
-**Healed** = clean on the three gating axes: **Efficacy** (no non-equivalent survivors, or all filed as
+**Sharpened** = clean on the three gating axes: **Efficacy** (no non-equivalent survivors, or all filed as
 Grow issues) · **Conformance** (zero violations) · **Brittleness** (no witnesses). **Redundancy** is
-advisory — recorded, never a heal-blocker. Any shippable state (`healed`/`in-progress`) additionally
-requires a valid `review` block (see *Fidelity*); without one the state is `dry-run`. A healed module is
+advisory — recorded, never a sharpen-blocker. Any shippable state (`sharpened`/`in-progress`) additionally
+requires a valid `review` block (see *Fidelity*); without one the state is `dry-run`. A sharpened module is
 skipped until:
 - its **`source_sha` changes** — a SHA-256 (hex) over the module's bytes concatenated with its mapped
   test file(s)' bytes; content-hash, not mtime, so it survives clones/CI (mtime was fine for the
@@ -339,7 +339,7 @@ order follows yield-on-this-suite. Detailed step plans go to `vibe/` when a buil
 ## Research
 
 The prompts and full results (5 papers read at file level + a file-grounded GitHub survey) live in the
-Saitenka-Vault note `_source/test-healing-research.md` (2026-07). The durable conclusions are already
+Saitenka-Vault note `_source/sharpen-research.md` (2026-07). The durable conclusions are already
 folded into this spec; the load-bearing ones:
 
 - **Brittleness (Axis 3) is genuinely under-tooled** — no turn-key Python tool exists; you build the
@@ -362,5 +362,5 @@ folded into this spec; the load-bearing ones:
   **source-hash-idempotent ledger bot**. So this loop's defensible novelty is *not* "mutation + critic"
   (that exists) — it is **Sharpen-refactoring of existing tests across four axes, with the brittleness
   probe and the ledger, integrated.** Reuse map: DSpot (`PitMutantScoreSelector` — mutation-selection),
-  UTRefactor (DSL heal-recipes), citypaul/trailofbits configs ("test behaviour not implementation, verify
+  UTRefactor (DSL sharpen-recipes), citypaul/trailofbits configs ("test behaviour not implementation, verify
   with mutation") for the AGENTS-level rules.

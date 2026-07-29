@@ -306,8 +306,8 @@ arch = { shell = "uv run --extra full lint-imports" }
 # first so a rule can't rot into a no-op. Install: `uvx --from ast-grep-cli ast-grep` / `brew install`.
 invariants = { shell = "ast-grep test --skip-snapshot-tests && ast-grep scan" }
 invariants-test = { shell = "ast-grep test --skip-snapshot-tests" }
-# Test-code lint (ast-grep, config: sgconfig-tests.yml) — the test-healing loop's Conformance instrument
-# (.agents/test-healing/SPEC.md, Axis 2): measures test↔implementation coupling (private-attr asserts,
+# Test-code lint (ast-grep, config: sgconfig-tests.yml) — the sharpen loop's Conformance instrument
+# (.agents/sharpen/SPEC.md, Axis 2): measures test↔implementation coupling (private-attr asserts,
 # mock-interaction, ambient wall-clock/entropy, env mutation, mutable session fixtures). ALL rules are
 # `warning` (advisory — exits 0), scoped to tests/, and DELIBERATELY NOT in `poe all`. `--json=compact`
 # for the loop's per-file counts. Planted +/- tests keep a rule from rotting into a no-op.
