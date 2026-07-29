@@ -8,6 +8,7 @@ from __future__ import annotations
 import textwrap
 
 from overlay.app.sub_index import (
+    SubCue,
     SubIndex,
     load_index,
     parse_ass,
@@ -112,6 +113,31 @@ def test_locate_by_text_prefers_nearest_to_hint():
     # both cues share the text "…"; the preferred hint disambiguates
     assert idx.locate(text="…", preferred=1) == 1
     assert idx.locate(text="…", preferred=0) == 0
+
+
+def test_locate_by_text_disambiguates_duplicate_lines_by_timing_then_first():
+    """A repeated line must resolve to the RIGHT occurrence. `_disambiguate_text_matches` has three
+    tiers — the `preferred` (last-jump) hint, then the cue whose ``[start, end)`` window holds
+    ``sub_start``, then the first match — but only the hint tier was asserted, so a wrong-occurrence
+    bug in the timing/fallback tiers (jump to the other copy of a repeated subtitle) slid past. "同じ"
+    repeats with a distinct cue between the copies, exercising all three tiers."""
+    idx = SubIndex(
+        [
+            SubCue(1.0, 2.0, "同じ"),  # 0
+            SubCue(3.0, 4.0, "ちがう"),  # 1 — distinct, never a match
+            SubCue(5.0, 6.0, "同じ"),  # 2
+        ]
+    )
+    dup = "同じ"  # matches cues 0 and 2
+    # tier 1 — the hint wins even when sub_start points at the other occurrence
+    assert idx.locate(text=dup, preferred=0, sub_start=5.5) == 0
+    assert idx.locate(text=dup, preferred=2, sub_start=1.5) == 2
+    # tier 2 — no hint (-1): the occurrence whose window contains sub_start (lower bound inclusive)
+    assert idx.locate(text=dup, preferred=-1, sub_start=5.5) == 2
+    assert idx.locate(text=dup, preferred=-1, sub_start=5.0) == 2
+    # tier 3 — no hint, sub_start in no window → first match (upper bound exclusive; None → first)
+    assert idx.locate(text=dup, preferred=-1, sub_start=6.0) == 0
+    assert idx.locate(text=dup, preferred=-1, sub_start=None) == 0
 
 
 def test_locate_by_time_pos_active_or_upcoming():
