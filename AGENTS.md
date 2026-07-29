@@ -8,7 +8,8 @@ Guidance for AI agents and developers working in this repo. Feature docs: `overl
 
 - **`CHANGELOG.md`** ([Keep a Changelog](https://keepachangelog.com/)) — shipped changes; drafted with
   [git-cliff](https://git-cliff.org/) (`uv run poe changelog`) then **hand-reviewed**, never shipped raw.
-  **`ROADMAP.md`** — future direction. Trackable work → issues/milestones. Scratch → `vibe/` (git-ignored).
+  **`ROADMAP.md`** — future direction. Trackable work → issues/milestones. Scratch (drafts, working
+  notes, to-be-filed issue bodies) → `vibe/` (git-ignored) — **never `.agents/`, which is durable-only**.
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
 - **`.agents/skills/`** — repo-local, tool-agnostic agent skills (`write-test`, `dev-gate`); each is a

@@ -1,0 +1,22 @@
+id: test-assert-private-attr
+language: python
+severity: warning
+message: >-
+  Assertion reaches a private attribute (`._x`) — a COUPLING METRIC, not an auto-fix list. High on
+  white-box / god-object code BY DESIGN (the real output may be un-assertable, e.g. OSD pixels). Triage
+  each against "is there a public observable / seam?" before rewriting; the actionable subset is
+  `test-assert-private-compound`. A lone private-attr assert with no public seam is often load-bearing.
+note: >-
+  Axis 2 (Conformance) → cause R2-PRIVATE. Read as a per-file coupling metric, NOT a per-hit bug list
+  (audit of test_controller.py: 83/92 were load-bearing white-box, only ~9 actionable). A high count is
+  an ARCHITECTURE signal (missing public observation seam) → Grow/refactor, not test-by-test sharpening.
+files:
+  - "tests/**/*.py"
+rule:
+  kind: attribute
+  inside:
+    kind: assert_statement
+    stopBy: end
+  has:
+    field: attribute
+    regex: "^_[A-Za-z0-9]"
