@@ -128,3 +128,12 @@ def test_map_tests_to_modules_prefers_the_filename_stem_over_import_count(tmp_pa
     mapping = sl.map_tests_to_modules(root)
     assert "tests/test_bar.py" in mapping["app/bar.py"]
     assert "tests/test_bar.py" not in mapping["app/foo.py"]
+
+
+def test_status_is_stale_when_the_module_moved_instead_of_raising(tmp_path):
+    root = _repo(tmp_path)
+    sha = sl.source_sha(root, "app/foo.py", TESTS)
+    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
+    ledger = _ledger(root, [MANIFEST, rec])
+    (root / "src/overlay/app/foo.py").unlink()  # module moved/deleted
+    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_SHA  # re-audit, never crash

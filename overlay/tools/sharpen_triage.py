@@ -6,17 +6,23 @@ must not touch: sharpened-and-unchanged modules, grow-filed gaps with an open is
 currently-open PR is editing (sharpen at rest, don't fight in-flight work).
 
 Signals per module:
-  - conformance      total `poe test-lint` hits across the module's test files (the always-available
-                     per-file coupling metric; the largest multi-purpose files surface first).
-  - actionable       the subset from actionable rules (vs metric rules) — what a sharpen can act on per-hit.
-  - churn / age      git commits touching module+tests over a window, and days since last change.
-  - survival         recorded non-equiv mutation survival, if the ledger has an Efficacy audit (else —).
-  - ledger status    unseen / stale-sha / stale-toolset / in-progress / sharpened-current / dry-run.
+  - survival (Efficacy)  recorded non-equiv mutation survival from the ledger — the strongest "still has
+                         sharpen work" signal; a half-done Efficacy module ranks HIGH, not last (else —).
+  - actionable           per-hit-fixable `poe test-lint` violations (actionable rules, not the metric ones)
+                         — the Sharpen-relevant conformance term.
+  - conformance          total test-lint hits (metric + actionable); a high metric count is a Grow/
+                         architecture signal, shown as a column, NOT the Sharpen ranker.
+  - churn / age          git commits touching module+tests over a window (a recency/activity proxy — NOT
+                         centrality: repowise get_risk is the documented, still-unwired centrality input).
+  - ledger status        unseen / stale-sha / stale-toolset / in-progress / sharpened-current / dry-run.
 
-Composite (higher = sharpen sooner): conformance is the workhorse term; churn/recency and an
-unseen/stale bonus break ties toward recently-changed, not-yet-audited modules. Run from `overlay/`:
+Composite (higher = sharpen sooner) = 0.4·survival + 0.4·actionable + 0.2·churn + freshness-bonus
+(unseen/stale). Efficacy and actionable-conformance are co-primary; the metric count is a separate
+column. Exclusions (sharpened-and-unchanged, grow-filed, open-PR) are hard drops; grow-filed and
+in-progress work offline (fail-closed), open-PR needs `gh`. Run from `overlay/`:
     uv run python tools/sharpen_triage.py            # ranked table
     uv run python tools/sharpen_triage.py --top 1    # just the pick
+    uv run python tools/sharpen_triage.py --no-network   # offline: open-PR exclusion disabled (warned)
 """
 
 from __future__ import annotations
@@ -133,22 +139,27 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
         c.churn, c.age_days = churn_and_age(root, module, tests)
         c.status = ledger.status(module, root, tests)
         c.survival = survival_from_ledger(ledger, module)
-        # exclusions (hard drops)
+        # exclusions (hard drops). Grow-filed and healed-state work offline (ledger-backed);
+        # grow-filed is FAIL-CLOSED — excluded unless we can positively confirm every issue closed.
         touched = {f"{sl.SRC}/{module}", *tests} & pr_paths
         if touched:
             c.excluded = f"open-PR: {min(touched)}"
         elif c.status == sl.SHARPENED_CURRENT:
             c.excluded = "sharpened & unchanged"
-        elif module in grow and check_network and any(open_issue(root, i) for i in grow[module]):
-            c.excluded = f"grow-filed open ({','.join(grow[module])})"
+        elif module in grow and (not check_network or any(open_issue(root, i) for i in grow[module])):
+            c.excluded = f"grow-filed{'' if check_network else ' (offline, assumed open)'} ({','.join(grow[module])})"
         cands.append(c)
 
     live = [c for c in cands if not c.excluded]
-    nconf = _norm([c.conformance for c in live])
+    # Four-axis composite (SPEC → Triage): Efficacy (survival) and actionable-conformance are co-primary
+    # Sharpen signals; churn is a recency/activity proxy (NOT centrality — repowise get_risk is the
+    # documented, still-unwired centrality/risk input); an unseen/stale module gets a freshness bonus.
+    nact = _norm([float(c.actionable) for c in live])
+    nsurv = _norm([c.survival or 0.0 for c in live])
     nchurn = _norm([float(c.churn) for c in live])
-    for c, sc, ch in zip(live, nconf, nchurn, strict=True):
-        bonus = 0.25 if c.status in (sl.UNSEEN, sl.STALE_SHA, sl.STALE_TOOLSET) else 0.0
-        c.score = 0.6 * sc + 0.25 * ch + bonus  # conformance-led, churn tie-break, freshness bonus
+    for c, a, s, ch in zip(live, nact, nsurv, nchurn, strict=True):
+        bonus = 0.2 if c.status in (sl.UNSEEN, sl.STALE_SHA, sl.STALE_TOOLSET) else 0.0
+        c.score = 0.4 * a + 0.4 * s + 0.2 * ch + bonus
     cands.sort(key=lambda c: (c.excluded != "", -c.score, c.module))
     return cands
 
@@ -170,6 +181,9 @@ def main() -> None:
     ap.add_argument("--ledger", default="../.ledger.sharpen.jsonl")
     args = ap.parse_args()
     root = Path.cwd()
+    if args.no_network:
+        print("WARNING: --no-network — open-PR exclusion is DISABLED; may pick a module under active "
+              "work. Grow-filed exclusion stays on (fail-closed).", file=sys.stderr)
     cands = rank(root, (root / args.ledger).resolve(), check_network=not args.no_network)
     live = [c for c in cands if not c.excluded]
     shown = live[: args.top] if args.top else cands

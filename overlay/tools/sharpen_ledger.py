@@ -107,7 +107,11 @@ class Ledger:
             return UNSEEN
         if int(rec.get("toolset_version", 1)) != self.toolset_version:
             return STALE_TOOLSET
-        if rec["source_sha"] != source_sha(root, module_key, test_files):
+        try:
+            current = source_sha(root, module_key, test_files)
+        except FileNotFoundError:
+            return STALE_SHA  # module or a mapped test moved/deleted → re-audit, never crash
+        if rec["source_sha"] != current:
             return STALE_SHA
         state = rec.get("state")
         if state == "sharpened":
