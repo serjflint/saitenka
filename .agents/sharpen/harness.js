@@ -53,6 +53,7 @@ const SELECT = {
     score: { type: 'number' },
     conformance: { type: 'integer', description: 'triage `conf=` column (total test-lint hits) — deterministic, do not recompute later' },
     actionable: { type: 'integer', description: 'triage `act=` column (per-hit-fixable violations) — deterministic, do not recompute later' },
+    pr_exclusion_checked: { type: 'boolean', description: 'true ONLY if triage ran the open-PR exclusion (gh authenticated, no --no-network); false if it could not — the harness then refuses to open a PR (fail-closed)' },
     reason: { type: 'string', description: 'why this module (the composite components) or why none' },
   },
 }
@@ -139,7 +140,7 @@ const RECORD = {
 phase('Select')
 const pick = await agent(
   `Run the Sharpen triage and return the top live candidate as structured output.\n` +
-  `From ${CWD}/ run: \`uv run python tools/sharpen_triage.py --top 1\` (add --no-network only if gh is unauthenticated — it disables the open-PR exclusion, note that in reason).\n` +
+  `From ${CWD}/ run: \`uv run python tools/sharpen_triage.py --top 1\`. Set pr_exclusion_checked=true ONLY if it ran with the open-PR exclusion active (gh authenticated, NO --no-network). If gh is unauthenticated you may add --no-network, but then set pr_exclusion_checked=false — the harness will refuse to open a PR (it can't confirm the module has no in-flight PR).\n` +
   (cfg.module ? `The maintainer pinned module=${cfg.module}; use it ONLY if triage lists it as a live (non-excluded) candidate, else report found=false with why.\n` : '') +
   `The "→ pick:" line names the module; map it to its test files via the table / \`tools/sharpen_ledger.py\`. ` +
   `Copy the pick's \`conf=\` and \`act=\` columns verbatim into conformance/actionable — these are the deterministic counts the rest of the loop uses; do NOT recompute them anywhere else. ` +
@@ -152,6 +153,14 @@ if (!pick || !pick.found) {
   return { done: false, reason: pick ? pick.reason : 'triage failed', openPr: OPEN_PR }
 }
 log(`pick: ${pick.module} (${pick.status}, score ${pick.score ?? '—'}) — ${pick.reason}`)
+
+// Fail-closed: only open a PR if the open-PR exclusion actually ran (SPEC → never sharpen a module with
+// an open feature branch). If triage couldn't check it (gh unauth / --no-network), force a dry-run so the
+// loop can't fight in-flight work — a structural guard, not a prompt-dependent one.
+const canOpenPr = OPEN_PR && pick.pr_exclusion_checked !== false
+if (OPEN_PR && !canOpenPr) {
+  log(`open-PR exclusion unverified (gh unauth / --no-network) — forcing dry-run: cannot confirm ${pick.module} has no in-flight PR`)
+}
 
 phase('Measure')
 // Known-green baseline BEFORE any edit — a poisoned before/after bounces good work or hides a regression
@@ -253,20 +262,27 @@ const skeptic = await agent(
   { phase: 'Skeptic', schema: REVIEW, label: 'skeptic' },
 )
 
-let verdict = skeptic?.verdict ?? 'REFUTED'
-let judgeNote = 'skeptic decisive'
-if (verdict === 'REFUTED') {
+// The author is NOT an independent reviewer — it wrote the edit. So a lone skeptic UPHELD is the only
+// gate before the human, and a single sycophantic skeptic could ship a bad edit. Require TWO independent
+// UPHOLDs to ship: the skeptic AND a second, independently-isolated reviewer (the judge). Either REFUTE →
+// DROP. A skeptic REFUTED drops immediately (default-drop; no judge "rescue" — the one independent voice
+// found a problem, and expected yield is low anyway).
+let verdict = 'REFUTED'
+let judgeNote = 'skeptic REFUTED — dropped'
+if (skeptic?.verdict === 'UPHELD') {
   phase('Judge')
-  // Disagreement (objective gate passed, skeptic refuted) → a Sonnet judge on the framed dispute.
-  // Default on genuine controversy is DROP (iterative debate-to-consensus is the sycophancy trap).
+  // A SECOND independent adversarial review — same isolation as the skeptic (what/diff only, no author
+  // rationale, and NOT told the first skeptic's grounds, so its vote is genuinely independent). Sonnet:
+  // verification is easier than generation. Default REFUTED on doubt.
   const judge = await agent(
-    `Adjudicate a Sharpen dispute. The deterministic objective gate PASSED (anti-cheat + mutation replay: ${gate.report}). An isolated skeptic voted REFUTED on these grounds: ${JSON.stringify(skeptic.grounds)} (constructed bug: ${skeptic.constructed_bug ?? 'none'}).\n` +
-    `The edit: ${JSON.stringify(proposal.proposals)}\nDIFF:\n${proposal.diff}\n\n` +
-    `Is the skeptic's objection substantive (a real over-fit / zero-value / change-detector edit) or not? Verdict UPHELD only if the objection is clearly unfounded AND the edit plainly improves bug-catching. On genuine controversy, verdict=REFUTED (drop).`,
+    `You are a SECOND, independent adversarial reviewer (the first reviewer is not shown to you). A test edit to ${pick.module} claims to make the suite catch a real change it currently misses. Try to REFUTE it, reasoning ONLY from the artifact and the code.\n\n` +
+    `WHAT (proposals): ${JSON.stringify(proposal.proposals.map((p) => ({ target_test: p.target_test, axis: p.axis, change: p.change })))}\n\nDIFF:\n${proposal.diff}\n\n` +
+    `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing. If you find one, verdict=REFUTED. Cite mutants/tests/lines, never authority. Default REFUTED on genuine doubt.`,
     { phase: 'Judge', schema: REVIEW, label: 'judge', model: 'sonnet' },
   )
+  // Ship iff BOTH independent reviewers upheld.
   verdict = judge?.verdict === 'UPHELD' ? 'UPHELD' : 'REFUTED'
-  judgeNote = `judge (sonnet): ${judge?.verdict ?? 'REFUTED (default)'}`
+  judgeNote = `2nd independent review (sonnet): ${judge?.verdict ?? 'REFUTED (default)'}`
 }
 
 phase('Record')
@@ -280,8 +296,8 @@ if (verdict !== 'UPHELD') {
   return { done: true, module: pick.module, state: 'dry-run', verdict, openPr: OPEN_PR }
 }
 
-const rec = await recordOutcome(OPEN_PR ? 'in-progress' : 'dry-run', proposal, skeptic, judgeNote, null)
-if (!OPEN_PR) {
+const rec = await recordOutcome(canOpenPr ? 'in-progress' : 'dry-run', proposal, skeptic, judgeNote, null)
+if (!canOpenPr) {
   // Dry-run touches only the ledger — revert the (upheld but un-shipped) edit so the tree isn't left
   // dirty, matching the record's "ledger-only" wording. The diff is already captured in the record.
   await agent(
@@ -289,18 +305,18 @@ if (!OPEN_PR) {
     { phase: 'Record', label: 'revert-dryrun', effort: 'low' },
   )
 }
-return { done: true, module: pick.module, state: rec?.state ?? (OPEN_PR ? 'in-progress' : 'dry-run'), pr: rec?.pr_url ?? null, openPr: OPEN_PR }
+return { done: true, module: pick.module, state: rec?.state ?? (canOpenPr ? 'in-progress' : 'dry-run'), pr: rec?.pr_url ?? null, openPr: OPEN_PR }
 
 // --- record helper ---------------------------------------------------------------------------------
 
 async function recordOutcome(state, prop, skepticReview, judgeNote, extraNote) {
-  // A shippable state (in-progress/sharpened) requires OPEN_PR: a valid review block + a real PR. Without
+  // A shippable state (in-progress/sharpened) requires canOpenPr: a valid review block + a real PR. Without
   // it we record dry-run (SPEC → Fidelity: no fidelity ⇒ no ship). The executor agent has the shell to
   // stamp the real date and hash — the JS runtime can't (no Date.now / fs).
   const review = skepticReview
     ? `{ "author": "sharpen-author (workflow-isolated)", "skeptic": "sharpen-skeptic (workflow-isolated, ≠author)", "judge": "${judgeNote}", "verdict": "${skepticReview.verdict}" }`
     : 'null (terminal outcome, no review reached)'
-  const wantPr = OPEN_PR && state === 'in-progress' && prop
+  const wantPr = canOpenPr && state === 'in-progress' && prop
   return agent(
     `Append one Sharpen ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.sharpen.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, if opening a PR, git/gh) — no other file.\n` +
     `Module ${pick.module}. Compute source_sha with tools/sharpen_ledger.py, stamp \`audited\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, toolset_version from the ledger manifest.\n` +

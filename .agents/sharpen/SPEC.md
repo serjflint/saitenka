@@ -103,7 +103,9 @@ changed and not yet covered by the ledger** (see *Ledger*), then descend the com
 multi-purpose test files score worst on cohesion and surface first.
 
 Never point the loop at a module with an **open feature branch touching it** — sharpen at rest, don't
-fight in-flight work (see the commit-around-parallel-work discipline).
+fight in-flight work (see the commit-around-parallel-work discipline). This exclusion is **fail-closed**:
+if it cannot run (no `gh` auth / offline `--no-network`), the loop must **not open a PR** — it downgrades
+to a dry-run rather than risk sharpening a module under active work.
 
 ## The cycle (one module per run)
 
@@ -177,11 +179,15 @@ Two tiers — objective is cheap and deterministic; the debate is spent only whe
 irreducible.
 
 - **Objective gate:** the deterministic tool re-measurement from the cycle's *Objective gate* step. No LLM. Deterministic bounce.
-- **Subjective gate:** an **author** agent (Opus) and a **skeptic** agent (Opus, *different context* —
-  sees only the factual *what* (target/axis/change) + the *diff*, never the author's *why*/rationale) argue whether the change genuinely improves
-  quality. Agree-good → pass. Disagree → a **Sonnet judge** decides; **default on genuine controversy
-  is DROP** and move to the next module. (Verification is easier than generation, so a Sonnet judge on
-  a well-framed disagreement is sound and cheap.)
+- **Subjective gate:** the **author** is *not* an independent reviewer — it wrote the edit — so shipping
+  requires **two independent UPHOLDs**, not one. A **skeptic** agent (Opus, *different context* — sees
+  only the factual *what* (target/axis/change) + the *diff*, never the author's *why*/rationale) reviews
+  first; a **skeptic REFUTED drops immediately** (default-drop; the one independent voice found a problem
+  and expected yield is low). On a skeptic UPHELD, a **second independent reviewer** — a **Sonnet judge**
+  in its own isolated context, given the same *what*/*diff* and **not** the first skeptic's grounds —
+  reviews adversarially; ship only if it **also** UPHOLDs. Either REFUTE → DROP. (Verification is easier
+  than generation, so a Sonnet second reviewer is sound and cheap; iterative debate-to-consensus stays a
+  trap — there is no back-and-forth, just two independent votes and default-drop.)
 
 Seed the skeptic's veto list with the auto-test defects prior art hit repeatedly (each applies to a
 *sharpen*, not just a generated test):
@@ -201,10 +207,11 @@ human surfaces new failure modes.
 The review only works if it is **actually adversarial** — one context cannot refute itself. So this is a
 hard rule, structurally enforced, not a discipline:
 
-- **Isolated subagents are mandatory.** Author, skeptic, and (on disagreement) judge are **separate agent
-  invocations with independent context**. The skeptic prompt contains only the factual *what*
+- **Isolated subagents are mandatory.** Author, skeptic, and the second-reviewer judge (on the ship path)
+  are **separate agent invocations with independent context**. Both reviewers get only the factual *what*
   (target/axis/change) and the *diff* — never the author's *why*/rationale (forwarding the persuasive
-  rationale is the SycEval trap below; the harness strips it). The loop runs as a **Workflow** where these are distinct `agent()` calls, so
+  rationale is the SycEval trap below; the harness strips it), and the judge is **not** told the first
+  skeptic's grounds, so the two UPHOLD votes are genuinely independent. The loop runs as a **Workflow** where these are distinct `agent()` calls, so
   the harness enforces isolation; a human "playing all roles" in one context is **not a valid review**.
   The harness is [`harness.js`](harness.js) (Claude Code Workflow: `sharpen-loop`) — one module per run,
   `args.openPr` false ⇒ dry-run (ledger only), true ⇒ the worth-it PR (never merges).
