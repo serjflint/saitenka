@@ -40,7 +40,8 @@ Conformance lint rules (`poe test-lint`, initial set — grows as smells surface
 - a default-tier test (no `integration`/`live`/`e2e` marker) that opens a socket, spawns a subprocess,
   mutates `os.environ`, reads the wall clock, or draws ambient `random` → **mis-levelled / non-deterministic**
 - a `session`/`module`-scoped fixture returning a literal mutable (`{}`/`[]`/`set()`) → cross-test state
-- control flow (`if`/`for`/`while`) in a test body → cohesion smell (**advisory, not a bounce**).
+- control flow (`if`/`for`/`while`) in a test body → cohesion smell (**advisory, not a bounce**) —
+  **specced, deliberately not built** (noisy on a classicist suite; the 8 shipped rules exclude it).
   Assertion-Roulette and Eager-Test are deliberately **not** gated — empirically noisy on a classicist
   suite (pytest's assertion rewriting already localises multi-assert failures).
 
@@ -177,7 +178,7 @@ irreducible.
 
 - **Objective gate:** the deterministic tool re-measurement from the cycle's *Objective gate* step. No LLM. Deterministic bounce.
 - **Subjective gate:** an **author** agent (Opus) and a **skeptic** agent (Opus, *different context* —
-  sees only what/why/diff, never the author's reasoning) argue whether the change genuinely improves
+  sees only the factual *what* (target/axis/change) + the *diff*, never the author's *why*/rationale) argue whether the change genuinely improves
   quality. Agree-good → pass. Disagree → a **Sonnet judge** decides; **default on genuine controversy
   is DROP** and move to the next module. (Verification is easier than generation, so a Sonnet judge on
   a well-framed disagreement is sound and cheap.)
@@ -201,8 +202,9 @@ The review only works if it is **actually adversarial** — one context cannot r
 hard rule, structurally enforced, not a discipline:
 
 - **Isolated subagents are mandatory.** Author, skeptic, and (on disagreement) judge are **separate agent
-  invocations with independent context**. The skeptic prompt contains only *what / why / diff* — never
-  the author's reasoning. The loop runs as a **Workflow** where these are distinct `agent()` calls, so
+  invocations with independent context**. The skeptic prompt contains only the factual *what*
+  (target/axis/change) and the *diff* — never the author's *why*/rationale (forwarding the persuasive
+  rationale is the SycEval trap below; the harness strips it). The loop runs as a **Workflow** where these are distinct `agent()` calls, so
   the harness enforces isolation; a human "playing all roles" in one context is **not a valid review**.
   The harness is [`harness.js`](harness.js) (Claude Code Workflow: `sharpen-loop`) — one module per run,
   `args.openPr` false ⇒ dry-run (ledger only), true ⇒ the worth-it PR (never merges).

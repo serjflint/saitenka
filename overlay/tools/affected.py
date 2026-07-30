@@ -11,14 +11,14 @@ How it works:
     module through an intermediary.
   - A change touching a static-graph blind spot forces a FULL default-tier run: `conftest.py` (fixtures),
     image goldens, the `.lua` asset, a dynamic-import loader (`importlib`/`entry_points`), config/
-    lockfiles, or the `deinflect` package overlay imports. A source module with no dependent test → FULL.
-  - Residual (not chased here, backstopped by the pre-push full run + a periodic selected-vs-full failure
-    audit): a change to a module `conftest` *imports* can shift a fixture used by tests outside the
-    closure. Escalating on that would collapse almost every selection to full (conftest pulls in the
-    god-objects), so it is deliberately left to `poe all`.
+    lockfiles, `tools/**` (its tests file-LOAD their targets via `importlib`, an edge ruff can't see),
+    or the `deinflect` package overlay imports. A source module with no dependent test → FULL.
+  - Residual, left to the pre-push full `poe all` (not chased here): a change to a module `conftest`
+    *imports* can shift a fixture used by tests outside the closure. Escalating on that would collapse
+    almost every selection to full (conftest pulls in the god-objects), so it is deliberately left out.
 
-Runs pytest with `-p no:cacheprovider` so a subset run never overwrites `.pytest_cache` (which would
-corrupt the selected-vs-full failure diff used to audit for escaped failures).
+Runs pytest with `-p no:cacheprovider` so a subset run never overwrites `.pytest_cache` (`lastfailed`),
+which the full pre-push run relies on.
 """
 
 from __future__ import annotations
@@ -75,8 +75,13 @@ def classify(changed: list[str]) -> tuple[list[str], set[str], set[str]]:
             full.append(f)  # code dep overlay imports, or a config/lock change
         elif not f.startswith(OV):
             continue  # docs / install / .github — irrelevant to the overlay suite
-        elif name == "conftest.py" or f.startswith(OV + "tests/golden/") or f.endswith(".lua"):
-            full.append(f)  # fixture injection / data goldens / runtime asset — no import edge
+        elif (
+            name == "conftest.py"
+            or f.startswith(OV + "tests/golden/")
+            or f.endswith(".lua")
+            or f.startswith(OV + "tools/")  # tests file-LOAD tools via importlib — no static edge
+        ):
+            full.append(f)  # fixture injection / data goldens / runtime asset / file-loaded tool
         elif f.endswith(".py"):
             if _is_dynamic(f):
                 full.append(f)

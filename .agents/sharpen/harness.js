@@ -245,7 +245,10 @@ phase('Skeptic')
 // misses; default REFUTED on doubt") and grounded in the artifact, not the author's rationale (SycEval).
 const skeptic = await agent(
   `You are an adversarial reviewer. A test edit to ${pick.module} claims to make the suite catch a real change it currently misses. Your job: try to REFUTE it. Reason ONLY from the artifact below and the code — you are NOT given the author's reasoning.\n\n` +
-  `WHAT (proposals): ${JSON.stringify(proposal.proposals)}\n\nDIFF:\n${proposal.diff}\n\n` +
+  // SycEval (SPEC → Fidelity): the author's persuasive rationale/claimed-kills must NOT reach the skeptic
+  // — preemptive, authority-flavoured framing *increases* regressive agreement. Forward only the factual
+  // what (target/axis/change) + the diff; the skeptic reasons from the code, not the author's "why".
+  `WHAT (proposals): ${JSON.stringify(proposal.proposals.map((p) => ({ target_test: p.target_test, axis: p.axis, change: p.change })))}\n\nDIFF:\n${proposal.diff}\n\n` +
   `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing over what was already asserted. If you find one, verdict=REFUTED. Cite mutants/tests/lines as grounds — never authority. Default REFUTED on genuine doubt.`,
   { phase: 'Skeptic', schema: REVIEW, label: 'skeptic' },
 )
