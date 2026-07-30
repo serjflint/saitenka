@@ -1,17 +1,21 @@
 """Impacted-test selector for the fast inner loop (`poe affected`).
 
 Selects the tests a change can affect, so the edit→feedback cycle runs a subset instead of the full ~32s
-`poe test`. It is NOT a gate — `poe all` / `poe test-ft` stays the pre-push safety net; this only speeds
-iteration, so it is allowed to over-select but never under-select (the TIA safety rule).
+`poe test`. It is NOT a gate — `poe all` / `poe test-ft` is the pre-push safety net, and *that* is what
+guarantees correctness. This only speeds iteration: it soundly over-approximates the STATIC import edges,
+and leaves the dynamic edges (fixtures, runtime imports) to the pre-push full run.
 
-How it stays sound:
+How it works:
   - `ruff analyze graph --direction dependents` gives a ONE-HOP `file → importers` map; we compute the
     reverse-transitive closure ourselves (BFS) — direct dependents alone would drop tests that reach a
     module through an intermediary.
-  - The static import graph is blind to non-import edges, so a change touching one of those forces a FULL
-    default-tier run: `conftest.py`/fixtures, image goldens, the `.lua` asset, a dynamic-import loader
-    (`importlib`/`entry_points`), config/lockfiles, or the `deinflect` package overlay imports.
-  - A changed source module with no dependent test → FULL run (can't prove it's covered).
+  - A change touching a static-graph blind spot forces a FULL default-tier run: `conftest.py` (fixtures),
+    image goldens, the `.lua` asset, a dynamic-import loader (`importlib`/`entry_points`), config/
+    lockfiles, or the `deinflect` package overlay imports. A source module with no dependent test → FULL.
+  - Residual (not chased here, backstopped by the pre-push full run + a periodic selected-vs-full failure
+    audit): a change to a module `conftest` *imports* can shift a fixture used by tests outside the
+    closure. Escalating on that would collapse almost every selection to full (conftest pulls in the
+    god-objects), so it is deliberately left to `poe all`.
 
 Runs pytest with `-p no:cacheprovider` so a subset run never overwrites `.pytest_cache` (which would
 corrupt the selected-vs-full failure diff used to audit for escaped failures).
@@ -95,8 +99,11 @@ def dependents_graph() -> dict[str, list[str]]:
 
 
 def closure_tests(seeds: set[str], graph: dict[str, list[str]]) -> set[str]:
-    """Reverse-transitive closure over the one-hop dependents map → the test files it reaches
-    (including any `conftest.py`, so `select` can escalate on it)."""
+    """Reverse-transitive closure over the one-hop dependents map → the test files it reaches.
+    `conftest.py` is excluded: it isn't a test, and because it imports the god-objects it sits in almost
+    every module's closure — escalating on it would collapse every selection to a full run. A change to
+    conftest *itself* is caught earlier (`classify` → full); fixture-behaviour shifts from a change to a
+    module conftest *imports* are a known residual the pre-push full `poe all` backstops."""
     seen: set[str] = set()
     q = deque(seeds)
     while q:
@@ -104,13 +111,11 @@ def closure_tests(seeds: set[str], graph: dict[str, list[str]]) -> set[str]:
             if dep not in seen:
                 seen.add(dep)
                 q.append(dep)
-    return {f for f in seen if f.startswith("tests/") and f.endswith(".py")}
-
-
-def reaches_conftest(tests: set[str]) -> bool:
-    """A conftest in the closure means the change flows through shared fixtures → the whole suite is
-    affected, not just these tests. Escalate to a full run (and never run a conftest as a test)."""
-    return any(t.rsplit("/", 1)[-1] == "conftest.py" for t in tests)
+    return {
+        f
+        for f in seen
+        if f.startswith("tests/") and f.endswith(".py") and not f.endswith("conftest.py")
+    }
 
 
 def select(base: str) -> tuple[list[str] | None, str]:
@@ -123,8 +128,6 @@ def select(base: str) -> tuple[list[str] | None, str]:
         return None, f"full run — blind-spot change: {full[:3]}"
     src_changed = {f for f in overlay_py if f.startswith("src/")}
     tests = closure_tests(overlay_py, dependents_graph()) | changed_tests
-    if reaches_conftest(tests):
-        return None, "full run — change reaches a conftest (shared fixtures affect the whole suite)"
     if src_changed and not tests:
         return None, f"full run — changed source has no dependent test: {sorted(src_changed)[:3]}"
     return sorted(tests), f"{len(tests)} impacted test file(s)"
