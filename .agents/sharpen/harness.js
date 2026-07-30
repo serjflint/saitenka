@@ -51,6 +51,8 @@ const SELECT = {
     status: { type: 'string', description: 'ledger status of the pick (unseen/stale-sha/in-progress/...)' },
     survival: { type: ['number', 'null'], description: 'recorded non-equiv mutation survival, or null' },
     score: { type: 'number' },
+    conformance: { type: 'integer', description: 'triage `conf=` column (total test-lint hits) — deterministic, do not recompute later' },
+    actionable: { type: 'integer', description: 'triage `act=` column (per-hit-fixable violations) — deterministic, do not recompute later' },
     reason: { type: 'string', description: 'why this module (the composite components) or why none' },
   },
 }
@@ -140,6 +142,7 @@ const pick = await agent(
   `From ${CWD}/ run: \`uv run python tools/sharpen_triage.py --top 1\` (add --no-network only if gh is unauthenticated — it disables the open-PR exclusion, note that in reason).\n` +
   (cfg.module ? `The maintainer pinned module=${cfg.module}; use it ONLY if triage lists it as a live (non-excluded) candidate, else report found=false with why.\n` : '') +
   `The "→ pick:" line names the module; map it to its test files via the table / \`tools/sharpen_ledger.py\`. ` +
+  `Copy the pick's \`conf=\` and \`act=\` columns verbatim into conformance/actionable — these are the deterministic counts the rest of the loop uses; do NOT recompute them anywhere else. ` +
   `Never pick an EXCLUDED module (open-PR / sharpened-current / grow-filed). Return found=false if there is no live candidate.`,
   { phase: 'Select', schema: SELECT, label: 'triage' },
 )
@@ -160,7 +163,7 @@ const TARGET_KEY = pick.module.split('/').pop().replace('.py', '') // allowlist 
 const base = await agent(
   `Establish the known-green baseline + before-snapshot for module ${pick.module} (tests: ${pick.tests.join(', ')}). ${REL} ${GUARD} (Measure runs read-only tools — no edits at all.)\n` +
   `1. Run the mapped tests; any pre-red/flaky node is QUARANTINED (list it), never folded into a number.\n` +
-  `2. Conformance: \`uv run poe test-lint-json\`, count this module's hits (total + actionable; the metric rules are test-assert-private-attr / test-monkeypatch-private-target).\n` +
+  `2. Conformance counts are ALREADY computed by triage (conformance=${pick.conformance ?? '?'}, actionable=${pick.actionable ?? '?'}); echo those into before.conformance/before.actionable — do NOT recompute (recomputing here undercounted on the 2026-07-30 run).\n` +
   `3. Efficacy — do NOT run \`poe mutate\`. Gate on the allowlist: \`uv run poe mutate --list\`. If \`${TARGET_KEY}\` is NOT listed → glue, set before.db=null, before.survival=null (Conformance-driven run). If it IS listed, look for a COMPLETE campaign DB at "${DB_REL}": if present, read the survival rate (\`cr-rate "${DB_REL}"\`) and the def carrying the most SURVIVED mutants (\`cosmic-ray dump\` grouped by definition_name) → set before.db to that path + before.survivor_func. If the DB is absent/partial → DEFER Efficacy: before.db=null, and note "no complete campaign DB — run \`poe mutate ${TARGET_KEY}\` out-of-band, Efficacy deferred this run".\n` +
   `Return the before-snapshot. green=false is a valid, honest outcome (record it and stop upstream).`,
   { phase: 'Measure', schema: BASELINE, label: 'baseline' },
@@ -170,6 +173,10 @@ if (!base || !base.green) {
   log(`Baseline not green — cannot measure an honest before/after. Quarantined: ${base ? base.quarantined.join(', ') : '?'}`)
   return { done: false, module: pick.module, reason: 'baseline not green', quarantined: base?.quarantined ?? [] }
 }
+// Triage's counts are the deterministic source of truth — override whatever Measure echoed (defends
+// against the recompute-undercount bug even if the agent ignores the instruction above).
+base.before.conformance = pick.conformance ?? base.before.conformance ?? 0
+base.before.actionable = pick.actionable ?? base.before.actionable ?? 0
 
 phase('Propose')
 // Author gets the MINIMUM decisive context (survivor coordinate, target test file, rubric) — never a
@@ -180,12 +187,23 @@ const efficacyMode = !!base.before.db
 let proposal = null
 let gate = null
 let carry = ''
+
+// Nothing to sharpen — no survivor to kill AND no actionable conformance violation. Don't spin the
+// author into fabricating a cosmetic, zero-value edit (the 2026-07-30 run split `assert A and B` into
+// two asserts; the review correctly dropped it, but the cycle was wasted). Record and stop.
+if (!efficacyMode && base.before.actionable === 0) {
+  log(`Nothing to sharpen on ${pick.module}: 0 actionable conformance violations, no mutation survivor.`)
+  const rec = await recordOutcome('left-undone', null, null, null,
+    `Nothing to sharpen: ${base.before.conformance} conformance hits are all metric (architecture/Grow signal, no per-hit fix), no mutation survivor. Efficacy ${base.before.db ? 'clean' : 'deferred — no campaign DB'}.`)
+  return { done: true, module: pick.module, state: rec?.state ?? 'left-undone', reason: 'nothing-to-sharpen', openPr: OPEN_PR }
+}
+
 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   proposal = await agent(
     `You are the Sharpen AUTHOR for module ${pick.module}. Tighten the EXISTING tests (${pick.tests.join(', ')}) so they catch a real change they currently miss — do not write new-feature coverage (that is Grow's job; file an issue instead). ${REL} ${GUARD}\n` +
     (efficacyMode
       ? `MODE Efficacy: kill the non-equivalent survivor cluster in \`${base.before.survivor_func ?? 'the module'}\`. Read only that function + the target test file + AGENTS.md "## Testing". Set touched_func to that def and cut_module to its dotted path.\n`
-      : `MODE Conformance: fix the ACTIONABLE \`poe test-lint\` violation(s) in the target tests (mis-levelled marker, private-attr compound, over/under-assertion) — tighten to observable behaviour or correct the tier marker. This module has no mutation campaign, so there is no survivor to kill; do not invent one. Set touched_func to "" and cut_module to the dotted module path.\n`) +
+      : `MODE Conformance (${base.before.actionable} actionable violation(s) exist per triage): run \`uv run poe test-lint-json\` and LOCATE the actual actionable hits in ${pick.tests.join(', ')} — rules OTHER than the metric ones (test-assert-private-attr / test-monkeypatch-private-target). Fix ONE genuine hit: correct a mis-levelled tier marker, drop a redundant private half of a compound assert, or tighten an under-assertion to observable behaviour. There is no mutation survivor — do NOT invent one, and do NOT make a cosmetic edit that changes no caught-failure set (splitting \`assert A and B\` into two asserts is worthless — the review WILL drop it). If you cannot tie your edit to a concrete actionable test-lint hit, return applied=false. Set touched_func to "" and cut_module to the dotted module path.\n`) +
     `Minimum decisive context: the before-snapshot is ${JSON.stringify(base.before)}.\n` +
     `Assert OBSERVABLE behaviour (return value / emitted IPC / written note), never a private attr or mock call-count. Apply the edit ONLY to a target test file. Emit a named, deduplicated proposal list and the unified diff. If there is genuinely nothing worth sharpening, return applied=false with the reason (a valid terminal outcome — never fabricate an edit).\n` +
     (carry ? `\nPRIOR ATTEMPT BOUNCED — do not repeat it. Gate report:\n${carry}\n` : ''),
