@@ -330,6 +330,10 @@ test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integra
 # -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
 # FT code paths still run without the GIL — it just parallelises (91s → ~22s).
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not slow'" }
+# Inner-loop test selector (NOT a gate — `all`/`test-ft` stay the pre-push net). Runs only the tests a
+# change can affect: ruff dependents reverse-closure + a full-run fallback on static-graph blind spots.
+# `poe affected` (working tree) / `poe affected --base main` (vs a branch) / `--print` to just list them.
+affected = { cmd = "uv run --extra full python tools/affected.py" }
 cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not slow'"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between
