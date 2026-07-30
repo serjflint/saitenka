@@ -37,7 +37,14 @@ ROOT = (
 OV = "overlay/"
 
 TIER = "not (slow or integration or requires_display or e2e)"  # mirror `poe test`'s fast universe
-DYNAMIC_IMPORT = ("importlib.import_module", "__import__(", "entry_points", "pkgutil")
+DYNAMIC_IMPORT = (
+    "importlib.import_module",
+    "importlib.util",
+    "__import__(",
+    "__subclasses__(",
+    "entry_points",
+    "pkgutil",
+)  # runtime import/dispatch the static graph can't see → route the module to a full run (over-select, safe)
 CLOSURE_CAP = 20  # above this, the serial subset loses to the parallel full suite — just run full
 
 
@@ -165,6 +172,17 @@ def main() -> int:
 
     selected, reason = select(args.base)
     print(f"affected: {reason}", file=sys.stderr)
+    if args.base == "HEAD" and reason == "no changes":
+        # foot-gun: `--base HEAD` sees only the working tree, so after a commit it reports "no changes"
+        # and runs 0 tests — reading as "all clear" though committed branch work went unchecked.
+        ahead = _git("rev-list", "--count", "origin/main..HEAD")
+        n = int(ahead[0]) if ahead and ahead[0].isdigit() else 0
+        if n:
+            print(
+                f"  ⚠ working tree clean, but {n} commit(s) ahead of origin/main — run "
+                f"`poe affected --base origin/main` to check committed work",
+                file=sys.stderr,
+            )
     if args.print_only:
         print("<FULL default tier>" if selected is None else "\n".join(selected))
         return 0

@@ -281,6 +281,14 @@ if (verdict !== 'UPHELD') {
 }
 
 const rec = await recordOutcome(OPEN_PR ? 'in-progress' : 'dry-run', proposal, skeptic, judgeNote, null)
+if (!OPEN_PR) {
+  // Dry-run touches only the ledger — revert the (upheld but un-shipped) edit so the tree isn't left
+  // dirty, matching the record's "ledger-only" wording. The diff is already captured in the record.
+  await agent(
+    `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — this UPHELD dry-run keeps only the ledger record; discard the edit. Confirm clean tree.`,
+    { phase: 'Record', label: 'revert-dryrun', effort: 'low' },
+  )
+}
 return { done: true, module: pick.module, state: rec?.state ?? (OPEN_PR ? 'in-progress' : 'dry-run'), pr: rec?.pr_url ?? null, openPr: OPEN_PR }
 
 // --- record helper ---------------------------------------------------------------------------------
