@@ -204,6 +204,8 @@ hard rule, structurally enforced, not a discipline:
   invocations with independent context**. The skeptic prompt contains only *what / why / diff* — never
   the author's reasoning. The loop runs as a **Workflow** where these are distinct `agent()` calls, so
   the harness enforces isolation; a human "playing all roles" in one context is **not a valid review**.
+  The harness is [`harness.js`](harness.js) (Claude Code Workflow: `sharpen-loop`) — one module per run,
+  `args.openPr` false ⇒ dry-run (ledger only), true ⇒ the worth-it PR (never merges).
 - **Evidence over trust.** Every iteration records a `review` provenance block in the ledger: the author
   and skeptic agent ids (which must differ), the judge id or `consensus`, and the verdict. No block, or
   `author == skeptic`, means the review didn't happen.
