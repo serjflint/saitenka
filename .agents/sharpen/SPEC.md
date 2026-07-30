@@ -305,6 +305,15 @@ active feature work. Slow, exhaustive, deliberate: this loop is allowed the long
 coding loop can't afford. `poe all` stays the fast local gate for the coding loop; this loop's
 slow instruments never join it.
 
+**Running the harness (operational).** Launch it from a **dedicated git worktree** (EnterWorktree →
+Workflow → ExitWorktree) so an executor edit can never touch the maintainer's live tree — all executors
+operate on paths relative to that worktree. The **Efficacy axis consumes a pre-built mutation campaign**
+(`.mutation-cache/`, gitignored, reused across runs); it never launches one inline — a campaign outlives
+a step budget, so `poe mutate <module>` is an out-of-band pre-req and the harness *defers* Efficacy
+(Conformance-driven run) when the DB is absent. The audited-module allowlist is `poe mutate --list`
+(canonical `TARGETS` in `tools/mutate/run.py`); the harness runs the Efficacy axis only for a listed
+module and treats the rest as Conformance-only.
+
 ## Human gate
 
 The maintainer approves every merge. The loop's entire job is to arrive at that gate with a small,

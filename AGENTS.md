@@ -144,10 +144,12 @@ Consult it when adding or rewriting a test.
 
 ## Mutation auditing
 
-- **The pure core is mutation-audited** — `sub_index`, `fsrs`, and (as they gain focused tests)
-  `scoring`, `tokenize`, `render.flow`, `deinflect`. `uv run poe mutate [module]` (cosmic-ray,
-  git-guarded, opt-in — minutes/module, NOT in `poe all`). Glue (controller/mpvio) is excluded:
-  I/O-bound, floods equivalent mutants.
+- **The pure core is mutation-audited.** The canonical allowlist is `TARGETS` in `tools/mutate/run.py`
+  (query it with `uv run poe mutate --list`) — a module joins only when it is pure/algorithmic, has
+  focused unit+property tests, and a human has run and triaged an initial campaign (the add/remove
+  procedure is the `run.py` docstring; a rot-guard test keeps the paths honest). `uv run poe mutate
+  [module]` (cosmic-ray, git-guarded, opt-in — minutes/module, NOT in `poe all`; a complete campaign is
+  reused, `--force` rebuilds). Glue (controller/mpvio) is excluded: I/O-bound, floods equivalent mutants.
 - **Survivors → Hypothesis, not a score.** A surviving mutant is a coordinate to harden, not a number
   to maximise (equivalent mutants make 100% unreachable). Kill the *class* with a property —
   boundary / round-trip / spec-oracle — and pin the shrunk input as `@example` so the kill is

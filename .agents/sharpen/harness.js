@@ -26,7 +26,18 @@ export const meta = {
 const cfg = args || {}
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
-const CWD = 'overlay' // poe tasks + tools run from overlay/ (never the repo root)
+const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
+
+// Worktree-safe: launch this run from a dedicated git worktree (EnterWorktree → Workflow → ExitWorktree)
+// so executor edits can't touch the maintainer's live tree. Every executor therefore operates on paths
+// RELATIVE to its inherited cwd — an absolute `cd /Users/.../saitenka` would escape the worktree.
+const REL = 'Run from the `' + CWD + '/` directory relative to your current working directory. Do NOT use ' +
+  'absolute paths or `cd` outside the repo you were launched in — this run may be inside a git worktree.'
+
+// Hard scope guard — the 2026-07-30 first run edited a tracked tool to work around a blocker. Never again.
+const GUARD = 'SCOPE: edit ONLY the one target test file named below. Never edit any source/tool/config ' +
+  'file, never add a mutation target, never install anything. If something blocks you, STOP and return ' +
+  'the blocker verbatim — do not work around it by touching another file.'
 
 // --- schemas ---------------------------------------------------------------------------------------
 
@@ -142,11 +153,15 @@ log(`pick: ${pick.module} (${pick.status}, score ${pick.score ?? '—'}) — ${p
 phase('Measure')
 // Known-green baseline BEFORE any edit — a poisoned before/after bounces good work or hides a regression
 // (SPEC step 2). Read structured tool output (session DB, test-lint --json), never scraped console.
+// Efficacy CONSUMES a pre-built mutation campaign; it never launches one (a campaign outlives a 10-min
+// step budget — that killed the first run). The campaign is a slow out-of-band pre-req.
+const DB_REL = `.mutation-cache/${`src/overlay/${pick.module}`.replaceAll('/', '_')}.sqlite` // matches run.py db_path(), relative to overlay/
+const TARGET_KEY = pick.module.split('/').pop().replace('.py', '') // allowlist key = module basename
 const base = await agent(
-  `Establish the known-green baseline + before-snapshot for module ${pick.module} (tests: ${pick.tests.join(', ')}), from ${CWD}/.\n` +
+  `Establish the known-green baseline + before-snapshot for module ${pick.module} (tests: ${pick.tests.join(', ')}). ${REL} ${GUARD} (Measure runs read-only tools — no edits at all.)\n` +
   `1. Run the mapped tests; any pre-red/flaky node is QUARANTINED (list it), never folded into a number.\n` +
   `2. Conformance: \`uv run poe test-lint-json\`, count this module's hits (total + actionable; the metric rules are test-assert-private-attr / test-monkeypatch-private-target).\n` +
-  `3. Efficacy (pure-core modules only — skip for glue like controller/mpvio): \`uv run poe mutate ${pick.module.replace('app/', '').replace('.py', '')}\` builds the cosmic-ray session DB under $TMPDIR; report its path and the def name carrying the non-equivalent survivor cluster worth targeting.\n` +
+  `3. Efficacy — do NOT run \`poe mutate\`. Gate on the allowlist: \`uv run poe mutate --list\`. If \`${TARGET_KEY}\` is NOT listed → glue, set before.db=null, before.survival=null (Conformance-driven run). If it IS listed, look for a COMPLETE campaign DB at "${DB_REL}": if present, read the survival rate (\`cr-rate "${DB_REL}"\`) and the def carrying the most SURVIVED mutants (\`cosmic-ray dump\` grouped by definition_name) → set before.db to that path + before.survivor_func. If the DB is absent/partial → DEFER Efficacy: before.db=null, and note "no complete campaign DB — run \`poe mutate ${TARGET_KEY}\` out-of-band, Efficacy deferred this run".\n` +
   `Return the before-snapshot. green=false is a valid, honest outcome (record it and stop upstream).`,
   { phase: 'Measure', schema: BASELINE, label: 'baseline' },
 )
@@ -159,14 +174,20 @@ if (!base || !base.green) {
 phase('Propose')
 // Author gets the MINIMUM decisive context (survivor coordinate, target test file, rubric) — never a
 // whole-repo dump. Retries carry only the one high-value context: the prior attempt + why the gate bounced.
+// Two modes by what Measure found: a live campaign DB ⇒ Efficacy (kill survivors); else ⇒ Conformance
+// (fix the actionable test-lint violation). Efficacy is the differentiator; Conformance is the workhorse.
+const efficacyMode = !!base.before.db
 let proposal = null
 let gate = null
 let carry = ''
 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   proposal = await agent(
-    `You are the Sharpen AUTHOR for module ${pick.module}. Tighten the EXISTING tests (${pick.tests.join(', ')}) so they catch a real change they currently miss — do not write new-feature coverage (that is Grow's job; file an issue instead).\n` +
-    `Minimum decisive context: the before-snapshot is ${JSON.stringify(base.before)}. The non-equivalent survivor cluster lives in \`${base.before.survivor_func ?? 'the module'}\`. Read only that function + the target test file + AGENTS.md "## Testing".\n` +
-    `Assert OBSERVABLE behaviour (return value / emitted IPC / written note), never a private attr or mock call-count. Apply the edit to the test file. Emit a named, deduplicated proposal list and the unified diff. Set touched_func to the production def whose survivors you claim to kill, and cut_module to its dotted path.\n` +
+    `You are the Sharpen AUTHOR for module ${pick.module}. Tighten the EXISTING tests (${pick.tests.join(', ')}) so they catch a real change they currently miss — do not write new-feature coverage (that is Grow's job; file an issue instead). ${REL} ${GUARD}\n` +
+    (efficacyMode
+      ? `MODE Efficacy: kill the non-equivalent survivor cluster in \`${base.before.survivor_func ?? 'the module'}\`. Read only that function + the target test file + AGENTS.md "## Testing". Set touched_func to that def and cut_module to its dotted path.\n`
+      : `MODE Conformance: fix the ACTIONABLE \`poe test-lint\` violation(s) in the target tests (mis-levelled marker, private-attr compound, over/under-assertion) — tighten to observable behaviour or correct the tier marker. This module has no mutation campaign, so there is no survivor to kill; do not invent one. Set touched_func to "" and cut_module to the dotted module path.\n`) +
+    `Minimum decisive context: the before-snapshot is ${JSON.stringify(base.before)}.\n` +
+    `Assert OBSERVABLE behaviour (return value / emitted IPC / written note), never a private attr or mock call-count. Apply the edit ONLY to a target test file. Emit a named, deduplicated proposal list and the unified diff. If there is genuinely nothing worth sharpening, return applied=false with the reason (a valid terminal outcome — never fabricate an edit).\n` +
     (carry ? `\nPRIOR ATTEMPT BOUNCED — do not repeat it. Gate report:\n${carry}\n` : ''),
     { phase: 'Propose', schema: PROPOSAL, label: `author#${attempt}` },
   )
@@ -174,11 +195,11 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 
   // Objective gate (deterministic, no judgment): anti-cheat static diff + efficacy mutation replay.
   gate = await agent(
-    `Run the deterministic Sharpen objective gate on the author's edit, from ${CWD}/. Report the tool output VERBATIM — do not interpret.\n` +
+    `Run the deterministic Sharpen objective gate on the author's edit. ${REL} Report the tool output VERBATIM — do not interpret. (This step runs read-only tools; it must not edit any file.)\n` +
     `Arm B (anti-cheat, fast): \`uv run python tools/sharpen_gate.py anticheat ${proposal.test_file.replace('overlay/', '')} --cut ${proposal.cut_module} --repo .\` (bounces removed/weakened/trivial/cut-derived asserts vs HEAD).\n` +
     (base.before.db
       ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
-      : `Arm A (efficacy): SKIP — no session DB (glue module, mutation-excluded). Record efficacy_pass=true with report "n/a — glue".\n`) +
+      : `Arm A (efficacy): SKIP — Conformance-driven run (no campaign DB for this module). Record efficacy_pass=true with report "n/a — no mutation campaign".\n`) +
     `pass = both arms clean. If either bounces, pass=false and quote the BOUNCE/REGRESSED lines.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
@@ -187,7 +208,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   log(`attempt ${attempt} bounced: ${carry.split('\n')[0]}`)
   // revert the failed edit so the next author starts from a known-green tree
   await agent(
-    `From ${CWD}/ run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` to discard the bounced edit. Confirm the tree is clean.`,
+    `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` to discard the bounced edit. Confirm the tree is clean.`,
     { phase: 'Propose', label: `revert#${attempt}`, effort: 'low' },
   )
   proposal = null
@@ -207,7 +228,7 @@ phase('Skeptic')
 const skeptic = await agent(
   `You are an adversarial reviewer. A test edit to ${pick.module} claims to make the suite catch a real change it currently misses. Your job: try to REFUTE it. Reason ONLY from the artifact below and the code — you are NOT given the author's reasoning.\n\n` +
   `WHAT (proposals): ${JSON.stringify(proposal.proposals)}\n\nDIFF:\n${proposal.diff}\n\n` +
-  `Read the touched production function \`${proposal.touched_func}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing over what was already asserted. If you find one, verdict=REFUTED. Cite mutants/tests/lines as grounds — never authority. Default REFUTED on genuine doubt.`,
+  `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing over what was already asserted. If you find one, verdict=REFUTED. Cite mutants/tests/lines as grounds — never authority. Default REFUTED on genuine doubt.`,
   { phase: 'Skeptic', schema: REVIEW, label: 'skeptic' },
 )
 
@@ -230,7 +251,7 @@ if (verdict === 'REFUTED') {
 phase('Record')
 if (verdict !== 'UPHELD') {
   await agent(
-    `From ${CWD}/ run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — the review dropped the edit. Confirm clean tree.`,
+    `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — the review dropped the edit. Confirm clean tree.`,
     { phase: 'Record', label: 'revert-dropped', effort: 'low' },
   )
   const rec = await recordOutcome('dry-run', null, skeptic, judgeNote,
@@ -252,7 +273,7 @@ async function recordOutcome(state, prop, skepticReview, judgeNote, extraNote) {
     : 'null (terminal outcome, no review reached)'
   const wantPr = OPEN_PR && state === 'in-progress' && prop
   return agent(
-    `Append one Sharpen ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}, from the repo root (parent of ${CWD}/).\n` +
+    `Append one Sharpen ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.sharpen.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, if opening a PR, git/gh) — no other file.\n` +
     `Module ${pick.module}. Compute source_sha with tools/sharpen_ledger.py, stamp \`audited\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, toolset_version from the ledger manifest.\n` +
     `state: "${state}". review block: ${review}.\n` +
     (prop ? `decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. axes before: ${JSON.stringify(base.before)}.\n` : '') +
