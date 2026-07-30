@@ -7,6 +7,16 @@ logs.
 
 ## [Unreleased]
 
+### Added (developer tooling — not part of the `poe all` gate)
+
+- **Sharpen loop** — an idle-time, one-module-per-run process that hardens the *existing* test suite
+  (fixes bugs in the tests) via mutation auditing + a `poe test-lint` conformance linter, proposing
+  through an isolated author→skeptic→judge review (two independent UPHOLDs to ship) and never merging.
+  See `.agents/sharpen/GUIDE.md`.
+- **`poe affected`** — inner-loop test selector: runs only the tests a change can touch (ruff
+  dependency-graph reverse-closure + full-run fallback on blind spots), seconds vs the full `poe test`.
+  Not a gate — `poe all` / `poe test-ft` remains the pre-push net.
+
 ## [0.9.1] - 2026-07-28
 
 ### Fixed
