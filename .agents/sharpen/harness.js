@@ -216,7 +216,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `Run the deterministic Sharpen objective gate on the author's edit. ${REL} Report the tool output VERBATIM — do not interpret. (This step runs read-only tools; it must not edit any file.)\n` +
     `Arm B (anti-cheat, fast): \`uv run python tools/sharpen_gate.py anticheat ${proposal.test_file.replace('overlay/', '')} --cut ${proposal.cut_module} --repo .\` (bounces removed/weakened/trivial/cut-derived asserts vs HEAD).\n` +
     (base.before.db
-      ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
+      ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/overlay/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
       : `Arm A (efficacy): SKIP — Conformance-driven run (no campaign DB for this module). Record efficacy_pass=true with report "n/a — no mutation campaign".\n`) +
     `pass = both arms clean. If either bounces, pass=false and quote the BOUNCE/REGRESSED lines.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
