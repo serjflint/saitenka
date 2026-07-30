@@ -38,6 +38,7 @@ OV = "overlay/"
 
 TIER = "not (slow or integration or requires_display or e2e)"  # mirror `poe test`'s fast universe
 DYNAMIC_IMPORT = ("importlib.import_module", "__import__(", "entry_points", "pkgutil")
+CLOSURE_CAP = 20  # above this, the serial subset loses to the parallel full suite — just run full
 
 
 def _git(*args: str) -> list[str]:
@@ -130,6 +131,15 @@ def select(base: str) -> tuple[list[str] | None, str]:
     tests = closure_tests(overlay_py, dependents_graph()) | changed_tests
     if src_changed and not tests:
         return None, f"full run — changed source has no dependent test: {sorted(src_changed)[:3]}"
+    # Fixed per-run cost (heavy app import + worker startup) dominates wall-clock, and the full suite
+    # parallelises across cores. A large closure run serially loses to that, so above the cap just run
+    # full — TIA only wins for genuinely small closures (a leaf edit), where a single-process subset
+    # skips the -n auto worker fan-out.
+    if len(tests) > CLOSURE_CAP:
+        return (
+            None,
+            f"full run — {len(tests)} impacted (> cap {CLOSURE_CAP}); parallel full is faster",
+        )
     return sorted(tests), f"{len(tests)} impacted test file(s)"
 
 
@@ -155,9 +165,11 @@ def main() -> int:
         return 0
     if selected == []:
         return 0  # nothing impacted
-    cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-m", TIER]
-    if selected:
-        cmd += selected
+    # `-p no:cacheprovider` keeps a subset from poisoning the failure cache. Full fallback parallelises
+    # like `poe test`; a capped-small subset runs single-process (one app import beats -n auto's
+    # per-worker import fan-out for a few files).
+    pytest = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-m", TIER]
+    cmd = [*pytest, "-n", "auto"] if selected is None else [*pytest, *selected]
     return subprocess.run(cmd, cwd=OVERLAY, check=False).returncode
 
 
