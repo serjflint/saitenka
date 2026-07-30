@@ -5,9 +5,12 @@
 __pycache__/
 *.pyc
 .venv/
-.venv-fuzz/          # pinned-3.13 atheris env for `poe fuzz` (kept out of the FT .venv)
-.venv-cx/            # pinned-3.13 CrossHair env for `poe crosshair` (z3 C-ext, no free-threading)
-.venv-pyspy/         # pinned-3.13 env for `poe stress-pyspy` (py-spy can't introspect 3.14t)
+# pinned-3.13 envs for opt-in tiers, kept out of the FT .venv (.gitignore has NO inline comments —
+# the pattern must be alone on its line): atheris (poe fuzz), CrossHair/z3 (poe crosshair), py-spy (poe
+# stress-pyspy, can't introspect 3.14t)
+.venv-fuzz/
+.venv-cx/
+.venv-pyspy/
 *.egg-info/
 
 # atheris/libFuzzer crash + timeout repro artifacts (add real ones as regression goldens, don't commit blobs)
@@ -22,6 +25,8 @@ overlay/tools/fuzz/corpus/
 .ruff_cache/
 .hypothesis/
 .coverage
+# cosmic-ray campaign DBs (poe mutate) — expensive to build, reused across runs
+.mutation-cache/
 
 # build artifacts
 dist/

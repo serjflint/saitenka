@@ -204,6 +204,8 @@ hard rule, structurally enforced, not a discipline:
   invocations with independent context**. The skeptic prompt contains only *what / why / diff* — never
   the author's reasoning. The loop runs as a **Workflow** where these are distinct `agent()` calls, so
   the harness enforces isolation; a human "playing all roles" in one context is **not a valid review**.
+  The harness is [`harness.js`](harness.js) (Claude Code Workflow: `sharpen-loop`) — one module per run,
+  `args.openPr` false ⇒ dry-run (ledger only), true ⇒ the worth-it PR (never merges).
 - **Evidence over trust.** Every iteration records a `review` provenance block in the ledger: the author
   and skeptic agent ids (which must differ), the judge id or `consensus`, and the verdict. No block, or
   `author == skeptic`, means the review didn't happen.
@@ -302,6 +304,15 @@ Background cron / idle time only — **one module per run**, bounded. Never runs
 active feature work. Slow, exhaustive, deliberate: this loop is allowed the long feedback the main
 coding loop can't afford. `poe all` stays the fast local gate for the coding loop; this loop's
 slow instruments never join it.
+
+**Running the harness (operational).** Launch it from a **dedicated git worktree** (EnterWorktree →
+Workflow → ExitWorktree) so an executor edit can never touch the maintainer's live tree — all executors
+operate on paths relative to that worktree. The **Efficacy axis consumes a pre-built mutation campaign**
+(`.mutation-cache/`, gitignored, reused across runs); it never launches one inline — a campaign outlives
+a step budget, so `poe mutate <module>` is an out-of-band pre-req and the harness *defers* Efficacy
+(Conformance-driven run) when the DB is absent. The audited-module allowlist is `poe mutate --list`
+(canonical `TARGETS` in `tools/mutate/run.py`); the harness runs the Efficacy axis only for a listed
+module and treats the rest as Conformance-only.
 
 ## Human gate
 
