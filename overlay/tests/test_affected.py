@@ -51,3 +51,9 @@ def test_classify_routes_blindspots_to_full_source_to_graph_docs_ignored() -> No
     assert "src/overlay/app/_nonexistent_mod.py" in overlay_py
     assert "tests/test_nonexistent.py" in changed_tests
     assert all("README" not in f for f in (*full, *overlay_py))
+
+
+def test_reaches_conftest_escalates() -> None:
+    a = _mod()
+    assert a.reaches_conftest({"tests/test_x.py", "tests/conftest.py"}) is True
+    assert a.reaches_conftest({"tests/test_x.py", "tests/test_y.py"}) is False

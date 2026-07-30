@@ -95,7 +95,8 @@ def dependents_graph() -> dict[str, list[str]]:
 
 
 def closure_tests(seeds: set[str], graph: dict[str, list[str]]) -> set[str]:
-    """Reverse-transitive closure over the one-hop dependents map → the test files it reaches."""
+    """Reverse-transitive closure over the one-hop dependents map → the test files it reaches
+    (including any `conftest.py`, so `select` can escalate on it)."""
     seen: set[str] = set()
     q = deque(seeds)
     while q:
@@ -104,6 +105,12 @@ def closure_tests(seeds: set[str], graph: dict[str, list[str]]) -> set[str]:
                 seen.add(dep)
                 q.append(dep)
     return {f for f in seen if f.startswith("tests/") and f.endswith(".py")}
+
+
+def reaches_conftest(tests: set[str]) -> bool:
+    """A conftest in the closure means the change flows through shared fixtures → the whole suite is
+    affected, not just these tests. Escalate to a full run (and never run a conftest as a test)."""
+    return any(t.rsplit("/", 1)[-1] == "conftest.py" for t in tests)
 
 
 def select(base: str) -> tuple[list[str] | None, str]:
@@ -116,6 +123,8 @@ def select(base: str) -> tuple[list[str] | None, str]:
         return None, f"full run — blind-spot change: {full[:3]}"
     src_changed = {f for f in overlay_py if f.startswith("src/")}
     tests = closure_tests(overlay_py, dependents_graph()) | changed_tests
+    if reaches_conftest(tests):
+        return None, "full run — change reaches a conftest (shared fixtures affect the whole suite)"
     if src_changed and not tests:
         return None, f"full run — changed source has no dependent test: {sorted(src_changed)[:3]}"
     return sorted(tests), f"{len(tests)} impacted test file(s)"
