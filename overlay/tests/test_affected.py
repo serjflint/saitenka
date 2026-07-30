@@ -53,6 +53,15 @@ def test_classify_routes_blindspots_to_full_source_to_graph_docs_ignored() -> No
     assert all("README" not in f for f in (*full, *overlay_py))
 
 
+def test_tools_edit_routes_to_full() -> None:
+    # tests file-LOAD tools via importlib.util (no static import edge ruff can see); without this the
+    # selector returned 0 tests and silently skipped the tool's own test. Must route to a full run.
+    a = _mod()
+    full, overlay_py, _ = a.classify(["overlay/tools/mutate/run.py"])
+    assert "overlay/tools/mutate/run.py" in full
+    assert not overlay_py
+
+
 def test_closure_excludes_conftest() -> None:
     # conftest sits in nearly every module's closure (it imports the god-objects); including it would
     # collapse every selection to a full run and it isn't a runnable test anyway.

@@ -200,10 +200,12 @@ gate; together they stop the lobotomies a green run hides.
 ### Axis 2 — `poe test-lint` (ast-grep rules under `sgconfig/test-rules/`)
 
 Eight hand-written [ast-grep](https://ast-grep.github.io/) rules scan `tests/` for smells:
-private-attribute asserts, mock-interaction asserts, private-symbol `monkeypatch`, mis-levelled real I/O
-(a real subprocess/socket/`time.sleep` in an unmarked default-tier test), ambient non-determinism,
-session-scoped mutable fixtures, and control flow. Each rule ships with planted `valid`/`invalid`
-examples (`poe test-lint-test`) so it can't silently rot into a no-op.
+private-attribute asserts (and the compound-assert variant), mock-interaction asserts, private-symbol
+`monkeypatch`, mis-levelled real I/O (a real subprocess/socket/`time.sleep` in an unmarked default-tier
+test), ambient non-determinism, `os.environ` mutation, and session-scoped mutable fixtures. Each rule
+ships with planted `valid`/`invalid` examples (`poe test-lint-test`) so it can't silently rot into a
+no-op. (A control-flow/cohesion rule is specced but deliberately not built — advisory-only, noisy on a
+classicist suite.)
 
 A key distinction the loop makes: a rule is either a **metric** or **actionable**.
 `test-assert-private-attr` is a *metric* — on white-box code it fires heavily *by design* (the real
@@ -322,9 +324,10 @@ human gate with worth-it, one-module, evidence-carrying proposals.
   (near-zero yield on this suite today); it's trigger-gated on a hidden-coupling case appearing.
 - **Redundancy (Axis 4)** — advisory only; cosmic-ray records no per-test kill-matrix, so it can only
   *flag* candidates, never auto-prune (a "redundant" test is often a regression/documentation guard).
-- **The autonomous Workflow harness** (author / skeptic / judge as isolated agents on an idle cron) is
-  the next stage. Until it exists, a manual run without a valid isolated review is a **`dry-run`** — fine
-  for exploration, but it may not open a PR as if reviewed.
+- **The autonomous Workflow harness** ([`harness.js`](harness.js) — author / skeptic / judge as isolated
+  `agent()` calls) is built and proven on dry-runs; the remaining gap is an idle-cron trigger and a
+  persisted workflow `review` block in the committed ledger. A manual run without a valid isolated review
+  is still a **`dry-run`** — fine for exploration, but it may not open a PR as if reviewed.
 - **repowise centrality/risk** is not yet a triage input (churn stands in as recency only).
 
 
