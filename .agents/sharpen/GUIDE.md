@@ -324,9 +324,11 @@ human gate with worth-it, one-module, evidence-carrying proposals.
   (near-zero yield on this suite today); it's trigger-gated on a hidden-coupling case appearing.
 - **Redundancy (Axis 4)** — advisory only; cosmic-ray records no per-test kill-matrix, so it can only
   *flag* candidates, never auto-prune (a "redundant" test is often a regression/documentation guard).
-- **The autonomous Workflow harness** ([`harness.js`](harness.js) — author / skeptic / judge as isolated
-  `agent()` calls) is built and proven on dry-runs; the remaining gap is an idle-cron trigger and a
-  persisted workflow `review` block in the committed ledger. A manual run without a valid isolated review
+- **The autonomous adapters** ([`ADAPTERS.md`](ADAPTERS.md) — author / skeptic / judge as isolated
+  invocations; [`harness.js`](harness.js) for Claude Workflow, `.agents/skills/sharpen-loop/` for Codex)
+  are built; the Claude adapter is proven on dry-runs and the Codex adapter is structurally validated
+  but has not spent its first live audit. The remaining gaps are that receipt and an idle-cron trigger.
+  A manual run without a valid isolated review
   is still a **`dry-run`** — fine for exploration, but it may not open a PR as if reviewed.
 - **repowise centrality/risk** is not yet a triage input (churn stands in as recency only).
 

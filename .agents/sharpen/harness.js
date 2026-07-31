@@ -13,7 +13,7 @@ export const meta = {
   ],
 }
 
-// Stage 4 of vibe/sharpen-loop-plan.md — the harness that makes a run non-`dry-run`. The deterministic
+// Claude Workflow adapter for the provider-neutral contract in ADAPTERS.md. The deterministic
 // judgment lives in the Python tools (sharpen_triage / sharpen_gate / sharpen_ledger); this script only
 // orchestrates them and enforces the one thing a single context cannot self-provide: an adversarial
 // review where the skeptic never sees the author's reasoning (.agents/sharpen/SPEC.md → Fidelity).
@@ -24,6 +24,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
+const CONTRACT_VERSION = 1 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -87,8 +88,9 @@ const PROPOSAL = {
     cut_module: { type: 'string', description: 'dotted code-under-test module for anti-cheat cut-derived, e.g. overlay.app.scoring' },
     touched_func: { type: 'string', description: 'the production def whose survivors this claims to kill (scopes the efficacy replay)' },
     diff: { type: 'string', description: 'unified diff of the test edit' },
+    reason: { type: ['string', 'null'], description: 'why no edit was applied' },
     proposals: {
-      type: 'array', minItems: 1,
+      type: 'array',
       items: {
         type: 'object', additionalProperties: false,
         required: ['target_test', 'axis', 'change', 'rationale'],
@@ -180,7 +182,10 @@ const base = await agent(
 
 if (!base || !base.green) {
   log(`Baseline not green — cannot measure an honest before/after. Quarantined: ${base ? base.quarantined.join(', ') : '?'}`)
-  return { done: false, module: pick.module, reason: 'baseline not green', quarantined: base?.quarantined ?? [] }
+  const quarantined = base?.quarantined ?? []
+  const rec = await recordOutcome('dry-run', null, null,
+    `Known-green baseline unavailable; quarantined: ${quarantined.join(', ') || 'baseline executor failed'}. No edit attempted.`)
+  return { done: true, module: pick.module, state: rec?.state ?? 'dry-run', reason: 'baseline not green', quarantined }
 }
 // Triage's counts are the deterministic source of truth — override whatever Measure echoed (defends
 // against the recompute-undercount bug even if the agent ignores the instruction above).
@@ -196,13 +201,14 @@ const efficacyMode = !!base.before.db
 let proposal = null
 let gate = null
 let carry = ''
+let authorInvocation = null
 
 // Nothing to sharpen — no survivor to kill AND no actionable conformance violation. Don't spin the
 // author into fabricating a cosmetic, zero-value edit (the 2026-07-30 run split `assert A and B` into
 // two asserts; the review correctly dropped it, but the cycle was wasted). Record and stop.
 if (!efficacyMode && base.before.actionable === 0) {
   log(`Nothing to sharpen on ${pick.module}: 0 actionable conformance violations, no mutation survivor.`)
-  const rec = await recordOutcome('left-undone', null, null, null,
+  const rec = await recordOutcome('left-undone', null, null,
     `Nothing to sharpen: ${base.before.conformance} conformance hits are all metric (architecture/Grow signal, no per-hit fix), no mutation survivor. Efficacy ${base.before.db ? 'clean' : 'deferred — no campaign DB'}.`)
   return { done: true, module: pick.module, state: rec?.state ?? 'left-undone', reason: 'nothing-to-sharpen', openPr: OPEN_PR }
 }
@@ -219,6 +225,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     { phase: 'Propose', schema: PROPOSAL, label: `author#${attempt}` },
   )
   if (!proposal || !proposal.applied) { carry = 'author did not apply an edit'; continue }
+  authorInvocation = `author#${attempt}` // adapter-assigned id; each agent() call is a fresh context
 
   // Objective gate (deterministic, no judgment): anti-cheat static diff + efficacy mutation replay.
   gate = await agent(
@@ -243,13 +250,13 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 
 if (!proposal || !gate || !gate.pass) {
   // Terminal: un-sharpenable within the retry cap. Not a spin — record and stop (SPEC step 3).
-  const rec = await recordOutcome('left-undone', null, null, null,
+  const rec = await recordOutcome('left-undone', null, null,
     `No proposal cleared the objective gate in ${MAX_RETRIES} attempts. Last bounce: ${carry}`)
   return { done: true, module: pick.module, state: rec?.state ?? 'left-undone', openPr: OPEN_PR }
 }
 
 phase('Skeptic')
-// ISOLATED refutation — the skeptic sees only what/why/diff, NEVER the author's reasoning (a separate
+// ISOLATED refutation — the skeptic sees only factual WHAT + DIFF, NEVER the author's reasoning (a separate
 // agent() call = harness-enforced context isolation). Framed as adversarial ("construct a bug this
 // misses; default REFUTED on doubt") and grounded in the artifact, not the author's rationale (SycEval).
 const skeptic = await agent(
@@ -261,6 +268,7 @@ const skeptic = await agent(
   `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing over what was already asserted. If you find one, verdict=REFUTED. Cite mutants/tests/lines as grounds — never authority. Default REFUTED on genuine doubt.`,
   { phase: 'Skeptic', schema: REVIEW, label: 'skeptic' },
 )
+const skepticInvocation = 'skeptic'
 
 // The author is NOT an independent reviewer — it wrote the edit. So a lone skeptic UPHELD is the only
 // gate before the human, and a single sycophantic skeptic could ship a bad edit. Require TWO independent
@@ -269,20 +277,32 @@ const skeptic = await agent(
 // found a problem, and expected yield is low anyway).
 let verdict = 'REFUTED'
 let judgeNote = 'skeptic REFUTED — dropped'
+let judge = null
+let judgeInvocation = null
 if (skeptic?.verdict === 'UPHELD') {
   phase('Judge')
   // A SECOND independent adversarial review — same isolation as the skeptic (what/diff only, no author
-  // rationale, and NOT told the first skeptic's grounds, so its vote is genuinely independent). Sonnet:
-  // verification is easier than generation. Default REFUTED on doubt.
-  const judge = await agent(
+  // rationale, and NOT told the first skeptic's grounds, so its vote is genuinely independent).
+  // The adapter chooses a verification-capable model; shared policy never names a provider model.
+  judge = await agent(
     `You are a SECOND, independent adversarial reviewer (the first reviewer is not shown to you). A test edit to ${pick.module} claims to make the suite catch a real change it currently misses. Try to REFUTE it, reasoning ONLY from the artifact and the code.\n\n` +
     `WHAT (proposals): ${JSON.stringify(proposal.proposals.map((p) => ({ target_test: p.target_test, axis: p.axis, change: p.change })))}\n\nDIFF:\n${proposal.diff}\n\n` +
     `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing. If you find one, verdict=REFUTED. Cite mutants/tests/lines, never authority. Default REFUTED on genuine doubt.`,
-    { phase: 'Judge', schema: REVIEW, label: 'judge', model: 'sonnet' },
+    { phase: 'Judge', schema: REVIEW, label: 'judge' },
   )
+  judgeInvocation = 'judge'
   // Ship iff BOTH independent reviewers upheld.
   verdict = judge?.verdict === 'UPHELD' ? 'UPHELD' : 'REFUTED'
-  judgeNote = `2nd independent review (sonnet): ${judge?.verdict ?? 'REFUTED (default)'}`
+  judgeNote = `2nd independent review: ${judge?.verdict ?? 'REFUTED (default)'}`
+}
+
+const review = {
+  author: authorInvocation,
+  skeptic: skepticInvocation,
+  judge: judgeInvocation,
+  skeptic_verdict: skeptic?.verdict ?? 'REFUTED',
+  judge_verdict: judge?.verdict ?? null,
+  verdict,
 }
 
 phase('Record')
@@ -291,37 +311,37 @@ if (verdict !== 'UPHELD') {
     `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — the review dropped the edit. Confirm clean tree.`,
     { phase: 'Record', label: 'revert-dropped', effort: 'low' },
   )
-  const rec = await recordOutcome('dry-run', null, skeptic, judgeNote,
+  const rec = await recordOutcome('dry-run', null, review,
     `Review dropped the change (${judgeNote}). Grounds: ${JSON.stringify(skeptic?.grounds ?? [])}`)
   return { done: true, module: pick.module, state: 'dry-run', verdict, openPr: OPEN_PR }
 }
 
-const rec = await recordOutcome(canOpenPr ? 'in-progress' : 'dry-run', proposal, skeptic, judgeNote, null)
 if (!canOpenPr) {
-  // Dry-run touches only the ledger — revert the (upheld but un-shipped) edit so the tree isn't left
-  // dirty, matching the record's "ledger-only" wording. The diff is already captured in the record.
+  // Hash the final pristine tree in the ledger: capture the diff in `proposal`, then revert BEFORE
+  // recording. Recording first would make source_sha stale immediately after the revert.
   await agent(
     `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — this UPHELD dry-run keeps only the ledger record; discard the edit. Confirm clean tree.`,
     { phase: 'Record', label: 'revert-dryrun', effort: 'low' },
   )
 }
+const rec = await recordOutcome(canOpenPr ? 'in-progress' : 'dry-run', proposal, review, null)
 return { done: true, module: pick.module, state: rec?.state ?? (canOpenPr ? 'in-progress' : 'dry-run'), pr: rec?.pr_url ?? null, openPr: OPEN_PR }
 
 // --- record helper ---------------------------------------------------------------------------------
 
-async function recordOutcome(state, prop, skepticReview, judgeNote, extraNote) {
+async function recordOutcome(state, prop, reviewResult, extraNote) {
   // A shippable state (in-progress/sharpened) requires canOpenPr: a valid review block + a real PR. Without
   // it we record dry-run (SPEC → Fidelity: no fidelity ⇒ no ship). The executor agent has the shell to
   // stamp the real date and hash — the JS runtime can't (no Date.now / fs).
-  const review = skepticReview
-    ? `{ "author": "sharpen-author (workflow-isolated)", "skeptic": "sharpen-skeptic (workflow-isolated, ≠author)", "judge": "${judgeNote}", "verdict": "${skepticReview.verdict}" }`
+  const reviewBlock = reviewResult
+    ? JSON.stringify(reviewResult)
     : 'null (terminal outcome, no review reached)'
   const wantPr = canOpenPr && state === 'in-progress' && prop
   return agent(
     `Append one Sharpen ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.sharpen.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, if opening a PR, git/gh) — no other file.\n` +
     `Module ${pick.module}. Compute source_sha with tools/sharpen_ledger.py, stamp \`audited\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, toolset_version from the ledger manifest.\n` +
-    `state: "${state}". review block: ${review}.\n` +
-    (prop ? `decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. axes before: ${JSON.stringify(base.before)}.\n` : '') +
+    `state: "${state}". review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}.\n` +
+    (prop ? `decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. axes before: ${JSON.stringify(base.before)}. Captured diff: ${JSON.stringify(prop.diff)}.\n` : '') +
     `axes_not_applied: list every axis you skipped and WHY (the guard against silent no-run — SPEC Self-reflection).\n` +
     (extraNote ? `note: ${extraNote}\n` : '') +
     (wantPr

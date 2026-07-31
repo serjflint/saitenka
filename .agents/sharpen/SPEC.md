@@ -180,14 +180,15 @@ irreducible.
 
 - **Objective gate:** the deterministic tool re-measurement from the cycle's *Objective gate* step. No LLM. Deterministic bounce.
 - **Subjective gate:** the **author** is *not* an independent reviewer — it wrote the edit — so shipping
-  requires **two independent UPHOLDs**, not one. A **skeptic** agent (Opus, *different context* — sees
+  requires **two independent UPHOLDs**, not one. A **skeptic** agent (*different context* — sees
   only the factual *what* (target/axis/change) + the *diff*, never the author's *why*/rationale) reviews
   first; a **skeptic REFUTED drops immediately** (default-drop; the one independent voice found a problem
-  and expected yield is low). On a skeptic UPHELD, a **second independent reviewer** — a **Sonnet judge**
+  and expected yield is low). On a skeptic UPHELD, a **second independent reviewer** — a **judge**
   in its own isolated context, given the same *what*/*diff* and **not** the first skeptic's grounds —
   reviews adversarially; ship only if it **also** UPHOLDs. Either REFUTE → DROP. (Verification is easier
-  than generation, so a Sonnet second reviewer is sound and cheap; iterative debate-to-consensus stays a
-  trap — there is no back-and-forth, just two independent votes and default-drop.)
+  than generation, so an adapter may choose a cheaper verification-capable model; iterative
+  debate-to-consensus stays a trap — there is no back-and-forth, just two independent votes and
+  default-drop.)
 
 Seed the skeptic's veto list with the auto-test defects prior art hit repeatedly (each applies to a
 *sharpen*, not just a generated test):
@@ -211,13 +212,15 @@ hard rule, structurally enforced, not a discipline:
   are **separate agent invocations with independent context**. Both reviewers get only the factual *what*
   (target/axis/change) and the *diff* — never the author's *why*/rationale (forwarding the persuasive
   rationale is the SycEval trap below; the harness strips it), and the judge is **not** told the first
-  skeptic's grounds, so the two UPHOLD votes are genuinely independent. The loop runs as a **Workflow** where these are distinct `agent()` calls, so
-  the harness enforces isolation; a human "playing all roles" in one context is **not a valid review**.
-  The harness is [`harness.js`](harness.js) (Claude Code Workflow: `sharpen-loop`) — one module per run,
-  `args.openPr` false ⇒ dry-run (ledger only), true ⇒ the worth-it PR (never merges).
-- **Evidence over trust.** Every iteration records a `review` provenance block in the ledger: the author
-  and skeptic agent ids (which must differ), the judge id or `consensus`, and the verdict. No block, or
-  `author == skeptic`, means the review didn't happen.
+  skeptic's grounds, so the two UPHOLD votes are genuinely independent. The host adapter must make
+  these distinct invocations; a human "playing all roles" in one context is **not a valid review**.
+  The provider contract is [`ADAPTERS.md`](ADAPTERS.md); [`harness.js`](harness.js) is its Claude
+  Workflow adapter and `.agents/skills/sharpen-loop/` is its Codex adapter — one module per run;
+  `openPr=false` means dry-run (ledger only), while true permits the worth-it PR (never merges).
+- **Evidence over trust.** Every iteration records a `review` provenance block in the ledger: distinct
+  author, skeptic, and judge invocation ids; both reviewer verdicts; and the final verdict. The host
+  adapter owns identity and decision composition (see `ADAPTERS.md`). No block, duplicate identities,
+  or missing judge on an UPHELD path means the review didn't happen.
 - **No fidelity ⇒ no ship.** An iteration without a valid `review` block is a **`dry-run`**: it MUST NOT
   open a PR and MUST record `state: dry-run` (never `sharpened`/`in-progress`). The PR step checks for the
   block first. A dry-run is fine for *exploration*; it just can't reach the human gate as if reviewed.
@@ -269,7 +272,8 @@ record carries a global `toolset_version`. One record per module audit:
   "toolset_version": 3,
   "axes": { "survival": 0.0, "conformance": 0, "brittleness": 0, "redundancy": "advisory:2" },
   "state": "sharpened | in-progress | blocked-on-bug | dry-run",
-  "review": { "author": "<agent-id>", "skeptic": "<agent-id, ≠author>", "judge": "consensus", "verdict": "UPHELD" },
+  "review": { "author": "<agent-id>", "skeptic": "<agent-id>", "judge": "<agent-id>",
+              "skeptic_verdict": "UPHELD", "judge_verdict": "UPHELD", "verdict": "UPHELD" },
   "decisions": ["tightened test_mine to assert the note payload, not _cache"],
   "left-undone": ["3 equivalent survivors (str|None under __future__) — unkillable"],
   "grow-filed": ["#43"],

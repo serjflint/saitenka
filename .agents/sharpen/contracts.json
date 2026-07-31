@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "proposal": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["applied", "test_file", "cut_module", "touched_func", "diff", "proposals"],
+    "properties": {
+      "applied": {"type": "boolean"},
+      "test_file": {"type": "string"},
+      "cut_module": {"type": "string"},
+      "touched_func": {"type": "string"},
+      "diff": {"type": "string"},
+      "reason": {"type": ["string", "null"]},
+      "proposals": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target_test", "axis", "change", "rationale"],
+          "properties": {
+            "target_test": {"type": "string"},
+            "axis": {"type": "string"},
+            "change": {"type": "string"},
+            "rationale": {"type": "string"},
+            "claimed_kills": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      }
+    }
+  },
+  "review": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["verdict", "grounds"],
+    "properties": {
+      "verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]},
+      "grounds": {"type": "array", "items": {"type": "string"}},
+      "constructed_bug": {"type": ["string", "null"]}
+    }
+  },
+  "review_provenance": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["author", "skeptic", "judge", "skeptic_verdict", "judge_verdict", "verdict"],
+    "properties": {
+      "author": {"type": "string"},
+      "skeptic": {"type": "string"},
+      "judge": {"type": ["string", "null"]},
+      "skeptic_verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]},
+      "judge_verdict": {"type": ["string", "null"], "enum": ["UPHELD", "REFUTED", null]},
+      "verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]}
+    }
+  }
+}
