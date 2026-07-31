@@ -24,7 +24,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 1 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 2 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -117,11 +117,21 @@ const GATE = {
 
 const REVIEW = {
   type: 'object', additionalProperties: false,
-  required: ['verdict', 'grounds'],
+  required: ['verdict', 'grounds', 'constructed_bug', 'better_fix'],
   properties: {
     verdict: { type: 'string', enum: ['UPHELD', 'REFUTED'], description: 'REFUTED = drop the change' },
     grounds: { type: 'array', items: { type: 'string' }, description: 'evidence citing mutants/tests/diff, never authority' },
     constructed_bug: { type: ['string', 'null'], description: 'a concrete bug the edit still lets slip, or null' },
+    better_fix: {
+      type: ['object', 'null'], additionalProperties: false,
+      required: ['summary', 'scope', 'evidence'],
+      properties: {
+        summary: { type: 'string' },
+        scope: { type: 'string', enum: ['target-test', 'outside-sharpen'] },
+        evidence: { type: 'string' },
+      },
+      description: 'smallest alternative when the objective is valid but this candidate is the wrong intervention; null otherwise',
+    },
   },
 }
 
@@ -265,7 +275,7 @@ const skeptic = await agent(
   // — preemptive, authority-flavoured framing *increases* regressive agreement. Forward only the factual
   // what (target/axis/change) + the diff; the skeptic reasons from the code, not the author's "why".
   `WHAT (proposals): ${JSON.stringify(proposal.proposals.map((p) => ({ target_test: p.target_test, axis: p.axis, change: p.change })))}\n\nDIFF:\n${proposal.diff}\n\n` +
-  `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing over what was already asserted. If you find one, verdict=REFUTED. Cite mutants/tests/lines as grounds — never authority. Default REFUTED on genuine doubt.`,
+  `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing over what was already asserted. If you find one, verdict=REFUTED. If the objective remains valid but this edit is too local or the wrong intervention, return the smallest evidence-backed better_fix and classify its scope; otherwise better_fix=null. A better fix never rescues this candidate. Cite mutants/tests/lines as grounds — never authority. Default REFUTED on genuine doubt.`,
   { phase: 'Skeptic', schema: REVIEW, label: 'skeptic' },
 )
 const skepticInvocation = 'skeptic'
@@ -287,7 +297,7 @@ if (skeptic?.verdict === 'UPHELD') {
   judge = await agent(
     `You are a SECOND, independent adversarial reviewer (the first reviewer is not shown to you). A test edit to ${pick.module} claims to make the suite catch a real change it currently misses. Try to REFUTE it, reasoning ONLY from the artifact and the code.\n\n` +
     `WHAT (proposals): ${JSON.stringify(proposal.proposals.map((p) => ({ target_test: p.target_test, axis: p.axis, change: p.change })))}\n\nDIFF:\n${proposal.diff}\n\n` +
-    `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing. If you find one, verdict=REFUTED. Cite mutants/tests/lines, never authority. Default REFUTED on genuine doubt.`,
+    `${REL} Read the touched production function \`${proposal.touched_func || '(conformance edit — no target function)'}\` and the edited test. Construct a concrete bug the edit STILL lets slip, or a way it merely pins an implementation detail / derives its expected value from the code under test / adds nothing. If you find one, verdict=REFUTED. If the objective remains valid but this edit is too local or the wrong intervention, return the smallest evidence-backed better_fix and classify its scope; otherwise better_fix=null. A better fix never rescues this candidate. Cite mutants/tests/lines, never authority. Default REFUTED on genuine doubt.`,
     { phase: 'Judge', schema: REVIEW, label: 'judge' },
   )
   judgeInvocation = 'judge'
@@ -307,12 +317,15 @@ const review = {
 
 phase('Record')
 if (verdict !== 'UPHELD') {
+  const refuter = skeptic?.verdict === 'REFUTED' ? skeptic : judge
+  const betterFix = refuter?.better_fix ?? null
   await agent(
     `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — the review dropped the edit. Confirm clean tree.`,
     { phase: 'Record', label: 'revert-dropped', effort: 'low' },
   )
   const rec = await recordOutcome('dry-run', null, review,
-    `Review dropped the change (${judgeNote}). Grounds: ${JSON.stringify(skeptic?.grounds ?? [])}`)
+    `Review dropped the change (${judgeNote}). Grounds: ${JSON.stringify(refuter?.grounds ?? [])}. ` +
+    `Better fix hand-off (separate authorization required; never applied by this run): ${JSON.stringify(betterFix)}`)
   return { done: true, module: pick.module, state: 'dry-run', verdict, openPr: OPEN_PR }
 }
 

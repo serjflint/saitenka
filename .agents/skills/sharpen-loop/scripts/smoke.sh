@@ -17,8 +17,10 @@ if rg -n 'TODO|\[TODO' "$skill_dir/SKILL.md" "$skill_dir/agents" "$skill_dir/ref
 fi
 
 rg -q 'fork_turns="none"' "$skill_dir/SKILL.md"
-rg -q '"version": 1' "$repo_dir/.agents/sharpen/contracts.json"
-rg -q 'CONTRACT_VERSION = 1' "$repo_dir/.agents/sharpen/harness.js"
+rg -q '"version": 2' "$repo_dir/.agents/sharpen/contracts.json"
+rg -q 'CONTRACT_VERSION = 2' "$repo_dir/.agents/sharpen/harness.js"
+rg -q 'better_fix' "$repo_dir/.agents/sharpen/contracts.json"
+rg -q 'Better fix hand-off' "$repo_dir/.agents/sharpen/harness.js"
 rg -q 'skeptic_verdict' "$repo_dir/.agents/sharpen/harness.js"
 rg -q 'judge_verdict' "$repo_dir/.agents/sharpen/harness.js"
 rg -Fq "verdict = judge?.verdict === 'UPHELD' ? 'UPHELD' : 'REFUTED'" "$repo_dir/.agents/sharpen/harness.js"

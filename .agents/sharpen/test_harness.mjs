@@ -62,8 +62,17 @@ async function scenario(responses) {
     baseline: green,
     'author#1': proposal,
     'gate#1': gate,
-    skeptic: { verdict: 'UPHELD', grounds: [] },
-    judge: { verdict: 'REFUTED', grounds: ['fixture refutation'] },
+    skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    judge: {
+      verdict: 'REFUTED',
+      grounds: ['the marker alone does not change ordinary selectors'],
+      constructed_bug: 'SAITENKA_LIVE=1 admits the test to the default universe',
+      better_fix: {
+        summary: 'exclude live in every ordinary selector',
+        scope: 'outside-sharpen',
+        evidence: 'test, test-ft, cov, and affected each define their own marker expression',
+      },
+    },
     'revert-dropped': undefined,
     record: { state: 'dry-run', ledger_appended: true },
   })
@@ -71,6 +80,9 @@ async function scenario(responses) {
   assert.match(record, /"skeptic_verdict":"UPHELD"/)
   assert.match(record, /"judge_verdict":"REFUTED"/)
   assert.match(record, /"verdict":"REFUTED"/)
+  assert.match(record, /exclude live in every ordinary selector/)
+  assert.match(record, /separate authorization required; never applied by this run/)
+  assert.equal(result.calls.filter(({ label }) => label.startsWith('author#')).length, 1)
 }
 
 {
@@ -79,8 +91,8 @@ async function scenario(responses) {
     baseline: green,
     'author#1': proposal,
     'gate#1': gate,
-    skeptic: { verdict: 'UPHELD', grounds: [] },
-    judge: { verdict: 'UPHELD', grounds: [] },
+    skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
     'revert-dryrun': undefined,
     record: { state: 'dry-run', ledger_appended: true },
   })

@@ -45,7 +45,9 @@ most the previous objective-gate bounce. The skeptic and judge each receive exac
 
 They do not receive rationale, claimed kills, authorities, or another review. The judge runs only after
 a skeptic `UPHELD`. Final verdict is `UPHELD` iff both verdicts are `UPHELD`; every other result is
-`REFUTED`.
+`REFUTED`. A refuting reviewer may return `better_fix` when its evidence preserves the objective but
+shows that the candidate is the wrong intervention. The adapter records that recommendation but never
+turns it into an UPHOLD or applies it in the same run.
 
 Persist review provenance in this shape:
 
@@ -68,6 +70,8 @@ Never copy `skeptic_verdict` into `verdict` without applying the judge result.
 - No complete mutation DB: defer Efficacy explicitly; continue only on a real actionable Conformance hit.
 - No actionable finding: record `left-undone`; do not ask the author to fabricate value.
 - Objective gate exhausted: record `left-undone` with the last bounce.
+- Refuted candidate with `better_fix`: revert it, record the recommendation and its scope, then stop;
+  route `outside-sharpen` work for separate maintainer authorization.
 - Missing isolation or identity: append `state: dry-run`; never open a PR.
 - Unverified open-PR exclusion: force `openPr=false` for the run.
 

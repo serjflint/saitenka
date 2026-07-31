@@ -183,7 +183,11 @@ irreducible.
   requires **two independent UPHOLDs**, not one. A **skeptic** agent (*different context* — sees
   only the factual *what* (target/axis/change) + the *diff*, never the author's *why*/rationale) reviews
   first; a **skeptic REFUTED drops immediately** (default-drop; the one independent voice found a problem
-  and expected yield is low). On a skeptic UPHELD, a **second independent reviewer** — a **judge**
+  and expected yield is low). A refuter may preserve the objective while showing that the candidate is
+  too local or the wrong intervention; record its smallest evidence-backed `better_fix` as a separate
+  hand-off, but never let it rescue or mutate the rejected candidate in the same run. Work outside the
+  selected test routes out of Sharpen for explicit maintainer authorization. On a skeptic UPHELD, a
+  **second independent reviewer** — a **judge**
   in its own isolated context, given the same *what*/*diff* and **not** the first skeptic's grounds —
   reviews adversarially; ship only if it **also** UPHOLDs. Either REFUTE → DROP. (Verification is easier
   than generation, so an adapter may choose a cheaper verification-capable model; iterative

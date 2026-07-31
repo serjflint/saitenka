@@ -33,9 +33,12 @@ Read `.agents/sharpen/GUIDE.md` only when explaining the design or adjudicating 
 5. Validate the author's response against `.agents/sharpen/contracts.json`, then run the objective gate directly. Retry at most three times, reverting only the patch created by the failed attempt.
 6. Invoke the skeptic in a second fresh isolated context with only factual WHAT plus DIFF. Do not include the author's rationale or claimed kills. Capture its invocation id.
 7. If the skeptic says `UPHELD`, invoke the judge in a third fresh isolated context with the same WHAT plus DIFF. Do not include the first review or its grounds. Capture its invocation id.
-8. Ship only when both independent reviewers say `UPHELD`. Either `REFUTED` means drop.
-9. Record actual invocation ids, both individual verdicts, and the final verdict. If the host exposes no invocation identity or cannot create fresh contexts, record `state: dry-run` and no valid review block.
-10. In dry-run mode, revert the test edit after capturing its diff; leave only the ledger append.
+8. Ship only when both independent reviewers say `UPHELD`. Either `REFUTED` means drop the candidate.
+9. On a refutation, inspect only that reviewer's evidence and `better_fix`. If it proves the objective is
+   valid but the candidate is too local, record and report the smallest evidence-backed alternative.
+   Never apply it in the same run; route `outside-sharpen` work for separate maintainer authorization.
+10. Record actual invocation ids, both individual verdicts, and the final verdict. If the host exposes no invocation identity or cannot create fresh contexts, record `state: dry-run` and no valid review block.
+11. In dry-run mode, revert the test edit after capturing its diff; leave only the ledger append.
 
 Use the host's equivalent of a context-free subagent invocation. In Codex environments that expose `spawn_agent`, use `fork_turns="none"`; run author, skeptic, and judge sequentially because they share the worktree.
 
@@ -54,5 +57,6 @@ Before reporting success, confirm:
 - the anti-cheat arm passed, plus efficacy replay when a complete DB existed;
 - author, skeptic, and judge identities are distinct on an upheld path;
 - the ledger's `review.verdict` is the final two-reviewer verdict;
+- a refutation-derived alternative is recorded as a hand-off, never as an UPHOLD or an automatic retry;
 - every skipped axis is listed with its reason;
 - a dry-run produced no outward action and left no test edit behind.

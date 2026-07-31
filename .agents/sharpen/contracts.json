@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "proposal": {
     "type": "object",
     "additionalProperties": false,
@@ -31,11 +31,21 @@
   "review": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["verdict", "grounds"],
+    "required": ["verdict", "grounds", "constructed_bug", "better_fix"],
     "properties": {
       "verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]},
       "grounds": {"type": "array", "items": {"type": "string"}},
-      "constructed_bug": {"type": ["string", "null"]}
+      "constructed_bug": {"type": ["string", "null"]},
+      "better_fix": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "required": ["summary", "scope", "evidence"],
+        "properties": {
+          "summary": {"type": "string"},
+          "scope": {"type": "string", "enum": ["target-test", "outside-sharpen"]},
+          "evidence": {"type": "string"}
+        }
+      }
     }
   },
   "review_provenance": {
