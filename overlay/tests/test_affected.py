@@ -7,9 +7,14 @@ would drop tests reaching a module through an intermediary), and blind-spot chan
 from __future__ import annotations
 
 import importlib.util
+import shlex
+import tomllib
 from pathlib import Path
 
+import pytest
+
 _AFF = Path(__file__).resolve().parent.parent / "tools" / "affected.py"
+_PYPROJECT = _AFF.parent.parent / "pyproject.toml"
 
 
 def _mod():
@@ -18,6 +23,22 @@ def _mod():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+def _poe_marker_expression(task: str) -> str:
+    tasks = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["tool"]["poe"]["tasks"]
+    command = tasks[task]
+    argv = shlex.split(command["shell"] if isinstance(command, dict) else command)
+    return argv[argv.index("-m") + 1]
+
+
+@pytest.mark.parametrize("task", ["test", "test-ft", "cov"])
+def test_ordinary_test_tasks_exclude_live(task: str) -> None:
+    assert "live" in _poe_marker_expression(task).replace("(", " ").replace(")", " ").split()
+
+
+def test_affected_tier_matches_default_test_universe() -> None:
+    assert _poe_marker_expression("test") == _mod().TIER
 
 
 def test_closure_is_reverse_transitive_not_one_hop() -> None:

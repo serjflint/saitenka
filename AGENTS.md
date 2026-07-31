@@ -12,7 +12,7 @@ Guidance for AI agents and developers working in this repo. Feature docs: `overl
   notes, to-be-filed issue bodies) → `vibe/` (git-ignored) — **never `.agents/`, which is durable-only**.
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
-- **`.agents/skills/`** — repo-local, tool-agnostic agent skills (`write-test`, `dev-gate`); each is a
+- **`.agents/skills/`** — repo-local agent skills; each is a
   `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard. For
   Claude Code auto-discovery, create a **local** symlink (`.claude/` is git-ignored, never committed):
   `ln -s ../.agents/skills .claude/skills`.
@@ -41,6 +41,10 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   after a deliberate refactor, never to silence a regression; the only copyleft allowed in the graph is
   our own GPL `deinflect`; new advisory tools are test-driven on THIS repo first (`vibe/quality-growth-plan.md`),
   preferring standalone out-of-process binaries (free-threading-safe).
+- **Inner loop (not a gate):** `uv run poe affected` runs only the tests a change can touch (ruff
+  dependency-graph reverse-closure + full-run fallback on blind spots) — seconds instead of the ~32s full
+  `poe test`, for the edit→feedback cycle. It over-approximates, never under-selects; `poe all`/`poe
+  test-ft` stays the correctness net before push. `--base origin/main` to check a committed branch.
 
 ## Refactoring
 
@@ -157,6 +161,11 @@ Consult it when adding or rewriting a test.
   confirm the score moved.
 - **cosmic-ray on 3.14t re-enables the GIL** via SQLAlchemy (harness only — the test subprocess still
   runs free-threaded). Expected, not a regression.
+- **The Sharpen loop** consumes this: an idle-time, one-module-per-run process that *sharpens the existing
+  tests* (fixes bugs in the tests) using mutation as its Efficacy axis + a `poe test-lint` conformance
+  linter, proposes via an isolated author→skeptic→judge review (two independent UPHOLDs to ship), and
+  never merges. Design + reader's guide: `.agents/sharpen/GUIDE.md` (+ `SPEC.md`, `harness.js`, the
+  committed `.ledger.sharpen.jsonl`). Not part of `poe all`.
 
 ## Fuzzing & symbolic checks
 

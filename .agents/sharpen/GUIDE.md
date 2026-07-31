@@ -161,8 +161,9 @@ Brittleness/Redundancy are depth added only on demonstrated need.
    each with the minimum decisive context (the surviving mutant, the target test, the rubric).
 4. **Objective gate** — the deterministic anti-lobotomization check (below). No LLM. A proposal that
    drops adequacy or fakes a kill is bounced automatically.
-5. **Subjective gate** — an *author* and an independent *skeptic* argue whether the change is a real
-   improvement; on genuine disagreement a judge decides and the default is **drop**.
+5. **Subjective gate** — two isolated reviewers must independently uphold the edit; either refutation
+   drops it. If a refuter preserves the objective but identifies a better intervention, the loop records
+   that as a separate hand-off instead of rescuing the candidate.
 6. **PR or Grow issue** — a surviving, worth-a-human's-time proposal becomes a one-module PR; a genuine
    coverage gap becomes a filed issue. A human merges. Always.
 7. **Record** the outcome (including what was deliberately left undone) in the ledger.
@@ -324,9 +325,11 @@ human gate with worth-it, one-module, evidence-carrying proposals.
   (near-zero yield on this suite today); it's trigger-gated on a hidden-coupling case appearing.
 - **Redundancy (Axis 4)** — advisory only; cosmic-ray records no per-test kill-matrix, so it can only
   *flag* candidates, never auto-prune (a "redundant" test is often a regression/documentation guard).
-- **The autonomous Workflow harness** ([`harness.js`](harness.js) — author / skeptic / judge as isolated
-  `agent()` calls) is built and proven on dry-runs; the remaining gap is an idle-cron trigger and a
-  persisted workflow `review` block in the committed ledger. A manual run without a valid isolated review
+- **The autonomous adapters** ([`ADAPTERS.md`](ADAPTERS.md) — author / skeptic / judge as isolated
+  invocations; [`harness.js`](harness.js) for Claude Workflow, `.agents/skills/sharpen-loop/` for Codex)
+  are built; the Claude adapter is proven on dry-runs and the Codex adapter is structurally validated
+  but has not spent its first live audit. The remaining gaps are that receipt and an idle-cron trigger.
+  A manual run without a valid isolated review
   is still a **`dry-run`** — fine for exploration, but it may not open a PR as if reviewed.
 - **repowise centrality/risk** is not yet a triage input (churn stands in as recency only).
 

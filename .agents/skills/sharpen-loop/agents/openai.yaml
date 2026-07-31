@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sharpen Loop"
+  short_description: "Run one safe test-sharpening audit"
+  default_prompt: "Use $sharpen-loop to run one dry-run Sharpen audit in an isolated worktree."
