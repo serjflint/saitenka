@@ -63,6 +63,8 @@ def _make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
     return clip, srt
 
 
+@pytest.mark.live
+@pytest.mark.timeout(30)
 def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
     from overlay.app.controller import Reader
     from overlay.mpvio.discover import find_mpv

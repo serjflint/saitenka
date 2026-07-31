@@ -36,7 +36,7 @@ ROOT = (
 )  # repo root; git paths are root-relative, ruff/pytest paths are overlay-relative
 OV = "overlay/"
 
-TIER = "not (slow or integration or requires_display or e2e)"  # mirror `poe test`'s fast universe
+TIER = "not (slow or integration or requires_display or e2e or live)"  # mirror `poe test`'s fast universe
 DYNAMIC_IMPORT = (
     "importlib.import_module",
     "importlib.util",
