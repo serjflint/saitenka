@@ -22,4 +22,6 @@ class OverlayId(IntEnum):
     TRANS = 4
     PREVIEW = 5
     NESTED = 6  # a scan popup opened by hovering a word *inside* the tooltip
+    SIDEBAR = 7
+    ANALYSIS = 8  # reserved for #66; keeps the two large surfaces collision-free
     LOADING = 9  # top-left "loading dictionaries" spinner during progressive startup

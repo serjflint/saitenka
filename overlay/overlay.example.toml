@@ -29,6 +29,7 @@
 # hover_pause_key = "Alt+p"  # toggle hover auto-pause for the current session
 # subtitle_language_key = "Alt+t"  # switch the primary subtitle between Japanese and English
 # bookmark_key = "Alt+b"  # toggle the active cue in the persistent deferred-capture backlog
+# sidebar_key = "\\"  # toggle the whole-track subtitle and deferred-capture sidebar
 # banded = true              # experimental windowed (O(viewport)) tooltip renderer; SAITENKA_BANDED=1 also enables it
 
 # ── Translation ──────────────────────────────────────────────────────────────────────────────────

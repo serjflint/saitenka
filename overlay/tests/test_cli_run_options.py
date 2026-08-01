@@ -34,12 +34,14 @@ def test_run_options_read_hover_pause_key():
             "hover_pause_key": "Alt+q",
             "subtitle_language_key": "Alt+l",
             "bookmark_key": "Alt+b",
+            "sidebar_key": "Alt+s",
         },
         **_BASE_KWARGS,
     )
     assert opts.keys.hover_pause_key == "Alt+q"
     assert opts.keys.subtitle_language_key == "Alt+l"
     assert opts.keys.bookmark_key == "Alt+b"
+    assert opts.keys.sidebar_key == "Alt+s"
 
 
 def test_attach_options_read_hover_pause_settings():
@@ -49,6 +51,7 @@ def test_attach_options_read_hover_pause_settings():
             "hover_pause_key": "Alt+q",
             "subtitle_language_key": "Alt+l",
             "bookmark_key": "Alt+b",
+            "sidebar_key": "Alt+s",
         },
         mine={},
     )
@@ -56,3 +59,4 @@ def test_attach_options_read_hover_pause_settings():
     assert opts.keys.hover_pause_key == "Alt+q"
     assert opts.keys.subtitle_language_key == "Alt+l"
     assert opts.keys.bookmark_key == "Alt+b"
+    assert opts.keys.sidebar_key == "Alt+s"

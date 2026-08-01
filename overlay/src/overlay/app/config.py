@@ -70,6 +70,7 @@ class KeyOptions:
     translate_key: str = "t"
     subtitle_language_key: str = "Alt+t"
     bookmark_key: str = "Alt+b"
+    sidebar_key: str = "\\"
     preview_key: str = "p"
     hover_pause_key: str = "Alt+p"
     sub_prev_key: str = "Alt+LEFT"

@@ -181,6 +181,9 @@ class Miner:
             existing = dedupe(r.anki, r.mine_cfg, card.expression)
             if existing:
                 r._mark_mined(card.expression)  # already in the deck → ✓
+                from overlay.app import sidebar
+
+                sidebar.mark_active_mined(r)
                 r._preview_existing(existing[0], card, "duplicate")
                 return
             video = r._get("path")
@@ -202,6 +205,9 @@ class Miner:
                 return
             r.anki.add_note(note)
             r._mark_mined(card.expression)
+            from overlay.app import sidebar
+
+            sidebar.mark_active_mined(r)
             r._preview_mined(card, tok, video)
         except AnkiError as e:
             r._toast(f"mine failed: {e}", "err")
