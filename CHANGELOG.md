@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-01
+
 ### Added
 
 - **FSRS maturity coloring** — an optional copied Anki database distinguishes learning, young,
@@ -24,6 +26,10 @@ logs.
   translation track only while its translation overlay is visible, follows manual primary-track
   changes with a language/count indicator, and `Alt+o` hands rendering and the OSD back to mpv while
   Saitenka is hidden.
+- **Fetched Japanese subtitles now appear promptly and survive later runs.** Jimaku and TsukiHime
+  share a provider-neutral cache of finished subtitle files; startup reuses that cache before opening
+  mpv, and a late fetch replaces an untouched English fallback without overriding a manual track
+  choice.
 - **Missing Anki on Windows no longer opens the shell's “cannot find anki” dialog.** Saitenka resolves
   the installed executable directly and quietly leaves mining unavailable when it cannot.
 - **The subtitle sidebar now consumes completed episode analysis**, showing N+1/N+2 cue badges and
