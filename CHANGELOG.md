@@ -9,6 +9,10 @@ logs.
 
 ### Added
 
+- **Pick which entry to mine (Yomitan-style stacked entries).** A word with several readings (退く =
+  のく / しりぞく) now shows each entry as its own block with its own reading and its own ⊕, so you mine
+  the exact reading and gloss you mean — not one fused card. Each block's ⊕ flips to ✓ once the word is
+  in the deck, and the reading names double as the tab / keyboard-nav sections.
 - **Blended rareness pill in the tooltip.** A single `diff` chip leads the frequency row with the
   harmonic-mean rank across every loaded **rank-based** frequency dictionary — one summary of the 7+
   per-dict pills, shown for any word the freq dicts cover (deck membership irrelevant). It is
@@ -16,6 +20,12 @@ logs.
   Occurrence-based dicts are excluded from the blend — their per-corpus dense rank is not comparable
   across lists, so only true ranks are combined (they still show their own pill). The blend matches
   `tools/anki_rank_dicts.py`, so the tooltip and the ranked mining lists agree on how rare a word is.
+
+### Changed
+
+- **Better default reading for the mined card.** When a headword has several readings, the auto-picked
+  entry now prefers the one matching the reading actually used in the line (退いた → のく, not しりぞく),
+  then the more common reading by frequency — instead of always taking the first dictionary entry.
 
 ## [1.1.0] - 2026-08-01
 
