@@ -63,6 +63,9 @@ class PanelKey(NamedTuple):
     tabs: bool = (
         True  # dict-tab strip reserved/drawn (base tooltip); a nested popup builds with tabs=False
     )
+    # Per-stacked-entry mined state (aligned to cards_for order): flips a group's ⊕→✓ and, as part of
+    # the key, rebuilds the panel when one stacked entry gets mined. () for single-entry words.
+    group_mined: tuple[bool, ...] = ()
 
 
 # --- hover -----------------------------------------------------------------------------------------
@@ -340,6 +343,23 @@ def hit_nested_speaker(reader: Reader, x: float, y: float) -> bool:
 # --- click routing -----------------------------------------------------------------------------
 
 
+def _mine_link(reader: Reader, lb, tok) -> bool:
+    """A stacked entry's ⊕ arrives as a ``LinkBox('mine:<card_index>')`` (it rides the normal link
+    hit-test). Mine that exact entry via ``cards_for(tok)[i]`` and report handled, so the caller does
+    not treat it as a cross-reference navigation. Not a mine link → False."""
+    if (
+        tok is None
+        or not isinstance(getattr(lb, "query", None), str)
+        or not lb.query.startswith("mine:")
+    ):
+        return False
+    cards = reader.dict_set.cards_for(tok) if reader.dict_set else []
+    idx = int(lb.query[len("mine:") :])
+    if 0 <= idx < len(cards):
+        reader._mine_token(tok, card=cards[idx])
+    return True
+
+
 def _click_nested(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the nested popup. Returns True if it did (regardless of what, if
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
@@ -351,7 +371,7 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
         speak(reader._nest.state.reading)  # 🔊 → read the inner word aloud
     else:
         lb = reader._link_hit(x, y, reader._nest.state, reader._nest.xy, reader._nest.scroll)
-        if lb is not None:
+        if lb is not None and not _mine_link(reader, lb, reader._nest.token):
             reader._open_link(lb, reader._nest.xy, reader._nest.scroll)  # cross-ref → navigate
     return True
 
@@ -374,7 +394,9 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
             return True
     lb = reader._link_hit(x, y, reader._tip_state, reader._tip_xy, reader._tip_scroll)
     if lb is not None:
-        reader._open_link(lb, reader._tip_xy, reader._tip_scroll)  # cross-ref → nested popup
+        tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
+        if not _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
+            reader._open_link(lb, reader._tip_xy, reader._tip_scroll)  # cross-ref → nested popup
     else:
         reader._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
     return True
@@ -410,6 +432,7 @@ def panel_key(
         anki_ok(reader),
         mined,
         tabs,
+        group_mined_of(reader, tok),
     )
 
 
@@ -422,6 +445,21 @@ def is_mined(reader: Reader, tok) -> bool:
         return card_for(tok).expression in reader._mined
     except Exception:  # noqa: BLE001  # render hot path - any lookup hiccup just hides the mined mark
         return False
+
+
+def group_mined_of(reader: Reader, tok) -> tuple[bool, ...]:
+    """Per-stacked-entry mined flags (aligned to ``cards_for`` order) for a multi-reading word — each
+    entry's ⊕ shows ✓ when that exact (expression, reading) is already in the deck. () when nothing is
+    mined yet (cheap short-circuit) or the word has fewer than two entries (no stacking)."""
+    if not reader._mined or reader.dict_set is None:
+        return ()
+    try:
+        cards = reader.dict_set.cards_for(tok)
+    except Exception:  # noqa: BLE001  # render hot path - a lookup hiccup just hides the mined marks
+        return ()
+    if len(cards) < 2:
+        return ()
+    return tuple(c.expression in reader._mined for c in cards)
 
 
 def anki_ok(reader: Reader) -> bool:
@@ -530,14 +568,15 @@ def _build_panel(
         during_scroll="1" if reader._scrolled_this_tick else "0",
     ):
         entry = entry_for_tok(reader, tok, inflected)
-        # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it clears
-        # the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for this
-        # word's dict names at this width, so a many-dict strip that wraps onto several rows
-        # reserves enough. Nested popups (tabs=False) reserve nothing.
+        # Reserve space for the sticky tab strip (base tooltip, ≥2 sections, tabs on) so it clears
+        # the header (reading + ⊕/🔊) instead of overlapping it. Sections are the per-reading stacked
+        # entries when grouped, else the dict names; use the WRAPPED height for those labels at this
+        # width so a strip that wraps onto several rows reserves enough. Nested popups reserve nothing.
+        sections = (
+            [g.reading for g in entry.groups] if entry.groups else [d.dict_name for d in entry.defs]
+        )
         reserve = (
-            tab_strip_height([d.dict_name for d in entry.defs], reader.tip_width)
-            if (tabs and len(entry.defs) >= 2)
-            else 0
+            tab_strip_height(sections, reader.tip_width) if (tabs and len(sections) >= 2) else 0
         )
         lazy = LazyPanel(
             panel_rows(
@@ -546,6 +585,7 @@ def _build_panel(
                 add_button=anki_ok(reader),
                 mined=mined,
                 speak_button=reader._tts_ok,
+                group_mined=_key.group_mined,
             ),
             reader.tip_width,
             top_reserve=reserve,
@@ -561,6 +601,7 @@ def _build_panel(
                     add_button=anki_ok(reader),
                     mined=mined,
                     speak_button=reader._tts_ok,
+                    group_mined=_key.group_mined,
                 ),
                 reader.tip_width,
                 top_reserve=reserve,

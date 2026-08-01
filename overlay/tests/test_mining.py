@@ -372,6 +372,63 @@ def _make_dict(path, title, entries):
     return str(path)
 
 
+def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
+    """The per-entry ⊕ arrives as a 'mine:<i>' LinkBox; _mine_link mines cards_for(tok)[i] — clicking
+    the しりぞく block (index 1) mines that reading/gloss, not the default のく."""
+    import dicthelp
+    from util import FakeIPC
+
+    from overlay.app import tooltip
+    from overlay.app.controller import Reader
+    from overlay.app.tokenize import Token
+    from overlay.model import LinkBox
+
+    d = _make_dict(
+        tmp_path / "tk.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    ipc = FakeIPC()
+    ipc.props["path"] = "/x/S - 01.mkv"
+    anki = _FakeAnki()
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
+    r.set_subtitle("退いた")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _b, _v: ("", ""))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    handled = tooltip._mine_link(
+        r, LinkBox("mine:1", 0, 0, 10, 10), tok
+    )  # cards_for: のく=0, しりぞく=1
+    assert handled
+    f = anki.added[0]["fields"]
+    assert (f["Expression"], f["ExpressionReading"]) == ("退く", "しりぞく")
+    assert f["Glossary"] == "<ol><li>to retreat</li></ol>"
+
+
+def test_group_mined_of_marks_entries_by_expression(tmp_path):
+    """Per-stacked-entry ✓ state tracks deck membership by expression (Anki's dedup key): mining 退く
+    flips every 退く reading-block, since a second reading would be a duplicate expression."""
+    import dicthelp
+    from util import FakeIPC
+
+    from overlay.app import tooltip
+    from overlay.app.controller import Reader
+    from overlay.app.tokenize import Token
+
+    d = _make_dict(
+        tmp_path / "gm.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    r = Reader(FakeIPC(), dict_set=ds)
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    assert tooltip.group_mined_of(r, tok) == ()  # nothing mined yet → no per-group flags
+    r._mined.add("退く")
+    assert tooltip.group_mined_of(r, tok) == (True, True)  # both entries share expression 退く
+
+
 def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
     that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
