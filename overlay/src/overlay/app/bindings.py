@@ -16,6 +16,7 @@ SUBTITLE_RETRY_MSG = "saitenka-retry-subtitle-providers"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 BOOKMARK_MSG = "saitenka-toggle-bookmark"
 SIDEBAR_MSG = "saitenka-toggle-sidebar"
+ANALYSIS_MSG = "saitenka-toggle-analysis"
 ANNOTATION_MSG = "saitenka-toggle-annotations"
 HELP_TOGGLE_MSG = "saitenka-toggle-help"
 HELP_PREV_MSG = "saitenka-help-prev"
@@ -100,6 +101,7 @@ BINDINGS: tuple[BindingSpec, ...] = (
     BindingSpec(
         "Essentials & language", "Subtitle and backlog sidebar", SIDEBAR_MSG, key_attr="sidebar_key"
     ),
+    BindingSpec("Essentials & language", "Episode analysis", ANALYSIS_MSG, key_attr="analysis_key"),
     BindingSpec("Subtitle navigation", "Previous subtitle", SUB_PREV_MSG, key_attr="sub_prev_key"),
     BindingSpec("Subtitle navigation", "Next subtitle", SUB_NEXT_MSG, key_attr="sub_next_key"),
     BindingSpec(

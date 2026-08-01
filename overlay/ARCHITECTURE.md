@@ -36,6 +36,7 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
   (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenize.py` (fugashi/unidic-lite word
   segmentation); `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite dictionary DB);
   `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring); `anki.py`/`miner.py` (mining);
+  `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
   (subtitle fetching); `cli.py`/`cli_run.py` (the entry point — thin parser + real orchestration).
 

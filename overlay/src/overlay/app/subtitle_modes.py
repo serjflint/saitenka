@@ -99,6 +99,9 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.en_sid = startup.tracks.en_sid
     reader.subtitle_language = startup.active or "jp"
     reader.subtitle_slang = slang
+    from overlay.app import analysis_overlay
+
+    analysis_overlay.on_index_changed(reader)
 
 
 def setup_secondary(reader: Reader) -> int | None:
@@ -135,6 +138,9 @@ def toggle(reader: Reader) -> None:
     reader.ipc.command("set_property", "sid", sid)
     reader.subtitle_language = target
     reader._sub_index = None
+    from overlay.app import analysis_overlay
+
+    analysis_overlay.on_index_changed(reader)
     reader.set_subtitle("")
     setup_secondary(reader)
     from overlay.app.embedded_subs import build_sub_index_for_current_track

@@ -851,6 +851,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             subtitle_language_key=cfg.get("subtitle_language_key", ko.subtitle_language_key),
             bookmark_key=cfg.get("bookmark_key", ko.bookmark_key),
             sidebar_key=cfg.get("sidebar_key", ko.sidebar_key),
+            analysis_key=cfg.get("analysis_key", ko.analysis_key),
             annotation_key=cfg.get("annotation_key", ko.annotation_key),
             help_key=cfg.get("help_key", ko.help_key),
             subtitle_retry_key=cfg.get("subtitle_retry_key", ko.subtitle_retry_key),

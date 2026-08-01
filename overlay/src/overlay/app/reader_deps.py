@@ -331,6 +331,9 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     reader.anki = deps.get("anki")
     reader.mine_cfg = deps.get("mine_cfg")
     reader.dict_set = deps.get("dict_set")
+    from overlay.app import analysis_overlay
+
+    analysis_overlay.on_vocabulary_changed(reader)
     if reader.sub_text:  # re-tokenise + re-score the CURRENT cue so coloring appears now
         reader.set_subtitle(reader.sub_text)
     if reader.anki:

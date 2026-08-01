@@ -24,6 +24,9 @@ def load_sub_index(reader: Reader, path) -> None:
     from overlay.app import sidebar
 
     sidebar.on_index_changed(reader)
+    from overlay.app import analysis_overlay
+
+    analysis_overlay.on_index_changed(reader)
 
 
 def _get_float(reader: Reader, prop: str) -> float | None:

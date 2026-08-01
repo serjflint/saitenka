@@ -357,6 +357,7 @@ def _build_run_options(
             subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),
             bookmark_key=cfg.get("bookmark_key", _ko.bookmark_key),
             sidebar_key=cfg.get("sidebar_key", _ko.sidebar_key),
+            analysis_key=cfg.get("analysis_key", _ko.analysis_key),
             annotation_key=cfg.get("annotation_key", _ko.annotation_key),
             help_key=cfg.get("help_key", _ko.help_key),
             subtitle_retry_key=cfg.get("subtitle_retry_key", _ko.subtitle_retry_key),

@@ -75,6 +75,10 @@ from Anki (`app/wordlists.py::KnownWords.from_ankiconnect`, decks→fields like 
 frequency from any Yomitan freq zip (user-supplied, e.g. under `tools/freq/`); JLPT from the vendored
 `assets/wordlists/jlpt.zip`. Result: `tests/artifacts/mvp_reader_colored.png`.
 
+Backquote opens a playback-neutral whole-track analysis with sentence/content-token totals, unique
+lemmas and kanji, unknown vocabulary, known coverage, N+1/N+2 counts, and optional JLPT/frequency
+distributions. Analysis runs in the background and is cached for the subtitle and vocabulary snapshot.
+
 ```bash
 uv run python examples/mpv_reader.py --sub-file jp.srt --color \
   --known "私,本,経" --freq "Frequency General"

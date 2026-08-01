@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from overlay import otel_metrics
 from overlay.app import (
+    analysis_overlay,
     backlog,
     help_overlay,
     miner_ui,
@@ -33,6 +34,7 @@ from overlay.app import (
     translation,
 )
 from overlay.app.bindings import (
+    ANALYSIS_MSG,
     ANNOTATION_MSG,
     BOOKMARK_MSG,
     CLICK_MSG,
@@ -87,6 +89,7 @@ if TYPE_CHECKING:
     import numpy as np
 
     from overlay.app.card_preview import PreviewData
+    from overlay.app.episode_analysis import AnalysisKey, EpisodeAnalysis
     from overlay.app.sub_index import SubIndex
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
@@ -157,6 +160,7 @@ class Reader:
         self.subtitle_language_key = o.keys.subtitle_language_key
         self.bookmark_key = o.keys.bookmark_key
         self.sidebar_key = o.keys.sidebar_key
+        self.analysis_key = o.keys.analysis_key
         self.annotation_key = o.keys.annotation_key
         self.help_key = o.keys.help_key
         self.subtitle_retry_key = o.keys.subtitle_retry_key
@@ -255,6 +259,14 @@ class Reader:
         self._sidebar_hits: tuple = ()
         self._sidebar_style_cache: dict = {}
         self._sidebar_geometry: tuple | None = None
+        self._analysis_open = False
+        self._analysis_status = "Analyzing…"
+        self._episode_analysis: EpisodeAnalysis | None = None
+        self._analysis_cache: dict[AnalysisKey, EpisodeAnalysis] = {}
+        self._analysis_results: queue.SimpleQueue = queue.SimpleQueue()
+        self._analysis_threads: list[threading.Thread] = []
+        self._analysis_generation = 0
+        self._analysis_active_key: AnalysisKey | None = None
         self._help_open = False
         self._help_page = 0
         self._last_jpg: Path | None = None
@@ -938,6 +950,9 @@ class Reader:
     def toggle_sidebar(self) -> None:
         sidebar.toggle(self)
 
+    def toggle_analysis(self) -> None:
+        analysis_overlay.toggle(self)
+
     def toggle_annotation_mode(self) -> None:
         self.annotation_mode = "hover" if self.annotation_mode == "full" else "full"
         self._annotation_hover = False
@@ -972,6 +987,7 @@ class Reader:
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         SIDEBAR_MSG: lambda r: r.toggle_sidebar(),
+        ANALYSIS_MSG: lambda r: r.toggle_analysis(),
         ANNOTATION_MSG: lambda r: r.toggle_annotation_mode(),
         HELP_TOGGLE_MSG: lambda r: r.toggle_help(),
         HELP_PREV_MSG: lambda r: help_overlay.step(r, -1),
@@ -1027,10 +1043,12 @@ class Reader:
                 if self.sub_text.strip():
                     self._draw_subtitle()
                 help_overlay.redraw(self)
+                analysis_overlay.redraw(self)
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
             subtitle_modes.apply_fetch_results(self)
+            analysis_overlay.apply_results(self)
             sidebar.update(self)
             self._update_hover()
             self._refresh_dirty_panels()
@@ -1206,6 +1224,8 @@ class Reader:
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         for th in self._subtitle_fetch_threads:
+            th.join(timeout=2.0)
+        for th in self._analysis_threads:
             th.join(timeout=2.0)
         if self._backlog_store is not None:
             self._backlog_store.close()

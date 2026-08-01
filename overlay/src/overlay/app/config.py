@@ -72,6 +72,7 @@ class KeyOptions:
     subtitle_language_key: str = "Alt+t"
     bookmark_key: str = "Alt+b"
     sidebar_key: str = "\\"
+    analysis_key: str = "`"
     annotation_key: str = "Alt+a"
     help_key: str = "F1"
     subtitle_retry_key: str = "Ctrl+Shift+T"
