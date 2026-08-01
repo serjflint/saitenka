@@ -12,6 +12,8 @@ logs.
 - **FSRS maturity coloring** — an optional copied Anki database distinguishes learning, young,
   mature-known, and forgotten words without opening the live collection. N+1 remains the strongest
   signal, and learning/young colors can be overridden under `[palette]`.
+- **Utility overlays can be resized together** with top-level `ui_scale`, covering the shortcut help,
+  subtitle/backlog sidebar, and episode-analysis window while preserving the `1.0` default.
 
 ### Fixed
 

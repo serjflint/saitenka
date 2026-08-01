@@ -48,11 +48,17 @@ class HelpDocument:
     pages: tuple[HelpPage, ...]
     width: int
     height: int
+    scale: float
 
 
-def _dimensions(osd: tuple[int, int]) -> tuple[int, int]:
-    width = max(240, min(PANEL_MAX_W, osd[0] - PANEL_MARGIN * 2))
-    height = max(150, min(PANEL_MAX_H, osd[1] - PANEL_MARGIN * 2))
+def _px(value: int, scale: float) -> int:
+    return max(1, round(value * scale))
+
+
+def _dimensions(osd: tuple[int, int], scale: float) -> tuple[int, int]:
+    margin = _px(PANEL_MARGIN, scale)
+    width = max(_px(240, scale), min(_px(PANEL_MAX_W, scale), osd[0] - margin * 2))
+    height = max(_px(150, scale), min(_px(PANEL_MAX_H, scale), osd[1] - margin * 2))
     return width, height
 
 
@@ -95,11 +101,13 @@ def _paginate(
 
 
 def build_document(
-    entries: tuple[HelpEntry, ...], *, osd: tuple[int, int], footer: str
+    entries: tuple[HelpEntry, ...], *, osd: tuple[int, int], footer: str, scale: float = 1.0
 ) -> HelpDocument:
-    width, height = _dimensions(osd)
-    capacity = max(2, (height - HEADER_H - FOOTER_H) // ROW_H)
-    return HelpDocument(_paginate(_group(entries), capacity=capacity, footer=footer), width, height)
+    width, height = _dimensions(osd, scale)
+    capacity = max(2, (height - _px(HEADER_H, scale) - _px(FOOTER_H, scale)) // _px(ROW_H, scale))
+    return HelpDocument(
+        _paginate(_group(entries), capacity=capacity, footer=footer), width, height, scale
+    )
 
 
 def _font(size: int, weight: int = 400):
@@ -115,33 +123,60 @@ def _ellipsize(draw: ImageDraw.ImageDraw, text: str, font, width: int) -> str:
     return text + suffix
 
 
-def render_page(page: HelpPage, *, width: int, height: int, index: int, total: int) -> Image.Image:
+def render_page(
+    page: HelpPage,
+    *,
+    width: int,
+    height: int,
+    index: int,
+    total: int,
+    scale: float = 1.0,
+) -> Image.Image:
     image = Image.new("RGBA", (width, height), BG)
     draw = ImageDraw.Draw(image)
-    title_font = _font(22, 650)
-    section_font = _font(13, 650)
-    body_font = _font(16)
-    small_font = _font(12)
-    draw.text((16, 26), "Saitenka shortcuts", font=title_font, fill=WHITE, anchor="lm")
-    draw.text((width - 16, 26), f"{index + 1} / {total}", font=small_font, fill=MUTED, anchor="rm")
-    y = HEADER_H
+
+    def px(value: int) -> int:
+        return _px(value, scale)
+
+    title_font = _font(px(22), 650)
+    section_font = _font(px(13), 650)
+    body_font = _font(px(16))
+    small_font = _font(px(12))
+    row_h, footer_h = px(ROW_H), px(FOOTER_H)
+    draw.text((px(16), px(26)), "Saitenka shortcuts", font=title_font, fill=WHITE, anchor="lm")
+    draw.text(
+        (width - px(16), px(26)),
+        f"{index + 1} / {total}",
+        font=small_font,
+        fill=MUTED,
+        anchor="rm",
+    )
+    y = px(HEADER_H)
     for section in page.sections:
         draw.text(
-            (16, y + ROW_H // 2),
+            (px(16), y + row_h // 2),
             section.title.upper(),
             font=section_font,
             fill=ACCENT,
             anchor="lm",
         )
-        y += ROW_H
+        y += row_h
         for entry in section.entries:
-            draw.rounded_rectangle((12, y + 2, width - 12, y + ROW_H - 2), radius=6, fill=ROW_BG)
-            key_width = min(148, max(52, round(draw.textlength(entry.key, font=small_font)) + 20))
             draw.rounded_rectangle(
-                (18, y + 5, 18 + key_width, y + ROW_H - 5), radius=5, fill=KEY_BG
+                (px(12), y + px(2), width - px(12), y + row_h - px(2)),
+                radius=px(6),
+                fill=ROW_BG,
+            )
+            key_width = min(
+                px(148), max(px(52), round(draw.textlength(entry.key, font=small_font)) + px(20))
+            )
+            draw.rounded_rectangle(
+                (px(18), y + px(5), px(18) + key_width, y + row_h - px(5)),
+                radius=px(5),
+                fill=KEY_BG,
             )
             draw.text(
-                (18 + key_width // 2, y + ROW_H // 2),
+                (px(18) + key_width // 2, y + row_h // 2),
                 entry.key,
                 font=small_font,
                 fill=WHITE,
@@ -150,23 +185,26 @@ def render_page(page: HelpPage, *, width: int, height: int, index: int, total: i
             badge = "mpv" if entry.source == "mpv" else entry.context
             badge_width = 0
             if badge:
-                badge_width = min(124, round(draw.textlength(badge, font=small_font)) + 16)
-                bx = width - badge_width - 18
+                badge_width = min(px(124), round(draw.textlength(badge, font=small_font)) + px(16))
+                bx = width - badge_width - px(18)
                 draw.text(
-                    (bx + badge_width // 2, y + ROW_H // 2),
+                    (bx + badge_width // 2, y + row_h // 2),
                     badge,
                     font=small_font,
                     fill=MUTED,
                     anchor="mm",
                 )
-            text_x = 18 + key_width + 12
-            label_width = width - text_x - badge_width - 28
-            label = _ellipsize(draw, entry.label, body_font, max(24, label_width))
-            draw.text((text_x, y + ROW_H // 2), label, font=body_font, fill=WHITE, anchor="lm")
-            y += ROW_H
-    draw.line((12, height - FOOTER_H, width - 12, height - FOOTER_H), fill=(59, 70, 85, 255))
+            text_x = px(18) + key_width + px(12)
+            label_width = width - text_x - badge_width - px(28)
+            label = _ellipsize(draw, entry.label, body_font, max(px(24), label_width))
+            draw.text((text_x, y + row_h // 2), label, font=body_font, fill=WHITE, anchor="lm")
+            y += row_h
+    draw.line(
+        (px(12), height - footer_h, width - px(12), height - footer_h),
+        fill=(59, 70, 85, 255),
+    )
     draw.text(
-        (width // 2, height - FOOTER_H // 2),
+        (width // 2, height - footer_h // 2),
         page.footer,
         font=small_font,
         fill=MUTED,

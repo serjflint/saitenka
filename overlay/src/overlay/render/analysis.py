@@ -57,27 +57,41 @@ def _rows(result: EpisodeAnalysis | None, status: str) -> tuple[tuple[str, str],
 
 
 def render_analysis(
-    result: EpisodeAnalysis | None, status: str, *, osd: tuple[int, int], close_key: str
+    result: EpisodeAnalysis | None,
+    status: str,
+    *,
+    osd: tuple[int, int],
+    close_key: str,
+    scale: float = 1.0,
 ) -> Image.Image:
-    width = max(320, min(680, osd[0] - 32))
+    def px(value: int) -> int:
+        return max(1, round(value * scale))
+
+    width = max(px(320), min(px(680), osd[0] - px(32)))
     rows = _rows(result, status)
-    height = 78 + len(rows) * 40 + 38
+    height = px(78) + len(rows) * px(40) + px(38)
     image = Image.new("RGBA", (width, height), BG)
     draw = ImageDraw.Draw(image)
-    title = _font(22, 650)
-    body = _font(15)
-    small = _font(12)
-    draw.text((18, 28), "Episode analysis", font=title, fill=WHITE, anchor="lm")
-    draw.text((width - 18, 28), f"{close_key} close", font=small, fill=MUTED, anchor="rm")
-    y = 58
-    for label, value in rows:
-        draw.rounded_rectangle((12, y, width - 12, y + 34), radius=6, fill=ROW_BG)
-        draw.text((22, y + 17), label, font=body, fill=ACCENT, anchor="lm")
-        if value:
-            draw.text((width - 22, y + 17), value, font=body, fill=WHITE, anchor="rm")
-        y += 40
+    title = _font(px(22), 650)
+    body = _font(px(15))
+    small = _font(px(12))
+    draw.text((px(18), px(28)), "Episode analysis", font=title, fill=WHITE, anchor="lm")
     draw.text(
-        (width // 2, height - 18),
+        (width - px(18), px(28)),
+        f"{close_key} close",
+        font=small,
+        fill=MUTED,
+        anchor="rm",
+    )
+    y = px(58)
+    for label, value in rows:
+        draw.rounded_rectangle((px(12), y, width - px(12), y + px(34)), radius=px(6), fill=ROW_BG)
+        draw.text((px(22), y + px(17)), label, font=body, fill=ACCENT, anchor="lm")
+        if value:
+            draw.text((width - px(22), y + px(17)), value, font=body, fill=WHITE, anchor="rm")
+        y += px(40)
+    draw.text(
+        (width // 2, height - px(18)),
         "Static subtitle-track metrics · playback unchanged",
         font=small,
         fill=MUTED,

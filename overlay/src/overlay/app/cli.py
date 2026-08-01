@@ -860,6 +860,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PanelOptions,
         PerfOptions,
         ReaderOptions,
         StatsOptions,
@@ -912,6 +913,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             enabled=bool(stats.get("enabled", False)),
             summary=bool(stats.get("summary", True)),
         ),
+        panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", po.prefetch_workers),

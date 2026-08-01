@@ -30,7 +30,8 @@ def _format_time(seconds: float) -> str:
 
 def _capacity(reader: Reader) -> int:
     height = max(180, round(reader.osd[1] * 0.84))
-    return max(1, (height - 52 - 28) // 54)
+    scale = reader.ui_scale
+    return max(1, (height - round(52 * scale) - round(28 * scale)) // round(54 * scale))
 
 
 def _active_index(reader: Reader) -> int:
@@ -218,9 +219,15 @@ def _summary_rows(reader: Reader) -> list[SidebarRow]:
 def redraw(reader: Reader) -> None:
     if not reader._sidebar_open:
         return
-    width = min(620, max(360, round(reader.osd[0] * 0.4)))
+    scale = reader.ui_scale
+    margin = round(18 * scale)
+    target_width = min(
+        round(620 * scale),
+        max(round(360 * scale), round(reader.osd[0] * 0.4 * scale)),
+    )
+    width = max(320, min(target_width, reader.osd[0] - margin * 2))
     height = max(180, round(reader.osd[1] * 0.84))
-    x, y = reader.osd[0] - width - 18, round(reader.osd[1] * 0.08)
+    x, y = reader.osd[0] - width - margin, round(reader.osd[1] * 0.08)
     capacity = _capacity(reader)
     unavailable = None
     try:
@@ -245,6 +252,7 @@ def redraw(reader: Reader) -> None:
         total=total,
         first=reader._sidebar_scroll,
         unavailable=unavailable,
+        scale=scale,
     )
     reader._sidebar_rect = (x, y, width, height)
     reader._sidebar_hits = rendered.hitboxes

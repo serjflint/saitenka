@@ -17,6 +17,7 @@
 # slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
 
 # ── Tooltip geometry & feel ──────────────────────────────────────────────────────────────────────
+# ui_scale = 1.0             # help, sidebar, and episode-analysis size (0.75–2.0)
 # tip_height = 0.4           # BASE tooltip max height as a fraction of the video height
 # nested_max_frac = 0.6      # nested (scan) popup max height fraction — deliberately roomier
 # show_dict_tabs = false     # sticky per-dictionary tab strip on the base tooltip
@@ -27,7 +28,7 @@
 # panel_cache_max = 128      # LRU cap on cached (compressed) rendered tooltip panels
 # pause_on_tooltip = true    # freeze the frame while a tooltip is shown (the mining default)
 # hover_pause_key = "Alt+p"  # toggle hover auto-pause for the current session
-# overlay_toggle_key = "Alt+o"  # hide/show Saitenka without changing mpv subtitle visibility
+# overlay_toggle_key = "Alt+o"  # hide/show Saitenka; hidden mode restores mpv subtitles and OSD
 # subtitle_language_key = "Alt+t"  # switch the primary subtitle between Japanese and English
 # bookmark_key = "Alt+b"  # toggle the active cue in the persistent deferred-capture backlog
 # sidebar_key = "\\"  # toggle the whole-track subtitle and deferred-capture sidebar

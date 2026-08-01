@@ -137,6 +137,13 @@ class StatsOptions:
 
 
 @dataclass(frozen=True)
+class PanelOptions:
+    """Scale for the help, sidebar, and episode-analysis utility surfaces."""
+
+    scale: float = 1.0
+
+
+@dataclass(frozen=True)
 class PerfOptions:
     """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
 
@@ -177,6 +184,7 @@ _OPTION_GROUPS: dict[str, str] = {
     **{f.name: "tooltip" for f in fields(TooltipOptions)},
     **{f.name: "mining" for f in fields(MiningOptions)},
     **{f.name: "translation" for f in fields(TranslationOptions)},
+    **{f.name: "panels" for f in fields(PanelOptions)},
     **{f.name: "perf" for f in fields(PerfOptions)},
 }
 
@@ -190,6 +198,7 @@ class ReaderOptions:
     mining: MiningOptions = MiningOptions()
     translation: TranslationOptions = TranslationOptions()
     stats: StatsOptions = StatsOptions()
+    panels: PanelOptions = PanelOptions()
     perf: PerfOptions = PerfOptions()
     prefetch: bool = True
     resync: bool = True  # auto-resync jimaku-sourced subs via alass/ffsubsync
@@ -199,7 +208,12 @@ class ReaderOptions:
         """Route flat legacy kwargs (``mine_key=…``, ``tip_max_frac=…``) onto the right group.
         Unknown names raise TypeError so typos stay loud."""
         keys, tooltip = self.keys, self.tooltip
-        mining, translation, stats = self.mining, self.translation, self.stats
+        mining, translation, stats, panels = (
+            self.mining,
+            self.translation,
+            self.stats,
+            self.panels,
+        )
         perf = self.perf
         prefetch, resync, overlay_id_base = self.prefetch, self.resync, self.overlay_id_base
         for name, value in kw.items():
@@ -218,6 +232,8 @@ class ReaderOptions:
                 mining = replace(mining, **{name: value})
             elif group == "translation":
                 translation = replace(translation, **{name: value})
+            elif group == "panels":
+                panels = replace(panels, **{name: value})
             elif group == "perf":
                 perf = replace(perf, **{name: value})
             else:
@@ -229,6 +245,7 @@ class ReaderOptions:
             perf=perf,
             translation=translation,
             stats=stats,
+            panels=panels,
             prefetch=prefetch,
             resync=resync,
             overlay_id_base=overlay_id_base,

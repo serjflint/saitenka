@@ -268,3 +268,15 @@ def test_renderer_windows_rows_and_bounds_hitboxes():
         and hit.y + hit.h <= rendered.image.height
         for hit in rendered.hitboxes
     )
+
+
+def test_ui_scale_increases_sidebar_rows_and_reduces_capacity():
+    rows = [SidebarRow(value=i, timestamp="00:00", text=f"cue {i}") for i in range(20)]
+
+    normal = render_sidebar(rows, width=620, height=600, view="track", total=20, first=0)
+    enlarged = render_sidebar(
+        rows, width=930, height=600, view="track", total=20, first=0, scale=1.5
+    )
+
+    assert enlarged.image.width > normal.image.width
+    assert enlarged.row_capacity < normal.row_capacity

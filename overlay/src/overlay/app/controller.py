@@ -141,6 +141,7 @@ class Reader:
         if legacy_kw:
             o = o.with_overrides(**legacy_kw)
         self.options = o
+        self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
         self.sub_size_override = o.tooltip.sub_size

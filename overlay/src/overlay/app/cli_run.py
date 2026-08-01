@@ -340,6 +340,7 @@ def _build_run_options(
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PanelOptions,
         PerfOptions,
         ReaderOptions,
         StatsOptions,
@@ -394,6 +395,7 @@ def _build_run_options(
             enabled=bool(stats.get("enabled", False)),
             summary=bool(stats.get("summary", True)),
         ),
+        panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),

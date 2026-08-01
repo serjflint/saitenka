@@ -10,7 +10,7 @@ from overlay.app.bindings import (
     SUB_NEXT_MSG,
     active_bindings,
 )
-from overlay.app.config import KeyOptions, ReaderOptions
+from overlay.app.config import KeyOptions, PanelOptions, ReaderOptions
 from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId
 from overlay.render.help import render_page
@@ -114,6 +114,19 @@ def test_small_osd_pages_and_repeats_navigation_hints():
         assert image.size == (document.width, document.height)
         assert image.width <= reader.osd[0]
         assert image.height <= reader.osd[1]
+
+
+def test_ui_scale_enlarges_help_document():
+    normal = Reader(FakeIPC(), options=ReaderOptions())
+    enlarged = Reader(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
+    normal.osd = enlarged.osd = (1920, 1080)
+
+    normal_document = help_overlay.document_for(normal)
+    enlarged_document = help_overlay.document_for(enlarged)
+
+    assert enlarged_document.width > normal_document.width
+    assert enlarged_document.height > normal_document.height
+    assert enlarged_document.scale == 1.5
 
 
 def test_toggle_navigation_and_escape_are_playback_neutral():

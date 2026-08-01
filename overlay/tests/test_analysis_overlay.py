@@ -7,6 +7,7 @@ from overlay.app.overlay_ids import OverlayId
 from overlay.app.scoring import Scorer
 from overlay.app.sub_index import SubCue, SubIndex
 from overlay.app.wordlists import KnownWords
+from overlay.render.analysis import render_analysis
 
 
 class FakeIPC:
@@ -113,3 +114,11 @@ def test_english_or_missing_japanese_track_is_unavailable():
     assert reader._analysis_status == "Japanese track unavailable"
     assert reader._episode_analysis is None
     assert not reader._analysis_threads
+
+
+def test_ui_scale_enlarges_episode_analysis_window():
+    normal = render_analysis(None, "Analyzing…", osd=(1920, 1080), close_key="`")
+    enlarged = render_analysis(None, "Analyzing…", osd=(1920, 1080), close_key="`", scale=1.5)
+
+    assert enlarged.width > normal.width
+    assert enlarged.height > normal.height
