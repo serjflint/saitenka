@@ -1,6 +1,6 @@
 [project]
 name = "saitenka"
-version = "1.0.0"
+version = "1.1.0"
 description = "Learn Japanese from the video you're watching: FSRS-aware subtitle coloring + one-key Anki mining, drawn inside mpv"
 readme = "PYPI.md"
 requires-python = ">=3.13"
@@ -26,6 +26,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/serjflint/saitenka"
+Documentation = "https://saitenka.readthedocs.io"
 Repository = "https://github.com/serjflint/saitenka"
 Issues = "https://github.com/serjflint/saitenka/issues"
 Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
