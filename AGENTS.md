@@ -31,8 +31,10 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate (no CI):** `uv run poe all` is the pre-push gate — 14 tasks (lint/types/arch/invariants/
-  complexity/test/test-ft/cov + supply-chain: audit/deps/licenses/spell/links/shell). Run it before
+- **Dev gate (no CI):** `uv run poe all` is the pre-push gate — its task list is `all` in
+  `[tool.poe.tasks]` (the source of truth: static checks + the suite + supply-chain). `cov` runs `-n auto`
+  with a superset marker set, so it is the functional run too — the standalone `test` stays the inner loop,
+  not a third suite run. Run it before
   pushing. The task-by-task runbook, how to read each failure, the advisory `poe hygiene` tier, and the
   free-threaded / 3.13-pinned-env traps live in the **dev-gate skill** (`.agents/skills/dev-gate/`) — consult it. The real tasks live
   in `overlay/`; the repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works from the repo

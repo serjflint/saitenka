@@ -337,6 +337,8 @@ complexity = { shell = "uv run --extra full complexipy" }
 # review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
 complexity-baseline = { shell = "uv run --extra full complexipy --snapshot-create" }
 # Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
+# Inner-loop task only — NOT in `all`: `cov` runs a superset marker set with `-n auto`, so it is the
+# gate's functional run too (no point running the suite a third time without coverage).
 test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e or live)'" }
 # -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
 # FT code paths still run without the GIL — it just parallelises (91s → ~22s).
@@ -345,7 +347,10 @@ test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not 
 # change can affect: ruff dependents reverse-closure + a full-run fallback on static-graph blind spots.
 # `poe affected` (working tree) / `poe affected --base main` (vs a branch) / `--print` to just list them.
 affected = { cmd = "uv run --extra full python tools/affected.py" }
-cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
+# The gate's functional + coverage run. `-n auto` parallelises it (~99s → ~38s); pytest-cov combines
+# per-worker data. Its marker set (`not (slow or live)`) is a superset of `test`'s, so `all` runs this
+# instead of a separate `test` — the suite runs twice total (here + `test-ft` under PYTHON_GIL=0).
+cov = "uv run --extra full pytest -q -n auto --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between
 # synthetic cues, so it's slower than the other benches; not folded into `bench`/`poe all`.
@@ -523,4 +528,4 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "complexity", "test", "test-ft", "cov", "audit", "deps", "licenses", "spell", "links", "shell"]
+all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "audit", "deps", "licenses", "spell", "links", "shell"]
