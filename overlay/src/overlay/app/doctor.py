@@ -451,8 +451,7 @@ def check_plugin() -> Check:
 
 
 def check_jimaku() -> Check:
-    """When ``[jimaku].enabled``, confirm an API key resolves (config > env > Keychain). A key in
-    the Keychain is the one plugin-mode mpv can read; a shell env var it cannot."""
+    """When ``[jimaku].enabled``, confirm an API key resolves from persistent storage or the env."""
     cfg = load_config()
     _jm = cfg.get("jimaku")
     jm = _jm if isinstance(_jm, dict) else {}
@@ -465,8 +464,8 @@ def check_jimaku() -> Check:
         return Check(
             "jimaku",
             "warn",
-            "jimaku enabled but no API key — run `saitenka set-jimaku-key` (Keychain, "
-            "readable by plugin-mode mpv)",
+            "jimaku enabled but no API key — run `saitenka set-jimaku-key` (persistent and readable "
+            "by plugin-mode mpv)",
         )
     if src == "env":
         # The resolver prefers env over the Keychain, so a key present in BOTH reports src=env. What
@@ -482,7 +481,7 @@ def check_jimaku() -> Check:
             "jimaku",
             "warn",
             "jimaku key from $JIMAKU_API_KEY only — works in a terminal but NOT under a GUI-launched "
-            "(plugin) mpv; run `set-jimaku-key` to store it in the Keychain",
+            "(plugin) mpv; run `set-jimaku-key` to persist it",
         )
     return Check("jimaku", "ok", f"jimaku enabled; API key from {src}")
 

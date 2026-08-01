@@ -519,8 +519,8 @@ def set_jimaku_key(
 ) -> int:  # pragma: no cover — interactive/secret I/O; keychain_set is unit-tested
     """Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
-    macOS: the login Keychain. Windows/Linux (no Keychain): ``[jimaku].key`` in overlay.toml. Either
-    beats a shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
+    Uses the OS keyring when available, else an owner-only file beside overlay.toml. Either beats a
+    shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
     (API docs: https://jimaku.cc/api/docs).
 
     Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a
@@ -529,7 +529,6 @@ def set_jimaku_key(
     """
     import getpass
 
-    from overlay.app.config import config_path
     from overlay.app.init_wizard import store_jimaku_key
     from overlay.app.jimaku import key_paste_warning, prompt_for_key
 
@@ -549,7 +548,9 @@ def set_jimaku_key(
     if method == "keyring":
         print("stored in the OS secret store (Keychain / Credential Locker / Secret Service)")
     else:
-        print(f"stored in {config_path()} as [jimaku].key (plaintext — keep the file private)")
+        from overlay.app.jimaku import key_file_path
+
+        print(f"stored in {key_file_path()} (plaintext, owner-only)")
         if backup:
             print(f"backed up existing config → {backup}")
     return 0

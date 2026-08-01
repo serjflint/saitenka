@@ -72,7 +72,9 @@ def backup_existing(dest: Path) -> Path | None:
         return None
     ts = time.strftime("%Y%m%d-%H%M%S")
     backup = dest.with_name(f"{dest.name}.{ts}.bak")
-    backup.write_bytes(dest.read_bytes())
+    from overlay.app.paths import atomic_write_text
+
+    atomic_write_text(backup, dest.read_text(encoding="utf-8"))
     return backup
 
 
@@ -87,7 +89,22 @@ def _merge_into(doc, data: dict) -> None:
             doc[k] = v
 
 
-def write_config(proposal: dict, confirm: Confirm, dest: Path | None = None) -> Path | None:
+def _remove_path(doc, path: tuple[str, ...]) -> None:
+    table = doc
+    for key in path[:-1]:
+        table = table.get(key)
+        if not isinstance(table, dict):
+            return
+    table.pop(path[-1], None)
+
+
+def write_config(
+    proposal: dict,
+    confirm: Confirm,
+    dest: Path | None = None,
+    *,
+    remove: tuple[tuple[str, ...], ...] = (),
+) -> Path | None:
     """Write the proposed config on confirm; back up an existing file first.
 
     Round-trips through **tomlkit** so an existing file's COMMENTS + formatting survive — we only set
@@ -101,6 +118,8 @@ def write_config(proposal: dict, confirm: Confirm, dest: Path | None = None) -> 
         return None
     backup = backup_existing(dest)
     doc = tomlkit.parse(dest.read_text(encoding="utf-8")) if dest.exists() else tomlkit.document()
+    for path in remove:
+        _remove_path(doc, path)
     _merge_into(doc, proposal)
     from overlay.app.paths import atomic_write_text
 
@@ -116,23 +135,26 @@ def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
 
 def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, Path | None]:
     """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
-    via ``keyring`` (macOS Keychain / Windows Credential Locker / Linux Secret Service), else
-    ``[jimaku].key`` in the config when no keyring backend exists (headless Linux). Returns
-    ``(method, backup)`` where method is ``"keyring"`` or ``"config"``.
+    via ``keyring`` (macOS Keychain / Windows Credential Locker / opt-in Linux Secret Service), else
+    a private file next to the config. Returns ``(method, backup)`` where method is ``"keyring"`` or
+    ``"file"``.
 
     Either way it writes ``[jimaku].fetch = true``: setting a key MEANS "fetch JP subs from jimaku when
     a file has no JP track", so ``run``/``attach`` act on it without a flag. It also gives the installer
     a plain-text config marker that jimaku is set up (the keyring isn't cheaply readable from a shell)."""
     from overlay.app.config import load_config
-    from overlay.app.jimaku import keychain_set
+    from overlay.app.jimaku import key_file_set, keychain_set
 
-    method = "keyring" if keychain_set(k) else "config"
+    if keychain_set(k):
+        method = "keyring"
+    else:
+        key_file_set(k)
+        method = "file"
     cfg = load_config()
     jm = dict(cfg.get("jimaku") or {})
     jm["fetch"] = True
-    if method == "config":
-        jm["key"] = k  # no OS secret store available — persist the key in the config (plaintext)
-    backup = write_config({**cfg, "jimaku": jm}, confirm=confirm)
+    jm.pop("key", None)
+    backup = write_config({**cfg, "jimaku": jm}, confirm=confirm, remove=(("jimaku", "key"),))
     return method, backup
 
 
@@ -157,7 +179,9 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
     if method == "keyring":
         print("stored in the OS secret store (Keychain / Credential Locker / Secret Service)")
     else:
-        print(f"stored in {config_path()} as [jimaku].key (plaintext — keep it private)")
+        from overlay.app.jimaku import key_file_path
+
+        print(f"stored in {key_file_path()} (plaintext, owner-only)")
 
 
 def run_init() -> int:  # pragma: no cover — interactive wizard, exercised live

@@ -242,10 +242,14 @@ change the set, `uv tool install --reinstall 'saitenka[<extra>]'`:
 | *(none)* / `[minimal]` | the bare overlay — bring your own Yomitan dictionaries | Apache-2.0 |
 | `[jmdict]` | the JMdict English fallback (hover + mined-card glosses when a word isn't in your dicts) | Apache-2.0 |
 | `[deinflect]` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
-| `[full]` | everything above | **GPL-3.0** |
+| `[linux-keyring]` | Linux Secret Service storage for the jimaku key on Python 3.15+ | Apache-2.0 |
+| `[full]` | all portable features above (`linux-keyring` remains explicit) | **GPL-3.0** |
 
 Mining prefers *your* dictionaries, so `[jmdict]` is only a fallback. `[deinflect]`/`[full]` pull the
-GPL-3.0 add-on — a `[full]` install is therefore GPL-3.0 (see [LICENSING.md](LICENSING.md)).
+GPL-3.0 add-on — a `[full]` install is therefore GPL-3.0 (see [LICENSING.md](LICENSING.md)). On Linux,
+Python 3.13/3.14 install Secret Service support by default; Python 3.15+ uses `JIMAKU_API_KEY` or an
+owner-only `$XDG_CONFIG_HOME/saitenka/jimaku.key` unless `[linux-keyring]` is installed, avoiding its
+`cryptography` dependency.
 
 Full run/test walkthrough: **[`overlay/RUNNING.md`](overlay/RUNNING.md)**. Feature tour:
 **[`overlay/README.md`](overlay/README.md)**.

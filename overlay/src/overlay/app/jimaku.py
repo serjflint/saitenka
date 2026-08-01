@@ -117,7 +117,10 @@ def keychain_get() -> str | None:
     try:
         import keyring
         import keyring.errors
-
+    except ImportError:
+        log.debug("keyring is not installed", exc_info=True)
+        return None
+    try:
         return keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) or None
     except keyring.errors.KeyringError:
         return None
@@ -133,7 +136,10 @@ def keychain_set(key: str) -> bool:
     try:
         import keyring
         import keyring.errors
-
+    except ImportError:
+        log.debug("keyring is not installed", exc_info=True)
+        return False
+    try:
         keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, key)
         return True
     except keyring.errors.KeyringError:
@@ -143,9 +149,29 @@ def keychain_set(key: str) -> bool:
         return False
 
 
+def key_file_path() -> Path:
+    """Private plaintext fallback next to the platform-native Saitenka config."""
+    from overlay.app.config import config_path
+
+    return config_path().with_name("jimaku.key")
+
+
+def key_file_get() -> str | None:
+    try:
+        return key_file_path().read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def key_file_set(key: str) -> Path:
+    from overlay.app.paths import atomic_write_text
+
+    return atomic_write_text(key_file_path(), f"{key.strip()}\n")
+
+
 def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
-    """Return ``(key, source)`` with precedence explicit (config/CLI) > ``$JIMAKU_API_KEY`` > macOS
-    Keychain. ``source`` is ``config``/``env``/``keychain``/``none`` — reported by doctor.
+    """Return ``(key, source)`` with precedence explicit (config/CLI) > ``$JIMAKU_API_KEY`` > OS
+    keyring > private file. ``source`` is reported by doctor.
 
     Every source is ``.strip()``-ed: a stray trailing newline/space (easy to introduce when pasting a
     key, or reading it back from a store) would otherwise make urllib reject the ``Authorization``
@@ -154,6 +180,7 @@ def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
         (explicit, "config"),
         (os.environ.get("JIMAKU_API_KEY"), "env"),
         (keychain_get(), "keychain"),
+        (key_file_get(), "file"),
     ):
         cleaned = (value or "").strip()
         if cleaned:
@@ -231,8 +258,8 @@ class JimakuClient:
         self.base = base
         if not self.api_key:
             raise JimakuError(
-                "no jimaku API key — run `saitenka set-jimaku-key` (stored in the OS secret "
-                "store, readable by plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
+                "no jimaku API key — run `saitenka set-jimaku-key` (persistent and readable by "
+                "plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
             )
 
     @staticmethod

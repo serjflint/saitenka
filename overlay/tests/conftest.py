@@ -55,9 +55,11 @@ def _tts_present(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_keyring():
-    """Never touch the real OS keyring in tests — force keyring's 'fail' backend so an un-mocked
-    keychain_get/set can't read the developer's actual stored jimaku key from the login Keychain."""
+def _isolate_keyring(tmp_path, monkeypatch):
+    """Never touch the developer's real jimaku credentials."""
+    from overlay.app import jimaku
+
+    monkeypatch.setattr(jimaku, "key_file_path", lambda: tmp_path / "jimaku.key")
     try:
         import keyring
         from keyring.backends import fail
