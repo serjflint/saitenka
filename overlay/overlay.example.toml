@@ -32,6 +32,7 @@
 # sidebar_key = "\\"  # toggle the whole-track subtitle and deferred-capture sidebar
 # annotation_key = "Alt+a"  # toggle full and hover-only learning annotations
 # help_key = "F1"  # toggle the compact in-player shortcut reference
+# subtitle_retry_key = "Ctrl+Shift+T"  # retry enabled Japanese subtitle providers
 # annotation_mode = "full"  # "full" (default) or neutral until the subtitle is hovered
 # banded = true              # experimental windowed (O(viewport)) tooltip renderer; SAITENKA_BANDED=1 also enables it
 

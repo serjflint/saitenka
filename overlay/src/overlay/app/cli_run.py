@@ -182,27 +182,16 @@ def _resolve_jimaku_subs(
         return None
 
 
-def _resolve_tsukihime_subs(
-    video_path: Path,
-    title_override: str | None,
-    episode: int | None,
-    tmp: Path,
-    tsukihime_cfg: dict,
-    *,
-    resync: bool,
-) -> Path | None:
-    from overlay.app.subselect import fetch_tsukihime_path
-
-    path, status = fetch_tsukihime_path(
-        str(video_path),
-        config=tsukihime_cfg,
-        title_override=title_override,
-        episode=episode,
-        resync=resync,
-        dest_dir=tmp,
+def _enabled_provider_names(
+    video: str | None, *, jimaku: bool, jimaku_cfg: dict, tsukihime_cfg: dict
+) -> tuple[str, ...]:
+    if not video:
+        return ()
+    flags = (
+        ("jimaku", jimaku or bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled"))),
+        ("tsukihime", bool(tsukihime_cfg.get("enabled"))),
     )
-    print(status, file=sys.stderr if path is None else sys.stdout)
-    return path
+    return tuple(provider for provider, enabled in flags if enabled)
 
 
 def _resolve_subtitles(
@@ -219,7 +208,7 @@ def _resolve_subtitles(
     episode: int | None,
     resync: bool,
     slang: str,
-) -> tuple[Path | None, Path | None, tuple[str, ...]]:
+) -> tuple[Path | None, Path | None, tuple[str, ...], tuple[str, ...]]:
     """Resolve explicit startup subtitles and defer configured providers until mpv is ready."""
     _jm = cfg.get("jimaku")
     jimaku_cfg = _jm if isinstance(_jm, dict) else {}
@@ -244,6 +233,9 @@ def _resolve_subtitles(
         bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled")),
     )
     sub_path = en_sub_path = None
+    enabled_providers = _enabled_provider_names(
+        video, jimaku=jimaku, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
+    )
     fetch_in_background: tuple[str, ...] = ()
     if sub_file:
         sub_path = Path(sub_file).expanduser()
@@ -264,7 +256,7 @@ def _resolve_subtitles(
         _make_srt(sub_path, dur, DEMO_LINE)
         en_sub_path = tmp / "line.en.srt"  # secondary EN track → test the `t` translation reveal
         _make_srt(en_sub_path, dur, DEMO_LINE_EN)
-    return sub_path, en_sub_path, fetch_in_background
+    return sub_path, en_sub_path, fetch_in_background, enabled_providers
 
 
 def _launch_mpv_and_connect(
@@ -367,6 +359,7 @@ def _build_run_options(
             sidebar_key=cfg.get("sidebar_key", _ko.sidebar_key),
             annotation_key=cfg.get("annotation_key", _ko.annotation_key),
             help_key=cfg.get("help_key", _ko.help_key),
+            subtitle_retry_key=cfg.get("subtitle_retry_key", _ko.subtitle_retry_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
@@ -403,66 +396,66 @@ def _build_run_options(
     )
 
 
+def _provider_fetch_factory(
+    providers: tuple[str, ...],
+    *,
+    jimaku_key: str | None,
+    jimaku_title: str | None,
+    episode: int | None,
+    resync: bool,
+    tsukihime_cfg: dict,
+):
+    from overlay.app.subselect import fetch_provider_path
+
+    def factory(video: str):
+        return lambda: fetch_provider_path(
+            video,
+            providers,
+            jimaku_key=jimaku_key,
+            title_override=jimaku_title,
+            episode=episode,
+            resync=resync,
+            tsukihime_config=tsukihime_cfg,
+        )
+
+    return factory
+
+
 def _start_run_provider_fetch(
     reader,
     cfg: dict,
     video_path: Path,
-    tmp: Path,
     *,
     providers: tuple[str, ...],
+    enabled_providers: tuple[str, ...],
     jimaku_title: str | None,
     episode: int | None,
     jimaku_key: str | None,
     resync: bool,
 ) -> None:
-    if not providers:
+    if not providers and not enabled_providers:
         return
-    raw = cfg.get("jimaku")
-    jimaku_cfg = raw if isinstance(raw, dict) else {}
     raw_tsukihime = cfg.get("tsukihime")
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
-
-    def fetch_japanese_subtitles():
-        from overlay.app.subtitle_providers import fetch_first
-
-        def fetch_jimaku():
-            path = _resolve_jimaku_subs(
-                video_path,
-                jimaku_title,
-                episode,
-                tmp,
-                jimaku_key,
-                jimaku_cfg,
-                resync=resync,
-            )
-            status = f"jimaku: added {path.name}" if path else "jimaku: no Japanese subtitles found"
-            return path, status
-
-        def fetch_tsukihime():
-            path = _resolve_tsukihime_subs(
-                video_path,
-                jimaku_title,
-                episode,
-                tmp,
-                tsukihime_cfg,
-                resync=resync,
-            )
-            status = (
-                f"tsukihime: added {path.name}"
-                if path
-                else "tsukihime: no unique Japanese subtitles found"
-            )
-            return path, status
-
-        attempts = []
-        for provider in providers:
-            if provider == "jimaku":
-                attempts.append((provider, fetch_jimaku))
-            elif provider == "tsukihime":
-                attempts.append((provider, fetch_tsukihime))
-        return fetch_first(attempts)
-
-    reader.fetch_japanese_subs_async(fetch_japanese_subtitles)
+    retry_factory = _provider_fetch_factory(
+        enabled_providers,
+        jimaku_key=jimaku_key,
+        jimaku_title=jimaku_title,
+        episode=episode,
+        resync=resync,
+        tsukihime_cfg=tsukihime_cfg,
+    )
+    reader.configure_subtitle_retry(retry_factory if enabled_providers else None)
+    if providers:
+        startup_factory = _provider_fetch_factory(
+            providers,
+            jimaku_key=jimaku_key,
+            jimaku_title=jimaku_title,
+            episode=episode,
+            resync=resync,
+            tsukihime_cfg=tsukihime_cfg,
+        )
+        reader.fetch_japanese_subs_async(startup_factory(str(video_path)))
 
 
 def _build_run_deps(
@@ -745,7 +738,7 @@ def run_impl(
     deps_future = None if (demo_word or screenshot) else begin_deps_build(cfg, _build_deps)
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
-    sub_path, en_sub_path, fetch_jimaku_in_background = _resolve_subtitles(
+    sub_path, en_sub_path, fetch_jimaku_in_background, enabled_providers = _resolve_subtitles(
         cfg,
         video,
         video_path,
@@ -818,8 +811,8 @@ def run_impl(
         reader,
         cfg,
         video_path,
-        tmp,
         providers=(fetch_jimaku_in_background if subtitle_startup.tracks.jp_sid is None else ()),
+        enabled_providers=enabled_providers,
         jimaku_title=jimaku_title,
         episode=episode,
         jimaku_key=jimaku_key,

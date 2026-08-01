@@ -17,9 +17,13 @@ class IPC:
 class Reader:
     def __init__(self):
         self.fetch = None
+        self.retry_factory = None
 
     def fetch_japanese_subs_async(self, fetch):
         self.fetch = fetch
+
+    def configure_subtitle_retry(self, factory):
+        self.retry_factory = factory
 
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
@@ -39,6 +43,7 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
         None,
         slang="ja,jpn,jp",
         fetch_in_background=("jimaku", "tsukihime"),
+        enabled_providers=("jimaku", "tsukihime"),
         jimaku_key=None,
         jimaku_title=None,
         episode=None,
@@ -47,8 +52,34 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
     )
 
     assert reader.fetch is not None
+    assert reader.retry_factory is not None
     assert ipc.commands == [("get_property", "path")]
     assert reader.fetch() == (Path("episode.ja.ass"), "tsukihime: added")
     assert calls == [("/videos/Show - 01.mkv", ("jimaku", "tsukihime"), {"result_cap": 5})]
     assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+    reader.retry_factory("/videos/Show - 02.mkv")()
+    assert calls[-1][0] == "/videos/Show - 02.mkv"
+
+
+def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch):
+    reader, ipc = Reader(), IPC()
+    monkeypatch.setattr(cli, "build_sub_index_for_current_track", lambda _reader: None)
+
+    cli._finish_attach_subtitle_startup(
+        reader,
+        ipc,
+        None,
+        slang="ja,jpn,jp",
+        fetch_in_background=(),
+        enabled_providers=("tsukihime",),
+        jimaku_key=None,
+        jimaku_title=None,
+        episode=None,
+        resync=False,
+    )
+
+    assert reader.fetch is None
+    assert reader.retry_factory is not None
+    assert ipc.commands == []

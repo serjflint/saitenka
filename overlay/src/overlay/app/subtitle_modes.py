@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 
     from overlay.app.controller import Reader
 
+    ProviderFetch = Callable[[], tuple[Path | None, str]]
+    ProviderFetchFactory = Callable[[str], ProviderFetch]
+
 log = logging.getLogger(__name__)
 
 Language = Literal["jp", "en"]
@@ -141,22 +144,64 @@ def toggle(reader: Reader) -> None:
 
 
 def start_fetch(
-    reader: Reader, fetch: Callable[[], tuple[Path | None, str]], *, name: str = "sub-provider"
+    reader: Reader,
+    fetch: ProviderFetch,
+    *,
+    name: str = "sub-provider",
+    on_done: Callable[[], None] | None = None,
 ) -> None:
     """Run provider I/O off-thread; mpv IPC stays on the reader thread."""
 
     def work() -> None:
         try:
-            reader._subtitle_results.put(fetch())
-        except (
-            Exception
-        ) as exc:  # provider failures are soft; surfaced through the normal toast path
-            log.warning("background subtitle fetch failed", exc_info=True)
-            reader._subtitle_results.put((None, f"Japanese subtitle fetch failed: {exc}"))
+            try:
+                reader._subtitle_results.put(fetch())
+            except (
+                Exception
+            ) as exc:  # provider failures are soft; surfaced through the normal toast path
+                log.warning("background subtitle fetch failed", exc_info=True)
+                reader._subtitle_results.put((None, f"Japanese subtitle fetch failed: {exc}"))
+        finally:
+            if on_done is not None:
+                on_done()
 
     thread = threading.Thread(target=work, name=f"saitenka-{name}", daemon=True)
     reader._subtitle_fetch_threads.append(thread)
     thread.start()
+
+
+def configure_retry(reader: Reader, factory: ProviderFetchFactory | None) -> None:
+    reader._subtitle_retry_factory = factory
+
+
+def _finish_retry(reader: Reader) -> None:
+    with reader._subtitle_retry_lock:
+        reader._subtitle_retry_active = False
+
+
+def retry(reader: Reader) -> None:
+    factory = reader._subtitle_retry_factory
+    if factory is None:
+        reader._toast("No Japanese subtitle providers enabled", "warn")
+        return
+    video_path = reader._get("path")
+    if not video_path:
+        reader._toast("No media loaded for subtitle search", "warn")
+        return
+    with reader._subtitle_retry_lock:
+        if reader._subtitle_retry_active:
+            reader._toast("Japanese subtitle search already running", "warn")
+            return
+        reader._subtitle_retry_active = True
+    try:
+        fetch = factory(str(video_path))
+    except Exception as exc:
+        _finish_retry(reader)
+        log.warning("subtitle retry setup failed", exc_info=True)
+        reader._toast(f"Japanese subtitle search failed: {exc}", "warn")
+        return
+    reader._toast("Searching Japanese subtitle providers…")
+    start_fetch(reader, fetch, name="subtitle-retry", on_done=lambda: _finish_retry(reader))
 
 
 def apply_fetch_results(reader: Reader) -> None:

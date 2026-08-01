@@ -88,7 +88,8 @@ uv run python examples/mpv_reader.py --sub-file jp.srt --color \
 An explicit `--sub-file` or `--jimaku` can override startup. Otherwise the reader selects embedded
 Japanese, immediately falls back to English when needed, then tries configured providers in the
 background: Jimaku first, followed by opt-in TsukiHime. Fetched Japanese is added without switching
-tracks. Amazon-style **inline furigana** baked into ASS (`龍門光英りゅうもんみつひで`) is stripped
+tracks; configurable `Ctrl+Shift+T` retries that chain for the current media. Amazon-style **inline
+furigana** baked into ASS (`龍門光英りゅうもんみつひで`) is stripped
 before tokenizing (`app/tokenize.py::strip_inline_furigana`).
 
 ```bash

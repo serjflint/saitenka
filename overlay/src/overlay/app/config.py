@@ -74,6 +74,7 @@ class KeyOptions:
     sidebar_key: str = "\\"
     annotation_key: str = "Alt+a"
     help_key: str = "F1"
+    subtitle_retry_key: str = "Ctrl+Shift+T"
     preview_key: str = "p"
     hover_pause_key: str = "Alt+p"
     sub_prev_key: str = "Alt+LEFT"
