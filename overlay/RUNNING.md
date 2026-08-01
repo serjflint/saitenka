@@ -102,6 +102,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 | **Ctrl+m** | mine the **hovered** word → Anki card + **preview** (auto-plays the clip) |
 | **Shift+m** | **bulk-mine** every unknown word in the current line |
 | **t** | toggle the **English** translation of the current line |
+| **Alt+p** | toggle whether opening a tooltip automatically pauses mpv |
 | **p** | replay the last card preview + its audio |
 | space / f / ← → / q | mpv: pause / fullscreen / seek / quit |
 

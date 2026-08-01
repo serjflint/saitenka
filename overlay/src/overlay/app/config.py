@@ -69,6 +69,7 @@ class KeyOptions:
     mine_all_key: str = "Shift+m"
     translate_key: str = "t"
     preview_key: str = "p"
+    hover_pause_key: str = "Alt+p"
     sub_prev_key: str = "Alt+LEFT"
     sub_next_key: str = "Alt+RIGHT"
     sub_replay_key: str = "Alt+DOWN"

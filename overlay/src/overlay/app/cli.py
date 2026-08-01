@@ -24,7 +24,7 @@ import threading
 import time
 from datetime import UTC
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import cyclopts
 
@@ -41,6 +41,9 @@ from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.paths import cache_dir
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from overlay.app.config import ReaderOptions
 
 
 def _ensure_free_threaded() -> None:
@@ -827,6 +830,57 @@ def setup(
     return run_setup(yes=yes, dry_run=dry_run)
 
 
+def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
+    from overlay.app.config import (
+        KeyOptions,
+        MiningOptions,
+        PerfOptions,
+        ReaderOptions,
+        TooltipOptions,
+        TranslationOptions,
+    )
+
+    ko, tt, mo, po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
+    return ReaderOptions(
+        keys=KeyOptions(
+            mine_key=mine.get("key", ko.mine_key),
+            mine_all_key=mine.get("all_key", ko.mine_all_key),
+            preview_key=mine.get("preview_key", ko.preview_key),
+            translate_key=cfg.get("translate_key", ko.translate_key),
+            hover_pause_key=cfg.get("hover_pause_key", ko.hover_pause_key),
+            sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
+            sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
+            sub_replay_key=cfg.get("sub_replay_key", ko.sub_replay_key),
+        ),
+        tooltip=TooltipOptions(
+            tip_max_frac=cfg.get("tip_height", tt.tip_max_frac),
+            nested_max_frac=cfg.get("nested_max_frac", tt.nested_max_frac),
+            pause_on_tooltip=bool(cfg.get("pause_on_tooltip", tt.pause_on_tooltip)),
+            show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
+            scan_delay=cfg.get("scan_delay", tt.scan_delay),
+            hide_delay=cfg.get("hide_delay", tt.hide_delay),
+            flash_secs=cfg.get("flash_secs", tt.flash_secs),
+            panel_cache_max=cfg.get("panel_cache_max", tt.panel_cache_max),
+            banded=bool(cfg.get("banded", tt.banded)),
+        ),
+        mining=MiningOptions(
+            play_audio=not bool(cfg.get("no_audio_play", False)),
+            max_bulk=cfg.get("max_bulk", mo.max_bulk),
+            anki_ok_ttl=cfg.get("anki_ok_ttl", mo.anki_ok_ttl),
+            anki_ping_timeout=cfg.get("anki_ping_timeout", mo.anki_ping_timeout),
+        ),
+        translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
+        perf=PerfOptions(
+            poll_interval=cfg.get("poll_interval", po.poll_interval),
+            prefetch_workers=cfg.get("prefetch_workers", po.prefetch_workers),
+            prefetch_lookahead=cfg.get("prefetch_lookahead", po.prefetch_lookahead),
+            head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", po.head_prefetch_lookahead),
+            head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", po.head_prefetch_queue_max),
+        ),
+        overlay_id_base=int(cfg.get("overlay_id_base", 1)),
+    )
+
+
 @app.command
 def attach(
     socket: str | None = None,
@@ -877,14 +931,6 @@ def attach(
     # landing on the critical path later.
     threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
 
-    from overlay.app.config import (
-        KeyOptions,
-        MiningOptions,
-        PerfOptions,
-        ReaderOptions,
-        TooltipOptions,
-        TranslationOptions,
-    )
     from overlay.app.controller import Reader
     from overlay.mpvio.ipc import MpvIPC
 
@@ -955,44 +1001,7 @@ def attach(
     # with none configured, attach stays a working subtitle renderer (jamdict-fallback tooltips).
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
-    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
-
-    opts = ReaderOptions(
-        keys=KeyOptions(
-            mine_key=mc.get("key", "Ctrl+m"),
-            mine_all_key=mc.get("all_key", "Shift+m"),
-            preview_key=mc.get("preview_key", "p"),
-            translate_key=cfg.get("translate_key", "t"),
-            sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
-            sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
-            sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
-        ),
-        tooltip=TooltipOptions(
-            tip_max_frac=cfg.get("tip_height", _tt.tip_max_frac),
-            nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
-            show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
-            scan_delay=cfg.get("scan_delay", _tt.scan_delay),
-            hide_delay=cfg.get("hide_delay", _tt.hide_delay),
-            flash_secs=cfg.get("flash_secs", _tt.flash_secs),
-            panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
-            banded=bool(cfg.get("banded", _tt.banded)),
-        ),
-        mining=MiningOptions(
-            play_audio=not bool(cfg.get("no_audio_play", False)),
-            max_bulk=cfg.get("max_bulk", _mo.max_bulk),
-            anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
-            anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
-        ),
-        translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
-        perf=PerfOptions(
-            poll_interval=cfg.get("poll_interval", _po.poll_interval),
-            prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),
-            prefetch_lookahead=cfg.get("prefetch_lookahead", _po.prefetch_lookahead),
-            head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
-            head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
-        ),
-        overlay_id_base=int(cfg.get("overlay_id_base", 1)),
-    )
+    opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
     # index whatever track mpv ends up with (external/jimaku path, or an embedded track extracted
     # via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines

@@ -26,6 +26,7 @@
 # scan_delay = 0.25          # dwell before a nested (scan) popup opens; scrolling resets this timer too
 # panel_cache_max = 128      # LRU cap on cached (compressed) rendered tooltip panels
 # pause_on_tooltip = true    # freeze the frame while a tooltip is shown (the mining default)
+# hover_pause_key = "Alt+p"  # toggle hover auto-pause for the current session
 # banded = true              # experimental windowed (O(viewport)) tooltip renderer; SAITENKA_BANDED=1 also enables it
 
 # ── Translation ──────────────────────────────────────────────────────────────────────────────────

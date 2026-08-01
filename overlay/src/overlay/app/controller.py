@@ -66,6 +66,7 @@ NESTED_ID = OverlayId.NESTED
 MINE_MSG = "saitenka-mine"
 MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
+HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 PREVIEW_MSG = "saitenka-preview"
 SCROLL_UP_MSG = "saitenka-scroll-up"
 SCROLL_DOWN_MSG = "saitenka-scroll-down"
@@ -148,6 +149,7 @@ class Reader:
         self.mine_all_key = o.keys.mine_all_key
         self.translate_key = o.keys.translate_key
         self.preview_key = o.keys.preview_key
+        self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
         # 🔊 TTS button is drawn only when the OS has a Japanese voice — else it silently does nothing.
         # Computed once (voices don't change mid-session; tts_available is itself cached).
@@ -835,6 +837,14 @@ class Reader:
         self.ov.show(img, x, y, oid=TOAST_ID)
         self._toast_until = time.monotonic() + seconds
 
+    def toggle_hover_pause(self) -> None:
+        self.pause_on_tooltip = not self.pause_on_tooltip
+        if not self.pause_on_tooltip and self._paused_by_tip:
+            self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv IPC wire value
+            self._paused_by_tip = False
+        state = "on" if self.pause_on_tooltip else "off"
+        self._toast(f"hover auto-pause: {state}")
+
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
@@ -842,6 +852,7 @@ class Reader:
             self.ipc.command("keybind", key, f"script-message {msg}")
 
         bind(self.translate_key, TRANS_MSG)
+        bind(self.hover_pause_key, HOVER_PAUSE_MSG)
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
         bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
@@ -871,6 +882,7 @@ class Reader:
         MINE_MSG: lambda r: r.mine_current(),
         MINE_ALL_MSG: lambda r: r.bulk_mine(),
         TRANS_MSG: lambda r: r.toggle_translation(),
+        HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),

@@ -314,13 +314,14 @@ def _build_run_options(
         TranslationOptions,
     )
 
-    _tt, _mo, _po = TooltipOptions(), MiningOptions(), PerfOptions()
+    _ko, _tt, _mo, _po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
     return ReaderOptions(
         keys=KeyOptions(
             mine_key=mine_key,
             mine_all_key=mine_all_key,
             translate_key=translate_key,
             preview_key=preview_key,
+            hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
