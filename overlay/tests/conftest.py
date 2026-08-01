@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402  # must come after the sys.path setup above
 
+import overlay.app.backlog as _backlog  # noqa: E402  # must come after the sys.path setup above
 import overlay.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
 
 # Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
@@ -32,6 +33,7 @@ def _hermetic_dict_db(tmp_path, monkeypatch):
     unaffected; code that opens the default path (reader_deps, doctor, dicthelp) gets this tmp DB.
     ``test_compare`` opts back into the real DB by resetting the override."""
     monkeypatch.setattr(_dictdb, "_DB_PATH_OVERRIDE", tmp_path / "dictionaries.sqlite")
+    monkeypatch.setattr(_backlog, "_DB_PATH_OVERRIDE", tmp_path / "backlog.sqlite")
 
 
 @pytest.fixture(autouse=True)
