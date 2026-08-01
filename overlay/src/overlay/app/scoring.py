@@ -80,9 +80,61 @@ class TokenStyle:
     tag: str = "base"  # 'n+1' | 'known' | 'freq-N' | 'base' (+ '/jlpt-Nx')
 
 
-def _is_content(t: Token) -> bool:
+def is_content(t: Token) -> bool:
     """Content word for coloring/N+1 = anything that isn't a function-word POS (SubMiner blacklist)."""
     return bool(t.surface.strip()) and t.pos not in FUNCTION_POS
+
+
+_is_content = is_content  # compatibility for tooltip's lazy import
+
+
+@dataclass(frozen=True)
+class SentenceProfile:
+    """The shared lexical eligibility result for one subtitle sentence."""
+
+    content_indices: tuple[int, ...]
+    unknown_indices: tuple[int, ...]
+
+
+def _sentence_profile(
+    tokens: list[Token], known: list[bool], sent: range
+) -> SentenceProfile | None:
+    if not any(tokens[j].surface.strip() for j in sent):
+        return None
+    content = tuple(j for j in sent if is_content(tokens[j]))
+    unknown = tuple(
+        j
+        for j in content
+        if not known[j] and not tokens[j].is_kana_only and not tokens[j].is_proper_noun
+    )
+    return SentenceProfile(content, unknown)
+
+
+def sentence_profiles(tokens: list[Token], known: list[bool]) -> tuple[SentenceProfile, ...]:
+    """Split like subtitle coloring and classify the eligible unknowns once for N+1/N+2."""
+    profiles: list[SentenceProfile] = []
+    start = 0
+    for i in range(len(tokens) + 1):
+        boundary = i == len(tokens) or any(c in SENT_BOUNDARY for c in tokens[i].surface)
+        if not boundary:
+            continue
+        profile = _sentence_profile(tokens, known, range(start, min(i + 1, len(tokens))))
+        if profile is not None:
+            profiles.append(profile)
+        start = i + 1
+    return tuple(profiles)
+
+
+def mark_n_plus(
+    tokens: list[Token], known: list[bool], *, unknowns: int, min_words: int = 3
+) -> set[int]:
+    """Indices in sentences with exactly ``unknowns`` eligible unknown content words."""
+    return {
+        index
+        for profile in sentence_profiles(tokens, known)
+        if len(profile.content_indices) >= min_words and len(profile.unknown_indices) == unknowns
+        for index in profile.unknown_indices
+    }
 
 
 @dataclass(frozen=True)
@@ -99,23 +151,7 @@ class _StyleCtx:
 
 def mark_n_plus_one(tokens: list[Token], known: list[bool], min_words: int = 3) -> set[int]:
     """Indices of the single unknown content word in each ≥min_words-content-word sentence."""
-    targets: set[int] = set()
-    start = 0
-    for i in range(len(tokens) + 1):
-        boundary = i == len(tokens) or any(c in SENT_BOUNDARY for c in tokens[i].surface)
-        if not boundary:
-            continue
-        sent = range(start, min(i + 1, len(tokens)))
-        content = [j for j in sent if _is_content(tokens[j])]
-        candidates = [
-            j
-            for j in content
-            if not known[j] and not tokens[j].is_kana_only and not tokens[j].is_proper_noun
-        ]
-        if len(content) >= min_words and len(candidates) == 1:
-            targets.add(candidates[0])
-        start = i + 1
-    return targets
+    return mark_n_plus(tokens, known, unknowns=1, min_words=min_words)
 
 
 # The banded coloring only distinguishes ranks up to here (band() returns None past it), so a rank
@@ -151,6 +187,10 @@ class Scorer:
         if self.fsrs_snap is not None:
             return self.fsrs_snap.is_known(t.surface, t.lemma, t.reading)
         return False
+
+    def is_known(self, t: Token) -> bool:
+        """Public knownness seam shared by coloring and whole-track analysis."""
+        return self._is_known(t)
 
     def _is_forgotten(self, t: Token) -> bool:
         """True when the FSRS snapshot marks the word as 'forgotten'."""
@@ -204,7 +244,7 @@ class Scorer:
 
     def _style(self, t: Token, *, is_known: bool, is_n1: bool) -> TokenStyle:
         p = self.palette
-        content = _is_content(t)
+        content = is_content(t)
         level = (
             self.jlpt.level(t.lemma, t.surface, t.reading)
             if (self.enable_jlpt and self.jlpt and content)

@@ -30,6 +30,7 @@
 # subtitle_language_key = "Alt+t"  # switch the primary subtitle between Japanese and English
 # bookmark_key = "Alt+b"  # toggle the active cue in the persistent deferred-capture backlog
 # sidebar_key = "\\"  # toggle the whole-track subtitle and deferred-capture sidebar
+# analysis_key = "`"  # toggle whole-track Japanese subtitle analysis
 # annotation_key = "Alt+a"  # toggle full and hover-only learning annotations
 # help_key = "F1"  # toggle the compact in-player shortcut reference
 # subtitle_retry_key = "Ctrl+Shift+T"  # retry enabled Japanese subtitle providers

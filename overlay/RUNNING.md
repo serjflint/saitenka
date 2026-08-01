@@ -110,6 +110,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 | **Alt+p** | toggle whether opening a tooltip automatically pauses mpv |
 | **Alt+b** | save/archive the active cue for later review without pausing or seeking |
 | **\\** | toggle the whole-track subtitle and deferred-capture sidebar |
+| **backquote** | toggle whole-track Japanese subtitle analysis and difficulty statistics |
 | **Alt+a** | toggle full and hover-only learning annotations |
 | **F1** | toggle the compact in-player shortcut reference; `Esc` closes it |
 | **p** | replay the last card preview + its audio |

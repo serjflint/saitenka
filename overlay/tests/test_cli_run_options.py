@@ -35,6 +35,7 @@ def test_run_options_read_hover_pause_key():
             "subtitle_language_key": "Alt+l",
             "bookmark_key": "Alt+b",
             "sidebar_key": "Alt+s",
+            "analysis_key": "Ctrl+d",
             "annotation_key": "Ctrl+a",
             "help_key": "Ctrl+h",
             "subtitle_retry_key": "Ctrl+r",
@@ -46,6 +47,7 @@ def test_run_options_read_hover_pause_key():
     assert opts.keys.subtitle_language_key == "Alt+l"
     assert opts.keys.bookmark_key == "Alt+b"
     assert opts.keys.sidebar_key == "Alt+s"
+    assert opts.keys.analysis_key == "Ctrl+d"
     assert opts.keys.annotation_key == "Ctrl+a"
     assert opts.keys.help_key == "Ctrl+h"
     assert opts.keys.subtitle_retry_key == "Ctrl+r"
@@ -60,6 +62,7 @@ def test_attach_options_read_hover_pause_settings():
             "subtitle_language_key": "Alt+l",
             "bookmark_key": "Alt+b",
             "sidebar_key": "Alt+s",
+            "analysis_key": "Ctrl+d",
             "annotation_key": "Ctrl+a",
             "help_key": "Ctrl+h",
             "subtitle_retry_key": "Ctrl+r",
@@ -72,6 +75,7 @@ def test_attach_options_read_hover_pause_settings():
     assert opts.keys.subtitle_language_key == "Alt+l"
     assert opts.keys.bookmark_key == "Alt+b"
     assert opts.keys.sidebar_key == "Alt+s"
+    assert opts.keys.analysis_key == "Ctrl+d"
     assert opts.keys.annotation_key == "Ctrl+a"
     assert opts.keys.help_key == "Ctrl+h"
     assert opts.keys.subtitle_retry_key == "Ctrl+r"

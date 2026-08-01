@@ -56,6 +56,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
         keys=KeyOptions(
             help_key="Ctrl+h",
             translate_key="e",
+            analysis_key="Ctrl+d",
             sub_next_key="Ctrl+RIGHT",
             mine_key="Ctrl+x",
         )
@@ -68,6 +69,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
     assert by_label["Shortcut reference"].key == "Ctrl+h"
     assert by_label["Show English translation"].key == "e"
     assert by_label["Next subtitle"].key == "Ctrl+RIGHT"
+    assert by_label["Episode analysis"].key == "Ctrl+d"
     assert by_label["Mine hovered word"].key == "Ctrl+x"
     assert by_label["Close tooltip"].context == "tooltip only"
     assert by_label["Pause / resume (SyncPlay)"].source == "mpv"

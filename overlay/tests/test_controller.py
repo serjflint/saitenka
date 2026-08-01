@@ -54,6 +54,7 @@ def test_keybinds_use_single_string_command():
         "Alt+t",
         "Alt+b",
         "\\",
+        "`",
         "Alt+a",
         "F1",
         "Ctrl+Shift+T",
