@@ -131,6 +131,15 @@ resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) �
 # key = "..."       # last resort — plaintext; Keychain (set-jimaku-key) is preferred
 # force = true      # prefer jimaku OVER the embedded JP track (mistimed/wrong baked-in subs)
 
+# ── [tsukihime] keyless Japanese subtitle fallback — OFF by default ─────────────────────────────
+# Runs in the background after a Jimaku miss. It loads only a unique release with one Japanese text
+# attachment; ambiguous/image-only results leave playback unchanged.
+[tsukihime]
+enabled = false
+# api_base = "https://api.tsukihime.org/v1"
+# timeout = 15.0
+# result_cap = 10    # 1..100; a truncated search is never auto-selected
+
 # ── [telemetry] Runtime tracing/metrics (OpenTelemetry) — OFF by default ─────────────────────────
 # Requires the `telemetry` extra (`saitenka[telemetry]`) even when enabled here. Local-only: a
 # Chrome Trace Format file under the cache dir, no backend/gRPC. See RUNNING.md "Telemetry".
