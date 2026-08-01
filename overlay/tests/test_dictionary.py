@@ -338,6 +338,33 @@ def test_cards_for_returns_one_card_per_reading_best_first(tmp_path):
     assert cards[0] == ds.card_for(tok)  # default == first offered
 
 
+def test_entry_for_builds_stacked_groups_for_multi_reading(tmp_path):
+    """entry_for exposes one EntryGroup per distinct reading, ordered like cards_for (退いた context →
+    のく first), each carrying its card_index for the per-entry ⊕ and only its reading's definition."""
+    d = _make_dict(
+        tmp_path / "grp.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    entry = ds.entry_for(tok)
+    assert [(g.reading, g.card_index) for g in entry.groups] == [("のく", 0), ("しりぞく", 1)]
+    cards = ds.cards_for(tok)
+    # each group's card_index points at its own entry in cards_for
+    assert all(cards[g.card_index].reading == g.reading for g in entry.groups)
+    assert "to step aside" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+    assert "to retreat" not in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+
+
+def test_entry_for_single_reading_has_no_groups(tmp_path):
+    """A single-reading word keeps the fused single-header panel (no stacking) — groups is empty."""
+    d = _make_dict(tmp_path / "one.zip", "One", [["読む", "よむ", ["to read"]]])
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    assert ds.entry_for(tok).groups == []
+
+
 def test_cards_for_empty_when_no_glossed_hit(tmp_path):
     d = _make_dict(tmp_path / "cfe.zip", "TestDict", [["猫", "ねこ", ["cat"]]])
     ds = dicthelp.load_set([d])

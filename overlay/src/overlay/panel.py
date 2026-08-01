@@ -53,6 +53,18 @@ class Definition:
 
 
 @dataclass
+class EntryGroup:
+    """One Yomitan-style stacked entry: a distinct (term, reading) with its own ruby'd headword and
+    per-dictionary definitions, drawn as its own block with its own ⊕ mine button. ``card_index``
+    indexes ``DictionarySet.cards_for(token)`` so the button mines exactly this entry."""
+
+    headword: object  # structured-content node (ruby'd)
+    reading: str
+    defs: list[Definition] = field(default_factory=list)
+    card_index: int = 0
+
+
+@dataclass
 class Entry:
     headword: object  # structured-content node (ruby'd)
     tags: list[str] = field(default_factory=list)
@@ -64,6 +76,10 @@ class Entry:
     # Distinct pitch accents as (reading, positions) — drawn as compact graphs in a header-area row;
     # the purple text pill in the freq row stays as the compact fallback.
     pitches: list[tuple[str, tuple[int, ...]]] = field(default_factory=list)
+    # Yomitan-style stacked entries: when a headword has ≥2 distinct readings (退く = のく / しりぞく),
+    # one EntryGroup per reading, each rendered as its own block with its own ⊕. Empty for the common
+    # single-entry case — the fused header path above is unchanged (goldens preserved).
+    groups: list[EntryGroup] = field(default_factory=list)
 
 
 def _hex(s: str) -> RGBA:

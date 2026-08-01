@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 
 from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
-from overlay.panel import Definition, Entry, Freq
+from overlay.panel import Definition, Entry, EntryGroup, Freq
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -508,9 +508,14 @@ class DictionarySet:
         forms = (token.lemma, token.surface, token.reading)
         formset = {f for f in forms if f}
         termforms = {f for f in (token.lemma, token.surface) if f}
+        batched = self._batch_exact(forms)  # one query for all dicts (no per-dict _fetch)
         by_key: dict[tuple[str, str], CardData] = {}
         for d in self.dicts:
-            hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
+            hits = [
+                h
+                for h in d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
+                if _glosses_of(h.glossary)
+            ]
             hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
             for h in hits:
                 by_key.setdefault((h.term, h.reading), self._card_from_hit(h, token))
@@ -631,6 +636,54 @@ class DictionarySet:
             defs.append(Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags)))
         return defs, headword, reading
 
+    def _entry_groups(
+        self, forms: tuple[str, str, str], termforms: set[str], token: Token
+    ) -> list[EntryGroup]:
+        """Yomitan-style stacked entries: one :class:`EntryGroup` per distinct (term, reading), each
+        with its own ruby'd headword and per-dictionary definitions. Aligned to :meth:`cards_for` order
+        (and its ``card_index``) so a group's ⊕ mines that exact entry. Empty for a single-reading word
+        — then the fused single-header panel is used, unchanged. Mirrors ``_dict_defs``' per-dict gloss
+        dedup, but keyed per (term, reading) instead of collapsed to one headword."""
+        cards = self.cards_for(token)
+        if len(cards) < 2:
+            return []
+        order = {(c.expression, c.reading): i for i, c in enumerate(cards)}
+        defs_by_key: dict[tuple[str, str], list[Definition]] = {}
+        batched = self._batch_exact(forms)
+        for d in self.dicts:
+            hits = [
+                h
+                for h in d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
+                if _glosses_of(h.glossary)
+            ]
+            hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
+            nodes_by_key: dict[tuple[str, str], list] = {}
+            seen_by_key: dict[tuple[str, str], set] = {}
+            tags_by_key: dict[tuple[str, str], str] = {}
+            for h in hits:
+                key = (h.term, h.reading)
+                if key not in order:
+                    continue
+                seen = seen_by_key.setdefault(key, set())
+                if h.raw_glossary in seen:  # kanji+kana duplicate rows share raw JSON — dedup
+                    continue
+                seen.add(h.raw_glossary)
+                nodes_by_key.setdefault(key, []).extend(_glossary_to_nodes(h.glossary))
+                tags_by_key.setdefault(key, h.tags)
+            for key, nodes in nodes_by_key.items():
+                defs_by_key.setdefault(key, []).append(
+                    Definition(d.title, nodes, tags=d.resolve_deftags(tags_by_key[key]))
+                )
+        return [
+            EntryGroup(
+                headword=furigana(term, reading),
+                reading=reading,
+                defs=defs_by_key[(term, reading)],
+                card_index=order[(term, reading)],
+            )
+            for term, reading in sorted(defs_by_key, key=lambda k: order[k])
+        ]
+
     def _pitch_accents(
         self, forms: tuple[str, str, str], reading: str
     ) -> list[tuple[str, tuple[int, ...]]]:
@@ -661,4 +714,5 @@ class DictionarySet:
             inflection_chain=inflection_chain(inflected or token.surface, token.lemma, headword),
             reading=reading or token.reading,
             pitches=pitches,
+            groups=self._entry_groups(forms, termforms, token),
         )
