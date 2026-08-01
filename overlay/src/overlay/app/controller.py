@@ -73,6 +73,7 @@ SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 BOOKMARK_MSG = "saitenka-toggle-bookmark"
 SIDEBAR_MSG = "saitenka-toggle-sidebar"
+ANNOTATION_MSG = "saitenka-toggle-annotations"
 PREVIEW_MSG = "saitenka-preview"
 SCROLL_UP_MSG = "saitenka-scroll-up"
 SCROLL_DOWN_MSG = "saitenka-scroll-down"
@@ -157,6 +158,7 @@ class Reader:
         self.subtitle_language_key = o.keys.subtitle_language_key
         self.bookmark_key = o.keys.bookmark_key
         self.sidebar_key = o.keys.sidebar_key
+        self.annotation_key = o.keys.annotation_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -171,6 +173,10 @@ class Reader:
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
         self.show_dict_tabs = o.tooltip.show_dict_tabs  # draw the sticky dict-tab strip (base only)
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
+        if o.tooltip.annotation_mode not in ("full", "hover"):
+            raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
+        self.annotation_mode = o.tooltip.annotation_mode
+        self._annotation_hover = False
         self.hide_delay = o.tooltip.hide_delay  # tooltip linger after the cursor leaves the word
         self.flash_secs = o.tooltip.flash_secs  # "copied" highlight border pulse duration
         self.panel_cache_max = (
@@ -457,6 +463,7 @@ class Reader:
         with otel_metrics.traced("teardown_tip"):
             self._teardown_tip()
         self.hover = -1
+        self._annotation_hover = False
         self.sub_text = text
         self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
         with otel_metrics.traced("hide_preview"):
@@ -485,12 +492,13 @@ class Reader:
             if self.subtitle_language == "en":
                 sr = render_plain_subtitle(self.sub_text, self.osd[0], size=self.sub_size)
             else:
+                annotated = self.annotation_mode == "full" or self._annotation_hover
                 sr = render_subtitle(
                     self.lines,
                     self.osd[0],
                     size=self.sub_size,
-                    hover=self.hover if self.hover >= 0 else None,
-                    styles=self.styles,
+                    hover=self.hover if annotated and self.hover >= 0 else None,
+                    styles=self.styles if annotated else None,
                 )
         self.boxes = sr.boxes
         ox = (self.osd[0] - sr.image.width) // 2
@@ -526,6 +534,18 @@ class Reader:
 
     def set_hover(self, index: int) -> None:
         tooltip.set_hover(self, index)
+
+    def set_annotation_hover(self, *, revealed: bool) -> None:
+        target = bool(
+            revealed
+            and self.annotation_mode == "hover"
+            and self.subtitle_language == "jp"
+            and self.tokens
+        )
+        if target == self._annotation_hover:
+            return
+        self._annotation_hover = target
+        self._draw_subtitle()
 
     def speak_hovered(self) -> None:
         tooltip.speak_hovered(self)
@@ -900,6 +920,14 @@ class Reader:
     def toggle_sidebar(self) -> None:
         sidebar.toggle(self)
 
+    def toggle_annotation_mode(self) -> None:
+        self.annotation_mode = "hover" if self.annotation_mode == "full" else "full"
+        self._annotation_hover = False
+        if self.sub_text.strip():
+            self._draw_subtitle()
+        label = "full" if self.annotation_mode == "full" else "hover-only"
+        self._toast(f"annotations: {label}")
+
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
@@ -911,6 +939,7 @@ class Reader:
         bind(self.hover_pause_key, HOVER_PAUSE_MSG)
         bind(self.bookmark_key, BOOKMARK_MSG)
         bind(self.sidebar_key, SIDEBAR_MSG)
+        bind(self.annotation_key, ANNOTATION_MSG)
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
         bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
@@ -944,6 +973,7 @@ class Reader:
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         SIDEBAR_MSG: lambda r: r.toggle_sidebar(),
+        ANNOTATION_MSG: lambda r: r.toggle_annotation_mode(),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
