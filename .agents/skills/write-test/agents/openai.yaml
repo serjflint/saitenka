@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Saitenka Test"
+  short_description: "Author tests in Saitenka house style"
+  default_prompt: "Use $write-test to add a focused Saitenka pytest test in the correct tier."

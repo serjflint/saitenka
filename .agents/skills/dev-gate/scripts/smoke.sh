@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Smoke: every poe task the SKILL.md documents must exist, and the `all` sequence must match.
 set -euo pipefail
-cd "$(dirname "$0")/../../../.."
+skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+test -f "$skill_dir/agents/openai.yaml"
+cd "$skill_dir/../../.."
 PT="overlay/pyproject.toml"
 fail=0
 

@@ -13,8 +13,9 @@ Guidance for AI agents and developers working in this repo. Feature docs: `overl
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
 - **`.agents/skills/`** — repo-local agent skills; each is a
-  `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard. For
-  Claude Code auto-discovery, create a **local** symlink (`.claude/` is git-ignored, never committed):
+  `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard. Codex
+  discovers this directory directly. For Claude Code auto-discovery, create a **local** symlink
+  (`.claude/` is git-ignored, never committed):
   `ln -s ../.agents/skills .claude/skills`.
 
 ## Python: always `uv`
@@ -94,7 +95,7 @@ wrong — the real gate had grown to 14 tasks, the docs still said 5.)
 - **High-level over step-by-step, when a canonical walkthrough exists.** README explains *what* and
   *why*; RUNNING.md (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
   not the fix.
-- **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh Claude — no
+- **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
   invent something is the doc's bug, not the reader's (this is exactly how an auto-generated repowise
   wiki page's hallucinations got caught — the same check works on hand-written docs).

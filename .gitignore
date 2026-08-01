@@ -62,3 +62,6 @@ overlay/.vscode/
 
 # Claude Code: entirely local (settings + an optional .claude/skills -> ../.agents/skills symlink). Never committed.
 /.claude/
+
+# Codex: local machine config (for example the Repowise MCP adapter). Durable guidance lives in AGENTS.md/.agents.
+/.codex/config.toml

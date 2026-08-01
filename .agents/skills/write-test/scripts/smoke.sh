@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Smoke: every symbol/test/marker the SKILL.md points at must still exist, or the skill has rotted.
 set -euo pipefail
-cd "$(dirname "$0")/../../../.."   # -> overlay/ repo root's overlay dir
+skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+test -f "$skill_dir/agents/openai.yaml"
+cd "$skill_dir/../../.."   # -> overlay/ repo root's overlay dir
 OV="overlay"
 fail=0
 need() { grep -rq "$1" "$OV/$2" || { echo "MISSING: $1  (in $2)"; fail=1; }; }

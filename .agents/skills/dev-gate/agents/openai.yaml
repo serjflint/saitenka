@@ -1,0 +1,4 @@
+interface:
+  display_name: "Saitenka Dev Gate"
+  short_description: "Run and diagnose Saitenka quality checks"
+  default_prompt: "Use $dev-gate to run and interpret the Saitenka pre-push quality gate."
