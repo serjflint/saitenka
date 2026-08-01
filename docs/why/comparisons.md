@@ -1,8 +1,9 @@
 # How it compares
 
-Saitenka, [SubMiner](https://github.com/ksyasuda/SubMiner), and
-[Autocards](https://learnjapanese.moe/autocards/) all put Japanese vocabulary from video into Anki, but
-from three different angles.
+Saitenka, [SubMiner](https://github.com/ksyasuda/SubMiner),
+[Autocards](https://learnjapanese.moe/autocards/), and
+[Anki Miner](https://github.com/0xzerolight/anki_miner) all put Japanese vocabulary into Anki, but from
+four different angles.
 
 - **Saitenka** is a grounded, FSRS-driven engine composited inside mpv — colored subtitles, a hover
   dictionary tooltip, and one-key mining, all drawn into mpv's own video surface.
@@ -11,37 +12,45 @@ from three different angles.
 - **Autocards** is a retroactive media back-filler: it doesn't create cards or show dictionaries — it
   batch-attaches a screenshot and sentence audio to text-only cards you made elsewhere, by matching each
   card's Sentence field against the subtitle's timing.
+- **Anki Miner** is a batch-mining desktop GUI: point it at a folder, whole series, YouTube playlist,
+  audiobook, manga, or ebook, review the candidate words in a curator, and it builds a frequency-ranked
+  deck in one pass — the opposite pole from Saitenka's live, one-word-at-a-time overlay.
 
 So this is a map of trade-offs across different jobs, not a scoreboard. For raw rendering and lookup
 latency, see [Speed](benchmarks.md); to try it, see [Get started](../start/install.md).
 
 ## Capability matrix
 
-| Capability | 再点火 Saitenka | SubMiner | Autocards |
-|---|:---:|:---:|:---:|
-| Category | live in-mpv engine | Electron mining app | retroactive enricher |
-| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ | ❌ |
-| Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ | ❌ |
-| One-key **+ bulk Anki mining** (audio, screenshot, reading, freq) | ✅ | ✅ | ❌ |
-| **Retroactive media back-fill** onto existing text-only cards (sentence↔sub-timing match) | ❌* | ❌ | ✅ |
-| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ | ❌ |
-| **N+1** sentence targeting | ✅ | ✅ | ❌ |
-| **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ | ❌ |
-| Grounded / local-first (readings never from an LLM) | ✅ | ✅ | ✅ |
-| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ |
-| Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool |
-| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ |
-| AniList **progress scrobbling** | ❌ | ✅ | ❌ |
-| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ |
-| Episode analysis · local session history | ✅ | ✅ | ❌ |
-| Cross-machine stats/history **sync** | ❌ | ✅ | ❌ |
-| Mined-audio loudness normalization | ❌* | ✅ | ❌ |
-| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ |
-| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ |
-| One-command installer / portable bundle | ✅ | ✅ | ✅ |
-| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ | ❌ |
-| Core license | Apache-2.0 | GPL-3.0 | GPL-3.0 |
-| Linux · macOS · Windows | ✅ | ✅ | ❌ Windows |
+| Capability | 再点火 Saitenka | SubMiner | Autocards | Anki Miner |
+|---|:---:|:---:|:---:|:---:|
+| Category | live in-mpv engine | Electron mining app | retroactive enricher | batch mining GUI |
+| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ | ❌ | ❌ |
+| Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ | ❌ | ✅ |
+| One-key **+ bulk Anki mining** (audio, screenshot, reading, freq) | ✅ | ✅ | ❌ | ✅ |
+| **Retroactive media back-fill** onto existing text-only cards (sentence↔sub-timing match) | ❌* | ❌ | ✅ | ❌ |
+| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ | ❌ | ❌ |
+| **N+1** sentence targeting | ✅ | ✅ | ❌ | ✅ |
+| **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ | ❌ | ❌ |
+| Grounded / local-first (readings never from an LLM) | ✅ | ✅ | ✅ | ✅ |
+| Batch folder / whole-series **frequency-ranked deck building** | ❌ | ❌ | ❌ | ✅ |
+| **Reading mining** — manga (mokuro) · novels (epub/txt) · pasted text | ❌ | ❌ | ❌ | ✅ |
+| Audiobook / **YouTube URL + playlist** mining (yt-dlp) | ❌ | ❌ | ❌ | ✅ |
+| **Pre-mine word curation** — review candidates before cards | ❌ | ❌ | ❌ | ✅ |
+| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ | ❌ |
+| Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool | ✅ utility |
+| **Local subtitle generation** (Whisper ASR, when no subs exist) | ❌ | ❌ | ❌ | ✅ |
+| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ | ⚠️ YouTube only |
+| AniList **progress scrobbling** | ❌ | ✅ | ❌ | ❌ |
+| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ | ❌ |
+| Episode analysis · local session history | ✅ | ✅ | ❌ | ✅ |
+| Cross-machine stats/history **sync** | ❌ | ✅ | ❌ | ❌ |
+| Mined-audio loudness normalization | ❌* | ✅ | ❌ | ❌ |
+| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ | ❌ |
+| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ | ❌ |
+| One-command installer / portable bundle | ✅ | ✅ | ✅ | ✅ |
+| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ | ❌ | ⚠️ AppImage · deb · exe |
+| Core license | Apache-2.0 | GPL-3.0 | GPL-3.0 | GPL-3.0 |
+| Linux · macOS · Windows | ✅ | ✅ | ❌ Windows | ✅ |
 
 <sub>✅ yes · ❌ no / out of scope · ⚠️ partial · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
 
@@ -73,6 +82,9 @@ reach, because those aren't mpv.
   (AniList scrobbling, Jellyfin, a media launcher, cross-machine sync, native installers).
 - Reach for **Autocards** if you make cards fast in a browser texthooker and want to attach the media in
   one pass afterward (Windows-only).
+- Reach for **Anki Miner** if you want to batch-mine whole series, manga, ebooks, audiobooks, or YouTube
+  into a frequency-ranked deck, curating the candidate words before cards are made — a tabbed desktop app,
+  not a live overlay.
 - Reach for **Saitenka** if you want a fast, single-surface, FSRS-grounded engine that draws straight into
   mpv — no second window, forgotten words resurfacing from your review state.
 
