@@ -874,9 +874,9 @@ class Reader:
         with otel_metrics.traced("anki_mine", source="base"):
             self._miner.mine_token(self.tokens[idx])
 
-    def _mine_token(self, tok) -> None:
+    def _mine_token(self, tok, *, card=None) -> None:
         with otel_metrics.traced("anki_mine", source="nested"):
-            self._miner.mine_token(tok)
+            self._miner.mine_token(tok, card=card)
 
     def _mark_mined(self, expression: str) -> None:
         miner_ui.mark_mined(self, expression)

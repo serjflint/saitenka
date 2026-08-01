@@ -319,6 +319,32 @@ def test_card_for_breaks_reading_tie_by_frequency(tmp_path):
     assert card.reading == "おもて"
 
 
+def test_cards_for_returns_one_card_per_reading_best_first(tmp_path):
+    """The per-entry mine choices: one CardData per distinct (term, reading), ordered best-first —
+    退いた's contextual reading のいた puts のく ahead of the first-listed しりぞく, and each card carries
+    only its own reading's glosses. cards_for[0] is card_for's default."""
+    d = _make_dict(
+        tmp_path / "cff.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    cards = ds.cards_for(tok)
+    assert [(c.reading, c.glosses) for c in cards] == [
+        ("のく", ("to step aside",)),
+        ("しりぞく", ("to retreat",)),
+    ]
+    assert cards[0] == ds.card_for(tok)  # default == first offered
+
+
+def test_cards_for_empty_when_no_glossed_hit(tmp_path):
+    d = _make_dict(tmp_path / "cfe.zip", "TestDict", [["猫", "ねこ", ["cat"]]])
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="犬", lemma="犬", reading="いぬ", pos="名詞", start=0, end=1)
+    assert ds.cards_for(tok) == []
+
+
 def test_card_for_miss_returns_empty_glossary(tmp_path):
     """A word in no configured dict → expression-only card with empty glossary_html, so the miner
     can fall back to the JMdict/jamdict source."""

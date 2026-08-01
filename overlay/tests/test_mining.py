@@ -198,6 +198,27 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     assert shown == ["読む"]
 
 
+def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
+    """A per-entry ⊕ passes an explicit CardData, so the mined note is that chosen entry (しりぞく),
+    not whatever the default dict-first pick would derive for the token."""
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+    from overlay.app.lookup import CardData
+
+    ipc = FakeIPC()
+    anki = _FakeAnki()
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok, card=chosen)
+    assert anki.added[0]["fields"]["Expression"] == "退く"
+    assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
+
+
 def test_mine_token_duplicate_shows_existing(monkeypatch):
     from util import FakeIPC
 

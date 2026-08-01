@@ -457,18 +457,29 @@ class DictionarySet:
         ranks = [r for fs in self.freqs if (r := fs.rank((term,), reading)) is not None]
         return min(ranks) if ranks else None
 
-    def _best_hit(self, hits: list[DictEntry], token: Token, formset: set[str]) -> DictEntry:
-        """Pick the entry to mine among a dictionary's hits: exact-headword first (like Yomitan and
+    def _rank_key(self, term: str, reading: str, token: Token, formset: set[str]):
+        """Sort key for choosing/ordering entries: exact-headword first (like Yomitan and
         :meth:`Dictionary.lookup`), then the reading closest to the token's contextual reading (退いた
-        prefers のく over しりぞく), then the more common reading by frequency rank. ``min`` is stable, so
-        ties fall back to the dict's own order — the prior ``hits[0]`` behaviour."""
-        return min(
-            hits,
-            key=lambda h: (
-                h.term not in formset,
-                -_reading_affinity(h.reading, token.reading),
-                self._freq_rank(h.term, h.reading) or float("inf"),
-            ),
+        prefers のく over しりぞく), then the more common reading by frequency rank."""
+        return (
+            term not in formset,
+            -_reading_affinity(reading, token.reading),
+            self._freq_rank(term, reading) or float("inf"),
+        )
+
+    def _best_hit(self, hits: list[DictEntry], token: Token, formset: set[str]) -> DictEntry:
+        """The single entry ``card_for`` mines from one dict's hits. ``min`` is stable, so a full tie
+        falls back to the dict's own order — the prior ``hits[0]`` behaviour."""
+        return min(hits, key=lambda h: self._rank_key(h.term, h.reading, token, formset))
+
+    @staticmethod
+    def _card_from_hit(hit: DictEntry, token: Token) -> CardData:
+        glosses = _glosses_of(hit.glossary)
+        return CardData(
+            expression=hit.term or token.lemma or token.surface,
+            reading=hit.reading or token.reading,
+            glossary_html="<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>",
+            glosses=tuple(glosses),
         )
 
     def card_for(self, token: Token) -> CardData:
@@ -481,19 +492,30 @@ class DictionarySet:
         formset = {f for f in forms if f}
         for d in self.dicts:
             hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
-            if not hits:
-                continue
-            best = self._best_hit(hits, token, formset)
-            glosses = _glosses_of(best.glossary)
-            glossary_html = "<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>"
-            return CardData(
-                expression=best.term or token.lemma or token.surface,
-                reading=best.reading or token.reading,
-                glossary_html=glossary_html,
-                glosses=tuple(glosses),
-            )
+            if hits:
+                return self._card_from_hit(self._best_hit(hits, token, formset), token)
         return CardData(
             expression=token.lemma or token.surface, reading=token.reading, glossary_html=""
+        )
+
+    def cards_for(self, token: Token) -> list[CardData]:
+        """Every distinct entry (term + reading) across the user's dicts as a mineable CardData,
+        best-first (same ranking ``card_for`` picks its default from) — the choices a per-entry mine
+        button offers, mirroring Yomitan's stacked entries. The glossary for a (term, reading) comes
+        from the first dict that has it with a non-empty glossary. Empty when no dict has a glossed hit,
+        so the caller falls back to the JMdict source. ``cards_for(token)[0] == card_for(token)`` for a
+        single dictionary."""
+        forms = (token.lemma, token.surface, token.reading)
+        formset = {f for f in forms if f}
+        termforms = {f for f in (token.lemma, token.surface) if f}
+        by_key: dict[tuple[str, str], CardData] = {}
+        for d in self.dicts:
+            hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
+            hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
+            for h in hits:
+                by_key.setdefault((h.term, h.reading), self._card_from_hit(h, token))
+        return sorted(
+            by_key.values(), key=lambda c: self._rank_key(c.expression, c.reading, token, formset)
         )
 
     def _collect_search_hits(self, glob: str, limit: int) -> list[tuple[str, str, str]]:

@@ -170,15 +170,17 @@ class Miner:
             return
         self.mine_token(r.tokens[idx])
 
-    def mine_token(self, tok, *, force: bool = False) -> None:
+    def mine_token(self, tok, *, force: bool = False, card=None) -> None:
         """Mine a specific token into Anki — the hovered subtitle word, or an inner word discovered
         by scanning inside the tooltip (the nested popup's ⊕). ``force`` mines a second card for an
-        expression already in the deck (the preview's explicit "add anyway" for a different scene)."""
+        expression already in the deck (the preview's explicit "add anyway" for a different scene).
+        ``card`` mines an explicit CardData (a specific entry chosen from the panel's per-entry ⊕),
+        bypassing the default entry pick — otherwise the dict-first ``_card_for`` derives it."""
         r = self.r
         if not r.anki or not r.mine_cfg:
             return
         try:
-            card = self._card_for(tok)
+            card = card if card is not None else self._card_for(tok)
             if not force:
                 existing = dedupe(r.anki, r.mine_cfg, card.expression)
                 if existing:
