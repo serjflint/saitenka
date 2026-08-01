@@ -23,10 +23,11 @@ def test_ensure_launches_when_down_then_comes_up(monkeypatch):
         return calls["n"] >= 2
 
     monkeypatch.setattr(anki_mod, "anki_reachable", reachable)
+    monkeypatch.setattr(anki_mod.sys, "platform", "darwin")
     monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda cmd, **_k: calls.update(launched=cmd))
     monkeypatch.setattr(anki_mod.time, "sleep", lambda _s: None)
     assert anki_mod.ensure_anki_running(wait=5) is True
-    assert calls["launched"][0] in ("open", "cmd", "anki")  # platform launch command
+    assert calls["launched"] == ["open", "-a", "Anki"]
 
 
 def test_ensure_returns_false_when_launch_fails(monkeypatch):

@@ -176,6 +176,7 @@ def test_windows_and_powershell_checks_are_ok_off_windows(monkeypatch):
 
 
 def test_mpv_socket_check_reports_set_and_unset(monkeypatch):
+    monkeypatch.setattr(doc.sys, "platform", "darwin")
     monkeypatch.setattr(doc, "load_config", lambda: {"mpv_socket": r"\\.\pipe\mpvsocket"})
     set_c = doc.check_mpv_socket()
     assert set_c.status == "ok" and "mpvsocket" in set_c.detail
