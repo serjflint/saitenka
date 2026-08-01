@@ -71,15 +71,20 @@ Saitenka solves three problems:
 
 ## Features
 
-- FSRS-aware subtitle **word coloring** + JLPT underlines + N+1 targeting (sourced from your Anki decks
-  via AnkiConnect).
+- FSRS-aware subtitle **word coloring** + JLPT underlines + N+1 targeting. An optional copy of Anki's
+  database distinguishes learning, young, mature-known, and forgotten words without touching the live
+  collection.
 - Hover → **multi-dictionary tooltip**: ordered definitions, ruby, frequency pills, pitch-accent,
   clickable cross-references, in-tooltip word scanning, wildcard search.
 - **One-key + bulk mining** to Anki (Lapis-style cards — a popular community Anki note type): sentence
   audio, clean screenshot, reading, glossary, frequency, structured provenance tags — with dedup and a
   post-mine card preview.
-- On-demand **English reveal** (anti-crutch: only while you're actively looking a word up) and
-  **jimaku.cc** subtitle fetch when a file has no Japanese track.
+- **Watch-party controls:** toggle hover auto-pause, switch between JP-only, EN-only, and JP+EN, or
+  fall back to English immediately while Japanese providers search without pausing or switching tracks.
+- A whole-episode **subtitle panel**, move-safe deferred-capture backlog, playback-neutral episode
+  analysis, and opt-in local session history. Press `F1` for the effective shortcut reference.
+- Background subtitle fetch from **jimaku.cc** and the opt-in **TsukiHime** provider, with an explicit
+  non-switching retry shortcut.
 - Import dictionaries from **Yomitan** — both standard dictionary `.zip`s and a full Yomitan database
   export (streamed, so a multi-GB export never loads into memory).
 - A `doctor` command that checks the whole environment and a one-command `setup` wizard.
@@ -101,11 +106,11 @@ trade-offs, not a scoreboard.
 | **N+1** sentence targeting | ✅ | ✅ |
 | **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ |
 | Grounded / local-first (readings never from an LLM) | ✅ | ✅ |
-| jimaku.cc subtitle fetch | ✅ | ✅ |
-| Extra subtitle sources (Animetosho / TsukiHime) · YouTube subs | ❌* | ✅ |
+| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ |
+| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ |
 | AniList **progress scrobbling** | ❌ | ✅ |
 | Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ |
-| Immersion **stats dashboard** | ❌* | ✅ |
+| Episode analysis · local session history | ✅ | ✅ |
 | Cross-machine stats/history **sync** | ❌ | ✅ |
 | Mined-audio loudness normalization | ❌* | ✅ |
 | Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ |
@@ -133,6 +138,7 @@ media-server rig, this is the division of labor:
 | Acquire episodes | [Sonarr](https://sonarr.tv/) (PVR — monitors RSS, grabs + renames) · [Taiga](https://taiga.moe/) (RSS/torrent feeds, Windows) · Usenet/torrent clients | — |
 | Identify & organize the files | [Shoko](https://shokoanime.com/) (AniDB hashing) + Shokofin | — |
 | Serve & stream the library | [Jellyfin](https://jellyfin.org/) · Plex · Emby | — |
+| Synchronize a watch party | [Syncplay](https://syncplay.pl/) (coordinates each friend's local player) | ✅ runs alongside |
 | **Play the file** | **[mpv](https://mpv.io/)** | ✅ **attaches here** |
 | Color words · dictionary · mine | **Saitenka** | ✅ its whole job |
 | Spaced repetition | [Anki](https://apps.ankiweb.net/) + FSRS | ✅ mines in via AnkiConnect |
@@ -141,14 +147,18 @@ media-server rig, this is the division of labor:
 **The one hard rule:** Saitenka draws into a **real, local mpv** process — over its IPC socket, with the
 auto-start plugin. It rides the *player*, not the *server*, so it works with a Jellyfin/Shoko library only
 when you play the file in mpv (open it directly, or hand off to mpv as an external player where your client
-supports it). Watching *inside* a Jellyfin/Plex client — web, TV, or phone — is out of reach, because those
-aren't mpv.
+supports it). Syncplay is compatible because it coordinates a local mpv; Saitenka still attaches at the
+same player boundary. Watching *inside* a Jellyfin/Plex client — web, TV, or phone — is out of reach,
+because those aren't mpv.
 
 **Composes cleanly with:**
 
 - **A Jellyfin + Shoko + Sonarr library.** Let them acquire, identify (AniDB), and organize; point mpv at
   the resulting local file and the overlay just works. Shoko's AniDB-accurate filenames also keep
   downstream filename-based tools happy.
+- **A Syncplay watch party.** Syncplay owns synchronized playback; Saitenka joins each participant's
+  local mpv. Its language, capture, analysis, and provider controls avoid automatic playback changes,
+  while an explicit subtitle-panel seek remains an ordinary synchronized seek.
 - **A list-driven watch loop.** Taiga (Windows) and Trackma (cross-platform) do more than scrobble — one
   tracking list drives the whole loop. Taiga in particular auto-downloads *only* the airing episodes of
   shows you're watching (RSS feeds filtered by watch-status + episode-availability, handed to qBittorrent),
@@ -182,9 +192,8 @@ doesn't track your watch progress. (All three are GPLv3.)
 progress, a Jellyfin/media-server client, a media launcher, and cross-machine stats sync. Saitenka defers
 these to the dedicated tools above and stays a single-purpose mpv engine (the plain `❌` rows above).
 
-**Not there *yet*, but [on the roadmap](https://github.com/serjflint/saitenka/issues):** an immersion
-stats dashboard, extra subtitle sources, mined-audio loudness normalization, and a hosted docs site (the
-`❌*` rows above).
+**Not there *yet*, but [on the roadmap](https://github.com/serjflint/saitenka/issues):** more subtitle
+sources, mined-audio loudness normalization, and a hosted docs site (the `❌*` rows above).
 
 ## Quick start
 
