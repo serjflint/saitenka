@@ -1,8 +1,8 @@
 [project]
 name = "saitenka"
 version = "1.0.0"
-description = "Rich-text + ruby renderer for the native in-mpv Yomitan overlay (Saitenka)"
-readme = "README.md"
+description = "Learn Japanese from the video you're watching: FSRS-aware subtitle coloring + one-key Anki mining, drawn inside mpv"
+readme = "PYPI.md"
 requires-python = ">=3.13"
 dependencies = [
     "pillow>=11.0",
@@ -24,10 +24,16 @@ dependencies = [
     "rich>=14.0",  # progress bars in cli.py; used directly, so declared (not left transitive via cyclopts)
 ]
 
+[project.urls]
+Homepage = "https://github.com/serjflint/saitenka"
+Repository = "https://github.com/serjflint/saitenka"
+Issues = "https://github.com/serjflint/saitenka/issues"
+Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 # GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
 # core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
-deinflect = ["saitenka-deinflect"]
+deinflect = ["saitenka-deinflect>=0.1.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
 # default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
@@ -61,9 +67,6 @@ full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
 
 [project.scripts]
 saitenka = "overlay.app.cli:main"
-
-[tool.uv.sources]
-saitenka-deinflect = { path = "../deinflect", editable = true }
 
 [dependency-groups]
 # libcst is a codemod-authoring tool (see AGENTS.md "Refactoring") — nothing in src/tests/gate imports
@@ -291,10 +294,10 @@ DEP002 = [
     "jamdict-data-fix", # Windows drop-in for jamdict-data (never imported)
     "saitenka", # self-reference from the `full`/`minimal` convenience extras
     "saitenka-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
-    "filelock",         # declared ahead of use for the planned Windows mandatory-lock work (ROADMAP.md
-                        # "real Windows kernel" residue); not yet imported. Remove IF that work is dropped.
+    "filelock",         # declared ahead of use for the planned Windows mandatory-lock work; not yet
+                        # imported. Remove IF that work is dropped.
 ]
-DEP003 = ["saitenka_deinflect"]  # GPL add-on via the editable `deinflect` extra — the chokepoint import
+DEP003 = ["saitenka_deinflect"]  # GPL add-on via the `deinflect` extra (PyPI) — the chokepoint import
 
 # --- Stage 8b: local task runner (no CI — `poe all` is the pre-push gate) -------------------------
 # Every `uv run` carries `--extra full` so the optional features (deinflect inflection chain + JMdict
@@ -334,6 +337,8 @@ complexity = { shell = "uv run --extra full complexipy" }
 # review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
 complexity-baseline = { shell = "uv run --extra full complexipy --snapshot-create" }
 # Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
+# Inner-loop task only — NOT in `all`: `cov` runs a superset marker set with `-n auto`, so it is the
+# gate's functional run too (no point running the suite a third time without coverage).
 test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e or live)'" }
 # -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
 # FT code paths still run without the GIL — it just parallelises (91s → ~22s).
@@ -342,7 +347,10 @@ test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not 
 # change can affect: ruff dependents reverse-closure + a full-run fallback on static-graph blind spots.
 # `poe affected` (working tree) / `poe affected --base main` (vs a branch) / `--print` to just list them.
 affected = { cmd = "uv run --extra full python tools/affected.py" }
-cov = "uv run --extra full pytest -q --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
+# The gate's functional + coverage run. `-n auto` parallelises it (~99s → ~38s); pytest-cov combines
+# per-worker data. Its marker set (`not (slow or live)`) is a superset of `test`'s, so `all` runs this
+# instead of a separate `test` — the suite runs twice total (here + `test-ft` under PYTHON_GIL=0).
+cov = "uv run --extra full pytest -q -n auto --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
 # Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between
 # synthetic cues, so it's slower than the other benches; not folded into `bench`/`poe all`.
@@ -438,6 +446,10 @@ release-publish = { shell = "cd .. && uv run install/release.py publish $POE_EXT
 # lockfile directly, no venv build (pip-audit SIGABRTs building one on uv-managed pythons; its
 # `--no-deps` mode is the documented fallback). Experimental → the preview flag pins the interface.
 audit = { shell = "uv audit --preview-features audit-command" }
+# ADVISORY (not in `all`) — second-opinion CVE scan via pip-audit (PyPA Advisory DB + OSV) over the
+# exported lockfile. `--no-deps` audits the pinned graph WITHOUT building a venv (a full build SIGABRTs
+# on uv-managed pythons, per the `audit` note above); runs out-of-process via uvx (free-threading-safe).
+pip-audit = { shell = "uv export --frozen --no-emit-project --no-hashes --all-extras | uvx pip-audit --no-deps -r /dev/stdin" }
 # GATE (in `all`) — spelling across code + docs. typos (Rust via uvx), gitignore-aware; allowlist in
 # [tool.typos]. Ran from repo root so it covers the top-level docs and the deinflect add-on too.
 spell = { shell = "cd .. && uvx typos" }
@@ -446,11 +458,14 @@ spell = { shell = "cd .. && uvx typos" }
 # `links-net` below (network → flaky → not in `all`). lychee = Rust binary (brew install lychee).
 links = { shell = "cd .. && lychee --offline --no-progress '**/*.md'" }
 links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress '**/*.md'" }
-# Docs site (Material for MkDocs → Read the Docs). `--strict` fails the build on broken links/nav, so a
-# docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an opt-in group); `docs`
-# builds to overlay/site/, `docs-serve` live-reloads at http://127.0.0.1:8000.
-docs = { shell = "uv run --group docs mkdocs build --strict" }
-docs-serve = { shell = "uv run --group docs mkdocs serve" }
+# Docs site (Material for MkDocs → Read the Docs). Source lives at the repo root (../mkdocs.yml, ../docs),
+# but the build runs here because this env has the `saitenka` package + `docs` group. `--strict` fails on
+# broken links/nav, so a docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an
+# opt-in group); builds to ../site/, `docs-serve` live-reloads at http://127.0.0.1:8000.
+# `docs-cli` regenerates the committed CLI reference from the cyclopts app (run after changing commands).
+docs = { shell = "uv run --group docs mkdocs build -f ../mkdocs.yml --strict" }
+docs-serve = { shell = "uv run --group docs mkdocs serve -f ../mkdocs.yml" }
+docs-cli = { shell = "uv run python -m overlay.app.gen_cli_docs > ../docs/usage/cli.md" }
 
 # SAST (flake8-bandit `S`) is now folded into the ruff `select` above, so it runs inside `lint` (in
 # `all`) — no separate `sec` task. The 2026-07-25 triage put reasoned per-line `# noqa: S…` at each
@@ -513,4 +528,4 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "complexity", "test", "test-ft", "cov", "audit", "deps", "licenses", "spell", "links", "shell"]
+all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "audit", "deps", "licenses", "spell", "links", "shell"]

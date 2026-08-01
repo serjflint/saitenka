@@ -285,9 +285,12 @@ def build_note(
     freq_html: str = "",
     freq_sort: str = "",
     tags=(),
+    *,
+    allow_duplicate: bool = False,
 ) -> dict:
     """Assemble the AnkiConnect note dict from card data + media filenames. ``tags`` are extra per-card
-    tags (source/episode) added to the config's static tags."""
+    tags (source/episode) added to the config's static tags. ``allow_duplicate`` lets an explicit
+    "add anyway" mine a second card for an expression already in the deck (a different scene)."""
     values = {
         "expression": card.expression,
         "reading": card.reading,
@@ -308,5 +311,5 @@ def build_note(
         "modelName": cfg.model,
         "fields": note_fields,
         "tags": all_tags,
-        "options": {"allowDuplicate": False},
+        "options": {"allowDuplicate": allow_duplicate},
     }

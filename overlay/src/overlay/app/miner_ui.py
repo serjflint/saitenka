@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from overlay.app.anki import AnkiError
+from overlay.app.bindings import TIP_CLOSE_MSG, active_bindings
 from overlay.app.card_preview import PreviewData, render_card_preview
 from overlay.app.media import audio_duration, play_audio
 from overlay.app.overlay_ids import OverlayId
@@ -77,13 +78,13 @@ def footer(reader: Reader, video) -> str:
     return f"{reader.mine_cfg.deck} · {reader.mine_cfg.model} · {reader._provenance(video)}"
 
 
-def preview_mined(reader: Reader, card, tok, video) -> None:
+def preview_mined(reader: Reader, card, tok, video, status: str = "mined") -> None:
     img = None
     if reader._last_jpg and Path(reader._last_jpg).exists():
         img = Image.open(reader._last_jpg)
     secs = audio_duration(reader._last_audio) if reader._last_audio else None
     pv = PreviewData(
-        "mined",
+        status,
         card.expression,
         card.reading,
         sentence_lines(reader),
@@ -153,11 +154,30 @@ def media_tempfile(reader: Reader, name):
         return None
 
 
+def _grab_preview_keys(reader: Reader) -> None:
+    """Route the preview-scoped keys (Esc → close) to the preview while it's on screen."""
+    for b in active_bindings(reader, "preview"):
+        reader.ipc.command("keybind", b.key, f"script-message {b.spec.message}")
+
+
+def _release_preview_keys(reader: Reader) -> None:
+    """Hand the preview's keys back when it closes. Esc is shared with the tooltip, so return it there
+    if a tooltip is still up (the help overlay, if open, owns Esc itself — leave it alone)."""
+    if reader._help_open:
+        return
+    for b in active_bindings(reader, "preview"):
+        if b.key == "ESC" and reader._tip_keys_bound:
+            reader.ipc.command("keybind", b.key, f"script-message {TIP_CLOSE_MSG}")
+        else:
+            reader.ipc.command("keybind", b.key, "ignore")
+
+
 def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
     reader._last_preview, reader._last_audio = pv, audio_path
     reader._preview_zoom = False
     render_preview(reader)
+    _grab_preview_keys(reader)
 
 
 def render_preview(reader: Reader) -> None:
@@ -175,13 +195,15 @@ def render_preview(reader: Reader) -> None:
     reader._preview_close_rect = _screen(pr.close_rect)
     reader._preview_audio_rect = _screen(pr.audio_rect)
     reader._preview_image_rect = _screen(pr.image_rect)
+    reader._preview_dup_rect = _screen(pr.dup_rect)
 
 
 def hide_preview(reader: Reader) -> None:
     reader.ov.hide(OverlayId.PREVIEW)
     reader._last_preview = None
     reader._preview_rect = reader._preview_close_rect = None
-    reader._preview_audio_rect = reader._preview_image_rect = None
+    reader._preview_audio_rect = reader._preview_image_rect = reader._preview_dup_rect = None
+    _release_preview_keys(reader)
 
 
 def click_preview(reader: Reader, x: float, y: float) -> bool:
@@ -191,6 +213,8 @@ def click_preview(reader: Reader, x: float, y: float) -> bool:
         return False
     if reader._preview_close_rect and reader._in_rect(reader._preview_close_rect, x, y):
         hide_preview(reader)
+    elif reader._preview_dup_rect and reader._in_rect(reader._preview_dup_rect, x, y):
+        reader._add_duplicate()  # ＋ add anyway → mine a second card for this scene
     elif reader._preview_image_rect and reader._in_rect(reader._preview_image_rect, x, y):
         reader._preview_zoom = not reader._preview_zoom
         render_preview(reader)  # enlarge to verify the frame / shrink back

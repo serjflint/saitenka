@@ -33,6 +33,14 @@ def test_preview_without_media():
     assert pr.image_rect is None  # no screenshot → nothing to enlarge
 
 
+def test_exists_preview_offers_add_duplicate_button():
+    """A card already in the deck shows the ＋ "add anyway" affordance; a freshly mined card does not."""
+    exists = PreviewData("exists", "本", "ほん", ["本を読む"], "本", ["book"], None, None, "")
+    mined = PreviewData("mined", "本", "ほん", ["本を読む"], "本", ["book"], None, None, "")
+    assert render_card_preview(exists, width=440).dup_rect is not None
+    assert render_card_preview(mined, width=440).dup_rect is None
+
+
 def test_preview_scales_with_window():
     # Matches the tooltip: the card preview's contents scale with the window (mpv model), so its
     # height and its clickable ✕ button scale together — same layout, just smaller on a small video.

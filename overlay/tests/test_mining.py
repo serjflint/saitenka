@@ -186,7 +186,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
     shown = []
     monkeypatch.setattr(
-        r, "_preview_mined", lambda card, _tok, _video: shown.append(card.expression)
+        r, "_preview_mined", lambda card, _tok, _video, _st="mined": shown.append(card.expression)
     )
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
@@ -214,8 +214,77 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)
     assert anki.added == []  # dedupe: nothing added
-    assert previewed == [(42, "duplicate")]
+    assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
     assert "読む" in r._mined  # ⊕ flips to ✓
+
+
+def test_preview_replay_key_is_tooltip_scoped():
+    """`p` (replay preview) is bound only while a tooltip is up, so global `p` keeps mpv's pause
+    (the Windows collision). It must NOT be a global startup binding."""
+    from util import FakeIPC
+
+    from overlay.app.bindings import PREVIEW_MSG, active_bindings
+    from overlay.app.controller import Reader
+
+    r = Reader(FakeIPC(), anki=object(), mine_cfg=MineConfig())
+    global_msgs = {b.spec.message for b in active_bindings(r, "global")}
+    tooltip_msgs = {b.spec.message for b in active_bindings(r, "tooltip")}
+    assert PREVIEW_MSG not in global_msgs
+    assert PREVIEW_MSG in tooltip_msgs
+
+
+def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
+    """Showing the preview grabs Esc → close; pressing it hides the preview; closing hands Esc back
+    to a no-op when no tooltip is up."""
+    from util import FakeIPC
+
+    from overlay.app import miner_ui
+    from overlay.app.bindings import PREVIEW_CLOSE_MSG
+    from overlay.app.card_preview import PreviewData
+    from overlay.app.controller import Reader
+
+    ipc = FakeIPC()
+    r = Reader(ipc, anki=object(), mine_cfg=MineConfig())
+    monkeypatch.setattr(miner_ui, "render_preview", lambda _r: None)  # skip the PIL render
+    pv = PreviewData(
+        "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
+    )
+
+    r._show_preview(pv, None)
+    assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
+
+    r._handle(PREVIEW_CLOSE_MSG)
+    assert r._last_preview is None  # Esc dismissed it
+    assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
+
+
+def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
+    """Mining an in-deck word shows "✓ in deck" and adds nothing, but stashes the token; the preview's
+    ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+
+    ipc = FakeIPC()
+    anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
+    dup_status = []
+    monkeypatch.setattr(
+        r, "_preview_mined", lambda _c, _t, _v, status="mined": dup_status.append(status)
+    )
+    tok = next(t for t in r.tokens if t.surface == "読む")
+
+    r._mine_token(tok)  # already in deck → nothing added, token remembered
+    assert anki.added == []
+    assert r._dup_tok is tok
+
+    r._add_duplicate()  # ＋ add anyway
+    assert len(anki.added) == 1
+    assert anki.added[0]["options"]["allowDuplicate"] is True
+    assert dup_status == ["duplicate"]  # the new card's preview says "• duplicate" (accurate now)
 
 
 def test_select_bulk_targets_dedupes_skips_known_and_caps():

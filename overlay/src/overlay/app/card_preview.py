@@ -21,6 +21,9 @@ from overlay.render.layout import Block
 from overlay.sc.walk import inline_flow
 
 RED: RGBA = (200, 60, 60, 255)
+OUTLINE: RGBA = (200, 200, 200, 255)  # thumbnail / screenshot border
+DUP_CHIP: RGBA = (120, 90, 150, 255)  # the ＋ "add anyway" affordance
+DUP_LABEL = "＋ add anyway (different scene)"
 CLOSE = 20  # ✕ close button size
 ZOOM_MAX = (700, 620)  # enlarged screenshot bounds (verify the frame)
 STATUS = {
@@ -53,6 +56,7 @@ class PreviewRender:
     close_rect: Rect | None = None  # ✕ dismiss
     audio_rect: Rect | None = None  # ▶ play the mined clip
     image_rect: Rect | None = None  # the screenshot thumbnail (click to enlarge / shrink)
+    dup_rect: Rect | None = None  # ＋ add a second card for a different scene ('exists' only)
 
 
 def _bold_sentence(lines: list[str], surface: str, size: int, color: RGBA) -> list:
@@ -83,6 +87,55 @@ def _audio_chip(pv: PreviewData, size: int = 20) -> Image.Image:
     return render_chip(txt, ChipStyle(size=size, bg=bg)).image
 
 
+def _dup_button(
+    pv: PreviewData, theme: Theme, cw: int
+) -> tuple[Image.Image | None, tuple[int, int]]:
+    """The ＋ "add anyway" row — shown only for an in-deck ('exists') card, to mine a second card for a
+    different scene (line/episode/anime). Returns (row image | None, (width, height))."""
+    if pv.status != "exists":
+        return None, (0, 0)
+    chip = render_chip(DUP_LABEL, ChipStyle(size=theme.px(18), bg=DUP_CHIP)).image
+    row = Image.new("RGBA", (cw, chip.height), (0, 0, 0, 0))
+    row.alpha_composite(chip, (0, 0))
+    return row, (chip.width, chip.height)
+
+
+def _media_row(
+    pv: PreviewData, theme: Theme, cw: int, *, zoom: bool
+) -> tuple[Image.Image, Rect | None, Rect | None]:
+    """Screenshot (thumbnail, or enlarged when zoomed) beside the ▶ audio chip. Returns the row plus
+    its (image_rect, audio_rect) in row-local coords."""
+    a_chip = _audio_chip(pv, theme.px(20))
+    if zoom and pv.image is not None:  # enlarged screenshot stacked over the audio chip
+        big = pv.image.convert("RGBA").copy()
+        big.thumbnail((theme.px(ZOOM_MAX[0]), theme.px(ZOOM_MAX[1])))
+        media = Image.new("RGBA", (cw, big.height + theme.px(8) + a_chip.height), (0, 0, 0, 0))
+        media.alpha_composite(big, (0, 0))
+        ImageDraw.Draw(media).rounded_rectangle(
+            [0, 0, big.width - 1, big.height - 1], radius=theme.px(4), outline=OUTLINE
+        )
+        ay = big.height + theme.px(8)
+        media.alpha_composite(a_chip, (0, ay))
+        return media, (0, 0, big.width, big.height), (0, ay, a_chip.width, a_chip.height)
+    media_h, top = theme.px(118), theme.px(4)
+    media = Image.new("RGBA", (cw, media_h), (0, 0, 0, 0))
+    x, image_rect_local = 0, None
+    if pv.image is not None:
+        thumb = pv.image.convert("RGBA").copy()
+        thumb.thumbnail((theme.px(196), theme.px(110)))
+        media.alpha_composite(thumb, (0, top))
+        ImageDraw.Draw(media).rounded_rectangle(
+            [0, top, thumb.width - 1, top + thumb.height - 1],
+            radius=theme.px(4),
+            outline=(200, 200, 200, 255),
+        )
+        image_rect_local = (0, top, thumb.width, thumb.height)
+        x = thumb.width + theme.px(14)
+    ay = (media_h - a_chip.height) // 2
+    media.alpha_composite(a_chip, (x, ay))
+    return media, image_rect_local, (x, ay, a_chip.width, a_chip.height)
+
+
 def render_card_preview(
     pv: PreviewData, width: int = 460, theme: Theme = _DEFAULT_THEME, *, zoom: bool = False
 ) -> PreviewRender:
@@ -90,8 +143,6 @@ def render_card_preview(
     close = theme.px(CLOSE)  # ✕ button, scaled with the window like the tooltip
     gap = theme.px(8)
     rows: list[Image.Image] = []
-    image_rect_local: Rect | None = None  # within the media row
-    audio_rect_local: Rect | None = None
 
     def flow_row(spans, scale=1.3):
         return render_flow(
@@ -133,40 +184,14 @@ def render_card_preview(
             gspans.append(Span(f"・{g}", Style(size=theme.px(21), color=theme.text)))
         rows.append(flow_row(gspans))
 
-    # media row: screenshot (thumbnail, or enlarged when zoomed) + audio chip
-    a_chip = _audio_chip(pv, theme.px(20))
-    if zoom and pv.image is not None:  # enlarged screenshot stacked over the audio chip
-        big = pv.image.convert("RGBA").copy()
-        big.thumbnail((theme.px(ZOOM_MAX[0]), theme.px(ZOOM_MAX[1])))
-        media = Image.new("RGBA", (cw, big.height + theme.px(8) + a_chip.height), (0, 0, 0, 0))
-        media.alpha_composite(big, (0, 0))
-        ImageDraw.Draw(media).rounded_rectangle(
-            [0, 0, big.width - 1, big.height - 1], radius=theme.px(4), outline=(200, 200, 200, 255)
-        )
-        image_rect_local = (0, 0, big.width, big.height)
-        ay = big.height + theme.px(8)
-        media.alpha_composite(a_chip, (0, ay))
-        audio_rect_local = (0, ay, a_chip.width, a_chip.height)
-    else:
-        media_h, top = theme.px(118), theme.px(4)
-        media = Image.new("RGBA", (cw, media_h), (0, 0, 0, 0))
-        x = 0
-        if pv.image is not None:
-            thumb = pv.image.convert("RGBA").copy()
-            thumb.thumbnail((theme.px(196), theme.px(110)))
-            media.alpha_composite(thumb, (0, top))
-            ImageDraw.Draw(media).rounded_rectangle(
-                [0, top, thumb.width - 1, top + thumb.height - 1],
-                radius=theme.px(4),
-                outline=(200, 200, 200, 255),
-            )
-            image_rect_local = (0, top, thumb.width, thumb.height)
-            x = thumb.width + theme.px(14)
-        ay = (media_h - a_chip.height) // 2
-        media.alpha_composite(a_chip, (x, ay))
-        audio_rect_local = (x, ay, a_chip.width, a_chip.height)
+    media, image_rect_local, audio_rect_local = _media_row(pv, theme, cw, zoom=zoom)
     media_idx = len(rows)
     rows.append(media)
+
+    # The ＋ "add anyway" row sits directly under the media row when the card is already in the deck.
+    dup_row, dup_size = _dup_button(pv, theme, cw)
+    if dup_row is not None:
+        rows.append(dup_row)
 
     if pv.footer:
         rows.append(flow_row([Span(pv.footer, Style(size=theme.px(15), color=theme.muted))]))
@@ -186,4 +211,7 @@ def render_card_preview(
     def _abs(local: Rect | None) -> Rect | None:
         return (m + local[0], media_y + local[1], local[2], local[3]) if local else None
 
-    return PreviewRender(canvas, close_rect, _abs(audio_rect_local), _abs(image_rect_local))
+    dup_abs = (m, media_y + media.height + gap, *dup_size) if dup_row is not None else None
+    return PreviewRender(
+        canvas, close_rect, _abs(audio_rect_local), _abs(image_rect_local), dup_abs
+    )

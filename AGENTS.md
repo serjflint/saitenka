@@ -1,14 +1,14 @@
 # AGENTS.md — Saitenka (Japanese immersion tooling)
 
-Guidance for AI agents and developers working in this repo. Feature docs: `overlay/README.md` (renderer
-+ reader tour), `overlay/RUNNING.md` (run/test walkthrough), and `overlay/ARCHITECTURE.md` (module map
-+ data flow).
+Guidance for AI agents and developers working in this repo. Feature docs: the docs site
+(`docs/`, `mkdocs.yml` → [saitenka.readthedocs.io](https://saitenka.readthedocs.io); run/usage/dev live
+there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (module map + data flow).
 
 ## Planning artifacts
 
 - **`CHANGELOG.md`** ([Keep a Changelog](https://keepachangelog.com/)) — shipped changes; drafted with
   [git-cliff](https://git-cliff.org/) (`uv run poe changelog`) then **hand-reviewed**, never shipped raw.
-  **`ROADMAP.md`** — future direction. Trackable work → issues/milestones. Scratch (drafts, working
+  Future direction and trackable work → GitHub issues/milestones. Scratch (drafts, working
   notes, to-be-filed issue bodies) → `vibe/` (git-ignored) — **never `.agents/`, which is durable-only**.
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
@@ -31,8 +31,10 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate (no CI):** `uv run poe all` is the pre-push gate — 14 tasks (lint/types/arch/invariants/
-  complexity/test/test-ft/cov + supply-chain: audit/deps/licenses/spell/links/shell). Run it before
+- **Dev gate (no CI):** `uv run poe all` is the pre-push gate — its task list is `all` in
+  `[tool.poe.tasks]` (the source of truth: static checks + the suite + supply-chain). `cov` runs `-n auto`
+  with a superset marker set, so it is the functional run too — the standalone `test` stays the inner loop,
+  not a third suite run. Run it before
   pushing. The task-by-task runbook, how to read each failure, the advisory `poe hygiene` tier, and the
   free-threaded / 3.13-pinned-env traps live in the **dev-gate skill** (`.agents/skills/dev-gate/`) — consult it. The real tasks live
   in `overlay/`; the repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works from the repo
@@ -72,8 +74,7 @@ target, not the model.
   *what* (`# loop over the dicts`). Delete zero-delta echoes.
 - **Distill to the irreducible signal.** Keep the delta, cut the words — no teaching tone, no
   narrative, no hedging. One tight clause beats a paragraph. A long comment is a smell: compress it or
-  justify it. The `ipc.py` Windows-pipe lesson is one line ("single-threaded `pump()` was a no-op on
-  the named pipe → reader thread"), not an essay.
+  justify it.
 - **No process scars.** No `(plan R4)`, `Stage N`, "as discussed".
 - **Not a gate.** "Echoes the code" / "too verbose" is semantic, not AST-matchable — a review
   discipline, not a `poe` check.
@@ -81,9 +82,7 @@ target, not the model.
 ## Documentation
 
 Same over-explaining trend as **Comments** above, one layer up: duplicated specifics rot faster than
-prose bloat does, because two copies of a fact drift independently and one goes stale silently. (Real
-incident: README.md and RUNNING.md each carried their own copy of the `poe all` task list; both were
-wrong — the real gate had grown to 14 tasks, the docs still said 5.)
+prose bloat does, because two copies of a fact drift independently and one goes stale silently.
 
 - **One canonical source per fact.** A task list, a command, a version number — state it once, where
   it's authoritative (`pyproject.toml`'s `[tool.poe.tasks]` for what runs; `.agents/skills/` for the
@@ -93,12 +92,11 @@ wrong — the real gate had grown to 14 tasks, the docs still said 5.)
   something the heading/command name doesn't already? Cut the paragraph restating the heading.
 - **No process scars.** No `(Stage N)` section tags — same rule as comments, same reason.
 - **High-level over step-by-step, when a canonical walkthrough exists.** README explains *what* and
-  *why*; RUNNING.md (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
+  *why*; the docs site (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
   not the fix.
 - **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
-  invent something is the doc's bug, not the reader's (this is exactly how an auto-generated repowise
-  wiki page's hallucinations got caught — the same check works on hand-written docs).
+  invent something is the doc's bug, not the reader's.
 - **Not a gate.** Same as comments — a review discipline, not a `poe` check.
 
 ## Testing
@@ -182,9 +180,8 @@ random bytes, and symbolic solving — so they find different classes of bug.
 - **`poe crosshair`** — CrossHair runs the existing Hypothesis property tests under a **z3 symbolic
   backend** (via the `crosshair` Hypothesis backend, registered in `conftest.py` only when installed):
   an SMT solver finds exact-boundary counterexamples random search misses. Slow (~15 s/property) → opt-in.
-  HypoFuzz was **test-driven** (ran clean, found nothing atheris/CrossHair didn't) and **not adopted** —
-  its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS), unfit to commit here, and the
-  trio already covers pure-core adequacy.
+  Do **not** adopt HypoFuzz — its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS),
+  unfit to commit here, and the trio already covers pure-core adequacy.
 - **Both `fuzz` and `crosshair` are pinned to CPython 3.13 in SEPARATE envs** (`.venv-fuzz` / `.venv-cx`
   via `UV_PROJECT_ENVIRONMENT`): atheris (libFuzzer) and z3 are C-extensions that can't load under the
   free-threaded 3.14t default — the same out-of-process 3.13 crutch as `invariants-taint`. The target

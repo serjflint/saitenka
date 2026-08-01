@@ -24,6 +24,7 @@ HELP_PREV_MSG = "saitenka-help-prev"
 HELP_NEXT_MSG = "saitenka-help-next"
 HELP_CLOSE_MSG = "saitenka-help-close"
 PREVIEW_MSG = "saitenka-preview"
+PREVIEW_CLOSE_MSG = "saitenka-preview-close"
 SCROLL_UP_MSG = "saitenka-scroll-up"
 SCROLL_DOWN_MSG = "saitenka-scroll-down"
 SPEAK_MSG = "saitenka-speak"
@@ -44,7 +45,7 @@ TIP_UP_MSG = "saitenka-tip-up"
 TIP_DOWN_MSG = "saitenka-tip-down"
 TIP_CLOSE_MSG = "saitenka-tip-close"
 
-Scope = Literal["global", "tooltip", "help", "mpv"]
+Scope = Literal["global", "tooltip", "help", "mpv", "preview"]
 Requirement = Literal["always", "anki", "tts"]
 
 
@@ -137,7 +138,17 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Capture & mining",
         "Replay card preview",
         PREVIEW_MSG,
+        scope="tooltip",  # bound only while a tooltip is up, so global `p` keeps mpv's pause (Windows)
         key_attr="preview_key",
+        context="card preview",
+        requires="anki",
+    ),
+    BindingSpec(
+        "Capture & mining",
+        "Close card preview",
+        PREVIEW_CLOSE_MSG,
+        scope="preview",  # bound on show_preview, handed back on hide_preview
+        key="ESC",
         context="card preview",
         requires="anki",
     ),

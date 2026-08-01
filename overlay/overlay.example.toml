@@ -157,7 +157,7 @@ enabled = false
 
 # ── [telemetry] Runtime tracing/metrics (OpenTelemetry) — OFF by default ─────────────────────────
 # Requires the `telemetry` extra (`saitenka[telemetry]`) even when enabled here. Local-only: a
-# Chrome Trace Format file under the cache dir, no backend/gRPC. See RUNNING.md "Telemetry".
+# Chrome Trace Format file under the cache dir, no backend/gRPC. See the Development docs (Telemetry).
 # [telemetry]
 # enabled = true
 # export_dir = "~/custom/telemetry"   # default: <cache dir>/telemetry

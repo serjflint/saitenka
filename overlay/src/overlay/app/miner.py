@@ -170,22 +170,25 @@ class Miner:
             return
         self.mine_token(r.tokens[idx])
 
-    def mine_token(self, tok) -> None:
+    def mine_token(self, tok, *, force: bool = False) -> None:
         """Mine a specific token into Anki — the hovered subtitle word, or an inner word discovered
-        by scanning inside the tooltip (the nested popup's ⊕)."""
+        by scanning inside the tooltip (the nested popup's ⊕). ``force`` mines a second card for an
+        expression already in the deck (the preview's explicit "add anyway" for a different scene)."""
         r = self.r
         if not r.anki or not r.mine_cfg:
             return
         try:
             card = self._card_for(tok)
-            existing = dedupe(r.anki, r.mine_cfg, card.expression)
-            if existing:
-                r._mark_mined(card.expression)  # already in the deck → ✓
-                from overlay.app import sidebar
+            if not force:
+                existing = dedupe(r.anki, r.mine_cfg, card.expression)
+                if existing:
+                    r._mark_mined(card.expression)  # already in the deck → ✓
+                    from overlay.app import sidebar
 
-                sidebar.mark_active_mined(r)
-                r._preview_existing(existing[0], card, "duplicate")
-                return
+                    sidebar.mark_active_mined(r)
+                    r._dup_tok = tok  # remember for an explicit "add anyway"
+                    r._preview_existing(existing[0], card, "exists")
+                    return
             video = r._get("path")
             pic, audio = self.capture_media(f"saitenka_{int(time.time() * 1000)}", video)
             freq_html, freq_sort = self.frequency(tok)
@@ -199,8 +202,9 @@ class Miner:
                 freq_html,
                 freq_sort,
                 self.mine_tags(video),
+                allow_duplicate=force,
             )
-            if not r.anki.can_add(note):
+            if not force and not r.anki.can_add(note):
                 r._toast(f"can't add {card.expression}", "err")
                 return
             r.anki.add_note(note)
@@ -210,7 +214,7 @@ class Miner:
             from overlay.app import sidebar
 
             sidebar.mark_active_mined(r)
-            r._preview_mined(card, tok, video)
+            r._preview_mined(card, tok, video, "duplicate" if force else "mined")
         except AnkiError as e:
             r._toast(f"mine failed: {e}", "err")
         except Exception as e:  # never let a mine crash the loop

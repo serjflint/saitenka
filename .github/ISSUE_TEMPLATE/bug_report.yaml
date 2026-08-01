@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in the overlay, mining, or CLI does not work
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Saitenka — sorry something broke.
+
+        Please describe the problem **in your own words** (see the
+        [AI Policy](https://github.com/serjflint/saitenka/blob/main/.github/AI_POLICY.md)).
+        `saitenka doctor` diagnoses most environment issues (mpv/AnkiConnect/dictionaries/config) —
+        run it first and paste the output below.
+  - type: textarea
+    attributes:
+      label: "What's wrong?"
+      description: "What did you do, and what happened?"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "What did you expect?"
+      description: "How should it have behaved?"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "`saitenka doctor` output"
+      description: "Paste the full output of `saitenka doctor`."
+      render: text
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: "Saitenka version"
+      description: "`saitenka --version` (or the commit SHA if running from source)."
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: "OS + mpv/ffmpeg"
+      description: "Your OS and version, plus `mpv --version` / `ffmpeg -version` first lines."
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Relevant log lines"
+      description: "Recent errors from `~/.cache/saitenka/overlay.log` (JSON-lines; redact anything private)."
+      render: text
+    validations:
+      required: false

@@ -19,4 +19,4 @@ python:
     - requirements: requirements.txt
 
 mkdocs:
-  configuration: overlay/mkdocs.yml
+  configuration: mkdocs.yml
