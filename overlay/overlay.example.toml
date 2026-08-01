@@ -24,7 +24,7 @@
 # hide_delay = 0.6           # seconds the tooltip lingers after the cursor leaves the word
 # flash_secs = 0.22          # duration of the "copied" highlight pulse on a popup
 # hover_switch_delay = 0.15  # dwell before the tooltip switches to a NEW word
-# scan_delay = 0.25          # dwell before a nested (scan) popup opens; scrolling resets this timer too
+# scan_delay = 1.0           # dwell before a nested (scan) popup opens; scrolling resets this timer too
 # panel_cache_max = 128      # LRU cap on cached (compressed) rendered tooltip panels
 # pause_on_tooltip = true    # freeze the frame while a tooltip is shown (the mining default)
 # hover_pause_key = "Alt+p"  # toggle hover auto-pause for the current session
@@ -37,7 +37,7 @@
 # help_key = "F1"  # toggle the compact in-player shortcut reference
 # subtitle_retry_key = "Ctrl+Shift+T"  # retry enabled Japanese subtitle providers
 # annotation_mode = "full"  # "full" (default) or neutral until the subtitle is hovered
-# banded = true              # experimental windowed (O(viewport)) tooltip renderer; SAITENKA_BANDED=1 also enables it
+# banded = true              # windowed (O(viewport)) tooltip renderer (default); SAITENKA_BANDED=0/1 overrides
 
 # ── Translation ──────────────────────────────────────────────────────────────────────────────────
 # translate_key = "t"        # mpv key to toggle the official EN translation
@@ -59,16 +59,15 @@
 #                            # sub index (embedded/jimaku tracks have none → no-op). Try 1–3. Cheap —
 #                            # this is dictionary preload only, no rendering; see head_prefetch_lookahead
 #                            # below for the (separate, pricier) tooltip pre-render knob.
-# head_prefetch_lookahead = 0  # EXPERIMENTAL, off by default — ALSO speculatively pre-RENDER (not just
-#                            # decode) a selective subset of upcoming words (n+1 / rare-frequency,
-#                            # excluding already-known/-mined) so more first-hovers land upload-only
-#                            # instead of paying render cost on top of an idle-decoded entry. Deliberately
-#                            # a separate, shallower knob than prefetch_lookahead — render jobs cost far
-#                            # more than decode-only ones. Known tradeoff: real memory cost under
-#                            # sustained use, more pronounced on free-threaded builds — not yet
-#                            # recommended for a normal session; try 1 if you want to experiment.
+# head_prefetch_lookahead = 1  # ALSO speculatively pre-RENDER (not just decode) a selective subset of
+#                            # upcoming words (n+1 / rare-frequency, excluding already-known/-mined) so
+#                            # more first-hovers land upload-only instead of paying render cost on top of
+#                            # an idle-decoded entry. Deliberately a separate, shallower knob than
+#                            # prefetch_lookahead — render jobs cost far more than decode-only ones, so it
+#                            # carries a real memory cost under sustained use (more pronounced on
+#                            # free-threaded builds). Set 0 to disable; raise it to look further ahead.
 # head_prefetch_queue_max = 24 # caps in-flight speculative render jobs (the transient-memory bound for
-#                            # head_prefetch_lookahead above — irrelevant while it's 0)
+#                            # head_prefetch_lookahead above)
 # poll_interval = 0.025      # main-loop tick (s) — trades CPU against input latency
 # no_audio_play = false      # set true to NOT auto-play the sentence audio on mine
 

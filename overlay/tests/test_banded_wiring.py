@@ -50,7 +50,14 @@ def test_banded_config_enables_it_and_logs(caplog):
 
 def test_env_var_enables_banded(monkeypatch):
     monkeypatch.setenv("SAITENKA_BANDED", "1")
-    assert Reader(FakeIPC(), dict_set=_FakeDS())._banded  # env wins over the config default
+    assert Reader(FakeIPC(), dict_set=_FakeDS(), banded=False)._banded  # env=1 wins over config off
+
+
+def test_env_var_disables_banded(monkeypatch):
+    monkeypatch.setenv("SAITENKA_BANDED", "0")
+    assert not Reader(
+        FakeIPC(), dict_set=_FakeDS(), banded=True
+    )._banded  # env=0 wins over config on
 
 
 def _content_word(r: Reader) -> int:

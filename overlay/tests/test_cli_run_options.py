@@ -20,7 +20,7 @@ _BASE_KWARGS = {
 
 def test_scan_delay_defaults_when_absent_from_config():
     opts = _build_run_options({}, **_BASE_KWARGS)
-    assert opts.tooltip.scan_delay == 0.25
+    assert opts.tooltip.scan_delay == 1.0
 
 
 def test_scan_delay_reads_from_config():

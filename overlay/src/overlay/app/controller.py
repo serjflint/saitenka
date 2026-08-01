@@ -208,7 +208,7 @@ class Reader:
         self.prefetch_lookahead = (
             o.perf.prefetch_lookahead
         )  # cues to warm ahead of the current line
-        # EXPERIMENTAL head-prefetch (prototype, off by default — see config.py PerfOptions):
+        # Head-prefetch (see config.py PerfOptions):
         # speculatively renders the SAME viewport-capped head a real hover would, via the SAME
         # panel_for()/panel_cache path, for a SELECTIVE subset of upcoming words (n+1/forgotten/
         # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
@@ -302,11 +302,12 @@ class Reader:
         self._tip_scroll = 0
         self._tip_view_h = 0
         self._tip_xy: tuple[int, int] = (0, 0)
-        # Experimental: render the base tooltip's visible frames from the windowed (banded) engine —
-        # O(viewport) compositing + windowed hit-testing — instead of slicing a whole-panel BGRA blob.
-        # Off by default; the blob path is untouched. From [tooltip].banded, or SAITENKA_BANDED=1 (env
-        # wins, for quick trials). Parity-gated (tests/test_banded_wiring.py).
-        self._banded = o.tooltip.banded or os.environ.get("SAITENKA_BANDED") == "1"
+        # Render the base tooltip's visible frames from the windowed (banded) engine — O(viewport)
+        # compositing + windowed hit-testing — instead of slicing a whole-panel BGRA blob. On by
+        # default (from [tooltip].banded); SAITENKA_BANDED=0/1 in the env overrides either way, for a
+        # quick A/B against the legacy blob path. Parity-gated (tests/test_banded_wiring.py).
+        _env_banded = os.environ.get("SAITENKA_BANDED")
+        self._banded = _env_banded == "1" if _env_banded in ("0", "1") else o.tooltip.banded
         if self._banded:
             log.info("banded tooltip renderer ENABLED (windowed O(viewport) compositing)")
         self._tip_state: TipPanel | None = (
