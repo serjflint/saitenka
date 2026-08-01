@@ -117,7 +117,10 @@ def keychain_get() -> str | None:
     try:
         import keyring
         import keyring.errors
-
+    except ImportError:
+        log.debug("keyring is not installed", exc_info=True)
+        return None
+    try:
         return keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) or None
     except keyring.errors.KeyringError:
         return None
@@ -133,7 +136,10 @@ def keychain_set(key: str) -> bool:
     try:
         import keyring
         import keyring.errors
-
+    except ImportError:
+        log.debug("keyring is not installed", exc_info=True)
+        return False
+    try:
         keyring.set_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, key)
         return True
     except keyring.errors.KeyringError:

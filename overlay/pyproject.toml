@@ -13,7 +13,7 @@ dependencies = [
     "cyclopts>=4.22.1",
     "ijson>=3.5.1",
     "platformdirs>=4.11.0",
-    "keyring>=25.7.0",
+    "keyring>=25.7.0; sys_platform != 'linux' or python_version < '3.15'",
     "psutil>=7.2.2",
     "filelock>=3.32.0",
     "certifi>=2026.6.17",
@@ -48,10 +48,14 @@ telemetry = [
     "opentelemetry-api>=1.44.0",
     "opentelemetry-sdk>=1.44.0",
 ]
+# Linux Secret Service support on Python 3.15+. Earlier Linux and other platforms install keyring by
+# default; omitting this extra on 3.15+ falls back to JIMAKU_API_KEY or [jimaku].key without cryptography.
+linux-keyring = ["keyring>=25.7.0; sys_platform == 'linux'"]
 # Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
-# exists only so `saitenka[minimal]` reads as a deliberate choice. `full` pulls every optional
-# feature and is what the checkout installers install. Note `full` includes the GPL-3.0 `deinflect`
-# add-on, so a `full` install is GPL-3.0, not Apache-2.0 (see ../LICENSING.md).
+# exists only so `saitenka[minimal]` reads as a deliberate choice. `full` pulls every portable feature
+# and is what the checkout installers install; Linux Secret Service remains an explicit platform
+# integration. Note `full` includes the GPL-3.0 `deinflect` add-on, so a `full` install is GPL-3.0,
+# not Apache-2.0 (see ../LICENSING.md).
 minimal = []
 full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
 

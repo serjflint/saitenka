@@ -6,6 +6,8 @@ works under a GUI-launched plugin-mode mpv, so its coordinates and the resolver 
 
 from __future__ import annotations
 
+import sys
+
 from overlay.app import jimaku
 
 
@@ -54,6 +56,12 @@ def test_keychain_returns_false_none_when_no_backend(monkeypatch):
 
     monkeypatch.setattr(keyring, "set_password", _boom)
     monkeypatch.setattr(keyring, "get_password", _boom)
+    assert jimaku.keychain_set("x") is False
+    assert jimaku.keychain_get() is None
+
+
+def test_keychain_falls_back_when_keyring_is_not_installed(monkeypatch):
+    monkeypatch.setitem(sys.modules, "keyring", None)
     assert jimaku.keychain_set("x") is False
     assert jimaku.keychain_get() is None
 

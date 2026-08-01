@@ -116,7 +116,7 @@ def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
 
 def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, Path | None]:
     """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
-    via ``keyring`` (macOS Keychain / Windows Credential Locker / Linux Secret Service), else
+    via ``keyring`` (macOS Keychain / Windows Credential Locker / opt-in Linux Secret Service), else
     ``[jimaku].key`` in the config when no keyring backend exists (headless Linux). Returns
     ``(method, backup)`` where method is ``"keyring"`` or ``"config"``.
 

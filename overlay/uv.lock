@@ -1579,7 +1579,7 @@ dependencies = [
     { name = "fonttools" },
     { name = "fugashi" },
     { name = "ijson" },
-    { name = "keyring" },
+    { name = "keyring", marker = "python_full_version < '3.15' or sys_platform != 'linux'" },
     { name = "msgspec" },
     { name = "numpy" },
     { name = "pillow" },
@@ -1608,6 +1608,9 @@ jmdict = [
     { name = "jamdict" },
     { name = "jamdict-data", marker = "sys_platform != 'win32'" },
     { name = "jamdict-data-fix", marker = "sys_platform == 'win32'" },
+]
+linux-keyring = [
+    { name = "keyring", marker = "sys_platform == 'linux'" },
 ]
 telemetry = [
     { name = "opentelemetry-api" },
@@ -1662,7 +1665,8 @@ requires-dist = [
     { name = "jamdict", marker = "extra == 'jmdict'", specifier = ">=0.1a11.post2" },
     { name = "jamdict-data", marker = "sys_platform != 'win32' and extra == 'jmdict'", specifier = ">=1.5" },
     { name = "jamdict-data-fix", marker = "sys_platform == 'win32' and extra == 'jmdict'", specifier = ">=1.5.1a2" },
-    { name = "keyring", specifier = ">=25.7.0" },
+    { name = "keyring", marker = "python_full_version < '3.15' or sys_platform != 'linux'", specifier = ">=25.7.0" },
+    { name = "keyring", marker = "sys_platform == 'linux' and extra == 'linux-keyring'", specifier = ">=25.7.0" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.44.0" },
@@ -1680,7 +1684,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect", "jmdict", "telemetry", "minimal", "full"]
+provides-extras = ["deinflect", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
 [package.metadata.requires-dev]
 codemod = [{ name = "libcst", specifier = ">=1.8.6" }]

@@ -134,9 +134,9 @@ preview_key = "p"
 
 # ── [jimaku] jimaku.cc subtitle fetch for attach/plugin mode ─────────────────────────────────────
 # `attach` first selects an embedded JP track; only when the file has NO Japanese subs does it fetch
-# from jimaku (safe to leave on). Key resolution: this `key` > $JIMAKU_API_KEY > macOS Keychain. Prefer
-# the Keychain (`saitenka set-jimaku-key`) — a GUI-launched mpv can read it; a shell env var and
-# a plaintext key here it cannot (or should not).
+# from jimaku (safe to leave on). Key resolution: this `key` > $JIMAKU_API_KEY > OS keyring. On Linux
+# Python 3.15+, Secret Service storage requires the `linux-keyring` extra; otherwise `set-jimaku-key`
+# falls back to this config. A GUI-launched mpv cannot inherit a shell-only environment variable.
 [jimaku]
 enabled = true
 resync = true       # auto-resync fetched subs to the video (alass/ffsubsync) — recommended
