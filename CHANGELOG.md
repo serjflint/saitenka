@@ -13,6 +13,12 @@ logs.
   mature-known, and forgotten words without opening the live collection. N+1 remains the strongest
   signal, and learning/young colors can be overridden under `[palette]`.
 
+### Fixed
+
+- **The subtitle sidebar now consumes completed episode analysis**, showing N+1/N+2 cue badges and
+  clearing stale results before a subtitle-track redraw.
+- **`poe affected` works from the repository root**, matching the other delegated development tasks.
+
 ### Added (developer tooling — not part of the `poe all` gate)
 
 - **Sharpen loop** — an idle-time, one-module-per-run process that hardens the *existing* test suite

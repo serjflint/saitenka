@@ -33,6 +33,7 @@ complexity = { cmd = "uv run poe complexity", cwd = "overlay" }
 complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
 test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
+affected = { cmd = "uv run poe affected", cwd = "overlay" }
 cov = { cmd = "uv run poe cov", cwd = "overlay" }
 bench = { cmd = "uv run poe bench", cwd = "overlay" }
 smoke-live = { cmd = "uv run poe smoke-live", cwd = "overlay" }
