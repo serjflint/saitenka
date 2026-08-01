@@ -12,23 +12,24 @@ content is folded into ``CHANGELOG.md``, not committed itself) before running ``
     uv run install/release.py publish [--publish]
 
 ``--notes PATH`` overrides the default ``RELEASE_NOTES.md`` location. Run from anywhere; paths
-resolve from ``__file__`` like ``make_bundle.py``.
+resolve from ``__file__``.
+
+Distribution is **PyPI** (`uv tool install "saitenka[full]"`) plus the hosted install scripts
+(`serjflint.github.io/saitenka`, see `poe pages`); a release is a git tag + a notes-only GitHub
+Release. This script builds and smoke-tests the wheel but does NOT upload it — publish the built wheel
+to PyPI yourself with ``cd overlay && uv publish`` (needs your token; irreversible).
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import re
 import subprocess
 import sys
 import tempfile
-import zipfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-
-from make_bundle import make_bundle
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OVERLAY_DIR = REPO_ROOT / "overlay"
@@ -138,37 +139,31 @@ def changelog_section(version: str) -> str:
 # --- build / smoke test ----------------------------------------------------------------------
 
 
-def checksum(zip_path: Path) -> Path:
-    digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
-    sums_path = zip_path.parent / "SHA256SUMS"
-    sums_path.write_text(f"{digest}  {zip_path.name}\n")
-    return sums_path
+def build_wheel(version: str) -> Path:
+    """Build the wheel (the artifact `uv publish` uploads to PyPI) and return its path."""
+    dist = OVERLAY_DIR / "dist"
+    for old in dist.glob("saitenka-*.whl"):
+        old.unlink()
+    run(["uv", "build", "--wheel"], cwd=OVERLAY_DIR)
+    wheels = list(dist.glob(f"saitenka-{version}-*.whl"))
+    if len(wheels) != 1:
+        raise RuntimeError(f"expected exactly one saitenka-{version} wheel in {dist}, found {wheels}")
+    return wheels[0]
 
 
-def smoke_test(zip_path: Path, expected_version: str) -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(tmp_path)
-        wheels = list(tmp_path.glob("*.whl"))
-        if len(wheels) != 1:
-            raise RuntimeError(f"expected exactly one wheel in the bundle, found {wheels}")
-        out = run(
-            ["uvx", "--from", str(wheels[0]), "saitenka", "--version"],
-            cwd=tmp_path,
-            capture=True,
-        ).stdout.strip()
-        if out != expected_version:
-            raise RuntimeError(f"smoke test: --version printed {out!r}, expected {expected_version!r}")
-        print(f"smoke test OK: isolated wheel install reports {out}")
+def smoke_test(wheel: Path, expected_version: str) -> None:
+    """Install the built wheel in an isolated env and confirm the version — catches packaging breakage
+    (entry point, data files, deps) that `poe all` can't."""
+    out = run(["uvx", "--from", str(wheel), "saitenka", "--version"], capture=True).stdout.strip()
+    if out != expected_version:
+        raise RuntimeError(f"smoke test: --version printed {out!r}, expected {expected_version!r}")
+    print(f"smoke test OK: isolated wheel install reports {out}")
 
 
-def build_checksum_smoke_test(version: str) -> tuple[Path, Path]:
-    zip_path = make_bundle()
-    sums_path = checksum(zip_path)
-    print((zip_path.parent / "SHA256SUMS").read_text().strip())
-    smoke_test(zip_path, version)
-    return zip_path, sums_path
+def build_and_smoke_test(version: str) -> Path:
+    wheel = build_wheel(version)
+    smoke_test(wheel, version)
+    return wheel
 
 
 # --- git / gh --------------------------------------------------------------------------------
@@ -228,7 +223,7 @@ def cmd_prepare(args: PrepareArgs) -> int:
     if not args.skip_gate:
         run(["uv", "run", "poe", "all"], cwd=OVERLAY_DIR)
 
-    build_checksum_smoke_test(next_version)
+    build_and_smoke_test(next_version)
 
     run(["git", "add", "pyproject.toml", "uv.lock"], cwd=OVERLAY_DIR)
     run(["git", "add", "CHANGELOG.md"], cwd=REPO_ROOT)
@@ -272,7 +267,7 @@ def cmd_publish(args: PublishArgs) -> int:
     if not args.skip_gate:
         run(["uv", "run", "poe", "all"], cwd=OVERLAY_DIR)
 
-    zip_path, sums_path = build_checksum_smoke_test(version)
+    wheel = build_and_smoke_test(version)
 
     run(["git", "tag", "-a", tag, "-m", f"Release {version}"], cwd=REPO_ROOT)
     run(["git", "push", "origin", tag], cwd=REPO_ROOT)
@@ -281,12 +276,13 @@ def cmd_publish(args: PublishArgs) -> int:
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
         f.write(notes)
         notes_path = Path(f.name)
+    # Notes-only GitHub Release — no binary assets. Distribution is PyPI + the hosted install scripts;
+    # the auto "Source code" archive covers source. `uv publish` (below) is the load-bearing step.
     run(
         [
             "gh", "release", "create", tag,
             "--draft", "--title", version,
             "--notes-file", str(notes_path),
-            str(zip_path), str(sums_path),
         ],
         cwd=REPO_ROOT,
     )
@@ -299,6 +295,9 @@ def cmd_publish(args: PublishArgs) -> int:
         print(f"\nPublished: {url}")
     else:
         print(f"\nDraft ready — review it, then publish:\n  gh release edit {tag} --draft=false\n  {url}")
+    # PyPI is the install channel — this is what makes `uv tool install`/`curl … | sh` see the new
+    # version. Manual on purpose (needs your token, irreversible):
+    print(f"\nUpload the wheel to PyPI:\n  (cd overlay && uv publish)   # built: {wheel.name}")
     return 0
 
 

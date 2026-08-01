@@ -10,35 +10,32 @@ requirement. Everything else — the Python interpreter, ffmpeg, the mpv plugin 
 |------|------|-------|
 | **mpv** ≥ 0.37 | required | `setup` installs it (Homebrew / winget) if it's missing; it need not be on `PATH` beforehand. |
 | **ffmpeg** | required | Screenshot + clip capture for mining; `setup` installs it too. |
-| **[uv](https://docs.astral.sh/uv/)** | required | Provides the Python interpreter (3.13+) and dependencies. The release-bundle installer bootstraps it for you. |
+| **[uv](https://docs.astral.sh/uv/)** | required | Provides the Python interpreter (3.13+) and dependencies. The install script bootstraps it for you. |
 | **[Anki](https://apps.ankiweb.net/)** + **[AnkiConnect](https://ankiweb.net/shared/info/2055492159)** | optional | FSRS-aware coloring and one-key mining. Without it you can still color from a manual known-word set. |
 | **[Yomitan](https://github.com/yomidevs/yomitan)** dictionaries | optional | Your own `.zip` dictionaries (or a full database export) drive the tooltip; [import them once](#dictionary-import). |
 
 !!! note "You don't need a clone"
-    The release bundle and the `uv tool` install both fetch a published package — no `git clone`, no
-    build step. Cloning is only for contributors (see the [Architecture](../contributing/architecture.md)
-    docs).
+    Both install paths fetch the published PyPI package — no `git clone`, no build step. Cloning is only
+    for contributors (see the [Architecture](../contributing/architecture.md) docs).
 
 ## Install
 
-=== "Release bundle (recommended)"
+=== "Install script (recommended)"
 
-    A self-contained zip that bootstraps `uv`, installs the overlay with the full feature set, and hands
-    off to the `setup` wizard — no prerequisites of its own.
+    Bootstraps `uv`, installs `saitenka[full]` from PyPI, and hands off to the `setup` wizard — no
+    prerequisites of its own.
 
-    1. Download **`saitenka-<version>.zip`** from the
-       [latest release](https://github.com/serjflint/saitenka/releases/latest) and unzip it.
-    2. From inside the unzipped folder, run the installer for your OS:
-
-    ```bash
-    # macOS / Linux — add --dry-run to preview without changing anything
-    bash overlay-install.sh
+    ```sh
+    # macOS / Linux
+    curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh | sh
     ```
 
     ```powershell
     # Windows (PowerShell)
-    powershell -ExecutionPolicy Bypass -File overlay-install.ps1
+    powershell -ExecutionPolicy ByPass -c "irm https://serjflint.github.io/saitenka/install.ps1 | iex"
     ```
+
+    Prefer to read it first? Download with `-o install.sh`, inspect it, then `sh install.sh`.
 
 === "uv tool (package only)"
 

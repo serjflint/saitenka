@@ -288,8 +288,8 @@ Full docs: **[saitenka.readthedocs.io](https://saitenka.readthedocs.io)** (insta
 - **[`tools/`](tools/)** — the Anki/FSRS deck engine: FSRS-based dictionary ranking, field
   normalization, provenance annotation, deck building, refile-by-review-state, anime chooser.
   Frequency dictionaries are user-supplied (`tools/freq/` or `--freq-dir` / `$SAITENKA_FREQ_DIR`).
-- **[`install/`](install/)** — cross-platform installers (macOS / Windows / Linux), the `doctor` health
-  check, and `make_bundle.py`, which builds a single self-contained zip you can hand to a friend.
+- **[`install/`](install/)** — the cross-platform install scripts (`overlay-install.{sh,ps1}`, served
+  from GitHub Pages) and the release helper (`release.py`).
 - **[`deinflect/`](deinflect/)** — *optional* **GPL-3.0** add-on (`saitenka-deinflect`): the
   Yomitan-derived inflection-chain display (🧩 `-て « -いる « -た`). Kept separate so the core stays
   Apache-2.0; the overlay runs fine without it. See [LICENSING.md](LICENSING.md).

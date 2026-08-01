@@ -176,28 +176,21 @@ wall — per-frame animation, huge panels, GPU scaling, live interactivity — e
 cosmic-text + the libmpv render API (see `rust/README.md`). The renderer here (walker, ruby, chrome,
 goldens) is the spec that escalation must match.
 
-## Sharing it with a friend (self-contained bundle)
+## Installing
 
-No PyPI or public repo needed. Build one shareable archive and send it:
+Published on PyPI — install without cloning, via the one-line script or `uv`/`pipx` directly:
 
-```bash
-uv run poe bundle                        # → dist/saitenka-<ver>.zip
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh | sh
+# …or, if you already have uv:
+uv tool install "saitenka[full]" && saitenka setup
 ```
 
-The zip carries the wheel (all fonts/wordlists/lua/data ride inside it via `importlib.resources`),
-both bootstrap installers, and an INSTALL.txt. Your friend unzips and runs the stub for their OS:
-
-```bash
-bash overlay-install.sh                   # macOS / Linux  (--dry-run to preview)
-powershell -ExecutionPolicy Bypass -File overlay-install.ps1   # Windows
-```
-
-The stub's only job is to get `uv`, `uv tool install ./<wheel>`, and hand off to
-`saitenka setup` — an interactive Python wizard that inventories the box, installs mpv +
-ffmpeg (macOS `brew`; Windows winget→choco→scoop; Linux prints copy-paste hints), runs `doctor`,
-writes the config (`init`), and offers `import-settings` + `install-plugin`. Every step is
-confirm-first, `--yes`/`--dry-run` are honoured, and it is resumable (re-runs skip satisfied steps).
-Upgrade = re-run with a newer bundle (`uv tool install --reinstall ./<wheel>`).
+`saitenka setup` inventories the box, installs mpv + ffmpeg (macOS `brew`; Windows
+winget→choco→scoop; Linux prints copy-paste hints), runs `doctor`, writes the config (`init`), and
+offers `import-settings` + `install-plugin`. Confirm-first, `--yes`/`--dry-run` honoured, resumable.
+Upgrade = `saitenka update` (keeps your extras). The installer scripts live in
+[`install/`](../install/) and are served from GitHub Pages via `poe pages`.
 
 ## Development
 

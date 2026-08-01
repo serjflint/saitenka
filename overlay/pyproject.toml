@@ -424,17 +424,13 @@ crosshair = { shell = "UV_PROJECT_ENVIRONMENT=.venv-cx uv run --python 3.13 --ex
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
-# Build the one shareable bundle (wheel + both bootstrap installers + INSTALL.txt) → dist/<ver>.zip.
-# install/make_bundle.py resolves its own paths from `__file__`, but needs repo-root cwd for `uv run`
-# to see it at all — `cd ..` here is that, not a path fix on the script's side.
-bundle = { shell = "cd .. && uv run install/make_bundle.py" }
-# RELEASING.md steps 1-7, automated: bump version, insert the curated RELEASE_NOTES.md entry (write
-# that first — the changelog is never auto-generated unattended), gate, build/checksum/smoke-test,
+# RELEASING.md steps 1-5, automated: bump version, insert the curated RELEASE_NOTES.md entry (write
+# that first — the changelog is never auto-generated unattended), gate, build+smoke-test the wheel,
 # commit. Never pushes or opens a PR on its own. $POE_EXTRA_ARGS forwards flags, e.g.
 # `poe release-prepare --dry-run` or `--bump minor` — see `release.py`'s docstring for the full set.
 release-prepare = { shell = "cd .. && uv run install/release.py prepare $POE_EXTRA_ARGS" }
-# RELEASING.md steps 8-10, automated: tag, rebuild from the merged commit, draft the GitHub Release.
-# Leaves it as a draft unless `--publish` is passed — publishing is a deliberate, separate step.
+# RELEASING.md steps 7-8, automated: tag, rebuild+smoke-test the wheel from the merged commit, draft the
+# (notes-only) GitHub Release. Draft unless `--publish`; `uv publish` to PyPI stays a separate manual step.
 release-publish = { shell = "cd .. && uv run install/release.py publish $POE_EXTRA_ARGS" }
 
 # --- Supply-chain & hygiene (test-driven & wired 2026-07-25; see vibe/quality-growth-plan.md) --------

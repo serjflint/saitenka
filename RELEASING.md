@@ -1,10 +1,11 @@
 # Releasing Saitenka
 
-Releases are cut **manually from macOS** (automated release CI is deferred). The distributable is a
-single `dist/saitenka-<ver>.zip` (wheel + GPL `deinflect` sdist + installers), published as a
-**GitHub Release**. This file is the source of truth for the human steps — `install/release.py`
+Releases are cut **manually from macOS** (automated release CI is deferred). Distribution is **PyPI**
+(`uv tool install "saitenka[full]"`) plus the hosted install scripts (`serjflint.github.io/saitenka`,
+kept in sync by `poe pages`); a release is a **git tag + a notes-only GitHub Release**, and `uv publish`
+uploads the wheel to PyPI. This file is the source of truth for the human steps — `install/release.py`
 automates them (see "Automated" below) but the review gates it can't remove (curating the changelog,
-merging the PR, publishing the Release) still happen exactly where they're described here.
+merging the PR, publishing the Release, uploading to PyPI) still happen exactly where they're described here.
 
 ## Versioning
 
@@ -13,7 +14,7 @@ breaking change) is a minor bump — `0.2.0 → 0.3.0`. Don't reach for `1.0.0` 
 being frozen.
 
 Single source of truth: **`overlay/pyproject.toml` `version`** (read at runtime via
-`importlib.metadata`, and by `install/make_bundle.py`). Nothing else hardcodes the version.
+`importlib.metadata`). Nothing else hardcodes the version.
 
 ## Automated
 
@@ -24,16 +25,17 @@ below for you. It still requires a human at two points: the changelog entry (wri
 
 ```sh
 $EDITOR RELEASE_NOTES.md              # curate the changelog entry (bullets, no heading)
-uv run poe release-prepare             # steps 1-6: bump version (auto patch/minor/major from
+uv run poe release-prepare             # steps 1-5: bump version (auto patch/minor/major from
                                         # Conventional Commits, capped at minor pre-1.0), insert
-                                        # the changelog section, `poe all`, build+checksum+smoke-
-                                        # test, commit `chore(overlay): release X.Y.Z`
-git push && gh pr create               # step 7: open the PR, get it reviewed, merge it
+                                        # the changelog section, `poe all`, build+smoke-test the
+                                        # wheel, commit `chore(overlay): release X.Y.Z`
+git push && gh pr create               # step 6: open the PR, get it reviewed, merge it
 
 git checkout main && git pull
-uv run poe release-publish             # steps 8-9: tag, rebuild from the merged commit,
-                                        # checksum+smoke-test again, create the Release as a draft
-uv run poe release-publish --publish   # step 9b: flip the draft live (or `gh release edit` by hand)
+uv run poe release-publish             # steps 7-8: tag, rebuild+smoke-test the wheel from the
+                                        # merged commit, create the (notes-only) Release as a draft
+uv run poe release-publish --publish   # flip the draft live (or `gh release edit` by hand)
+cd overlay && uv publish               # step 9: upload the wheel to PyPI (needs your token)
 ```
 
 Flags forward straight through poe (no `--` separator needed): `poe release-prepare --bump
@@ -48,36 +50,39 @@ wrap `uv run install/release.py prepare|publish --help` for the full set.
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
-3. **Build** the bundle: `uv run install/make_bundle.py` → `dist/saitenka-X.Y.Z.zip`.
-4. **Checksums:** `cd dist && shasum -a 256 saitenka-X.Y.Z.zip > SHA256SUMS`.
-   (Integrity only — GPG/Sigstore is intentionally skipped until a downstream packager needs it.)
-5. **Smoke-test the artifact, not the tree** — extract the zip in a temp dir and run the *built wheel* in
-   an isolated env:
+3. **Build the wheel:** `cd overlay && uv build --wheel` → `overlay/dist/saitenka-X.Y.Z-py3-none-any.whl`
+   (the artifact `uv publish` uploads).
+4. **Smoke-test the artifact, not the tree** — install the *built wheel* in an isolated env:
    ```sh
-   cd $(mktemp -d) && unzip -q <repo>/dist/saitenka-X.Y.Z.zip
-   uvx --from ./saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
+   uvx --from overlay/dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
    ```
    This catches packaging breakage (missing data files, entry point, deps) that `poe all` can't.
-6. **Gate:** `uv run poe all` green; update any version-referenced docs.
-7. **Merge the PR** into the default branch.
+5. **Gate:** `uv run poe all` green; update any version-referenced docs.
+6. **Merge the PR** into the default branch.
 
-`dist/` is git-ignored — the zip and `SHA256SUMS` are **not** committed; they ride on the Release.
+`overlay/dist/` is git-ignored — the wheel is **not** committed; `uv publish` uploads it to PyPI.
 
 ## After merge (on the default branch)
 
-8. **Annotated tag on the merge commit**, then push it:
+7. **Annotated tag on the merge commit**, then push it:
    ```sh
    git tag -a vX.Y.Z -m "Release X.Y.Z" && git push origin vX.Y.Z
    ```
    Tag *after* merge so it points at the exact shipped commit.
-9. **GitHub Release, draft-first** (so both assets are attached before it goes live):
+8. **GitHub Release, draft-first** (notes only — no binary assets; the auto "Source code" archive covers source):
    ```sh
    gh release create vX.Y.Z --draft --title "X.Y.Z" \
-     --notes-file <(sed -n '/## \[X.Y.Z\]/,/## \[/p' CHANGELOG.md | sed '$d') \
-     dist/saitenka-X.Y.Z.zip dist/SHA256SUMS
+     --notes-file <(sed -n '/## \[X.Y.Z\]/,/## \[/p' CHANGELOG.md | sed '$d')
    ```
-   Verify the draft (assets present, notes correct), then **publish** (`gh release edit vX.Y.Z --draft=false`).
-10. **Post-release:** confirm `## [Unreleased]` is empty on top and tags == `pyproject.toml`.
+   Verify the draft (notes correct), then **publish** (`gh release edit vX.Y.Z --draft=false`).
+9. **PyPI** — the install channel; this is what makes `uv tool install` / `curl … | sh` see the new
+   version. Publish the Apache-2.0 core wheel (the GPL `deinflect` add-on is its own package, already on
+   PyPI, so the license boundary stays clean):
+   ```sh
+   cd overlay && uv publish        # uploads dist/saitenka-X.Y.Z-py3-none-any.whl (needs your token)
+   ```
+10. **Post-release:** confirm `## [Unreleased]` is empty on top, tags == `pyproject.toml`, and
+    `uv tool install "saitenka[full]"` pulls the new version.
 
 ## Notes
 
@@ -87,10 +92,8 @@ wrap `uv run install/release.py prepare|publish --help` for the full set.
   `[X.Y.Z]: .../compare/v<prev>..vX.Y.Z` under the placeholder comment.
 - **Release candidates:** tag `vX.Y.Z-rc1`, publish as a **pre-release**, smoke-test, then cut `vX.Y.Z`
   from the same commit.
-- **PyPI (optional, deferred):** to make `uvx saitenka` work, publish only the Apache-2.0 core
-  wheel (`uv publish` from `overlay/`), keeping the GPL `deinflect` add-on an opt-in extra so the license
-  boundary stays clean. GitHub Releases remain the primary channel (bundle + installers for non-Python
-  users).
-- **Automate later:** once a runner builds the zip, a ~15-line `softprops/action-gh-release@v2` on
-  `push: tags: v*` can attach assets automatically — a one-file change, tied to enabling CI. Not worth it
-  while builds are local.
+- **Install scripts:** the hosted `install.sh`/`install.ps1` (`serjflint.github.io/saitenka`) install
+  from PyPI, so they're release-independent — re-run `poe pages` only when you edit
+  `install/overlay-install.{sh,ps1}`, not every release.
+- **Automate later:** a `pypa/gh-action-pypi-publish` (trusted publishing, no token) on `push: tags: v*`
+  could replace the manual `uv publish` — tied to enabling CI. Not worth it while releases are local.
