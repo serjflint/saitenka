@@ -36,7 +36,12 @@ def _active_index(reader: Reader) -> int:
     index = reader._sub_index
     if index is None:
         return -1
-    return index.locate(text=reader.sub_text, preferred=reader._nav_idx)
+    return index.locate(
+        text=reader.sub_text,
+        sub_start=reader._get("sub-start"),
+        time_pos=reader._get("time-pos"),
+        preferred=reader._nav_idx,
+    )
 
 
 def _ensure_store(reader: Reader) -> BacklogStore:

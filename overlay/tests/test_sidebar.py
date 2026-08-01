@@ -72,6 +72,14 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
 
+def test_active_row_uses_timing_to_disambiguate_repeated_text():
+    reader, _ipc = _reader(props={"sub-start": 5.2, "time-pos": 5.3})
+    reader._sub_index = SubIndex([SubCue(1.0, 2.0, "same line"), SubCue(5.0, 6.0, "same line")])
+    reader.sub_text = "same line"
+
+    assert sidebar._active_index(reader) == 1
+
+
 def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     reader, _ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
     calls = _capture_render(monkeypatch)
