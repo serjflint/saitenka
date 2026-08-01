@@ -144,6 +144,13 @@ def _ruby_parts(node: dict) -> tuple[str, str]:
     return "".join(base_parts), "".join(reading_parts)
 
 
+def _is_boxed(node: dict) -> bool:
+    # A filled/bordered/rounded span is a visually separated pill (POS/tag chip); Yomitan spaces these
+    # via CSS margins, which plain-text flattening otherwise loses — glueing e.g. `na-adjcolloquial`.
+    st = node.get("style") or {}
+    return any(k in st for k in (*_BG_KEYS, *_BORDER_KEYS, "borderRadius"))
+
+
 def _text_of(node) -> str:
     if node is None:
         return ""
@@ -152,9 +159,15 @@ def _text_of(node) -> str:
     if isinstance(node, list):
         return "".join(_text_of(n) for n in node)
     if isinstance(node, dict):
-        if node.get("tag") == "br":
+        tag = node.get("tag")
+        if tag == "br":
             return "\n"
-        return _text_of(node.get("content"))
+        text = _text_of(node.get("content"))
+        # Insert word boundaries the source encodes structurally, not textually: block elements and
+        # chip pills sit apart on screen but flatten adjacent. Callers collapse the extra whitespace.
+        if text and (tag in BLOCK_TAGS or _is_boxed(node)):
+            return f" {text} "
+        return text
     return ""
 
 

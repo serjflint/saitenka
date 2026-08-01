@@ -13,6 +13,7 @@ from overlay.app.dictionary import (
     DictionaryError,
     DictionarySet,
     _glossary_to_nodes,
+    _glosses_of,
     _short_freq_name,
     split_existing,
 )
@@ -72,6 +73,26 @@ def test_glossary_unwrap():
     assert nodes[1] == SC["content"]  # structured-content unwrapped
     assert nodes[2] == "t"
     assert nodes[3]["tag"] == "img"
+
+
+def test_glosses_of_separates_block_and_chip_items():
+    # A JMdict-style sense flattens to ONE gloss string; block items (<li>) and pill chips (styled
+    # spans) sit apart on screen but have no textual whitespace — they must not glue into
+    # `dramaticexcitingtouching` / `na-adjcolloquial` in the card preview.
+    sense = {
+        "type": "structured-content",
+        "content": [
+            {"tag": "span", "style": {"backgroundColor": "#565656"}, "content": "na-adj"},
+            {"tag": "span", "style": {"backgroundColor": "#565656"}, "content": "colloquial"},
+            {
+                "tag": "ul",
+                "content": [
+                    {"tag": "li", "content": g} for g in ("dramatic", "exciting", "touching")
+                ],
+            },
+        ],
+    }
+    assert _glosses_of([sense]) == ["na-adj colloquial dramatic exciting touching"]
 
 
 def test_load_and_lookup(tmp_path):
