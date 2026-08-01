@@ -9,15 +9,18 @@ from __future__ import annotations
 
 import html
 import http.client
+import importlib
 import json
 import logging
+import os
+import shutil
 import subprocess
 import sys
 import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import stamina
 
@@ -27,6 +30,56 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 ANKI_HOST = "http://127.0.0.1:8765"  # AnkiConnect stock default (webBindAddress:webBindPort)
+
+
+def _windows_anki_app_path() -> str | None:
+    try:
+        winreg: Any = importlib.import_module("winreg")
+    except ModuleNotFoundError:
+        return None
+
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for base in (
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths",
+        ):
+            try:
+                with winreg.OpenKey(hive, rf"{base}\anki.exe") as key:
+                    value, _kind = winreg.QueryValueEx(key, "")
+            except OSError:
+                continue
+            path = Path(str(value).strip('"'))
+            if path.is_file():
+                return str(path)
+    return None
+
+
+def find_anki(cfg: dict | None = None) -> str | None:
+    """Resolve an installed Anki executable without relying on Explorer's shell lookup."""
+    if cfg is None:
+        from overlay.app.config import load_config
+
+        cfg = load_config()
+    raw = cfg.get("anki")
+    settings: dict = raw if isinstance(raw, dict) else {}
+    configured = settings.get("executable")
+    if configured:
+        path = Path(os.path.expandvars(str(configured))).expanduser()
+        if path.is_file():
+            return str(path)
+    for name in ("anki.exe", "anki"):
+        if found := shutil.which(name):
+            return found
+    if found := _windows_anki_app_path():
+        return found
+    env = os.environ
+    roots = (
+        (env.get("LOCALAPPDATA"), ("Programs", "Anki", "anki.exe")),
+        (env.get("ProgramFiles"), ("Anki", "anki.exe")),
+        (env.get("ProgramFiles(x86)"), ("Anki", "anki.exe")),
+    )
+    candidates = (Path(root).joinpath(*parts) for root, parts in roots if root)
+    return next((str(path) for path in candidates if path.is_file()), None)
 
 
 def resolve_anki(cfg: dict | None = None) -> tuple[str, str | None]:
@@ -79,7 +132,11 @@ def ensure_anki_running(host: str | None = None, wait: float = 20.0) -> bool:
     if sys.platform == "darwin":
         launch = ["open", "-a", "Anki"]
     elif sys.platform.startswith("win"):
-        launch = ["cmd", "/c", "start", "", "anki"]
+        executable = find_anki()
+        if executable is None:
+            log.warning("could not find Anki to launch automatically")
+            return False
+        launch = [executable]
     else:
         launch = ["anki"]
     log.info("AnkiConnect down — launching Anki (%s)", launch[0])
