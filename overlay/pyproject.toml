@@ -456,8 +456,10 @@ spell = { shell = "cd .. && uvx typos" }
 # GATE (in `all`) — local link integrity (relative/anchor links resolve). `--offline` checks only
 # on-disk targets → deterministic and network-free; the full external-URL crawl is the advisory
 # `links-net` below (network → flaky → not in `all`). lychee = Rust binary (brew install lychee).
-links = { shell = "cd .. && lychee --offline --no-progress '**/*.md'" }
-links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress '**/*.md'" }
+# `git ls-files` scopes it to TRACKED markdown — an explicit `**/*.md` glob bypasses .gitignore and would
+# drag in git-ignored `vibe/` scratch (Yandex-wiki root-relative links that can't resolve on disk).
+links = { shell = "cd .. && lychee --offline --no-progress $(git ls-files '*.md')" }
+links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress $(git ls-files '*.md')" }
 # Docs site (Material for MkDocs → Read the Docs). Source lives at the repo root (../mkdocs.yml, ../docs),
 # but the build runs here because this env has the `saitenka` package + `docs` group. `--strict` fails on
 # broken links/nav, so a docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an
