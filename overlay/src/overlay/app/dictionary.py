@@ -713,14 +713,21 @@ class DictionarySet:
         defs, headword, reading = self._dict_defs(forms, termforms, token.reading)
         if headword is None:
             headword = token.lemma or token.surface
+        groups = self._entry_groups(forms, termforms, token)
+        # When stacked, the fused header (big ruby + its TTS reading + pitch/freq pills) tracks the
+        # best (first) entry, so it agrees with the block directly below it: 退いた shows しりぞく, not
+        # an arbitrary homophone from _dict_defs' hits[0].
+        header = groups[0].headword if groups else furigana(headword, reading)
+        if groups:
+            reading = groups[0].reading
         pitches = self._pitch_accents(forms, reading)
         return Entry(
-            headword=furigana(headword, reading),
+            headword=header,
             tags=[],
             freqs=self._freq_pills(forms, reading),
             defs=defs or [Definition("—", ["（辞書に見つかりませんでした）"])],
             inflection_chain=inflection_chain(inflected or token.surface, token.lemma, headword),
             reading=reading or token.reading,
             pitches=pitches,
-            groups=self._entry_groups(forms, termforms, token),
+            groups=groups,
         )

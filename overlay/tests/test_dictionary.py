@@ -357,6 +357,21 @@ def test_entry_for_builds_stacked_groups_for_multi_reading(tmp_path):
     assert "to retreat" not in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
 
 
+def test_entry_for_header_reading_agrees_with_first_stacked_group(tmp_path):
+    """The fused header (big ruby + TTS reading) tracks the best stacked entry, so it doesn't show an
+    arbitrary homophone above a differently-read first block — 退いた's header reads のく, like group 0."""
+    d = _make_dict(
+        tmp_path / "hdr.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    entry = ds.entry_for(tok)
+    assert entry.reading == entry.groups[0].reading == "のく"
+    assert entry.headword is entry.groups[0].headword
+
+
 def test_entry_for_single_reading_has_no_groups(tmp_path):
     """A single-reading word keeps the fused single-header panel (no stacking) — groups is empty."""
     d = _make_dict(tmp_path / "one.zip", "One", [["読む", "よむ", ["to read"]]])
