@@ -413,9 +413,17 @@ class DictionaryDb:
                 if kind == "dict":
                     self._load_dict_banks(conn, zf, did, on_bank)
                 else:  # 'freq' | 'pitch'
-                    self._load_meta_banks(
-                        conn, zf, did, on_bank, occurrence_based=_is_occurrence_based(zf)
-                    )
+                    occ = _is_occurrence_based(zf)
+                    self._load_meta_banks(conn, zf, did, on_bank, occurrence_based=occ)
+                    if kind == "freq":
+                        # Persist the ORIGINAL frequency mode so the harmonic-blend pill can exclude
+                        # occurrence-based dicts (their converted rank is a per-corpus dense rank, not
+                        # comparable to a real rank-based list — only ranks may be blended). Same
+                        # transaction; unknown key on old imports defaults to rank-based downstream.
+                        conn.execute(
+                            "INSERT OR REPLACE INTO meta VALUES(?, ?)",
+                            (f"freqmode:{did}", "occurrence" if occ else "rank"),
+                        )
             if kind != "dict":
                 # Keep term_meta's query-planner stats fresh after every freq/pitch import — see
                 # _ensure_schema's one-time catch-up for the reasoning (PitchSource.accents needs

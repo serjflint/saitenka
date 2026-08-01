@@ -661,6 +661,9 @@ class Reader:
     def _jlpt_pill(self, tok) -> Freq | None:
         return tooltip.jlpt_pill(self, tok)
 
+    def _rareness_pill(self, tok) -> Freq | None:
+        return tooltip.rareness_pill(self, tok)
+
     def _entry_for(self, tok, inflected):
         return tooltip.entry_for_tok(self, tok, inflected)
 

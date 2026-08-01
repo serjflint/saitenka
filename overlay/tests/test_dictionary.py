@@ -556,6 +556,20 @@ def test_freq_source_rank_none_when_absent(tmp_path):
     assert fs.rank(("存在しない語",), None) is None
 
 
+def test_freq_source_records_original_frequency_mode(tmp_path):
+    # The blend must know a dict's ORIGINAL mode even though occurrence counts are converted to
+    # ranks at import — persisted per dict so occurrence-based lists can be excluded.
+    rank_zip = dicthelp.meta_zip(
+        tmp_path / "rank.zip", "RankDict", "freq", [["猫", {"frequency": 500}]]
+    )
+    occ_zip = dicthelp.meta_zip(
+        tmp_path / "occ.zip", "OccDict", "freq", [["猫", 99999]], frequency_mode="occurrence-based"
+    )
+    on = dicthelp.db()
+    assert dicthelp.load_freqsource(rank_zip, on=on).occurrence_based is False
+    assert dicthelp.load_freqsource(occ_zip, on=on).occurrence_based is True
+
+
 def test_pitch_source_reading_and_positions(tmp_path):
     p = _make_meta(
         tmp_path / "pitch.zip",

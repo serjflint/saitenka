@@ -465,17 +465,40 @@ def jlpt_pill(reader: Reader, tok) -> Freq | None:
     return Freq("JLPT", level, _darken(base))
 
 
+def rareness_pill(reader: Reader, tok) -> Freq | None:
+    """The blended-rareness "diff" pill: harmonic mean of the word's rank across every loaded freq
+    dict, colored by band (:func:`fsrs.rareness_color`). Summarizes the row of 7+ per-dict pills into
+    one rareness read. ``None`` when no freq dict has the word, so the caller skips it cleanly."""
+    from overlay.app.fsrs import diff_pill, harmonic_of
+
+    ds = reader.dict_set
+    sources = getattr(ds, "freqs", None)
+    if not sources:
+        return None
+    # Only rank-based dicts may be blended — an occurrence-based dict's converted rank is a per-corpus
+    # dense rank on an incomparable scale (see FreqSource.occurrence_based); it stays in the per-dict
+    # pill row but never in the harmonic mean.
+    forms = (tok.lemma, tok.surface, tok.reading)
+    ranks = [
+        r
+        for fs in sources
+        if not getattr(fs, "occurrence_based", False)
+        and (r := fs.rank(forms, tok.reading)) is not None
+    ]
+    return diff_pill(harmonic_of([float(r) for r in ranks]))
+
+
 def entry_for_tok(reader: Reader, tok, inflected):
-    """Look up the panel entry and fold in the JLPT pill (near the frequency pills) when the word
-    carries a JLPT level, so it mirrors the subtitle underline.
+    """Look up the panel entry and fold in the blended-rareness pill and the JLPT pill (leading the
+    frequency pills) when the word has them, so they mirror the subtitle underline / freq row.
 
     Never mutates the lru_cached Entry from lookup.lookup_entry / dict_set.entry_for — returns
     a shallow copy with a new freqs list so repeated calls do not accumulate pills."""
     entry = reader.dict_set.entry_for(tok, inflected) if reader.dict_set else entry_for(tok)
-    pill = jlpt_pill(reader, tok)
-    if pill is not None and hasattr(entry, "freqs"):
+    extra = [p for p in (rareness_pill(reader, tok), jlpt_pill(reader, tok)) if p is not None]
+    if extra and hasattr(entry, "freqs"):
         # Build the pill list into a shallow copy — never mutate the cached original.
-        entry = _dc.replace(entry, freqs=[pill, *entry.freqs])
+        entry = _dc.replace(entry, freqs=[*extra, *entry.freqs])
     return entry
 
 

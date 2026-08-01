@@ -7,6 +7,16 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **Blended rareness pill in the tooltip.** A single `diff` chip leads the frequency row with the
+  harmonic-mean rank across every loaded **rank-based** frequency dictionary — one summary of the 7+
+  per-dict pills, shown for any word the freq dicts cover (deck membership irrelevant). It is
+  color-banded by rareness: green ≤10k (common), amber ≤30k (uncommon), red beyond (rare).
+  Occurrence-based dicts are excluded from the blend — their per-corpus dense rank is not comparable
+  across lists, so only true ranks are combined (they still show their own pill). The blend matches
+  `tools/anki_rank_dicts.py`, so the tooltip and the ranked mining lists agree on how rare a word is.
+
 ## [1.1.0] - 2026-08-01
 
 ### Added

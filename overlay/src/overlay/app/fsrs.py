@@ -7,9 +7,10 @@ Two public surfaces:
    The FSRS retrievability math is copied verbatim from ``tools/anki_rank_dicts.py`` and
    cross-checked against py-fsrs.
 
-2. :func:`harmonic_rank` / :func:`diff_pill` — blend frequency ranks from multiple Yomitan
-   freq dicts using the harmonic-mean formula (identical to ``tools/anki_rank_dicts.py``),
-   returning a compact ``Freq("diff", "1333", …)`` pill for the tooltip header row.
+2. :func:`harmonic_of` / :func:`harmonic_rank` / :func:`diff_pill` — blend frequency ranks from
+   multiple Yomitan freq dicts using the harmonic-mean formula (identical to
+   ``tools/anki_rank_dicts.py``), returning a compact ``Freq("diff", "1.3k", …)`` pill for the
+   tooltip header row, colored by rareness band (green common → amber → red rare).
 
 Threading note: KnownSnap is read-only once built; ``load_knownness`` is called at launch
 (or on snapshot refresh) from the main thread only.
@@ -43,8 +44,27 @@ FORGOTTEN_R = 0.85
 # Mature interval (days): cards with ivl ≥ this are "known", below = "young".
 MATURE_IVL = 21
 
-# Colour for the "diff" pill (medium grey-blue, distinct from the per-source freq pills)
-DIFF_COLOR: tuple[int, int, int, int] = (90, 140, 160, 255)
+# Rareness bands for the blended "diff" pill, by harmonic-mean rank. Cutoffs align with the scorer's
+# FREQ_BAND_TOP_X (10k): ≤10k common, ≤30k uncommon, else rare. The blend skews higher than any single
+# dict when a word is missing from the big-corpus lists, so "rare" sits at 30k, not 20k — tune here.
+RARENESS_COMMON_MAX = 10_000
+RARENESS_UNCOMMON_MAX = 30_000
+
+# green (common) → amber (uncommon) → red (rare); the green matches the per-source freq pills.
+_RARENESS_COLORS: tuple[tuple[int, int, int, int], ...] = (
+    (74, 158, 92, 255),
+    (198, 156, 60, 255),
+    (188, 86, 74, 255),
+)
+
+
+def rareness_color(rank: float) -> tuple[int, int, int, int]:
+    """Band color for a blended rank: green ≤10k, amber ≤30k, red beyond."""
+    if rank <= RARENESS_COMMON_MAX:
+        return _RARENESS_COLORS[0]
+    if rank <= RARENESS_UNCOMMON_MAX:
+        return _RARENESS_COLORS[1]
+    return _RARENESS_COLORS[2]
 
 
 # ---------------------------------------------------------------------------
@@ -419,25 +439,25 @@ def _read(
 # ---------------------------------------------------------------------------
 
 
+def harmonic_of(ranks: list[float]) -> float | None:
+    """Harmonic mean of a list of ranks — the blend's core. ``None`` if empty.
+
+    Matches ``tools/anki_rank_dicts.py:harmonic()``.
+    """
+    return len(ranks) / sum(1.0 / r for r in ranks) if ranks else None
+
+
 def harmonic_rank(
     word: str,
     freq_dicts: list[dict[str, int]],
 ) -> float | None:
-    """Harmonic mean of ``word``'s rank across all dicts that contain it.
-
-    Matches the blend used by ``tools/anki_rank_dicts.py:harmonic()``.
-    Returns ``None`` if the word appears in no dict.
-    """
-    ranks = [d[word] for d in freq_dicts if word in d]
-    if not ranks:
-        return None
-    return len(ranks) / sum(1.0 / r for r in ranks)
+    """Harmonic mean of ``word``'s rank across all dicts that contain it. ``None`` if in none."""
+    return harmonic_of([d[word] for d in freq_dicts if word in d])
 
 
 def diff_pill(rank: float | None) -> Freq | None:
-    """A ``Freq("diff", …, DIFF_COLOR)`` pill for the harmonic-blended difficulty rank.
-
-    Returns ``None`` when ``rank`` is ``None`` so the caller can skip it cleanly.
+    """A ``Freq("diff", …)`` pill for the harmonic-blended rank, colored by rareness band
+    (:func:`rareness_color`). Returns ``None`` when ``rank`` is ``None`` so the caller skips it.
     """
     if rank is None:
         return None
@@ -445,4 +465,4 @@ def diff_pill(rank: float | None) -> Freq | None:
 
     r = round(rank)
     value = (f"{r // 1000}k" if r % 1000 == 0 else f"{r / 1000:.1f}k") if r >= 1000 else str(r)
-    return _Freq(name="diff", value=value, color=DIFF_COLOR)
+    return _Freq(name="diff", value=value, color=rareness_color(rank))

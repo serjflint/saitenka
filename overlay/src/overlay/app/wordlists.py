@@ -175,6 +175,10 @@ class FreqSource:
         self.db = db
         self.dict_id = row.id
         self.title = row.title
+        # ORIGINAL frequency mode, persisted at import. Occurrence-based dicts store a per-corpus
+        # dense rank that is not comparable across dicts, so the harmonic-blend pill excludes them —
+        # only true rank-based lists may be blended. Missing key (pre-persist imports) → rank-based.
+        self.occurrence_based = db.meta_get(f"freqmode:{row.id}") == "occurrence"
 
     def _entries_for_form(self, conn, form: str) -> list[tuple[str | None, str]]:
         rows = conn.execute(
