@@ -26,13 +26,11 @@ from overlay.app.overlay_ids import OverlayId
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
+    from overlay.app.fsrs import KnownSnap
 
 log = logging.getLogger(__name__)
 
-# build_reader_deps's fan-out DAG peaks at 4 concurrent tasks (worst case: the JLPT load still
-# running when the freq/known-words/mining tasks all get submitted) — this is that DAG's actual
-# peak width, not a tunable knob. No worker ever calls .result() on another future, so a smaller
-# pool would just serialize the tail, never deadlock.
+# Four workers cap the independent dependency loads. No worker calls .result() on another future.
 _DEPS_DAG_WIDTH = 4
 
 
@@ -139,6 +137,17 @@ def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
     return KnownWords.from_set(fallback_words)
 
 
+def _load_fsrs_snapshot(cfg: dict) -> KnownSnap | None:
+    raw = cfg.get("fsrs")
+    fsrs_cfg: dict = raw if isinstance(raw, dict) else {}
+    collection = fsrs_cfg.get("collection")
+    if not collection:
+        return None
+    from overlay.app.fsrs import load_knownness
+
+    return load_knownness(collection)
+
+
 def _load_freq_dict(db, freq_rows, freq_titles: list[str]):
     from overlay.app.scoring import FREQ_BAND_TOP_X
     from overlay.app.wordlists import FreqDict
@@ -228,6 +237,7 @@ def build_reader_deps(
         )
         dictset_fut = ex.submit(_build_dict_set, db, dict_titles, freq_titles, pitch_titles)
         jlpt_fut = ex.submit(_load_jlpt_dict, db) if want_scorer else None
+        fsrs_fut = ex.submit(_load_fsrs_snapshot, cfg)
 
         dict_set, freq_rows = dictset_fut.result()
         fd_fut = ex.submit(_load_freq_dict, db, freq_rows, freq_titles) if want_scorer else None
@@ -248,10 +258,16 @@ def build_reader_deps(
 
         scorer = None
         if want_scorer:
-            from overlay.app.scoring import Scorer
+            from overlay.app.scoring import Palette, Scorer
 
             assert kw_fut is not None and fd_fut is not None and jlpt_fut is not None  # want_scorer
-            scorer = Scorer(known=kw_fut.result(), freq=fd_fut.result(), jlpt=jlpt_fut.result())
+            scorer = Scorer(
+                known=kw_fut.result(),
+                freq=fd_fut.result(),
+                jlpt=jlpt_fut.result(),
+                palette=Palette.from_config(cfg.get("palette")),
+                fsrs_snap=fsrs_fut.result(),
+            )
         anki, mine_conf = mining_fut.result()
 
     return scorer, anki, mine_conf, dict_set

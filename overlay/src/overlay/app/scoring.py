@@ -1,10 +1,9 @@
 """Score subtitle tokens into per-word colors, reproducing SubMiner's model.
 
-Text-color priority: **N+1 > known > frequency-band > base** (name-match is out of scope). JLPT is an
-**additive underline**, and frequency is suppressed when a token has a JLPT level (matching SubMiner's
-"frequency only if no other signal"). Coloring keys on the **lemma** with a reading fallback; function
-words stay base. The Saitenka edge: `KnownWords` comes from Anki (FSRS-aware later), so forgotten words
-re-surface as unknown.
+Text-color priority: **N+1 > forgotten > known > learning > young > frequency-band > base**
+(name-match is out of scope). JLPT is an **additive underline**, and frequency is suppressed when a
+token has a JLPT level (matching SubMiner's "frequency only if no other signal"). Coloring keys on the
+**lemma** with a reading fallback; function words stay base.
 """
 
 from __future__ import annotations
@@ -44,14 +43,27 @@ def _hex(s: str) -> RGBA:
     return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16), 255)
 
 
+def _configured_color(raw: dict, name: str, default: RGBA) -> RGBA:
+    value = raw.get(name)
+    if value is None:
+        return default
+    if not isinstance(value, str) or len(value.lstrip("#")) != 6:
+        raise ValueError(f"palette.{name} must be a six-digit hex color")
+    try:
+        return _hex(value)
+    except ValueError as error:
+        raise ValueError(f"palette.{name} must be a six-digit hex color") from error
+
+
 @dataclass(frozen=True)
 class Palette:
     """SubMiner defaults (Catppuccin Macchiato)."""
 
     base: RGBA = _hex("#cad3f5")
     known: RGBA = _hex("#a6da95")
-    # Forgotten words resurface between known (green) and base (grey).
-    forgotten: RGBA = _hex("#ee99a0")  # Macchiato flamingo — visually distinct from base+known
+    forgotten: RGBA = _hex("#ee99a0")
+    learning: RGBA = _hex("#eed49f")
+    young: RGBA = _hex("#8bd5ca")
     n_plus_one: RGBA = _hex("#c6a0f6")
     hover: RGBA = _hex("#f4dbd6")
     freq_single: RGBA = _hex("#f5a97f")
@@ -71,6 +83,16 @@ class Palette:
             "N5": _hex("#8aadf4"),
         }
     )
+
+    @classmethod
+    def from_config(cls, raw: object) -> Palette:
+        palette = cls()
+        if not isinstance(raw, dict):
+            return palette
+        return cls(
+            learning=_configured_color(raw, "learning", palette.learning),
+            young=_configured_color(raw, "young", palette.young),
+        )
 
 
 @dataclass(frozen=True)
@@ -143,6 +165,7 @@ class _StyleCtx:
 
     t: Token
     is_known: bool
+    fsrs_state: str | None
     is_n1: bool
     content: bool
     level: str | None
@@ -175,39 +198,42 @@ class Scorer:
     freq_mode: str = "banded"  # 'banded' | 'single'
     freq_top_x: int = FREQ_BAND_TOP_X
     min_sentence_words: int = 3
-    # FSRS knownness snapshot — gives the forgotten tint when set.
+    # FSRS state overrides the binary known set when the same card appears in both.
     fsrs_snap: KnownSnap | None = None
 
-    def _is_known(self, t: Token) -> bool:
-        """True when the word is in KnownWords OR in the FSRS snapshot as 'known'."""
+    def _fsrs_state(self, t: Token) -> str | None:
+        if not self.enable_known or self.fsrs_snap is None:
+            return None
+        return self.fsrs_snap.state(t.surface, t.lemma, t.reading)
+
+    def _known_for(self, t: Token, fsrs_state: str | None) -> bool:
         if not self.enable_known:
             return False
-        if self.known.is_known(t.surface, t.lemma, t.reading):
-            return True
-        if self.fsrs_snap is not None:
-            return self.fsrs_snap.is_known(t.surface, t.lemma, t.reading)
-        return False
+        if fsrs_state is not None:
+            return fsrs_state == "known"
+        return self.known.is_known(t.surface, t.lemma, t.reading)
+
+    def _is_known(self, t: Token) -> bool:
+        """True for mature FSRS cards, otherwise fall back to the binary known set."""
+        fsrs_state = self._fsrs_state(t)
+        return self._known_for(t, fsrs_state)
 
     def is_known(self, t: Token) -> bool:
         """Public knownness seam shared by coloring and whole-track analysis."""
         return self._is_known(t)
 
-    def _is_forgotten(self, t: Token) -> bool:
-        """True when the FSRS snapshot marks the word as 'forgotten'."""
-        return (
-            self.fsrs_snap is not None
-            and self.enable_known
-            and self.fsrs_snap.is_forgotten(t.surface, t.lemma, t.reading)
-        )
-
     def score_line(self, tokens: list[Token]) -> list[TokenStyle]:
-        known = [self._is_known(t) for t in tokens]
+        states = [self._fsrs_state(t) for t in tokens]
+        known = [self._known_for(t, state) for t, state in zip(tokens, states, strict=True)]
         n1 = (
             mark_n_plus_one(tokens, known, self.min_sentence_words)
             if self.enable_n_plus_one
             else set()
         )
-        return [self._style(t, is_known=known[i], is_n1=i in n1) for i, t in enumerate(tokens)]
+        return [
+            self._style(t, is_known=known[i], fsrs_state=states[i], is_n1=i in n1)
+            for i, t in enumerate(tokens)
+        ]
 
     def _style_n1(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
         # N+1 needs no `content` gate — mark_n_plus_one already excludes function words.
@@ -222,10 +248,10 @@ class Scorer:
             return TokenStyle(p.known, ctx.underline, self._tag("known", ctx.level))
         return None
 
-    def _style_forgotten(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
-        # Forgotten words resurface visibly with the forgotten tint (between known/unknown).
-        if ctx.content and self._is_forgotten(ctx.t):
-            return TokenStyle(p.forgotten, ctx.underline, self._tag("forgotten", ctx.level))
+    def _style_maturity(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
+        if ctx.content and ctx.fsrs_state in {"forgotten", "learning", "young"}:
+            state = ctx.fsrs_state
+            return TokenStyle(getattr(p, state), ctx.underline, self._tag(state, ctx.level))
         return None
 
     def _style_freq(self, p: Palette, ctx: _StyleCtx) -> TokenStyle | None:
@@ -240,9 +266,11 @@ class Scorer:
         band = FreqDict.band(rank, self.freq_top_x, len(p.freq_bands))
         return TokenStyle(p.freq_bands[band - 1], ctx.underline, f"freq-{band}") if band else None
 
-    _STYLE_RULES: ClassVar = (_style_n1, _style_known, _style_forgotten, _style_freq)
+    _STYLE_RULES: ClassVar = (_style_n1, _style_maturity, _style_known, _style_freq)
 
-    def _style(self, t: Token, *, is_known: bool, is_n1: bool) -> TokenStyle:
+    def _style(
+        self, t: Token, *, is_known: bool, fsrs_state: str | None, is_n1: bool
+    ) -> TokenStyle:
         p = self.palette
         content = is_content(t)
         level = (
@@ -251,7 +279,7 @@ class Scorer:
             else None
         )
         underline = p.jlpt.get(level) if level else None
-        ctx = _StyleCtx(t, is_known, is_n1, content, level, underline)
+        ctx = _StyleCtx(t, is_known, fsrs_state, is_n1, content, level, underline)
         for rule in self._STYLE_RULES:
             style = rule(self, p, ctx)
             if style is not None:
