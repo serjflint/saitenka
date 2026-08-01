@@ -60,6 +60,7 @@ from overlay.app.bindings import (
     SUB_PREV_MSG,
     SUB_REPLAY_MSG,
     SUBTITLE_LANGUAGE_MSG,
+    SUBTITLE_RETRY_MSG,
     TAB_NEXT_MSG,
     TAB_PREV_MSG,
     TIP_CLOSE_MSG,
@@ -158,6 +159,7 @@ class Reader:
         self.sidebar_key = o.keys.sidebar_key
         self.annotation_key = o.keys.annotation_key
         self.help_key = o.keys.help_key
+        self.subtitle_retry_key = o.keys.subtitle_retry_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -239,6 +241,9 @@ class Reader:
         self.subtitle_slang = "ja,jpn,jp"
         self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
         self._subtitle_fetch_threads: list[threading.Thread] = []
+        self._subtitle_retry_factory: subtitle_modes.ProviderFetchFactory | None = None
+        self._subtitle_retry_active = False
+        self._subtitle_retry_lock = threading.Lock()
         self._backlog_store: backlog.BacklogStore | None = None
         self._sidebar_open = False
         self._sidebar_view = "track"
@@ -900,6 +905,12 @@ class Reader:
     def fetch_japanese_subs_async(self, fetch) -> None:
         subtitle_modes.start_fetch(self, fetch)
 
+    def configure_subtitle_retry(self, factory) -> None:
+        subtitle_modes.configure_retry(self, factory)
+
+    def retry_japanese_subtitles(self) -> None:
+        subtitle_modes.retry(self)
+
     def _secondary_text(self) -> str:
         return translation.secondary_text(self)
 
@@ -957,6 +968,7 @@ class Reader:
         MINE_ALL_MSG: lambda r: r.bulk_mine(),
         TRANS_MSG: lambda r: r.toggle_translation(),
         SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
+        SUBTITLE_RETRY_MSG: lambda r: r.retry_japanese_subtitles(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         SIDEBAR_MSG: lambda r: r.toggle_sidebar(),

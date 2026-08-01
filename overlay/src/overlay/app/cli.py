@@ -853,6 +853,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             sidebar_key=cfg.get("sidebar_key", ko.sidebar_key),
             annotation_key=cfg.get("annotation_key", ko.annotation_key),
             help_key=cfg.get("help_key", ko.help_key),
+            subtitle_retry_key=cfg.get("subtitle_retry_key", ko.subtitle_retry_key),
             sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
             sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
             sub_replay_key=cfg.get("sub_replay_key", ko.sub_replay_key),
@@ -894,6 +895,7 @@ def _finish_attach_subtitle_startup(
     *,
     slang: str,
     fetch_in_background: tuple[str, ...],
+    enabled_providers: tuple[str, ...],
     jimaku_key: str | None,
     jimaku_title: str | None,
     episode: int | None,
@@ -903,24 +905,28 @@ def _finish_attach_subtitle_startup(
     if startup is not None:
         reader.configure_subtitle_mode(startup, slang=slang)
     build_sub_index_for_current_track(reader)
-    if not fetch_in_background:
-        return
-    video_path = ipc.command("get_property", "path").get("data")
-    if not video_path:
-        return
     from overlay.app.subselect import fetch_provider_path
 
-    reader.fetch_japanese_subs_async(
-        lambda: fetch_provider_path(
+    def fetch_for(video_path: str, providers: tuple[str, ...]):
+        return lambda: fetch_provider_path(
             video_path,
-            fetch_in_background,
+            providers,
             jimaku_key=jimaku_key,
             title_override=jimaku_title,
             episode=episode,
             resync=resync,
             tsukihime_config=tsukihime_config,
         )
+
+    reader.configure_subtitle_retry(
+        (lambda video_path: fetch_for(video_path, enabled_providers)) if enabled_providers else None
     )
+    if not fetch_in_background:
+        return
+    video_path = ipc.command("get_property", "path").get("data")
+    if not video_path:
+        return
+    reader.fetch_japanese_subs_async(fetch_for(str(video_path), fetch_in_background))
 
 
 @app.command
@@ -1014,9 +1020,16 @@ def attach(
     _th = cfg.get("tsukihime")
     th = _th if isinstance(_th, dict) else {}
     jimaku_force = jimaku_force or bool(jm.get("force", False))
-    jimaku = jimaku or jimaku_force or bool(jm.get("enabled", False))  # force implies fetch
+    jimaku = (
+        jimaku or jimaku_force or bool(jm.get("enabled", False) or jm.get("fetch", False))
+    )  # force implies fetch
     jimaku_key = jimaku_key or jm.get("key")
     resync = resync and bool(jm.get("resync", True))
+    enabled_providers = tuple(
+        provider
+        for provider, enabled in (("jimaku", jimaku), ("tsukihime", bool(th.get("enabled"))))
+        if enabled
+    )
 
     subtitle_startup = None
     fetch_jimaku_in_background: tuple[str, ...] = ()
@@ -1056,6 +1069,7 @@ def attach(
         subtitle_startup,
         slang=slang,
         fetch_in_background=fetch_jimaku_in_background,
+        enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
         jimaku_title=jimaku_title,
         episode=episode,

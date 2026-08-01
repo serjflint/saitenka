@@ -1,6 +1,8 @@
 """Run-mode subtitle startup decisions that happen before the live mpv boundary."""
 
-from overlay.app import cli_run
+from pathlib import Path
+
+from overlay.app import cli_run, subselect
 
 
 def _resolve(tmp_path, *, jimaku: bool):
@@ -33,9 +35,10 @@ def test_configured_run_fetch_is_deferred_until_after_english_fallback(tmp_path,
             AssertionError("configured provider must not block mpv startup")
         ),
     )
-    sub_path, en_path, fetch_in_background = _resolve(tmp_path, jimaku=False)
+    sub_path, en_path, fetch_in_background, enabled = _resolve(tmp_path, jimaku=False)
     assert sub_path is None and en_path is None
     assert fetch_in_background == ("jimaku",)
+    assert enabled == ("jimaku",)
 
 
 def test_explicit_run_jimaku_retains_synchronous_override(tmp_path, monkeypatch):
@@ -46,15 +49,16 @@ def test_explicit_run_jimaku_retains_synchronous_override(tmp_path, monkeypatch)
         lambda **kwargs: kwargs["explicit_flag"] or kwargs["cfg_fetch"],
     )
     monkeypatch.setattr(cli_run, "_resolve_jimaku_subs", lambda *_args, **_kwargs: fetched)
-    sub_path, _en_path, fetch_in_background = _resolve(tmp_path, jimaku=True)
+    sub_path, _en_path, fetch_in_background, enabled = _resolve(tmp_path, jimaku=True)
     assert sub_path == fetched
     assert fetch_in_background == ()
+    assert enabled == ("jimaku",)
 
 
 def test_tsukihime_is_background_only_and_follows_jimaku(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["cfg_fetch"])
 
-    _sub_path, _en_path, providers = cli_run._resolve_subtitles(
+    _sub_path, _en_path, providers, enabled = cli_run._resolve_subtitles(
         {"jimaku": {"fetch": True}, "tsukihime": {"enabled": True}},
         "episode.mkv",
         tmp_path / "episode.mkv",
@@ -70,12 +74,13 @@ def test_tsukihime_is_background_only_and_follows_jimaku(tmp_path, monkeypatch):
     )
 
     assert providers == ("jimaku", "tsukihime")
+    assert enabled == providers
 
 
 def test_disabled_tsukihime_does_not_enter_run_provider_chain(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["cfg_fetch"])
 
-    _sub_path, _en_path, providers = cli_run._resolve_subtitles(
+    _sub_path, _en_path, providers, enabled = cli_run._resolve_subtitles(
         {"tsukihime": {"enabled": False}},
         "episode.mkv",
         tmp_path / "episode.mkv",
@@ -91,3 +96,66 @@ def test_disabled_tsukihime_does_not_enter_run_provider_chain(tmp_path, monkeypa
     )
 
     assert providers == ()
+    assert enabled == ()
+
+
+def test_embedded_japanese_skips_startup_fetch_but_keeps_runtime_retry(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **_kwargs: False)
+
+    _sub_path, _en_path, background, enabled = cli_run._resolve_subtitles(
+        {"jimaku": {"enabled": True}, "tsukihime": {"enabled": True}},
+        "episode.mkv",
+        tmp_path / "episode.mkv",
+        30,
+        tmp_path,
+        sub_file=None,
+        jimaku=False,
+        jimaku_key=None,
+        jimaku_title=None,
+        episode=None,
+        resync=False,
+        slang="ja,jpn,jp",
+    )
+
+    assert background == ()
+    assert enabled == ("jimaku", "tsukihime")
+
+
+def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monkeypatch):
+    calls = []
+
+    class Reader:
+        retry_factory = None
+        startup_fetch = None
+
+        def configure_subtitle_retry(self, factory):
+            self.retry_factory = factory
+
+        def fetch_japanese_subs_async(self, fetch):
+            self.startup_fetch = fetch
+
+    def fetch(video, providers, **_kwargs):
+        calls.append((video, providers))
+        return tmp_path / "episode.ja.srt", "tsukihime: added episode.ja.srt"
+
+    monkeypatch.setattr(subselect, "fetch_provider_path", fetch)
+    reader = Reader()
+
+    cli_run._start_run_provider_fetch(
+        reader,
+        {"jimaku": {"enabled": True}, "tsukihime": {"enabled": True}},
+        tmp_path / "old.mkv",
+        providers=(),
+        enabled_providers=("jimaku", "tsukihime"),
+        jimaku_title=None,
+        episode=None,
+        jimaku_key=None,
+        resync=False,
+    )
+
+    assert reader.startup_fetch is None
+    assert reader.retry_factory is not None
+    path, status = reader.retry_factory("/videos/current.mkv")()
+    assert path == Path(tmp_path / "episode.ja.srt")
+    assert status == "tsukihime: added episode.ja.srt"
+    assert calls == [("/videos/current.mkv", ("jimaku", "tsukihime"))]

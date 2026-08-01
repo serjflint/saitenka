@@ -56,6 +56,7 @@ def test_keybinds_use_single_string_command():
         "\\",
         "Alt+a",
         "F1",
+        "Ctrl+Shift+T",
     } <= keys
 
 
@@ -67,6 +68,21 @@ def test_hover_pause_key_is_configurable():
     Reader(ipc, options=options)._register_keybinds()
     binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
     assert binds["Alt+q"] == "script-message saitenka-toggle-hover-pause"
+
+
+def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch):
+    from overlay.app.config import KeyOptions, ReaderOptions
+
+    ipc = FakeIPC()
+    reader = Reader(ipc, options=ReaderOptions(keys=KeyOptions(subtitle_retry_key="Ctrl+r")))
+    called = []
+    monkeypatch.setattr(reader, "retry_japanese_subtitles", lambda: called.append(True))
+    reader._register_keybinds()
+    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+
+    reader._handle(binds["Ctrl+r"].removeprefix("script-message "))
+
+    assert called == [True]
 
 
 # --- Stage 4: subtitle navigation keys (Alt+←/→/↓, sub-delay) ------------------------------------

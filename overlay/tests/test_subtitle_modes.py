@@ -1,5 +1,6 @@
 """JP/EN primary modes and background Japanese-track arrival."""
 
+import threading
 from pathlib import Path
 
 from PIL import Image
@@ -159,3 +160,97 @@ def test_background_japanese_arrival_can_be_selected_after_missing_both(tmp_path
     assert ("set_property", "sid", 9) in ipc.commands
     assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+
+def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypatch):
+    ipc = FakeIPC([EN.copy()])
+    ipc.props["path"] = "/videos/Show - 02.mkv"
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    started = threading.Event()
+    release = threading.Event()
+    paths = []
+    messages = []
+    monkeypatch.setattr(
+        reader,
+        "_toast",
+        lambda text, kind="ok": messages.append((text, kind)),
+    )
+
+    def factory(video_path):
+        paths.append(video_path)
+
+        def fetch():
+            started.set()
+            assert release.wait(timeout=1)
+            return None, "jimaku: no match; tsukihime: ambiguous"
+
+        return fetch
+
+    reader.configure_subtitle_retry(factory)
+    reader.retry_japanese_subtitles()
+    assert started.wait(timeout=1)
+    reader.retry_japanese_subtitles()
+
+    assert paths == ["/videos/Show - 02.mkv"]
+    assert len(reader._subtitle_fetch_threads) == 1
+    assert messages[:2] == [
+        ("Searching Japanese subtitle providers…", "ok"),
+        ("Japanese subtitle search already running", "warn"),
+    ]
+    assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
+    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+    release.set()
+    reader._subtitle_fetch_threads[0].join(timeout=1)
+    subtitle_modes.apply_fetch_results(reader)
+    assert messages[-1] == ("jimaku: no match; tsukihime: ambiguous", "warn")
+
+
+def test_runtime_retry_reports_missing_provider_or_media(monkeypatch):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    messages = []
+    monkeypatch.setattr(
+        reader,
+        "_toast",
+        lambda text, kind="ok": messages.append((text, kind)),
+    )
+
+    reader.retry_japanese_subtitles()
+    reader.configure_subtitle_retry(lambda _video: lambda: (None, "unused"))
+    reader.retry_japanese_subtitles()
+
+    assert messages == [
+        ("No Japanese subtitle providers enabled", "warn"),
+        ("No media loaded for subtitle search", "warn"),
+    ]
+    assert reader._subtitle_fetch_threads == []
+
+
+def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, monkeypatch):
+    ipc = FakeIPC([EN.copy()])
+    ipc.props["path"] = "/videos/Show - 03.mkv"
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    path = tmp_path / "episode.ja.srt"
+    path.write_text("Japanese")
+    messages = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    reader.configure_subtitle_retry(lambda _video: lambda: (path, "tsukihime: added"))
+    ipc.commands.clear()
+
+    reader.retry_japanese_subtitles()
+    reader._subtitle_fetch_threads[0].join(timeout=1)
+    subtitle_modes.apply_fetch_results(reader)
+
+    assert reader.subtitle_language == "en"
+    assert ("sub-add", str(path), "auto", "", "jpn") in ipc.commands
+    assert ("set_property", "sid", 1) in ipc.commands
+    assert ("set_property", "sid", 9) not in ipc.commands
+    assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
+    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+    assert messages == [
+        "Searching Japanese subtitle providers…",
+        "Japanese subtitles ready — Alt+t to switch",
+    ]
