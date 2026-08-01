@@ -1,0 +1,51 @@
+{
+  "headword": [
+    {"tag": "ruby", "content": ["退", {"tag": "rt", "content": "の"}]},
+    "く"
+  ],
+  "reading": "のく",
+  "freqs": [
+    {"name": "JPDB", "value": "1216", "color": "#3f9a5a"},
+    {"name": "BCCWJ", "value": "3402", "color": "#4a72c0"}
+  ],
+  "groups": [
+    {
+      "headword": [
+        {"tag": "ruby", "content": ["退", {"tag": "rt", "content": "の"}]},
+        "く"
+      ],
+      "reading": "のく",
+      "card_index": 0,
+      "defs": [
+        {
+          "dict": "三省堂国語辞典",
+          "tags": ["自五"],
+          "content": ["その場所からわきへ寄る。よけて場所を空ける。どく。"]
+        },
+        {
+          "dict": "JMdict",
+          "content": ["to step aside; to move (out of the way); to get out of the way"]
+        }
+      ]
+    },
+    {
+      "headword": [
+        {"tag": "ruby", "content": ["退", {"tag": "rt", "content": "しりぞ"}]},
+        "く"
+      ],
+      "reading": "しりぞく",
+      "card_index": 1,
+      "defs": [
+        {
+          "dict": "三省堂国語辞典",
+          "tags": ["自五"],
+          "content": ["後ろへさがる。うしろに引く。その地位・場所からはなれる。"]
+        },
+        {
+          "dict": "JMdict",
+          "content": ["to retreat; to withdraw; to fall back; to step down; to leave (office)"]
+        }
+      ]
+    }
+  ]
+}

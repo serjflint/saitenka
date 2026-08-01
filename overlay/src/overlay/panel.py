@@ -88,6 +88,10 @@ def _hex(s: str) -> RGBA:
     return _parse_color(s, (90, 122, 160, 255))
 
 
+def _load_defs(items: list) -> list[Definition]:
+    return [Definition(d["dict"], d["content"], tags=d.get("tags", [])) for d in items]
+
+
 def load_entry(path: str | Path) -> Entry:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     return Entry(
@@ -97,7 +101,19 @@ def load_entry(path: str | Path) -> Entry:
         reading_label=(
             tuple(data["reading_label"].values()) if data.get("reading_label") else None
         ),
-        defs=[Definition(d["dict"], d["content"]) for d in data.get("defs", [])],
+        defs=_load_defs(data.get("defs", [])),
+        reading=data.get("reading", ""),
+        # Yomitan-style stacked entries (退く = のく / しりぞく): one block per reading, each with its
+        # own ruby'd headword + ⊕. Absent in single-entry fixtures → the fused header path.
+        groups=[
+            EntryGroup(
+                headword=g["headword"],
+                reading=g.get("reading", ""),
+                defs=_load_defs(g.get("defs", [])),
+                card_index=g.get("card_index", i),
+            )
+            for i, g in enumerate(data.get("groups", []))
+        ],
     )
 
 
@@ -734,8 +750,11 @@ def render_panel(
     *,
     add_button: bool = False,
     mined: bool = False,
+    group_mined: tuple[bool, ...] = (),
 ) -> Image.Image:
-    rows = panel_rows(entry, width, theme, add_button=add_button, mined=mined)
+    rows = panel_rows(
+        entry, width, theme, add_button=add_button, mined=mined, group_mined=group_mined
+    )
     rendered = [(r.x, r.render()[0]) for r in rows]
     gaps = [theme.gap if r.gap is None else r.gap for r in rows]
     canvas = compose_panel(rendered, width, theme, gaps)
