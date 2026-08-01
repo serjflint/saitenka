@@ -182,6 +182,21 @@ def _resolve_jimaku_subs(
         return None
 
 
+def _cached_jimaku_subs(
+    video_path: Path, jimaku_title: str | None, episode: int | None
+) -> Path | None:
+    from overlay.app.jimaku import cached_subs, parse_filename
+
+    title, parsed_episode = parse_filename(video_path)
+    title = jimaku_title or title
+    episode = episode if episode is not None else parsed_episode
+    hit = cached_subs(video_path, title, episode) if video_path.exists() else None
+    if hit is not None:
+        print("jimaku: using cached subs", hit.name)
+        log.info("jimaku cache hit: %s", hit)
+    return hit
+
+
 def _enabled_provider_names(
     video: str | None, *, jimaku: bool, jimaku_cfg: dict, tsukihime_cfg: dict
 ) -> tuple[str, ...]:
@@ -192,6 +207,23 @@ def _enabled_provider_names(
         ("tsukihime", bool(tsukihime_cfg.get("enabled"))),
     )
     return tuple(provider for provider, enabled in flags if enabled)
+
+
+def _configured_subtitles(
+    video_path: Path,
+    jimaku_title: str | None,
+    episode: int | None,
+    *,
+    jimaku: bool,
+    tsukihime: bool,
+) -> tuple[Path | None, tuple[str, ...]]:
+    cached = _cached_jimaku_subs(video_path, jimaku_title, episode) if jimaku else None
+    if cached is not None:
+        return cached, ()
+    providers = tuple(
+        provider for provider, enabled in (("jimaku", jimaku), ("tsukihime", tsukihime)) if enabled
+    )
+    return None, providers
 
 
 def _resolve_subtitles(
@@ -246,10 +278,12 @@ def _resolve_subtitles(
         if sub_path is None and tsukihime_on:
             fetch_in_background = ("tsukihime",)
     elif jimaku_on or tsukihime_on:
-        fetch_in_background = tuple(
-            provider
-            for provider, enabled in (("jimaku", jimaku_on), ("tsukihime", tsukihime_on))
-            if enabled
+        sub_path, fetch_in_background = _configured_subtitles(
+            video_path,
+            jimaku_title,
+            episode,
+            jimaku=jimaku_on,
+            tsukihime=tsukihime_on,
         )
     elif not video:
         sub_path = tmp / "line.srt"

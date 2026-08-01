@@ -150,6 +150,51 @@ def test_ensure_jimaku_fetches_when_no_jp_track(tmp_path, monkeypatch):
     assert ("sub-add", str(fetched)) in ipc.calls
 
 
+def test_background_jimaku_fetch_reuses_persistent_cache(tmp_path, monkeypatch):
+    import overlay.app.jimaku as jm
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+    cached = jm.store_subs(video, "Show", 1, downloaded)
+    monkeypatch.setattr(
+        jm,
+        "JimakuClient",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network fetch")),
+    )
+
+    path, status = subselect.fetch_jimaku_path(str(video), resync=True)
+
+    assert path == cached
+    assert status == f"jimaku: using cached {cached.name} for 'Show' ep 1"
+
+
+def test_background_jimaku_fetch_stores_finished_subtitle(tmp_path, monkeypatch):
+    import overlay.app.jimaku as jm
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, _key=None):
+            pass
+
+        def fetch(self, _title, _episode, _dest):
+            return downloaded
+
+    monkeypatch.setattr(jm, "JimakuClient", FakeClient)
+
+    path, _status = subselect.fetch_jimaku_path(str(video), resync=False)
+
+    assert path == jm.cached_subs(video, "Show", 1)
+    assert path is not None and path.read_text(encoding="utf-8") == "Japanese"
+
+
 def _stub_jimaku(monkeypatch, tmp_path, *, ok=True):
     fetched = tmp_path / "fetched.ja.srt"
     fetched.write_text("x")

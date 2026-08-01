@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from overlay.app import cli_run, subselect
+from overlay.app import jimaku as jimaku_mod
 
 
 def _resolve(tmp_path, *, jimaku: bool):
@@ -38,6 +39,35 @@ def test_configured_run_fetch_is_deferred_until_after_english_fallback(tmp_path,
     sub_path, en_path, fetch_in_background, enabled = _resolve(tmp_path, jimaku=False)
     assert sub_path is None and en_path is None
     assert fetch_in_background == ("jimaku",)
+    assert enabled == ("jimaku",)
+
+
+def test_configured_run_uses_cached_jimaku_subtitle_before_launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["cfg_fetch"])
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+    cached = jimaku_mod.store_subs(video, "Show", 1, downloaded)
+
+    sub_path, _en_path, background, enabled = cli_run._resolve_subtitles(
+        {"jimaku": {"fetch": True}},
+        str(video),
+        video,
+        30,
+        tmp_path,
+        sub_file=None,
+        jimaku=False,
+        jimaku_key=None,
+        jimaku_title=None,
+        episode=None,
+        resync=True,
+        slang="ja,jpn,jp",
+    )
+
+    assert sub_path == cached
+    assert background == ()
     assert enabled == ("jimaku",)
 
 

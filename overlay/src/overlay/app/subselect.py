@@ -53,20 +53,32 @@ def fetch_jimaku_path(
     resync: bool = True,
 ) -> tuple[Path | None, str]:
     """Fetch and optionally resync without touching mpv IPC, so callers may run it off-thread."""
-    from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
+    from overlay.app.jimaku import (
+        JimakuClient,
+        JimakuError,
+        cached_subs,
+        parse_filename,
+        store_subs,
+    )
 
     title, ep = parse_filename(video)
     title = jimaku_title or title
     ep = episode if episode is not None else ep
+    video_path = Path(video)
+    hit = cached_subs(video_path, title, ep) if video_path.exists() else None
+    if hit is not None:
+        return hit, f"jimaku: using cached {hit.name} for {title!r} ep {ep}"
     tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
     try:
         sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
     except JimakuError as e:
         return None, f"jimaku failed: {e}"
-    if resync and Path(video).exists():
+    if resync and video_path.exists():
         from overlay.app.resync import maybe_resync
 
-        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
+        sub_path = maybe_resync(video_path, sub_path, enabled=True)
+    if video_path.exists():
+        sub_path = store_subs(video_path, title, ep, sub_path)
     return Path(sub_path), f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
 
 

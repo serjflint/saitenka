@@ -968,7 +968,7 @@ class Reader:
         subtitle_modes.toggle(self)
 
     def fetch_japanese_subs_async(self, fetch) -> None:
-        subtitle_modes.start_fetch(self, fetch)
+        subtitle_modes.start_fetch(self, fetch, select_if_unchanged=True)
 
     def configure_subtitle_retry(self, factory) -> None:
         subtitle_modes.configure_retry(self, factory)
