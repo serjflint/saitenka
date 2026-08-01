@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from overlay.app import analysis_overlay
 from overlay.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.subtitles import SidebarAction, SidebarRow, render_sidebar
@@ -82,6 +83,17 @@ def _cue_statuses(reader: Reader) -> dict[int, str]:
     return statuses
 
 
+def _analysis_status(reader: Reader, cue_index: int) -> str | None:
+    result = analysis_overlay.cue_result(reader, cue_index)
+    if result is None:
+        return None
+    labels = []
+    for label, count in (("N+1", result.n_plus_one_count), ("N+2", result.n_plus_two_count)):
+        if count:
+            labels.append(label if count == 1 else f"{label} ×{count}")
+    return " · ".join(labels) or None
+
+
 def _track_rows(
     reader: Reader, first: int, capacity: int, active: int
 ) -> tuple[list[SidebarRow], int]:
@@ -97,13 +109,18 @@ def _track_rows(
             actions = (SidebarAction("B", "bookmark", cue_index),)
             if reader.anki and reader.mine_cfg:
                 actions += (SidebarAction("+", "mine", cue_index),)
+        status = " · ".join(
+            label
+            for label in (statuses.get(cue_index), _analysis_status(reader, cue_index))
+            if label
+        )
         rows.append(
             SidebarRow(
                 value=cue_index,
                 timestamp=_format_time(cue.start),
                 text=cue.text,
                 parts=_cue_parts(reader, cue_index, cue),
-                status=statuses.get(cue_index),
+                status=status or None,
                 active=cue_index == active,
                 click_kind="seek",
                 actions=actions,

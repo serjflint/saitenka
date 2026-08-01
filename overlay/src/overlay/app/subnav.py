@@ -21,12 +21,12 @@ def load_sub_index(reader: Reader, path) -> None:
     target line instantly. Fail-soft: an unreadable/empty/unsupported file just leaves the index
     None → navigation falls back to a plain mpv sub-seek."""
     reader._sub_index = load_index(path)
-    from overlay.app import sidebar
-
-    sidebar.on_index_changed(reader)
     from overlay.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)
+    from overlay.app import sidebar
+
+    sidebar.on_index_changed(reader)
 
 
 def _get_float(reader: Reader, prop: str) -> float | None:

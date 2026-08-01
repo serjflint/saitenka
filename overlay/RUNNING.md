@@ -127,7 +127,8 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
       names with baked-in furigana (e.g. `龍門光英…`) are clean (reading stripped).
 - [ ] **Coloring**: known words (from `Saitenka::Known`) are **green**; the single unknown word in a
       sentence is **mauve** (N+1); others take a frequency-band color; JLPT words get an underline;
-      particles stay plain.
+      particles stay plain. With `[fsrs]`, learning, young, mature-known, and forgotten words use
+      distinct configured colors in both full and hover-only annotation modes.
 - [ ] **Tooltip**: hovering a word shows the dictionaries stacked in config order, with ruby examples.
       The tooltip anchors **above the hovered word's line**, and re-hovering a word is instant (cached).
 - [ ] **Frequency pills**: under the headword, a green row (one pill per freq dict, in config order)
@@ -139,6 +140,14 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
       its image + audio, and no duplicate is created.
 - [ ] **Bulk** (Shift+m): toast reads `mined N · M dup`; check `Saitenka::Mining` gets N new cards.
 - [ ] **Translation** (t): the English line appears above the JP subtitle; press `t` again to hide.
+- [ ] **Syncplay**: turn hover auto-pause off with `Alt+p`; opening tooltips, switching JP/EN,
+      retrying providers, bookmarking, and opening analysis/help do not pause or seek the room.
+- [ ] **Fallback**: with no Japanese track, English appears immediately; a fetched Japanese track is
+      announced but remains unselected until `Alt+t`.
+- [ ] **Sidebar** (`\`): active-cue tracking and manual scrolling work; N+1/N+2 badges appear when
+      episode analysis finishes; bookmarked cues survive reopening the same filename elsewhere.
+- [ ] **Session aids**: backquote shows episode analysis without pausing, and `F1` shows the effective
+      configured shortcuts.
 - [ ] **Fullscreen** (f): the subtitle, tooltip, preview all stay correctly placed (airspace test).
 
 ## 6. Playing your own episodes
