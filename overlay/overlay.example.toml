@@ -6,7 +6,7 @@
 #   • Commented (#) lines are those defaults — uncomment only to CHANGE one. The commonly-edited keys
 #     (dictionaries, decks, jimaku) are left active as a starting point.
 #   • Flat `key = value` lines are TOP-LEVEL and must sit ABOVE the first [table] header. Grouped keys
-#     live under their [table] ([mine], [known], [anki], [jimaku], [telemetry], [dictdb]). TOML rule:
+#     live under their [table] ([mine], [known], [fsrs], [palette], [anki], [jimaku], [telemetry], [dictdb]). TOML rule:
 #     once a [table] header appears, every later key belongs to it — so keep all flat keys at the top.
 #
 # Dictionaries are imported ONCE into a consolidated DB (~/.local/share/saitenka/dictionaries.sqlite) by
@@ -104,6 +104,16 @@ pitch = [
 # ── [known] Known-word source for FSRS-aware coloring: Anki decks → fields (read via AnkiConnect) ──
 [known]
 "Saitenka::Known" = ["Expression"]
+
+# ── [fsrs] Optional maturity state from a COPY of collection.anki2 ───────────────────────────────
+# Never point this at Anki's live database. Refresh the copy before starting Saitenka.
+# [fsrs]
+# collection = "~/path/to/collection-copy.anki2"
+
+# ── [palette] FSRS maturity colors ───────────────────────────────────────────────────────────────
+# [palette]
+# learning = "#eed49f"
+# young = "#8bd5ca"
 
 # ── [mine] One-key mining target ─────────────────────────────────────────────────────────────────
 # Mining is ON whenever this table is present (Ctrl+m mines the hovered word). enabled=false keeps the

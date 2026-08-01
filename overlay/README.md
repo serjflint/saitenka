@@ -69,11 +69,13 @@ content dictionary can be swapped in behind it later without touching the render
 
 ### Word coloring (SubMiner-parity, FSRS-aware)
 
-`app/scoring.py` colors each subtitle word: **N+1 > known > frequency-band > base** text color, plus a
-JLPT-level **underline** — the exact priority model SubMiner uses (Catppuccin palette). Known words come
-from Anki (`app/wordlists.py::KnownWords.from_ankiconnect`, decks→fields like SubMiner) or a static set;
-frequency from any Yomitan freq zip (user-supplied, e.g. under `tools/freq/`); JLPT from the vendored
-`assets/wordlists/jlpt.zip`. Result: `tests/artifacts/mvp_reader_colored.png`.
+`app/scoring.py` colors each subtitle word: **N+1 > forgotten > mature-known > learning > young >
+frequency-band > base** text color, plus a JLPT-level **underline**. Known words come from Anki
+(`app/wordlists.py::KnownWords.from_ankiconnect`, decks→fields like SubMiner) or a static set. An
+optional `[fsrs]` path to a copied `collection.anki2` refines that binary set; Saitenka never opens the
+live Anki database. Learning and young colors are configurable under `[palette]`;
+`overlay.example.toml` owns the settings and defaults. Frequency comes from a user-supplied Yomitan
+freq dictionary; JLPT comes from the vendored `assets/wordlists/jlpt.zip`.
 
 Backquote opens a playback-neutral whole-track analysis with sentence/content-token totals, unique
 lemmas and kanji, unknown vocabulary, known coverage, N+1/N+2 counts, and optional JLPT/frequency
