@@ -102,6 +102,10 @@ dev = [
     "complexipy>=6.2.0",
     "ruff>=0.16",
 ]
+docs = [
+    "mkdocs-include-markdown-plugin>=6.2",
+    "mkdocs-material>=9.5",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -442,6 +446,11 @@ spell = { shell = "cd .. && uvx typos" }
 # `links-net` below (network → flaky → not in `all`). lychee = Rust binary (brew install lychee).
 links = { shell = "cd .. && lychee --offline --no-progress '**/*.md'" }
 links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress '**/*.md'" }
+# Docs site (Material for MkDocs → Read the Docs). `--strict` fails the build on broken links/nav, so a
+# docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an opt-in group); `docs`
+# builds to overlay/site/, `docs-serve` live-reloads at http://127.0.0.1:8000.
+docs = { shell = "uv run --group docs mkdocs build --strict" }
+docs-serve = { shell = "uv run --group docs mkdocs serve" }
 
 # SAST (flake8-bandit `S`) is now folded into the ruff `select` above, so it runs inside `lint` (in
 # `all`) — no separate `sec` task. The 2026-07-25 triage put reasoned per-line `# noqa: S…` at each

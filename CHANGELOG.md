@@ -14,6 +14,9 @@ logs.
   fresh shell by default; `--now` hands off to a detached updater window that waits for the process to
   exit first. `reinstall` gained the same `--now` handoff and is now scoped to *changing* extras or
   install source.
+- **Documentation site** (Material for MkDocs, hosted on Read the Docs). The long-form docs stay
+  single-source — the site `include-markdown`s `RUNNING.md`/`ARCHITECTURE.md`/… rather than copying
+  them. Build locally with `poe docs` (`--strict`) or `poe docs-serve`.
 
 ### Fixed
 

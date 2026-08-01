@@ -65,3 +65,7 @@ overlay/.vscode/
 
 # Codex: local machine config (for example the Repowise MCP adapter). Durable guidance lives in AGENTS.md/.agents.
 /.codex/config.toml
+
+# MkDocs / Read the Docs build artifacts
+overlay/site/
+/requirements.txt

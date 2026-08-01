@@ -1,0 +1,75 @@
+# Docs site for Saitenka, built with Material for MkDocs and hosted on Read the Docs (see the repo-root
+# .readthedocs.yml, which installs this `docs` dependency-group with uv). The long-form docs stay
+# single-source: pages under docs/ `include-markdown` the canonical files (RUNNING.md, ARCHITECTURE.md,
+# …) rather than copying them — edit the originals, the site follows.
+site_name: Saitenka
+site_description: In-mpv Japanese subtitle overlay — FSRS coloring, hover→multi-dict tooltip, mining.
+site_url: https://saitenka.readthedocs.io/
+repo_url: https://github.com/serjflint/saitenka
+repo_name: serjflint/saitenka
+edit_uri: edit/main/overlay/docs/
+docs_dir: docs
+
+# The reused long-form docs link to sibling repo files (CHANGELOG.md, AGENTS.md, ROADMAP.md) that live
+# outside the site tree; lychee (`poe links`) already validates those on disk, so downgrade only the
+# "target not found" link check to non-fatal. Everything else (nav, anchors, absolute links) stays a
+# warning → fatal under `--strict`.
+validation:
+  links:
+    not_found: info
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.sections
+    - toc.follow
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  - include-markdown
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Running & configuration: running.md
+  - Architecture: architecture.md
+  - Benchmarks: benchmarks.md
+  - Changelog: changelog.md
+  - Roadmap: roadmap.md
