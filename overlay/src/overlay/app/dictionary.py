@@ -40,7 +40,7 @@ from overlay.app.wordlists import FreqSource, PitchSource
 from overlay.panel import Definition, Entry, EntryGroup, Freq
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Container, Sequence
 
     from overlay.app.dictdb import DictionaryDb, DictRow
     from overlay.app.tokenize import Token
@@ -636,14 +636,37 @@ class DictionarySet:
             defs.append(Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags)))
         return defs, headword, reading
 
+    @staticmethod
+    def _group_dict_defs(
+        d: Dictionary, hits: list[DictEntry], keep: Container[tuple[str, str]]
+    ) -> dict[tuple[str, str], Definition]:
+        """One dictionary's glossed hits → a :class:`Definition` per (term, reading) in ``keep``, with
+        the same kanji+kana raw-JSON gloss dedup ``_dict_defs`` uses. First hit's tags win per key."""
+        nodes_by_key: dict[tuple[str, str], list] = {}
+        seen_by_key: dict[tuple[str, str], set] = {}
+        tags_by_key: dict[tuple[str, str], str] = {}
+        for h in hits:
+            key = (h.term, h.reading)
+            if key not in keep:
+                continue
+            seen = seen_by_key.setdefault(key, set())
+            if h.raw_glossary in seen:  # kanji+kana duplicate rows share raw JSON — dedup
+                continue
+            seen.add(h.raw_glossary)
+            nodes_by_key.setdefault(key, []).extend(_glossary_to_nodes(h.glossary))
+            tags_by_key.setdefault(key, h.tags)
+        return {
+            key: Definition(d.title, nodes, tags=d.resolve_deftags(tags_by_key[key]))
+            for key, nodes in nodes_by_key.items()
+        }
+
     def _entry_groups(
         self, forms: tuple[str, str, str], termforms: set[str], token: Token
     ) -> list[EntryGroup]:
         """Yomitan-style stacked entries: one :class:`EntryGroup` per distinct (term, reading), each
         with its own ruby'd headword and per-dictionary definitions. Aligned to :meth:`cards_for` order
         (and its ``card_index``) so a group's ⊕ mines that exact entry. Empty for a single-reading word
-        — then the fused single-header panel is used, unchanged. Mirrors ``_dict_defs``' per-dict gloss
-        dedup, but keyed per (term, reading) instead of collapsed to one headword."""
+        — then the fused single-header panel is used, unchanged."""
         cards = self.cards_for(token)
         if len(cards) < 2:
             return []
@@ -657,23 +680,8 @@ class DictionarySet:
                 if _glosses_of(h.glossary)
             ]
             hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
-            nodes_by_key: dict[tuple[str, str], list] = {}
-            seen_by_key: dict[tuple[str, str], set] = {}
-            tags_by_key: dict[tuple[str, str], str] = {}
-            for h in hits:
-                key = (h.term, h.reading)
-                if key not in order:
-                    continue
-                seen = seen_by_key.setdefault(key, set())
-                if h.raw_glossary in seen:  # kanji+kana duplicate rows share raw JSON — dedup
-                    continue
-                seen.add(h.raw_glossary)
-                nodes_by_key.setdefault(key, []).extend(_glossary_to_nodes(h.glossary))
-                tags_by_key.setdefault(key, h.tags)
-            for key, nodes in nodes_by_key.items():
-                defs_by_key.setdefault(key, []).append(
-                    Definition(d.title, nodes, tags=d.resolve_deftags(tags_by_key[key]))
-                )
+            for key, definition in self._group_dict_defs(d, hits, order.keys()).items():
+                defs_by_key.setdefault(key, []).append(definition)
         return [
             EntryGroup(
                 headword=furigana(term, reading),

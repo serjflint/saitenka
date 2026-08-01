@@ -181,13 +181,70 @@ class Row:
     body_args: BodyRenderArgs | None = None
 
 
+def _emit_def_rows(
+    rows: list[Row],
+    defs: list[Definition],
+    content_w: int,
+    m: int,
+    theme: Theme,
+    *,
+    sectioned: bool,
+) -> None:
+    """Numbered per-dictionary definitions: a cheap def-name chip head row + one deferred def-BODY row
+    each. Shared by the fused single-header panel and each stacked group. ``sectioned`` keys the
+    def-head on its dict name for tabs/keyboard-nav (fused layout); stacked groups carry the section on
+    their group-head instead, so their def-heads pass ``sectioned=False``."""
+    body_style = Style(size=theme.px(23), color=theme.text)
+    for i, d in enumerate(defs, 1):
+
+        def _def_head(i=i, d=d):
+            dh: list = [Span(f"{i}. ", Style(size=theme.px(20), weight=700, color=theme.text))]
+            for tag in d.tags:  # defTag pills: ★ / priority form
+                dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
+                dh.append(Span(" ", Style(size=theme.px(19))))
+            dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
+            return _flow_row(dh, content_w, scale=1.7), [], []
+
+        rows.append(Row(m, _def_head, section=d.dict_name if sectioned else None))
+
+        # ONE row per def body, fully deferred: the SC-walk itself is NOT cheap for pathological
+        # entries (a 取る-class def walks in 200+ ms), so both the walk AND the rasterisation live
+        # inside the thunk — building rows costs nothing, and the head only walks/rasters the defs the
+        # viewport actually shows. ``render_capped`` bounds the raster mid-def (block budget + mid-block
+        # line clip via render_document/render_flow max_height) so cold first paint is O(viewport) even
+        # when the first visible def body is enormous. render_document stacks the walked blocks with the
+        # same 3px inter-block gap, so the composed full panel is byte-identical.
+        body_args = BodyRenderArgs(
+            content=d.content,
+            body_style=body_style,
+            body_w=content_w - theme.body_indent,
+            gap_px=theme.px(3),
+            indent_px=theme.px(INDENT_PX),
+            gutter_px=theme.px(GUTTER_PX),
+        )
+
+        def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)
+            def thunk():
+                img, scan, links, _complete = render_body_block(args)
+                return img, scan, links
+
+            def capped(max_h: int):
+                return render_body_block(args, max_h)
+
+            return thunk, capped
+
+        body_thunk, body_capped = _def_body(body_args)
+        rows.append(
+            Row(m + theme.body_indent, body_thunk, render_capped=body_capped, body_args=body_args)
+        )
+
+
 def _emit_group_rows(
     rows: list[Row],
     groups: list[EntryGroup],
     content_w: int,
     m: int,
     theme: Theme,
-    emit_defs: Callable[..., None],
     *,
     add_button: bool,
     group_mined: tuple[bool, ...],
@@ -215,7 +272,7 @@ def _emit_group_rows(
             return img, [], links
 
         rows.append(Row(m, _group_head, section=g.reading))
-        emit_defs(g.defs, sectioned=False)
+        _emit_def_rows(rows, g.defs, content_w, m, theme, sectioned=False)
 
 
 def panel_rows(
@@ -347,74 +404,12 @@ def panel_rows(
         rows.append(Row(m, _reading))
 
     # --- numbered definitions --- (def-name chip row is cheap; the body row is the expensive one)
-    body_style = Style(size=theme.px(23), color=theme.text)
-
-    def _emit_defs(defs: list[Definition], *, sectioned: bool) -> None:
-        for i, d in enumerate(defs, 1):
-
-            def _def_head(i=i, d=d):
-                dh: list = [Span(f"{i}. ", Style(size=theme.px(20), weight=700, color=theme.text))]
-                for tag in d.tags:  # defTag pills: ★ / priority form
-                    dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
-                    dh.append(Span(" ", Style(size=theme.px(19))))
-                dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
-                return _flow_row(dh, content_w, scale=1.7), [], []
-
-            # Tabs/keyboard-nav sections key on the def-name in the fused layout; in stacked (grouped)
-            # layout the group-head rows carry the section (per reading) instead, so def-heads don't.
-            rows.append(Row(m, _def_head, section=d.dict_name if sectioned else None))
-
-            # ONE row per def body, fully deferred: the SC-walk itself is NOT cheap for pathological
-            # entries (a 取る-class def walks in 200+ ms), so both the walk AND the rasterisation live
-            # inside the thunk — building rows costs nothing, and the head only walks/rasters the defs
-            # the viewport actually shows. ``render_capped`` bounds the raster mid-def (block budget +
-            # mid-block line clip via render_document/render_flow max_height) so cold first paint is
-            # O(viewport) even when the first visible def body is enormous. render_document stacks the
-            # walked blocks with the same 3px inter-block gap, so the composed full panel is
-            # byte-identical.
-            body_w = content_w - theme.body_indent
-            body_args = BodyRenderArgs(
-                content=d.content,
-                body_style=body_style,
-                body_w=body_w,
-                gap_px=theme.px(3),
-                indent_px=theme.px(INDENT_PX),
-                gutter_px=theme.px(GUTTER_PX),
-            )
-
-            def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)
-                def thunk():
-                    img, scan, links, _complete = render_body_block(args)
-                    return img, scan, links
-
-                def capped(max_h: int):
-                    return render_body_block(args, max_h)
-
-                return thunk, capped
-
-            body_thunk, body_capped = _def_body(body_args)
-            rows.append(
-                Row(
-                    m + theme.body_indent,
-                    body_thunk,
-                    render_capped=body_capped,
-                    body_args=body_args,
-                )
-            )
-
     if entry.groups:
         _emit_group_rows(
-            rows,
-            entry.groups,
-            content_w,
-            m,
-            theme,
-            _emit_defs,
-            add_button=add_button,
-            group_mined=group_mined,
+            rows, entry.groups, content_w, m, theme, add_button=add_button, group_mined=group_mined
         )
     else:
-        _emit_defs(entry.defs, sectioned=True)
+        _emit_def_rows(rows, entry.defs, content_w, m, theme, sectioned=True)
 
     return rows
 
