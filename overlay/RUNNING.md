@@ -107,7 +107,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 | **Shift+m** | **bulk-mine** every unknown word in the current line |
 | **t** | toggle the **English** translation of the current line |
 | **Alt+t** | switch the primary subtitle between Japanese-only and English-only |
-| **Alt+o** | hide/show all Saitenka surfaces without changing mpv's native subtitles |
+| **Alt+o** | hide/show Saitenka; hidden mode restores mpv's native subtitles and OSD |
 | **j** / **Shift+J** | mpv: cycle primary subtitle tracks forward / backward |
 | **v** / **Alt+v** | mpv: toggle primary / secondary native subtitle visibility |
 | **Ctrl+Shift+T** | retry enabled Japanese subtitle providers for the current media |

@@ -11,9 +11,14 @@ from overlay.mpvio.osd import Overlay
 class FakeIPC:
     def __init__(self):
         self.commands: list[tuple] = []
+        self.props = {"sub-visibility": False, "osd-level": 0}
 
     def command(self, *args):
         self.commands.append(args)
+        if args[0] == "get_property":
+            return {"data": self.props.get(args[1])}
+        if args[0] == "set_property":
+            self.props[args[1]] = args[2]
         return {"error": "success"}
 
 
@@ -48,7 +53,7 @@ def test_showing_overlay_restores_latest_hidden_draw():
     overlay.close()
 
 
-def test_alt_o_hides_saitenka_without_changing_mpv_subtitles():
+def test_alt_o_hides_saitenka_and_restores_native_osd():
     ipc = FakeIPC()
     reader = Reader(ipc)
     reader.ov.show(_image(), oid=OverlayId.SUB)
@@ -63,10 +68,20 @@ def test_alt_o_hides_saitenka_without_changing_mpv_subtitles():
     reader._handle(bindings["Alt+o"])
 
     assert ("overlay-remove", OverlayId.SUB) in ipc.commands
-    assert not [
-        command for command in ipc.commands if command[:2] == ("set_property", "sub-visibility")
-    ]
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert ("set_property", "osd-level", 1) in ipc.commands
     reader.close()
+
+
+def test_showing_overlay_restores_saitenka_subtitle_policy():
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+
+    reader.toggle_overlay()
+    reader.toggle_overlay()
+
+    assert ipc.props["sub-visibility"] is False
+    assert ipc.props["osd-level"] == 0
 
 
 def test_overlay_toggle_key_is_configurable():

@@ -244,6 +244,8 @@ class Reader:
         self._translate_on = False
         self._trans_text: str | None = None
         self._translation_secondary_sid: int | None = None
+        self._last_announced_sid: int | None = None
+        self._overlay_mpv_state: dict[str, object] | None = None
         self.jp_sid: int | None = None
         self.en_sid: int | None = None
         self.subtitle_language: subtitle_modes.Language = "jp"
@@ -428,13 +430,14 @@ class Reader:
     def _on_property_change(self, ev: dict) -> None:
         name = ev.get("name")
         if name:
+            changed = ev.get("data") != self._observed.get(name)
             if name == "pause" and ev.get("data") != self._observed.get(name):
                 # Breadcrumb for the "overlay only updates on mouse move" report: while paused, mpv's
                 # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
                 # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
                 log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
-            if name == "sid":
+            if name == "sid" and changed:
                 subtitle_modes.on_primary_changed(self, ev.get("data"))
 
     def refresh_osd(self) -> bool:
@@ -931,11 +934,25 @@ class Reader:
 
     def toggle_overlay(self) -> None:
         if self.ov.visible:
+            self._overlay_mpv_state = {
+                "sub-visibility": self._get("sub-visibility"),
+                "osd-level": self._get("osd-level"),
+            }
             self.hover = -1
             self._teardown_tip()
             self.ov.set_visible(visible=False)
             subtitle_modes.release_secondary(self)
+            self.ipc.command(
+                "set_property",
+                "sub-visibility",
+                True,  # noqa: FBT003  # mpv IPC wire value
+            )
+            self.ipc.command("set_property", "osd-level", 1)
             return
+        for name, value in (self._overlay_mpv_state or {}).items():
+            if value is not None:
+                self.ipc.command("set_property", name, value)
+        self._overlay_mpv_state = None
         self.ov.set_visible(visible=True)
         if self._translation_visible():
             self._setup_secondary()

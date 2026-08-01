@@ -176,10 +176,14 @@ def test_live_overlay_toggle_removes_and_restores_saitenka_surfaces():
 
         ipc.command("keypress", "Alt+o")
         _poll_until(reader, lambda: not reader.ov.visible, "Alt+o did not hide Saitenka")
+        assert ipc.command("get_property", "sub-visibility").get("data") is True
+        assert ipc.command("get_property", "osd-level").get("data") == 1
         hidden = _screenshot(ipc, tmp / "overlay-hidden.png")
 
         ipc.command("keypress", "Alt+o")
         _poll_until(reader, lambda: reader.ov.visible, "Alt+o did not restore Saitenka")
+        assert ipc.command("get_property", "sub-visibility").get("data") is False
+        assert ipc.command("get_property", "osd-level").get("data") == 0
         restored = _screenshot(ipc, tmp / "overlay-restored.png")
 
         assert ImageChops.difference(shown, hidden).getbbox() is not None

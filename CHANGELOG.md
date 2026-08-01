@@ -20,7 +20,8 @@ logs.
   `attach` uses mpv.net's default pipe without requiring an escaped TOML path.
 - **Subtitle-track cycling no longer loses English to a hidden secondary track.** Saitenka leases the
   translation track only while its translation overlay is visible, follows manual primary-track
-  changes, and `Alt+o` hides/restores all Saitenka surfaces without changing mpv's native subtitles.
+  changes with a language/count indicator, and `Alt+o` hands rendering and the OSD back to mpv while
+  Saitenka is hidden.
 - **Missing Anki on Windows no longer opens the shell's “cannot find anki” dialog.** Saitenka resolves
   the installed executable directly and quietly leaves mining unavailable when it cannot.
 - **The subtitle sidebar now consumes completed episode analysis**, showing N+1/N+2 cue badges and
