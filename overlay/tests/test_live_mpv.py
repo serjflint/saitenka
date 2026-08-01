@@ -203,3 +203,19 @@ def test_live_sidebar_key_draws_and_removes_sidebar():
 
         assert reader._sidebar_rect is None
         assert ImageChops.difference(opened, closed).getbbox() is not None
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_live_help_key_draws_and_escape_closes_shortcut_reference():
+    with _live_reader() as (tmp, reader, ipc):
+        closed = _screenshot(ipc, tmp / "help-closed.png")
+
+        ipc.command("keypress", "F1")
+        _poll_until(reader, lambda: reader._help_open, "F1 did not open shortcut help")
+        opened = _screenshot(ipc, tmp / "help-open.png")
+
+        ipc.command("keypress", "ESC")
+        _poll_until(reader, lambda: not reader._help_open, "Esc did not close shortcut help")
+
+        assert ImageChops.difference(opened, closed).getbbox() is not None
