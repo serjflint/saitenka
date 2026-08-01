@@ -43,7 +43,7 @@ def test_keybinds_use_single_string_command():
         assert len(c) == 3, f"malformed keybind (must be 3 parts): {c}"
         assert c[2].startswith("script-message "), c
     keys = {c[1] for c in binds}
-    assert {"a", "c", "WHEEL_UP", "WHEEL_DOWN", "MBTN_LEFT", "Ctrl+m", "Alt+p"} <= keys
+    assert {"a", "c", "WHEEL_UP", "WHEEL_DOWN", "MBTN_LEFT", "Ctrl+m", "Alt+p", "Alt+t"} <= keys
 
 
 def test_hover_pause_key_is_configurable():

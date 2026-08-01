@@ -213,18 +213,21 @@ def _resolve_subtitles(
         "jimaku fetch: %s (flag=%s cfg_fetch=%s)", jimaku_on, jimaku, bool(jimaku_cfg.get("fetch"))
     )
     sub_path = en_sub_path = None
+    fetch_in_background = False
     if sub_file:
         sub_path = Path(sub_file).expanduser()
-    elif jimaku_on:
+    elif jimaku_on and jimaku:
         sub_path = _resolve_jimaku_subs(
             video_path, jimaku_title, episode, tmp, jimaku_key, jimaku_cfg, resync=resync
         )
+    elif jimaku_on:
+        fetch_in_background = True
     elif not video:
         sub_path = tmp / "line.srt"
         _make_srt(sub_path, dur, DEMO_LINE)
         en_sub_path = tmp / "line.en.srt"  # secondary EN track → test the `t` translation reveal
         _make_srt(en_sub_path, dur, DEMO_LINE_EN)
-    return sub_path, en_sub_path
+    return sub_path, en_sub_path, fetch_in_background
 
 
 def _launch_mpv_and_connect(
@@ -322,6 +325,7 @@ def _build_run_options(
             translate_key=translate_key,
             preview_key=preview_key,
             hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
+            subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
@@ -355,6 +359,39 @@ def _build_run_options(
         ),
         prefetch=prefetch,
     )
+
+
+def _start_run_jimaku_fetch(
+    reader,
+    cfg: dict,
+    video_path: Path,
+    tmp: Path,
+    *,
+    enabled: bool,
+    jimaku_title: str | None,
+    episode: int | None,
+    jimaku_key: str | None,
+    resync: bool,
+) -> None:
+    if not enabled:
+        return
+    raw = cfg.get("jimaku")
+    jimaku_cfg = raw if isinstance(raw, dict) else {}
+
+    def fetch_japanese_subtitles():
+        path = _resolve_jimaku_subs(
+            video_path,
+            jimaku_title,
+            episode,
+            tmp,
+            jimaku_key,
+            jimaku_cfg,
+            resync=resync,
+        )
+        status = f"jimaku: added {path.name}" if path else "jimaku: no Japanese subtitles found"
+        return path, status
+
+    reader.fetch_japanese_subs_async(fetch_japanese_subtitles)
 
 
 def _build_run_deps(
@@ -637,7 +674,7 @@ def run_impl(
     deps_future = None if (demo_word or screenshot) else begin_deps_build(cfg, _build_deps)
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
-    sub_path, en_sub_path = _resolve_subtitles(
+    sub_path, en_sub_path, fetch_jimaku_in_background = _resolve_subtitles(
         cfg,
         video,
         video_path,
@@ -667,6 +704,10 @@ def run_impl(
     )
     if ipc is None:
         return 2
+
+    from overlay.app.subtitle_modes import select_initial
+
+    subtitle_startup = select_initial(ipc, slang)
 
     opts = _build_run_options(
         cfg,
@@ -700,6 +741,19 @@ def run_impl(
         reader.load_deps_async(
             cfg, prebuilt=deps_future
         )  # the build has been running since pre-launch
+
+    reader.configure_subtitle_mode(subtitle_startup, slang=slang)
+    _start_run_jimaku_fetch(
+        reader,
+        cfg,
+        video_path,
+        tmp,
+        enabled=fetch_jimaku_in_background and subtitle_startup.tracks.jp_sid is None,
+        jimaku_title=jimaku_title,
+        episode=episode,
+        jimaku_key=jimaku_key,
+        resync=resync,
+    )
 
     try:
         _execute_reader_session(

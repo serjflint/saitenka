@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from overlay.app import subtitle_modes
 from overlay.app.overlay_ids import OverlayId
 from overlay.model import Span, Style
 from overlay.render.flow import render_flow
@@ -16,21 +17,9 @@ from overlay.render.layout import Block, inline_width
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
 
-EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
-
 
 def setup_secondary(reader: Reader) -> int | None:
-    tracks = [t for t in (reader._get("track-list") or []) if t.get("type") == "sub"]
-    primary = reader._get("sid")
-    # prefer an English-tagged track; else any other sub track (generated demo subs carry no lang)
-    pick = next((t for t in tracks if (t.get("lang") or "").lower() in EN_LANGS), None)
-    if pick is None:
-        pick = next((t for t in tracks if t.get("id") != primary), None)
-    if pick is None:
-        return None
-    reader.ipc.command("set_property", "secondary-sid", pick["id"])
-    reader.ipc.command("set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
-    return pick["id"]
+    return subtitle_modes.setup_secondary(reader)
 
 
 def translation_visible(reader: Reader) -> bool:

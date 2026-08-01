@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING
 from PIL import Image, ImageDraw
 
 from overlay import fonts
-from overlay.render.layout import NO_START
+from overlay.model import Span, Style
+from overlay.render.flow import render_flow
+from overlay.render.layout import NO_START, Block
 
 if TYPE_CHECKING:
     from overlay.app.tokenize import Token
@@ -41,6 +43,17 @@ class WordBox:
 class SubtitleRender:
     image: Image.Image
     boxes: list[WordBox]
+
+
+def render_plain_subtitle(text: str, width: int, *, size: int) -> SubtitleRender:
+    """Render a non-Japanese primary track without tokenization or interactive hitboxes."""
+    normalized = text.replace("\\N", " ").replace("\n", " ").strip()
+    style = Style(size=size, color=WHITE)
+    image = render_flow(
+        [Span(normalized, style)],
+        Block(width=max(1, round(width * 0.86)), padding=14, background=BOX),
+    )
+    return SubtitleRender(image, [])
 
 
 def _font(size: int):

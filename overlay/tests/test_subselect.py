@@ -62,6 +62,23 @@ def test_ensure_no_jp_without_jimaku_reports_gap():
     assert ipc.sets("sub-visibility") == []  # left mpv alone
 
 
+def test_attach_starts_with_english_and_defers_enabled_jimaku():
+    ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
+    startup, status, fetch_in_background = subselect.prepare_attach_startup(ipc, jimaku=True)
+    assert startup.active == "en" and startup.tracks.en_sid == 1
+    assert "English fallback" in status
+    assert fetch_in_background is True
+    assert ipc.sets("sid") == [1]
+
+
+def test_attach_does_not_fetch_when_japanese_is_already_present():
+    ipc = FakeIPC(tracks=[EN, JP], path="/v/Has Japanese - 01.mkv")
+    startup, _status, fetch_in_background = subselect.prepare_attach_startup(ipc, jimaku=True)
+    assert startup.active == "jp"
+    assert fetch_in_background is False
+    assert ipc.sets("sid") == [2]
+
+
 def test_ensure_sub_file_is_added_and_selected(tmp_path):
     sub = tmp_path / "ep.ja.srt"
     sub.write_text("1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n", encoding="utf-8")

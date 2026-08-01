@@ -29,11 +29,22 @@ def test_scan_delay_reads_from_config():
 
 
 def test_run_options_read_hover_pause_key():
-    opts = _build_run_options({"hover_pause_key": "Alt+q"}, **_BASE_KWARGS)
+    opts = _build_run_options(
+        {"hover_pause_key": "Alt+q", "subtitle_language_key": "Alt+l"}, **_BASE_KWARGS
+    )
     assert opts.keys.hover_pause_key == "Alt+q"
+    assert opts.keys.subtitle_language_key == "Alt+l"
 
 
 def test_attach_options_read_hover_pause_settings():
-    opts = _build_attach_options({"pause_on_tooltip": False, "hover_pause_key": "Alt+q"}, mine={})
+    opts = _build_attach_options(
+        {
+            "pause_on_tooltip": False,
+            "hover_pause_key": "Alt+q",
+            "subtitle_language_key": "Alt+l",
+        },
+        mine={},
+    )
     assert opts.tooltip.pause_on_tooltip is False
     assert opts.keys.hover_pause_key == "Alt+q"
+    assert opts.keys.subtitle_language_key == "Alt+l"

@@ -848,6 +848,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             preview_key=mine.get("preview_key", ko.preview_key),
             translate_key=cfg.get("translate_key", ko.translate_key),
             hover_pause_key=cfg.get("hover_pause_key", ko.hover_pause_key),
+            subtitle_language_key=cfg.get("subtitle_language_key", ko.subtitle_language_key),
             sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
             sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
             sub_replay_key=cfg.get("sub_replay_key", ko.sub_replay_key),
@@ -878,6 +879,39 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", po.head_prefetch_queue_max),
         ),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
+    )
+
+
+def _finish_attach_subtitle_startup(
+    reader,
+    ipc,
+    startup,
+    *,
+    slang: str,
+    fetch_in_background: bool,
+    jimaku_key: str | None,
+    jimaku_title: str | None,
+    episode: int | None,
+    resync: bool,
+) -> None:
+    if startup is not None:
+        reader.configure_subtitle_mode(startup, slang=slang)
+    build_sub_index_for_current_track(reader)
+    if not fetch_in_background:
+        return
+    video_path = ipc.command("get_property", "path").get("data")
+    if not video_path:
+        return
+    from overlay.app.subselect import fetch_jimaku_path
+
+    reader.fetch_japanese_subs_async(
+        lambda: fetch_jimaku_path(
+            video_path,
+            jimaku_key=jimaku_key,
+            jimaku_title=jimaku_title,
+            episode=episode,
+            resync=resync,
+        )
     )
 
 
@@ -963,7 +997,7 @@ def attach(
         print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
         return 2
 
-    from overlay.app.subselect import ensure_jp_subs
+    from overlay.app.subselect import prepare_attach_startup
 
     # [jimaku] config table feeds attach defaults so plugin mode (which spawns a bare `attach`) can
     # fetch subs without CLI flags. An explicit --jimaku / --jimaku-key still wins.
@@ -974,8 +1008,10 @@ def attach(
     jimaku_key = jimaku_key or jm.get("key")
     resync = resync and bool(jm.get("resync", True))
 
+    subtitle_startup = None
+    fetch_jimaku_in_background = False
     try:
-        status = ensure_jp_subs(
+        subtitle_startup, status, fetch_jimaku_in_background = prepare_attach_startup(
             ipc,
             slang=slang,
             sub_file=sub_file,
@@ -1003,9 +1039,17 @@ def attach(
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
-    # index whatever track mpv ends up with (external/jimaku path, or an embedded track extracted
-    # via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
-    build_sub_index_for_current_track(reader)
+    _finish_attach_subtitle_startup(
+        reader,
+        ipc,
+        subtitle_startup,
+        slang=slang,
+        fetch_in_background=fetch_jimaku_in_background,
+        jimaku_key=jimaku_key,
+        jimaku_title=jimaku_title,
+        episode=episode,
+        resync=resync,
+    )
     reader.load_deps_async(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "
