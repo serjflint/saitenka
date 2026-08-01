@@ -79,5 +79,5 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 
 ---
 
-Dependencies: `pyproject.toml`. Setup/run/test steps: README.md / RUNNING.md. Task-by-task dev
-gate: the `dev-gate` skill.
+Dependencies: `pyproject.toml`. Setup/run/test steps: the [Development](https://saitenka.readthedocs.io/en/latest/contributing/development/)
+docs + `poe` tasks. Task-by-task dev gate: the `dev-gate` skill.

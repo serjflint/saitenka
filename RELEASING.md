@@ -1,6 +1,6 @@
 # Releasing Saitenka
 
-Releases are cut **manually from macOS** (CI is deferred — see `ROADMAP.md`). The distributable is a
+Releases are cut **manually from macOS** (automated release CI is deferred). The distributable is a
 single `dist/saitenka-<ver>.zip` (wheel + GPL `deinflect` sdist + installers), published as a
 **GitHub Release**. This file is the source of truth for the human steps — `install/release.py`
 automates them (see "Automated" below) but the review gates it can't remove (curating the changelog,

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas
+    about: For usage questions and open-ended discussion, please use GitHub Discussions.
+    url: https://github.com/serjflint/saitenka/discussions
+  - name: Security vulnerability
+    about: Do not open a public issue — report privately via a GitHub security advisory.
+    url: https://github.com/serjflint/saitenka/security/advisories/new

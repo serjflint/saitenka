@@ -1,0 +1,88 @@
+# Docs site for Saitenka — Material for MkDocs, hosted on Read the Docs (see .readthedocs.yml). Source
+# lives at repo root (docs/ + this file); the build runs in overlay's env (which has the package) via
+# `uv run poe docs`. Long-form dev docs stay single-source: pages `include-markdown` the canonical files
+# (overlay/ARCHITECTURE.md, CHANGELOG.md) rather than copying them — edit the originals, the site follows.
+site_name: Saitenka
+site_description: Learn Japanese from the video you're watching — FSRS subtitle coloring, hover→multi-dict tooltip, one-key Anki mining, drawn inside mpv.
+site_url: https://saitenka.readthedocs.io/
+repo_url: https://github.com/serjflint/saitenka
+repo_name: serjflint/saitenka
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+# The reused long-form docs link to sibling repo files (AGENTS.md, overlay/ARCHITECTURE.md, …) that live
+# outside the site tree; lychee (`poe links`) validates those on disk, so downgrade only the
+# "target not found" link check to non-fatal. Everything else stays a warning → fatal under `--strict`.
+validation:
+  links:
+    not_found: info
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  - include-markdown
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Install: start/install.md
+      - Quickstart: start/quickstart.md
+  - Usage:
+      - Features: usage/features.md
+      - Keyboard shortcuts: usage/shortcuts.md
+      - Configuration: usage/configuration.md
+      - CLI reference: usage/cli.md
+  - Why Saitenka:
+      - How it compares: why/comparisons.md
+      - Performance & benchmarks: why/benchmarks.md
+  - Contributing:
+      - Architecture: contributing/architecture.md
+      - Development: contributing/development.md
+      - Changelog: contributing/changelog.md

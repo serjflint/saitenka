@@ -1,8 +1,8 @@
 """The real overlay entrypoint: a cyclopts CLI with ``run`` as the default command.
 
 ``examples/mpv_reader.py`` is now a thin wrapper around this module. HARD CONSTRAINT: every legacy
-mpv_reader.py flag keeps its exact name and repeatable/negation behaviour (RUNNING.md is the
-contract; ``tests/test_cli.py`` pins the inventory). The config file feeds defaults declaratively
+mpv_reader.py flag keeps its exact name and repeatable/negation behaviour — ``tests/test_cli.py`` pins
+the inventory (the contract). The config file feeds defaults declaratively
 via ``cyclopts.config.Toml`` (precedence: defaults < file < explicit CLI flags); the legacy-named
 keys (``dicts``/``freq``/``pitch``/``known``/``[mine]``) are mapped explicitly, exactly as the old
 argparse two-phase parse did.

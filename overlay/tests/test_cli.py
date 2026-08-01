@@ -1,4 +1,4 @@
-"""Stage 8a: cyclopts CLI — the flag inventory is the contract (RUNNING.md / mpv_reader.py).
+"""Stage 8a: cyclopts CLI — the flag inventory is the contract (this test pins it; mpv_reader.py wraps it).
 
 HARD CONSTRAINT: every existing mpv_reader.py flag keeps its exact name and repeatable/negation
 behaviour. These tests pin the inventory and the parse semantics without launching mpv.

@@ -1,5 +1,8 @@
 # overlay — rich-text + ruby renderer for the in-mpv Yomitan panel
 
+> This is the renderer's design-rationale readme. **Using Saitenka** (install, features, shortcuts) →
+> the docs site: [saitenka.readthedocs.io](https://saitenka.readthedocs.io).
+
 Renders Yomitan `structured-content` (styled, wrapping CJK text with **ruby/furigana**) into a
 panel **image**, so it can be composited over mpv video in a **single surface** (no second
 top-level window → no Windows airspace/MPO/fullscreen bugs).
@@ -199,4 +202,5 @@ Upgrade = re-run with a newer bundle (`uv tool install --reinstall ./<wheel>`).
 ## Development
 
 Local task runner (no CI); `uv run poe all` is the pre-push gate. Full task-by-task breakdown and
-traps: [RUNNING.md](RUNNING.md) §9 / the `dev-gate` skill.
+traps: the `dev-gate` skill (`.agents/skills/dev-gate/`) / the
+[Development](https://saitenka.readthedocs.io/en/latest/contributing/development/) docs.

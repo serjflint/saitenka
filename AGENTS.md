@@ -1,14 +1,14 @@
 # AGENTS.md — Saitenka (Japanese immersion tooling)
 
-Guidance for AI agents and developers working in this repo. Feature docs: `overlay/README.md` (renderer
-+ reader tour), `overlay/RUNNING.md` (run/test walkthrough), and `overlay/ARCHITECTURE.md` (module map
-+ data flow).
+Guidance for AI agents and developers working in this repo. Feature docs: the docs site
+(`docs/`, `mkdocs.yml` → [saitenka.readthedocs.io](https://saitenka.readthedocs.io); run/usage/dev live
+there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (module map + data flow).
 
 ## Planning artifacts
 
 - **`CHANGELOG.md`** ([Keep a Changelog](https://keepachangelog.com/)) — shipped changes; drafted with
   [git-cliff](https://git-cliff.org/) (`uv run poe changelog`) then **hand-reviewed**, never shipped raw.
-  **`ROADMAP.md`** — future direction. Trackable work → issues/milestones. Scratch (drafts, working
+  Future direction and trackable work → GitHub issues/milestones. Scratch (drafts, working
   notes, to-be-filed issue bodies) → `vibe/` (git-ignored) — **never `.agents/`, which is durable-only**.
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
@@ -82,7 +82,7 @@ target, not the model.
 
 Same over-explaining trend as **Comments** above, one layer up: duplicated specifics rot faster than
 prose bloat does, because two copies of a fact drift independently and one goes stale silently. (Real
-incident: README.md and RUNNING.md each carried their own copy of the `poe all` task list; both were
+incident: two docs each carried their own copy of the `poe all` task list; both were
 wrong — the real gate had grown to 14 tasks, the docs still said 5.)
 
 - **One canonical source per fact.** A task list, a command, a version number — state it once, where
@@ -93,7 +93,7 @@ wrong — the real gate had grown to 14 tasks, the docs still said 5.)
   something the heading/command name doesn't already? Cut the paragraph restating the heading.
 - **No process scars.** No `(Stage N)` section tags — same rule as comments, same reason.
 - **High-level over step-by-step, when a canonical walkthrough exists.** README explains *what* and
-  *why*; RUNNING.md (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
+  *why*; the docs site (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
   not the fix.
 - **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader

@@ -4,6 +4,7 @@
 ![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)
 ![Built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-blue.svg)
+[![Docs](https://img.shields.io/badge/docs-saitenka.readthedocs.io-blue.svg)](https://saitenka.readthedocs.io)
 
 Saitenka turns **mpv** into an immersion workstation: Japanese subtitles get **FSRS-aware word
 coloring**, hovering a word opens a **Yomitan-style multi-dictionary tooltip**, and one key **mines**
@@ -14,6 +15,9 @@ overlay/fullscreen breakage that plagues external overlays.
 ![Saitenka's in-mpv overlay over a frame of the 1917 film Namakura Gatana: the word 読む highlighted in the subtitle line, with its multi-definition Yomitan-style dictionary tooltip open beside it.](docs/screenshot-hover.jpg)
 
 <sub>Saitenka running on a public-domain still — *[Namakura Gatana](https://archive.org/details/kouichi-junichi-namakura-gatana-1917-4-minute-restored-version)* (なまくら刀, 1917; dir. Kōuchi Jun'ichi), restored by the National Film Archive of Japan. Open-license dictionary only ([Jitendex](https://jitendex.org), CC BY-SA); the subtitle is a demo line.</sub>
+
+📖 **Full documentation → [saitenka.readthedocs.io](https://saitenka.readthedocs.io)** — install,
+configuration, keyboard shortcuts, the CLI reference, and how it compares.
 
 - **再点火 = "re-ignition"** — built to make picking study back up frictionless after a long break.
 - Local-first and grounded: readings and pitch always come from dictionaries, never a language model.
@@ -41,6 +45,16 @@ Sentence-mining from native video is the highest-leverage way to grow vocabulary
 a fragile chain of a browser texthooker, a clipboard bridge, a separate overlay window, and manual card
 assembly. The overlay-window approach in particular fights the OS: on Windows it flickers, loses hover
 focus, and breaks in fullscreen because a second window can never share the video's airspace.
+
+This practice isn't new, and Saitenka didn't invent it — the guides that popularized it are what taught
+the author to mine from native video around the **N3** level.
+**[TheMoeWay](https://learnjapanese.moe/animejp/)** makes the *why*: anime is authentic input made **by
+natives, for natives** — scripted native speech across every register (via *yakuwarigo*, role language),
+not textbook Japanese watered down for learners. **[Anacreon's original mpv script](https://anacreondjt.gitlab.io/docs/mpvscript/)**
+and the **[Animecards "Mine from anime"](https://animecards.site/minefromanime/)** workflow make the
+*how*: while you watch, capture the sentence, its audio, a screenshot, and the target word straight into
+Anki — turning passive viewing into vocabulary you actually encountered. Saitenka is a direct descendant
+of that loop; it keeps the method and removes the friction that was still in it.
 
 Saitenka solves three problems:
 
@@ -91,41 +105,48 @@ Saitenka solves three problems:
 
 ## How it compares
 
-Saitenka and **[SubMiner](https://github.com/ksyasuda/SubMiner)** solve the same problem — mine Japanese
-vocabulary from video without a browser texthooker — from opposite ends. Saitenka is a **grounded,
-FSRS-driven engine composited inside mpv**; SubMiner is a **feature-broad Electron app** with a large
-integration surface and turn-key desktop installers. They optimize different things, so this is a map of
-trade-offs, not a scoreboard.
+Saitenka, **[SubMiner](https://github.com/ksyasuda/SubMiner)**, and
+**[Autocards](https://learnjapanese.moe/autocards/)** all put Japanese vocabulary from video into Anki,
+but from three different angles. Saitenka is a **grounded, FSRS-driven engine composited inside mpv**;
+SubMiner is a **feature-broad Electron app** with a large integration surface and turn-key desktop
+installers; Autocards is a **retroactive media back-filler** — it doesn't create cards or show
+dictionaries, it batch-attaches screenshot + sentence audio to text-only cards you made elsewhere, by
+matching each card's sentence against the subtitle's timing. So this is a map of trade-offs across
+different jobs, not a scoreboard.
 
-| Capability | 再点火 Saitenka | SubMiner |
-|---|:---:|:---:|
-| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ |
-| Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ |
-| One-key **+ bulk Anki mining** (audio, screenshot, reading, freq) | ✅ | ✅ |
-| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ |
-| **N+1** sentence targeting | ✅ | ✅ |
-| **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ |
-| Grounded / local-first (readings never from an LLM) | ✅ | ✅ |
-| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ |
-| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ |
-| AniList **progress scrobbling** | ❌ | ✅ |
-| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ |
-| Episode analysis · local session history | ✅ | ✅ |
-| Cross-machine stats/history **sync** | ❌ | ✅ |
-| Mined-audio loudness normalization | ❌* | ✅ |
-| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ |
-| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ |
-| One-command installer (`setup` wizard · `uv tool` · venv scripts) | ✅ | ✅ |
-| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ |
-| Hosted **docs site** | ❌* | ✅ |
-| Core license | Apache-2.0 | GPL-3.0 |
-| Linux · macOS · Windows | ✅ | ✅ |
+| Capability | 再点火 Saitenka | SubMiner | Autocards |
+|---|:---:|:---:|:---:|
+| Category | live in-mpv engine | Electron mining app | retroactive enricher |
+| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ | ❌ |
+| Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ | ❌ |
+| One-key **+ bulk Anki mining** (audio, screenshot, reading, freq) | ✅ | ✅ | ❌ |
+| **Retroactive media back-fill** onto existing text-only cards (sentence↔sub-timing match) | ❌* | ❌ | ✅ |
+| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ | ❌ |
+| **N+1** sentence targeting | ✅ | ✅ | ❌ |
+| **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ | ❌ |
+| Grounded / local-first (readings never from an LLM) | ✅ | ✅ | ✅ |
+| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ |
+| Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool |
+| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ |
+| AniList **progress scrobbling** | ❌ | ✅ | ❌ |
+| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ |
+| Episode analysis · local session history | ✅ | ✅ | ❌ |
+| Cross-machine stats/history **sync** | ❌ | ✅ | ❌ |
+| Mined-audio loudness normalization | ❌* | ✅ | ❌ |
+| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ |
+| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ |
+| One-command installer / portable bundle | ✅ | ✅ | ✅ |
+| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ | ❌ |
+| Core license | Apache-2.0 | GPL-3.0 | GPL-3.0 |
+| Linux · macOS · Windows | ✅ | ✅ | ❌ Windows |
 
-<sub>✅ yes · ❌ no / out of scope · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
+<sub>✅ yes · ❌ no / out of scope · ⚠️ partial · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
 
 Short version: reach for **SubMiner** if you want the widest set of turn-key integrations and a packaged
-desktop app; reach for **Saitenka** if you want a fast, single-surface, FSRS-grounded engine that draws
-straight into mpv.
+desktop app; reach for **Autocards** if you make cards fast in a browser texthooker and want to attach the
+media in one pass afterward (Windows-only); reach for **Saitenka** if you want a fast, single-surface,
+FSRS-grounded engine that draws straight into mpv. The workflows compose — Autocards' back-fill is
+[on Saitenka's roadmap](https://github.com/serjflint/saitenka/issues) as an in-engine step.
 
 ## Where it fits in your setup
 
@@ -251,7 +272,8 @@ Python 3.13/3.14 install Secret Service support by default; Python 3.15+ uses `J
 owner-only `$XDG_CONFIG_HOME/saitenka/jimaku.key` unless `[linux-keyring]` is installed, avoiding its
 `cryptography` dependency.
 
-Full run/test walkthrough: **[`overlay/RUNNING.md`](overlay/RUNNING.md)**. Feature tour:
+Full docs: **[saitenka.readthedocs.io](https://saitenka.readthedocs.io)** (install, usage,
+[development](https://saitenka.readthedocs.io/en/latest/contributing/development/)). Renderer design:
 **[`overlay/README.md`](overlay/README.md)**.
 
 ## What's in the repo
@@ -311,3 +333,4 @@ Saitenka stands on a lot of excellent open-source work:
   **[JMdict/KANJIDIC](https://www.edrdg.org/)** (EDRDG) as the built-in fallback dictionary.
 - Prior art that shaped the design: **[SubMiner](https://github.com/ksyasuda/SubMiner)** and the
   **[Animecards](https://animecards.site/)** workflow with **[mpv_websocket](https://github.com/kuroahna/mpv_websocket)**.
+  The immersion guides that inspired the project are credited in [Why](#why).

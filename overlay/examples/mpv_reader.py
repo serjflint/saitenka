@@ -1,6 +1,6 @@
 """Thin wrapper around the real CLI (``overlay.app.cli``) — kept so the documented invocation
 ``uv run python examples/mpv_reader.py …`` keeps working. All flags, behaviour, and the demo /
-screenshot paths live in the CLI's ``run`` command (see RUNNING.md for the flag contract).
+screenshot paths live in the CLI's ``run`` command (see ``saitenka run --help`` / the CLI reference).
 
     uv run python examples/mpv_reader.py video.mkv --sub-file jp.srt
     uv run python examples/mpv_reader.py                      # generated demo clip

@@ -738,7 +738,7 @@ def run_impl(
             "       `saitenka setup`, or edit your config (see overlay.example.toml):\n"
             f"       {config_path()}\n"
             '       …or pass --dict … --freq … --pitch … --anki-decks \'{"Saitenka::Known":["Expression"]}\'\n'
-            "       --mine  (see RUNNING.md §3)."
+            "       --mine  (see `saitenka run --help`)."
         )
 
     def _build_deps():
