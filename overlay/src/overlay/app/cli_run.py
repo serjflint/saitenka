@@ -329,6 +329,7 @@ def _build_run_options(
             bookmark_key=cfg.get("bookmark_key", _ko.bookmark_key),
             sidebar_key=cfg.get("sidebar_key", _ko.sidebar_key),
             annotation_key=cfg.get("annotation_key", _ko.annotation_key),
+            help_key=cfg.get("help_key", _ko.help_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),

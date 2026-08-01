@@ -36,6 +36,7 @@ def test_run_options_read_hover_pause_key():
             "bookmark_key": "Alt+b",
             "sidebar_key": "Alt+s",
             "annotation_key": "Ctrl+a",
+            "help_key": "Ctrl+h",
             "annotation_mode": "hover",
         },
         **_BASE_KWARGS,
@@ -45,6 +46,7 @@ def test_run_options_read_hover_pause_key():
     assert opts.keys.bookmark_key == "Alt+b"
     assert opts.keys.sidebar_key == "Alt+s"
     assert opts.keys.annotation_key == "Ctrl+a"
+    assert opts.keys.help_key == "Ctrl+h"
     assert opts.tooltip.annotation_mode == "hover"
 
 
@@ -57,6 +59,7 @@ def test_attach_options_read_hover_pause_settings():
             "bookmark_key": "Alt+b",
             "sidebar_key": "Alt+s",
             "annotation_key": "Ctrl+a",
+            "help_key": "Ctrl+h",
             "annotation_mode": "hover",
         },
         mine={},
@@ -67,4 +70,5 @@ def test_attach_options_read_hover_pause_settings():
     assert opts.keys.bookmark_key == "Alt+b"
     assert opts.keys.sidebar_key == "Alt+s"
     assert opts.keys.annotation_key == "Ctrl+a"
+    assert opts.keys.help_key == "Ctrl+h"
     assert opts.tooltip.annotation_mode == "hover"

@@ -55,6 +55,7 @@ def test_keybinds_use_single_string_command():
         "Alt+b",
         "\\",
         "Alt+a",
+        "F1",
     } <= keys
 
 

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, ClassVar
 from overlay import otel_metrics
 from overlay.app import (
     backlog,
+    help_overlay,
     miner_ui,
     nested_popup,
     prefetch,
@@ -30,6 +31,42 @@ from overlay.app import (
     telemetry,
     tooltip,
     translation,
+)
+from overlay.app.bindings import (
+    ANNOTATION_MSG,
+    BOOKMARK_MSG,
+    CLICK_MSG,
+    COPY_CLICK_MSG,
+    COPY_LINE_MSG,
+    COPY_MSG,
+    HELP_CLOSE_MSG,
+    HELP_MESSAGES,
+    HELP_NEXT_MSG,
+    HELP_PREV_MSG,
+    HELP_TOGGLE_MSG,
+    HOVER_PAUSE_MSG,
+    KANJI_MSG,
+    MINE_ALL_MSG,
+    MINE_MSG,
+    PREVIEW_MSG,
+    SCROLL_DOWN_MSG,
+    SCROLL_UP_MSG,
+    SIDEBAR_MSG,
+    SPEAK_MSG,
+    SUB_DELAY_MINUS_MSG,
+    SUB_DELAY_PLUS_MSG,
+    SUB_DELAY_RESET_MSG,
+    SUB_NEXT_MSG,
+    SUB_PREV_MSG,
+    SUB_REPLAY_MSG,
+    SUBTITLE_LANGUAGE_MSG,
+    TAB_NEXT_MSG,
+    TAB_PREV_MSG,
+    TIP_CLOSE_MSG,
+    TIP_DOWN_MSG,
+    TIP_UP_MSG,
+    TRANS_MSG,
+    active_bindings,
 )
 from overlay.app.config import ReaderOptions
 from overlay.app.media import (
@@ -64,45 +101,6 @@ NESTED_ID = OverlayId.NESTED
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
 # the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
 # dict-tab strip / reserve (space-saving).
-
-
-MINE_MSG = "saitenka-mine"
-MINE_ALL_MSG = "saitenka-mine-all"
-TRANS_MSG = "saitenka-translate"
-SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
-HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
-BOOKMARK_MSG = "saitenka-toggle-bookmark"
-SIDEBAR_MSG = "saitenka-toggle-sidebar"
-ANNOTATION_MSG = "saitenka-toggle-annotations"
-PREVIEW_MSG = "saitenka-preview"
-SCROLL_UP_MSG = "saitenka-scroll-up"
-SCROLL_DOWN_MSG = "saitenka-scroll-down"
-SPEAK_MSG = "saitenka-speak"
-COPY_MSG = "saitenka-copy"
-COPY_LINE_MSG = "saitenka-copy-line"
-COPY_CLICK_MSG = "saitenka-copy-click"
-CLICK_MSG = "saitenka-click"
-SUB_PREV_MSG = "saitenka-sub-prev"  # Alt+LEFT → sub-seek -1 (previous subtitle line)
-SUB_NEXT_MSG = "saitenka-sub-next"  # Alt+RIGHT → sub-seek 1  (next subtitle line)
-SUB_REPLAY_MSG = "saitenka-sub-replay"  # Alt+DOWN → sub-seek 0  (replay current from its start)
-SUB_DELAY_MINUS_MSG = "saitenka-sub-delay-minus"  # z → sub-delay nudge −0.1 s
-SUB_DELAY_PLUS_MSG = "saitenka-sub-delay-plus"  # Z → sub-delay nudge +0.1 s
-SUB_DELAY_RESET_MSG = "saitenka-sub-delay-reset"  # x → sub-delay reset to 0
-KANJI_MSG = "saitenka-kanji"  # k → open / cycle the hovered word's kanji
-# Tooltip-scoped keys — registered ONLY while a tooltip is visible (bind on show, unbind on hide)
-# so mpv keeps its own arrows otherwise. Alt+arrows stay global.
-TAB_PREV_MSG = "saitenka-tab-prev"
-TAB_NEXT_MSG = "saitenka-tab-next"
-TIP_UP_MSG = "saitenka-tip-up"
-TIP_DOWN_MSG = "saitenka-tip-down"
-TIP_CLOSE_MSG = "saitenka-tip-close"
-TIP_KEYBINDS: tuple[tuple[str, str], ...] = (
-    ("LEFT", TAB_PREV_MSG),
-    ("RIGHT", TAB_NEXT_MSG),
-    ("UP", TIP_UP_MSG),
-    ("DOWN", TIP_DOWN_MSG),
-    ("ESC", TIP_CLOSE_MSG),
-)
 
 
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
@@ -159,6 +157,7 @@ class Reader:
         self.bookmark_key = o.keys.bookmark_key
         self.sidebar_key = o.keys.sidebar_key
         self.annotation_key = o.keys.annotation_key
+        self.help_key = o.keys.help_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -251,6 +250,8 @@ class Reader:
         self._sidebar_hits: tuple = ()
         self._sidebar_style_cache: dict = {}
         self._sidebar_geometry: tuple | None = None
+        self._help_open = False
+        self._help_page = 0
         self._last_jpg: Path | None = None
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
@@ -528,7 +529,7 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        if sidebar.suppress_hover(self):
+        if help_overlay.suppress_hover(self) or sidebar.suppress_hover(self):
             return
         tooltip.update_hover(self)
 
@@ -706,9 +707,11 @@ class Reader:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
         if self._tip_keys_bound:
             return
-        for key, msg in TIP_KEYBINDS:
-            self.ipc.command("keybind", key, f"script-message {msg}")  # ONE string (the gotcha)
         self._tip_keys_bound = True
+        if self._help_open:
+            return
+        for binding in active_bindings(self, "tooltip"):
+            self.ipc.command("keybind", binding.key, f"script-message {binding.spec.message}")
 
     def _unbind_tip_keys(self) -> None:
         """Neutralise the tooltip keys so a leaked bind can't fire ``tab-prev``/etc. when no tooltip is
@@ -718,9 +721,13 @@ class Reader:
         no error, and the key stops doing tooltip work while the popup is gone."""
         if not self._tip_keys_bound:
             return
-        for key, _msg in TIP_KEYBINDS:
-            self.ipc.command("keybind", key, "ignore")  # valid no-op; "" would be rejected by mpv
         self._tip_keys_bound = False
+        if self._help_open:
+            return
+        for binding in active_bindings(self, "tooltip"):
+            self.ipc.command(
+                "keybind", binding.key, "ignore"
+            )  # valid no-op; "" would be rejected by mpv
 
     def _render_tip_view(self) -> None:
         tooltip.render_tip_view(self)
@@ -928,39 +935,19 @@ class Reader:
         label = "full" if self.annotation_mode == "full" else "hover-only"
         self._toast(f"annotations: {label}")
 
+    def toggle_help(self) -> None:
+        help_overlay.toggle(self)
+
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
         def bind(key: str, msg: str) -> None:
             self.ipc.command("keybind", key, f"script-message {msg}")
 
-        bind(self.translate_key, TRANS_MSG)
-        bind(self.subtitle_language_key, SUBTITLE_LANGUAGE_MSG)
-        bind(self.hover_pause_key, HOVER_PAUSE_MSG)
-        bind(self.bookmark_key, BOOKMARK_MSG)
-        bind(self.sidebar_key, SIDEBAR_MSG)
-        bind(self.annotation_key, ANNOTATION_MSG)
-        # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
-        bind("WHEEL_UP", SCROLL_UP_MSG)
-        bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
-        if self._tts_ok:
-            bind("a", SPEAK_MSG)  # only bind TTS when a Japanese voice exists (else 'a' is a no-op)
-        bind("c", COPY_MSG)  # copy the hovered word
-        bind("k", KANJI_MSG)  # open / cycle the hovered word's kanji entry
-        bind("Shift+c", COPY_LINE_MSG)  # copy the whole subtitle line
-        bind("MBTN_LEFT", CLICK_MSG)  # left = actions (speak / ⊕ mine)
-        bind("MBTN_RIGHT", COPY_CLICK_MSG)  # right = copy (word under the cursor) + highlight flash
-        if self.anki:
-            bind(self.mine_key, MINE_MSG)
-            bind(self.mine_all_key, MINE_ALL_MSG)
-            bind(self.preview_key, PREVIEW_MSG)
-        # subtitle navigation — prev/next/replay sub and sub-delay nudges
-        bind(self.sub_prev_key, SUB_PREV_MSG)
-        bind(self.sub_next_key, SUB_NEXT_MSG)
-        bind(self.sub_replay_key, SUB_REPLAY_MSG)
-        bind("z", SUB_DELAY_MINUS_MSG)  # sub-delay −0.1 s (mpv default mapping, kept working)
-        bind("Z", SUB_DELAY_PLUS_MSG)  # sub-delay +0.1 s
-        bind("x", SUB_DELAY_RESET_MSG)  # reset sub-delay to 0
+        for binding in active_bindings(self, "global"):
+            message = binding.spec.message
+            if message is not None:
+                bind(binding.key, message)
 
     # msg -> handler(reader). Subtitle-nav entries render the target cue from the index INSTANTLY
     # (if we have one), then issue the real sub-seek so the video catches up behind it (read the
@@ -974,6 +961,10 @@ class Reader:
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         SIDEBAR_MSG: lambda r: r.toggle_sidebar(),
         ANNOTATION_MSG: lambda r: r.toggle_annotation_mode(),
+        HELP_TOGGLE_MSG: lambda r: r.toggle_help(),
+        HELP_PREV_MSG: lambda r: help_overlay.step(r, -1),
+        HELP_NEXT_MSG: lambda r: help_overlay.step(r, 1),
+        HELP_CLOSE_MSG: lambda r: help_overlay.close_help(r),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
@@ -997,6 +988,8 @@ class Reader:
     }
 
     def _handle(self, msg: str) -> None:
+        if self._help_open and msg not in HELP_MESSAGES:
+            return
         handler = self._HANDLERS.get(msg)
         if handler:
             handler(self)
@@ -1010,12 +1003,18 @@ class Reader:
             self._flush_paused_nudge()
             ops_before = self.ov.ops
             scroll_steps = self._drain_events()
-            if scroll_steps and not sidebar.scroll(self, scroll_steps):
+            if (
+                scroll_steps
+                and not help_overlay.scroll(self, scroll_steps)
+                and not sidebar.scroll(self, scroll_steps)
+            ):
                 self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
             self._expire_toast()
             self._expire_flash()
-            if self.refresh_osd() and self.sub_text.strip():
-                self._draw_subtitle()
+            if self.refresh_osd():
+                if self.sub_text.strip():
+                    self._draw_subtitle()
+                help_overlay.redraw(self)
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()

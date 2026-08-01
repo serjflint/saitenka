@@ -852,6 +852,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             bookmark_key=cfg.get("bookmark_key", ko.bookmark_key),
             sidebar_key=cfg.get("sidebar_key", ko.sidebar_key),
             annotation_key=cfg.get("annotation_key", ko.annotation_key),
+            help_key=cfg.get("help_key", ko.help_key),
             sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
             sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
             sub_replay_key=cfg.get("sub_replay_key", ko.sub_replay_key),

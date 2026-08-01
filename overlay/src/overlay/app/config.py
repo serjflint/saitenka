@@ -73,6 +73,7 @@ class KeyOptions:
     bookmark_key: str = "Alt+b"
     sidebar_key: str = "\\"
     annotation_key: str = "Alt+a"
+    help_key: str = "F1"
     preview_key: str = "p"
     hover_pause_key: str = "Alt+p"
     sub_prev_key: str = "Alt+LEFT"
