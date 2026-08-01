@@ -31,11 +31,18 @@ class _RecOv:
         self.hidden.append(oid)
 
 
-def test_draw_loading_shows_spinner_then_throttles():
+def test_draw_loading_shows_spinner_then_throttles(monkeypatch):
     from util import FakeIPC
 
+    from overlay.app import reader_deps
     from overlay.app.controller import Reader
     from overlay.app.overlay_ids import OverlayId
+
+    # Freeze the clock at the throttle seam: the spinner is throttled by a real 80 ms window, so on a
+    # loaded free-threaded (no-GIL) CI runner >80 ms can pass between two Python statements and the
+    # second draw slips the window. A fixed clock makes the throttle assertion deterministic.
+    clock = [100.0]
+    monkeypatch.setattr(reader_deps.time, "monotonic", lambda: clock[0])
 
     r = Reader(FakeIPC())
     r.ov = _RecOv()
@@ -45,7 +52,7 @@ def test_draw_loading_shows_spinner_then_throttles():
     assert OverlayId.LOADING in r.ov.shown  # spinner painted top-left
     assert r._load_frame == 1  # frame advanced
     shown_before = len(r.ov.shown)
-    r._draw_loading()  # immediately again → throttled (now < _load_next), nothing new drawn
+    r._draw_loading()  # same instant → now < _load_next → throttled, nothing new drawn
     assert len(r.ov.shown) == shown_before
 
 
