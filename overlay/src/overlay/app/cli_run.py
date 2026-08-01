@@ -327,6 +327,7 @@ def _build_run_options(
             hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),
             bookmark_key=cfg.get("bookmark_key", _ko.bookmark_key),
+            sidebar_key=cfg.get("sidebar_key", _ko.sidebar_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),

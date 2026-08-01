@@ -24,6 +24,7 @@ from overlay.app import (
     nested_popup,
     prefetch,
     reader_deps,
+    sidebar,
     subnav,
     subtitle_modes,
     telemetry,
@@ -71,6 +72,7 @@ TRANS_MSG = "saitenka-translate"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 BOOKMARK_MSG = "saitenka-toggle-bookmark"
+SIDEBAR_MSG = "saitenka-toggle-sidebar"
 PREVIEW_MSG = "saitenka-preview"
 SCROLL_UP_MSG = "saitenka-scroll-up"
 SCROLL_DOWN_MSG = "saitenka-scroll-down"
@@ -154,6 +156,7 @@ class Reader:
         self.translate_key = o.keys.translate_key
         self.subtitle_language_key = o.keys.subtitle_language_key
         self.bookmark_key = o.keys.bookmark_key
+        self.sidebar_key = o.keys.sidebar_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -232,6 +235,16 @@ class Reader:
         self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
         self._subtitle_fetch_threads: list[threading.Thread] = []
         self._backlog_store: backlog.BacklogStore | None = None
+        self._sidebar_open = False
+        self._sidebar_view = "track"
+        self._sidebar_scroll = 0
+        self._sidebar_manual_until = 0.0
+        self._sidebar_last_active = -1
+        self._sidebar_total = 0
+        self._sidebar_rect: tuple[int, int, int, int] | None = None
+        self._sidebar_hits: tuple = ()
+        self._sidebar_style_cache: dict = {}
+        self._sidebar_geometry: tuple | None = None
         self._last_jpg: Path | None = None
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
@@ -507,6 +520,8 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
+        if sidebar.suppress_hover(self):
+            return
         tooltip.update_hover(self)
 
     def set_hover(self, index: int) -> None:
@@ -554,6 +569,9 @@ class Reader:
         return tooltip.hit_nested_speaker(self, x, y)
 
     def on_click(self) -> None:
+        mp = self._get("mouse-pos") or {}
+        if sidebar.on_click(self, mp.get("x", -1), mp.get("y", -1)):
+            return
         tooltip.on_click(self)
 
     def _panel_key(
@@ -879,6 +897,9 @@ class Reader:
     def toggle_bookmark(self) -> None:
         backlog.capture_current(self)
 
+    def toggle_sidebar(self) -> None:
+        sidebar.toggle(self)
+
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
@@ -889,6 +910,7 @@ class Reader:
         bind(self.subtitle_language_key, SUBTITLE_LANGUAGE_MSG)
         bind(self.hover_pause_key, HOVER_PAUSE_MSG)
         bind(self.bookmark_key, BOOKMARK_MSG)
+        bind(self.sidebar_key, SIDEBAR_MSG)
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
         bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
@@ -921,6 +943,7 @@ class Reader:
         SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
+        SIDEBAR_MSG: lambda r: r.toggle_sidebar(),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
@@ -957,7 +980,7 @@ class Reader:
             self._flush_paused_nudge()
             ops_before = self.ov.ops
             scroll_steps = self._drain_events()
-            if scroll_steps:
+            if scroll_steps and not sidebar.scroll(self, scroll_steps):
                 self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
             self._expire_toast()
             self._expire_flash()
@@ -967,6 +990,7 @@ class Reader:
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
             subtitle_modes.apply_fetch_results(self)
+            sidebar.update(self)
             self._update_hover()
             self._refresh_dirty_panels()
             self._update_prefetch()

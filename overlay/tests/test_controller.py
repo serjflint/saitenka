@@ -53,6 +53,7 @@ def test_keybinds_use_single_string_command():
         "Alt+p",
         "Alt+t",
         "Alt+b",
+        "\\",
     } <= keys
 
 
