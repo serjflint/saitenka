@@ -151,7 +151,7 @@ uv run python examples/mpv_reader.py episode.mkv --color \
   --dict "Bilingual Dict" \
   --dict "Monolingual Dict A" \
   --dict "Monolingual Dict B"
-# hover a word; Ctrl+m mine · Shift+m mine-all · t translation
+# hover a word; Ctrl+m mine · Shift+m mine-all · t translation · Alt+p hover auto-pause
 ```
 
 ## Escalation ladder (simplest tool first)

@@ -43,7 +43,17 @@ def test_keybinds_use_single_string_command():
         assert len(c) == 3, f"malformed keybind (must be 3 parts): {c}"
         assert c[2].startswith("script-message "), c
     keys = {c[1] for c in binds}
-    assert {"a", "c", "WHEEL_UP", "WHEEL_DOWN", "MBTN_LEFT", "Ctrl+m"} <= keys
+    assert {"a", "c", "WHEEL_UP", "WHEEL_DOWN", "MBTN_LEFT", "Ctrl+m", "Alt+p"} <= keys
+
+
+def test_hover_pause_key_is_configurable():
+    from overlay.app.config import KeyOptions, ReaderOptions
+
+    ipc = FakeIPC()
+    options = ReaderOptions(keys=KeyOptions(hover_pause_key="Alt+q"))
+    Reader(ipc, options=options)._register_keybinds()
+    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+    assert binds["Alt+q"] == "script-message saitenka-toggle-hover-pause"
 
 
 # --- Stage 4: subtitle navigation keys (Alt+←/→/↓, sub-delay) ------------------------------------
@@ -655,6 +665,47 @@ def test_pause_on_tooltip_respects_manual_pause():
     r = _reader_with_word(ipc)
     r._show_tooltip(0)
     assert not r._paused_by_tip  # never took ownership → won't resume
+
+
+def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
+    ipc = FakeIPC()
+    r = _reader_with_word(ipc)
+    r._paused_by_tip = True
+    monkeypatch.setattr(r, "_toast", lambda *_args: None)
+    r.toggle_hover_pause()
+    assert ("set_property", "pause", False) in ipc.commands
+
+
+def test_hover_pause_toggle_changes_state_and_reports_it(monkeypatch):
+    r = _reader_with_word(FakeIPC())
+    messages = []
+    monkeypatch.setattr(r, "_toast", messages.append)
+    r.toggle_hover_pause()
+    assert (r.pause_on_tooltip, messages) == (False, ["hover auto-pause: off"])
+    r.toggle_hover_pause()
+    assert (r.pause_on_tooltip, messages) == (
+        True,
+        ["hover auto-pause: off", "hover auto-pause: on"],
+    )
+
+
+def test_hover_pause_toggle_preserves_external_pause(monkeypatch):
+    ipc = FakeIPC()
+    ipc.props["pause"] = True
+    r = _reader_with_word(ipc)
+    monkeypatch.setattr(r, "_toast", lambda *_args: None)
+    r.toggle_hover_pause()
+    assert ("set_property", "pause", False) not in ipc.commands
+
+
+def test_hover_pause_toggle_disables_future_hover_pause(monkeypatch):
+    ipc = FakeIPC()
+    ipc.props["pause"] = False
+    r = _reader_with_word(ipc)
+    monkeypatch.setattr(r, "_toast", lambda *_args: None)
+    r.toggle_hover_pause()
+    r._show_tooltip(0)
+    assert ("set_property", "pause", True) not in ipc.commands
 
 
 def test_prefetch_queues_full_render_when_paused():
