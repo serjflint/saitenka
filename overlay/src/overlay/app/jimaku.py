@@ -188,44 +188,37 @@ def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
     return None, "none"
 
 
-# --- fetched-sub cache ---------------------------------------------------------------------------
-# jimaku subs (and their alass/ffsubsync resync, the slow part) are cached PER VIDEO so a rewatch of
-# the same file reuses the synced .srt instead of re-downloading + re-aligning every run. Keyed by the
-# video's name + byte size (a cheap change-detector: a re-encode/replace changes size → cache miss).
-
-
 def subs_cache_dir() -> Path:
-    from overlay.app.paths import cache_dir
+    from overlay.app.subtitle_cache import subs_cache_dir as shared_cache_dir
 
-    return cache_dir() / "jimaku"
-
-
-def subs_cache_key(video: str | os.PathLike, title: str, episode) -> str:
-    from overlay.app.paths import sanitize_filename
-
-    v = Path(video)
-    try:
-        size = v.stat().st_size
-    except OSError:
-        size = 0
-    return sanitize_filename(f"{v.stem}-{title}-ep{episode}-{size}") + ".srt"
+    return shared_cache_dir()
 
 
-def cached_subs(video: str | os.PathLike, title: str, episode) -> Path | None:
-    """The cached synced sub for this (video, title, episode), or ``None`` on a miss."""
-    p = subs_cache_dir() / subs_cache_key(video, title, episode)
-    return p if p.exists() else None
+def subs_cache_key(video: str | os.PathLike, title: str, episode, *, resync: bool = True) -> str:
+    from overlay.app.subtitle_cache import subs_cache_key as shared_cache_key
+
+    return shared_cache_key(video, title, episode, resync=resync)
 
 
-def store_subs(video: str | os.PathLike, title: str, episode, sub_path: str | os.PathLike) -> Path:
-    """Copy the finished (synced) sub into the cache and return the cached path (used going forward)."""
-    import shutil
+def cached_subs(
+    video: str | os.PathLike, title: str, episode, *, resync: bool = True
+) -> Path | None:
+    from overlay.app.subtitle_cache import cached_subs as shared_cached_subs
 
-    dest_dir = subs_cache_dir()
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / subs_cache_key(video, title, episode)
-    shutil.copy2(str(sub_path), str(dest))
-    return dest
+    return shared_cached_subs(video, title, episode, resync=resync)
+
+
+def store_subs(
+    video: str | os.PathLike,
+    title: str,
+    episode,
+    sub_path: str | os.PathLike,
+    *,
+    resync: bool = True,
+) -> Path:
+    from overlay.app.subtitle_cache import store_subs as shared_store_subs
+
+    return shared_store_subs(video, title, episode, sub_path, resync=resync)
 
 
 @dataclass

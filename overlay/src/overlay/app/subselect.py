@@ -44,6 +44,52 @@ def _add_and_select(ipc, sub_path: str | Path) -> None:
     ipc.command("sub-add", str(sub_path), "select")
 
 
+def _subtitle_identity(
+    video: str, title_override: str | None, episode: int | None
+) -> tuple[Path, str, int | None]:
+    from overlay.app.jimaku import parse_filename
+
+    video_path = Path(video)
+    parsed_title, parsed_episode = parse_filename(video_path)
+    return (
+        video_path,
+        title_override or parsed_title,
+        episode if episode is not None else parsed_episode,
+    )
+
+
+def _cached_subtitle(
+    video_path: Path, title: str, episode: int | None, *, resync: bool
+) -> tuple[Path | None, str | None]:
+    from overlay.app.subtitle_cache import cached_subs
+
+    hit = cached_subs(video_path, title, episode, resync=resync) if video_path.exists() else None
+    if hit is not None:
+        log.info("subtitle cache hit: %s", hit)
+    status = f"subtitle cache: using {hit.name} for {title!r} ep {episode}" if hit else None
+    return hit, status
+
+
+def _finish_subtitle(
+    video_path: Path,
+    title: str,
+    episode: int | None,
+    sub_path: str | Path,
+    *,
+    resync: bool,
+) -> Path:
+    finished = Path(sub_path)
+    if resync and video_path.exists():
+        from overlay.app.resync import maybe_resync
+
+        finished = maybe_resync(video_path, finished, enabled=True)
+    if video_path.exists():
+        from overlay.app.subtitle_cache import store_subs
+
+        finished = store_subs(video_path, title, episode, finished, resync=resync)
+    return finished
+
+
 def fetch_jimaku_path(
     video: str,
     *,
@@ -53,32 +99,19 @@ def fetch_jimaku_path(
     resync: bool = True,
 ) -> tuple[Path | None, str]:
     """Fetch and optionally resync without touching mpv IPC, so callers may run it off-thread."""
-    from overlay.app.jimaku import (
-        JimakuClient,
-        JimakuError,
-        cached_subs,
-        parse_filename,
-        store_subs,
-    )
+    from overlay.app.jimaku import JimakuClient, JimakuError
 
-    title, ep = parse_filename(video)
-    title = jimaku_title or title
-    ep = episode if episode is not None else ep
-    video_path = Path(video)
-    hit = cached_subs(video_path, title, ep) if video_path.exists() else None
+    video_path, title, ep = _subtitle_identity(video, jimaku_title, episode)
+    hit, cache_status = _cached_subtitle(video_path, title, ep, resync=resync)
     if hit is not None:
-        return hit, f"jimaku: using cached {hit.name} for {title!r} ep {ep}"
+        assert cache_status is not None
+        return hit, cache_status
     tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
     try:
         sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
     except JimakuError as e:
         return None, f"jimaku failed: {e}"
-    if resync and video_path.exists():
-        from overlay.app.resync import maybe_resync
-
-        sub_path = maybe_resync(video_path, sub_path, enabled=True)
-    if video_path.exists():
-        sub_path = store_subs(video_path, title, ep, sub_path)
+    sub_path = _finish_subtitle(video_path, title, ep, sub_path, resync=resync)
     return Path(sub_path), f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
 
 
@@ -92,7 +125,6 @@ def fetch_tsukihime_path(
     dest_dir: str | Path | None = None,
 ) -> tuple[Path | None, str]:
     """Fetch a unique TsukiHime match without touching mpv IPC."""
-    from overlay.app.jimaku import parse_filename
     from overlay.app.tsukihime import (
         API_BASE,
         DEFAULT_RESULT_CAP,
@@ -102,9 +134,11 @@ def fetch_tsukihime_path(
     )
 
     cfg = config or {}
-    title, parsed_episode = parse_filename(video)
-    title = title_override or title
-    requested_episode = episode if episode is not None else parsed_episode
+    video_path, title, requested_episode = _subtitle_identity(video, title_override, episode)
+    hit, cache_status = _cached_subtitle(video_path, title, requested_episode, resync=resync)
+    if hit is not None:
+        assert cache_status is not None
+        return hit, cache_status
     destination = dest_dir or tempfile.mkdtemp(prefix="saitenka-tsukihime-")
     try:
         client = TsukiHimeClient(
@@ -115,10 +149,7 @@ def fetch_tsukihime_path(
         sub_path = client.fetch(title, requested_episode, destination)
     except (TsukiHimeError, TypeError, ValueError) as exc:
         return None, f"tsukihime failed: {exc}"
-    if resync and Path(video).exists():
-        from overlay.app.resync import maybe_resync
-
-        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
+    sub_path = _finish_subtitle(video_path, title, requested_episode, sub_path, resync=resync)
     return (
         Path(sub_path),
         f"tsukihime: added {Path(sub_path).name} for {title!r} ep {requested_episode}",

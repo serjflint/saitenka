@@ -142,58 +142,37 @@ def _resolve_jimaku_subs(
     video_path: Path,
     jimaku_title: str | None,
     episode: int | None,
-    tmp: Path,
     jimaku_key: str | None,
     jimaku_cfg: dict,
     *,
     resync: bool,
 ) -> Path | None:
-    from overlay.app.jimaku import (
-        JimakuClient,
-        JimakuError,
-        cached_subs,
-        parse_filename,
-        store_subs,
+    from overlay.app.subselect import fetch_jimaku_path
+
+    sub_path, status = fetch_jimaku_path(
+        str(video_path),
+        jimaku_key=jimaku_key or jimaku_cfg.get("key"),
+        jimaku_title=jimaku_title,
+        episode=episode,
+        resync=resync,
     )
-
-    title, ep = parse_filename(video_path)
-    title = jimaku_title or title
-    ep = episode if episode is not None else ep
-    hit = cached_subs(video_path, title, ep) if video_path.exists() else None
-    if hit:
-        print("jimaku: using cached subs", hit.name)
-        log.info("jimaku cache hit: %s", hit)
-        return hit
-    print(f"jimaku: fetching subs for {title!r} ep {ep}…")
-    try:
-        sub_path = JimakuClient(jimaku_key or jimaku_cfg.get("key")).fetch(title, ep, tmp)
-        print("jimaku: got", sub_path.name)
-        if resync and video_path.exists():
-            from overlay.app.resync import maybe_resync
-
-            print("jimaku: resyncing…")
-            sub_path = maybe_resync(video_path, sub_path, enabled=True)
-            print("jimaku: resync →", sub_path.name)
-        if video_path.exists():  # cache the finished (synced) sub for the next rewatch
-            sub_path = store_subs(video_path, title, ep, sub_path)
-        return sub_path
-    except JimakuError as e:
-        print("jimaku failed:", e, "— falling back to embedded/default", file=sys.stderr)
-        return None
+    print(status, file=sys.stderr if sub_path is None else sys.stdout)
+    return sub_path
 
 
-def _cached_jimaku_subs(
-    video_path: Path, jimaku_title: str | None, episode: int | None
+def _cached_subtitles(
+    video_path: Path, jimaku_title: str | None, episode: int | None, *, resync: bool
 ) -> Path | None:
-    from overlay.app.jimaku import cached_subs, parse_filename
+    from overlay.app.jimaku import parse_filename
+    from overlay.app.subtitle_cache import cached_subs
 
     title, parsed_episode = parse_filename(video_path)
     title = jimaku_title or title
     episode = episode if episode is not None else parsed_episode
-    hit = cached_subs(video_path, title, episode) if video_path.exists() else None
+    hit = cached_subs(video_path, title, episode, resync=resync) if video_path.exists() else None
     if hit is not None:
-        print("jimaku: using cached subs", hit.name)
-        log.info("jimaku cache hit: %s", hit)
+        print("subtitle cache: using", hit.name)
+        log.info("subtitle cache hit: %s", hit)
     return hit
 
 
@@ -216,8 +195,9 @@ def _configured_subtitles(
     *,
     jimaku: bool,
     tsukihime: bool,
+    resync: bool,
 ) -> tuple[Path | None, tuple[str, ...]]:
-    cached = _cached_jimaku_subs(video_path, jimaku_title, episode) if jimaku else None
+    cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync)
     if cached is not None:
         return cached, ()
     providers = tuple(
@@ -273,7 +253,7 @@ def _resolve_subtitles(
         sub_path = Path(sub_file).expanduser()
     elif jimaku_on and jimaku:
         sub_path = _resolve_jimaku_subs(
-            video_path, jimaku_title, episode, tmp, jimaku_key, jimaku_cfg, resync=resync
+            video_path, jimaku_title, episode, jimaku_key, jimaku_cfg, resync=resync
         )
         if sub_path is None and tsukihime_on:
             fetch_in_background = ("tsukihime",)
@@ -284,6 +264,7 @@ def _resolve_subtitles(
             episode,
             jimaku=jimaku_on,
             tsukihime=tsukihime_on,
+            resync=resync,
         )
     elif not video:
         sub_path = tmp / "line.srt"
