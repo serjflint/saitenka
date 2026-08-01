@@ -6,6 +6,8 @@ from PIL import Image
 from overlay.app import sidebar
 from overlay.app.backlog import BacklogStore, Capture
 from overlay.app.controller import Reader
+from overlay.app.episode_analysis import analyze_cues
+from overlay.app.scoring import Scorer
 from overlay.app.sub_index import SubCue, SubIndex
 from overlay.app.subtitles import (
     SidebarAction,
@@ -14,6 +16,7 @@ from overlay.app.subtitles import (
     SidebarRow,
     render_sidebar,
 )
+from overlay.app.wordlists import KnownWords
 
 
 class FakeIPC:
@@ -140,6 +143,52 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
 
     assert total == 1
     assert rows[0].parts == (("cue 0", sidebar.PLAIN),)
+
+
+def test_rows_use_shared_episode_analysis_when_ready():
+    reader, _ipc = _reader(cue_count=1)
+    reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
+    reader.sub_text = "私は本を読む。"
+    reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
+    reader._episode_analysis = analyze_cues(list(reader._sub_index.cues), reader.scorer)
+
+    rows, _total = sidebar._track_rows(reader, 0, 1, 0)
+
+    assert rows[0].status == "N+1"
+
+
+def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
+    reader, _ipc = _reader(cue_count=1)
+    reader.jp_sid = 1
+    reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
+    reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
+    reader._episode_analysis = analyze_cues(list(reader._sub_index.cues), reader.scorer)
+    reader._sidebar_open = True
+    reader._loading = True
+    calls = _capture_render(monkeypatch)
+    monkeypatch.setattr(
+        "overlay.app.subnav.load_index",
+        lambda _path: SubIndex([SubCue(0.0, 1.0, "猫です。")]),
+    )
+
+    reader.load_sub_index("new-track.srt")
+
+    assert calls[-1][0][0].text == "猫です。"
+    assert calls[-1][0][0].status is None
+
+
+def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
+    reader, ipc = _reader(props={"mouse-pos": {"x": 110, "y": 110}})
+    reader._sidebar_open = True
+    reader._sidebar_rect = (100, 100, 400, 500)
+    monkeypatch.setattr(
+        "overlay.app.tooltip.update_hover",
+        lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
+    )
+
+    reader._update_hover()
+
+    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
 
 def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkeypatch):
