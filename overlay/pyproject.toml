@@ -469,6 +469,10 @@ links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress
 docs = { shell = "uv run --group docs mkdocs build -f ../mkdocs.yml --strict" }
 docs-serve = { shell = "uv run --group docs mkdocs serve -f ../mkdocs.yml" }
 docs-cli = { shell = "uv run python -m overlay.app.gen_cli_docs > ../docs/usage/cli.md" }
+# Publish the install scripts to the gh-pages branch (https://serjflint.github.io/saitenka/). Keeps the
+# served install.sh/install.ps1 in sync with install/overlay-install.{sh,ps1}; re-run after editing them
+# and at each release. Not in `all` (touches the remote).
+pages = { shell = "cd .. && bash install/publish-pages.sh" }
 
 # SAST (flake8-bandit `S`) is now folded into the ruff `select` above, so it runs inside `lint` (in
 # `all`) — no separate `sec` task. The 2026-07-25 triage put reasoned per-line `# noqa: S…` at each

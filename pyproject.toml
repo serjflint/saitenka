@@ -41,6 +41,7 @@ changelog = { cmd = "uv run poe changelog", cwd = "overlay" }
 docs = { cmd = "uv run poe docs", cwd = "overlay" }
 docs-serve = { cmd = "uv run poe docs-serve", cwd = "overlay" }
 docs-cli = { cmd = "uv run poe docs-cli", cwd = "overlay" }
+pages = { cmd = "uv run poe pages", cwd = "overlay" }
 bundle = { cmd = "uv run poe bundle", cwd = "overlay" }
 release-prepare = { cmd = "uv run poe release-prepare", cwd = "overlay" }
 release-publish = { cmd = "uv run poe release-publish", cwd = "overlay" }
