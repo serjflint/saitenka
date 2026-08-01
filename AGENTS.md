@@ -74,8 +74,7 @@ target, not the model.
   *what* (`# loop over the dicts`). Delete zero-delta echoes.
 - **Distill to the irreducible signal.** Keep the delta, cut the words — no teaching tone, no
   narrative, no hedging. One tight clause beats a paragraph. A long comment is a smell: compress it or
-  justify it. The `ipc.py` Windows-pipe lesson is one line ("single-threaded `pump()` was a no-op on
-  the named pipe → reader thread"), not an essay.
+  justify it.
 - **No process scars.** No `(plan R4)`, `Stage N`, "as discussed".
 - **Not a gate.** "Echoes the code" / "too verbose" is semantic, not AST-matchable — a review
   discipline, not a `poe` check.
@@ -83,9 +82,7 @@ target, not the model.
 ## Documentation
 
 Same over-explaining trend as **Comments** above, one layer up: duplicated specifics rot faster than
-prose bloat does, because two copies of a fact drift independently and one goes stale silently. (Real
-incident: two docs each carried their own copy of the `poe all` task list; both were
-wrong — the real gate had grown to 14 tasks, the docs still said 5.)
+prose bloat does, because two copies of a fact drift independently and one goes stale silently.
 
 - **One canonical source per fact.** A task list, a command, a version number — state it once, where
   it's authoritative (`pyproject.toml`'s `[tool.poe.tasks]` for what runs; `.agents/skills/` for the
@@ -99,8 +96,7 @@ wrong — the real gate had grown to 14 tasks, the docs still said 5.)
   not the fix.
 - **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
-  invent something is the doc's bug, not the reader's (this is exactly how an auto-generated repowise
-  wiki page's hallucinations got caught — the same check works on hand-written docs).
+  invent something is the doc's bug, not the reader's.
 - **Not a gate.** Same as comments — a review discipline, not a `poe` check.
 
 ## Testing
@@ -184,9 +180,8 @@ random bytes, and symbolic solving — so they find different classes of bug.
 - **`poe crosshair`** — CrossHair runs the existing Hypothesis property tests under a **z3 symbolic
   backend** (via the `crosshair` Hypothesis backend, registered in `conftest.py` only when installed):
   an SMT solver finds exact-boundary counterexamples random search misses. Slow (~15 s/property) → opt-in.
-  HypoFuzz was **test-driven** (ran clean, found nothing atheris/CrossHair didn't) and **not adopted** —
-  its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS), unfit to commit here, and the
-  trio already covers pure-core adequacy.
+  Do **not** adopt HypoFuzz — its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS),
+  unfit to commit here, and the trio already covers pure-core adequacy.
 - **Both `fuzz` and `crosshair` are pinned to CPython 3.13 in SEPARATE envs** (`.venv-fuzz` / `.venv-cx`
   via `UV_PROJECT_ENVIRONMENT`): atheris (libFuzzer) and z3 are C-extensions that can't load under the
   free-threaded 3.14t default — the same out-of-process 3.13 crutch as `invariants-taint`. The target
