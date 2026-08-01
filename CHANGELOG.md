@@ -18,6 +18,14 @@ logs.
   single-source — the site `include-markdown`s `RUNNING.md`/`ARCHITECTURE.md`/… rather than copying
   them. Build locally with `poe docs` (`--strict`) or `poe docs-serve`.
 
+### Changed
+
+- **The windowed (banded) tooltip renderer and selective head-prefetch are now on by default** —
+  both graduate from experimental. `banded = true` (env `SAITENKA_BANDED=0/1` overrides either way) and
+  `head_prefetch_lookahead = 1`. Set them back to `false`/`0` in `[tooltip]`/`[perf]` to opt out.
+- **`scan_delay` default raised to `1.0` s** (from `0.25`) — longer dwell before a nested scan popup
+  opens.
+
 ### Fixed
 
 - **`reinstall` no longer crashes with a confusing traceback on Windows.** A self-replacing reinstall

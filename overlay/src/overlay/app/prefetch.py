@@ -59,7 +59,7 @@ class PrefetchItem:
 
 @dataclass(frozen=True, slots=True)
 class HeadPrefetchItem:
-    """EXPERIMENTAL (prototype) — a selective speculative HEAD render for an upcoming word: the SAME
+    """A selective speculative HEAD render for an upcoming word: the SAME
     viewport-capped head a real hover would render (``panel_for(..., finish=False)``), not a whole
     ``finish()``, and not a separate cache — it's written straight into ``reader._panel_cache`` via
     the exact path a real hover reads, so a later hover is a plain cache hit with no promotion/
@@ -180,7 +180,7 @@ def _try_prefetch_item(reader: Reader) -> None:
 
 
 def _try_head_prefetch_item(reader: Reader) -> bool:
-    """EXPERIMENTAL — one queued speculative head-render, if any; ``True`` when handled (so the
+    """One queued speculative head-render, if any; ``True`` when handled (so the
     worker loops before the plain decode-warm queue: a render job is worth doing ahead of a cheap
     decode, but never outranks a real :class:`FinishItem` for the on-screen tooltip)."""
     try:
@@ -283,7 +283,7 @@ def _enqueue_lookahead(reader: Reader, gen: int, seen: set[str]) -> None:
 
 
 def _head_priority(tag: str) -> int | None:
-    """EXPERIMENTAL — lower sorts first; ``None`` means "not worth a render job at all," which is the
+    """Lower sorts first; ``None`` means "not worth a render job at all," which is the
     real RAM/CPU cap on this feature (selectivity, not just the queue's ``maxsize``). n+1/forgotten
     (the word the system already expects to be looked up) first, then rarer frequency bands; already-
     ``known`` words are excluded outright — see :class:`overlay.app.scoring.Scorer` for the tag
@@ -291,8 +291,8 @@ def _head_priority(tag: str) -> int | None:
 
     Known blind spot: a word absent from the frequency list entirely (arguably the RAREST case) tags
     ``'base'`` — identical to a word that's merely low-signal — so it's excluded here rather than
-    risking treating an ordinary word as high-priority. Good enough for a prototype; a real ranking
-    would read ``Scorer.freq.rank()`` directly instead of the coloring tag string."""
+    risking treating an ordinary word as high-priority. A finer ranking could read
+    ``Scorer.freq.rank()`` directly instead of the coloring tag string."""
     base = tag.split("/", 1)[0]
     if base in ("n+1", "forgotten"):
         return 0
@@ -322,7 +322,7 @@ def _head_prefetch_candidate(
 
 
 def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
-    """EXPERIMENTAL (prototype) — speculative HEAD render for a SELECTIVE subset of the next
+    """Speculative HEAD render for a SELECTIVE subset of the next
     ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
     render cost over plain decode-warming, in priority order, bounded by the queue's ``maxsize`` (the
     transient-RSS cap — panel_cache's LRU only bounds RETAINED size). Needs a scorer for the n+1/

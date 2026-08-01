@@ -98,7 +98,7 @@ class TooltipOptions:
         True  # freeze the frame the moment a tooltip opens — the mining default
     )
     annotation_mode: Literal["full", "hover"] = "full"
-    scan_delay: float = 0.25  # dwell before a nested scan popup opens
+    scan_delay: float = 1.0  # dwell before a nested scan popup opens
     hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
     hide_delay: float = 0.6  # seconds the tooltip lingers after the cursor leaves the word
     flash_secs: float = 0.22  # how long the "copied" highlight border pulses on a popup
@@ -106,9 +106,11 @@ class TooltipOptions:
         False  # sticky per-dictionary tab strip on the BASE tooltip (off default)
     )
     panel_cache_max: int = 128  # LRU cap on cached (zlib-compressed) rendered tooltip panels
-    banded: bool = False  # experimental: render the base tooltip via the windowed (banded) engine —
-    # O(viewport) compositing + hit-testing instead of slicing a whole-panel blob. Off default; the
-    # SAITENKA_BANDED=1 env var also enables it (env wins, for quick trials without editing overlay.toml)
+    banded: bool = (
+        True  # render the base tooltip via the windowed engine — O(viewport) compositing +
+    )
+    # hit-testing instead of slicing a whole-panel blob. On default; SAITENKA_BANDED=0 in the env forces
+    # the legacy blob path (env wins, for a quick A/B without editing overlay.toml).
 
 
 @dataclass(frozen=True)
@@ -161,15 +163,14 @@ class PerfOptions:
     # so the first hover after the line advances (or an Alt+→ nav) is already warm. Needs an external
     # sub index — embedded/jimaku tracks have none, so it's a no-op there.
 
-    # EXPERIMENTAL (prototype, off by default) — see vibe/hot-path-idle-spreading-plan.md Stage 4 and
-    # examples/bench_responsiveness.py --timeline --head-prefetch. Speculatively renders the SAME
-    # viewport-capped head a real hover would (via the same panel_for()/panel_cache path — a cache
-    # hit at hover time, no separate cache tier or key-matching logic needed), for a WORTHWHILE subset
-    # of upcoming words — n+1 / forgotten / rare-frequency-band, explicitly excluding already-known or
-    # already-mined words — instead of only decode-warming them. Selectivity IS the RAM/CPU cap: most
-    # upcoming words never get a render job at all, only the ones worth the extra cost over plain
-    # decode. Needs a sub index + a scorer (for the n+1/known/freq signal); a no-op without either.
-    head_prefetch_lookahead: int = 0  # upcoming cues to consider for head pre-render (0 = off);
+    # Speculatively renders the SAME viewport-capped head a real hover would (via the same
+    # panel_for()/panel_cache path — a cache hit at hover time, no separate cache tier or key-matching
+    # logic needed), for a WORTHWHILE subset of upcoming words — n+1 / forgotten / rare-frequency-band,
+    # explicitly excluding already-known or already-mined words — instead of only decode-warming them.
+    # Selectivity IS the RAM/CPU cap: most upcoming words never get a render job at all, only the ones
+    # worth the extra cost over plain decode. Needs a sub index + a scorer (for the n+1/known/freq
+    # signal); a no-op without either.
+    head_prefetch_lookahead: int = 1  # upcoming cues to consider for head pre-render (0 = off);
     # deliberately a SEPARATE, shallower knob than prefetch_lookahead — render jobs cost far more
     # than decode-only warm jobs, so this should stay shorter-range even when lookahead is generous
     head_prefetch_queue_max: int = (
