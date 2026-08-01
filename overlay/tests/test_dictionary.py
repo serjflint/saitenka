@@ -280,6 +280,45 @@ def test_card_for_uses_user_dictionary(tmp_path):
     assert card.glosses == ("to read", "to peruse")
 
 
+def test_card_for_prefers_contextual_reading_over_dict_order(tmp_path):
+    """退いた: both 退く entries are exact-headword hits, so the tie-break falls to the reading closest
+    to the token's contextual (surface) reading — のいた shares の with のく, picking it over the
+    first-listed しりぞく (which the old ``hits[0]`` rule would have mined)."""
+    d = _make_dict(
+        tmp_path / "nk.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    card = ds.card_for(tok)
+    assert card.reading == "のく"
+    assert card.glosses == ("to step aside",)
+
+
+def test_card_for_breaks_reading_tie_by_frequency(tmp_path):
+    """No entry's reading matches the (absent) context reading → the tie falls through to commonness:
+    the lower freq rank (おもて) wins over the first-listed ひょう."""
+    d = _make_dict(
+        tmp_path / "fq.zip",
+        "Multi",
+        [["表", "ひょう", ["table"]], ["表", "おもて", ["surface"]]],
+    )
+    freq = dicthelp.meta_zip(
+        tmp_path / "fr.zip",
+        "Freq",
+        "freq",
+        [
+            ["表", {"reading": "おもて", "frequency": 500}],
+            ["表", {"reading": "ひょう", "frequency": 9000}],
+        ],
+    )
+    ds = dicthelp.load_set([d], [freq])
+    tok = Token(surface="表", lemma="表", reading="", pos="名詞", start=0, end=1)
+    card = ds.card_for(tok)
+    assert card.reading == "おもて"
+
+
 def test_card_for_miss_returns_empty_glossary(tmp_path):
     """A word in no configured dict → expression-only card with empty glossary_html, so the miner
     can fall back to the JMdict/jamdict source."""
@@ -494,6 +533,27 @@ def test_freq_source_joins_multiple_entries(tmp_path):
     )
     fs = dicthelp.load_freqsource(p)
     assert fs.display(("本命",), "ほんめい") == "12813, 14117, 14086"
+
+
+def test_freq_source_rank_returns_min_numeric_rank(tmp_path):
+    # SUW+LUW give two entries for one term → the blend consumes the most-frequent (min) rank.
+    p = _make_meta(
+        tmp_path / "freqr.zip",
+        "FreqR",
+        "freq",
+        [
+            ["本命", {"reading": "ほんめい", "frequency": 14117}],
+            ["本命", {"reading": "ほんめい", "frequency": 12813}],
+        ],
+    )
+    fs = dicthelp.load_freqsource(p)
+    assert fs.rank(("本命", "本命", "ほんめい"), "ほんめい") == 12813
+
+
+def test_freq_source_rank_none_when_absent(tmp_path):
+    p = _make_meta(tmp_path / "freqr2.zip", "FreqR2", "freq", [["猫", {"frequency": 500}]])
+    fs = dicthelp.load_freqsource(p)
+    assert fs.rank(("存在しない語",), None) is None
 
 
 def test_pitch_source_reading_and_positions(tmp_path):

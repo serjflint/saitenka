@@ -209,6 +209,30 @@ class FreqSource:
             return self._dedup_preferring_reading(ents, reading)
         return None
 
+    def rank(self, forms, reading: str | None = None) -> int | None:
+        """Numeric rank for the first matching form (min across its entries) — the raw signal the
+        harmonic-blend pill consumes, parallel to :meth:`display` which formats it for the row. When
+        ``reading`` is given, entries whose reading matches it are preferred (so a multi-reading term
+        like 退く scores のく separately from しりぞく for the card tie-breaker), falling back to all
+        entries for the term when none match."""
+        conn = self.db._conn()
+        for f in forms:
+            if not f:
+                continue
+            rows = conn.execute(
+                "SELECT reading, rank FROM term_meta WHERE dict_id=? AND mode='freq' AND term=?",
+                (self.dict_id, f),
+            ).fetchall()
+            ranks = [
+                rk
+                for r, rk in rows
+                if rk is not None and rk > 0 and (reading is None or r is None or r == reading)
+            ]
+            use = ranks or [rk for _, rk in rows if rk is not None and rk > 0]
+            if use:
+                return min(use)
+        return None
+
 
 class PitchSource:
     """A pitch-accent dictionary → the ``reading [positions]`` label the tooltip shows, from the DB."""

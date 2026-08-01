@@ -105,6 +105,24 @@ def _to_glob(pattern: str) -> str:
     return pattern.replace("＊", "*").replace("？", "?")
 
 
+def _reading_affinity(dict_reading: str, ctx_reading: str) -> int:
+    """How well a dictionary headword reading matches the token's contextual (surface) reading, so a
+    multi-reading kanji picks the reading actually used. Exact match wins; otherwise the longest common
+    kana prefix — 退いた's surface reading のいた shares の with のく but nothing with しりぞく. Survives
+    inflection because the stem reading is a prefix of the conjugated surface reading for godan/ichidan
+    verbs (irregulars like する/来る carry a single reading, so there is nothing to disambiguate)."""
+    if not dict_reading or not ctx_reading:
+        return 0
+    if dict_reading == ctx_reading:
+        return len(dict_reading) + 1  # exact reading beats any prefix
+    n = 0
+    for a, b in zip(dict_reading, ctx_reading, strict=False):
+        if a != b:
+            break
+        n += 1
+    return n
+
+
 def _glosses_of(glossary: list) -> list[str]:
     """Every glossary item flattened to plain text (SC/HTML stripped, whitespace collapsed)."""
     from overlay.sc.walk import _text_of
@@ -433,23 +451,44 @@ class DictionarySet:
         nums = [int(n) for _, value in rows for n in re.findall(r"\d+", value)]
         return html, (str(min(nums)) if nums else "")
 
+    def _freq_rank(self, term: str, reading: str) -> int | None:
+        """Lowest (most-common) frequency rank across the freq sources for this ``(term, reading)`` —
+        the tie-breaker's commonness signal. ``None`` when no source ranks it."""
+        ranks = [r for fs in self.freqs if (r := fs.rank((term,), reading)) is not None]
+        return min(ranks) if ranks else None
+
+    def _best_hit(self, hits: list[DictEntry], token: Token, formset: set[str]) -> DictEntry:
+        """Pick the entry to mine among a dictionary's hits: exact-headword first (like Yomitan and
+        :meth:`Dictionary.lookup`), then the reading closest to the token's contextual reading (退いた
+        prefers のく over しりぞく), then the more common reading by frequency rank. ``min`` is stable, so
+        ties fall back to the dict's own order — the prior ``hits[0]`` behaviour."""
+        return min(
+            hits,
+            key=lambda h: (
+                h.term not in formset,
+                -_reading_affinity(h.reading, token.reading),
+                self._freq_rank(h.term, h.reading) or float("inf"),
+            ),
+        )
+
     def card_for(self, token: Token) -> CardData:
         """Mined-card fields (expression / reading / glossary) from the USER's dictionaries — the
-        dict-first mining path. Returns the first dictionary that has the word with a non-empty
-        glossary; otherwise an expression-only CardData (empty ``glossary_html``) so the caller can
-        fall back to the JMdict/jamdict source. No JMdict sequence id — Yomitan terms carry none."""
+        dict-first mining path. Returns the best entry (see :meth:`_best_hit`) of the first dictionary
+        that has the word with a non-empty glossary; otherwise an expression-only CardData (empty
+        ``glossary_html``) so the caller can fall back to the JMdict/jamdict source. No JMdict sequence
+        id — Yomitan terms carry none."""
         forms = (token.lemma, token.surface, token.reading)
+        formset = {f for f in forms if f}
         for d in self.dicts:
-            hits = d.lookup(*forms)
+            hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
             if not hits:
                 continue
-            glosses = _glosses_of(hits[0].glossary)
-            if not glosses:
-                continue
+            best = self._best_hit(hits, token, formset)
+            glosses = _glosses_of(best.glossary)
             glossary_html = "<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>"
             return CardData(
-                expression=hits[0].term or token.lemma or token.surface,
-                reading=hits[0].reading or token.reading,
+                expression=best.term or token.lemma or token.surface,
+                reading=best.reading or token.reading,
                 glossary_html=glossary_html,
                 glosses=tuple(glosses),
             )
