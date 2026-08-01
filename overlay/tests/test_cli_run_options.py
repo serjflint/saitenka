@@ -40,6 +40,7 @@ def test_run_options_read_hover_pause_key():
             "help_key": "Ctrl+h",
             "subtitle_retry_key": "Ctrl+r",
             "annotation_mode": "hover",
+            "stats": {"enabled": True, "summary": False},
         },
         **_BASE_KWARGS,
     )
@@ -52,6 +53,8 @@ def test_run_options_read_hover_pause_key():
     assert opts.keys.help_key == "Ctrl+h"
     assert opts.keys.subtitle_retry_key == "Ctrl+r"
     assert opts.tooltip.annotation_mode == "hover"
+    assert opts.stats.enabled is True
+    assert opts.stats.summary is False
 
 
 def test_attach_options_read_hover_pause_settings():
@@ -67,6 +70,7 @@ def test_attach_options_read_hover_pause_settings():
             "help_key": "Ctrl+h",
             "subtitle_retry_key": "Ctrl+r",
             "annotation_mode": "hover",
+            "stats": {"enabled": True, "summary": False},
         },
         mine={},
     )
@@ -80,3 +84,5 @@ def test_attach_options_read_hover_pause_settings():
     assert opts.keys.help_key == "Ctrl+h"
     assert opts.keys.subtitle_retry_key == "Ctrl+r"
     assert opts.tooltip.annotation_mode == "hover"
+    assert opts.stats.enabled is True
+    assert opts.stats.summary is False

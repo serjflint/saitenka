@@ -150,6 +150,13 @@ enabled = false
 # export_dir = "~/custom/telemetry"   # default: <cache dir>/telemetry
 # sample_hot_path = 0.0               # [0.0–1.0] fraction of per-tick hit-tests to instrument (0 = never)
 
+# ── [stats] Local immersion-session history — OFF by default ───────────────────────────────────
+# Independent of telemetry: snapshots are queued to a local SQLite writer thread.
+# `saitenka stats` shows recent sessions; an interrupted process leaves its row incomplete.
+# [stats]
+# enabled = true
+# summary = true                     # print the session summary on close
+
 # ── [dictdb] Per-connection SQLite tuning for the consolidated dictionary DB (advanced) ──────────
 # [dictdb]
 # mmap_size = 268435456      # 256 MiB mmap window per read connection

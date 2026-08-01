@@ -204,6 +204,8 @@ class Miner:
                 r._toast(f"can't add {card.expression}", "err")
                 return
             r.anki.add_note(note)
+            if r._session_recorder is not None:
+                r._session_recorder.record_mined()
             r._mark_mined(card.expression)
             from overlay.app import sidebar
 
@@ -257,6 +259,8 @@ class Miner:
                 else:
                     dup += 1
             r._toast(f"mined {mined} · {dup} dup", "ok" if mined else "warn")
+            if r._session_recorder is not None:
+                r._session_recorder.record_mined(mined)
         except AnkiError as e:
             r._toast(f"bulk failed: {e}", "err")
 

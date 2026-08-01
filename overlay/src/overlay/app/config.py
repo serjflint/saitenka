@@ -128,6 +128,14 @@ class TranslationOptions:
 
 
 @dataclass(frozen=True)
+class StatsOptions:
+    """Local immersion history; explicit opt-in and independent of telemetry."""
+
+    enabled: bool = False
+    summary: bool = True
+
+
+@dataclass(frozen=True)
 class PerfOptions:
     """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
 
@@ -180,6 +188,7 @@ class ReaderOptions:
     tooltip: TooltipOptions = TooltipOptions()
     mining: MiningOptions = MiningOptions()
     translation: TranslationOptions = TranslationOptions()
+    stats: StatsOptions = StatsOptions()
     perf: PerfOptions = PerfOptions()
     prefetch: bool = True
     resync: bool = True  # auto-resync jimaku-sourced subs via alass/ffsubsync
@@ -189,7 +198,7 @@ class ReaderOptions:
         """Route flat legacy kwargs (``mine_key=…``, ``tip_max_frac=…``) onto the right group.
         Unknown names raise TypeError so typos stay loud."""
         keys, tooltip = self.keys, self.tooltip
-        mining, translation = self.mining, self.translation
+        mining, translation, stats = self.mining, self.translation, self.stats
         perf = self.perf
         prefetch, resync, overlay_id_base = self.prefetch, self.resync, self.overlay_id_base
         for name, value in kw.items():
@@ -218,6 +227,7 @@ class ReaderOptions:
             mining=mining,
             perf=perf,
             translation=translation,
+            stats=stats,
             prefetch=prefetch,
             resync=resync,
             overlay_id_base=overlay_id_base,

@@ -192,6 +192,8 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
     reader.hover = 0
     store = BacklogStore(tmp_path / "reader.sqlite", clock=lambda: 10.0)
     reader._backlog_store = store
+    captures = []
+    reader._session_recorder = SimpleNamespace(record_capture=lambda: captures.append(True))
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
 
     reader.toggle_bookmark()
@@ -219,8 +221,12 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(tmp_path, 
         "secondary_sid": 4,
     }
     assert (entry.hovered_surface, entry.hovered_lemma) == ("日本", "日本")
+    assert captures == [True]
+    reader.toggle_bookmark()
+    assert captures == [True]
     forbidden = {"seek", "sub-seek", "set_property", "screenshot-to-file"}
     assert not any(command[0] in forbidden for command in ipc.commands)
+    reader._session_recorder = None
     reader.close()
 
 

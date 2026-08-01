@@ -342,11 +342,14 @@ def _build_run_options(
         MiningOptions,
         PerfOptions,
         ReaderOptions,
+        StatsOptions,
         TooltipOptions,
         TranslationOptions,
     )
 
     _ko, _tt, _mo, _po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
+    raw_stats = cfg.get("stats")
+    stats: dict = raw_stats if isinstance(raw_stats, dict) else {}
     return ReaderOptions(
         keys=KeyOptions(
             mine_key=mine_key,
@@ -386,6 +389,10 @@ def _build_run_options(
             anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
         ),
         translation=TranslationOptions(auto_translate=auto_translate),
+        stats=StatsOptions(
+            enabled=bool(stats.get("enabled", False)),
+            summary=bool(stats.get("summary", True)),
+        ),
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),

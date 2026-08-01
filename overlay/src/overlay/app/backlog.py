@@ -340,7 +340,7 @@ class BacklogStore:
         self._con.commit()
         return self.media(media_id)
 
-    def toggle_capture(self, capture: Capture) -> BacklogEntry:
+    def toggle_capture_result(self, capture: Capture) -> tuple[BacklogEntry, bool]:
         media = self.ensure_media(capture.video_path)
         row = self._con.execute(
             """
@@ -359,7 +359,7 @@ class BacklogStore:
         if row is not None:
             status: Status = "archived" if row["status"] == "open" else "open"
             self._set_status(row["id"], status, now)
-            return self.entry(row["id"])
+            return self.entry(row["id"]), False
         cur = self._con.execute(
             """
             INSERT INTO entry (
@@ -387,7 +387,11 @@ class BacklogStore:
             (entry_id, now),
         )
         self._con.commit()
-        return self.entry(entry_id)
+        return self.entry(entry_id), True
+
+    def toggle_capture(self, capture: Capture) -> BacklogEntry:
+        entry, _created = self.toggle_capture_result(capture)
+        return entry
 
     def _set_status(self, entry_id: int, status: Status, now: float) -> None:
         if status not in STATUSES:
@@ -482,10 +486,12 @@ def capture_current(reader) -> BacklogEntry | None:
     try:
         if reader._backlog_store is None:
             reader._backlog_store = BacklogStore()
-        entry = reader._backlog_store.toggle_capture(capture)
+        entry, created = reader._backlog_store.toggle_capture_result(capture)
     except (OSError, sqlite3.Error, ValueError) as exc:
         reader._toast(f"bookmark failed: {exc}", "err")
         return None
     state = "saved" if entry.status == "open" else entry.status
+    if created and reader._session_recorder is not None:
+        reader._session_recorder.record_capture()
     reader._toast(f"bookmark {state}")
     return entry
