@@ -128,9 +128,78 @@ def test_legacy_files_check_warns_when_present(monkeypatch, tmp_path):
 
 
 def test_anki_check_reachable(monkeypatch):
-    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: 6 if action == "version" else [])
+    replies = {"version": 6, "deckNames": ["Saitenka::Mining"], "modelNames": ["Lapis"]}
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
     c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
-    assert c.status in ("ok", "warn")
+    assert c.status == "ok"
+
+
+def test_anki_check_missing_note_type_fails(monkeypatch):
+    # the note type can't be auto-created, so a configured-but-absent one is an error, not a warning
+    replies = {"version": 6, "deckNames": ["Saitenka::Mining"], "modelNames": ["Basic"]}
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
+    assert c.status == "fail"
+    assert "Lapis" in c.detail
+
+
+def test_anki_check_missing_deck_only_warns(monkeypatch):
+    # a deck IS auto-created on the first mine, so its absence is a heads-up, not an error
+    replies = {"version": 6, "deckNames": [], "modelNames": ["Lapis"]}
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
+    assert c.status == "warn"
+
+
+def _patch_known(monkeypatch, cfg, anki):
+    monkeypatch.setattr(doc, "load_config", lambda: cfg)
+    monkeypatch.setattr(doc, "_anki_call", anki)
+
+
+def test_known_check_ok_when_unconfigured(monkeypatch):
+    _patch_known(monkeypatch, {}, lambda *_a, **_k: [])
+    assert doc.check_known().status == "ok"
+
+
+def test_known_check_fails_when_deck_missing(monkeypatch):
+    _patch_known(monkeypatch, {"known": {"Ghost": ["Front"]}}, lambda *_a, **_k: ["Real"])
+    c = doc.check_known()
+    assert c.status == "fail"
+    assert "Ghost" in c.detail
+
+
+def test_known_check_fails_when_field_missing(monkeypatch):
+    def anki(action, **_kw):
+        return {
+            "deckNames": ["JP"],
+            "findNotes": [1],
+            "notesInfo": [{"fields": {"Word": {"value": "食べる"}}}],
+        }.get(action, [])
+
+    _patch_known(monkeypatch, {"known": {"JP": ["Expression"]}}, anki)
+    c = doc.check_known()
+    assert c.status == "fail"
+    assert "Expression" in c.detail and "Word" in c.detail
+
+
+def test_known_check_ok_when_deck_and_field_present(monkeypatch):
+    def anki(action, **_kw):
+        return {
+            "deckNames": ["JP"],
+            "findNotes": [1],
+            "notesInfo": [{"fields": {"Word": {"value": "食べる"}}}],
+        }.get(action, [])
+
+    _patch_known(monkeypatch, {"known": {"JP": ["Word"]}}, anki)
+    assert doc.check_known().status == "ok"
+
+
+def test_known_check_warns_when_anki_unreachable(monkeypatch):
+    def boom(_action, **_kw):
+        raise OSError("connection refused")
+
+    _patch_known(monkeypatch, {"known": {"JP": ["Word"]}}, boom)
+    assert doc.check_known().status == "warn"
 
 
 def test_anki_check_unreachable(monkeypatch):

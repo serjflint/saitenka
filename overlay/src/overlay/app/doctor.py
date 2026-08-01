@@ -336,13 +336,56 @@ def check_anki(deck: str, model: str) -> Check:
     try:
         decks = _anki_call("deckNames") or []
         models = _anki_call("modelNames") or []
-        if deck not in decks:
-            return Check("anki", "warn", f"{detail}, but mine deck {deck!r} not found")
-        if model not in models:
-            return Check("anki", "warn", f"{detail}, but note type {model!r} not found")
     except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
         return Check("anki", "warn", f"{detail}, but couldn't list decks/models")
-    return Check("anki", "ok", f"{detail}; deck+model present")
+    if model not in models:  # a note type can't be auto-created — mining truly can't run without it
+        return Check("anki", "fail", f"{detail}, but mining note type {model!r} doesn't exist")
+    if deck not in decks:  # a deck IS auto-created on the first addNote, so this is only a heads-up
+        return Check(
+            "anki",
+            "warn",
+            f"{detail}, but mining deck {deck!r} doesn't exist yet (created on first mine)",
+        )
+    return Check("anki", "ok", f"{detail}; mining deck+note type present")
+
+
+def _known_deck_fields(deck: str) -> set[str] | None:
+    """Field names on the first note of ``deck``, or ``None`` when the deck is empty / unreadable — so
+    the caller can confirm the deck exists yet skip field validation it can't perform."""
+    ids = _anki_call("findNotes", query=f'deck:"{deck}"') or []
+    if not ids:
+        return None
+    info = _anki_call("notesInfo", notes=ids[:1]) or []
+    return set(info[0].get("fields", {})) if info else None
+
+
+def check_known() -> Check:
+    """Validate the ``[known]`` coloring config against Anki: every configured deck exists and its chosen
+    field(s) exist on the deck's note type. A deck/field that isn't there means coloring silently sees an
+    empty known set, so it's an error the user should fix (or re-run ``setup``), not a silent no-op."""
+    known = load_config().get("known") or {}
+    if not known:
+        return Check("known", "ok", "no known-words deck configured (coloring by freq+JLPT)")
+    try:
+        decks = set(_anki_call("deckNames") or [])
+    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
+        return Check("known", "warn", "AnkiConnect unreachable — can't verify [known] deck/fields")
+    problems: list[str] = []
+    for deck, fields in known.items():
+        if deck not in decks:
+            problems.append(f"deck {deck!r} not found")
+            continue
+        note_fields = _known_deck_fields(deck)
+        if note_fields is None:  # empty/unreadable deck — the deck exists, fields can't be checked
+            continue
+        missing = [f for f in (fields or []) if f not in note_fields]
+        if missing:
+            problems.append(f"{deck!r} has no field(s) {missing} (has {sorted(note_fields)})")
+    if problems:
+        return Check(
+            "known", "fail", "known-words config doesn't match Anki: " + "; ".join(problems)
+        )
+    return Check("known", "ok", f"[known] deck(s)+field(s) present ({len(known)})")
 
 
 def check_python() -> Check:
@@ -707,6 +750,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_tts(),
         check_deinflect(),
         check_anki(deck, model),
+        check_known(),
         check_mpv_ipc(),
         check_mpv_socket(),
         check_plugin(),

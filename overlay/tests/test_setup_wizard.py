@@ -201,3 +201,22 @@ def test_default_known_deck_prefers_saitenka_known_then_largest():
     # nothing qualifies → '' so the caller offers skip
     assert d(["Default"], {"Default": 5}) == ""
     assert d(["Empty"], {"Empty": 0}) == ""
+
+
+def test_intersect_default_only_keeps_available():
+    from overlay.app.setup_wizard import intersect_default as pick
+
+    assert pick("Lapis", ["Lapis", "Basic"]) == "Lapis"  # preferred exists → kept
+    assert pick("Lapis", ["Basic", "Cloze"]) == "Basic"  # absent → first real note type
+    assert pick("Lapis", []) == ""  # nothing installed → no default
+
+
+def test_default_known_deck_prefers_mining_deck_over_largest():
+    from overlay.app.setup_wizard import default_known_deck as d
+
+    # a single-deck user's mining deck becomes the known default, even when a bigger deck exists
+    assert d(["Mine", "Big"], {"Mine": 3, "Big": 999}, prefer="Mine") == "Mine"
+    # a real ::Known deck still wins over the mining deck
+    assert d(["Mine", "JP::Known"], {"Mine": 3, "JP::Known": 1}, prefer="Mine") == "JP::Known"
+    # prefer that isn't an actual deck is ignored → falls through to the largest
+    assert d(["Big", "Small"], {"Big": 9, "Small": 1}, prefer="Ghost") == "Big"

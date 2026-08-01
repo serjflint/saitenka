@@ -281,15 +281,27 @@ def rank_decks(decks: list[str], sizes: dict[str, int]) -> list[str]:
     return sorted(decks, key=lambda d: (-sizes.get(d, 0), d))
 
 
-def default_known_deck(decks: list[str], sizes: dict[str, int]) -> str:
+def intersect_default(preferred: str, available: list[str]) -> str:
+    """The default to propose for a choice: ``preferred`` only when it's actually in Anki's
+    ``available`` list, else the first available name (or ``''`` when nothing is). Stops the wizard from
+    defaulting to a note type/deck that doesn't exist on this machine (e.g. the hardcoded ``Lapis``)."""
+    if preferred in available:
+        return preferred
+    return available[0] if available else ""
+
+
+def default_known_deck(decks: list[str], sizes: dict[str, int], prefer: str = "") -> str:
     """A sensible default 'words I already know' deck: prefer Saitenka's own ``Saitenka::Known`` (or any
-    ``…::Known`` leaf) if present — that's the config convention — else the largest deck that isn't
-    empty or the built-in ``Default``. ``''`` when nothing qualifies, so the caller offers skip."""
+    ``…::Known`` leaf) if present — that's the config convention — then ``prefer`` (the mining deck, so a
+    single-deck user reuses it for coloring), else the largest deck that isn't empty or the built-in
+    ``Default``. ``''`` when nothing qualifies, so the caller offers skip."""
     if "Saitenka::Known" in decks:
         return "Saitenka::Known"
     known_leaf = next((d for d in rank_decks(decks, sizes) if d.rsplit("::", 1)[-1] == "Known"), "")
     if known_leaf:
         return known_leaf
+    if prefer and prefer in decks:
+        return prefer
     for d in rank_decks(decks, sizes):
         if sizes.get(d, 0) > 0 and d.lower() != "default":
             return d
@@ -322,7 +334,6 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
 
     sizes = _deck_sizes(anki)
     ranked = rank_decks(decks, sizes)
-    default_known = default_known_deck(decks, sizes)
     top = ranked[:12]  # don't dump 50+ decks; show the biggest, accept any typed name below
     print("\n  Decks (largest first):")
     for i, d in enumerate(top, 1):
@@ -333,11 +344,23 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
 
     cfg = load_config()
     cur = dict(cfg.get("mine") or {})
+    # Ask the mining deck/model FIRST: most users have one mining deck, so it's the natural default for
+    # the known-words deck below (a single-deck user reuses it for coloring instead of picking twice).
+    mine_deck = _prompt(
+        f"  Mining deck [{cur.get('deck', 'Saitenka::Mining')}]?", decks
+    ) or cur.get("deck", "Saitenka::Mining")
+    # The note type MUST already exist in Anki (unlike the deck, which is created on first mine), so
+    # only default to Lapis / the configured model when it's really installed — else the first model.
+    model_default = intersect_default(cur.get("model", "Lapis"), models)
+    mine_model = (
+        _prompt(f"  Mining note type [{model_default or '(none)'}]?", models) or model_default
+    )
+    default_known = default_known_deck(decks, sizes, prefer=mine_deck)
     raw_known = _prompt(
         f"  Deck of words you already KNOW → coloring [{default_known or 'none'}]; 'n' to skip?",
         top,
     )
-    # 'n'/skip → no known deck; blank → the default (Saitenka::Known or largest); else the typed name.
+    # 'n'/skip → no known deck; blank → the default (Saitenka::Known or the mining deck); else typed.
     skip = raw_known.lower() in ("n", "no", "skip", "-")
     known_deck = "" if skip else (raw_known or default_known)
     known_field = ""
@@ -348,12 +371,6 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
             _prompt(f"    Field with the word {fields or '(none read)'} [{default_field}]?", fields)
             or default_field
         )
-    mine_deck = _prompt(
-        f"  Mining deck [{cur.get('deck', 'Saitenka::Mining')}]?", decks
-    ) or cur.get("deck", "Saitenka::Mining")
-    mine_model = _prompt(f"  Mining note type [{cur.get('model', 'Lapis')}]?", models) or cur.get(
-        "model", "Lapis"
-    )
 
     frag = anki_config_fragment(known_deck, known_field, mine_deck, mine_model, existing_mine=cur)
     write_config({**cfg, **frag}, confirm=lambda _p: True)

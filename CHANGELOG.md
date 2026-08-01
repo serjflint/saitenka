@@ -26,6 +26,14 @@ logs.
 - **Better default reading for the mined card.** When a headword has several readings, the auto-picked
   entry now prefers the one matching the reading actually used in the line (退いた → のく, not しりぞく),
   then the more common reading by frequency — instead of always taking the first dictionary entry.
+- **Setup asks for the mining deck first, then defaults the known-words deck to it.** Most users mine
+  into a single deck, so that deck is now the natural default for coloring — no need to pick a deck
+  twice. The mining note-type default is also intersected with the note types actually installed, so
+  setup never proposes a `Lapis` (or any) note type that isn't in your Anki.
+- **`doctor` verifies your Anki config against Anki.** It now fails (not just warns) when the mining
+  note type doesn't exist — it can't be auto-created — and adds a `known` check that errors when a
+  configured `[known]` deck is missing or its chosen field isn't on that deck's note type, instead of
+  coloring silently seeing nothing. A missing mining *deck* stays a heads-up (it's created on first mine).
 
 ## [1.1.0] - 2026-08-01
 
