@@ -79,6 +79,10 @@ Backquote opens a playback-neutral whole-track analysis with sentence/content-to
 lemmas and kanji, unknown vocabulary, known coverage, N+1/N+2 counts, and optional JLPT/frequency
 distributions. Analysis runs in the background and is cached for the subtitle and vocabulary snapshot.
 
+Optional local session history records watch time, cues, lookups, deferred captures, cards mined,
+and subtitle-language usage without telemetry. Enable `[stats]` in `overlay.toml`; `saitenka stats`
+shows recent complete and interrupted sessions. Stored difficulty snapshots reuse the analysis above.
+
 ```bash
 uv run python examples/mpv_reader.py --sub-file jp.srt --color \
   --known "私,本,経" --freq "Frequency General"

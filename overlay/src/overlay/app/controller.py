@@ -26,6 +26,7 @@ from overlay.app import (
     nested_popup,
     prefetch,
     reader_deps,
+    session_stats,
     sidebar,
     subnav,
     subtitle_modes,
@@ -90,6 +91,7 @@ if TYPE_CHECKING:
 
     from overlay.app.card_preview import PreviewData
     from overlay.app.episode_analysis import AnalysisKey, EpisodeAnalysis
+    from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
@@ -267,6 +269,7 @@ class Reader:
         self._analysis_threads: list[threading.Thread] = []
         self._analysis_generation = 0
         self._analysis_active_key: AnalysisKey | None = None
+        self._session_recorder: SessionRecorder | None = None
         self._help_open = False
         self._help_page = 0
         self._last_jpg: Path | None = None
@@ -491,6 +494,15 @@ class Reader:
             self.ov.hide(SUB_ID)
             self.ov.hide(TIP_ID)
             return
+        if self._session_recorder is not None:
+            self._session_recorder.record_cue(
+                (
+                    self.subtitle_language,
+                    self._prop("sub-start"),
+                    self._prop("sub-end"),
+                    text,
+                )
+            )
         if self.subtitle_language == "en":
             self.lines, self.tokens, self.styles = [], [], None
             self._draw_subtitle()
@@ -1028,6 +1040,7 @@ class Reader:
         try:
             self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
+            session_stats.tick(self)
             self._flush_paused_nudge()
             ops_before = self.ov.ops
             scroll_steps = self._drain_events()
@@ -1204,6 +1217,7 @@ class Reader:
         self._register_keybinds()
         self._seed_mined()
         self.start_prefetch()
+        session_stats.start(self)
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
         # In run/attach the deps (and thus prefetch workers) load ASYNC — dict_set is still None here,
         # so start_prefetch above was a no-op and the worker count is 0. Defer the banner to when
@@ -1227,6 +1241,9 @@ class Reader:
             th.join(timeout=2.0)
         for th in self._analysis_threads:
             th.join(timeout=2.0)
+        stats_summary = session_stats.finish(self)
+        if stats_summary and self.options.stats.summary:
+            print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # requested close summary
         if self._backlog_store is not None:
             self._backlog_store.close()
         self.ov.close()

@@ -17,12 +17,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import sysconfig
 import threading
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -424,6 +425,30 @@ def telemetry(
         print(
             "  (the 'telemetry' extra stays installed — uninstall separately if you want it gone)"
         )
+    return 0
+
+
+@app.command
+def stats(
+    limit: Annotated[int, cyclopts.Parameter(help="number of recent sessions to show")] = 20,
+) -> int:
+    """Show local immersion-session history."""
+    from overlay.app.session_stats import SessionStore, summary
+
+    try:
+        store = SessionStore()
+        rows = store.recent(limit)
+        store.close()
+    except (OSError, sqlite3.Error) as exc:
+        print(f"session history unavailable: {exc}", file=sys.stderr)
+        return 1
+    if not rows:
+        print("No immersion sessions recorded. Enable [stats] in overlay.toml to start recording.")
+        return 0
+    for row in rows:
+        stamp = datetime.fromtimestamp(row.started_at, UTC).astimezone().strftime("%Y-%m-%d %H:%M")
+        state = "complete" if row.completed else "incomplete"
+        print(f"{stamp}  {row.media_name or '(unknown media)'}  [{state}]  {summary(row)}")
     return 0
 
 
@@ -836,11 +861,14 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         MiningOptions,
         PerfOptions,
         ReaderOptions,
+        StatsOptions,
         TooltipOptions,
         TranslationOptions,
     )
 
     ko, tt, mo, po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
+    raw_stats = cfg.get("stats")
+    stats: dict = raw_stats if isinstance(raw_stats, dict) else {}
     return ReaderOptions(
         keys=KeyOptions(
             mine_key=mine.get("key", ko.mine_key),
@@ -878,6 +906,10 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             anki_ping_timeout=cfg.get("anki_ping_timeout", mo.anki_ping_timeout),
         ),
         translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
+        stats=StatsOptions(
+            enabled=bool(stats.get("enabled", False)),
+            summary=bool(stats.get("summary", True)),
+        ),
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", po.prefetch_workers),

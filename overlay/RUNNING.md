@@ -221,6 +221,13 @@ Logs: the overlay writes a rotating **JSON-lines** debug log to `~/.cache/saiten
 hole. Each line is a redacted JSON object (`{"event": "...", "level": "...", "timestamp": "..."}`),
 so it's `jq`-able; `doctor`'s "recent errors" section and `report`'s bundle both read it as-is.
 
+### Session history (optional, off by default)
+
+Enable `[stats] enabled = true` to persist local immersion sessions independently of telemetry.
+Writes run on a dedicated SQLite thread; controlled close prints a summary, while a hard interruption
+leaves an incomplete row. `saitenka stats` lists recent sessions. Static difficulty comes only from
+the shared episode analysis result.
+
 ### Telemetry (optional, off by default)
 
 Runtime tracing/metrics via OpenTelemetry — **not installed or enabled unless you opt in**. Two

@@ -198,6 +198,8 @@ def set_hover(reader: Reader, index: int) -> None:
         reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
         return
     show_tooltip(reader, index)
+    if reader._session_recorder is not None:
+        reader._session_recorder.record_lookup()
     reader._sync_auto_translation()  # hovering a word → auto-reveal the translation
 
 
