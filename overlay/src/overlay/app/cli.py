@@ -719,6 +719,79 @@ def uninstall_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin 
     return 0
 
 
+def _spawn_handoff(
+    script: str,
+) -> None:  # pragma: no cover — Windows-only detached spawn side effect
+    """Write the handoff ``.cmd`` to a temp file and launch it fully detached in its own console, then
+    return so ``main`` can exit and release the venv lock. ``CREATE_NEW_CONSOLE`` (not
+    ``DETACHED_PROCESS`` — mutually exclusive) gives the user a visible progress window;
+    ``close_fds`` keeps the child from inheriting handles that would re-lock the venv."""
+    import os
+    import subprocess
+    import tempfile
+
+    path = Path(tempfile.gettempdir()) / f"saitenka-update-{os.getpid()}.cmd"
+    with path.open("w", encoding="ascii", newline="") as f:
+        f.write(script)
+    if sys.platform == "win32":  # guard so basedpyright sees the win32-only creationflags
+        flags = subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(["cmd", "/c", path], creationflags=flags, close_fds=True)
+
+
+def _dispatch_install(attempts: list[list[str]], *, now: bool, label: str) -> int:
+    """Run one of ``attempts`` (first that succeeds). POSIX has no exe lock → run in place. Windows
+    can't replace a running uv-tool venv, so default to print-and-exit (the user runs it in a fresh
+    shell); ``--now`` hands off to a detached updater that waits for THIS process to exit first."""
+    import subprocess
+
+    if sys.platform == "win32":  # a running uv-tool process can't delete its own locked venv
+        from overlay.app.lifecycle import handoff_script, resolve_uv
+
+        if not now:
+            print(f"Windows can't {label} saitenka while it's running. Run this in a fresh shell:")
+            for cmd in attempts:
+                print("   ", " ".join(cmd))
+            print(
+                f"(or re-run `saitenka {label} --now` to hand off to a background updater window)"
+            )
+            return 0
+        import os
+
+        resolved = [[resolve_uv(), *cmd[1:]] for cmd in attempts]
+        _spawn_handoff(handoff_script(resolved, os.getpid()))
+        print(f"{label} handed off to a background window; this process will now exit.")
+        sys.exit(0)
+    rc = 1  # POSIX: no exe lock — run in place, trying each attempt until one succeeds
+    for i, cmd in enumerate(attempts):
+        print("  $", " ".join(cmd))
+        rc = subprocess.run(cmd, check=False).returncode
+        if rc == 0:
+            return 0
+        if i + 1 < len(attempts):
+            print(f"  that source failed (exit {rc}) — trying the next…")
+    return rc
+
+
+@app.command
+def update(
+    *,
+    now: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative=(),
+            help="on Windows, hand off to a detached updater instead of printing the cmd",
+        ),
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; _dispatch_install/update_command are unit-tested
+    """Update saitenka to the latest, keeping your extras (wraps ``uv tool upgrade``, which preserves
+    the recorded extras/constraints). On Windows a running tool can't replace its own venv, so this
+    prints the command to run in a fresh shell; ``--now`` hands off to a detached updater that waits
+    for this process to exit. To CHANGE extras or install from GitHub, use ``reinstall`` instead."""
+    from overlay.app.lifecycle import update_command
+
+    return _dispatch_install([update_command()], now=now, label="update")
+
+
 @app.command
 def reinstall(
     *,
@@ -733,17 +806,23 @@ def reinstall(
             "Default: the latest RELEASE tag, falling back to main"
         ),
     ] = None,
+    now: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative=(),
+            help="on Windows, hand off to a detached updater instead of printing the cmd",
+        ),
+    ] = False,
     yes: Annotated[
         bool, cyclopts.Parameter(negative=(), help="don't prompt; just run the reinstall")
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; detect_extras/reinstall_attempts are unit-tested
-    """Reinstall (pull the latest) preserving your extras. A bare ``uv tool install --reinstall``
-    *replaces* the extras set (silently dropping deinflect/telemetry); this detects what's installed
-    and keeps it. From PyPI, falling back to GitHub (which also carries the GPL deinflect add-on). The
-    GitHub attempt targets the latest RELEASE tag by default — not bleeding-edge main; pass ``--ref
-    main`` for that, or ``--ref vX.Y.Z`` to pin a release."""
-    import subprocess
-
+    """Reinstall to CHANGE your extras or source, preserving what's installed. A bare ``uv tool install
+    --reinstall`` *replaces* the extras set (silently dropping deinflect/telemetry); this detects
+    what's installed and keeps it. From PyPI, falling back to GitHub (which also carries the GPL
+    deinflect add-on). The GitHub attempt targets the latest RELEASE tag by default — not bleeding-edge
+    main; pass ``--ref main`` for that, or ``--ref vX.Y.Z`` to pin a release. For a plain "get the
+    latest" with no extras change, prefer ``update``."""
     from overlay.app.lifecycle import detect_extras, latest_release_tag, reinstall_attempts
 
     extras = detect_extras()
@@ -761,15 +840,7 @@ def reinstall(
     ).strip().lower() not in ("y", "yes"):
         print("cancelled")
         return 1
-    rc = 1
-    for i, cmd in enumerate(attempts):
-        print("  $", " ".join(cmd))
-        rc = subprocess.run(cmd, check=False).returncode
-        if rc == 0:
-            return 0
-        if i + 1 < len(attempts):
-            print(f"  that source failed (exit {rc}) — trying the next…")
-    return rc
+    return _dispatch_install(attempts, now=now, label="reinstall")
 
 
 @app.command
@@ -1184,9 +1255,15 @@ def main() -> None:  # pragma: no cover — live-run entry point
         # clean exit, not a traceback. 130 = 128 + SIGINT, the shell convention.
         sys.exit(130)
     finally:
-        from overlay.app.telemetry import shutdown as shutdown_telemetry
-
-        shutdown_telemetry()  # flush + tear down providers; a no-op if never configured
+        # Guard the import: a reinstall can swap site-packages out from under a live process, and this
+        # runs at EVERY exit — an unguarded ImportError here would mask the real exit code/exception
+        # with a confusing traceback. shutdown() is already a no-op if telemetry was never configured.
+        try:
+            from overlay.app.telemetry import shutdown as shutdown_telemetry
+        except ImportError:
+            pass
+        else:
+            shutdown_telemetry()  # flush + tear down providers
 
 
 if __name__ == "__main__":

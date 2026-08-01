@@ -7,6 +7,21 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`saitenka update`** pulls the latest release while keeping your extras (wraps `uv tool upgrade`).
+  Because a running tool on Windows cannot replace its own files, it prints the command to run in a
+  fresh shell by default; `--now` hands off to a detached updater window that waits for the process to
+  exit first. `reinstall` gained the same `--now` handoff and is now scoped to *changing* extras or
+  install source.
+
+### Fixed
+
+- **`reinstall` no longer crashes with a confusing traceback on Windows.** A self-replacing reinstall
+  could not delete the running tool's own files and left the process importing an already-swapped
+  module at exit; updates now run from a detached helper after the process exits, and telemetry
+  shutdown no longer masks the real exit when its module is unavailable.
+
 ## [1.0.0] - 2026-08-01
 
 ### Added
