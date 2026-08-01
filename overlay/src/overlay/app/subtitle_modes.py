@@ -68,6 +68,14 @@ class SubtitleStartup:
     active: Language | None
 
 
+@dataclass(frozen=True)
+class SubtitleFetchResult:
+    path: Path | None
+    status: str
+    select_if_unchanged: bool
+    initial_sid: int | str | None
+
+
 def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
     tracks = sub_tracks(ipc)
     wants = [part.strip().lower() for part in slang.split(",") if part.strip()]
@@ -215,19 +223,31 @@ def start_fetch(
     fetch: ProviderFetch,
     *,
     name: str = "sub-provider",
+    select_if_unchanged: bool = False,
     on_done: Callable[[], None] | None = None,
 ) -> None:
     """Run provider I/O off-thread; mpv IPC stays on the reader thread."""
+    initial_sid = reader._get("sid") if select_if_unchanged else None
 
     def work() -> None:
         try:
             try:
-                reader._subtitle_results.put(fetch())
+                path, status = fetch()
+                reader._subtitle_results.put(
+                    SubtitleFetchResult(path, status, select_if_unchanged, initial_sid)
+                )
             except (
                 Exception
             ) as exc:  # provider failures are soft; surfaced through the normal toast path
                 log.warning("background subtitle fetch failed", exc_info=True)
-                reader._subtitle_results.put((None, f"Japanese subtitle fetch failed: {exc}"))
+                reader._subtitle_results.put(
+                    SubtitleFetchResult(
+                        None,
+                        f"Japanese subtitle fetch failed: {exc}",
+                        select_if_unchanged,
+                        initial_sid,
+                    )
+                )
         finally:
             if on_done is not None:
                 on_done()
@@ -274,19 +294,43 @@ def retry(reader: Reader) -> None:
 def apply_fetch_results(reader: Reader) -> None:
     while True:
         try:
-            path, status = reader._subtitle_results.get_nowait()
+            result = reader._subtitle_results.get_nowait()
         except queue.Empty:
             return
+        path, status = result.path, result.status
         if path is None:
             log.warning("%s", status)
             reader._toast(status, "warn")
             continue
-        retained_sid = reader.en_sid if reader.subtitle_language == "en" else reader.jp_sid
+        current_sid = reader._get("sid")
+        had_japanese = reader.jp_sid is not None
         reader.ipc.command("sub-add", str(path), "auto", "", "jpn")
-        reader.ipc.command(
-            "set_property", "sid", retained_sid if retained_sid is not None else "no"
-        )
         tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
         reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-        reader._toast("Japanese subtitles ready — Alt+t to switch")
+        select_japanese = (
+            result.select_if_unchanged
+            and not had_japanese
+            and current_sid == result.initial_sid
+            and reader.jp_sid is not None
+        )
+        if not select_japanese:
+            reader.ipc.command(
+                "set_property", "sid", current_sid if current_sid is not None else "no"
+            )
+            reader._toast("Japanese subtitles ready — Alt+t to switch")
+            log.info("%s", status)
+            continue
+
+        reader.ipc.command("set_property", "secondary-sid", "no")
+        reader._translation_secondary_sid = None
+        reader.ipc.command("set_property", "sid", reader.jp_sid)
+        reader.subtitle_language = "jp"
+        reader._sub_index = None
+        reader.set_subtitle("")
+        if reader._translation_visible():
+            setup_secondary(reader)
+        from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+        build_sub_index_for_current_track(reader)
+        reader._toast("Japanese subtitles ready")
         log.info("%s", status)

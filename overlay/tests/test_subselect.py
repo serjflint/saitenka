@@ -117,6 +117,53 @@ def test_tsukihime_provider_error_returns_soft_status(tmp_path, monkeypatch):
     assert status == "tsukihime failed: malformed detail"
 
 
+def test_tsukihime_fetch_reuses_shared_cache(tmp_path, monkeypatch):
+    import overlay.app.subtitle_cache as cache
+    import overlay.app.tsukihime as th
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+    cached = cache.store_subs(video, "Show", 1, downloaded, resync=True)
+    monkeypatch.setattr(
+        th,
+        "TsukiHimeClient",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("network fetch")),
+    )
+
+    path, status = subselect.fetch_tsukihime_path(str(video), resync=True)
+
+    assert path == cached
+    assert status == f"subtitle cache: using {cached.name} for 'Show' ep 1"
+
+
+def test_tsukihime_fetch_stores_finished_subtitle(tmp_path, monkeypatch):
+    import overlay.app.subtitle_cache as cache
+    import overlay.app.tsukihime as th
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fetch(self, _title, _episode, _destination):
+            return downloaded
+
+    monkeypatch.setattr(th, "TsukiHimeClient", FakeClient)
+
+    path, _status = subselect.fetch_tsukihime_path(str(video), resync=False)
+
+    assert path == cache.cached_subs(video, "Show", 1, resync=False)
+    assert path is not None and path.read_text(encoding="utf-8") == "Japanese"
+
+
 def test_ensure_sub_file_is_added_and_selected(tmp_path):
     sub = tmp_path / "ep.ja.srt"
     sub.write_text("1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n", encoding="utf-8")
@@ -148,6 +195,51 @@ def test_ensure_jimaku_fetches_when_no_jp_track(tmp_path, monkeypatch):
     msg = subselect.ensure_jp_subs(ipc, jimaku=True, resync=False)
     assert "jimaku: added fetched.ja.srt" in msg and "ep 9" in msg
     assert ("sub-add", str(fetched)) in ipc.calls
+
+
+def test_background_jimaku_fetch_reuses_persistent_cache(tmp_path, monkeypatch):
+    import overlay.app.jimaku as jm
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+    cached = jm.store_subs(video, "Show", 1, downloaded)
+    monkeypatch.setattr(
+        jm,
+        "JimakuClient",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network fetch")),
+    )
+
+    path, status = subselect.fetch_jimaku_path(str(video), resync=True)
+
+    assert path == cached
+    assert status == f"subtitle cache: using {cached.name} for 'Show' ep 1"
+
+
+def test_background_jimaku_fetch_stores_finished_subtitle(tmp_path, monkeypatch):
+    import overlay.app.jimaku as jm
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "downloaded.srt"
+    downloaded.write_text("Japanese", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, _key=None):
+            pass
+
+        def fetch(self, _title, _episode, _dest):
+            return downloaded
+
+    monkeypatch.setattr(jm, "JimakuClient", FakeClient)
+
+    path, _status = subselect.fetch_jimaku_path(str(video), resync=False)
+
+    assert path == jm.cached_subs(video, "Show", 1, resync=False)
+    assert path is not None and path.read_text(encoding="utf-8") == "Japanese"
 
 
 def _stub_jimaku(monkeypatch, tmp_path, *, ok=True):

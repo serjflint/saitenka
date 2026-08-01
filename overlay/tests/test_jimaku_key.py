@@ -166,6 +166,30 @@ def test_subs_cache_roundtrip(monkeypatch, tmp_path):
     assert jimaku.cached_subs(video, "Show", 1) is None  # → miss, re-fetch
 
 
+def test_subs_cache_separates_resync_modes(monkeypatch, tmp_path):
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    src = tmp_path / "downloaded.srt"
+    src.write_text("Japanese", encoding="utf-8")
+
+    raw = jimaku.store_subs(video, "Show", 1, src, resync=False)
+
+    assert jimaku.cached_subs(video, "Show", 1, resync=False) == raw
+    assert jimaku.cached_subs(video, "Show", 1, resync=True) is None
+
+
+def test_subs_cache_reads_legacy_jimaku_entry(monkeypatch, tmp_path):
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    legacy = tmp_path / "cache" / "jimaku" / jimaku.subs_cache_key(video, "Show", 1)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("Japanese", encoding="utf-8")
+
+    assert jimaku.cached_subs(video, "Show", 1, resync=True) == legacy
+
+
 def test_key_paste_warning_flags_short_key():
     """A key far shorter than a real ~58-char token → warning (the hidden-prompt Ctrl+V trap that
     lands a single char on Windows). A full-length key → None; empty → None (callers handle empty as
