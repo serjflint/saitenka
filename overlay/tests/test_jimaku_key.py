@@ -1,14 +1,32 @@
-"""jimaku API-key resolution + macOS Keychain storage.
+"""jimaku API-key resolution + persistent storage.
 
-Precedence: explicit (config/CLI) > $JIMAKU_API_KEY > Keychain. The Keychain path is the one that
-works under a GUI-launched plugin-mode mpv, so its coordinates and the resolver order matter.
+Precedence: explicit (config/CLI) > $JIMAKU_API_KEY > OS keyring > private file.
 """
 
 from __future__ import annotations
 
+import stat
 import sys
+from types import ModuleType
 
 from overlay.app import jimaku
+
+
+def _fake_keyring(monkeypatch) -> ModuleType:
+    keyring = ModuleType("keyring")
+    errors = ModuleType("keyring.errors")
+
+    class KeyringError(Exception):
+        pass
+
+    errors.KeyringError = KeyringError
+    errors.NoKeyringError = KeyringError
+    keyring.errors = errors
+    keyring.get_password = lambda *_args: None
+    keyring.set_password = lambda *_args: None
+    monkeypatch.setitem(sys.modules, "keyring", keyring)
+    monkeypatch.setitem(sys.modules, "keyring.errors", errors)
+    return keyring
 
 
 def test_resolve_prefers_explicit(monkeypatch):
@@ -37,8 +55,7 @@ def test_resolve_none_when_nothing_set(monkeypatch):
 
 def test_keychain_roundtrip_via_keyring(monkeypatch):
     """keychain_get/set delegate to the keyring library (cross-platform secret store)."""
-    import keyring
-
+    keyring = _fake_keyring(monkeypatch)
     store: dict = {}
     monkeypatch.setattr(keyring, "set_password", lambda s, u, p: store.__setitem__((s, u), p))
     monkeypatch.setattr(keyring, "get_password", lambda s, u: store.get((s, u)))
@@ -49,7 +66,7 @@ def test_keychain_roundtrip_via_keyring(monkeypatch):
 
 def test_keychain_returns_false_none_when_no_backend(monkeypatch):
     """No keyring backend (headless Linux) → set() is False, get() is None → caller falls back."""
-    import keyring
+    keyring = _fake_keyring(monkeypatch)
 
     def _boom(*_a, **_k):
         raise keyring.errors.NoKeyringError("no backend")
@@ -77,23 +94,30 @@ def test_client_error_names_the_keychain_command(monkeypatch):
         raise AssertionError("expected JimakuError")
 
 
-def test_store_key_falls_back_to_config_without_keyring(monkeypatch, tmp_path):
-    """No keyring backend → the key is written into [jimaku].key, resolves from config, enables fetch,
-    and preserves pre-existing tables."""
+def test_store_key_falls_back_to_private_file_without_keyring(monkeypatch, tmp_path):
+    """No keyring backend keeps jimaku usable without putting its secret in the main config."""
     from overlay.app import init_wizard
     from overlay.app.config import load_config
 
     cfg = tmp_path / "overlay.toml"
-    cfg.write_text('slang = "ja"\n\n[mine]\nkey = "Ctrl+m"\n')  # a pre-existing table must survive
+    cfg.write_text('slang = "ja"\n\n[mine]\nkey = "Ctrl+m"\n\n[jimaku]\nkey = "LEGACY"\n')
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    monkeypatch.delenv("JIMAKU_API_KEY", raising=False)
     monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda _k: False)  # no backend
 
-    method, _ = init_wizard.store_jimaku_key("MYKEY123")
-    assert method == "config"
+    method, backup = init_wizard.store_jimaku_key("MYKEY123")
+    assert method == "file"
     loaded = load_config()
-    assert loaded["jimaku"]["key"] == "MYKEY123"
     assert loaded["jimaku"]["fetch"] is True  # setting a key enables jimaku fetch
+    assert "key" not in loaded["jimaku"]
     assert loaded["mine"]["key"] == "Ctrl+m"  # dumps_toml preserved the other table
+    assert jimaku.resolve_jimaku_key() == ("MYKEY123", "file")
+    key_file = cfg.with_name("jimaku.key")
+    assert key_file.read_text(encoding="utf-8") == "MYKEY123\n"
+    if sys.platform != "win32":
+        assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+        assert stat.S_IMODE(cfg.stat().st_mode) == 0o600
+        assert backup is not None and stat.S_IMODE(backup.stat().st_mode) == 0o600
 
 
 def test_store_key_uses_keyring_when_available(monkeypatch, tmp_path):

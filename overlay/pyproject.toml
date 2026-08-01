@@ -49,7 +49,7 @@ telemetry = [
     "opentelemetry-sdk>=1.44.0",
 ]
 # Linux Secret Service support on Python 3.15+. Earlier Linux and other platforms install keyring by
-# default; omitting this extra on 3.15+ falls back to JIMAKU_API_KEY or [jimaku].key without cryptography.
+# default; omitting this extra on 3.15+ falls back to JIMAKU_API_KEY or an owner-only file.
 linux-keyring = ["keyring>=25.7.0; sys_platform == 'linux'"]
 # Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
 # exists only so `saitenka[minimal]` reads as a deliberate choice. `full` pulls every portable feature
