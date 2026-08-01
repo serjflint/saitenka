@@ -25,7 +25,9 @@ def setup_secondary(reader: Reader) -> int | None:
 def translation_visible(reader: Reader) -> bool:
     """Should the EN translation be shown now? Manual toggle (`t`), OR auto-reveal while a tooltip is
     up (auto-translate opt-in)."""
-    return reader._translate_on or (reader.auto_translate and reader.hover >= 0)
+    return reader.ov.visible and (
+        reader._translate_on or (reader.auto_translate and reader.hover >= 0)
+    )
 
 
 def sync_auto_translation(reader: Reader) -> None:
@@ -33,19 +35,23 @@ def sync_auto_translation(reader: Reader) -> None:
     if not reader.auto_translate:
         return
     if translation_visible(reader):
+        setup_secondary(reader)
         draw_translation(reader)
     elif not reader._translate_on:
         reader.ov.hide(OverlayId.TRANS)
         reader._trans_text = None
+        subtitle_modes.release_secondary(reader)
 
 
 def toggle_translation(reader: Reader) -> None:
     reader._translate_on = not reader._translate_on
     if translation_visible(reader):
+        setup_secondary(reader)
         draw_translation(reader)
     else:
         reader.ov.hide(OverlayId.TRANS)
         reader._trans_text = None
+        subtitle_modes.release_secondary(reader)
 
 
 def secondary_text(reader: Reader) -> str:

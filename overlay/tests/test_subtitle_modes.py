@@ -84,6 +84,50 @@ def test_language_switch_changes_only_existing_target_and_rebuilds_index(monkeyp
     assert messages == ["subtitle mode: EN"]
 
 
+def test_hidden_translation_does_not_reserve_english_secondary():
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    ipc.commands.clear()
+
+    subtitle_modes.release_secondary(reader)
+
+    assert not [
+        command for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")
+    ]
+
+
+def test_translation_leases_english_only_while_visible(monkeypatch):
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    monkeypatch.setattr(reader, "_draw_translation", lambda: None)
+    ipc.commands.clear()
+
+    reader.toggle_translation()
+    reader.toggle_translation()
+
+    secondary = [
+        command[2] for command in ipc.commands if command[:2] == ("set_property", "secondary-sid")
+    ]
+    assert secondary == [1, "no"]
+
+
+def test_primary_sid_event_updates_rendering_language_and_releases_duplicate_translation():
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    reader._translate_on = True
+    reader._translation_secondary_sid = 1
+    reader._observed = {"sid": 2}
+    ipc.commands.clear()
+
+    reader._on_property_change({"name": "sid", "data": 1})
+
+    assert reader.subtitle_language == "en"
+    assert ("set_property", "secondary-sid", "no") in ipc.commands
+
+
 def test_unavailable_language_keeps_current_mode(monkeypatch):
     ipc = FakeIPC([JP.copy()])
     reader = Reader(ipc)

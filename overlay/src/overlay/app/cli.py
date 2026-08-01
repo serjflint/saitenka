@@ -876,6 +876,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             mine_all_key=mine.get("all_key", ko.mine_all_key),
             preview_key=mine.get("preview_key", ko.preview_key),
             translate_key=cfg.get("translate_key", ko.translate_key),
+            overlay_toggle_key=cfg.get("overlay_toggle_key", ko.overlay_toggle_key),
             hover_pause_key=cfg.get("hover_pause_key", ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", ko.subtitle_language_key),
             bookmark_key=cfg.get("bookmark_key", ko.bookmark_key),
@@ -1014,13 +1015,13 @@ def attach(
     threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
 
     from overlay.app.controller import Reader
-    from overlay.mpvio.ipc import MpvIPC
+    from overlay.mpvio.ipc import MpvIPC, default_attach_ipc_path
 
     cfg = load_config(config)
     from overlay.app.cli_run import setup_session_telemetry
 
     setup_session_telemetry(cfg)  # capture is per reader session, not global (see cli.main note)
-    sock = socket or cfg.get("mpv_socket")
+    sock = socket or cfg.get("mpv_socket") or default_attach_ipc_path()
     if not sock:
         print(
             "no socket given — pass one (e.g. --attach /tmp/mpv-socket) or set mpv_socket in the "

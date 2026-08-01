@@ -13,9 +13,11 @@ import os
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from PIL import Image, ImageChops
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("SAITENKA_LIVE"),
@@ -63,9 +65,8 @@ def _make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
     return clip, srt
 
 
-@pytest.mark.live
-@pytest.mark.timeout(30)
-def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
+@contextmanager
+def _live_reader():
     from overlay.app.controller import Reader
     from overlay.mpvio.discover import find_mpv
     from overlay.mpvio.ipc import MpvIPC, default_ipc_path
@@ -98,6 +99,7 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
         reader.refresh_osd()
         reader.start_observing()
         reader._register_keybinds()
+        reader.load_sub_index(srt)
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
             reader.poll_once()
@@ -105,7 +107,42 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
                 break
             time.sleep(0.1)
         assert reader.tokens and reader.boxes, "subtitle never loaded into the reader"
+        yield tmp, reader, ipc
+    finally:
+        try:
+            if reader is not None:
+                reader.close()
+            if ipc is not None:
+                ipc.command("quit")
+                ipc.close()
+        except Exception:  # noqa: BLE001  # best-effort teardown - preserve the test's assertion
+            pass
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
+
+def _poll_until(reader, predicate, message: str) -> None:
+    for _ in range(60):
+        reader.poll_once()
+        if predicate():
+            return
+        time.sleep(0.05)
+    pytest.fail(message)
+
+
+def _screenshot(ipc, path: Path) -> Image.Image:
+    response = ipc.command("screenshot-to-file", str(path), "window")
+    assert response.get("error") == "success"
+    return Image.open(path).convert("RGB")
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
+    with _live_reader() as (tmp, reader, ipc):
         # aim a REAL mouse move at the screen centre of a content word
         i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
         box = next(b for b in reader.boxes if b.index == i)
@@ -113,14 +150,13 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
         cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
         ipc.command("mouse", cx, cy)
 
-        for _ in range(60):  # let mpv emit mouse-pos → poll → _update_hover → tooltip
-            reader.poll_once()
-            if reader._tip_rect is not None:
-                break
-            time.sleep(0.05)
+        _poll_until(
+            reader,
+            lambda: reader._tip_rect is not None,
+            "a real mouse over a word did not show a tooltip",
+        )
         ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
 
-        assert reader._tip_rect is not None, "a real mouse over a word did not show a tooltip"
         # R1: the hovered word must be the one we aimed at — this is the mouse-pos→OSD alignment the
         # headless tests can't check. A mismatch here is the HiDPI scaling bug.
         assert reader.hover == i, (
@@ -130,17 +166,40 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
 
         # a real keypress must reach the reader (mine key is bound) — drive it and drain
         reader.poll_once()
-    finally:
-        try:
-            if reader is not None:
-                reader.close()
-            if ipc is not None:
-                ipc.command("quit")
-                ipc.close()
-        except Exception:  # noqa: BLE001  # best-effort teardown - never let cleanup fail the test's own assertions
-            pass
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_live_overlay_toggle_removes_and_restores_saitenka_surfaces():
+    with _live_reader() as (tmp, reader, ipc):
+        shown = _screenshot(ipc, tmp / "overlay-shown.png")
+
+        ipc.command("keypress", "Alt+o")
+        _poll_until(reader, lambda: not reader.ov.visible, "Alt+o did not hide Saitenka")
+        hidden = _screenshot(ipc, tmp / "overlay-hidden.png")
+
+        ipc.command("keypress", "Alt+o")
+        _poll_until(reader, lambda: reader.ov.visible, "Alt+o did not restore Saitenka")
+        restored = _screenshot(ipc, tmp / "overlay-restored.png")
+
+        assert ImageChops.difference(shown, hidden).getbbox() is not None
+        assert ImageChops.difference(restored, hidden).getbbox() is not None
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_live_sidebar_key_draws_and_removes_sidebar():
+    with _live_reader() as (tmp, reader, ipc):
+        closed = _screenshot(ipc, tmp / "sidebar-closed.png")
+
+        ipc.command("keypress", "\\")
+        _poll_until(reader, lambda: reader._sidebar_open, "sidebar key did not open the sidebar")
+        opened = _screenshot(ipc, tmp / "sidebar-open.png")
+
+        ipc.command("keypress", "\\")
+        _poll_until(
+            reader, lambda: not reader._sidebar_open, "sidebar key did not close the sidebar"
+        )
+
+        assert reader._sidebar_rect is None
+        assert ImageChops.difference(opened, closed).getbbox() is not None

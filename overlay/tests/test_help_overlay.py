@@ -73,6 +73,9 @@ def test_help_document_uses_effective_catalog_and_context_labels():
     assert by_label["Mine hovered word"].key == "Ctrl+x"
     assert by_label["Close tooltip"].context == "tooltip only"
     assert by_label["Pause / resume (SyncPlay)"].source == "mpv"
+    assert by_label["Cycle primary subtitles"].key == "j / Shift+J"
+    assert by_label["Toggle native primary subtitles"].key == "v"
+    assert by_label["Toggle native secondary subtitles"].key == "Alt+v"
     assert {
         "Essentials & language",
         "Subtitle navigation",

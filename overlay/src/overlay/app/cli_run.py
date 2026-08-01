@@ -355,6 +355,7 @@ def _build_run_options(
             mine_key=mine_key,
             mine_all_key=mine_all_key,
             translate_key=translate_key,
+            overlay_toggle_key=cfg.get("overlay_toggle_key", _ko.overlay_toggle_key),
             preview_key=preview_key,
             hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),

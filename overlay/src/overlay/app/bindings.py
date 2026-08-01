@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 MINE_MSG = "saitenka-mine"
 MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
+OVERLAY_TOGGLE_MSG = "saitenka-toggle-overlay"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 SUBTITLE_RETRY_MSG = "saitenka-retry-subtitle-providers"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
@@ -73,6 +74,12 @@ BINDINGS: tuple[BindingSpec, ...] = (
     ),
     BindingSpec(
         "Essentials & language", "Show English translation", TRANS_MSG, key_attr="translate_key"
+    ),
+    BindingSpec(
+        "Essentials & language",
+        "Hide / show Saitenka",
+        OVERLAY_TOGGLE_MSG,
+        key_attr="overlay_toggle_key",
     ),
     BindingSpec(
         "Essentials & language",
@@ -228,6 +235,30 @@ BINDINGS: tuple[BindingSpec, ...] = (
         None,
         scope="mpv",
         key="LEFT / RIGHT",
+        source="mpv",
+    ),
+    BindingSpec(
+        "Useful mpv controls",
+        "Cycle primary subtitles",
+        None,
+        scope="mpv",
+        key="j / Shift+J",
+        source="mpv",
+    ),
+    BindingSpec(
+        "Useful mpv controls",
+        "Toggle native primary subtitles",
+        None,
+        scope="mpv",
+        key="v",
+        source="mpv",
+    ),
+    BindingSpec(
+        "Useful mpv controls",
+        "Toggle native secondary subtitles",
+        None,
+        scope="mpv",
+        key="Alt+v",
         source="mpv",
     ),
     BindingSpec("Useful mpv controls", "Quit mpv", None, scope="mpv", key="q", source="mpv"),

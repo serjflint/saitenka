@@ -69,6 +69,7 @@ class KeyOptions:
     mine_key: str = "Ctrl+m"
     mine_all_key: str = "Shift+m"
     translate_key: str = "t"
+    overlay_toggle_key: str = "Alt+o"
     subtitle_language_key: str = "Alt+t"
     bookmark_key: str = "Alt+b"
     sidebar_key: str = "\\"

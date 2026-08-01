@@ -51,6 +51,7 @@ from overlay.app.bindings import (
     KANJI_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
+    OVERLAY_TOGGLE_MSG,
     PREVIEW_MSG,
     SCROLL_DOWN_MSG,
     SCROLL_UP_MSG,
@@ -111,7 +112,7 @@ NESTED_ID = OverlayId.NESTED
 
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
-OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
+OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text", "sid")
 
 
 # Popup view/panel classes live in app/popups.py; legacy aliases kept because the controller
@@ -159,6 +160,7 @@ class Reader:
         self.mine_key = o.keys.mine_key
         self.mine_all_key = o.keys.mine_all_key
         self.translate_key = o.keys.translate_key
+        self.overlay_toggle_key = o.keys.overlay_toggle_key
         self.subtitle_language_key = o.keys.subtitle_language_key
         self.bookmark_key = o.keys.bookmark_key
         self.sidebar_key = o.keys.sidebar_key
@@ -241,6 +243,7 @@ class Reader:
         self.auto_translate = o.translation.auto_translate
         self._translate_on = False
         self._trans_text: str | None = None
+        self._translation_secondary_sid: int | None = None
         self.jp_sid: int | None = None
         self.en_sid: int | None = None
         self.subtitle_language: subtitle_modes.Language = "jp"
@@ -431,6 +434,8 @@ class Reader:
                 # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
                 log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
+            if name == "sid":
+                subtitle_modes.on_primary_changed(self, ev.get("data"))
 
     def refresh_osd(self) -> bool:
         d = self._prop("osd-dimensions") or {}
@@ -558,7 +563,11 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        if help_overlay.suppress_hover(self) or sidebar.suppress_hover(self):
+        if (
+            not getattr(self.ov, "visible", True)
+            or help_overlay.suppress_hover(self)
+            or sidebar.suppress_hover(self)
+        ):
             return
         tooltip.update_hover(self)
 
@@ -619,6 +628,8 @@ class Reader:
         return tooltip.hit_nested_speaker(self, x, y)
 
     def on_click(self) -> None:
+        if not self.ov.visible:
+            return
         mp = self._get("mouse-pos") or {}
         if sidebar.on_click(self, mp.get("x", -1), mp.get("y", -1)):
             return
@@ -918,6 +929,18 @@ class Reader:
     def toggle_translation(self) -> None:
         translation.toggle_translation(self)
 
+    def toggle_overlay(self) -> None:
+        if self.ov.visible:
+            self.hover = -1
+            self._teardown_tip()
+            self.ov.set_visible(visible=False)
+            subtitle_modes.release_secondary(self)
+            return
+        self.ov.set_visible(visible=True)
+        if self._translation_visible():
+            self._setup_secondary()
+            self._draw_translation()
+
     def configure_subtitle_mode(
         self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
     ) -> None:
@@ -994,6 +1017,7 @@ class Reader:
         MINE_MSG: lambda r: r.mine_current(),
         MINE_ALL_MSG: lambda r: r.bulk_mine(),
         TRANS_MSG: lambda r: r.toggle_translation(),
+        OVERLAY_TOGGLE_MSG: lambda r: r.toggle_overlay(),
         SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
         SUBTITLE_RETRY_MSG: lambda r: r.retry_japanese_subtitles(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
@@ -1213,7 +1237,6 @@ class Reader:
         interval = interval if interval is not None else self.poll_interval
         self.refresh_osd()
         self.start_observing()  # event-driven property reads from here on
-        self._setup_secondary()
         self._register_keybinds()
         self._seed_mined()
         self.start_prefetch()

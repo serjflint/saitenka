@@ -72,11 +72,17 @@ class Overlay:
         self.id_base = id_base
         self._files: dict[int, Path] = {}
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
+        self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
 
     def _oid(self, oid: int) -> int:
         """Map a logical overlay id (1-based) to the configured physical range."""
         return oid + (self.id_base - 1)
+
+    def _add(self, oid: int, tail: tuple) -> dict:
+        if self.visible:
+            return self.ipc.command("overlay-add", oid, *tail)
+        return {"error": "success"}
 
     def _tempfile(self, oid: int) -> Path:
         path = self._files.get(oid)
@@ -98,7 +104,7 @@ class Overlay:
             path = self._tempfile(oid)
             path.write_bytes(data)
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
-            res = self.ipc.command("overlay-add", oid, *tail)
+            res = self._add(oid, tail)
         self._live[oid], self.ops = tail, self.ops + 1
         _warn_overlay_add(oid, w, h, res)
         return res
@@ -112,14 +118,14 @@ class Overlay:
             path = self._tempfile(oid)
             path.write_bytes(buf.tobytes())
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
-            res = self.ipc.command("overlay-add", oid, *tail)
+            res = self._add(oid, tail)
         self._live[oid], self.ops = tail, self.ops + 1
         _warn_overlay_add(oid, w, h, res)
         return res
 
     def hide(self, oid: int = 0) -> dict:
         oid = self._oid(oid)
-        res = self.ipc.command("overlay-remove", oid)
+        res = self.ipc.command("overlay-remove", oid) if self.visible else {"error": "success"}
         self._live.pop(oid, None)
         self.ops += 1
         p = self._files.pop(oid, None)
@@ -127,14 +133,25 @@ class Overlay:
             p.unlink()
         return res
 
+    def set_visible(self, *, visible: bool) -> None:
+        """Hide/show Saitenka's surfaces while retaining their latest desired state."""
+        if visible == self.visible:
+            return
+        self.visible = visible
+        command = "overlay-add" if visible else "overlay-remove"
+        for oid, tail in list(self._live.items()):
+            self.ipc.command(command, oid, *tail) if visible else self.ipc.command(command, oid)
+            self.ops += 1
+
     def repaint(self) -> None:
         """Re-issue every live overlay so mpv re-composites and PRESENTS them. While paused (esp. on
         Windows) mpv throttles OSD updates until *something* pokes the OSD (mpv #8172) — a new/updated
         overlay only shows on the next frame or input event (the "doesn't update until I move the
         mouse" bug). Re-adding the same overlays is that poke. Does NOT bump ``ops`` (it's the reaction
         to a change, not a new one), so it can't feed back into another nudge."""
-        for oid, tail in list(self._live.items()):
-            self.ipc.command("overlay-add", oid, *tail)
+        if self.visible:
+            for oid, tail in list(self._live.items()):
+                self.ipc.command("overlay-add", oid, *tail)
 
     def close(self) -> None:
         for oid in list(self._files):
