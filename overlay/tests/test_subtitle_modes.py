@@ -136,3 +136,26 @@ def test_background_japanese_arrival_adds_without_selecting(tmp_path, monkeypatc
     assert ("set_property", "sid", 1) in ipc.commands
     assert ("set_property", "sid", 9) not in ipc.commands
     assert messages == ["Japanese subtitles ready — Alt+t to switch"]
+
+
+def test_background_japanese_arrival_can_be_selected_after_missing_both(tmp_path, monkeypatch):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+    )
+    path = Path(tmp_path / "episode.ja.srt")
+    path.write_text("Japanese")
+
+    reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
+    reader._subtitle_fetch_threads[0].join(timeout=1)
+    subtitle_modes.apply_fetch_results(reader)
+    ipc.commands.clear()
+    reader.toggle_subtitle_language()
+
+    assert reader.subtitle_language == "jp"
+    assert ("set_property", "sid", 9) in ipc.commands
+    assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
+    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)

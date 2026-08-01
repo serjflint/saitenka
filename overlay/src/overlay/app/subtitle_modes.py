@@ -111,9 +111,19 @@ def setup_secondary(reader: Reader) -> int | None:
 
 
 def toggle(reader: Reader) -> None:
-    target: Language = "en" if reader.subtitle_language == "jp" else "jp"
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
+    active_sid = reader._get("sid")
+    if active_sid == reader.jp_sid:
+        target: Language = "en"
+    elif active_sid == reader.en_sid or (
+        reader.subtitle_language == "jp" and reader.jp_sid is not None
+    ):
+        target = "jp"
+    elif reader.subtitle_language == "en" and reader.en_sid is not None:
+        target = "en"
+    else:
+        target = "jp" if reader.jp_sid is not None else "en"
     sid = reader.en_sid if target == "en" else reader.jp_sid
     if sid is None:
         reader._toast(f"{target.upper()} subtitles unavailable", "warn")
