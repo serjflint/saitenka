@@ -372,6 +372,38 @@ def test_entry_for_header_reading_agrees_with_first_stacked_group(tmp_path):
     assert entry.headword is entry.groups[0].headword
 
 
+def test_entry_for_stacks_phrase_terms_longest_first(tmp_path):
+    """A multi-token phrase (数ある) passed as an extra term stacks ABOVE the bare word (数), longest
+    first — Yomitan shows the longest match first. Hovering 数 in 数ある must surface 数ある, not just 数."""
+    d = _make_dict(
+        tmp_path / "ph.zip",
+        "Phrase",
+        [["数ある", "かずある", ["many; numerous"]], ["数", "かず", ["number"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="数", lemma="数", reading="かず", pos="名詞", start=0, end=1)
+    entry = ds.entry_for(tok, extra_terms=("数ある",))
+    assert [g.reading for g in entry.groups] == ["かずある", "かず"]  # phrase first, then bare word
+    assert "many; numerous" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+    assert entry.reading == "かずある"  # fused header tracks the longest (top) entry
+
+
+def test_phrase_cards_align_with_groups_for_mining(tmp_path):
+    """The per-entry ⊕ mines cards_for(...)[card_index]; with phrase terms the card list must span the
+    same stacked entries in the same order, so a group's ⊕ mines that exact entry (phrase default first)."""
+    d = _make_dict(
+        tmp_path / "phm.zip",
+        "Phrase",
+        [["数ある", "かずある", ["many"]], ["数", "かず", ["number"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="数", lemma="数", reading="かず", pos="名詞", start=0, end=1)
+    entry = ds.entry_for(tok, extra_terms=("数ある",))
+    cards = ds.cards_for(tok, extra_terms=("数ある",))
+    assert cards[0].expression == "数ある"  # default mine is the longest match
+    assert all(cards[g.card_index].reading == g.reading for g in entry.groups)
+
+
 def test_entry_for_single_reading_has_no_groups(tmp_path):
     """A single-reading word keeps the fused single-header panel (no stacking) — groups is empty."""
     d = _make_dict(tmp_path / "one.zip", "One", [["読む", "よむ", ["to read"]]])

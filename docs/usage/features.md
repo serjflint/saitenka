@@ -50,6 +50,9 @@ dictionary entry.
   structured content (ruby examples, notes, cross-refs).
 - **Pitch accent and frequency pills** sit under the headword — one green pill per frequency
   dictionary, plus a purple pitch pill (e.g. `ほんめい [0]`).
+- **Longest-match on hover.** A phrase the tokenizer over-splits still resolves as one entry:
+  hovering 数 in *数ある* looks up the whole 数ある and stacks it **above** the bare 数
+  (longest match first, like Yomitan), with the underline spanning the matched phrase.
 - **De-inflected form** and the inflection chain (🧩 `-て « -いる « -た`) display when the
   optional GPL deinflect add-on is installed.
 - **Nested lookups:** cross-references inside a definition are themselves scannable, and the

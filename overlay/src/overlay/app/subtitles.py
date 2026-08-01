@@ -351,7 +351,9 @@ def _draw_visual_lines(
     stroke: int,
     styles: list | None,
     hover: int | None,
+    hover_end: int | None = None,
 ) -> list[WordBox]:
+    hi_end = hover_end if hover_end is not None else (hover + 1 if hover is not None else 0)
     draw = ImageDraw.Draw(img)
     boxes: list[WordBox] = []
     y = 0
@@ -362,7 +364,8 @@ def _draw_visual_lines(
         baseline = y + pad_y + ascent
         for gi, tok, w in vl:
             st = styles[gi] if styles and gi < len(styles) else None
-            color = HOVER if gi == hover else (st.color if st else WHITE)
+            hovered = hover is not None and hover <= gi < hi_end
+            color = HOVER if hovered else (st.color if st else WHITE)
             underline = st.underline if st else None
             draw.text(
                 (x, baseline),
@@ -387,6 +390,7 @@ def render_subtitle(
     osd_w: int,
     size: int = 44,
     hover: int | None = None,
+    hover_end: int | None = None,
     styles: list | None = None,
     pad_x: int = 20,
     pad_y: int = 8,
@@ -395,7 +399,8 @@ def render_subtitle(
     """`lines` is a list of source lines (each a token list); global token index is row-major.
 
     `styles` (optional, indexed by global token index) gives each token a text color and an optional
-    JLPT underline color; the hovered token overrides the text color with the highlight.
+    JLPT underline color; the hovered token overrides the text color with the highlight. A merged
+    multi-token term highlights the whole span ``[hover, hover_end)`` (defaults to a single token).
     """
     max_w = osd_w * 0.94
     font, size, measured = _fit_font_size(lines, max_w, pad_x, size)
@@ -433,5 +438,6 @@ def render_subtitle(
         stroke=stroke,
         styles=styles,
         hover=hover,
+        hover_end=hover_end,
     )
     return SubtitleRender(img, boxes)

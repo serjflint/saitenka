@@ -10,6 +10,10 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # fugashi/MeCab wraps a C extension that has NOT declared free-threaded safety, so on a free-threaded
 # build we run with PYTHON_GIL=0 (see examples/mpv_reader._ensure_free_threaded). Tokenising is
@@ -179,6 +183,41 @@ def inflected_in(tokens: list[Token], index: int) -> str:
         s += tokens[j].surface
         j += 1
     return s
+
+
+_MAX_MERGE_SPAN = 4  # forward longest-match window; unidic over-splits compounds/set phrases by 2-3
+
+
+def phrase_terms(
+    tokens: list[Token], index: int, has_term: Callable[[str], bool]
+) -> tuple[list[str], int] | None:
+    """Multi-token dictionary terms starting at ``tokens[index]``, longest first. unidic over-splits
+    set phrases and compounds (数+ある → 数ある); before a tooltip, probe whether the hovered token plus
+    following ones concatenate to terms the dictionaries actually have, so the tooltip can stack them
+    above the bare word — Yomitan-style longest-match-first from the cursor. Returns ``(terms, end)``
+    (``terms`` longest-first, ``end`` the exclusive token span of the longest) or ``None`` when no
+    multi-token term exists.
+
+    ``has_term`` is the dict-set membership seam, kept a callable so this stays dict-free and the whole
+    search strategy is swappable (a future char-level line scanner drops in here). These surfaces are
+    fed to :meth:`DictionarySet.entry_for` as extra lookup terms; the dictionary supplies each reading."""
+    base = tokens[index]
+    surface, prev_end = base.surface, base.end
+    hits: list[tuple[str, int]] = []  # (surface, end-exclusive), shortest→longest as we extend
+    for k in range(index + 1, min(len(tokens), index + _MAX_MERGE_SPAN)):
+        nxt = tokens[k]
+        # stop at punctuation/space or a line break: per-line offsets restart, so a smaller start than
+        # the previous end means the next token is on a different source line (not adjacent in text).
+        if nxt.pos in SKIP_POS or not nxt.surface.strip() or nxt.start < prev_end:
+            break
+        surface += nxt.surface
+        prev_end = nxt.end
+        if has_term(surface):
+            hits.append((surface, k + 1))
+    if not hits:
+        return None
+    hits.reverse()  # longest first
+    return [s for s, _ in hits], hits[0][1]
 
 
 def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> list[Token]:

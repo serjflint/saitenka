@@ -168,7 +168,15 @@ class Miner:
         if idx is None:
             r._toast("no word to mine", "warn")
             return
-        self.mine_token(r.tokens[idx])
+        tok = r.tokens[idx]
+        # Mining the hovered word defaults to its longest stacked phrase (数ある over 数), matching the
+        # tooltip's top entry; the explicit per-entry ⊕ still mines any specific stacked entry.
+        cards = (
+            r.dict_set.cards_for(tok, extra_terms=r._hover_terms)
+            if (r.dict_set and idx == r.hover and r._hover_terms)
+            else []
+        )
+        self.mine_token(tok, card=cards[0] if cards else None)
 
     def mine_token(self, tok, *, force: bool = False, card=None) -> None:
         """Mine a specific token into Anki — the hovered subtitle word, or an inner word discovered

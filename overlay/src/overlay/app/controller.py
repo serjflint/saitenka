@@ -344,6 +344,11 @@ class Reader:
         )
         self._flash_until = 0.0
         self._hover_reading = ""  # dict-form reading of the hovered word, for TTS
+        # Multi-token dictionary terms starting at the hovered word (数ある over 数), longest-first, and
+        # the token span the longest covers: the tooltip stacks them above the bare word and the
+        # underline spans the match. Empty / None when no longer term starts here.
+        self._hover_terms: tuple[str, ...] = ()
+        self._hover_span: tuple[int, int] | None = None
         self._kanji_index = 0  # `k` cycles the hovered word's kanji
         # Per-dictionary tabs (sticky row over the tooltip viewport) + tooltip keys
         self._tab_names: list[str] = []
@@ -468,6 +473,8 @@ class Reader:
         self._tip_key = None
         self._tip_dirty = False
         self._hover_reading = ""
+        self._hover_terms = ()
+        self._hover_span = None
         self._kanji_index = 0
         self._tab_names, self._tab_offsets, self._tab_rects = [], [], []
         self._tab_bgra, self._tab_h, self._tab_active = None, 0, -1
@@ -541,6 +548,7 @@ class Reader:
                     self.osd[0],
                     size=self.sub_size,
                     hover=self.hover if annotated and self.hover >= 0 else None,
+                    hover_end=self._hover_span[1] if annotated and self._hover_span else None,
                     styles=self.styles if annotated else None,
                 )
         self.boxes = sr.boxes
