@@ -13,19 +13,17 @@ import logging
 import tempfile
 from pathlib import Path
 
+from overlay.app.subtitle_modes import (
+    lang_matches as _lang_matches,
+)
+from overlay.app.subtitle_modes import (
+    select_initial,
+)
+from overlay.app.subtitle_modes import (
+    sub_tracks as _sub_tracks,
+)
+
 log = logging.getLogger(__name__)
-
-
-def _lang_matches(lang: str | None, wants: list[str]) -> bool:
-    """True if an mpv track ``lang`` (e.g. ``jpn``/``ja``/``Japanese``) matches any wanted code.
-    Prefix-both-ways so ``ja`` matches ``japanese`` and the 2-/3-letter ISO codes interoperate."""
-    low = (lang or "").lower()
-    return any(w and (low == w or low.startswith(w) or w.startswith(low)) for w in wants)
-
-
-def _sub_tracks(ipc) -> list[dict]:
-    data = ipc.command("get_property", "track-list").get("data") or []
-    return [t for t in data if t.get("type") == "sub"]
 
 
 def select_sub_track(ipc, slang: str) -> int | None:
@@ -46,6 +44,32 @@ def _add_and_select(ipc, sub_path: str | Path) -> None:
     ipc.command("sub-add", str(sub_path), "select")
 
 
+def fetch_jimaku_path(
+    video: str,
+    *,
+    jimaku_key: str | None = None,
+    jimaku_title: str | None = None,
+    episode: int | None = None,
+    resync: bool = True,
+) -> tuple[Path | None, str]:
+    """Fetch and optionally resync without touching mpv IPC, so callers may run it off-thread."""
+    from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
+
+    title, ep = parse_filename(video)
+    title = jimaku_title or title
+    ep = episode if episode is not None else ep
+    tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
+    try:
+        sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
+    except JimakuError as e:
+        return None, f"jimaku failed: {e}"
+    if resync and Path(video).exists():
+        from overlay.app.resync import maybe_resync
+
+        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
+    return Path(sub_path), f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
+
+
 def fetch_jimaku(
     ipc,
     *,
@@ -57,26 +81,21 @@ def fetch_jimaku(
     """Fetch JP subs from jimaku.cc for the attached mpv's current file, add + select them, and hide
     mpv's native rendering. Returns ``(ok, status)`` so callers can fall back on failure. Usable
     standalone as the runtime "force jimaku" action (a keybind can call this mid-playback)."""
-    from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
-
     video = ipc.command("get_property", "path").get("data")
     if not video:
         return False, "jimaku: mpv reports no file path — cannot fetch"
-    title, ep = parse_filename(video)
-    title = jimaku_title or title
-    ep = episode if episode is not None else ep
-    tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
-    try:
-        sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
-    except JimakuError as e:
-        return False, f"jimaku failed: {e}"
-    if resync and Path(video).exists():
-        from overlay.app.resync import maybe_resync
-
-        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
+    sub_path, status = fetch_jimaku_path(
+        video,
+        jimaku_key=jimaku_key,
+        jimaku_title=jimaku_title,
+        episode=episode,
+        resync=resync,
+    )
+    if sub_path is None:
+        return False, status
     _add_and_select(ipc, sub_path)
     ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
-    return True, f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
+    return True, status
 
 
 def ensure_jp_subs(
@@ -125,3 +144,41 @@ def ensure_jp_subs(
         ipc, jimaku_key=jimaku_key, jimaku_title=jimaku_title, episode=episode, resync=resync
     )
     return status
+
+
+def prepare_attach_startup(
+    ipc,
+    *,
+    slang: str = "ja,jpn,jp",
+    sub_file: str | None = None,
+    jimaku: bool = False,
+    jimaku_force: bool = False,
+    jimaku_key: str | None = None,
+    jimaku_title: str | None = None,
+    episode: int | None = None,
+    resync: bool = True,
+):
+    """Select the immediate attach track and defer a missing-JP provider fetch."""
+    status = ""
+    if sub_file or jimaku_force:
+        status = ensure_jp_subs(
+            ipc,
+            slang=slang,
+            sub_file=sub_file,
+            jimaku=jimaku,
+            jimaku_force=jimaku_force,
+            jimaku_key=jimaku_key,
+            jimaku_title=jimaku_title,
+            episode=episode,
+            resync=resync,
+        )
+
+    startup = select_initial(ipc, slang)
+    if not status:
+        if startup.active == "jp":
+            status = f"selected JP subtitle track sid={startup.tracks.jp_sid}"
+        elif startup.active == "en":
+            status = f"selected English fallback sid={startup.tracks.en_sid}"
+        else:
+            status = "no Japanese or English subtitle track found"
+    return startup, status, jimaku and startup.tracks.jp_sid is None

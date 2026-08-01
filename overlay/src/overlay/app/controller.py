@@ -24,6 +24,7 @@ from overlay.app import (
     prefetch,
     reader_deps,
     subnav,
+    subtitle_modes,
     telemetry,
     tooltip,
     translation,
@@ -37,7 +38,7 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import PopupView, TipPanel
-from overlay.app.subtitles import render_subtitle
+from overlay.app.subtitles import render_plain_subtitle, render_subtitle
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 from overlay.mpvio.osd import Overlay
@@ -66,6 +67,7 @@ NESTED_ID = OverlayId.NESTED
 MINE_MSG = "saitenka-mine"
 MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
+SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 PREVIEW_MSG = "saitenka-preview"
 SCROLL_UP_MSG = "saitenka-scroll-up"
@@ -148,6 +150,7 @@ class Reader:
         self.mine_key = o.keys.mine_key
         self.mine_all_key = o.keys.mine_all_key
         self.translate_key = o.keys.translate_key
+        self.subtitle_language_key = o.keys.subtitle_language_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -219,6 +222,12 @@ class Reader:
         self.auto_translate = o.translation.auto_translate
         self._translate_on = False
         self._trans_text: str | None = None
+        self.jp_sid: int | None = None
+        self.en_sid: int | None = None
+        self.subtitle_language: subtitle_modes.Language = "jp"
+        self.subtitle_slang = "ja,jpn,jp"
+        self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
+        self._subtitle_fetch_threads: list[threading.Thread] = []
         self._last_jpg: Path | None = None
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
@@ -440,6 +449,10 @@ class Reader:
             self.ov.hide(SUB_ID)
             self.ov.hide(TIP_ID)
             return
+        if self.subtitle_language == "en":
+            self.lines, self.tokens, self.styles = [], [], None
+            self._draw_subtitle()
+            return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = text.replace("\\N", "\n").replace("\r", "")
         with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
@@ -452,13 +465,16 @@ class Reader:
 
     def _draw_subtitle(self) -> None:
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
-            sr = render_subtitle(
-                self.lines,
-                self.osd[0],
-                size=self.sub_size,
-                hover=self.hover if self.hover >= 0 else None,
-                styles=self.styles,
-            )
+            if self.subtitle_language == "en":
+                sr = render_plain_subtitle(self.sub_text, self.osd[0], size=self.sub_size)
+            else:
+                sr = render_subtitle(
+                    self.lines,
+                    self.osd[0],
+                    size=self.sub_size,
+                    hover=self.hover if self.hover >= 0 else None,
+                    styles=self.styles,
+                )
         self.boxes = sr.boxes
         ox = (self.osd[0] - sr.image.width) // 2
         oy = self.osd[1] - sr.image.height - self.bottom_margin
@@ -824,6 +840,17 @@ class Reader:
     def toggle_translation(self) -> None:
         translation.toggle_translation(self)
 
+    def configure_subtitle_mode(
+        self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
+    ) -> None:
+        subtitle_modes.configure(self, startup, slang=slang)
+
+    def toggle_subtitle_language(self) -> None:
+        subtitle_modes.toggle(self)
+
+    def fetch_japanese_subs_async(self, fetch) -> None:
+        subtitle_modes.start_fetch(self, fetch)
+
     def _secondary_text(self) -> str:
         return translation.secondary_text(self)
 
@@ -852,6 +879,7 @@ class Reader:
             self.ipc.command("keybind", key, f"script-message {msg}")
 
         bind(self.translate_key, TRANS_MSG)
+        bind(self.subtitle_language_key, SUBTITLE_LANGUAGE_MSG)
         bind(self.hover_pause_key, HOVER_PAUSE_MSG)
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
@@ -882,6 +910,7 @@ class Reader:
         MINE_MSG: lambda r: r.mine_current(),
         MINE_ALL_MSG: lambda r: r.bulk_mine(),
         TRANS_MSG: lambda r: r.toggle_translation(),
+        SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
@@ -923,11 +952,12 @@ class Reader:
                 self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
             self._expire_toast()
             self._expire_flash()
-            if self.refresh_osd() and self.tokens:
+            if self.refresh_osd() and self.sub_text.strip():
                 self._draw_subtitle()
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
+            subtitle_modes.apply_fetch_results(self)
             self._update_hover()
             self._refresh_dirty_panels()
             self._update_prefetch()
@@ -1101,5 +1131,7 @@ class Reader:
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
+        for th in self._subtitle_fetch_threads:
+            th.join(timeout=2.0)
         self.ov.close()
         shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir

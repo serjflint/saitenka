@@ -80,6 +80,8 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 
 - The embedded **Japanese** track is auto-selected and re-drawn by the overlay (mpv's own subs hidden);
   the embedded **English** track is loaded as the hidden secondary (for the `t` reveal).
+- If Japanese is unavailable, English is shown immediately without Japanese tokenization or mining.
+  A configured Jimaku fetch runs in the background and announces the added track without selecting it.
 - Dictionaries are already imported into the DB (§1a), so `run`/`attach` open it instantly — no build
   at play time. (Importing a brand-new dict is the only slow step, and it happens under `import`.)
 - `--start 600` jumps ~10 min in (past the OP, into dialogue). Press **space** to pause on a line with
@@ -102,6 +104,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 | **Ctrl+m** | mine the **hovered** word → Anki card + **preview** (auto-plays the clip) |
 | **Shift+m** | **bulk-mine** every unknown word in the current line |
 | **t** | toggle the **English** translation of the current line |
+| **Alt+t** | switch the primary subtitle between Japanese-only and English-only |
 | **Alt+p** | toggle whether opening a tooltip automatically pauses mpv |
 | **p** | replay the last card preview + its audio |
 | space / f / ← → / q | mpv: pause / fullscreen / seek / quit |
