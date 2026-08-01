@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 
 Language = Literal["jp", "en"]
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
+JP_LANGS = {"ja", "jpn", "jp", "japanese"}
 
 
 def lang_matches(lang: str | None, wants: list[str]) -> bool:
@@ -99,6 +100,8 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.en_sid = startup.tracks.en_sid
     reader.subtitle_language = startup.active or "jp"
     reader.subtitle_slang = slang
+    if reader._get("secondary-sid") not in {None, False, "no"}:
+        reader.ipc.command("set_property", "secondary-sid", "no")
     from overlay.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)
@@ -109,11 +112,64 @@ def setup_secondary(reader: Reader) -> int | None:
         tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
         reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
     sid = reader.en_sid if reader.subtitle_language == "jp" else reader.jp_sid
-    if sid is None:
+    if sid is None or sid == reader._get("sid"):
+        release_secondary(reader)
         return None
+    if reader._translation_secondary_sid == sid:
+        return sid
     reader.ipc.command("set_property", "secondary-sid", sid)
     reader.ipc.command("set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
+    reader._translation_secondary_sid = sid
     return sid
+
+
+def release_secondary(reader: Reader) -> None:
+    if reader._translation_secondary_sid is None:
+        return
+    reader.ipc.command("set_property", "secondary-sid", "no")
+    reader._translation_secondary_sid = None
+
+
+def on_primary_changed(reader: Reader, sid) -> None:
+    if sid == reader._translation_secondary_sid:
+        return
+    announce_track(reader, sid)
+    if sid == reader.jp_sid:
+        language: Language = "jp"
+    elif sid == reader.en_sid:
+        language = "en"
+    else:
+        return
+    if language != reader.subtitle_language:
+        reader.subtitle_language = language
+        reader._sub_index = None
+        from overlay.app import analysis_overlay
+
+        analysis_overlay.on_index_changed(reader)
+    if reader._translation_visible():
+        setup_secondary(reader)
+    else:
+        release_secondary(reader)
+
+
+def _language_name(lang: str | None) -> str:
+    low = (lang or "").lower()
+    if low in JP_LANGS:
+        return "Japanese"
+    if low in EN_LANGS:
+        return "English"
+    return lang or "unknown language"
+
+
+def announce_track(reader: Reader, sid) -> None:
+    if sid == reader._last_announced_sid:
+        return
+    tracks = sub_tracks(reader.ipc)
+    for index, track in enumerate(tracks, 1):
+        if track.get("id") == sid:
+            reader._last_announced_sid = sid
+            reader._toast(f"subtitles: {_language_name(track.get('lang'))} ({index}/{len(tracks)})")
+            return
 
 
 def toggle(reader: Reader) -> None:
@@ -135,6 +191,8 @@ def toggle(reader: Reader) -> None:
         reader._toast(f"{target.upper()} subtitles unavailable", "warn")
         return
 
+    reader.ipc.command("set_property", "secondary-sid", "no")
+    reader._translation_secondary_sid = None
     reader.ipc.command("set_property", "sid", sid)
     reader.subtitle_language = target
     reader._sub_index = None
@@ -142,11 +200,14 @@ def toggle(reader: Reader) -> None:
 
     analysis_overlay.on_index_changed(reader)
     reader.set_subtitle("")
-    setup_secondary(reader)
+    if reader._translation_visible():
+        setup_secondary(reader)
+    else:
+        release_secondary(reader)
     from overlay.app.embedded_subs import build_sub_index_for_current_track
 
     build_sub_index_for_current_track(reader)
-    reader._toast(f"subtitle mode: {target.upper()}")
+    announce_track(reader, sid)
 
 
 def start_fetch(

@@ -12,9 +12,20 @@ logs.
 - **FSRS maturity coloring** — an optional copied Anki database distinguishes learning, young,
   mature-known, and forgotten words without opening the live collection. N+1 remains the strongest
   signal, and learning/young colors can be overridden under `[palette]`.
+- **Utility overlays can be resized together** with top-level `ui_scale`, covering the shortcut help,
+  subtitle/backlog sidebar, and episode-analysis window while preserving the `1.0` default.
 
 ### Fixed
 
+- **Windows overlay startup and refresh no longer stall behind named-pipe reads.** IPC now uses
+  full-duplex overlapped I/O, invalid or locale-mangled pipe settings are diagnosed, and bare
+  `attach` uses mpv.net's default pipe without requiring an escaped TOML path.
+- **Subtitle-track cycling no longer loses English to a hidden secondary track.** Saitenka leases the
+  translation track only while its translation overlay is visible, follows manual primary-track
+  changes with a language/count indicator, and `Alt+o` hands rendering and the OSD back to mpv while
+  Saitenka is hidden.
+- **Missing Anki on Windows no longer opens the shell's “cannot find anki” dialog.** Saitenka resolves
+  the installed executable directly and quietly leaves mining unavailable when it cannot.
 - **The subtitle sidebar now consumes completed episode analysis**, showing N+1/N+2 cue badges and
   clearing stale results before a subtitle-track redraw.
 - **`poe affected` works from the repository root**, matching the other delegated development tasks.

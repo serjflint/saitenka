@@ -25,6 +25,7 @@ def _show(reader: Reader) -> None:
         reader._analysis_status,
         osd=reader.osd,
         close_key=reader.analysis_key,
+        scale=reader.ui_scale,
     )
     x = (reader.osd[0] - image.width) // 2
     y = (reader.osd[1] - image.height) // 2

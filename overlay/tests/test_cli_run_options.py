@@ -28,6 +28,16 @@ def test_scan_delay_reads_from_config():
     assert opts.tooltip.scan_delay == 1.5
 
 
+def test_run_options_read_utility_ui_scale():
+    opts = _build_run_options({"ui_scale": 1.5}, **_BASE_KWARGS)
+    assert opts.panels.scale == 1.5
+
+
+def test_attach_options_read_utility_ui_scale():
+    opts = _build_attach_options({"ui_scale": 1.5}, mine={})
+    assert opts.panels.scale == 1.5
+
+
 def test_run_options_read_hover_pause_key():
     opts = _build_run_options(
         {

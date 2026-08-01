@@ -340,6 +340,7 @@ def _build_run_options(
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
+        PanelOptions,
         PerfOptions,
         ReaderOptions,
         StatsOptions,
@@ -355,6 +356,7 @@ def _build_run_options(
             mine_key=mine_key,
             mine_all_key=mine_all_key,
             translate_key=translate_key,
+            overlay_toggle_key=cfg.get("overlay_toggle_key", _ko.overlay_toggle_key),
             preview_key=preview_key,
             hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),
@@ -393,6 +395,7 @@ def _build_run_options(
             enabled=bool(stats.get("enabled", False)),
             summary=bool(stats.get("summary", True)),
         ),
+        panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),
         perf=PerfOptions(
             poll_interval=cfg.get("poll_interval", _po.poll_interval),
             prefetch_workers=cfg.get("prefetch_workers", _po.prefetch_workers),

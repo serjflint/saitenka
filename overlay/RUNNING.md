@@ -78,8 +78,9 @@ uv run python examples/mpv_reader.py \
 
 Or spell everything out on the CLI (overrides the config), e.g. `--dict … --freq … --pitch … --anki-decks '{"Saitenka::Known":["Expression"]}'`.
 
-- The embedded **Japanese** track is auto-selected and re-drawn by the overlay (mpv's own subs hidden);
-  the embedded **English** track is loaded as the hidden secondary (for the `t` reveal).
+- The embedded **Japanese** track is auto-selected and re-drawn by the overlay (mpv's own subs hidden).
+  English is leased as the secondary only while the `t` translation is visible, so normal subtitle
+  cycling can still select it as the primary track.
 - If Japanese is unavailable, English is shown immediately without Japanese tokenization or mining.
   Enabled providers run in the background (Jimaku, then TsukiHime) and announce an added track
   without selecting it.
@@ -106,6 +107,9 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 | **Shift+m** | **bulk-mine** every unknown word in the current line |
 | **t** | toggle the **English** translation of the current line |
 | **Alt+t** | switch the primary subtitle between Japanese-only and English-only |
+| **Alt+o** | hide/show Saitenka; hidden mode restores mpv's native subtitles and OSD |
+| **j** / **Shift+J** | mpv: cycle primary subtitle tracks forward / backward |
+| **v** / **Alt+v** | mpv: toggle primary / secondary native subtitle visibility |
 | **Ctrl+Shift+T** | retry enabled Japanese subtitle providers for the current media |
 | **Alt+p** | toggle whether opening a tooltip automatically pauses mpv |
 | **Alt+b** | save/archive the active cue for later review without pausing or seeking |
@@ -201,6 +205,8 @@ uv run saitenka uninstall-plugin   # removes it (backs up first)
 ```
 
 `doctor` reports whether `mpv.conf` sets `input-ipc-server` and which known tool uses that socket.
+On Windows, bare `attach` uses mpv.net's `\\.\pipe\mpvsocket` default; no escaped pipe path needs
+to be stored in `overlay.toml`. `doctor` diagnoses invalid TOML and locale-mangled yen separators.
 If another mpv script already owns OSD overlay ids 1–6, set `overlay_id_base` in the config to shift
 ours. mpv discovery order: `mpv_path` config → `PATH` → `/Applications/mpv.app` / Homebrew / scoop /
 choco / winget shims.

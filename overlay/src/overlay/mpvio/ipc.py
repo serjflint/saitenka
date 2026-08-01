@@ -24,6 +24,28 @@ from overlay.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTra
 
 log = logging.getLogger(__name__)
 
+MPVNET_DEFAULT_PIPE = r"\\.\pipe\mpvsocket"
+
+
+def normalize_ipc_path(path: str, *, platform: str | None = None) -> str:
+    """Accept Windows pipe names copied from Japanese-locale UIs or written as portable slashes."""
+    value = str(path).strip().strip('"')
+    if (platform or sys.platform) != "win32":
+        return value
+    value = value.replace("¥", "\\").replace("￥", "\\").replace("/", "\\")
+    if "\\" not in value:
+        return rf"\\.\pipe\{value}"
+    return value
+
+
+def default_attach_ipc_path() -> str | None:
+    """Known player default for a bare attach; Unix has no universal socket name."""
+    return MPVNET_DEFAULT_PIPE if sys.platform == "win32" else None
+
+
+def is_windows_pipe_path(path: str) -> bool:
+    return normalize_ipc_path(path).lower().startswith("\\\\.\\pipe\\")
+
 
 def default_ipc_path(unique: str) -> str:
     """The ``--input-ipc-server`` value to hand mpv (and connect to) for a self-launched mpv.
@@ -51,7 +73,7 @@ class MpvIPC:
     (called only from the main/IPC thread, as the controller does), so one reply channel suffices."""
 
     def __init__(self, path: str):
-        self.path = path
+        self.path = normalize_ipc_path(path)
         self._transport: Transport | None = None  # set by connect() (or injected in tests)
         self._buf = b""  # reader-thread-only accumulation buffer
         self._bytes_read = (

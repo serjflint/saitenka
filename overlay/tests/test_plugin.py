@@ -84,3 +84,69 @@ def test_named_pipe_roundtrip():  # pragma: no cover — Windows-gated smoke
     assert any(e.get("name") == "sub-text" for e in ipc.drain_events())
     ipc.close()
     th.join(2)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.skipif(sys.platform != "win32", reason="named pipes are Windows-only")
+def test_named_pipe_command_returns_while_reader_is_blocked():  # pragma: no cover — Windows kernel
+    import json
+    import threading
+    import time
+
+    from overlay.mpvio.ipc import MpvIPC
+
+    name = default_ipc_path("test-full-duplex")
+
+    def _server():
+        import _winapi
+
+        handle = _winapi.CreateNamedPipe(
+            name,
+            _winapi.PIPE_ACCESS_DUPLEX,
+            _winapi.PIPE_WAIT,
+            1,
+            65536,
+            65536,
+            0,
+            _winapi.NULL,
+        )
+        _winapi.ConnectNamedPipe(handle, _winapi.NULL)
+        data, _error = _winapi.ReadFile(handle, 65536)
+        command = json.loads(data)
+        assert command["command"] == ["get_property", "sub-text"]
+        _winapi.WriteFile(
+            handle,
+            b'{"event":"property-change","name":"sub-text","data":"current"}\n'
+            b'{"data":"current","error":"success"}\n',
+        )
+        _winapi.CloseHandle(handle)
+
+    thread = threading.Thread(target=_server, daemon=True)
+    thread.start()
+    time.sleep(0.1)
+    ipc = MpvIPC(name).connect(timeout=2)
+
+    reply = ipc.command("get_property", "sub-text", timeout=2)
+
+    assert reply == {"data": "current", "error": "success"}
+    assert any(event.get("data") == "current" for event in ipc.drain_events())
+    ipc.close()
+    thread.join(1)
+
+
+def test_windows_pipe_path_normalizes_japanese_yen_glyphs(monkeypatch):
+    from overlay.mpvio import ipc as ipc_module
+
+    monkeypatch.setattr(ipc_module.sys, "platform", "win32")
+
+    assert ipc_module.normalize_ipc_path("￥￥.￥pipe￥mpvsocket") == r"\\.\pipe\mpvsocket"
+    assert ipc_module.normalize_ipc_path("mpvsocket") == r"\\.\pipe\mpvsocket"
+
+
+def test_windows_attach_has_platform_default(monkeypatch):
+    from overlay.mpvio import ipc as ipc_module
+
+    monkeypatch.setattr(ipc_module.sys, "platform", "win32")
+
+    assert ipc_module.default_attach_ipc_path() == r"\\.\pipe\mpvsocket"

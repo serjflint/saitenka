@@ -105,22 +105,25 @@ def _ellipsize(draw: ImageDraw.ImageDraw, text: str, font, width: int) -> str:
 
 
 def _draw_sidebar_header(
-    draw: ImageDraw.ImageDraw, width: int, view: str, title_font, small_font
+    draw: ImageDraw.ImageDraw, width: int, view: str, title_font, small_font, scale: float
 ) -> list[SidebarHitBox]:
-    draw.text((14, 16), "Subtitles", font=title_font, fill=WHITE, anchor="lm")
+    def px(value: int) -> int:
+        return max(1, round(value * scale))
+
+    draw.text((px(14), px(16)), "Subtitles", font=title_font, fill=WHITE, anchor="lm")
     hits: list[SidebarHitBox] = []
-    tab_x = width - 178
+    tab_x = width - px(178)
     for label, tab_view in (("Track", "track"), ("Backlog", "backlog")):
         selected = view == tab_view
-        tab_width = 82
+        tab_width = px(82)
         draw.rounded_rectangle(
-            (tab_x, 10, tab_x + tab_width, 42),
-            radius=8,
+            (tab_x, px(10), tab_x + tab_width, px(42)),
+            radius=px(8),
             fill=SIDEBAR_ACTIVE if selected else SIDEBAR_ROW,
         )
-        draw.text((tab_x + tab_width // 2, 26), label, font=small_font, fill=WHITE, anchor="mm")
-        hits.append(SidebarHitBox(f"view:{tab_view}", 0, tab_x, 10, tab_width, 32))
-        tab_x += tab_width + 6
+        draw.text((tab_x + tab_width // 2, px(26)), label, font=small_font, fill=WHITE, anchor="mm")
+        hits.append(SidebarHitBox(f"view:{tab_view}", 0, tab_x, px(10), tab_width, px(32)))
+        tab_x += tab_width + px(6)
     return hits
 
 
@@ -133,49 +136,66 @@ def _draw_sidebar_row(
     row_height: int,
     body_font,
     small_font,
+    scale: float,
 ) -> list[SidebarHitBox]:
+    def px(value: int) -> int:
+        return max(1, round(value * scale))
+
     draw.rectangle(
-        (8, y + 2, width - 8, y + row_height - 2),
+        (px(8), y + px(2), width - px(8), y + row_height - px(2)),
         fill=SIDEBAR_ACTIVE if row.active else SIDEBAR_ROW,
     )
     hits: list[SidebarHitBox] = []
     action_width = 0
-    action_x = width - 16
+    action_x = width - px(16)
     for action in reversed(row.actions):
-        action_x -= 34
+        action_x -= px(34)
         draw.rounded_rectangle(
-            (action_x, y + 11, action_x + 28, y + 41), radius=7, fill=(61, 78, 98, 255)
-        )
-        draw.text((action_x + 14, y + 26), action.label, font=small_font, fill=WHITE, anchor="mm")
-        hits.append(SidebarHitBox(action.kind, action.value, action_x, y + 8, 30, 36))
-        action_x -= 4
-        action_width += 34
-    status_width = 0
-    if row.status:
-        status_text = _ellipsize(draw, row.status, small_font, 132)
-        status_width = min(148, max(44, round(draw.textlength(status_text, font=small_font)) + 16))
-        status_x = width - action_width - status_width - 12
-        status_color = SIDEBAR_STATUS.get(row.status, (75, 66, 112, 255))
-        draw.rounded_rectangle(
-            (status_x, y + 14, status_x + status_width, y + 40), radius=7, fill=status_color
+            (action_x, y + px(11), action_x + px(28), y + px(41)),
+            radius=px(7),
+            fill=(61, 78, 98, 255),
         )
         draw.text(
-            (status_x + status_width // 2, y + 27),
+            (action_x + px(14), y + px(26)),
+            action.label,
+            font=small_font,
+            fill=WHITE,
+            anchor="mm",
+        )
+        hits.append(SidebarHitBox(action.kind, action.value, action_x, y + px(8), px(30), px(36)))
+        action_x -= px(4)
+        action_width += px(34)
+    status_width = 0
+    if row.status:
+        status_text = _ellipsize(draw, row.status, small_font, px(132))
+        status_width = min(
+            px(148),
+            max(px(44), round(draw.textlength(status_text, font=small_font)) + px(16)),
+        )
+        status_x = width - action_width - status_width - px(12)
+        status_color = SIDEBAR_STATUS.get(row.status, (75, 66, 112, 255))
+        draw.rounded_rectangle(
+            (status_x, y + px(14), status_x + status_width, y + px(40)),
+            radius=px(7),
+            fill=status_color,
+        )
+        draw.text(
+            (status_x + status_width // 2, y + px(27)),
             status_text,
             font=small_font,
             fill=WHITE,
             anchor="mm",
         )
-    draw.text((16, y + 27), row.timestamp, font=small_font, fill=SIDEBAR_MUTED, anchor="lm")
-    text_x = 86
+    draw.text((px(16), y + px(27)), row.timestamp, font=small_font, fill=SIDEBAR_MUTED, anchor="lm")
+    text_x = px(86)
     reserved_width = action_width + status_width
-    remaining = max(30, width - text_x - reserved_width - 18)
+    remaining = max(px(30), width - text_x - reserved_width - px(18))
     x = text_x
     for text, color in row.parts or ((row.text, WHITE),):
         shown = _ellipsize(draw, text, body_font, remaining)
         if not shown:
             break
-        draw.text((x, y + 27), shown, font=body_font, fill=color, anchor="lm")
+        draw.text((x, y + px(27)), shown, font=body_font, fill=color, anchor="lm")
         advance = round(draw.textlength(shown, font=body_font))
         x += advance
         remaining -= advance
@@ -186,10 +206,10 @@ def _draw_sidebar_row(
             SidebarHitBox(
                 row.click_kind,
                 row.value,
-                8,
-                y + 2,
-                width - reserved_width - 20,
-                row_height - 4,
+                px(8),
+                y + px(2),
+                width - reserved_width - px(20),
+                row_height - px(4),
             )
         )
     return hits
@@ -211,19 +231,24 @@ def render_sidebar(
     total: int,
     first: int,
     unavailable: str | None = None,
+    scale: float = 1.0,
 ) -> SidebarRender:
     """Render only the supplied viewport rows; coordinates are panel-local."""
+
+    def px(value: int) -> int:
+        return max(1, round(value * scale))
+
     width, height = max(320, width), max(180, height)
     image = Image.new("RGBA", (width, height), SIDEBAR_BG)
     draw = ImageDraw.Draw(image)
-    title_font = _font(22)
-    body_font = _font(18)
-    small_font = _font(14)
+    title_font = _font(px(22))
+    body_font = _font(px(18))
+    small_font = _font(px(14))
     hits: list[SidebarHitBox] = []
-    header_h, footer_h, row_h = 52, 28, 54
+    header_h, footer_h, row_h = px(52), px(28), px(54)
     capacity = max(1, (height - header_h - footer_h) // row_h)
 
-    hits.extend(_draw_sidebar_header(draw, width, view, title_font, small_font))
+    hits.extend(_draw_sidebar_header(draw, width, view, title_font, small_font, scale))
 
     if unavailable:
         draw.text(
@@ -244,11 +269,12 @@ def render_sidebar(
                 row_height=row_h,
                 body_font=body_font,
                 small_font=small_font,
+                scale=scale,
             )
         )
 
     footer = _sidebar_footer(total, first, len(rows))
-    draw.text((14, height - 14), footer, font=small_font, fill=SIDEBAR_MUTED, anchor="lm")
+    draw.text((px(14), height - px(14)), footer, font=small_font, fill=SIDEBAR_MUTED, anchor="lm")
     return SidebarRender(image, tuple(hits), capacity)
 
 

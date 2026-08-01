@@ -22,7 +22,7 @@ def document_for(reader: Reader):
     visible = active_bindings(reader, "global", "tooltip", "mpv")
     entries = tuple(_entry(binding) for binding in visible if binding.spec.show_in_help)
     footer = f"{reader.help_key} / Esc close  ·  PgUp/PgDn or wheel"
-    return build_document(entries, osd=reader.osd, footer=footer)
+    return build_document(entries, osd=reader.osd, footer=footer, scale=reader.ui_scale)
 
 
 def redraw(reader: Reader) -> None:
@@ -37,6 +37,7 @@ def redraw(reader: Reader) -> None:
         height=document.height,
         index=reader._help_page,
         total=len(document.pages),
+        scale=document.scale,
     )
     x = (reader.osd[0] - document.width) // 2
     y = (reader.osd[1] - document.height) // 2

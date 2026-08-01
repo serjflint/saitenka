@@ -6,6 +6,7 @@
 name: E2E
 
 on:
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * 1" # weekly, Mon 06:00 UTC
@@ -21,6 +22,7 @@ permissions:
 
 jobs:
   e2e:
+    if: github.event_name != 'pull_request'
     name: e2e (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -65,3 +67,35 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: overlay
         run: xvfb-run -a uv run poe smoke-live
+
+  windows-regressions:
+    if: github.event_name == 'pull_request'
+    name: Windows IPC and runtime regressions
+    runs-on: windows-latest
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      - name: Windows regressions
+        working-directory: overlay
+        run: >-
+          uv run pytest -q
+          tests/test_plugin.py
+          tests/test_transport_windows.py
+          tests/test_anki_launch.py
+          tests/test_subtitle_modes.py
+          tests/test_overlay_visibility.py
+          tests/test_doctor.py
