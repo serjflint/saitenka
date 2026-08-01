@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saitenka — install</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem; }
+  code, pre { background: #f4f4f5; border-radius: 6px; }
+  pre { padding: 1rem; overflow-x: auto; }
+  a { color: #4f46e5; }
+</style>
+</head>
+<body>
+<h1>再点火 Saitenka</h1>
+<p>Learn Japanese from the video you're watching — FSRS subtitle coloring, hover→multi-dict tooltip,
+one-key Anki mining, drawn inside mpv.</p>
+
+<h2>Install</h2>
+<p>macOS / Linux:</p>
+<pre><code>curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh | sh</code></pre>
+<p>Windows (PowerShell):</p>
+<pre><code>powershell -ExecutionPolicy ByPass -c "irm https://serjflint.github.io/saitenka/install.ps1 | iex"</code></pre>
+<p>Or from PyPI: <code>uv tool install "saitenka[full]"</code></p>
+
+<p>Full documentation → <a href="https://saitenka.readthedocs.io">saitenka.readthedocs.io</a> ·
+Source → <a href="https://github.com/serjflint/saitenka">github.com/serjflint/saitenka</a></p>
+
+<p><small>These install scripts are published from
+<a href="https://github.com/serjflint/saitenka/tree/main/install"><code>install/</code></a> in the repo.</small></p>
+</body>
+</html>
