@@ -10,8 +10,9 @@ background reader thread; ``read`` returns ``b""`` at EOF (the peer closed).
 from __future__ import annotations
 
 import socket
-from pathlib import Path
-from typing import BinaryIO, Protocol, runtime_checkable
+import sys
+import threading
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -56,25 +57,104 @@ class UnixSocketTransport:
 
 
 class NamedPipeTransport:
-    r"""mpv IPC over a Windows named pipe (``\\.\pipe\…``), opened as a raw unbuffered file. A background
-    reader thread does blocking ``read``s — the single-threaded ``pump()`` this replaced was a NO-OP on
-    the pipe, which is why hover/mining/quit-detection were dead on Windows even though attach
-    'succeeded'."""
+    r"""mpv IPC over one overlapped Windows named-pipe handle.
 
-    def __init__(self, pipe: BinaryIO) -> None:
-        self._pipe = pipe
+    The reader waits on one OVERLAPPED operation while the controller writes through another. A
+    synchronous ``FileIO`` object serializes those directions on Windows, delaying replies/events
+    until unrelated input wakes mpv."""
+
+    def __init__(self, handle: int, api: Any) -> None:
+        self._handle = handle
+        self._api = api
+        self._state_lock = threading.Lock()
+        self._write_lock = threading.Lock()
+        self._read_op: Any | None = None
+        self._write_op: Any | None = None
+        self._closed = False
+
+    @staticmethod
+    def _windows_api() -> Any:
+        if sys.platform == "win32":
+            import _winapi
+
+            return _winapi
+        raise OSError("Windows named pipes are unavailable on this platform")
 
     @classmethod
     def dial(cls, path: str, _timeout: float) -> NamedPipeTransport:
-        # timeout unused (open() doesn't block-dial like connect()); kept for a uniform dial() signature.
-        return cls(Path(path).open("r+b", buffering=0))
+        api = cls._windows_api()
+        handle = api.CreateFile(
+            path,
+            api.GENERIC_READ | api.GENERIC_WRITE,
+            0,
+            api.NULL,
+            api.OPEN_EXISTING,
+            api.FILE_FLAG_OVERLAPPED,
+            api.NULL,
+        )
+        return cls(handle, api)
+
+    def _begin(self, attr: str, operation) -> Any:
+        with self._state_lock:
+            if self._closed:
+                raise OSError("named pipe is closed")
+            op, error = operation(self._handle)
+            if error not in (0, self._api.ERROR_IO_PENDING):
+                op.cancel()
+                raise OSError(error, "named-pipe operation failed")
+            setattr(self, attr, op)
+            return op
+
+    def _finish(self, attr: str, op) -> tuple[int, int]:
+        try:
+            return op.GetOverlappedResult(True)  # noqa: FBT003  # WinAPI's wait flag
+        finally:
+            with self._state_lock:
+                if getattr(self, attr) is op:
+                    setattr(self, attr, None)
 
     def read(self, n: int) -> bytes:
-        return self._pipe.read(n) or b""
+        op = self._begin("_read_op", lambda handle: self._api.ReadFile(handle, n, overlapped=True))
+        _count, error = self._finish("_read_op", op)
+        if error in (0, getattr(self._api, "ERROR_MORE_DATA", -1)):
+            return bytes(op.getbuffer() or b"")
+        if error in (
+            self._api.ERROR_BROKEN_PIPE,
+            self._api.ERROR_OPERATION_ABORTED,
+            getattr(self._api, "ERROR_NO_DATA", -1),
+        ):
+            return b""
+        raise OSError(error, "named-pipe read failed")
 
     def write(self, data: bytes) -> None:
-        self._pipe.write(data)
-        self._pipe.flush()
+        sent = 0
+        with self._write_lock:
+            while sent < len(data):
+                chunk = data[sent:]
+                op = self._begin(
+                    "_write_op",
+                    lambda handle, payload=chunk: self._api.WriteFile(
+                        handle, payload, overlapped=True
+                    ),
+                )
+                written, error = self._finish("_write_op", op)
+                if error != 0:
+                    raise OSError(error, "named-pipe write failed")
+                if written <= 0:
+                    raise OSError("named-pipe write made no progress")
+                sent += written
 
     def close(self) -> None:
-        self._pipe.close()
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+            handle = self._handle
+            pending = (self._read_op, self._write_op)
+        for op in pending:
+            if op is not None:
+                try:
+                    op.cancel()
+                except OSError:
+                    pass
+        self._api.CloseHandle(handle)

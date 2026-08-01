@@ -89,6 +89,17 @@ def test_config_check_missing(tmp_path, monkeypatch):
     assert c.status == "warn"  # no config yet → run `init`
 
 
+def test_config_check_reports_invalid_windows_pipe_escape(tmp_path, monkeypatch):
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text(r'mpv_socket = "\\.\pipe\mpvsocket"' + "\n")
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+
+    c = doc.check_config()
+
+    assert c.status == "fail"
+    assert "single-quoted TOML" in c.detail
+
+
 def test_dict_db_check_reports_unimported_title(tmp_path, monkeypatch):
     import dicthelp
 
@@ -173,6 +184,16 @@ def test_mpv_socket_check_reports_set_and_unset(monkeypatch):
     assert (
         unset_c.status == "ok" and "attach to YOUR" in unset_c.detail
     )  # informational hint, not a warn
+
+
+def test_mpv_socket_check_warns_about_locale_mangled_windows_pipe(monkeypatch):
+    monkeypatch.setattr(doc.sys, "platform", "win32")
+    monkeypatch.setattr(doc, "load_config", lambda: {"mpv_socket": "￥￥.￥pipe￥mpvsocket"})
+
+    c = doc.check_mpv_socket()
+
+    assert c.status == "warn"
+    assert r"\\.\pipe\mpvsocket" in c.detail
 
 
 def test_python_check_reports_version_and_build():

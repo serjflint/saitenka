@@ -24,6 +24,7 @@ import subprocess
 import sys
 import sysconfig
 import time
+import tomllib
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -165,9 +166,15 @@ def check_config() -> Check:
     if not p.exists():
         return Check("config", "warn", f"no config at {p} — run `saitenka init`")
     try:
-        load_config()
-    except Exception as e:  # noqa: BLE001  # pragma: no cover — load_config already swallows parse errors; defensive only
-        return Check("config", "fail", f"config parse error: {e}")
+        with p.open("rb") as stream:
+            tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        return Check(
+            "config",
+            "fail",
+            f"config parse error: {e}; Windows pipe paths are safest as single-quoted TOML, "
+            r"for example mpv_socket = '\\.\pipe\mpvsocket'",
+        )
     return Check("config", "ok", f"config parses ({p})")
 
 
@@ -649,15 +656,37 @@ def check_mpv_socket() -> Check:
     absence is what stalls users. mpv.net's default IPC pipe is ``\\\\.\\pipe\\mpvsocket``."""
     sock = load_config().get("mpv_socket")
     if sock:
+        from overlay.mpvio.ipc import is_windows_pipe_path, normalize_ipc_path
+
+        normalized = normalize_ipc_path(str(sock))
+        if sys.platform == "win32" and not is_windows_pipe_path(normalized):
+            return Check(
+                "mpv-socket",
+                "warn",
+                f"mpv_socket is not a Windows named pipe ({sock}); use "
+                r"'\\.\pipe\mpvsocket' or omit it for mpv.net's default",
+            )
+        if normalized != sock:
+            return Check(
+                "mpv-socket",
+                "warn",
+                f"mpv_socket contains locale/path separators; Saitenka will normalize it to "
+                f"{normalized}. Rewrite it as a single-quoted TOML string.",
+            )
         return Check("mpv-socket", "ok", f"mpv_socket set ({sock}) — bare `attach` connects here")
-    hint = (
-        "\\\\.\\pipe\\mpvsocket" if sys.platform == "win32" else "/tmp/mpv-socket"  # noqa: S108  # doc hint string, not a temp file we create
-    )
+    if sys.platform == "win32":
+        from overlay.mpvio.ipc import MPVNET_DEFAULT_PIPE
+
+        return Check(
+            "mpv-socket",
+            "ok",
+            f"no mpv_socket — bare `attach` uses mpv.net's default ({MPVNET_DEFAULT_PIPE})",
+        )
     return Check(
         "mpv-socket",
         "ok",
         "no mpv_socket — plugin mode auto-passes its own; to attach to YOUR already-running mpv set "
-        f"mpv_socket in overlay.toml (mpv.net default: {hint})",
+        "mpv_socket in overlay.toml (for example /tmp/mpv-socket)",
     )
 
 
