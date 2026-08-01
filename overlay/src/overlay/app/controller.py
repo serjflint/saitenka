@@ -52,6 +52,7 @@ from overlay.app.bindings import (
     MINE_ALL_MSG,
     MINE_MSG,
     OVERLAY_TOGGLE_MSG,
+    PREVIEW_CLOSE_MSG,
     PREVIEW_MSG,
     SCROLL_DOWN_MSG,
     SCROLL_UP_MSG,
@@ -291,6 +292,8 @@ class Reader:
         self._preview_close_rect: tuple | None = None
         self._preview_audio_rect: tuple | None = None
         self._preview_image_rect: tuple | None = None
+        self._preview_dup_rect: tuple | None = None
+        self._dup_tok: Token | None = None  # token behind an "exists" preview, for "add anyway"
         self._preview_zoom = False  # the screenshot is enlarged (toggled by clicking it)
         self._tip_rect: tuple | None = (
             None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
@@ -885,8 +888,14 @@ class Reader:
     def _footer(self, video) -> str:
         return miner_ui.footer(self, video)
 
-    def _preview_mined(self, card, tok, video) -> None:
-        miner_ui.preview_mined(self, card, tok, video)
+    def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
+        miner_ui.preview_mined(self, card, tok, video, status)
+
+    def _add_duplicate(self) -> None:
+        """The preview's ＋ button: mine a second card for the current scene even though the
+        expression is already in the deck (a different line/episode/anime)."""
+        if self._dup_tok is not None:
+            self._miner.mine_token(self._dup_tok, force=True)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         miner_ui.preview_existing(self, note_id, card, status)
@@ -1049,6 +1058,7 @@ class Reader:
         HELP_NEXT_MSG: lambda r: help_overlay.step(r, 1),
         HELP_CLOSE_MSG: lambda r: help_overlay.close_help(r),
         PREVIEW_MSG: lambda r: r.replay_preview(),
+        PREVIEW_CLOSE_MSG: lambda r: r._hide_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
         SPEAK_MSG: lambda r: r.speak_hovered(),

@@ -5,7 +5,7 @@
     "functions": [
       {
         "name": "render_card_preview",
-        "complexity": 19
+        "complexity": 16
       }
     ]
   },

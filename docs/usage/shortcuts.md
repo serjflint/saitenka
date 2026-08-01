@@ -32,7 +32,8 @@ focus). What each action does is described in [Features](features.md); to rebind
 | `` ` `` (backquote) | Toggle whole-track subtitle analysis and difficulty statistics |
 | Alt+A | Toggle full and hover-only learning annotations |
 | F1 | Toggle the compact in-player shortcut reference (`Esc` closes it) |
-| p | Replay the last card preview + its audio |
+| Esc | Close the card preview (also the tooltip / shortcut reference) |
+| p | Replay the last card preview + its audio (while a tooltip is open) |
 
 ## Rebindable keys
 
