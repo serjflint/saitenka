@@ -7,31 +7,42 @@ logs.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-01
+
 ### Added
 
+- **New documentation site** — a task-first [Material for MkDocs](https://saitenka.readthedocs.io) site
+  hosted on Read the Docs, built around the questions new users actually arrive with: **Getting Started**
+  (install, quickstart), **Usage** (features, keyboard shortcuts, configuration, and a full **CLI
+  reference generated from the app** so it can't drift), **Why Saitenka** (how it compares, performance &
+  benchmarks), and **Contributing**. Each fact lives in one canonical place; the README now points here.
 - **`saitenka update`** pulls the latest release while keeping your extras (wraps `uv tool upgrade`).
-  Because a running tool on Windows cannot replace its own files, it prints the command to run in a
-  fresh shell by default; `--now` hands off to a detached updater window that waits for the process to
-  exit first. `reinstall` gained the same `--now` handoff and is now scoped to *changing* extras or
-  install source.
-- **Documentation site** (Material for MkDocs, hosted on Read the Docs). The long-form docs stay
-  single-source — the site `include-markdown`s `RUNNING.md`/`ARCHITECTURE.md`/… rather than copying
-  them. Build locally with `poe docs` (`--strict`) or `poe docs-serve`.
+  Because a running tool on Windows cannot replace its own files, it prints the command to run in a fresh
+  shell by default; `--now` hands off to a detached updater window that waits for the process to exit
+  first. `reinstall` gained the same `--now` handoff and is now scoped to *changing* extras or install source.
+- **"Add anyway" in the card preview** — mine a note even when Anki flags it as a duplicate, alongside
+  assorted card-preview UX fixes.
 
 ### Changed
 
-- **The windowed (banded) tooltip renderer and selective head-prefetch are now on by default** —
-  both graduate from experimental. `banded = true` (env `SAITENKA_BANDED=0/1` overrides either way) and
+- **The windowed (banded) tooltip renderer and selective head-prefetch are now on by default** — both
+  graduate from experimental. `banded = true` (env `SAITENKA_BANDED=0/1` overrides either way) and
   `head_prefetch_lookahead = 1`. Set them back to `false`/`0` in `[tooltip]`/`[perf]` to opt out.
-- **`scan_delay` default raised to `1.0` s** (from `0.25`) — longer dwell before a nested scan popup
-  opens.
+- **`scan_delay` default raised to `1.0` s** (from `0.25`) — a longer dwell before a nested scan popup opens.
 
 ### Fixed
 
 - **`reinstall` no longer crashes with a confusing traceback on Windows.** A self-replacing reinstall
-  could not delete the running tool's own files and left the process importing an already-swapped
-  module at exit; updates now run from a detached helper after the process exits, and telemetry
-  shutdown no longer masks the real exit when its module is unavailable.
+  could not delete the running tool's own files and left the process importing an already-swapped module
+  at exit; updates now run from a detached helper after the process exits, and telemetry shutdown no
+  longer masks the real exit when its module is unavailable.
+
+### Development
+
+- The pre-push gate (`poe all`) is faster — coverage runs in parallel (`-n auto`) and the redundant
+  standalone test run was dropped, so the suite runs twice (coverage + free-threaded) instead of three times.
+- `RUNNING.md` was retired: user-facing content moved to the docs site, contributor content to a new
+  Development page, with the generated CLI reference + `tests/test_cli.py` as the flag/key contract.
 
 ## [1.0.0] - 2026-08-01
 
