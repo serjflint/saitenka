@@ -88,10 +88,16 @@ def update_hover(reader: Reader) -> None:
 
 def _hover_targets(reader: Reader, mx: float, my: float, *, inside: bool):
     """Which of (subtitle word, base tooltip, nested popup) the cursor is currently over."""
-    over_word = reader._hit(mx, my) if (inside and reader.tokens) else -1
     over_tip = inside and reader._tip_rect is not None and reader._in_rect(reader._tip_rect, mx, my)
     over_nest = (
         inside and reader._nest.rect is not None and reader._in_rect(reader._nest.rect, mx, my)
+    )
+    # The popups are drawn ON TOP of the subtitle, so a hit on a popup occludes the word beneath it:
+    # keep the lease on the open tooltip instead of switching to the word it happens to cover (e.g. the
+    # tooltip for the lower line, drawn up over the upper line of a two-line cue). Without this the base
+    # hit-test still sees that covered word and `hover_switch_delay` only *delays* the hijack.
+    over_word = (
+        reader._hit(mx, my) if (inside and reader.tokens and not (over_tip or over_nest)) else -1
     )
     return over_word, over_tip, over_nest
 
