@@ -83,12 +83,13 @@ uv run python examples/mpv_reader.py --sub-file jp.srt --color \
   --anki-decks '{"Kaishi 1.5k":["Word"]}'
 ```
 
-### Subtitle source: embedded / jimaku / file
+### Subtitle source: embedded / providers / file
 
-The reader takes subs from (in order): `--sub-file` → `--jimaku` (fetch from jimaku.cc, needs
-`$JIMAKU_API_KEY`) → the video's **embedded** JP track (`--slang ja,jpn`, auto-selected, native
-rendering hidden). Amazon-style **inline furigana** baked into ASS (`龍門光英りゅうもんみつひで`) is
-stripped before tokenizing (`app/tokenize.py::strip_inline_furigana`).
+An explicit `--sub-file` or `--jimaku` can override startup. Otherwise the reader selects embedded
+Japanese, immediately falls back to English when needed, then tries configured providers in the
+background: Jimaku first, followed by opt-in TsukiHime. Fetched Japanese is added without switching
+tracks. Amazon-style **inline furigana** baked into ASS (`龍門光英りゅうもんみつひで`) is stripped
+before tokenizing (`app/tokenize.py::strip_inline_furigana`).
 
 ```bash
 # real anime with an embedded JP track + your real Anki known-set (FSRS deck):

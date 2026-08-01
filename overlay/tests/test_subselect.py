@@ -67,7 +67,7 @@ def test_attach_starts_with_english_and_defers_enabled_jimaku():
     startup, status, fetch_in_background = subselect.prepare_attach_startup(ipc, jimaku=True)
     assert startup.active == "en" and startup.tracks.en_sid == 1
     assert "English fallback" in status
-    assert fetch_in_background is True
+    assert fetch_in_background == ("jimaku",)
     assert ipc.sets("sid") == [1]
 
 
@@ -75,8 +75,46 @@ def test_attach_does_not_fetch_when_japanese_is_already_present():
     ipc = FakeIPC(tracks=[EN, JP], path="/v/Has Japanese - 01.mkv")
     startup, _status, fetch_in_background = subselect.prepare_attach_startup(ipc, jimaku=True)
     assert startup.active == "jp"
-    assert fetch_in_background is False
+    assert fetch_in_background == ()
     assert ipc.sets("sid") == [2]
+
+
+def test_attach_orders_enabled_jimaku_before_tsukihime():
+    ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
+
+    startup, _status, providers = subselect.prepare_attach_startup(ipc, jimaku=True, tsukihime=True)
+
+    assert startup.active == "en"
+    assert providers == ("jimaku", "tsukihime")
+
+
+def test_disabled_tsukihime_is_absent_from_provider_chain():
+    ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
+
+    _startup, _status, providers = subselect.prepare_attach_startup(ipc, tsukihime=False)
+
+    assert providers == ()
+
+
+def test_tsukihime_provider_error_returns_soft_status(tmp_path, monkeypatch):
+    import overlay.app.jimaku as jm
+    import overlay.app.tsukihime as th
+
+    monkeypatch.setattr(jm, "parse_filename", lambda _path: ("Show", 1))
+
+    class FailingClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def fetch(self, *_args):
+            raise th.TsukiHimeError("malformed detail")
+
+    monkeypatch.setattr(th, "TsukiHimeClient", FailingClient)
+
+    path, status = subselect.fetch_tsukihime_path(str(tmp_path / "Show - 01.mkv"), resync=False)
+
+    assert path is None
+    assert status == "tsukihime failed: malformed detail"
 
 
 def test_ensure_sub_file_is_added_and_selected(tmp_path):

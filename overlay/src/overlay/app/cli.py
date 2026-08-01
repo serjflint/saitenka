@@ -893,11 +893,12 @@ def _finish_attach_subtitle_startup(
     startup,
     *,
     slang: str,
-    fetch_in_background: bool,
+    fetch_in_background: tuple[str, ...],
     jimaku_key: str | None,
     jimaku_title: str | None,
     episode: int | None,
     resync: bool,
+    tsukihime_config: dict | None = None,
 ) -> None:
     if startup is not None:
         reader.configure_subtitle_mode(startup, slang=slang)
@@ -907,15 +908,17 @@ def _finish_attach_subtitle_startup(
     video_path = ipc.command("get_property", "path").get("data")
     if not video_path:
         return
-    from overlay.app.subselect import fetch_jimaku_path
+    from overlay.app.subselect import fetch_provider_path
 
     reader.fetch_japanese_subs_async(
-        lambda: fetch_jimaku_path(
+        lambda: fetch_provider_path(
             video_path,
+            fetch_in_background,
             jimaku_key=jimaku_key,
-            jimaku_title=jimaku_title,
+            title_override=jimaku_title,
             episode=episode,
             resync=resync,
+            tsukihime_config=tsukihime_config,
         )
     )
 
@@ -1008,13 +1011,15 @@ def attach(
     # fetch subs without CLI flags. An explicit --jimaku / --jimaku-key still wins.
     _jm = cfg.get("jimaku")
     jm = _jm if isinstance(_jm, dict) else {}
+    _th = cfg.get("tsukihime")
+    th = _th if isinstance(_th, dict) else {}
     jimaku_force = jimaku_force or bool(jm.get("force", False))
     jimaku = jimaku or jimaku_force or bool(jm.get("enabled", False))  # force implies fetch
     jimaku_key = jimaku_key or jm.get("key")
     resync = resync and bool(jm.get("resync", True))
 
     subtitle_startup = None
-    fetch_jimaku_in_background = False
+    fetch_jimaku_in_background: tuple[str, ...] = ()
     try:
         subtitle_startup, status, fetch_jimaku_in_background = prepare_attach_startup(
             ipc,
@@ -1024,6 +1029,7 @@ def attach(
             jimaku_force=jimaku_force,
             jimaku_key=jimaku_key,
             jimaku_title=jimaku_title,
+            tsukihime=bool(th.get("enabled", False)),
             episode=episode,
             resync=resync,
         )
@@ -1054,6 +1060,7 @@ def attach(
         jimaku_title=jimaku_title,
         episode=episode,
         resync=resync,
+        tsukihime_config=th,
     )
     reader.load_deps_async(cfg)
     print(

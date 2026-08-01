@@ -70,6 +70,93 @@ def fetch_jimaku_path(
     return Path(sub_path), f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
 
 
+def fetch_tsukihime_path(
+    video: str,
+    *,
+    config: dict | None = None,
+    title_override: str | None = None,
+    episode: int | None = None,
+    resync: bool = True,
+    dest_dir: str | Path | None = None,
+) -> tuple[Path | None, str]:
+    """Fetch a unique TsukiHime match without touching mpv IPC."""
+    from overlay.app.jimaku import parse_filename
+    from overlay.app.tsukihime import (
+        API_BASE,
+        DEFAULT_RESULT_CAP,
+        DEFAULT_TIMEOUT,
+        TsukiHimeClient,
+        TsukiHimeError,
+    )
+
+    cfg = config or {}
+    title, parsed_episode = parse_filename(video)
+    title = title_override or title
+    requested_episode = episode if episode is not None else parsed_episode
+    destination = dest_dir or tempfile.mkdtemp(prefix="saitenka-tsukihime-")
+    try:
+        client = TsukiHimeClient(
+            api_base=cfg.get("api_base", API_BASE),
+            timeout=float(cfg.get("timeout", DEFAULT_TIMEOUT)),
+            result_cap=int(cfg.get("result_cap", DEFAULT_RESULT_CAP)),
+        )
+        sub_path = client.fetch(title, requested_episode, destination)
+    except (TsukiHimeError, TypeError, ValueError) as exc:
+        return None, f"tsukihime failed: {exc}"
+    if resync and Path(video).exists():
+        from overlay.app.resync import maybe_resync
+
+        sub_path = maybe_resync(Path(video), sub_path, enabled=True)
+    return (
+        Path(sub_path),
+        f"tsukihime: added {Path(sub_path).name} for {title!r} ep {requested_episode}",
+    )
+
+
+def fetch_provider_path(
+    video: str,
+    providers: tuple[str, ...],
+    *,
+    jimaku_key: str | None = None,
+    title_override: str | None = None,
+    episode: int | None = None,
+    resync: bool = True,
+    tsukihime_config: dict | None = None,
+) -> tuple[Path | None, str]:
+    """Run configured providers in deterministic order without touching playback."""
+    from overlay.app.subtitle_providers import fetch_first
+
+    attempts = []
+    for provider in providers:
+        if provider == "jimaku":
+            attempts.append(
+                (
+                    provider,
+                    lambda: fetch_jimaku_path(
+                        video,
+                        jimaku_key=jimaku_key,
+                        jimaku_title=title_override,
+                        episode=episode,
+                        resync=resync,
+                    ),
+                )
+            )
+        elif provider == "tsukihime":
+            attempts.append(
+                (
+                    provider,
+                    lambda: fetch_tsukihime_path(
+                        video,
+                        config=tsukihime_config,
+                        title_override=title_override,
+                        episode=episode,
+                        resync=resync,
+                    ),
+                )
+            )
+    return fetch_first(attempts)
+
+
 def fetch_jimaku(
     ipc,
     *,
@@ -155,6 +242,7 @@ def prepare_attach_startup(
     jimaku_force: bool = False,
     jimaku_key: str | None = None,
     jimaku_title: str | None = None,
+    tsukihime: bool = False,
     episode: int | None = None,
     resync: bool = True,
 ):
@@ -181,4 +269,10 @@ def prepare_attach_startup(
             status = f"selected English fallback sid={startup.tracks.en_sid}"
         else:
             status = "no Japanese or English subtitle track found"
-    return startup, status, jimaku and startup.tracks.jp_sid is None
+    providers: list[str] = []
+    if startup.tracks.jp_sid is None:
+        if jimaku and not jimaku_force:
+            providers.append("jimaku")
+        if tsukihime:
+            providers.append("tsukihime")
+    return startup, status, tuple(providers)
