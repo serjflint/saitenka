@@ -89,6 +89,46 @@ def reinstall_attempts(
     return [reinstall_command(extras, source="pypi"), github]
 
 
+def update_command() -> list[str]:
+    """``uv tool upgrade saitenka`` — the plain "get the latest, keep my setup" path. Unlike a bare
+    ``install --reinstall`` (which *replaces* the extras set), ``upgrade`` re-resolves the recorded
+    request, so extras/constraints/settings from the original install are preserved automatically —
+    no ``detect_extras`` dance needed. Pure — unit-tested."""
+    return ["uv", "tool", "upgrade", "saitenka"]
+
+
+def resolve_uv() -> str:
+    """Absolute path to the ``uv`` binary (or the bare name if not found). Resolve it in-process: a
+    detached updater console — especially one spawned from a GUI/mpv launch — can start with a minimal
+    PATH that no longer contains uv."""
+    return shutil.which("uv") or "uv"
+
+
+def handoff_script(attempts: list[list[str]], pid: int) -> str:
+    """A self-deleting Windows ``.cmd`` that waits for OUR process (``pid``) to exit — releasing the
+    lock on saitenka's own uv-tool venv — then runs the install command(s), trying each in order until
+    one succeeds (``||``). This is the only safe way to reinstall on Windows: a running uv-tool process
+    can't delete the ``Scripts`` dir its interpreter lives in (``os error 5``). Pure — unit-tested;
+    the caller resolves argv[0] to an absolute uv path and spawns this detached in a new console."""
+    chain = " || ".join(" ".join(f'"{arg}"' for arg in cmd) for cmd in attempts)
+    return (
+        "@echo off\r\n"
+        "title saitenka update\r\n"
+        f"echo Waiting for saitenka (PID {pid}) to exit...\r\n"
+        ":wait\r\n"
+        f'tasklist /fi "PID eq {pid}" 2>nul | find "{pid}" >nul '
+        "&& (timeout /t 1 /nobreak >nul & goto wait)\r\n"
+        "echo Updating saitenka...\r\n"
+        f"{chain}\r\n"
+        "echo.\r\n"
+        "if errorlevel 1 (echo Update FAILED - see the output above.) "
+        "else (echo Update complete.)\r\n"
+        "echo Press any key to close this window.\r\n"
+        "pause >nul\r\n"
+        'del "%~f0"\r\n'
+    )
+
+
 def uninstall_targets(*, keep_dicts: bool = False) -> list[Path]:
     """saitenka's OWN dirs to delete — config, data (dict DB), cache (logs/telemetry), crash reports —
     de-duplicated by resolved path, existing only. ``keep_dicts`` preserves the data dir (the expensive

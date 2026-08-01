@@ -40,6 +40,30 @@ def test_reinstall_attempts_ordering_by_source_and_ref():
     assert len(lc.reinstall_attempts([], source="github")) == 1  # forced GitHub only
 
 
+def test_update_command_is_uv_tool_upgrade():
+    # upgrade (not install --reinstall) preserves the recorded extras/constraints automatically.
+    assert lc.update_command() == ["uv", "tool", "upgrade", "saitenka"]
+
+
+def test_resolve_uv_prefers_which_falls_back_to_bare_name(monkeypatch):
+    monkeypatch.setattr(lc.shutil, "which", lambda _n: "/opt/uv/bin/uv")
+    assert lc.resolve_uv() == "/opt/uv/bin/uv"
+    monkeypatch.setattr(lc.shutil, "which", lambda _n: None)  # not on PATH → bare name
+    assert lc.resolve_uv() == "uv"
+
+
+def test_handoff_script_waits_on_pid_chains_attempts_and_self_deletes():
+    attempts = [["uv", "tool", "upgrade", "saitenka"], ["uv", "tool", "install", "saitenka[x] @ y"]]
+    script = lc.handoff_script(attempts, pid=4321)
+    assert 'tasklist /fi "PID eq 4321"' in script and "goto wait" in script  # waits for us to exit
+    # each attempt is fully quoted (the github spec has spaces) and they fall back with ||
+    assert '"uv" "tool" "upgrade" "saitenka"' in script
+    assert '"uv" "tool" "install" "saitenka[x] @ y"' in script
+    assert " || " in script
+    assert 'del "%~f0"' in script  # cleans up the temp script
+    assert script.endswith("\r\n") and "\r\n" in script  # CRLF for cmd.exe
+
+
 def test_latest_release_tag_parses_api_or_returns_none(monkeypatch):
     import io
     import json
