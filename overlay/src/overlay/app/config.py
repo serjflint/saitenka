@@ -17,6 +17,7 @@ import os
 import tomllib
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
+from typing import Literal
 
 from overlay.app import paths
 
@@ -71,6 +72,7 @@ class KeyOptions:
     subtitle_language_key: str = "Alt+t"
     bookmark_key: str = "Alt+b"
     sidebar_key: str = "\\"
+    annotation_key: str = "Alt+a"
     preview_key: str = "p"
     hover_pause_key: str = "Alt+p"
     sub_prev_key: str = "Alt+LEFT"
@@ -91,6 +93,7 @@ class TooltipOptions:
     pause_on_tooltip: bool = (
         True  # freeze the frame the moment a tooltip opens — the mining default
     )
+    annotation_mode: Literal["full", "hover"] = "full"
     scan_delay: float = 0.25  # dwell before a nested scan popup opens
     hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
     hide_delay: float = 0.6  # seconds the tooltip lingers after the cursor leaves the word

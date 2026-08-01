@@ -270,6 +270,7 @@ def suppress_hover(reader: Reader) -> bool:
     mp = reader._prop("mouse-pos") or {}
     if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
         return False
+    reader.set_annotation_hover(revealed=False)
     reader.set_hover(-1)
     return True
 

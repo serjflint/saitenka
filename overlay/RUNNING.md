@@ -108,6 +108,7 @@ Or spell everything out on the CLI (overrides the config), e.g. `--dict … --fr
 | **Alt+p** | toggle whether opening a tooltip automatically pauses mpv |
 | **Alt+b** | save/archive the active cue for later review without pausing or seeking |
 | **\\** | toggle the whole-track subtitle and deferred-capture sidebar |
+| **Alt+a** | toggle full and hover-only learning annotations |
 | **p** | replay the last card preview + its audio |
 | space / f / ← → / q | mpv: pause / fullscreen / seek / quit |
 

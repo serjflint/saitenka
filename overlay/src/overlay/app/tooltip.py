@@ -184,6 +184,7 @@ def update_hover_impl(reader: Reader) -> None:
     mx, my = mp.get("x", -1), mp.get("y", -1)
     reader._last_mouse = (mx, my)
     over_word, over_tip, over_nest = _hover_targets(reader, mx, my, inside=inside)
+    reader.set_annotation_hover(revealed=over_word >= 0)
     _update_nested_hover(reader, mx, my, over_tip=over_tip, over_nest=over_nest)
     _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
 
