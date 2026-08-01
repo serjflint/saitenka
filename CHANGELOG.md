@@ -7,6 +7,12 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **FSRS maturity coloring** — an optional copied Anki database distinguishes learning, young,
+  mature-known, and forgotten words without opening the live collection. N+1 remains the strongest
+  signal, and learning/young colors can be overridden under `[palette]`.
+
 ### Added (developer tooling — not part of the `poe all` gate)
 
 - **Sharpen loop** — an idle-time, one-module-per-run process that hardens the *existing* test suite
