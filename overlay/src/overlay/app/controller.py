@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from overlay import otel_metrics
 from overlay.app import (
+    backlog,
     miner_ui,
     nested_popup,
     prefetch,
@@ -69,6 +70,7 @@ MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
+BOOKMARK_MSG = "saitenka-toggle-bookmark"
 PREVIEW_MSG = "saitenka-preview"
 SCROLL_UP_MSG = "saitenka-scroll-up"
 SCROLL_DOWN_MSG = "saitenka-scroll-down"
@@ -151,6 +153,7 @@ class Reader:
         self.mine_all_key = o.keys.mine_all_key
         self.translate_key = o.keys.translate_key
         self.subtitle_language_key = o.keys.subtitle_language_key
+        self.bookmark_key = o.keys.bookmark_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -228,6 +231,7 @@ class Reader:
         self.subtitle_slang = "ja,jpn,jp"
         self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
         self._subtitle_fetch_threads: list[threading.Thread] = []
+        self._backlog_store: backlog.BacklogStore | None = None
         self._last_jpg: Path | None = None
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
@@ -872,6 +876,9 @@ class Reader:
         state = "on" if self.pause_on_tooltip else "off"
         self._toast(f"hover auto-pause: {state}")
 
+    def toggle_bookmark(self) -> None:
+        backlog.capture_current(self)
+
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
@@ -881,6 +888,7 @@ class Reader:
         bind(self.translate_key, TRANS_MSG)
         bind(self.subtitle_language_key, SUBTITLE_LANGUAGE_MSG)
         bind(self.hover_pause_key, HOVER_PAUSE_MSG)
+        bind(self.bookmark_key, BOOKMARK_MSG)
         # tooltip: scroll (see monolingual sections below the fold), speak (TTS), copy, click
         bind("WHEEL_UP", SCROLL_UP_MSG)
         bind("WHEEL_DOWN", SCROLL_DOWN_MSG)
@@ -912,6 +920,7 @@ class Reader:
         TRANS_MSG: lambda r: r.toggle_translation(),
         SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
+        BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
@@ -1133,5 +1142,7 @@ class Reader:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         for th in self._subtitle_fetch_threads:
             th.join(timeout=2.0)
+        if self._backlog_store is not None:
+            self._backlog_store.close()
         self.ov.close()
         shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir

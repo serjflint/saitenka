@@ -849,6 +849,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             translate_key=cfg.get("translate_key", ko.translate_key),
             hover_pause_key=cfg.get("hover_pause_key", ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", ko.subtitle_language_key),
+            bookmark_key=cfg.get("bookmark_key", ko.bookmark_key),
             sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
             sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
             sub_replay_key=cfg.get("sub_replay_key", ko.sub_replay_key),
