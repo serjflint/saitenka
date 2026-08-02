@@ -2077,6 +2077,26 @@ def test_popups_module_unifies_popup_view_state():
     assert panel.reading == "ほんめい" and panel.width == 384 and panel.full_height > 0
 
 
+def test_from_rows_band_cache_max_retains_more_of_a_tall_panel():
+    from overlay.app.popups import Panel
+    from overlay.panel import Definition, Entry, panel_rows
+
+    # A tall, polysemous entry whose blocks far exceed one viewport, so eviction actually bites.
+    def entry():
+        return Entry(
+            headword=["掛ける", {"tag": "rt", "content": "かける"}],
+            defs=[Definition(f"辞書{i}", [f"意味{i}：とても長い説明文。" * 3]) for i in range(40)],
+        )
+
+    # cap=None keeps exactly the viewport±overscan; a generous cap retains the MRU bands past it.
+    default = Panel.from_rows(panel_rows(entry(), 384), 384, "")
+    capped = Panel.from_rows(panel_rows(entry(), 384), 384, "", band_cache_max=200)
+    for scroll in range(0, 3000, 100):
+        default.viewport(scroll, 300, overscan=60)
+        capped.viewport(scroll, 300, overscan=60)
+    assert capped.windowed.cached_blocks > default.windowed.cached_blocks
+
+
 def test_miner_module_owns_the_mining_flow(monkeypatch):
     from overlay.app.miner import Miner, tag_slug
 

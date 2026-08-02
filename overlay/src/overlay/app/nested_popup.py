@@ -144,6 +144,7 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
             panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok),
             reader.tip_width,
             "",
+            band_cache_max=reader.band_cache_max,
         )
         with reader._cache_lock:
             st = reader._panel_cache_setdefault(key, st)
@@ -187,6 +188,7 @@ def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None
             panel_rows(entry, reader.tip_width, speak_button=reader._tts_ok),
             reader.tip_width,
             entry.reading,
+            band_cache_max=reader.band_cache_max,
         )
         with reader._cache_lock:
             st = reader._panel_cache_setdefault(key, st)
