@@ -334,6 +334,42 @@ def _fit_font_size(lines: list[list[Token]], max_w: float, pad_x: int, size: int
     return font, size, measured
 
 
+def _draw_token(
+    draw: ImageDraw.ImageDraw,
+    tok: Token,
+    x: float,
+    baseline: float,
+    w: float,
+    *,
+    gi: int,
+    y: int,
+    pad_y: int,
+    text_h: int,
+    style,
+    hovered: bool,
+    font,
+    size: int,
+    stroke: int,
+) -> WordBox:
+    """Draw one token's glyphs (+ its JLPT underline, if any) at ``x``/``baseline`` and return its
+    hit box. The hovered token takes the highlight color; else the style's color (or plain white)."""
+    color = HOVER if hovered else (style.color if style else WHITE)
+    draw.text(
+        (x, baseline),
+        tok.surface,
+        font=font,
+        fill=color,
+        anchor="ls",
+        stroke_width=stroke,
+        stroke_fill=OUTLINE,
+    )
+    underline = style.underline if style else None
+    if underline is not None:
+        uy = baseline + max(2, round(size * 0.10))
+        draw.line([(x, uy), (x + w, uy)], fill=underline, width=max(2, size // 14))
+    return WordBox(gi, int(x), y + pad_y, int(w), text_h)
+
+
 def _draw_visual_lines(
     img: Image.Image,
     visual_lines: list[list[tuple[int, Token, float]]],
@@ -365,21 +401,24 @@ def _draw_visual_lines(
         for gi, tok, w in vl:
             st = styles[gi] if styles and gi < len(styles) else None
             hovered = hover is not None and hover <= gi < hi_end
-            color = HOVER if hovered else (st.color if st else WHITE)
-            underline = st.underline if st else None
-            draw.text(
-                (x, baseline),
-                tok.surface,
-                font=font,
-                fill=color,
-                anchor="ls",
-                stroke_width=stroke,
-                stroke_fill=OUTLINE,
+            boxes.append(
+                _draw_token(
+                    draw,
+                    tok,
+                    x,
+                    baseline,
+                    w,
+                    gi=gi,
+                    y=y,
+                    pad_y=pad_y,
+                    text_h=text_h,
+                    style=st,
+                    hovered=hovered,
+                    font=font,
+                    size=size,
+                    stroke=stroke,
+                )
             )
-            if underline is not None:
-                uy = baseline + max(2, round(size * 0.10))
-                draw.line([(x, uy), (x + w, uy)], fill=underline, width=max(2, size // 14))
-            boxes.append(WordBox(gi, int(x), y + pad_y, int(w), text_h))
             x += w
         y += row_h + line_gap
     return boxes
