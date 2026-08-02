@@ -692,8 +692,11 @@ class Reader:
         finish: bool = False,
         mined: bool | None = None,
         tabs: bool | None = None,
+        nested: bool = False,
     ):
-        return tooltip.panel_for(self, tok, inflected, min_h, finish=finish, mined=mined, tabs=tabs)
+        return tooltip.panel_for(
+            self, tok, inflected, min_h, finish=finish, mined=mined, tabs=tabs, nested=nested
+        )
 
     def _panel_cache_setdefault(self, key, st) -> TipPanel:
         return tooltip.panel_cache_setdefault(self, key, st)

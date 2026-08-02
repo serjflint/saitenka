@@ -187,6 +187,15 @@ class WindowedPanel:
         return self._offsets.prefix_len
 
     @property
+    def full_height(self) -> int:
+        """Best current estimate of the whole panel's pixel height (incl. margins) — exact for measured
+        blocks, seeded for the rest, converging to exact as blocks render. Drives the scroll clamp and
+        scrollbar without the eager whole-panel blob render. Matches a one-shot ``render_panel`` height
+        once every block is measured (same ``total`` as :class:`OffsetTable`)."""
+        with self._lock:
+            return self._offsets.total_estimate()
+
+    @property
     def cached_blocks(self) -> int:
         """Blocks whose pixels are currently retained (bounded by ``max_cached_blocks`` if set, else by
         the viewport±overscan window)."""

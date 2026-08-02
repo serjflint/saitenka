@@ -106,6 +106,7 @@ def open_nested(reader: Reader, tok, inflected, wx: float, wy: float, wh: float,
         finish=not reader._finish_available(),
         mined=mined,
         tabs=False,
+        nested=True,  # identity, independent of the (visual) dict-tab strip
     )
     place_nested(reader, st, key, tok, tok.surface, wx, wy, wh, tail)
 

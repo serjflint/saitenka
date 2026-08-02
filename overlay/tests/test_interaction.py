@@ -99,6 +99,27 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     assert r._hover_span is None and r._hover_terms == ()
 
 
+def test_phrase_reaches_panel_lookup_with_dict_tabs_off(monkeypatch):
+    """Regression: the phrase terms must reach the entry lookup even when the dict-tab strip is OFF
+    (the default). The build once gated extra_terms on ``tabs`` (= show_dict_tabs), so with tabs off
+    お休み never stacked — hovering お showed the bare 御 instead."""
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5, show_dict_tabs=False)
+    r.osd = (1920, 1080)
+    r._finish_available = lambda: True
+    r.set_subtitle("本命を読む")
+    monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
+    seen: dict[str, tuple] = {}
+    real = r.dict_set.entry_for
+
+    def record(tok, inflected=None, *, extra_terms=()):
+        seen["extra"] = tuple(extra_terms)
+        return real(tok, inflected, extra_terms=extra_terms)
+
+    monkeypatch.setattr(r.dict_set, "entry_for", record)
+    Driver(r).move_to_word(0)
+    assert seen["extra"] == ("本命を",), "phrase must reach the panel lookup with dict-tabs off"
+
+
 def test_move_off_words_does_not_hover(monkeypatch):
     r = _reader(monkeypatch)
     ui = Driver(r)
