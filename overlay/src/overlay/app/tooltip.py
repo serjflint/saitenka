@@ -215,8 +215,8 @@ def resolve_hover(reader: Reader, index: int) -> None:
     if has_term is not None:
         got = phrase_terms(tokens=reader.tokens, index=index, has_term=has_term)
         if got is not None:
-            term_list, end = got
-            terms, span = tuple(term_list), (index, end)
+            term_list, start, end = got
+            terms, span = tuple(term_list), (start, end)
     reader._hover_terms = terms
     reader._hover_span = span
 

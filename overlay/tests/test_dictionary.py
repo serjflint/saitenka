@@ -388,6 +388,22 @@ def test_entry_for_stacks_phrase_terms_longest_first(tmp_path):
     assert entry.reading == "かずある"  # fused header tracks the longest (top) entry
 
 
+def test_entry_for_stacks_honorific_phrase_from_the_content_word(tmp_path):
+    """お休み splits into お(prefix)+休み; hovering 休み folds the leading お back in, so passing お休み as
+    an extra term stacks it ABOVE the bare 休み — the natural hover (the kanji, not the tiny お) surfaces
+    the whole word."""
+    d = _make_dict(
+        tmp_path / "oy.zip",
+        "Honorific",
+        [["お休み", "おやすみ", ["rest; good night"]], ["休み", "やすみ", ["holiday"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="休み", lemma="休む", reading="やすみ", pos="動詞", start=1, end=3)
+    entry = ds.entry_for(tok, extra_terms=("お休み",))
+    assert [g.reading for g in entry.groups] == ["おやすみ", "やすみ"]  # お休み first, then 休み
+    assert "rest; good night" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+
+
 def test_phrase_cards_align_with_groups_for_mining(tmp_path):
     """The per-entry ⊕ mines cards_for(...)[card_index]; with phrase terms the card list must span the
     same stacked entries in the same order, so a group's ⊕ mines that exact entry (phrase default first)."""

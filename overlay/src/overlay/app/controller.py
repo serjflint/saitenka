@@ -543,12 +543,17 @@ class Reader:
                 sr = render_plain_subtitle(self.sub_text, self.osd[0], size=self.sub_size)
             else:
                 annotated = self.annotation_mode == "full" or self._annotation_hover
+                # A phrase span highlights [start, end) — start can precede the hovered token (a leading
+                # お in お休み), so it drives the underline, not self.hover.
+                span = self._hover_span if annotated else None
                 sr = render_subtitle(
                     self.lines,
                     self.osd[0],
                     size=self.sub_size,
-                    hover=self.hover if annotated and self.hover >= 0 else None,
-                    hover_end=self._hover_span[1] if annotated and self._hover_span else None,
+                    hover=span[0]
+                    if span
+                    else (self.hover if annotated and self.hover >= 0 else None),
+                    hover_end=span[1] if span else None,
                     styles=self.styles if annotated else None,
                 )
         self.boxes = sr.boxes
