@@ -39,6 +39,9 @@ _STRESS_CACHE_CAP = (
     24  # --stress forces reader.panel_cache_max to this — a test control, independent
 )
 # of the user's own [tooltip].panel_cache_max — so eviction thrash is exercised deterministically
+_SCROLL_JANK_STEPS = (
+    40  # --scroll-jank: wheel steps DOWN into each entry (bounds tall-entry render time)
+)
 
 # Hand-picked multi-sense words Serj still sees pathological first lookups on: very polysemous
 # common words whose monolingual entries are enormous (手 alone is ~100 senses in a big monolingual dict).
@@ -523,6 +526,103 @@ def run_stress(
     return rc
 
 
+def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None = None) -> int:
+    """Scroll-ISOLATED jank: show each heavy/tall entry's BASE tooltip and scroll it top→bottom, timing
+    each scroll re-composite on its own. Unlike --stress (scroll mixed with hover + nested in one p99), a
+    jank tail here IS the scroll frame. Cold = scrolling into un-rendered tail blocks (they rasterise as
+    the viewport reaches them — the real jank); a warm re-traverse of the now-cached blocks is the floor.
+    A cold ≫ warm gap ⇒ the jank is cold-block render (getmask2), which idle prefetch hides in real use
+    only when it rendered ahead (see --timeline)."""
+    from overlay.app.subtitles import WordBox
+
+    ds, tag = _load_dict_set()
+    if ds is None:
+        ds = _SyntheticDS()
+    reader = _cold_reader(ds)
+    if hasattr(ds, "dicts") and ds.dicts:
+        corpus = [(t, r) for _s, t, r in _pathological_corpus(ds)]
+    else:
+        corpus = [(w, w) for w in ("かける", "する", "手", "気", "出る")]
+    step = round(OSD[1] * 0.08)  # one wheel step
+    cap = reader._tip_cap()
+    cold: list[float] = []
+    warm: list[float] = []
+    worst: list[tuple[float, str, int]] = []
+
+    def show(term: str, reading: str) -> None:
+        reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
+        reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+        reader.sub_origin = (0, 0)
+        reader.hover = 0
+        reader._show_tooltip(0)
+
+    def traverse(bucket: list[float], word: str | None) -> None:
+        st = reader._tip_state
+        if st is None:
+            return
+        reader._tip_scroll = 0
+        # Scroll DOWN into the cold tail, capped: a 90 kpx entry is ~1000 wheel steps — far past what a
+        # user scrolls, and every cold step rasterises a block. _SCROLL_JANK_STEPS samples enough cold
+        # blocks to surface the jank without rendering the whole monster.
+        steps = min(_SCROLL_JANK_STEPS, max(1, (st.full_height - cap) // step + 1))
+        for _ in range(steps):
+            t0 = time.perf_counter()
+            reader._scroll_tip(step)
+            bucket.append((time.perf_counter() - t0) * 1000.0)
+            if word is not None:
+                worst.append((bucket[-1], word, st.full_height))
+
+    for term, reading in corpus:  # warmup: build each panel once
+        show(term, reading)
+    for _ in range(max(1, reps)):
+        for term, reading in corpus:
+            reader._panel_cache.clear()  # cold panel → tail blocks rasterise DURING the scroll (jank)
+            show(term, reading)  # untimed first paint (head only)
+            traverse(cold, term)  # top→bottom over cold blocks — the scroll jank
+            traverse(warm, None)  # immediate re-traverse: blocks now cached — the warm floor
+
+    c, w = _stats(cold), _stats(warm)
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(
+        f"\nSaitenka overlay — SCROLL JANK: base-tooltip scroll over {len(corpus)} pathological "
+        f"entries × {reps} rounds   ({tag})"
+    )
+    print(format_runtime(rt))
+    print(
+        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {cap}px   step: {step}px   "
+        f"scroll frames: {c['n']}"
+    )
+    print(
+        f"\ncold scroll frame (renders tail block):  p50 {c['p50']:.1f}  p95 {c['p95']:.1f}  "
+        f"p99 {c['p99']:.1f}  MAX {c['max']:.1f} ms  (cv {c['cv']:.2f})"
+    )
+    print(
+        f"warm scroll frame (blocks cached):       p50 {w['p50']:.1f}  p95 {w['p95']:.1f}  "
+        f"p99 {w['p99']:.1f}  MAX {w['max']:.1f} ms"
+    )
+    print("\nworst cold scroll frames (word, ms, panel_px):")
+    by_word: dict[str, tuple[float, int]] = {}
+    for dt, word, px in worst:
+        if dt > by_word.get(word, (0.0, 0))[0]:
+            by_word[word] = (dt, px)
+    for word, (dt, px) in sorted(by_word.items(), key=lambda kv: -kv[1][0])[:8]:
+        print(f"    {word:<10}{dt:>9.1f}{px:>10}")
+    print(
+        "\ncold = first scroll into un-rendered tail blocks; warm = immediate re-scroll of the same "
+        "panel. cold ≫ warm ⇒ block render (getmask2) dominates and a warm re-scroll is free. cold ≈ "
+        "warm (the usual result) ⇒ the block cache is bounded (retained pixels are O(viewport) by "
+        "design), so a re-scroll re-renders — the scroll jank is the per-block render each time the "
+        "viewport reaches it, hidden in real use only when idle prefetch rendered ahead (see --timeline)."
+    )
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps({"runtime": rt, "cold": c, "warm": w, "corpus_size": len(corpus)}, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\nwrote scroll-jank baseline → {json_path}")
+    return gil_rc
+
+
 # Module-level worker state for the --vocab --parallel path (ProcessPool workers each rebuild the DB in
 # the initializer; threads share the copy run_vocab sets). Top-level so ProcessPool can pickle by name.
 _VOCAB_DS = None
@@ -920,6 +1020,12 @@ def main() -> int:
         "surfaces cache-eviction thrash, memory growth, and the frame-latency tail under load",
     )
     ap.add_argument(
+        "--scroll-jank",
+        action="store_true",
+        help="scroll the BASE tooltip top→bottom over pathological entries, timing each scroll frame in "
+        "isolation — the scroll-only jank tail (cold tail-block render vs warm cached re-composite)",
+    )
+    ap.add_argument(
         "--max-frame-ms",
         type=float,
         help="stress: fail if any single op exceeds this frame budget (ms)",
@@ -997,6 +1103,8 @@ def main() -> int:
         return run_stress(
             args.reps, rt, args.require_ft, args.json, args.max_frame_ms, args.max_rss_mb
         )
+    if args.scroll_jank:
+        return run_scroll_jank(args.reps, rt, args.require_ft, args.json)
     if args.vocab:
         return run_vocab(
             args.vocab,
