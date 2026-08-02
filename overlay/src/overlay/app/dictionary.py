@@ -453,9 +453,38 @@ class DictionarySet:
 
     def _freq_rank(self, term: str, reading: str) -> int | None:
         """Lowest (most-common) frequency rank across the freq sources for this ``(term, reading)`` —
-        the tie-breaker's commonness signal. ``None`` when no source ranks it."""
-        ranks = [r for fs in self.freqs if (r := fs.rank((term,), reading)) is not None]
-        return min(ranks) if ranks else None
+        the tie-breaker's commonness signal. ``None`` when no source ranks it.
+
+        Called once per candidate hit while sorting entries, so it batches all freq dicts into ONE
+        ``dict_id IN (…)`` query (parallel to :meth:`Dictionary._batch_exact`) instead of one query per
+        dict. The reading preference is applied **per dict** — a dict with only a non-matching entry
+        still contributes its rank, so a global preference would drop it (different result); grouping by
+        ``dict_id`` before the min preserves the per-``FreqSource.rank`` semantics exactly."""
+        if not self.freqs or not term:
+            return None
+        dids = [fs.dict_id for fs in self.freqs]
+        placeholders = ",".join("?" * len(dids))
+        rows = (
+            self.freqs[0]
+            .db._conn()
+            .execute(
+                f"SELECT dict_id, reading, rank FROM term_meta "  # noqa: S608 — only ?-placeholder count interpolated
+                f"WHERE dict_id IN ({placeholders}) AND mode='freq' AND term=?",
+                (*dids, term),
+            )
+            .fetchall()
+        )
+        by_dict: dict[int, list[tuple[str | None, int]]] = {}
+        for did, r, rk in rows:
+            if rk is not None and rk > 0:
+                by_dict.setdefault(did, []).append((r, rk))
+        best: int | None = None
+        for entries in by_dict.values():
+            matched = [rk for r, rk in entries if reading is None or r is None or r == reading]
+            use = matched or [rk for _, rk in entries]
+            m = min(use)
+            best = m if best is None else min(best, m)
+        return best
 
     def _rank_key(self, term: str, reading: str, token: Token, formset: set[str]):
         """Sort key for choosing/ordering entries: exact-headword first (like Yomitan and
