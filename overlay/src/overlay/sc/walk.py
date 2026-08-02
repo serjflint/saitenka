@@ -44,6 +44,9 @@ def link_query(href: str | None, text: str = "") -> str | None:
 
 _BORDER_KEYS = ("borderColor", "borderStyle", "borderWidth", "border")
 _BG_KEYS = ("backgroundColor", "background")
+_BOX_KEYS = frozenset(
+    (*_BG_KEYS, *_BORDER_KEYS, "borderRadius")
+)  # pill test; hoisted (hot in the SC walk)
 
 INLINE_TAGS = {"span", "a", "em", "strong", "b", "i", "u", "code", "ruby", "rt", "rb", "sub", "sup"}
 BLOCK_TAGS = {"div", "p", "ul", "ol", "li", "details", "summary", "table", "tr", "td", "th"}
@@ -149,7 +152,7 @@ def _is_boxed(node: dict) -> bool:
     # A filled/bordered/rounded span is a visually separated pill (POS/tag chip); Yomitan spaces these
     # via CSS margins, which plain-text flattening otherwise loses — glueing e.g. `na-adjcolloquial`.
     st = node.get("style") or {}
-    return any(k in st for k in (*_BG_KEYS, *_BORDER_KEYS, "borderRadius"))
+    return not _BOX_KEYS.isdisjoint(st)
 
 
 _tls = threading.local()  # per-walk _text_of memo (see walk()); thread-local so prefetch workers
