@@ -16,7 +16,12 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
   `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard. Codex
   discovers this directory directly. For Claude Code auto-discovery, create a **local** symlink
   (`.claude/` is git-ignored, never committed):
-  `ln -s ../.agents/skills .claude/skills`.
+  `ln -s ../.agents/skills .claude/skills`. Full per-agent activation of the optional intelligence stack
+  (repowise + Basic Memory MCP, pyrefly LSP, hooks) → the **`agent-setup`** skill; which tool answers
+  what → **`agent-tooling`**.
+- **`.agents/mcp/servers.json`** — canonical, agent-agnostic MCP server definitions (no shared cross-agent
+  format exists); `agent-setup`'s `render.py` emits each agent's dialect. The generated `.mcp.json` is
+  git-ignored.
 - **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
   `searching.md` (don't `find … | xargs grep`; prefer Grep/Glob or `git grep`).
 
@@ -34,9 +39,9 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
 - **Dev gate (no CI):** `uv run poe all` is the pre-push gate — its task list is `all` in
-  `[tool.poe.tasks]` (the source of truth: static checks + the suite + supply-chain). `cov` runs `-n auto`
-  with a superset marker set, so it is the functional run too — the standalone `test` stays the inner loop,
-  not a third suite run. Run it before
+  `[tool.poe.tasks]` (the source of truth: static checks + the suite + supply-chain). `cov` is the
+  functional run too (a superset marker set), so the standalone `test` stays the inner loop, not a third
+  suite run. Run it before
   pushing. The task-by-task runbook, how to read each failure, the advisory `poe hygiene` tier, and the
   free-threaded / 3.13-pinned-env traps live in the **dev-gate skill** (`.agents/skills/dev-gate/`) — consult it. The real tasks live
   in `overlay/`; the repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works from the repo
@@ -53,9 +58,10 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
 
 ## Refactoring
 
-- **Navigate by symbols, not text sweeps or research subagents.** Use the `LSP` tool (basedpyright) —
+- **Navigate by symbols, not text sweeps or research subagents.** Use the `LSP` tool (pyrefly) —
   `findReferences` / `incomingCalls` / `documentSymbol` — to map callers before touching a symbol. It's
-  exact and far cheaper than grep-and-read.
+  exact and far cheaper than grep-and-read. pyrefly here is the **nav backend only** — which type-checkers
+  the gate runs is `poe types` (SSOT), separate from this. Register the LSP via the `pyrefly-lsp` skill.
 - **Mechanical edits go through a codemod.** For repo-wide renames/moves or splitting a big module
   (`app/controller.py` is the standing example), author a **LibCST** or **ast-grep** codemod and apply it
   rather than hand-rewriting a large file — formatting, comments, and goldens survive untouched. LibCST
@@ -104,10 +110,10 @@ prose bloat does, because two copies of a fact drift independently and one goes 
 ## Testing
 
 Forward-looking discipline: every **new** test follows these; existing tests migrate opportunistically
-when you touch them, never in a big-bang sweep. Tiers run via `poe test` (fast: `-n auto`, excludes
-`slow`/`integration`/`requires_display`/`e2e`) and `poe test-ft` (`PYTHON_GIL=0`, whole-suite
-free-threaded — the FT check is the *suite run*, not a per-test assert). Adequacy beyond the unit suite
-is its own contract: see **Mutation auditing** and **Fuzzing & symbolic checks** below.
+when you touch them, never in a big-bang sweep. Tiers run via `poe test` (the fast inner loop) and
+`poe test-ft` (the free-threaded whole-suite check — the FT check is the *suite run*, not a per-test
+assert); their exact flags and marker exclusions live in `[tool.poe.tasks]` (SSOT). Adequacy beyond the
+unit suite is its own contract: see **Mutation auditing** and **Fuzzing & symbolic checks** below.
 
 The rules below are the *invariants*; the step-by-step procedure for authoring one test — decision tree,
 recipes against the real fakes, when-not-to-test — is the **write-test skill** (`.agents/skills/write-test/`).
