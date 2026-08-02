@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 from overlay import otel_metrics
 from overlay.panel import Row
-from overlay.render.banded import WindowedPanel
+from overlay.render.banded import _BAND_PX, WindowedPanel
 
 WIDTH = 384
 BLOCK_H = 100  # every synthetic block is this tall → rendered_px == BLOCK_H * blocks rendered
@@ -32,6 +32,26 @@ def _fixed_panel(n_blocks: int, **kw) -> WindowedPanel:
         for _ in range(n_blocks)
     ]
     return WindowedPanel(rows, WIDTH, **kw)
+
+
+def _tall_band_row(h: int) -> Row:
+    """A synthetic BANDED body row of height ``h``: ``measure`` yields the height with no raster;
+    ``render_window`` rasters just the requested band. No fonts — so the per-band budget is exact."""
+
+    def full():
+        return Image.new("RGBA", (WIDTH, h), (0, 0, 0, 0)), [], []
+
+    def measure() -> int:
+        return h
+
+    def window(y0: int, y1: int):
+        return Image.new("RGBA", (WIDTH, y1 - y0), (0, 0, 0, 0)), [], []
+
+    return Row(0, full, measure=measure, render_window=window)
+
+
+def _banded_panel(heights: list[int], **kw) -> WindowedPanel:
+    return WindowedPanel([_tall_band_row(h) for h in heights], WIDTH, **kw)
 
 
 @contextlib.contextmanager
@@ -99,6 +119,40 @@ def test_show_render_budget_is_bounded_to_the_viewport_not_the_whole_panel():
     rendered = snap["saitenka.block_cache.rendered_px"]["sum"]
     assert rendered < wp.full_height  # rendered the head, not the whole panel
     assert rendered <= 2 * (view_h + BLOCK_H)  # ~one viewport (+ overscan slack), not 4000px
+
+
+def test_first_reach_into_a_tall_block_rasters_at_most_one_band():
+    # The PR3 crux: reaching a pathologically tall block (here 34× the viewport) rasterises only the
+    # BANDS overlapping the viewport, each ≤ _BAND_PX — never the whole ~14k-px block. This is what
+    # bounds a cold scroll frame to ~9ms instead of ~500ms.
+    with _telemetry():
+        wp = _banded_panel([14000])  # one block, 34× a 432px viewport
+        view_h = 300
+        wp.viewport(0, view_h)
+        snap = otel_metrics.snapshot()
+    px = snap["saitenka.block_cache.rendered_px"]
+    assert px["sum"] <= px["count"] * _BAND_PX  # every rasterised unit is ≤ one band
+    # a viewport spanning [0,300) touches bands [0,256) and [256,512) → 2 bands, ~one viewport of px
+    assert px["sum"] <= 2 * (view_h + _BAND_PX)  # O(viewport), NOT O(block) — tightened to _BAND_PX
+    assert px["sum"] < 14000  # emphatically not the whole block
+
+
+def test_scroll_notch_into_a_tall_block_rasters_at_most_one_new_band():
+    # A one-notch (86px) scroll deeper into a tall block enters at most one new band.
+    with _telemetry():
+        wp = _banded_panel([14000])
+        wp.viewport(0, 300)
+        after_show = otel_metrics.snapshot()
+        wp.viewport(300, 300)  # a screen deeper — crosses into new bands
+        after_scroll = otel_metrics.snapshot()
+    px0 = after_show["saitenka.block_cache.rendered_px"]
+    px1 = after_scroll["saitenka.block_cache.rendered_px"]
+    new_px = px1["sum"] - px0["sum"]
+    new_bands = px1["count"] - px0["count"]
+    assert new_px <= new_bands * _BAND_PX
+    assert new_px <= 2 * (
+        300 + _BAND_PX
+    )  # a screen-deep jump renders ~one screen of bands, not more
 
 
 def test_scroll_render_budget_only_renders_newly_visible_blocks():

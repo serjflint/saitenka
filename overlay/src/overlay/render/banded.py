@@ -194,9 +194,9 @@ class WindowedPanel:
         self._rows = list(rows)
         self._cap = max_cached_blocks  # LRU pixel-cache cap (None = keep exactly visible±overscan)
         self._compress = compress
-        # Injected, not imported: overlay.body_block depends on render.document, so a module-level
-        # import of render_body_block here would cycle back through .render at the package level.
-        # Only needed for the GIL-build process-pool path in _render_ahead_parallel.
+        # A truthy value ENABLES the GIL-build process pool in render_ahead (the actual band renderer,
+        # render_body_band, is a function-scope import — module-level would cycle body_block →
+        # render.document → back through .render). None keeps render_ahead in-process (hermetic tests).
         self._render_block_fn = render_block_fn
         gaps = [r.gap if r.gap is not None else self.theme.gap for r in self._rows]
         self._offsets = LazyOffsets(
