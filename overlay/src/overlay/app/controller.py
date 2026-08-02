@@ -251,16 +251,7 @@ class Reader:
         self._subtitle_retry_active = False
         self._subtitle_retry_lock = threading.Lock()
         self._backlog_store: backlog.BacklogStore | None = None
-        self._sidebar_open = False
-        self._sidebar_view = "track"
-        self._sidebar_scroll = 0
-        self._sidebar_manual_until = 0.0
-        self._sidebar_last_active = -1
-        self._sidebar_total = 0
-        self._sidebar_rect: tuple[int, int, int, int] | None = None
-        self._sidebar_hits: tuple = ()
-        self._sidebar_style_cache: dict = {}
-        self._sidebar_geometry: tuple | None = None
+        self.sidebar = sidebar.SidebarState()
         self._analysis_open = False
         self._analysis_status = "Analyzing…"
         self._episode_analysis: EpisodeAnalysis | None = None
