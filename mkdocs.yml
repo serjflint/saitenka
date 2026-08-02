@@ -85,4 +85,5 @@ nav:
   - Contributing:
       - Architecture: contributing/architecture.md
       - Development: contributing/development.md
+      - Agent tooling: contributing/agent-tooling.md
       - Changelog: contributing/changelog.md

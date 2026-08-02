@@ -104,6 +104,13 @@ What to verify after a change that could touch rendering, coloring, mining, or t
 Inner loop (not a gate): `uv run poe affected` runs only the tests a change can touch — seconds instead
 of the full suite, for the edit→feedback cycle.
 
+## Optional: agent intelligence stack
+
+If you drive development with a coding agent (Claude Code, Codex), the repo can wire up local,
+grounded code intelligence — repowise (whole-repo Q&A), pyrefly (symbol navigation), and Basic Memory
+(notes) over a local MLX/Qwen backend. All optional; the repo builds and tests without them. Setup and
+reproduction: [Agent tooling](agent-tooling.md).
+
 ## Optional: session history & telemetry
 
 Both are **local-only and off by default**:
