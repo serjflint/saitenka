@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from overlay.app import analysis_overlay
@@ -21,6 +22,22 @@ SIDEBAR_ID = OverlayId.SIDEBAR
 MANUAL_SCROLL_HOLD = 1.5
 ROWS_PER_WHEEL_STEP = 3
 PLAIN = (236, 241, 247, 255)
+
+
+@dataclass
+class SidebarState:
+    """The in-mpv sidebar's runtime state, grouped off the Reader (was ~10 ``_sidebar_*`` fields)."""
+
+    open: bool = False
+    view: str = "track"
+    scroll: int = 0
+    manual_until: float = 0.0  # while >now, honour the user's manual scroll over auto-follow
+    last_active: int = -1
+    total: int = 0
+    rect: tuple[int, int, int, int] | None = None
+    hits: tuple = ()
+    style_cache: dict = field(default_factory=dict)
+    geometry: tuple | None = None
 
 
 def _format_time(seconds: float) -> str:
@@ -56,13 +73,13 @@ def _cue_parts(reader: Reader, cue_index: int, cue: SubCue) -> tuple[tuple[str, 
     if reader.subtitle_language == "en" or reader.scorer is None:
         return ((cue.text.replace("\n", " "), PLAIN),)
     key = (reader.subtitle_language, cue_index, cue.text, id(reader.scorer))
-    cached = reader._sidebar_style_cache.get(key)
+    cached = reader.sidebar.style_cache.get(key)
     if cached is not None:
         return cached
     tokens = tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
     styles = reader.scorer.score_line(tokens)
     parts = tuple((token.surface, style.color) for token, style in zip(tokens, styles, strict=True))
-    reader._sidebar_style_cache[key] = parts
+    reader.sidebar.style_cache[key] = parts
     return parts
 
 
@@ -217,7 +234,7 @@ def _summary_rows(reader: Reader) -> list[SidebarRow]:
 
 
 def redraw(reader: Reader) -> None:
-    if not reader._sidebar_open:
+    if not reader.sidebar.open:
         return
     scale = reader.ui_scale
     margin = round(18 * scale)
@@ -231,15 +248,15 @@ def redraw(reader: Reader) -> None:
     capacity = _capacity(reader)
     unavailable = None
     try:
-        if reader._sidebar_view == "track":
+        if reader.sidebar.view == "track":
             active = _active_index(reader)
-            rows, total = _track_rows(reader, reader._sidebar_scroll, capacity, active)
+            rows, total = _track_rows(reader, reader.sidebar.scroll, capacity, active)
             if reader._sub_index is None or len(reader._sub_index) == 0:
                 unavailable = "Subtitle cue index unavailable"
         else:
             all_rows = _summary_rows(reader)
             total = len(all_rows)
-            rows = all_rows[reader._sidebar_scroll : reader._sidebar_scroll + capacity]
+            rows = all_rows[reader.sidebar.scroll : reader.sidebar.scroll + capacity]
             if not rows:
                 unavailable = "Backlog is empty"
     except (OSError, sqlite3.Error, ValueError) as exc:
@@ -248,49 +265,47 @@ def redraw(reader: Reader) -> None:
         rows,
         width=width,
         height=height,
-        view=reader._sidebar_view,
+        view=reader.sidebar.view,
         total=total,
-        first=reader._sidebar_scroll,
+        first=reader.sidebar.scroll,
         unavailable=unavailable,
         scale=scale,
     )
-    reader._sidebar_rect = (x, y, width, height)
-    reader._sidebar_hits = rendered.hitboxes
-    reader._sidebar_total = total
+    reader.sidebar.rect = (x, y, width, height)
+    reader.sidebar.hits = rendered.hitboxes
+    reader.sidebar.total = total
     reader.ov.show(rendered.image, x, y, oid=SIDEBAR_ID)
 
 
 def toggle(reader: Reader) -> None:
-    reader._sidebar_open = not reader._sidebar_open
-    if reader._sidebar_open:
+    reader.sidebar.open = not reader.sidebar.open
+    if reader.sidebar.open:
         reader.set_hover(-1)
         active = _active_index(reader)
-        reader._sidebar_scroll = max(0, active - _capacity(reader) // 2)
-        reader._sidebar_last_active = active
+        reader.sidebar.scroll = max(0, active - _capacity(reader) // 2)
+        reader.sidebar.last_active = active
         redraw(reader)
     else:
         reader.ov.hide(SIDEBAR_ID)
-        reader._sidebar_rect = None
-        reader._sidebar_hits = ()
+        reader.sidebar.rect = None
+        reader.sidebar.hits = ()
 
 
 def on_index_changed(reader: Reader) -> None:
-    reader._sidebar_style_cache.clear()
-    reader._sidebar_scroll = 0
-    reader._sidebar_last_active = -1
+    reader.sidebar.style_cache.clear()
+    reader.sidebar.scroll = 0
+    reader.sidebar.last_active = -1
     redraw(reader)
 
 
 def contains(reader: Reader, x: float, y: float) -> bool:
     return bool(
-        reader._sidebar_open
-        and reader._sidebar_rect
-        and reader._in_rect(reader._sidebar_rect, x, y)
+        reader.sidebar.open and reader.sidebar.rect and reader._in_rect(reader.sidebar.rect, x, y)
     )
 
 
 def suppress_hover(reader: Reader) -> bool:
-    if not reader._sidebar_open:
+    if not reader.sidebar.open:
         return False
     mp = reader._prop("mouse-pos") or {}
     if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
@@ -301,39 +316,39 @@ def suppress_hover(reader: Reader) -> bool:
 
 
 def scroll(reader: Reader, steps: int) -> bool:
-    if not reader._sidebar_open:
+    if not reader.sidebar.open:
         return False
     mp = reader._prop("mouse-pos") or {}
     if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
         return False
-    maximum = max(0, reader._sidebar_total - _capacity(reader))
-    reader._sidebar_scroll = max(
-        0, min(maximum, reader._sidebar_scroll + steps * ROWS_PER_WHEEL_STEP)
+    maximum = max(0, reader.sidebar.total - _capacity(reader))
+    reader.sidebar.scroll = max(
+        0, min(maximum, reader.sidebar.scroll + steps * ROWS_PER_WHEEL_STEP)
     )
-    reader._sidebar_manual_until = time.monotonic() + MANUAL_SCROLL_HOLD
+    reader.sidebar.manual_until = time.monotonic() + MANUAL_SCROLL_HOLD
     redraw(reader)
     return True
 
 
 def update(reader: Reader) -> None:
-    if not reader._sidebar_open:
+    if not reader.sidebar.open:
         return
-    if reader._sidebar_view != "track":
+    if reader.sidebar.view != "track":
         return
     active = _active_index(reader)
     geometry = (reader.osd, id(reader._sub_index), reader.subtitle_language, id(reader.scorer))
-    changed = active != reader._sidebar_last_active or geometry != reader._sidebar_geometry
-    if not changed and time.monotonic() < reader._sidebar_manual_until:
+    changed = active != reader.sidebar.last_active or geometry != reader.sidebar.geometry
+    if not changed and time.monotonic() < reader.sidebar.manual_until:
         return
     capacity = _capacity(reader)
-    old_scroll = reader._sidebar_scroll
-    visible = reader._sidebar_scroll <= active < reader._sidebar_scroll + capacity
-    if active >= 0 and (time.monotonic() >= reader._sidebar_manual_until or visible):
-        reader._sidebar_scroll = max(0, active - capacity // 2)
-        reader._sidebar_manual_until = 0.0
-    reader._sidebar_last_active = active
-    reader._sidebar_geometry = geometry
-    if changed or old_scroll != reader._sidebar_scroll:
+    old_scroll = reader.sidebar.scroll
+    visible = reader.sidebar.scroll <= active < reader.sidebar.scroll + capacity
+    if active >= 0 and (time.monotonic() >= reader.sidebar.manual_until or visible):
+        reader.sidebar.scroll = max(0, active - capacity // 2)
+        reader.sidebar.manual_until = 0.0
+    reader.sidebar.last_active = active
+    reader.sidebar.geometry = geometry
+    if changed or old_scroll != reader.sidebar.scroll:
         redraw(reader)
 
 
@@ -351,8 +366,8 @@ def _seek_hit(reader: Reader, hit) -> bool:
 
 def _activate_hit(reader: Reader, hit) -> None:
     if hit.kind.startswith("view:"):
-        reader._sidebar_view = hit.kind.split(":", 1)[1]
-        reader._sidebar_scroll = 0
+        reader.sidebar.view = hit.kind.split(":", 1)[1]
+        reader.sidebar.scroll = 0
     elif _seek_hit(reader, hit):
         return
     elif hit.kind == "bookmark" and hit.value == _active_index(reader):
@@ -366,10 +381,10 @@ def _activate_hit(reader: Reader, hit) -> None:
 
 
 def on_click(reader: Reader, x: float, y: float) -> bool:
-    if not contains(reader, x, y) or reader._sidebar_rect is None:
+    if not contains(reader, x, y) or reader.sidebar.rect is None:
         return False
-    local_x, local_y = x - reader._sidebar_rect[0], y - reader._sidebar_rect[1]
-    hit = next((box for box in reader._sidebar_hits if box.contains(local_x, local_y)), None)
+    local_x, local_y = x - reader.sidebar.rect[0], y - reader.sidebar.rect[1]
+    hit = next((box for box in reader.sidebar.hits if box.contains(local_x, local_y)), None)
     if hit is None:
         return True
     _activate_hit(reader, hit)

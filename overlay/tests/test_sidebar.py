@@ -70,7 +70,7 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
 
     sidebar.toggle(reader)
 
-    assert reader._sidebar_open is True
+    assert reader.sidebar.open is True
     assert [row.value for row in calls[-1][0]] == list(range(8, 17))
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
@@ -89,27 +89,27 @@ def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
     now = [10.0]
     monkeypatch.setattr(sidebar.time, "monotonic", lambda: now[0])
     sidebar.toggle(reader)
-    reader._sidebar_rect = (900, 50, 360, 600)
+    reader.sidebar.rect = (900, 50, 360, 600)
 
     assert sidebar.scroll(reader, -3) is True
-    held_scroll = reader._sidebar_scroll
+    held_scroll = reader.sidebar.scroll
     reader.sub_text = "cue 18"
     sidebar.update(reader)
-    assert reader._sidebar_scroll == held_scroll
+    assert reader.sidebar.scroll == held_scroll
 
     before_expiry = len(calls)
     now[0] = 12.0
     sidebar.update(reader)
-    assert reader._sidebar_scroll == 14
+    assert reader.sidebar.scroll == 14
     assert len(calls) == before_expiry + 1
 
 
 def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
     reader, ipc = _reader(active=3)
     _capture_render(monkeypatch)
-    reader._sidebar_open = True
-    reader._sidebar_rect = (100, 100, 400, 500)
-    reader._sidebar_hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
+    reader.sidebar.open = True
+    reader.sidebar.rect = (100, 100, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
 
     assert sidebar.on_click(reader, 110, 110) is True
     assert ("set_property", "time-pos", 7.0) in ipc.commands
@@ -124,9 +124,9 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
     _capture_render(monkeypatch)
     invoked = []
     monkeypatch.setattr(reader, method, lambda: invoked.append(method))
-    reader._sidebar_open = True
-    reader._sidebar_rect = (100, 100, 400, 500)
-    reader._sidebar_hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
+    reader.sidebar.open = True
+    reader.sidebar.rect = (100, 100, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)
 
     sidebar.on_click(reader, 110, 110)
 
@@ -163,7 +163,7 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
     reader._episode_analysis = analyze_cues(list(reader._sub_index.cues), reader.scorer)
-    reader._sidebar_open = True
+    reader.sidebar.open = True
     reader._loading = True
     calls = _capture_render(monkeypatch)
     monkeypatch.setattr(
@@ -179,8 +179,8 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
 
 def test_sidebar_hover_suppresses_tooltip_without_pausing(monkeypatch):
     reader, ipc = _reader(props={"mouse-pos": {"x": 110, "y": 110}})
-    reader._sidebar_open = True
-    reader._sidebar_rect = (100, 100, 400, 500)
+    reader.sidebar.open = True
+    reader.sidebar.rect = (100, 100, 400, 500)
     monkeypatch.setattr(
         "overlay.app.tooltip.update_hover",
         lambda _reader: (_ for _ in ()).throw(AssertionError("tooltip reached")),
@@ -209,9 +209,9 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     assert store.entries_for_path(renamed) == []
 
     _capture_render(monkeypatch)
-    reader._sidebar_open = True
-    reader._sidebar_rect = (0, 0, 400, 500)
-    reader._sidebar_hits = (SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),)
+    reader.sidebar.open = True
+    reader.sidebar.rect = (0, 0, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox("relink", entry.media_id, 0, 0, 100, 40),)
     sidebar.on_click(reader, 10, 10)
 
     assert store.entries_for_path(renamed) == [entry]
@@ -220,8 +220,8 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
     expanded = next(row for row in matched_rows if row.click_kind == "backlog-seek")
     assert (expanded.text, expanded.status) == ("秘密の字幕", "open")
 
-    reader._sidebar_rect = (0, 0, 400, 500)
-    reader._sidebar_hits = (SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),)
+    reader.sidebar.rect = (0, 0, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox("backlog-seek", entry.id, 0, 0, 100, 40),)
     sidebar.on_click(reader, 10, 10)
     assert ("set_property", "time-pos", 0.0) in reader.ipc.commands
 
@@ -229,7 +229,7 @@ def test_backlog_candidate_hides_cue_text_until_explicit_relink(tmp_path, monkey
 def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, monkeypatch):
     video = tmp_path / "Show - 01.mkv"
     reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
-    reader._sidebar_open = True
+    reader.sidebar.open = True
     store = BacklogStore(tmp_path / "backlog.sqlite")
     entry = store.toggle_capture(Capture(str(video), 0.0, 0.8, jp_text="cue 0"))
     reader._backlog_store = store

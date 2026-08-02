@@ -197,15 +197,15 @@ def test_live_sidebar_key_draws_and_removes_sidebar():
         closed = _screenshot(ipc, tmp / "sidebar-closed.png")
 
         ipc.command("keypress", "\\")
-        _poll_until(reader, lambda: reader._sidebar_open, "sidebar key did not open the sidebar")
+        _poll_until(reader, lambda: reader.sidebar.open, "sidebar key did not open the sidebar")
         opened = _screenshot(ipc, tmp / "sidebar-open.png")
 
         ipc.command("keypress", "\\")
         _poll_until(
-            reader, lambda: not reader._sidebar_open, "sidebar key did not close the sidebar"
+            reader, lambda: not reader.sidebar.open, "sidebar key did not close the sidebar"
         )
 
-        assert reader._sidebar_rect is None
+        assert reader.sidebar.rect is None
         assert ImageChops.difference(opened, closed).getbbox() is not None
 
 
