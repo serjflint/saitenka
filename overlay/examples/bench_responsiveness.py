@@ -42,6 +42,15 @@ _STRESS_CACHE_CAP = (
 _SCROLL_JANK_STEPS = (
     40  # --scroll-jank: wheel steps DOWN into each entry (bounds tall-entry render time)
 )
+# Realistic per-notch reading pause: a real user rests on the revealed content before the next wheel
+# notch, and THAT idle window is when the prefetch worker renders the next blocks ahead (PR #132). The
+# synchronous cold/warm rows still measure the render itself; this dwell is what lets the off-thread
+# warm actually land, so the "prefetched" row reflects a live session, not a tight loop.
+_SCROLL_DWELL_S = 0.15
+_SCROLL_REALISTIC_STEPS = (
+    12  # notches per entry in the LIVE pass — real-time dwells make it wall-clock
+)
+_SCROLL_JANK_MS = 16.0  # a frame slower than this is perceptible stutter (kept-ahead threshold)
 
 # Hand-picked multi-sense words Serj still sees pathological first lookups on: very polysemous
 # common words whose monolingual entries are enormous (手 alone is ~100 senses in a big monolingual dict).
@@ -283,10 +292,14 @@ def _timeline_scorer(words: list[list[str]]):
     )
 
 
-def _cold_reader(ds):
-    """A fresh Reader on a fake IPC, head-path forced (as a live run with workers would)."""
-    reader = Reader(FakeIPC(), dict_set=ds, prefetch=False)
+def _cold_reader(ds, *, prefetch: bool = False):
+    """A fresh Reader on a fake IPC, head-path forced (as a live run with workers would). With
+    ``prefetch=True`` the real background workers run (``start_prefetch``), so scroll-ahead warms the
+    next blocks off the main thread exactly as a live session does — the realistic scroll path."""
+    reader = Reader(FakeIPC(), dict_set=ds, prefetch=prefetch)
     reader.osd = OSD
+    if prefetch:
+        reader.start_prefetch()
     return reader
 
 
@@ -526,6 +539,38 @@ def run_stress(
     return rc
 
 
+def _scroll_trajectory(
+    reader, corpus, step: int, cap: int, reps: int, *, dwell: float
+) -> list[float]:
+    """Time each scroll frame over the SAME short top→down trajectory on ``reader``. ``dwell`` is the
+    per-notch reading pause — 0 for the synchronous baseline, >0 for the live pass where that idle is
+    when the prefetch worker warms the next blocks. Same steps + same panels on both readers, so the
+    live-vs-sync delta is purely the off-thread warming, not a sampling difference."""
+    from overlay.app.subtitles import WordBox
+
+    frames: list[float] = []
+    for _ in range(max(1, reps)):
+        for term, reading in corpus:
+            reader._panel_cache.clear()
+            reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
+            reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+            reader.sub_origin = (0, 0)
+            reader.hover = 0
+            reader._show_tooltip(0)
+            st = reader._tip_state
+            if st is None:
+                continue
+            reader._tip_scroll = 0
+            steps = min(_SCROLL_REALISTIC_STEPS, max(1, (st.full_height - cap) // step + 1))
+            for _s in range(steps):
+                t0 = time.perf_counter()
+                reader._scroll_tip(step)  # scroll_tip requests render-ahead in this direction
+                frames.append((time.perf_counter() - t0) * 1000.0)
+                if dwell:
+                    time.sleep(dwell)  # reading pause: the worker warms the next blocks
+    return frames
+
+
 def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None = None) -> int:
     """Scroll-ISOLATED jank: show each heavy/tall entry's BASE tooltip and scroll it top→bottom, timing
     each scroll re-composite on its own. Unlike --stress (scroll mixed with hover + nested in one p99), a
@@ -581,7 +626,22 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
             traverse(cold, term)  # top→bottom over cold blocks — the scroll jank
             traverse(warm, None)  # immediate re-traverse: blocks now cached — the warm floor
 
-    c, w = _stats(cold), _stats(warm)
+    # Matched sync-vs-live comparison over one short trajectory: the SAME notches + panels, once with
+    # no workers (synchronous baseline) and once on a reader whose real prefetch workers run with a
+    # reading pause between notches (the live setup). Scroll-ahead (PR #132) warms the next blocks off
+    # the main thread during each pause, so live≪sync is the off-thread win; the frames live still can't
+    # hide are monster blocks the worker can't finish inside one dwell (what windowed rasterisation,
+    # PR #3, is meant to shrink). cold/warm above stay as the workers-off render-cost diagnostic.
+    sync = _scroll_trajectory(reader, corpus, step, cap, reps, dwell=0.0)
+    live_reader = _cold_reader(ds, prefetch=True)
+    try:
+        live = _scroll_trajectory(live_reader, corpus, step, cap, reps, dwell=_SCROLL_DWELL_S)
+    finally:
+        live_reader._stop.set()  # stop the workers before the run returns
+
+    c, w, s, p = _stats(cold), _stats(warm), _stats(sync), _stats(live)
+    kept_sync = 100.0 * sum(1 for x in sync if x <= _SCROLL_JANK_MS) / max(1, len(sync))
+    kept = 100.0 * sum(1 for x in live if x <= _SCROLL_JANK_MS) / max(1, len(live))
     gil_rc = finalize_runtime(rt, require_ft)
     print(
         f"\nSaitenka overlay — SCROLL JANK: base-tooltip scroll over {len(corpus)} pathological "
@@ -600,6 +660,18 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         f"warm scroll frame (blocks cached):       p50 {w['p50']:.1f}  p95 {w['p95']:.1f}  "
         f"p99 {w['p99']:.1f}  MAX {w['max']:.1f} ms"
     )
+    print(
+        f"\nmatched {_SCROLL_REALISTIC_STEPS}-notch trajectory   (sync = no workers · "
+        f"live = real workers + {_SCROLL_DWELL_S * 1000:.0f}ms reading pause → scroll-ahead)"
+    )
+    print(
+        f"  synchronous (no prefetch):  p50 {s['p50']:.1f}  p95 {s['p95']:.1f}  p99 {s['p99']:.1f}  "
+        f"MAX {s['max']:.1f} ms   {kept_sync:.0f}% <{_SCROLL_JANK_MS:.0f}ms"
+    )
+    print(
+        f"  LIVE (workers warm ahead):  p50 {p['p50']:.1f}  p95 {p['p95']:.1f}  p99 {p['p99']:.1f}  "
+        f"MAX {p['max']:.1f} ms   {kept:.0f}% <{_SCROLL_JANK_MS:.0f}ms"
+    )
     print("\nworst cold scroll frames (word, ms, panel_px):")
     by_word: dict[str, tuple[float, int]] = {}
     for dt, word, px in worst:
@@ -608,15 +680,28 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     for word, (dt, px) in sorted(by_word.items(), key=lambda kv: -kv[1][0])[:8]:
         print(f"    {word:<10}{dt:>9.1f}{px:>10}")
     print(
-        "\ncold = first scroll into un-rendered tail blocks; warm = immediate re-scroll of the same "
-        "panel. cold ≫ warm ⇒ block render (getmask2) dominates and a warm re-scroll is free. cold ≈ "
-        "warm (the usual result) ⇒ the block cache is bounded (retained pixels are O(viewport) by "
-        "design), so a re-scroll re-renders — the scroll jank is the per-block render each time the "
-        "viewport reaches it, hidden in real use only when idle prefetch rendered ahead (see --timeline)."
+        "\ncold/warm isolate the synchronous render cost (NO workers): cold = first scroll into "
+        "un-rendered blocks, warm = immediate re-scroll of the cached panel. The matched trajectory "
+        "runs the SAME notches sync-vs-live: LIVE has the real prefetch workers warming the next blocks "
+        "off the main thread during each reading pause (PR #132). Read the two effects separately — a "
+        "lower LIVE tail (p99/MAX) = off-thread warming hid a big block; a HIGHER LIVE median = the "
+        "worker renders contend with the compositor (shared panel lock + CPU) on every frame. Windowed "
+        "rasterisation (PR #3) shrinks each render, which lifts both: fewer misses AND less contention."
     )
     if json_path:
         Path(json_path).write_text(
-            json.dumps({"runtime": rt, "cold": c, "warm": w, "corpus_size": len(corpus)}, indent=2),
+            json.dumps(
+                {
+                    "runtime": rt,
+                    "cold": c,
+                    "warm": w,
+                    "sync": s,
+                    "live": p,
+                    "kept_ahead_pct": {"sync": kept_sync, "live": kept},
+                    "corpus_size": len(corpus),
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
         print(f"\nwrote scroll-jank baseline → {json_path}")
