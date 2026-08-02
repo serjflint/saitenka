@@ -80,6 +80,7 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 * `--mine, --no-mine`: one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)  *[default: True]*
 * `--mine-deck`:   *[default: Saitenka::Mining]*
 * `--mine-model`:   *[default: Lapis]*
+* `--mine-normalize-audio, --no-mine-normalize-audio`: normalize mined clip loudness to −23 LUFS (EBU R128) so cards play at an even volume  *[default: False]*
 * `--mine-key`: mpv key that mines the hovered word  *[default: Ctrl+m]*
 * `--mine-all-key`: mpv key that bulk-mines the cue  *[default: Shift+m]*
 * `--preview-key`: mpv key to replay the last card preview + audio  *[default: p]*
@@ -131,6 +132,7 @@ Play a video with Japanese subs; hover a word → Yomitan-like dictionary toolti
 * `--mine, --no-mine`: one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)  *[default: True]*
 * `--mine-deck`:   *[default: Saitenka::Mining]*
 * `--mine-model`:   *[default: Lapis]*
+* `--mine-normalize-audio, --no-mine-normalize-audio`: normalize mined clip loudness to −23 LUFS (EBU R128) so cards play at an even volume  *[default: False]*
 * `--mine-key`: mpv key that mines the hovered word  *[default: Ctrl+m]*
 * `--mine-all-key`: mpv key that bulk-mines the cue  *[default: Shift+m]*
 * `--preview-key`: mpv key to replay the last card preview + audio  *[default: p]*
@@ -211,7 +213,7 @@ saitenka set-jimaku-key [ARGS]
 Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
 Uses the OS keyring when available, else an owner-only file beside overlay.toml. Either beats a
-shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
+shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/account
 (API docs: https://jimaku.cc/api/docs).
 
 Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a

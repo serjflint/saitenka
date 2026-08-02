@@ -200,7 +200,7 @@ gate; together they stop the lobotomies a green run hides.
 
 ### Axis 2 — `poe test-lint` (ast-grep rules under `sgconfig/test-rules/`)
 
-Eight hand-written [ast-grep](https://ast-grep.github.io/) rules scan `tests/` for smells:
+Eight hand-written [ast-grep](https://github.com/ast-grep/ast-grep) rules scan `tests/` for smells:
 private-attribute asserts (and the compound-assert variant), mock-interaction asserts, private-symbol
 `monkeypatch`, mis-levelled real I/O (a real subprocess/socket/`time.sleep` in an unmarked default-tier
 test), ambient non-determinism, `os.environ` mutation, and session-scoped mutable fixtures. Each rule
@@ -357,5 +357,5 @@ Peer-reviewed and first-party sources this loop rests on (from an internal surve
 - **`Jott2121/crucible`** — closest GitHub artifact (mutation + critic + anti-cheat + receipts + A/B).
 
 Tools: [cosmic-ray](https://cosmic-ray.readthedocs.io/) · [Hypothesis](https://hypothesis.readthedocs.io/)
-· [ast-grep](https://ast-grep.github.io/). Local conventions: `AGENTS.md` (*Testing*, *Mutation
+· [ast-grep](https://github.com/ast-grep/ast-grep). Local conventions: `AGENTS.md` (*Testing*, *Mutation
 auditing*, *Fuzzing & symbolic checks*) and the `write-test` / `dev-gate` skills.
