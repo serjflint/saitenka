@@ -27,6 +27,23 @@ def test_apply_deps_injects_and_stops_loading():
     assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
 
 
+def test_pending_anki_seed_backfills_on_the_next_tick(monkeypatch):
+    """reader_deps' Anki watcher hands off via _pending_anki_seed; the poll loop must backfill the mined
+    set on the main thread exactly once, and an unset flag is a no-op."""
+    r = Reader(FakeIPC())
+    seeded = []
+    monkeypatch.setattr(r, "_seed_mined", lambda: seeded.append(True))
+
+    r._apply_pending_anki_seed()  # flag unset → nothing happens
+    assert seeded == []
+
+    r._pending_anki_seed = True
+    r._apply_pending_anki_seed()
+    r._apply_pending_anki_seed()  # flag cleared after the first → seeds exactly once
+    assert seeded == [True]
+    assert r._pending_anki_seed is False
+
+
 def test_runtime_banner_reports_real_worker_count_after_async_deps(capsys, monkeypatch):
     """Regression: the banner printed from run() BEFORE async deps spawned prefetch workers, so it
     always said '0 prefetch worker(s)'. It must now fire from apply_deps with the live count, exactly

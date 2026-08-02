@@ -151,6 +151,9 @@ class Reader:
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         self._pending_deps: dict | None = None
+        # Set by reader_deps' background Anki watcher when AnkiConnect answers → the poll loop backfills
+        # the mined set on the main thread (a not-yet-up Anki must not stall the dep/coloring startup).
+        self._pending_anki_seed = False
         self._loading = False
         self._load_frame = 0
         self._load_next = 0.0
@@ -1016,6 +1019,7 @@ class Reader:
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
+            self._apply_pending_anki_seed()
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)
             sidebar.update(self)
@@ -1076,6 +1080,12 @@ class Reader:
             self._apply_deps(deps)
         elif self._loading:
             self._draw_loading()
+
+    def _apply_pending_anki_seed(self) -> None:
+        """Main-thread hand-off from reader_deps' Anki watcher: backfill the mined set once Anki is up."""
+        if self._pending_anki_seed:
+            self._pending_anki_seed = False
+            self._seed_mined()
 
     def _schedule_paused_nudge(self, ops_before: int) -> None:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually

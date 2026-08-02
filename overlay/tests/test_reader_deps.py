@@ -11,8 +11,9 @@ from overlay.app import reader_deps
 
 @pytest.fixture(autouse=True)
 def _no_anki_launch(monkeypatch):
-    """Never launch/poll real Anki from build_reader_deps in tests."""
-    monkeypatch.setattr(anki_mod, "ensure_anki_running", lambda *_a, **_k: True)
+    """Never launch real Anki from build_reader_deps in tests (conftest already stubs anki_reachable
+    → True, so _maybe_start_anki takes the already-up path; this guards the launch seam too)."""
+    monkeypatch.setattr(anki_mod, "launch_anki", lambda *_a, **_k: True)
 
 
 def test_empty_config_yields_no_deps():
@@ -114,6 +115,58 @@ def test_freqdict_load_caps_at_top_x_and_drops_the_uncolorable_tail(tmp_path):
         db, row
     )  # None cap → full ranking still available for a single-mode caller
     assert full.rank("稀語") == FREQ_BAND_TOP_X + 500
+
+
+def test_anki_launch_is_fire_and_forget_off_the_critical_path(monkeypatch):
+    """A down Anki must not block the dep build: it's launched fire-and-forget and the build returns
+    the dict/mining objects immediately — no synchronous poll for AnkiConnect to come up."""
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)  # Anki not up at build
+    launched = []
+    monkeypatch.setattr(anki_mod, "launch_anki", lambda: launched.append(True) or True)
+    waited = []
+    monkeypatch.setattr(
+        anki_mod, "wait_until_anki_up", lambda *_a, **_k: waited.append(True) or True
+    )
+    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
+
+    _, anki, mine_conf, _ = reader_deps.build_reader_deps(
+        {"mine": {"deck": "D", "model": "M"}}, color=False
+    )
+    assert launched == [True]  # Anki was kicked off...
+    assert waited == []  # ...but the build never blocked polling for it
+    assert anki == "ANKI" and mine_conf is not None
+
+
+class _SeedFlagReader:
+    """Minimal stand-in for the watcher's cross-thread hand-off (a real Reader is a heavy god-object)."""
+
+    def __init__(self):
+        self._pending_anki_seed = False
+
+
+def test_anki_watch_flags_seed_when_already_up(monkeypatch):
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: True)
+    reader = _SeedFlagReader()
+    reader_deps._anki_seed_watch(reader)
+    assert reader._pending_anki_seed is True
+
+
+def test_anki_watch_flags_seed_once_anki_comes_up(monkeypatch):
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
+    monkeypatch.setattr(anki_mod, "wait_until_anki_up", lambda *_a, **_k: True)
+    reader = _SeedFlagReader()
+    reader_deps._anki_seed_watch(reader)
+    assert reader._pending_anki_seed is True
+
+
+def test_anki_watch_warns_and_skips_seed_on_timeout(monkeypatch, caplog):
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
+    monkeypatch.setattr(anki_mod, "wait_until_anki_up", lambda *_a, **_k: False)
+    reader = _SeedFlagReader()
+    with caplog.at_level("WARNING"):
+        reader_deps._anki_seed_watch(reader)
+    assert reader._pending_anki_seed is False  # never came up → nothing to backfill
+    assert "didn't come up" in caplog.text  # console warning fired
 
 
 def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
