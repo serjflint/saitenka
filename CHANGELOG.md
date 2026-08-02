@@ -47,6 +47,13 @@ logs.
   `SAITENKA_BANDED` env override are also gone — the windowed (O(viewport)) renderer is now the single
   tooltip render path for every popup, so there is nothing to switch.
 
+### Fixed
+
+- **Rare kanji outside the basic plane are highlighted again.** Words containing supplementary-plane
+  kanji (surrogate-pair ideographs such as 𩸽 ほっけ or 𠮟る) were read as having no kanji, so they lost
+  kanji-based highlighting and N+1 eligibility. The tokenizer now recognizes the CJK Extension B–H
+  planes, not just the BMP.
+
 ## [1.1.0] - 2026-08-01
 
 ### Added
