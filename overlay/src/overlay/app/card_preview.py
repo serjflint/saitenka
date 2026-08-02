@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 
 from overlay.app.lookup import furigana
 from overlay.draw.chip import ChipStyle, render_chip
-from overlay.draw.icons import cross
+from overlay.draw.icon_source import Icon, render_icon
 from overlay.model import RGBA, Span, Style
 from overlay.panel import _DEFAULT_THEME, Theme
 from overlay.render.flow import render_flow
@@ -161,7 +161,7 @@ def render_card_preview(
     header.alpha_composite(
         hw_img, (chip.width + theme.px(12), (header.height - hw_img.height) // 2)
     )
-    header.alpha_composite(cross(close), (cw - close, 0))
+    header.alpha_composite(render_icon(Icon.CLOSE, close), (cw - close, 0))
     close_rect = (m + cw - close, m, close, close)  # header sits at (m, m)
     rows.append(header)
 

@@ -19,7 +19,7 @@ from PIL import Image
 
 from overlay.body_block import BodyRenderArgs, SCNode, render_body_block
 from overlay.draw.chip import ChipStyle
-from overlay.draw.icons import check, dot, plus, speaker
+from overlay.draw.icon_source import Icon, render_icon
 from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme
 from overlay.parallel import shared_executor
 from overlay.render.document import GUTTER_PX, INDENT_PX
@@ -277,7 +277,7 @@ def _emit_group_rows(
             links: list[LinkBox] = []
             if add_button:
                 add = theme.px(_ADD_SIZE)
-                btn = check(add) if mined else plus(add)
+                btn = render_icon(Icon.MINED if mined else Icon.ADD, add)
                 bx, by = content_w - add, theme.px(2)
                 img.alpha_composite(btn, (bx, by))
                 links.append(LinkBox(f"mine:{g.card_index}", bx, by, add, add))
@@ -321,12 +321,12 @@ def panel_rows(
         right = content_w
         top = theme.px(_ICON_TOP)
         if speak_button:
-            spk = speaker(theme.px(_SPK_SIZE))
+            spk = render_icon(Icon.SPEAKER, theme.px(_SPK_SIZE))
             hdr.alpha_composite(spk, (right - spk.width, top))
             right -= theme.px(_SPK_SIZE) + theme.px(_ICON_GAP)
         if header_add:
             add = theme.px(_ADD_SIZE)
-            btn = check(add) if mined else plus(add)
+            btn = render_icon(Icon.MINED if mined else Icon.ADD, add)
             hdr.alpha_composite(btn, (right - add, top + theme.px(2)))
         return hdr, [], []
 
@@ -358,7 +358,12 @@ def panel_rows(
         def _chain(chain=tuple(entry.inflection_chain)):
             pz = theme.px(18)
             cflow: list = [
-                ImgBox(width=pz, height=pz, sprite=dot(pz), baseline_drop=theme.px(3)),
+                ImgBox(
+                    width=pz,
+                    height=pz,
+                    sprite=render_icon(Icon.MARKER, pz),
+                    baseline_drop=theme.px(3),
+                ),
                 Span("  ", Style(size=theme.px(20))),
             ]
             for i, name in enumerate(chain):
@@ -377,7 +382,12 @@ def panel_rows(
         def _tag(tag=tag):
             pz = theme.px(18)
             tflow = [
-                ImgBox(width=pz, height=pz, sprite=dot(pz), baseline_drop=theme.px(3)),
+                ImgBox(
+                    width=pz,
+                    height=pz,
+                    sprite=render_icon(Icon.MARKER, pz),
+                    baseline_drop=theme.px(3),
+                ),
                 Span("  " + tag, Style(size=theme.px(20), color=theme.muted)),
             ]
             return _flow_row(tflow, content_w), [], []

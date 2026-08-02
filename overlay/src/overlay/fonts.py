@@ -27,9 +27,10 @@ ASSETS = asset("fonts")  # importlib.resources so the wheel path works too
 # 308 distinct cached fonts / 172.7 MB retained from a single --stress run touching 33 entries).
 _FONT_CACHE_MAX = 64
 
-# Fallback order: JP first (it also carries Latin, so mixed strings stay in one font and look
-# consistent), Latin Noto as a secondary. Add more (emoji, symbols) here later.
-FONT_FILES: tuple[str, ...] = ("NotoSansJP.ttf", "NotoSans.ttf")
+# Fallback order: JP first (it also carries Latin + most symbols, so mixed strings stay in one font
+# and look consistent), Latin Noto as a secondary, monochrome Noto Emoji LAST — it only catches glyphs
+# the Noto Sans faces lack (emoji, pictographs) so text is unaffected while icons/emoji stop being tofu.
+FONT_FILES: tuple[str, ...] = ("NotoSansJP.ttf", "NotoSans.ttf", "NotoEmoji.ttf")
 
 
 @dataclass(frozen=True)
