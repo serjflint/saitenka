@@ -490,8 +490,9 @@ class WindowedPanel:
         """The next up-to-``max_blocks`` not-yet-cached BODY bands just beyond the viewport in the scroll
         ``direction``. MEASURES ahead as it walks (``cache_nonbody=False`` — learn a row's height/walk
         without caching its non-body pixels), so a row's first band never pays the ~200ms walk on the
-        main thread. Every target is a banded body row (picklable ``body_args``) — non-body rows are
-        warmed by the measure pass itself, so the pool path needs no cheap-inline split."""
+        main thread. Only banded body rows are targets (picklable ``body_args`` → pool path needs no
+        cheap-inline split); the measure pass drops non-body pixels, so those small rows re-render on
+        demand when the viewport reaches them — never on this warm path."""
         targets: list[tuple[int, int, int, int]] = []
         if direction >= 0:
             threshold = scroll + view_h + overscan  # first content row below the fold
