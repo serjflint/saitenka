@@ -12,6 +12,7 @@ Reference: Yomitan ``dictionary-term-bank-v3`` structured-content schema.
 from __future__ import annotations
 
 import re
+import threading
 import urllib.parse
 from dataclasses import replace
 
@@ -151,24 +152,37 @@ def _is_boxed(node: dict) -> bool:
     return any(k in st for k in (*_BG_KEYS, *_BORDER_KEYS, "borderRadius"))
 
 
+_tls = threading.local()  # per-walk _text_of memo (see walk()); thread-local so prefetch workers
+# don't share, and id()-keyed so it MUST NOT outlive the tree it indexes.
+
+
 def _text_of(node) -> str:
-    if node is None:
-        return ""
-    if isinstance(node, str):
-        return node
+    # Thin memo wrapper over _flatten. The tree is re-flattened ~4x (chip test → recurse → child chip
+    # test …); memoise per walk, keyed on id() — safe because the tree is alive for the walk and the
+    # memo is cleared at walk() exit.
+    if not isinstance(node, (dict, list)):
+        return node if isinstance(node, str) else ""
+    memo = getattr(_tls, "memo", None)
+    if memo is not None and (hit := memo.get(id(node))) is not None:
+        return hit
+    result = _flatten(node)
+    if memo is not None:
+        memo[id(node)] = result
+    return result
+
+
+def _flatten(node) -> str:
     if isinstance(node, list):
         return "".join(_text_of(n) for n in node)
-    if isinstance(node, dict):
-        tag = node.get("tag")
-        if tag == "br":
-            return "\n"
-        text = _text_of(node.get("content"))
-        # Insert word boundaries the source encodes structurally, not textually: block elements and
-        # chip pills sit apart on screen but flatten adjacent. Callers collapse the extra whitespace.
-        if text and (tag in BLOCK_TAGS or _is_boxed(node)):
-            return f" {text} "
-        return text
-    return ""
+    tag = node.get("tag")
+    if tag == "br":
+        return "\n"
+    text = _text_of(node.get("content"))
+    # Insert word boundaries the source encodes structurally, not textually: block elements and chip
+    # pills sit apart on screen but flatten adjacent. Callers collapse the extra whitespace.
+    if text and (tag in BLOCK_TAGS or _is_boxed(node)):
+        return f" {text} "
+    return text
 
 
 class _Walker:
@@ -209,22 +223,22 @@ class _Walker:
                     self.cur.flow[i] = replace(seg, href=query)
 
     def _chip_for(self, node: dict, style: Style) -> ChipBox | None:
+        # Style gate FIRST: an unstyled node can never be a chip, so skip the (potentially deep)
+        # _text_of flatten for it — the common case, and most of the walk's redundant flattening.
         st = node.get("style") or {}
-        label = _text_of(node.get("content"))
-        chip_label = label.strip()
+        has_bg = any(k in st for k in _BG_KEYS)
+        has_border = any(k in st for k in _BORDER_KEYS)
+        if not (has_bg or has_border or "borderRadius" in st):
+            return None
         # A short filled/bordered leaf → a chip: POS tags like `noun`/`no-adj` (filled pill,
         # backgroundColor + white text, borderRadius, no borderColor) or labels like 逆引き
         # (transparent + border). Long bordered content (example sentences) must flow and keep
         # its ruby, so recurse instead. Honour backgroundColor — dropping it left white-on-white
         # text in an empty box. A whitespace-only styled span (some dicts' accent/marker spacers) is
         # NOT a chip — gating on the stripped label avoids the stray empty pill.
-        has_bg = any(k in st for k in _BG_KEYS)
-        has_border = any(k in st for k in _BORDER_KEYS)
-        if not (
-            (has_bg or has_border or "borderRadius" in st)
-            and 0 < len(chip_label) <= 12
-            and "\n" not in label
-        ):
+        label = _text_of(node.get("content"))
+        chip_label = label.strip()
+        if not (0 < len(chip_label) <= 12 and "\n" not in label):
             return None
         from overlay.draw.chip import ChipStyle
 
@@ -340,7 +354,14 @@ class _Walker:
 
 def walk(node, base: Style | None = None) -> list[Block]:
     """Turn a structured-content node into a list of layout blocks."""
-    return _Walker(base or Style()).walk(node)
+    prev = getattr(
+        _tls, "memo", None
+    )  # save/restore so a nested walk() can't clobber an outer memo
+    _tls.memo = {}
+    try:
+        return _Walker(base or Style()).walk(node)
+    finally:
+        _tls.memo = prev
 
 
 def inline_flow(node, base: Style | None = None) -> list:
