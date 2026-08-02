@@ -103,12 +103,12 @@ def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.hover = 0
     r._handle("saitenka-kanji")
-    assert r._nest.state is not None
-    assert r._nest.word == "読"  # first kanji of the hovered word
+    assert r.hover_view().nested.state is not None
+    assert r.hover_view().nested.word == "読"  # first kanji of the hovered word
     r._handle("saitenka-kanji")
-    assert r._nest.word == "本"  # repeat cycles to the next kanji
+    assert r.hover_view().nested.word == "本"  # repeat cycles to the next kanji
     r._handle("saitenka-kanji")
-    assert r._nest.word == "読"  # …and wraps around
+    assert r.hover_view().nested.word == "読"  # …and wraps around
 
 
 def test_k_key_bound_globally():
@@ -124,11 +124,11 @@ def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     toasts = []
     monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
-    assert r._nest.state is None
+    assert r.hover_view().nested.state is None
     r.tokens = [Token("よむ", "よむ", "よむ", "動詞", 0, 2)]
     r.hover = 0
     r._handle("saitenka-kanji")  # kana-only word → warn toast
-    assert r._nest.state is None and toasts
+    assert r.hover_view().nested.state is None and toasts
 
 
 # --- single-ideograph scan cell with no term match falls back to the kanji entry -------------------
@@ -158,6 +158,6 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
         "y": sy + (sb.y - r._tip_scroll) + sb.h / 2,
     }
     r.on_click()
-    assert r._nest.state is not None
-    assert r._nest.word == "本"  # the kanji entry, via the nested-popup route
-    assert r._nest.token is None  # a kanji panel has no minable token
+    assert r.hover_view().nested.state is not None
+    assert r.hover_view().nested.word == "本"  # the kanji entry, via the nested-popup route
+    assert r.hover_view().nested.token is None  # a kanji panel has no minable token

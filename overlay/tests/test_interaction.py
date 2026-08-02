@@ -179,9 +179,9 @@ def test_golden_base_and_nested_render():
     r = _reader()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert r._tip_state is not None
+    assert r.hover_view().tip.state is not None
     assert_golden(_full_panel_image(r._tip_state), "interaction_base_tooltip.png", tol=3.0)
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
-    assert r._nest.state is not None
+    assert r.hover_view().nested.state is not None
     assert_golden(_full_panel_image(r._nest.state), "interaction_nested_popup.png", tol=3.0)

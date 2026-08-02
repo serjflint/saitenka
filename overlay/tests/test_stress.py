@@ -85,8 +85,8 @@ def test_sustained_churn_evicts_and_stays_clean():
         f"panel cache overflowed its LRU cap: {len(r._panel_cache)}"
     )
     # after the final set_hover(-1) the whole hover stack must be torn down
-    assert r._tip_state is None
-    assert r._nest.state is None  # nested popup cleared
+    assert r.hover_view().tip.state is None
+    assert r.hover_view().nested.state is None  # nested popup cleared
     assert r.hover == -1
 
 
