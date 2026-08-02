@@ -1,7 +1,8 @@
 # 再点火 (Saitenka) — learn Japanese from the video you're already watching
 
+[![PyPI](https://img.shields.io/pypi/v/saitenka.svg)](https://pypi.org/project/saitenka/)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)
+![Python](https://img.shields.io/badge/python-3.13%20%7C%203.14%20%7C%203.15-blue.svg)
 ![Built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20%C2%B7%20macOS%20%C2%B7%20Windows-blue.svg)
 [![Docs](https://img.shields.io/badge/docs-saitenka.readthedocs.io-blue.svg)](https://saitenka.readthedocs.io)
@@ -31,7 +32,6 @@ configuration, keyboard shortcuts, the CLI reference, and how it compares.
 - [How it works](#how-it-works)
 - [Features](#features)
 - [How it compares](#how-it-compares)
-- [Where it fits in your setup](#where-it-fits-in-your-setup)
 - [Quick start](#quick-start)
 - [What's in the repo](#whats-in-the-repo)
 - [Requirements](#requirements)
@@ -106,115 +106,21 @@ Saitenka solves three problems:
 ## How it compares
 
 Saitenka, **[SubMiner](https://github.com/ksyasuda/SubMiner)**, and
-**[Autocards](https://learnjapanese.moe/autocards/)** all put Japanese vocabulary from video into Anki,
-but from three different angles. Saitenka is a **grounded, FSRS-driven engine composited inside mpv**;
-SubMiner is a **feature-broad Electron app** with a large integration surface and turn-key desktop
-installers; Autocards is a **retroactive media back-filler** — it doesn't create cards or show
-dictionaries, it batch-attaches screenshot + sentence audio to text-only cards you made elsewhere, by
-matching each card's sentence against the subtitle's timing. So this is a map of trade-offs across
-different jobs, not a scoreboard.
+**[Autocards](https://learnjapanese.moe/autocards/)** all get Japanese vocabulary from video into Anki,
+from three different angles: Saitenka is a **grounded, FSRS-driven engine composited inside mpv's own
+surface**; SubMiner is a **feature-broad Electron app** with turn-key desktop installers and a large
+integration surface; Autocards is a **retroactive back-filler** that attaches media to text-only cards
+you made elsewhere. It's a map of trade-offs across different jobs, not a scoreboard.
 
-| Capability | 再点火 Saitenka | SubMiner | Autocards |
-|---|:---:|:---:|:---:|
-| Category | live in-mpv engine | Electron mining app | retroactive enricher |
-| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ | ❌ |
-| Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ | ❌ |
-| One-key **+ bulk Anki mining** (audio, screenshot, reading, freq) | ✅ | ✅ | ❌ |
-| **Retroactive media back-fill** onto existing text-only cards (sentence↔sub-timing match) | ❌* | ❌ | ✅ |
-| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ | ❌ |
-| **N+1** sentence targeting | ✅ | ✅ | ❌ |
-| **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ | ❌ |
-| Grounded / local-first (readings never from an LLM) | ✅ | ✅ | ✅ |
-| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ |
-| Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool |
-| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ |
-| AniList **progress scrobbling** | ❌ | ✅ | ❌ |
-| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ |
-| Episode analysis · local session history | ✅ | ✅ | ❌ |
-| Cross-machine stats/history **sync** | ❌ | ✅ | ❌ |
-| Mined-audio loudness normalization | ❌* | ✅ | ❌ |
-| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ |
-| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ |
-| One-command installer / portable bundle | ✅ | ✅ | ✅ |
-| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ | ❌ |
-| Core license | Apache-2.0 | GPL-3.0 | GPL-3.0 |
-| Linux · macOS · Windows | ✅ | ✅ | ❌ Windows |
+**Why reach for Saitenka:** a fast, single-surface engine that draws straight into mpv — no second window,
+fullscreen/airspace-safe; **live FSRS review-state coloring** so forgotten words resurface and **N+1**
+sentences are highlighted; a multi-dictionary Yomitan tooltip; and one-key + bulk mining, all grounded
+(readings/pitch from dictionaries, never an LLM). Reach for **SubMiner** for the widest set of turn-key
+integrations and a packaged desktop app; reach for **Autocards** to bulk-attach media to cards after the
+fact (Windows-only). The workflows compose.
 
-<sub>✅ yes · ❌ no / out of scope · ⚠️ partial · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
-
-Short version: reach for **SubMiner** if you want the widest set of turn-key integrations and a packaged
-desktop app; reach for **Autocards** if you make cards fast in a browser texthooker and want to attach the
-media in one pass afterward (Windows-only); reach for **Saitenka** if you want a fast, single-surface,
-FSRS-grounded engine that draws straight into mpv. The workflows compose — Autocards' back-fill is
-[on Saitenka's roadmap](https://github.com/serjflint/saitenka/issues) as an in-engine step.
-
-## Where it fits in your setup
-
-Saitenka is the **study layer at the mpv playback point**. It doesn't acquire, organize, serve, or track
-your library — it composes with the tools that do, rather than replacing them. If you already run a
-media-server rig, this is the division of labor:
-
-| Pipeline stage | Common tools | Saitenka |
-|---|---|:---:|
-| Acquire episodes | [Sonarr](https://sonarr.tv/) (PVR — monitors RSS, grabs + renames) · [Taiga](https://taiga.moe/) (RSS/torrent feeds, Windows) · Usenet/torrent clients | — |
-| Identify & organize the files | [Shoko](https://shokoanime.com/) (AniDB hashing) + Shokofin | — |
-| Serve & stream the library | [Jellyfin](https://jellyfin.org/) · Plex · Emby | — |
-| Synchronize a watch party | [Syncplay](https://syncplay.pl/) (coordinates each friend's local player) | ✅ runs alongside |
-| **Play the file** | **[mpv](https://mpv.io/)** | ✅ **attaches here** |
-| Color words · dictionary · mine | **Saitenka** | ✅ its whole job |
-| Spaced repetition | [Anki](https://apps.ankiweb.net/) + FSRS | ✅ mines in via AnkiConnect |
-| Track list · discover · scrobble | [Taiga](https://taiga.moe/) (Windows) · [Trackma](https://github.com/z411/trackma) (cross-platform) | runs alongside |
-
-**The one hard rule:** Saitenka draws into a **real, local mpv** process — over its IPC socket, with the
-auto-start plugin. It rides the *player*, not the *server*, so it works with a Jellyfin/Shoko library only
-when you play the file in mpv (open it directly, or hand off to mpv as an external player where your client
-supports it). Syncplay is compatible because it coordinates a local mpv; Saitenka still attaches at the
-same player boundary. Watching *inside* a Jellyfin/Plex client — web, TV, or phone — is out of reach,
-because those aren't mpv.
-
-**Composes cleanly with:**
-
-- **A Jellyfin + Shoko + Sonarr library.** Let them acquire, identify (AniDB), and organize; point mpv at
-  the resulting local file and the overlay just works. Shoko's AniDB-accurate filenames also keep
-  downstream filename-based tools happy.
-- **A Syncplay watch party.** Syncplay owns synchronized playback; Saitenka joins each participant's
-  local mpv. Its language, capture, analysis, and provider controls avoid automatic playback changes,
-  while an explicit subtitle-panel seek remains an ordinary synchronized seek.
-- **A list-driven watch loop.** Taiga (Windows) and Trackma (cross-platform) do more than scrobble — one
-  tracking list drives the whole loop. Taiga in particular auto-downloads *only* the airing episodes of
-  shows you're watching (RSS feeds filtered by watch-status + episode-availability, handed to qBittorrent),
-  so there's a single source of truth and no separate download queue to reconcile. None of that overlaps
-  Saitenka: their local mpv detection (Trackma's inotify / MPRIS / win32; Taiga's Anisthesia) sees the
-  *same* mpv instance the overlay is attached to, so one playthrough both mines vocab **and** scrobbles
-  your progress — no wiring, they just observe the same player. (In a Shoko rig, Shokofin syncs
-  watched-state to your lists itself — no separate tracker needed.)
-- **Anki + AnkiConnect · Yomitan dictionaries · jimaku.cc** — its actual dependencies (see
-  [Requirements](#requirements)).
-
-**Picking the watch-loop tool that pairs with it.** Saitenka doesn't compete in this space — these are the
-tools you run *alongside* it to track progress and get episodes onto disk. They trade off differently:
-
-| | [Taiga](https://taiga.moe/) | [Trackma](https://github.com/z411/trackma) | [Sonarr](https://sonarr.tv/) |
-|---|:---:|:---:|:---:|
-| Platforms | Windows | Linux · macOS · Windows | Linux · macOS · Windows |
-| Scrobble progress → AniList/MAL/… | ✅ | ✅ | ❌ |
-| Downloads episodes | ✅ from your watch-list → qBittorrent | ❌ | ✅ own series monitoring (can import your list) |
-| Detects playback in local mpv | ✅ (Windows only) | ✅ inotify / MPRIS / win32 | ❌ |
-| Polls Plex/Jellyfin "now playing" | ❌ browser tab only | ✅ Plex · Jellyfin · Kodi | — |
-| Season discovery browser | ✅ | ❌ | ❌ |
-| Footprint | desktop app | desktop app · TUI · CLI | background daemon + web UI |
-
-Rough guide: **Taiga** is the most unified single-list loop but is Windows-only; **Trackma** is
-cross-platform tracking + scrobble (with Plex/Jellyfin now-playing backends) but doesn't download;
-**Sonarr** is cross-platform, powerful list-driven downloading, but a separate always-on system that
-doesn't track your watch progress. (All three are GPLv3.)
-
-**Deliberately out of scope** — reach for a broader tool like SubMiner if you need these: built-in AniList
-progress, a Jellyfin/media-server client, a media launcher, and cross-machine stats sync. Saitenka defers
-these to the dedicated tools above and stays a single-purpose mpv engine (the plain `❌` rows above).
-
-**Not there *yet*, but [on the roadmap](https://github.com/serjflint/saitenka/issues):** more subtitle
-sources, mined-audio loudness normalization, and a hosted docs site (the `❌*` rows above).
+📊 **Full capability matrix, and where Saitenka fits in a media-server / watch-tracking rig →
+[Why Saitenka → How it compares](https://saitenka.readthedocs.io/en/latest/why/comparisons/).**
 
 ## Quick start
 
