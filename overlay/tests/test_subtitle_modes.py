@@ -3,6 +3,7 @@
 import threading
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from overlay.app import subtitle_modes
@@ -376,3 +377,84 @@ def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, m
         "Searching Japanese subtitle providers…",
         "Japanese subtitles ready — Alt+t to switch",
     ]
+
+
+@pytest.mark.parametrize(
+    ("lang", "wants", "expected"),
+    [
+        ("jpn", ["jp"], True),  # tag longer than want — low.startswith(want)
+        ("jp", ["jpn"], True),  # want longer than tag — want.startswith(low)
+        ("JA", ["ja"], True),  # case-insensitive
+        ("Japanese", ["ja"], True),  # full language name
+        ("ger", ["ja", "jpn", "jp"], False),  # unrelated tag never matches
+        (None, ["ja"], True),  # untagged track is a wildcard — load-bearing for foreign-only files
+        ("", ["ja"], True),  # empty tag likewise matches
+        ("ja", [""], False),  # empty want is ignored, not a wildcard
+        ("ja", [], False),  # no wants → no match
+    ],
+)
+def test_lang_matches_prefix_rule_and_wildcard_edges(lang, wants, expected):
+    assert subtitle_modes.lang_matches(lang, wants) is expected
+
+
+def test_foreign_only_tracks_use_the_selected_one_as_primary():
+    ipc = FakeIPC(
+        [
+            {"id": 4, "type": "sub", "lang": "fre"},
+            {"id": 3, "type": "sub", "lang": "ger", "selected": True, "main-selection": 0},
+        ]
+    )
+    assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(jp_sid=3, en_sid=4)
+
+
+def test_foreign_only_tracks_default_to_first_when_none_selected():
+    ipc = FakeIPC(
+        [{"id": 5, "type": "sub", "lang": "ger"}, {"id": 6, "type": "sub", "lang": "fre"}]
+    )
+    assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(jp_sid=5, en_sid=6)
+
+
+def test_single_foreign_track_has_no_secondary():
+    ipc = FakeIPC([{"id": 7, "type": "sub", "lang": "ger"}])
+    assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(
+        jp_sid=7, en_sid=None
+    )
+
+
+def test_announce_names_a_japanese_track(monkeypatch):
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    seen = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_args: seen.append(text))
+
+    subtitle_modes.announce_track(reader, 2)
+
+    assert seen == ["subtitles: Japanese (2/2)"]
+
+
+def test_announce_passes_through_an_unknown_language(monkeypatch):
+    ipc = FakeIPC([{"id": 3, "type": "sub", "lang": "ger"}])
+    reader = Reader(ipc)
+    seen = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_args: seen.append(text))
+
+    subtitle_modes.announce_track(reader, 3)
+
+    assert seen == ["subtitles: ger (1/1)"]
+
+
+def test_toggle_from_english_returns_to_japanese(monkeypatch):
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # JP active
+    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+    )
+
+    reader.toggle_subtitle_language()  # JP → EN
+    ipc.commands.clear()
+    reader.toggle_subtitle_language()  # EN → JP exercises the return-to-Japanese branch
+
+    assert reader.subtitle_language == "jp"
+    assert ("set_property", "sid", 2) in ipc.commands

@@ -277,3 +277,59 @@ def test_jimaku_force_falls_back_to_embedded_on_fetch_failure(tmp_path, monkeypa
     msg = subselect.ensure_jp_subs(ipc, jimaku=True, jimaku_force=True, resync=False)
     assert "sid=2" in msg  # jimaku failed → embedded JP track selected as fallback
     assert ipc.sets("sid") == [2]
+
+
+def test_provider_path_runs_configured_order_and_returns_first_success(tmp_path, monkeypatch):
+    calls = []
+    hit = tmp_path / "th.srt"
+
+    def fake_jimaku(_video, **_kwargs):
+        calls.append("jimaku")
+        return None, "jimaku: none"
+
+    def fake_tsukihime(_video, **_kwargs):
+        calls.append("tsukihime")
+        return hit, "tsukihime: added th.srt"
+
+    monkeypatch.setattr(subselect, "fetch_jimaku_path", fake_jimaku)
+    monkeypatch.setattr(subselect, "fetch_tsukihime_path", fake_tsukihime)
+
+    path, status = subselect.fetch_provider_path("/v/Show - 01.mkv", ("jimaku", "tsukihime"))
+
+    assert path == hit
+    assert status == "tsukihime: added th.srt"
+    assert calls == ["jimaku", "tsukihime"]  # jimaku tried first, tsukihime won
+
+
+def test_provider_path_skips_unknown_provider_names(tmp_path, monkeypatch):
+    hit = tmp_path / "jm.srt"
+    calls = []
+
+    def fake_jimaku(_video, **_kwargs):
+        calls.append("jimaku")
+        return hit, "jimaku: ok"
+
+    def fail_tsukihime(*_args, **_kwargs):
+        raise AssertionError("tsukihime should not run")
+
+    monkeypatch.setattr(subselect, "fetch_jimaku_path", fake_jimaku)
+    monkeypatch.setattr(subselect, "fetch_tsukihime_path", fail_tsukihime)
+
+    path, status = subselect.fetch_provider_path("/v/Show - 01.mkv", ("bogus", "jimaku"))
+
+    assert path == hit
+    assert status == "jimaku: ok"
+    assert calls == ["jimaku"]  # the unknown name produced no attempt
+
+
+def test_provider_path_with_no_providers_reports_none(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise AssertionError("no provider should run")
+
+    monkeypatch.setattr(subselect, "fetch_jimaku_path", fail)
+    monkeypatch.setattr(subselect, "fetch_tsukihime_path", fail)
+
+    path, status = subselect.fetch_provider_path("/v/Show - 01.mkv", ())
+
+    assert path is None
+    assert status == "no Japanese subtitle providers enabled"
