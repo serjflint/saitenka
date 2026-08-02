@@ -1,0 +1,4 @@
+interface:
+  display_name: "Saitenka Agent Tooling"
+  short_description: "Pick the right code-intelligence tool (repowise / LSP / Basic Memory)"
+  default_prompt: "Use $agent-tooling to decide whether repowise, the LSP tool, or Basic Memory answers my question best."

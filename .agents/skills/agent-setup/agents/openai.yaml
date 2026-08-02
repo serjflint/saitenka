@@ -1,0 +1,4 @@
+interface:
+  display_name: "Saitenka Agent Setup"
+  short_description: "Wire this repo's MCP servers, LSP, and hooks into your agent"
+  default_prompt: "Use $agent-setup to enable this repo's tooling (repowise + Basic Memory MCP, pyrefly LSP, hooks) in my agent."
