@@ -207,6 +207,41 @@ def document_geometry(doc: DocLayout) -> tuple[list[ScanBox], list[LinkBox]]:
     return scan, links
 
 
+def _draw_window_block(
+    canvas: Image.Image,
+    draw,
+    doc: DocLayout,
+    lb: LaidBlock,
+    y0: int,
+    y1: int,
+    scan_out: list[ScanBox] | None,
+    link_out: list[LinkBox] | None,
+) -> None:
+    """Draw one block's overlapping band into the window canvas at its stacked top minus ``y0``, and
+    append its scan/link boxes in window space (see :func:`_composite_window`)."""
+    from overlay.render.layout import draw_inline
+
+    local_y0 = max(0, y0 - lb.top)  # first block-local row inside the window
+    local_y1 = min(lb.height, y1 - lb.top)
+    local_scan: list[ScanBox] | None = [] if scan_out is not None else None
+    local_link: list[LinkBox] | None = [] if link_out is not None else None
+    img = render_flow_window(lb.layout, local_y0, local_y1, local_scan, local_link)
+    dst_y = lb.top + local_y0 - y0  # where the drawn band lands in the window
+    canvas.alpha_composite(img, (lb.x, dst_y))
+    if lb.marker:
+        draw_inline(
+            canvas,
+            draw,
+            lb.x - doc.gutter_px,
+            lb.top + lb.baseline - y0,
+            [Span(lb.marker, doc.base)],
+        )
+    if scan_out is not None and local_scan is not None:
+        scan_out.extend(ScanBox(s.text, s.x + lb.x, s.y + dst_y, s.w, s.h) for s in local_scan)
+    if link_out is not None and local_link is not None:
+        link_out.extend(LinkBox(k.query, k.x + lb.x, k.y + dst_y, k.w, k.h) for k in local_link)
+
+
 def _composite_window(
     doc: DocLayout,
     y0: int,
@@ -220,33 +255,11 @@ def _composite_window(
     window's space (offset by ``-y0``), matching :func:`_composite`."""
     from PIL import ImageDraw
 
-    from overlay.render.layout import draw_inline
-
     canvas = Image.new("RGBA", (doc.width, max(1, y1 - y0)), doc.background)
     draw = ImageDraw.Draw(canvas)
     for lb in doc.blocks:
-        top, h = lb.top, lb.height
-        if top >= y1 or top + h <= y0:  # block fully outside the window
-            continue
-        local_y0 = max(0, y0 - top)  # first block-local row inside the window
-        local_y1 = min(h, y1 - top)
-        local_scan: list[ScanBox] | None = [] if scan_out is not None else None
-        local_link: list[LinkBox] | None = [] if link_out is not None else None
-        img = render_flow_window(lb.layout, local_y0, local_y1, local_scan, local_link)
-        dst_y = top + local_y0 - y0  # where the drawn band lands in the window
-        canvas.alpha_composite(img, (lb.x, dst_y))
-        if lb.marker:
-            draw_inline(
-                canvas,
-                draw,
-                lb.x - doc.gutter_px,
-                top + lb.baseline - y0,
-                [Span(lb.marker, doc.base)],
-            )
-        if scan_out is not None and local_scan is not None:
-            scan_out.extend(ScanBox(s.text, s.x + lb.x, s.y + dst_y, s.w, s.h) for s in local_scan)
-        if link_out is not None and local_link is not None:
-            link_out.extend(LinkBox(k.query, k.x + lb.x, k.y + dst_y, k.w, k.h) for k in local_link)
+        if lb.top < y1 and lb.top + lb.height > y0:  # block's band overlaps the window
+            _draw_window_block(canvas, draw, doc, lb, y0, y1, scan_out, link_out)
     return canvas
 
 

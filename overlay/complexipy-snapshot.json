@@ -50,16 +50,6 @@
     ]
   },
   {
-    "path": "src/overlay/app/subtitles.py",
-    "file_name": "subtitles.py",
-    "functions": [
-      {
-        "name": "_draw_visual_lines",
-        "complexity": 20
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/yomitan_db_import.py",
     "file_name": "yomitan_db_import.py",
     "functions": [

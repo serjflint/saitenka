@@ -183,7 +183,7 @@ class WindowedPanel:
         seed_height: int = 200,
         max_cached_blocks: int | None = None,
         compress: bool = False,
-        render_block_fn: Callable[[BodyRenderArgs, int | None], tuple] | None = None,
+        render_block_fn: Callable[[BodyRenderArgs, int, int], tuple] | None = None,
     ):
         from overlay.model import _DEFAULT_THEME
         from overlay.render.window import LazyOffsets
@@ -543,18 +543,20 @@ class WindowedPanel:
     def _submit_process_pool(
         self, ex, targets: list[tuple[int, int, int, int]]
     ) -> dict[Future[Any], tuple[int, int, int, int]]:
-        """Submit every band target to the process pool via the picklable
-        :func:`overlay.body_block.render_body_band` (plain ``BodyRenderArgs`` + band bounds — re-walks
-        per call, but the GIL build has no shared-memory handle to reuse anyway). All targets are body
-        bands, so there is no cheap-inline split as the whole-row path once had."""
-        from overlay.body_block import render_body_band
-
+        """Submit every band target to the process pool via the INJECTED picklable band renderer
+        (``render_block_fn`` = ``overlay.body_block.render_body_band`` — plain ``BodyRenderArgs`` + band
+        bounds; re-walks per call, but the GIL build has no shared-memory handle to reuse anyway). It is
+        injected, not imported, to keep ``render`` free of the ``render → body_block`` import cycle. Only
+        reached when ``render_block_fn`` is truthy (the None gate ran in the caller). All targets are
+        body bands, so there is no cheap-inline split as the whole-row path once had."""
+        fn = self._render_block_fn
+        assert fn is not None  # caller gated on this (None → in-process serial)
         futures: dict[Future[Any], tuple[int, int, int, int]] = {}
         for tgt in targets:
             i, _b, y0, y1 = tgt
             body_args = self._rows[i].body_args
             assert body_args is not None  # banded rows always carry body_args
-            futures[ex.submit(render_body_band, body_args, y0, y1)] = tgt
+            futures[ex.submit(fn, body_args, y0, y1)] = tgt
         return futures
 
     def _render_serial(

@@ -53,7 +53,7 @@ def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
     # forcing a fresh pool per iteration — a stale pool from a differently-configured earlier test
     # must never leak in (that mismatch used to crash with an opaque PicklingError).
     import overlay.parallel as PA
-    from overlay.body_block import render_body_block
+    from overlay.body_block import render_body_band
 
     entry = _entry(20)
     ref = render_panel(entry, width=WIDTH)
@@ -62,7 +62,7 @@ def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
         for ft in (True, False):
             PA.shutdown_shared_executor()
             monkeypatch.setattr(PA, "is_free_threaded", lambda ft=ft: ft)
-            wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, render_block_fn=render_body_block)
+            wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, render_block_fn=render_body_band)
             wp.viewport(0, 260)  # cache the head
             n = wp.render_ahead(0, 260, direction=1, max_blocks=6, workers=2)
             results[ft] = (n, wp.measured)
