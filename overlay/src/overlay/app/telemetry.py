@@ -59,21 +59,6 @@ _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _span_processor: CTFSpanProcessor | None = None
 
-#: Named counter/gauge instruments (see otel_metrics.register) sampled once per tick into the CTF
-#: trace as graph tracks — curated, not "every instrument": duration histograms are visualized as
-#: spans instead (that's what Perfetto's timeline is for), not as a value-over-time line.
-_SAMPLED_COUNTERS = (
-    "saitenka.runtime.gil_enabled",
-    "saitenka.prefetch.queue_depth",
-    "saitenka.panel_cache.hits",
-    "saitenka.panel_cache.misses",
-    "saitenka.panel_cache.evictions",
-    "saitenka.dict_cache.hits",
-    "saitenka.dict_cache.misses",
-    "saitenka.osd.paused_draw",
-    "saitenka.osd.paused_nudge",
-)
-
 #: Gates the span pipeline. Starts off (so it costs nothing before/without telemetry); `configure()`
 #: turns it on as part of enabling telemetry — see the comment there. Exists as a separate switch
 #: from `TelemetryOptions.enabled` for a future dynamic on/off (a doctor/keybind hook toggling
@@ -137,10 +122,15 @@ def _sample_counters() -> dict[str, float]:
     from overlay import otel_metrics
     from overlay.app import perf
 
+    # Every counter/gauge, by TYPE — not a hand-maintained allowlist. A counter/gauge summarizes to a
+    # scalar ``value``; a duration histogram to ``count``/``sum``/percentiles (no ``value``) and is
+    # shown as SPANS, so it's skipped here. Deriving this from the instrument shape means a newly
+    # registered counter graphs automatically — the old name allowlist silently dropped block_cache.*
+    # for a whole release (its counters incremented but never reached the trace).
     snap = otel_metrics.snapshot()
     out: dict[str, float] = {}
-    for name in _SAMPLED_COUNTERS:
-        value = snap.get(name, {}).get("value")
+    for name, summary in snap.items():
+        value = summary.get("value")
         if isinstance(value, int | float):
             out[name.removeprefix("saitenka.")] = float(value)
     out["telemetry.dropped_spans"] = float(dropped_span_count())
