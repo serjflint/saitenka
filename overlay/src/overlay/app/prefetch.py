@@ -21,7 +21,6 @@ from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
-    from overlay.app.popups import TipPanel
 
 log = logging.getLogger(__name__)
 
@@ -74,17 +73,6 @@ class HeadPrefetchItem:
     mined: bool
 
 
-@dataclass(frozen=True, slots=True)
-class FinishItem:
-    """High-priority job: finish the deferred tail of the panel the user is looking at RIGHT NOW.
-
-    ``key`` is the panel-cache key — the worker flags a refresh only if this panel is still the one
-    on screen."""
-
-    panel: TipPanel
-    key: tuple
-
-
 def prefetch_worker_count(reader: Reader) -> int:
     """An explicit ``[perf].prefetch_workers`` (>0) pins the count on both builds; ``0`` (auto) picks a
     flat per-build default (``_AUTO_WORKERS_FREE_THREADED`` / ``_AUTO_WORKERS_GIL``). Each worker is
@@ -117,30 +105,6 @@ def start_prefetch(reader: Reader) -> None:
         reader._prefetch_threads.append(th)
 
 
-def _try_finish_job(reader: Reader) -> bool:
-    """Finish the deferred tail of the on-screen tooltip if one is queued; ``True`` when handled (so
-    the worker loops before touching the warm queue — the visible panel outranks warming)."""
-    try:
-        fin: FinishItem = reader._finish_q.get_nowait()
-    except queue.Empty:
-        return False
-    try:
-        # The deferred tail: finish() fans the panel's body rows across the shared pool (threads when
-        # free-threaded, a process pool on a GIL build — parallel.pick_executor). executor mirrors that
-        # choice so the trace shows which one ran; on the process path wall ≫ cpu_ms here is the
-        # pickle/IPC tax the pool costs, the parent thread just waiting on the futures.
-        with otel_metrics.traced("finish_tail", executor="thread" if gil_disabled() else "process"):
-            fin.panel.finish()
-    except Exception:
-        log.debug("finish job failed", exc_info=True)
-        return True
-    if fin.key == reader._tip_key and fin.panel is reader._tip_state:
-        reader._tip_dirty = True  # main loop re-uploads the now-complete panel
-    elif fin.key == reader._nest.key and fin.panel is reader._nest.state:
-        reader._nest.dirty = True
-    return True
-
-
 def _run_item(reader: Reader, item: PrefetchItem) -> None:
     """A viewport-first HEAD render when the user's engaged (a hover is imminent), else a cheap
     dict-only WARM (decode+cache the glossary into ``Dictionary._entry_cache``, no layout) so a
@@ -149,15 +113,12 @@ def _run_item(reader: Reader, item: PrefetchItem) -> None:
     # the live counterpart to what --timeline measures out-of-band (worker keep-ahead margin).
     with otel_metrics.traced("prefetch_decode", kind="head" if item.full else "warm"):
         if item.full:
-            # Head-first, NOT the whole panel: a real hover defers the tail via the finish queue
-            # anyway, so pre-rendering the full body of every engaged content word just saturates the
-            # worker on pathological entries (seconds-long renders → queue backlog, hovers land cold).
-            # Same viewport cap + panel_for()/cache path a hover uses, so the warmed head is a hit.
-            # item.mined came from the main thread — never call _is_mined/card_for from a worker
-            # (jamdict is not thread-safe on free-threaded builds).
-            reader._panel_for(
-                item.token, item.inflected, min_h=reader._tip_cap(), finish=False, mined=item.mined
-            )
+            # Head-first, NOT the whole panel: the windowed engine composites the tail on scroll, so
+            # pre-rendering the full body of every engaged content word just saturates the worker on
+            # pathological entries. Same viewport cap + panel_for()/cache path a hover uses, so the
+            # warmed head is a hit. item.mined came from the main thread — never call _is_mined/card_for
+            # from a worker (jamdict is not thread-safe on free-threaded builds).
+            reader._panel_for(item.token, item.inflected, min_h=reader._tip_cap(), mined=item.mined)
         elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
             reader.dict_set.entry_for(item.token, item.inflected)
 
@@ -195,9 +156,7 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
         # kind="head_ahead" distinguishes the speculative lookahead render from the engaged current
         # line's kind="head" — without a span here it was invisible, folding into anonymous `render`.
         with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
-            reader._panel_for(
-                item.token, item.inflected, min_h=reader._tip_cap(), finish=False, mined=item.mined
-            )
+            reader._panel_for(item.token, item.inflected, min_h=reader._tip_cap(), mined=item.mined)
         reader._head_built += 1
     except Exception:
         log.debug(
@@ -208,8 +167,6 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
 
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
-        if _try_finish_job(reader):
-            continue
         if _try_head_prefetch_item(reader):
             continue
         _try_prefetch_item(reader)
@@ -312,10 +269,7 @@ def _head_prefetch_candidate(
         return None
     if reader._is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
         return None
-    # tabs MUST match how panel_for() itself resolves it (reader.show_dict_tabs, since
-    # _try_head_prefetch_item calls panel_for without an explicit tabs=) or this dedup check
-    # would miss the panel_for() build's real cache key and always look like a miss.
-    key = reader._panel_key(t, inflected_in(toks, i), mined=False, tabs=reader.show_dict_tabs)
+    key = reader._panel_key(t, inflected_in(toks, i), mined=False)
     if key in reader._panel_cache:
         return None  # already warm (hovered earlier, or a prior speculative render)
     return priority, HeadPrefetchItem(gen, t, inflected_in(toks, i), mined=False)

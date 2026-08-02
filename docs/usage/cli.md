@@ -85,7 +85,6 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 * `--preview-key`: mpv key to replay the last card preview + audio  *[default: p]*
 * `--no-audio-play`: don't auto-play the mined clip  *[default: False]*
 * `--tip-height`: max BASE tooltip height as a fraction of the video height (default 0.4)  *[default: 0.4]*
-* `--dict-tabs, --no-dict-tabs`: draw the sticky per-dictionary tab strip on the tooltip (default: off)  *[default: False]*
 * `--pause-on-tooltip, --no-pause-on-tooltip`: auto-pause playback while a tooltip is shown (resumes when it hides)  *[default: True]*
 * `--prefetch, --no-prefetch`: disable background prefetch of the paused line's tooltips  *[default: True]*
 * `--auto-translate`: auto-reveal the EN translation while a tooltip is shown (else press the translate key). Anti-crutch: the EN only appears when you're looking a word up  *[default: False]*
@@ -137,7 +136,6 @@ Play a video with Japanese subs; hover a word → Yomitan-like dictionary toolti
 * `--preview-key`: mpv key to replay the last card preview + audio  *[default: p]*
 * `--no-audio-play`: don't auto-play the mined clip  *[default: False]*
 * `--tip-height`: max BASE tooltip height as a fraction of the video height (default 0.4)  *[default: 0.4]*
-* `--dict-tabs, --no-dict-tabs`: draw the sticky per-dictionary tab strip on the tooltip (default: off)  *[default: False]*
 * `--pause-on-tooltip, --no-pause-on-tooltip`: auto-pause playback while a tooltip is shown (resumes when it hides)  *[default: True]*
 * `--prefetch, --no-prefetch`: disable background prefetch of the paused line's tooltips  *[default: True]*
 * `--auto-translate`: auto-reveal the EN translation while a tooltip is shown (else press the translate key). Anti-crutch: the EN only appears when you're looking a word up  *[default: False]*

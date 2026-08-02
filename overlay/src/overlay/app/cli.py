@@ -230,13 +230,6 @@ def run(
         # The default lives once, on TooltipOptions.tip_max_frac. cyclopts still layers
         # defaults < config < CLI (token-based), so sourcing the floor here changes nothing but DRY.
     ] = TooltipOptions().tip_max_frac,
-    dict_tabs: Annotated[
-        bool,
-        cyclopts.Parameter(
-            negative="--no-dict-tabs",
-            help="draw the sticky per-dictionary tab strip on the tooltip (default: off)",
-        ),
-    ] = False,
     pause_on_tooltip: Annotated[
         bool,
         cyclopts.Parameter(
@@ -315,7 +308,6 @@ def run(
         preview_key=preview_key,
         no_audio_play=no_audio_play,
         tip_height=tip_height,
-        dict_tabs=dict_tabs,
         pause_on_tooltip=pause_on_tooltip,
         prefetch=prefetch,
         auto_translate=auto_translate,
@@ -966,12 +958,10 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             nested_max_frac=cfg.get("nested_max_frac", tt.nested_max_frac),
             pause_on_tooltip=bool(cfg.get("pause_on_tooltip", tt.pause_on_tooltip)),
             annotation_mode=cfg.get("annotation_mode", tt.annotation_mode),
-            show_dict_tabs=bool(cfg.get("show_dict_tabs", False)),
             scan_delay=cfg.get("scan_delay", tt.scan_delay),
             hide_delay=cfg.get("hide_delay", tt.hide_delay),
             flash_secs=cfg.get("flash_secs", tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", tt.panel_cache_max),
-            banded=bool(cfg.get("banded", tt.banded)),
         ),
         mining=MiningOptions(
             play_audio=not bool(cfg.get("no_audio_play", False)),

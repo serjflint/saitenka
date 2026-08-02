@@ -39,8 +39,6 @@ SUB_DELAY_MINUS_MSG = "saitenka-sub-delay-minus"
 SUB_DELAY_PLUS_MSG = "saitenka-sub-delay-plus"
 SUB_DELAY_RESET_MSG = "saitenka-sub-delay-reset"
 KANJI_MSG = "saitenka-kanji"
-TAB_PREV_MSG = "saitenka-tab-prev"
-TAB_NEXT_MSG = "saitenka-tab-next"
 TIP_UP_MSG = "saitenka-tip-up"
 TIP_DOWN_MSG = "saitenka-tip-down"
 TIP_CLOSE_MSG = "saitenka-tip-close"
@@ -188,22 +186,6 @@ BINDINGS: tuple[BindingSpec, ...] = (
         COPY_CLICK_MSG,
         key="MBTN_RIGHT",
         context="tooltip",
-    ),
-    BindingSpec(
-        "Tooltip actions",
-        "Previous dictionary tab",
-        TAB_PREV_MSG,
-        scope="tooltip",
-        key="LEFT",
-        context="tooltip only",
-    ),
-    BindingSpec(
-        "Tooltip actions",
-        "Next dictionary tab",
-        TAB_NEXT_MSG,
-        scope="tooltip",
-        key="RIGHT",
-        context="tooltip only",
     ),
     BindingSpec(
         "Tooltip actions",

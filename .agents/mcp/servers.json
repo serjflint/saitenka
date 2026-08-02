@@ -1,0 +1,29 @@
+{
+  "$comment": "Canonical, agent-agnostic MCP server definitions for this repo. There is no shared cross-agent MCP config format (Claude uses .mcp.json, Codex uses .codex/config.toml TOML), so this neutral file is the single source of truth and `.agents/skills/agent-setup/scripts/render.py` emits each agent's format. No absolute paths, no secrets. Per-user state (Basic Memory vault path, the MLX endpoint) stays out of here.",
+  "servers": {
+    "repowise": {
+      "command": "repowise",
+      "args": ["mcp", ".", "--transport", "stdio"],
+      "description": "repowise: codebase intelligence — docs, graph, git signals, dead code, decisions"
+    },
+    "basic-memory": {
+      "command": "basic-memory",
+      "args": ["mcp"],
+      "description": "Basic Memory: personal Markdown knowledge base over your Obsidian vault (local-only).",
+      "env": {
+        "BASIC_MEMORY_FORCE_LOCAL": "true",
+        "BASIC_MEMORY_FORCE_CLOUD": "false",
+        "BASIC_MEMORY_NO_PROMOS": "1",
+        "BASIC_MEMORY_LOGFIRE_ENABLED": "false",
+        "BASIC_MEMORY_AUTO_UPDATE": "false",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1"
+      },
+      "codex": {
+        "approval": {
+          "write_note": "approve"
+        }
+      }
+    }
+  }
+}

@@ -38,7 +38,6 @@ def _reader() -> Reader:
     r = Reader(FakeIPC(), dict_set=_TallDS())
     r.osd = (1920, 1080)
     r.sub_origin = (0, 0)
-    r._finish_available = lambda: True  # head-path (as a live run with a prefetch worker)
     return r
 
 
@@ -57,7 +56,7 @@ def _churn(r: Reader, term: str) -> bool:
     for _ in range(4):  # scroll toward the bottom of the tall entry
         r._scroll_tip(round(r.osd[1] * 0.12))
     st = r._tip_state
-    boxes = st.lazy.scan_boxes if st is not None else []
+    boxes = st.windowed.scan_boxes() if st is not None else []
     opened = False
     if boxes:
         r._show_nested(boxes[len(boxes) // 3])  # nested popup on an inner cell
@@ -86,7 +85,7 @@ def test_sustained_churn_evicts_and_stays_clean():
         f"panel cache overflowed its LRU cap: {len(r._panel_cache)}"
     )
     # after the final set_hover(-1) the whole hover stack must be torn down
-    assert r._tip_state is None and r._tip_bgra is None
+    assert r._tip_state is None
     assert r._nest.state is None  # nested popup cleared
     assert r.hover == -1
 

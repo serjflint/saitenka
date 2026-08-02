@@ -359,6 +359,21 @@ def _known_deck_fields(deck: str) -> set[str] | None:
     return set(info[0].get("fields", {})) if info else None
 
 
+def _known_deck_problem(deck: str, fields, decks: set[str]) -> str | None:
+    """The mismatch (if any) between one configured ``[known]`` deck and Anki: a missing deck, or a
+    chosen field absent from its note type. ``None`` when the deck is fine (or is empty/unreadable, so
+    its fields can't be checked — the deck exists, which is what matters)."""
+    if deck not in decks:
+        return f"deck {deck!r} not found"
+    note_fields = _known_deck_fields(deck)
+    if note_fields is None:
+        return None
+    missing = [f for f in (fields or []) if f not in note_fields]
+    if missing:
+        return f"{deck!r} has no field(s) {missing} (has {sorted(note_fields)})"
+    return None
+
+
 def check_known() -> Check:
     """Validate the ``[known]`` coloring config against Anki: every configured deck exists and its chosen
     field(s) exist on the deck's note type. A deck/field that isn't there means coloring silently sees an
@@ -370,17 +385,9 @@ def check_known() -> Check:
         decks = set(_anki_call("deckNames") or [])
     except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
         return Check("known", "warn", "AnkiConnect unreachable — can't verify [known] deck/fields")
-    problems: list[str] = []
-    for deck, fields in known.items():
-        if deck not in decks:
-            problems.append(f"deck {deck!r} not found")
-            continue
-        note_fields = _known_deck_fields(deck)
-        if note_fields is None:  # empty/unreadable deck — the deck exists, fields can't be checked
-            continue
-        missing = [f for f in (fields or []) if f not in note_fields]
-        if missing:
-            problems.append(f"{deck!r} has no field(s) {missing} (has {sorted(note_fields)})")
+    problems = [
+        p for deck, fields in known.items() if (p := _known_deck_problem(deck, fields, decks))
+    ]
     if problems:
         return Check(
             "known", "fail", "known-words config doesn't match Anki: " + "; ".join(problems)

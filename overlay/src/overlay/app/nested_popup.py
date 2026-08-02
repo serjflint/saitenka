@@ -12,10 +12,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from overlay.app.overlay_ids import OverlayId
-from overlay.app.popups import PopupView, TipPanel
-from overlay.app.prefetch import FinishItem, cap_for
+from overlay.app.popups import Panel, PopupView
+from overlay.app.prefetch import cap_for
 from overlay.app.tokenize import SKIP_POS, tokenize
-from overlay.panel import LazyPanel, panel_rows
+from overlay.panel import panel_rows
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
@@ -42,31 +42,23 @@ def nested_view_h(reader: Reader, full_h: int, wy: float) -> int:
 
 
 def render_nested_view(reader: Reader) -> None:
-    # No dict-tab strip on the nested popup — it's built tabs=False (no reserve), so it stays
-    # compact and gives the deep-dive its full height (a depth-1 quick look, scrolled with the wheel).
-    if reader._nest.bgra is None:
+    # The nested popup is a compact depth-1 quick look, scrolled with the wheel — composited from the
+    # same windowed engine as the base tooltip.
+    st = reader._nest.state
+    if st is None:
         return
     reader._nest.rect = reader._blit_panel(
-        reader._nest.bgra,
-        reader._nest.scroll,
-        reader._nest.view_h,
-        reader._nest.xy,
-        OverlayId.NESTED,
+        st, reader._nest.scroll, reader._nest.view_h, reader._nest.xy, OverlayId.NESTED
     )
 
 
-def refresh_nested_full(reader: Reader) -> None:
-    st = reader._nest.state
-    if st is None or not st.ready:
-        return
-    reader._nest.bgra = st.bgra()  # re-decompress the grown nested panel into its scroll buffer
-    render_nested_view(reader)
-
-
 def scroll_nested(reader: Reader, delta: int) -> None:
-    if reader._nest.bgra is None:
+    st = reader._nest.state
+    if st is None:
         return
-    maxs = max(0, reader._nest.bgra.shape[0] - reader._nest.view_h)
+    maxs = max(
+        0, st.full_height - reader._nest.view_h
+    )  # windowed estimate, converging as it renders
     ns = min(maxs, max(0, reader._nest.scroll + delta))
     if ns != reader._nest.scroll:
         reader._nest.scroll = ns
@@ -96,50 +88,31 @@ def open_nested(reader: Reader, tok, inflected, wx: float, wy: float, wh: float,
     """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
     Shared by scan-hover and a clicked cross-reference link."""
     mined = reader._is_mined(tok)
-    key = reader._panel_key(
-        tok, inflected, mined=mined, tabs=False
-    )  # nested: no tab strip / reserve
-    st = reader._panel_for(
-        tok,
-        inflected,
-        min_h=reader._tip_cap(),
-        finish=not reader._finish_available(),
-        mined=mined,
-        tabs=False,
-        nested=True,  # identity, independent of the (visual) dict-tab strip
-    )
+    key = reader._panel_key(tok, inflected, mined=mined)
+    st = reader._panel_for(tok, inflected, min_h=reader._tip_cap(), mined=mined, nested=True)
     place_nested(reader, st, key, tok, tok.surface, wx, wy, wh, tail)
 
 
 def place_nested(
     reader: Reader, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None
 ) -> None:
-    """Anchor a built :class:`TipPanel` ``st`` as the nested popup. ``token`` is the inner Token to
-    mine via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
+    """Anchor a built :class:`Panel` ``st`` as the nested popup. ``token`` is the inner Token to mine
+    via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
     reader._nest.state, reader._nest.key = st, key
     reader._nest.token, reader._nest.word = token, word
     reader._nest.tail = tail
-    reader._nest.dirty, reader._nest.scroll = False, 0
-    reader._nest.bgra = st.bgra()  # decompress the cached nested panel into its scroll buffer
-    ph, pw = st.shape[0], st.shape[1]
-    reader._nest.view_h = nested_view_h(reader, ph, wy)
-    reader._nest.xy = reader._place_panel(pw, wx, wy, wh, reader._nest.view_h)
+    reader._nest.scroll = 0
+    reader._nest.view_h = nested_view_h(reader, st.full_height, wy)
+    reader._nest.xy = reader._place_panel(st.width, wx, wy, wh, reader._nest.view_h)
     render_nested_view(reader)
-    if not st.complete:
-        reader._finish_q.put(FinishItem(st, key))  # worker fills the tail → _nest.dirty → refresh
 
 
 def link_hit(mx: float, my: float, state, xy, scroll: int):
-    """Which :class:`~overlay.model.LinkBox` of ``state`` is under (mx, my)? Maps screen → panel
-    coords (scroll)."""
+    """The :class:`~overlay.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test."""
     if state is None:
         return None
     sx, sy = xy
-    px, py = mx - sx, (my - sy) + scroll
-    for lb in state.lazy.link_boxes:
-        if lb.x <= px < lb.x + lb.w and lb.y <= py < lb.y + lb.h:
-            return lb
-    return None
+    return state.windowed.link_hit(int(mx - sx), int((my - sy) + scroll))
 
 
 def open_link(reader: Reader, lb, xy, scroll: int) -> None:
@@ -167,11 +140,11 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
     st = reader._panel_cache.get(key)
     if st is None:
         entry = reader.dict_set.search(pattern)
-        lazy = LazyPanel(
+        st = Panel.from_rows(
             panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok),
             reader.tip_width,
+            "",
         )
-        st = TipPanel(lazy, "")
         with reader._cache_lock:
             st = reader._panel_cache_setdefault(key, st)
     else:
@@ -180,10 +153,7 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
                 reader._panel_cache.move_to_end(key)
             except KeyError:
                 pass
-    if reader._finish_available():
-        st.render_head(reader._tip_cap())
-    else:
-        st.finish()
+    st.render_head(reader._tip_cap())
     place_nested(reader, st, key, None, pattern, wx, wy, wh)
 
 
@@ -213,11 +183,11 @@ def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None
     key = ("kanji", ch, reader.tip_width)
     st = reader._panel_cache.get(key)
     if st is None:
-        lazy = LazyPanel(
-            panel_rows(entry, reader.tip_width, speak_button=reader._tts_ok), reader.tip_width
+        st = Panel.from_rows(
+            panel_rows(entry, reader.tip_width, speak_button=reader._tts_ok),
+            reader.tip_width,
+            entry.reading,
         )
-        st = TipPanel(lazy, entry.reading)
-        st.finish()  # kanji entries are small — render whole
         with reader._cache_lock:
             st = reader._panel_cache_setdefault(key, st)
     else:
@@ -226,6 +196,7 @@ def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None
                 reader._panel_cache.move_to_end(key)
             except KeyError:
                 pass
+    st.render_head(reader._tip_cap())
     place_nested(reader, st, key, None, ch, wx, wy, wh)
 
 

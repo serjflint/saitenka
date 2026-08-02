@@ -25,7 +25,7 @@ licenses · spell · links · shell`
 | Task | What it gates | Read a failure as |
 |---|---|---|
 | `lint` | ruff (explicit select, **not** `ALL`) + flake8-bandit `S` SAST | style / a security smell → fix, or `# noqa: S… # reason` at a legit site |
-| `types` | mypy + basedpyright (blocking); pyrefly + ty (advisory) | a real type error — don't `# type: ignore` without a reason |
+| `types` | mypy + basedpyright + pyrefly (blocking); ty (advisory) | a real type error — don't `# type: ignore` without a reason |
 | `arch` | import-linter: no cycles, PIL-agnostic core, **GPL chokepoint** | a forbidden import — move the code, don't relax the contract |
 | `invariants` | ast-grep call-level anti-pattern gate | a banned call shape → rewrite |
 | `complexity` | complexipy, ratcheted vs `overlay/complexipy-snapshot.json` | a function got more complex → simplify; **regenerate the baseline only after a deliberate refactor** with `poe complexity-baseline`, never to silence a regression |

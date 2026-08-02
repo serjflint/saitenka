@@ -21,8 +21,9 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
   `render.flow` is the core. `render/window.py` is the PIL-free geometry kernel (block offset table +
   half-open visible-range) and `render/banded.py` the **windowed (banded) tooltip engine**
   (`WindowedPanel`): render only the blocks in the viewport±overscan, retain heights/hit-geometry past
-  pixel eviction, composite O(viewport) — pixel-identical to a `render_panel` crop. Wired into the base
-  tooltip behind `[tooltip].banded` / `SAITENKA_BANDED=1` (off by default; blob-slice path is default).
+  pixel eviction (each retained block zlib-compressed), composite O(viewport) — pixel-identical to a
+  `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
+  search) is a `Panel` (`app/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
 - **`raster/`** + top-level **`panel`** — compose the final RGBA panel image; `Definition`/`Entry`
   (in `panel.py`) hold one dictionary's rendered entry for a word. Value types with no render deps —

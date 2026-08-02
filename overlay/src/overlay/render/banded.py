@@ -65,6 +65,16 @@ class CachedBlock:
         data, size = self._packed
         return Image.frombytes("RGBA", size, zlib.decompress(data))
 
+    @property
+    def nbytes(self) -> int:
+        """Retained on-heap pixel size: the compressed blob length when packed, else the raw RGBA
+        bytes. Summed by :meth:`WindowedPanel.retained_nbytes` for the panel-cache gauge."""
+        if self._packed is not None:
+            return len(self._packed[0])
+        assert self._img is not None
+        w, h = self._img.size
+        return w * h * 4
+
 
 @dataclass(frozen=True, slots=True)
 class BlockGeom:
@@ -200,6 +210,21 @@ class WindowedPanel:
         """Blocks whose pixels are currently retained (bounded by ``max_cached_blocks`` if set, else by
         the viewport±overscan window)."""
         return len(self._blocks)
+
+    @property
+    def retained_nbytes(self) -> int:
+        """On-heap pixel footprint of the retained blocks (compressed when ``compress=True``). The
+        panel-cache gauge sums this across cached panels — the windowed successor to the old blob's
+        ``packed_nbytes``."""
+        with self._lock:
+            return sum(b.nbytes for b in self._blocks.values())
+
+    def measure_to(self, px: int) -> None:
+        """Render + cache blocks top-down until the exact-offset prefix covers ``px`` px — warms the
+        head and tightens :attr:`full_height` without compositing a viewport image. Used to warm a
+        panel's head for placement (a real hover) and for speculative prefetch."""
+        with self._lock:
+            self._grow_prefix(px)
 
     def _store(self, rb: RenderedBlock) -> CachedBlock:
         """Cache a rendered block's pixels + geometry + height. Call under ``self._lock``. Idempotent:

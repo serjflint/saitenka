@@ -8,7 +8,6 @@ near the word. Both overlays live in mpv's own OSD surface → fullscreen-safe.
 from __future__ import annotations
 
 import logging
-import os
 import queue
 import tempfile
 import threading
@@ -66,8 +65,6 @@ from overlay.app.bindings import (
     SUB_REPLAY_MSG,
     SUBTITLE_LANGUAGE_MSG,
     SUBTITLE_RETRY_MSG,
-    TAB_NEXT_MSG,
-    TAB_PREV_MSG,
     TIP_CLOSE_MSG,
     TIP_DOWN_MSG,
     TIP_UP_MSG,
@@ -82,15 +79,13 @@ from overlay.app.media import (
 from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
-from overlay.app.popups import PopupView, TipPanel
+from overlay.app.popups import Panel, PopupView
 from overlay.app.subtitles import render_plain_subtitle, render_subtitle
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
-    import numpy as np
-
     from overlay.app.card_preview import PreviewData
     from overlay.app.episode_analysis import AnalysisKey, EpisodeAnalysis
     from overlay.app.session_stats import SessionRecorder
@@ -107,8 +102,7 @@ TIP_ID = OverlayId.TIP
 TOAST_ID = OverlayId.TOAST
 NESTED_ID = OverlayId.NESTED
 # The nested popup gets its own (roomier) height cap (TooltipOptions.nested_max_frac) so shrinking
-# the base tooltip (tip_max_frac) doesn't cramp the deep-dive; the nested popup also carries no
-# dict-tab strip / reserve (space-saving).
+# the base tooltip (tip_max_frac) doesn't cramp the deep-dive.
 
 
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
@@ -116,9 +110,8 @@ NESTED_ID = OverlayId.NESTED
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text", "sid")
 
 
-# Popup view/panel classes live in app/popups.py; legacy aliases kept because the controller
-# internals and the test-suite reference the old private names.
-_TipPanel = TipPanel
+# Popup view/panel classes live in app/popups.py; the _Nested alias is kept because the controller
+# internals and the test-suite reference the old private name.
 _Nested = PopupView
 
 
@@ -182,7 +175,6 @@ class Reader:
         self.sub_replay_key = o.keys.sub_replay_key  # Alt+DOWN  → sub-seek  0 (replay current)
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
-        self.show_dict_tabs = o.tooltip.show_dict_tabs  # draw the sticky dict-tab strip (base only)
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
         if o.tooltip.annotation_mode not in ("full", "hover"):
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
@@ -224,9 +216,6 @@ class Reader:
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
         self._prefetch_q: queue.Queue = queue.Queue()
-        self._finish_q: queue.Queue = (
-            queue.Queue()
-        )  # high-priority: finish the visible tooltip's tail
         self._prefetch_gen = 0  # bumped on line change / resume / seek → cancels in-flight
         self._prefetch_key: tuple[str, bool] | None = None
         self._mouse_in = False  # cursor over the video window — an engagement signal
@@ -299,29 +288,11 @@ class Reader:
             None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
         )
         self._hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
-        self._tip_bgra: np.ndarray | None = (
-            None  # active panel decompressed to a premultiplied BGRA array — scroll slices this
-        )
         self._tip_scroll = 0
         self._tip_view_h = 0
         self._tip_xy: tuple[int, int] = (0, 0)
-        # Render the base tooltip's visible frames from the windowed (banded) engine — O(viewport)
-        # compositing + windowed hit-testing — instead of slicing a whole-panel BGRA blob. On by
-        # default (from [tooltip].banded); SAITENKA_BANDED=0/1 in the env overrides either way, for a
-        # quick A/B against the legacy blob path. Parity-gated (tests/test_banded_wiring.py).
-        _env_banded = os.environ.get("SAITENKA_BANDED")
-        self._banded = _env_banded == "1" if _env_banded in ("0", "1") else o.tooltip.banded
-        if self._banded:
-            log.info("banded tooltip renderer ENABLED (windowed O(viewport) compositing)")
-        self._tip_state: TipPanel | None = (
-            None  # _TipPanel currently shown (viewport-first render may still be filling)
-        )
-        self._tip_key: tooltip.PanelKey | None = (
-            None  # its cache key — the finisher only refreshes the panel still on screen
-        )
-        self._tip_dirty = (
-            False  # a background finish completed the shown panel → re-upload the view
-        )
+        self._tip_state: Panel | None = None  # Panel currently shown
+        self._tip_key: tooltip.PanelKey | None = None  # its cache key
         self._nest = _Nested()  # nested scan popup (hover a word inside the tooltip → its entry)
         # Yomitan-style scan delay: the cursor must dwell on a word inside the tooltip before its
         # popup opens, so drifting across the definition doesn't fire a flurry of popups.
@@ -350,21 +321,13 @@ class Reader:
         self._hover_terms: tuple[str, ...] = ()
         self._hover_span: tuple[int, int] | None = None
         self._kanji_index = 0  # `k` cycles the hovered word's kanji
-        # Per-dictionary tabs (sticky row over the tooltip viewport) + tooltip keys
-        self._tab_names: list[str] = []
-        self._tab_offsets: list[int] = []
-        self._tab_rects: list[tuple[int, int, int, int]] = []  # screen coords, for clicks
-        self._tab_bgra: np.ndarray | None = None
-        self._tab_h = 0
-        self._tab_active = -1
         self._tip_keys_bound = False
-        # LRU cache: OrderedDict keyed by panel_key, bounded at panel_cache_max entries. Each _TipPanel
-        # now holds only a zlib-compressed BGRA blob (~16x on mostly-transparent panels → sub-MB even
-        # for a tall multi-dict entry), so the whole cache is tens of MB — we raised the cap from 48 to
-        # 128 accordingly. On overflow we evict the LEAST-recently-used entry (the OrderedDict
-        # move_to_end protocol) rather than clearing everything (which would lose already-rendered
-        # panels the user is likely to re-hover).
-        self._panel_cache: OrderedDict = OrderedDict()  # key -> _TipPanel
+        # LRU cache: OrderedDict keyed by panel_key, bounded at panel_cache_max entries. Each Panel
+        # retains only its windowed engine's blocks (zlib-compressed, bounded to the last viewport±
+        # overscan), so the whole cache stays small. On overflow we evict the LEAST-recently-used entry
+        # (the OrderedDict move_to_end protocol) rather than clearing everything (which would lose
+        # already-rendered panels the user is likely to re-hover).
+        self._panel_cache: OrderedDict = OrderedDict()  # key -> Panel
         self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         self._toast_until = 0.0
         # Event-driven property state (observe_property); empty + off until run() calls
@@ -468,16 +431,12 @@ class Reader:
         self.ov.hide(TIP_ID)
         self._hide_nested()
         self._tip_rect = None
-        self._tip_bgra = None
         self._tip_state = None
         self._tip_key = None
-        self._tip_dirty = False
         self._hover_reading = ""
         self._hover_terms = ()
         self._hover_span = None
         self._kanji_index = 0
-        self._tab_names, self._tab_offsets, self._tab_rects = [], [], []
-        self._tab_bgra, self._tab_h, self._tab_active = None, 0, -1
         self._unbind_tip_keys()
         if self._paused_by_tip:
             self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
@@ -633,9 +592,6 @@ class Reader:
     def _hit_header_region(self, x: float, y: float, prect, xy, scroll: int, view_h: int) -> bool:
         return tooltip.hit_header_region(self, x, y, prect, xy, scroll, view_h)
 
-    def _tip_reserve(self) -> int:
-        return tooltip.tip_reserve(self)
-
     def _hit_header_add(self, x: float, y: float) -> bool:
         return tooltip.hit_header_add(self, x, y)
 
@@ -656,10 +612,8 @@ class Reader:
             return
         tooltip.on_click(self)
 
-    def _panel_key(
-        self, tok, inflected, *, mined: bool = False, tabs: bool = True
-    ) -> tooltip.PanelKey:
-        return tooltip.panel_key(self, tok, inflected, mined=mined, tabs=tabs)
+    def _panel_key(self, tok, inflected, *, mined: bool = False) -> tooltip.PanelKey:
+        return tooltip.panel_key(self, tok, inflected, mined=mined)
 
     def _is_mined(self, tok) -> bool:
         return tooltip.is_mined(self, tok)
@@ -680,25 +634,18 @@ class Reader:
     def _entry_for(self, tok, inflected):
         return tooltip.entry_for_tok(self, tok, inflected)
 
-    def _finish_available(self) -> bool:
-        return tooltip.finish_available(self)
-
     def _panel_for(
         self,
         tok,
         inflected=None,
         min_h: int | None = None,
         *,
-        finish: bool = False,
         mined: bool | None = None,
-        tabs: bool | None = None,
         nested: bool = False,
     ):
-        return tooltip.panel_for(
-            self, tok, inflected, min_h, finish=finish, mined=mined, tabs=tabs, nested=nested
-        )
+        return tooltip.panel_for(self, tok, inflected, min_h, mined=mined, nested=nested)
 
-    def _panel_cache_setdefault(self, key, st) -> TipPanel:
+    def _panel_cache_setdefault(self, key, st) -> Panel:
         return tooltip.panel_cache_setdefault(self, key, st)
 
     # --- background prefetch (warm the current/next line's tooltips) — logic in app/prefetch.py --
@@ -716,12 +663,12 @@ class Reader:
 
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
-        the hot path). ``panel_cache.bytes`` is the compressed on-heap footprint; ``dict_cache.size``
-        the decoded-entry count across every dictionary. Read under ``_cache_lock`` so a concurrent
-        prefetch worker mutating the panel cache can't fault the iteration."""
+        the hot path). ``panel_cache.bytes`` is the retained (compressed) on-heap footprint;
+        ``dict_cache.size`` the decoded-entry count across every dictionary. Read under ``_cache_lock``
+        so a concurrent prefetch worker mutating the panel cache can't fault the iteration."""
         with self._cache_lock:
             panel_n = len(self._panel_cache)
-            panel_bytes = sum(st.packed_nbytes for st in self._panel_cache.values())
+            panel_bytes = sum(st.retained_nbytes for st in self._panel_cache.values())
         dict_n = self.dict_set.decoded_entry_count() if self.dict_set is not None else 0
         return {
             "panel_cache.size": float(panel_n),
@@ -743,32 +690,8 @@ class Reader:
     ) -> tuple[int, int]:
         return tooltip.place_panel(self, full_w, wx, wy, wh, view_h)
 
-    def _refresh_tip_full(self) -> None:
-        tooltip.refresh_tip_full(self)
-
-    def _blit_panel(self, bgra, scroll: int, view_h: int, xy, oid: int, header=None):
-        return tooltip.blit_panel(self, bgra, scroll, view_h, xy, oid, header)
-
-    def _blit_panel_banded(
-        self, wp, scroll: int, view_h: int, xy, oid: int, full_h: int, header=None
-    ):
-        return tooltip.blit_panel_banded(self, wp, scroll, view_h, xy, oid, full_h, header)
-
-    def _decorate_and_upload(self, view, y0: int, full_h: int, xy, oid: int, header=None):
-        return tooltip.decorate_and_upload(self, view, y0, full_h, xy, oid, header)
-
-    # --- per-dictionary tabs + tooltip keys -------------------------------------------------------
-    def _update_tabs(self) -> None:
-        tooltip.update_tabs(self)
-
-    def _active_section(self) -> int:
-        return tooltip.active_section(self)
-
-    def _scroll_to_section(self, offset: int) -> None:
-        tooltip.scroll_to_section(self, offset)
-
-    def _tab_step(self, delta: int) -> None:
-        tooltip.tab_step(self, delta)
+    def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
+        return tooltip.blit_panel(self, panel, scroll, view_h, xy, oid)
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
@@ -801,9 +724,6 @@ class Reader:
 
     def _render_nested_view(self) -> None:
         nested_popup.render_nested_view(self)
-
-    def _refresh_nested_full(self) -> None:
-        nested_popup.refresh_nested_full(self)
 
     def _scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
@@ -1091,8 +1011,6 @@ class Reader:
         SUB_DELAY_MINUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "-0.1"),
         SUB_DELAY_PLUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "0.1"),
         KANJI_MSG: lambda r: r.kanji_current(),
-        TAB_PREV_MSG: lambda r: r._tab_step(-1),
-        TAB_NEXT_MSG: lambda r: r._tab_step(1),
         TIP_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
         TIP_CLOSE_MSG: lambda r: r.set_hover(-1),
@@ -1136,7 +1054,6 @@ class Reader:
             analysis_overlay.apply_results(self)
             sidebar.update(self)
             self._update_hover()
-            self._refresh_dirty_panels()
             self._update_prefetch()
             if self._translation_visible() and self._secondary_text() != self._trans_text:
                 self._draw_translation()  # keep the (manual or auto) translation current as subs change
@@ -1193,14 +1110,6 @@ class Reader:
             self._apply_deps(deps)
         elif self._loading:
             self._draw_loading()
-
-    def _refresh_dirty_panels(self) -> None:
-        if self._tip_dirty:  # a worker finished the shown panel's deferred tail
-            self._tip_dirty = False
-            self._refresh_tip_full()
-        if self._nest.dirty:  # …or the nested scan popup's tail
-            self._nest.dirty = False
-            self._refresh_nested_full()
 
     def _schedule_paused_nudge(self, ops_before: int) -> None:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually

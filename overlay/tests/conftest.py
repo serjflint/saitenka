@@ -14,7 +14,7 @@ import overlay.app.backlog as _backlog  # noqa: E402  # must come after the sys.
 import overlay.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
 
 # Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
-# Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 .venv-cx), so default test
+# Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 `poe crosshair` env), so default test
 # runs are untouched. Select with `pytest --hypothesis-profile=crosshair`; a per-test @settings that
 # omits `backend` inherits this profile's crosshair backend. See AGENTS.md "Fuzzing & symbolic checks".
 try:

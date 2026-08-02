@@ -12,7 +12,7 @@ logs.
 - **Pick which entry to mine (Yomitan-style stacked entries).** A word with several readings (退く =
   のく / しりぞく) now shows each entry as its own block with its own reading and its own ⊕, so you mine
   the exact reading and gloss you mean — not one fused card. Each block's ⊕ flips to ✓ once the word is
-  in the deck, and the reading names double as the tab / keyboard-nav sections.
+  in the deck, and the reading names label each stacked block.
 - **Blended rareness pill in the tooltip.** A single `diff` chip leads the frequency row with the
   harmonic-mean rank across every loaded **rank-based** frequency dictionary — one summary of the 7+
   per-dict pills, shown for any word the freq dicts cover (deck membership irrelevant). It is
@@ -34,6 +34,14 @@ logs.
   note type doesn't exist — it can't be auto-created — and adds a `known` check that errors when a
   configured `[known]` deck is missing or its chosen field isn't on that deck's note type, instead of
   coloring silently seeing nothing. A missing mining *deck* stays a heads-up (it's created on first mine).
+
+### Removed
+
+- **The sticky per-dictionary tab strip** (`show_dict_tabs` / `--dict-tabs` / `--no-dict-tabs`) and its
+  `LEFT` / `RIGHT` tab-nav keys. It was off by default and purely cosmetic; the reading names still label
+  each stacked entry, and `UP` / `DOWN` scroll the tooltip. The `[tooltip].banded` toggle and the
+  `SAITENKA_BANDED` env override are also gone — the windowed (O(viewport)) renderer is now the single
+  tooltip render path for every popup, so there is nothing to switch.
 
 ## [1.1.0] - 2026-08-01
 

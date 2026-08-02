@@ -102,15 +102,7 @@ class TooltipOptions:
     hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
     hide_delay: float = 0.6  # seconds the tooltip lingers after the cursor leaves the word
     flash_secs: float = 0.22  # how long the "copied" highlight border pulses on a popup
-    show_dict_tabs: bool = (
-        False  # sticky per-dictionary tab strip on the BASE tooltip (off default)
-    )
-    panel_cache_max: int = 128  # LRU cap on cached (zlib-compressed) rendered tooltip panels
-    banded: bool = (
-        True  # render the base tooltip via the windowed engine — O(viewport) compositing +
-    )
-    # hit-testing instead of slicing a whole-panel blob. On default; SAITENKA_BANDED=0 in the env forces
-    # the legacy blob path (env wins, for a quick A/B without editing overlay.toml).
+    panel_cache_max: int = 128  # LRU cap on cached (compressed) rendered tooltip panels
 
 
 @dataclass(frozen=True)

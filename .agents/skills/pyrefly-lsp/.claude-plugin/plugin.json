@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "pyrefly-lsp",
+  "version": "0.1.0",
+  "description": "pyrefly Python language server for Claude Code code intelligence",
+  "author": {
+    "name": "Sergei Iakhnitskii",
+    "email": "serjflint@gmail.com"
+  },
+  "skills": [
+    "./"
+  ]
+}
