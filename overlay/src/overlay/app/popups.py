@@ -32,10 +32,13 @@ class Panel:
         self.reading = reading
 
     @classmethod
-    def from_rows(cls, rows, width: int, reading: str) -> Panel:
+    def from_rows(
+        cls, rows, width: int, reading: str, *, band_cache_max: int | None = None
+    ) -> Panel:
         """Wrap ``rows`` in the windowed engine (the sole tooltip compositor). ``compress=True`` retains
         each rendered block zlib-compressed, so a cached/warmed panel keeps the old blob's memory
-        profile. Shared by the base tooltip and the nested/kanji/search popups."""
+        profile. ``band_cache_max`` caps retained render bands per panel (``None`` = keep exactly the
+        viewport±overscan). Shared by the base tooltip and the nested/kanji/search popups."""
         # Lazy imports: overlay.body_block depends on render.document, so a module-level import of
         # render_body_band would cycle back through .render at the package level. It's injected as the
         # windowed engine's GIL-build process-pool band renderer for the same reason (see WindowedPanel).
@@ -43,7 +46,14 @@ class Panel:
         from overlay.render.banded import WindowedPanel
 
         return cls(
-            WindowedPanel(rows, width, compress=True, render_block_fn=render_body_band), reading
+            WindowedPanel(
+                rows,
+                width,
+                compress=True,
+                max_cached_blocks=band_cache_max,
+                render_block_fn=render_body_band,
+            ),
+            reading,
         )
 
     @property

@@ -618,6 +618,7 @@ def _build_panel(
             ),
             reader.tip_width,
             getattr(entry, "reading", "") or tok.reading,
+            band_cache_max=reader.band_cache_max,
         )
 
 

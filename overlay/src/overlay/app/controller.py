@@ -193,6 +193,7 @@ class Reader:
         self.panel_cache_max = (
             o.tooltip.panel_cache_max
         )  # LRU cap on cached rendered tooltip panels
+        self.band_cache_max = o.tooltip.band_cache_max  # LRU cap on retained render bands per panel
         self.max_bulk = o.mining.max_bulk  # cap on words mined in one "mine all" bulk action
         self.anki_ok_ttl = (
             o.mining.anki_ok_ttl
