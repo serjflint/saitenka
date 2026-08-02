@@ -73,6 +73,22 @@ def _val(snap, name: str) -> float:
     return snap.get(name, {}).get("value", 0)
 
 
+def test_block_cache_counters_reach_the_ctf_trace_export():
+    # Regression: the block-cache counters are registered in otel_metrics but the CTF trace exporter
+    # (telemetry._sample_counters) used to filter by a hand-maintained name allowlist that omitted
+    # them — so a correctly-running banded render showed NO block_cache series in any report. The
+    # export now derives counters by TYPE (scalar value), so any registered counter graphs; assert the
+    # block-cache misses actually reach the sampled dict, and the rendered_px HISTOGRAM does not (it's
+    # shown as spans, not a value-over-time track).
+    from overlay.app import telemetry
+
+    with _telemetry():
+        _fixed_panel(20).viewport(0, 300)
+        sampled = telemetry._sample_counters()
+    assert sampled.get("block_cache.misses", 0) > 0  # the counter now reaches the trace export
+    assert "block_cache.rendered_px" not in sampled  # histogram stays a span, not a counter track
+
+
 def test_cold_viewport_records_a_miss_and_the_rasterised_px_per_block():
     with _telemetry():
         wp = _fixed_panel(20)
