@@ -7,6 +7,15 @@ logs.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-03
+
+### Fixed
+
+- **Release pipeline no longer references the removed `poe bundle` task.** The tag-triggered publish
+  workflow failed before uploading anything, so 1.2.0 was tagged but never reached PyPI. 1.2.1 is the
+  first build published under the corrected, notes-only GitHub Release flow (install is via PyPI) — no
+  code changes from 1.2.0.
+
 ## [1.2.0] - 2026-08-03
 
 ### Added
