@@ -1,6 +1,6 @@
 """Fetch Japanese subtitles from jimaku.cc (the modern kitsunekko replacement).
 
-For files without an embedded Japanese track. Needs a free API key (https://jimaku.cc/profile).
+For files without an embedded Japanese track. Needs a free API key (https://jimaku.cc/account).
 The key is resolved with precedence ``explicit (config/CLI) > $JIMAKU_API_KEY > macOS Keychain`` —
 the Keychain is the one that works under a GUI-launched (plugin-mode) mpv, which doesn't inherit the
 shell's env. Flow: search anime by title → pick the entry → list the episode's files → download the
@@ -30,7 +30,7 @@ BASE = "https://jimaku.cc/api"
 # to get the token. jimaku.cc accounts are free and require no personal data.
 KEY_HELP = (
     "Get a free jimaku.cc API key: sign in at https://jimaku.cc, then copy it from "
-    "https://jimaku.cc/profile — API docs at https://jimaku.cc/api/docs."
+    "https://jimaku.cc/account — API docs at https://jimaku.cc/api/docs."
 )
 
 # jimaku.cc keys are long tokens (~58 chars). A very short entered value almost always means a botched
@@ -252,7 +252,7 @@ class JimakuClient:
         if not self.api_key:
             raise JimakuError(
                 "no jimaku API key — run `saitenka set-jimaku-key` (persistent and readable by "
-                "plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/profile"
+                "plugin-mode mpv), or set $JIMAKU_API_KEY. Free key: https://jimaku.cc/account"
             )
 
     @staticmethod

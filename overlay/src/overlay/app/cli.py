@@ -520,7 +520,7 @@ def set_jimaku_key(
     """Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
     Uses the OS keyring when available, else an owner-only file beside overlay.toml. Either beats a
-    shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/profile
+    shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/account
     (API docs: https://jimaku.cc/api/docs).
 
     Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a
