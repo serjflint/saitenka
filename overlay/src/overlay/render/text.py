@@ -29,7 +29,7 @@ def measure(text: str, opts: TextOpts) -> tuple[int, int, int]:
     width = 0.0
     for run in fonts.resolve_runs(text):
         font = fonts.load(fonts.FontSpec(run.file, opts.size, opts.weight))
-        width += font.getlength(run.text)
+        width += fonts.text_width(font, run.text)
     # Vertical metrics from the primary font at this size (consistent baseline for all runs).
     primary = fonts.load(fonts.FontSpec(fonts.FONT_FILES[0], opts.size, opts.weight))
     ascent, descent = primary.getmetrics()
@@ -46,7 +46,7 @@ def draw_line(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, opts: T
     for run in fonts.resolve_runs(text):
         font = fonts.load(fonts.FontSpec(run.file, opts.size, opts.weight))
         draw.text((x, baseline_y), run.text, font=font, fill=opts.color, anchor="ls")
-        x += font.getlength(run.text)
+        x += fonts.text_width(font, run.text)
     return x
 
 

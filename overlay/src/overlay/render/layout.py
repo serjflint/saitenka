@@ -72,11 +72,13 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
                 j += 1
             seg = text[i:j]
             f = fonts.FONT_FILES[0]
-            tokens.append(Token(seg, f, "space", _font(f, style).getlength(seg), style, href))
+            tokens.append(
+                Token(seg, f, "space", fonts.text_width(_font(f, style), seg), style, href)
+            )
             i = j
         elif _is_cjk(ch):
             f = fonts.font_for_char(ch)
-            tokens.append(Token(ch, f, "cjk", _font(f, style).getlength(ch), style, href))
+            tokens.append(Token(ch, f, "cjk", fonts.text_width(_font(f, style), ch), style, href))
             i += 1
         else:
             j = i
@@ -84,7 +86,9 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
                 j += 1
             seg = text[i:j]
             f = fonts.font_for_char(seg[0])
-            tokens.append(Token(seg, f, "word", _font(f, style).getlength(seg), style, href))
+            tokens.append(
+                Token(seg, f, "word", fonts.text_width(_font(f, style), seg), style, href)
+            )
             i = j
     return tokens
 

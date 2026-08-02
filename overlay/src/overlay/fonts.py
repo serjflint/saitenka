@@ -26,6 +26,9 @@ ASSETS = asset("fonts")  # importlib.resources so the wheel path works too
 # otherwise accumulate an unbounded number of one-off FreeType faces (a memray leak-flamegraph found
 # 308 distinct cached fonts / 172.7 MB retained from a single --stress run touching 33 entries).
 _FONT_CACHE_MAX = 64
+_WIDTH_CACHE_MAX = (
+    20_000  # (font, text) → getlength memo; bounds the CJK working set + a few styles
+)
 
 # Fallback order: JP first (it also carries Latin + most symbols, so mixed strings stay in one font
 # and look consistent), Latin Noto as a secondary, monochrome Noto Emoji LAST — it only catches glyphs
@@ -76,6 +79,29 @@ def load(spec: FontSpec) -> ImageFont.FreeTypeFont:
     if len(cache) > _FONT_CACHE_MAX:
         cache.popitem(last=False)
     return font
+
+
+def text_width(font: ImageFont.FreeTypeFont, text: str) -> float:
+    """Cached ``font.getlength(text)``. Per thread (a shared cache would race under free-threading;
+    FreeType faces are already thread-local, see :func:`load`). Hot: layout measures every CJK char
+    individually and the CJK set is small + heavily reused across entries, so this is near-all hits
+    after warmup. Keyed on the font *object* (which encodes size+weight but not colour, so colour
+    variants share) — a strong ref, so no ``id()`` reuse after eviction. LRU-bounded."""
+    cache: OrderedDict[tuple[ImageFont.FreeTypeFont, str], float] | None = getattr(
+        _tls, "widths", None
+    )
+    if cache is None:
+        cache = _tls.widths = OrderedDict()
+    key = (font, text)
+    w = cache.get(key)
+    if w is not None:
+        cache.move_to_end(key)
+        return w
+    w = font.getlength(text)
+    cache[key] = w
+    if len(cache) > _WIDTH_CACHE_MAX:
+        cache.popitem(last=False)
+    return w
 
 
 def covers(file: str, ch: str) -> bool:
