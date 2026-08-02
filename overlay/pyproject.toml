@@ -544,4 +544,12 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "audit", "deps", "licenses", "spell", "links", "shell"]
+all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "deps", "spell", "links"]
+
+# Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
+# `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
+# rarely relevant to a code PR, release-critical to verify once) plus the checks too slow/heavy for it:
+# network link integrity, the real-mpv smoke, and a bench-runs smoke. Needs mpv + network; NOT for PR
+# iteration. The human-triage advisory tools (hygiene/ps1/perf-risk) stay OUT — deterministic pass/fail
+# only; run those by hand and triage.
+pre-release = ["all", "audit", "licenses", "shell", "links-net", "smoke-live", "bench"]

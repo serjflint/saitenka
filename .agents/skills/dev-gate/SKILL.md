@@ -1,50 +1,42 @@
 ---
 name: dev-gate
 description: >-
-  Run and interpret the Saitenka pre-push quality gate (`poe all`) and the advisory
-  `poe hygiene` tier. Use before pushing or when asked to "run the gate", "run poe all",
-  "check it passes / is it green", "lint/types/arch/tests before commit", or when a
-  gate task fails and you need to read the failure. Explains the 14-task bundle, the
-  advisory tier, and the free-threaded / 3.13-pinned-env traps that bite agents. NOT for
-  authoring a test (use the write-test skill); NOT for release/publish (see RELEASING.md);
-  NOT for mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks").
+  Run and interpret the Saitenka quality gates — the fast pre-push `poe all` and the slower
+  pre-tag `poe pre-release`. Use before pushing or when asked to "run the gate", "run poe all",
+  "check it passes / is it green", "lint/types/arch/tests before commit", "pre-release gate", or
+  when a gate task fails and you need to read the failure. Explains both bundles, the advisory
+  tier, and the free-threaded / 3.13-pinned-env traps that bite agents. NOT for authoring a test
+  (use the write-test skill); the release flow itself is RELEASING.md; NOT for
+  mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks").
 metadata:
   project: saitenka
 ---
 
 # dev-gate
 
-The repo has **no CI** — `uv run poe all` is the gate. Run it from the repo root or
-`overlay/` (a root shim delegates). Run it before every push.
+The repo has **no CI**. Two gates, both defined in `overlay/pyproject.toml` `[tool.poe.tasks]` — that
+is the source of truth for what each runs; `uv run poe --dry-run <gate>` prints the exact chain. Run
+either from the repo root or `overlay/` (a root shim delegates).
 
-## `poe all` — 14 tasks, in order
+- **`poe all`** — the fast pre-push PR gate. Run before every push.
+- **`poe pre-release`** — the slower superset run once before tagging; `release.py` gates on this, not
+  `all`. Adds the supply-chain + installer checks and the heavier real-mpv / network smokes; needs
+  **mpv + network**, so not for PR iteration. The human-triage advisory tools (`hygiene` / `ps1` /
+  `perf-risk`) are deliberately **not** in it — run those by hand.
 
-`lint · types · arch · invariants · complexity · test · test-ft · cov · audit · deps ·
-licenses · spell · links · shell`
+## Reading a failure (the non-obvious ones)
 
-| Task | What it gates | Read a failure as |
-|---|---|---|
-| `lint` | ruff (explicit select, **not** `ALL`) + flake8-bandit `S` SAST | style / a security smell → fix, or `# noqa: S… # reason` at a legit site |
-| `types` | mypy + basedpyright + pyrefly (blocking); ty (advisory) | a real type error — don't `# type: ignore` without a reason |
-| `arch` | import-linter: no cycles, PIL-agnostic core, **GPL chokepoint** | a forbidden import — move the code, don't relax the contract |
-| `invariants` | ast-grep call-level anti-pattern gate | a banned call shape → rewrite |
-| `complexity` | complexipy, ratcheted vs `overlay/complexipy-snapshot.json` | a function got more complex → simplify; **regenerate the baseline only after a deliberate refactor** with `poe complexity-baseline`, never to silence a regression |
-| `test` | fast tier, `-n auto`, excludes `slow/integration/requires_display/e2e` | a real failure |
-| `test-ft` | whole suite under `PYTHON_GIL=0` (free-threaded) | a C-ext re-enabled the GIL, or a no-GIL race |
-| `cov` | coverage floor **85%** | add a behaviour test, not a coverage-painting one |
-| `audit` | `uv audit` vuln scan over `uv.lock` | a CVE → bump |
-| `deps` | deptry: unused / missing / misplaced deps | fix `pyproject` |
-| `licenses` | pip-licenses — only allowed copyleft is our own GPL `deinflect` | a new copyleft dep slipped in → drop it |
-| `spell` | typos (allowlist in root `_typos.toml`) | real typo or add to allowlist with cause |
-| `links` | lychee `--offline` local-link integrity | a broken relative link |
-| `shell` | shellcheck over `install/*.sh` | installer bug |
-
-## Advisory tier — NOT in `all`
-
-`poe hygiene` = `deadcode` (vulture) + `dup` (jscpd). Standalone advisory:
-`perf-risk` (repowise I/O-in-loop / N+1), `ps1` (PSScriptAnalyzer, needs `pwsh`),
-`links-net` (network crawl). Run nightly / pre-release / on triage. These emit
-file:line / JSON — feed findings to the repowise navigator, don't fix blind.
+- `types` — a real type error; don't `# type: ignore` without a reason.
+- `arch` (import-linter) — a forbidden import (cycle, PIL-in-core, GPL chokepoint): move the code,
+  don't relax the contract.
+- `complexity` — a function got more complex: simplify. Regenerate the baseline
+  (`poe complexity-baseline`) only after a deliberate refactor, never to silence a regression.
+- `cov` — floor 85%: add a behaviour test, not a coverage-painting one.
+- `test-ft` — a C-ext re-enabled the GIL, or a genuine no-GIL race.
+- `licenses` — a copyleft dep leaked in (only our own GPL `deinflect` is allowed): drop it.
+- `bench` — a **crash** is API rot; the printed numbers are informational, not pass/fail.
+- `smoke-live` — overlay↔mpv breakage the fakes can't catch.
+- `hygiene` / `perf-risk` — advisory: triage via the repowise navigator, don't fix blind.
 
 ## Env traps (these bite)
 
@@ -58,5 +50,5 @@ file:line / JSON — feed findings to the repowise navigator, don't fix blind.
 
 ## Verify
 
-`uv run poe all` exits 0. If a single task is red, run it alone (e.g. `uv run poe types`)
-to iterate, then re-run `poe all`.
+The gate exits 0. If a single task is red, run it alone (e.g. `uv run poe types`) to iterate, then
+re-run the gate.

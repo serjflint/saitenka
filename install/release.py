@@ -221,7 +221,7 @@ def cmd_prepare(args: PrepareArgs) -> int:
     insert_changelog_section(notes_text, next_version)
 
     if not args.skip_gate:
-        run(["uv", "run", "poe", "all"], cwd=OVERLAY_DIR)
+        run(["uv", "run", "poe", "pre-release"], cwd=OVERLAY_DIR)
 
     build_and_smoke_test(next_version)
 
@@ -265,7 +265,7 @@ def cmd_publish(args: PublishArgs) -> int:
         raise RuntimeError(f"tag {tag} already exists")
 
     if not args.skip_gate:
-        run(["uv", "run", "poe", "all"], cwd=OVERLAY_DIR)
+        run(["uv", "run", "poe", "pre-release"], cwd=OVERLAY_DIR)
 
     wheel = build_and_smoke_test(version)
 
@@ -314,13 +314,13 @@ def main() -> int:
     p.add_argument("--version", help="exact X.Y.Z override (skips --bump)")
     p.add_argument("--allow-major", action="store_true", help="let a detected breaking change cross to 1.0.0")
     p.add_argument("--push", action="store_true", help="also `git push` after committing")
-    p.add_argument("--skip-gate", action="store_true", help="skip `poe all` (faster iteration only)")
+    p.add_argument("--skip-gate", action="store_true", help="skip `poe pre-release` (faster iteration only)")
     p.add_argument("--dry-run", action="store_true", help="print the computed version + notes, change nothing")
 
     q = sub.add_parser("publish", help="tag, build, draft-release, optionally publish (post-merge)")
     q.add_argument("--version", help="defaults to overlay/pyproject.toml's current version")
     q.add_argument("--publish", action="store_true", help="flip the draft live (default: leave as draft)")
-    q.add_argument("--skip-gate", action="store_true", help="skip `poe all`")
+    q.add_argument("--skip-gate", action="store_true", help="skip `poe pre-release`")
     q.add_argument(
         "--no-require-main", dest="require_main", action="store_false",
         help="allow running off a branch other than main (rare; e.g. re-running after a failed step)",
