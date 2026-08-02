@@ -565,10 +565,13 @@ _SCROLL_SPAN_PX = 6000  # realistic distance scrolled into an entry: head + the 
 
 
 def _block_profile(reader, term: str, reading: str, span_px: int) -> tuple[list[int], list[float]]:
-    """Render each block covering the first ``span_px`` of an entry ONCE, returning parallel lists of
-    (block-top px, block render ms). Reaches into WindowedPanel internals deliberately — this IS the
-    per-block render cost the scroll pays, measured directly rather than inferred from notch timings."""
+    """Render each BAND covering the first ``span_px`` of an entry ONCE, returning parallel lists of
+    (band-top px, band render ms). Reaches into WindowedPanel internals deliberately — this IS the
+    per-band raster cost the scroll pays. The ~200ms SC-walk is EXCLUDED (measure runs it once, ahead,
+    and the memoised layout handle serves every band's ``render_window``) — so the times are the pure
+    ``getmask2`` a scroll frame pays, which the lead model then hides band-by-band."""
     from overlay.app.subtitles import WordBox
+    from overlay.render.banded import _row_bands
 
     reader._panel_cache.clear()
     reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
@@ -583,15 +586,27 @@ def _block_profile(reader, term: str, reading: str, span_px: int) -> tuple[list[
     tops: list[int] = []
     times: list[float] = []
     with wp._lock:
-        for i in range(wp.count):
-            top = wp._offsets.start(i)  # exact: every predecessor was stored just below
-            if top > span_px and i > 0:
+        wp._grow_prefix(
+            span_px
+        )  # measure (walk + wrap) every row in the span — the memoised layouts
+        for i in range(wp._offsets.prefix_len):
+            row_top = wp._offsets.start(i)  # exact: the whole prefix is measured
+            if row_top > span_px and tops:
                 break
-            t0 = time.perf_counter()
-            rb = wp._render_pixels(i)
-            times.append((time.perf_counter() - t0) * 1000.0)
-            wp._store(rb)
-            tops.append(top)
+            row = wp._rows[i]
+            if row.render_window is None:  # non-body — one small band, whole-row render
+                t0 = time.perf_counter()
+                row.render()
+                times.append((time.perf_counter() - t0) * 1000.0)
+                tops.append(row_top)
+                continue
+            for _b, y0, y1 in _row_bands(wp._offsets.height(i)):
+                if row_top + y0 > span_px and tops:
+                    break
+                t0 = time.perf_counter()
+                row.render_window(y0, y1)  # pure band getmask2 — layout already memoised by measure
+                times.append((time.perf_counter() - t0) * 1000.0)
+                tops.append(row_top + y0)
     return tops, times
 
 
@@ -627,6 +642,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     A cold ≫ warm gap ⇒ the jank is cold-block render (getmask2), which idle prefetch hides in real use
     only when it rendered ahead (see --timeline)."""
     from overlay.app.subtitles import WordBox
+    from overlay.render.banded import _BAND_PX
 
     ds, tag = _load_dict_set()
     if ds is None:
@@ -726,14 +742,15 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         f"p99 {w['p99']:.1f}  MAX {w['max']:.1f} ms"
     )
     print(
-        f"\nlead model — scroll the first {_SCROLL_SPAN_PX}px with the worker warming ahead "
-        f"(no contention modelled):"
+        f"\nlead model — scroll the first {_SCROLL_SPAN_PX}px warming BANDS ahead (no contention "
+        f"modelled). Expectation post-PR3: worst first-reach ≤ ~1 band ({_BAND_PX}px ≈ 9-12ms), so "
+        f"even an un-warmed frame lands under the 16ms budget — not a ~500ms whole-block stall:"
     )
     for label, jf, wmax, notches in envelope:
-        smooth = 100.0 * (1 - jf / max(1, notches))
+        smooth = 100.0 * (1 - jf / max(1, notches))  # % of bands the worker warmed before reach
         print(
-            f"  {label:<8} {smooth:5.1f}% smooth   {jf:>3} jank frame(s) / {notches} notches   "
-            f"worst first-reach {wmax:.0f} ms"
+            f"  {label:<8} {smooth:5.1f}% warmed-ahead   {jf:>3} first-reach band(s) / {notches} "
+            f"notches   worst first-reach {wmax:.0f} ms"
         )
     print(
         f"\nreal threads — worst {len(subset)} entries, workers running, actual frame time "
@@ -752,12 +769,13 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     for word, (dt, px) in sorted(by_word.items(), key=lambda kv: -kv[1][0])[:8]:
         print(f"    {word:<10}{dt:>9.1f}{px:>10}")
     print(
-        "\ncold/warm isolate the synchronous per-block render (NO workers). The lead model then asks the "
-        "real question: scrolling the span at each pace, how many frames reach a block before the worker "
-        "warmed it? A monster block is rendered ONCE then cruised as cache hits, so a slow pace hides it "
-        "(long lead) and a fast flick may not (short lead vs a 500ms render) — that residual is the "
-        "worst-first-reach column, which windowed rasterisation (PR #3) shrinks to ~O(viewport). The "
-        "real-threads rows confirm the model and expose the worker/compositor contention it omits."
+        "\ncold/warm isolate the synchronous per-BAND render (NO workers). The lead model then asks the "
+        "real question: scrolling the span at each pace, how many frames reach a band before the worker "
+        "warmed it? Pre-PR3 the unit was a whole def block (up to ~500ms getmask2), so a fast flick hit a "
+        "monster stall; PR3 rasterises in ~256px bands (~9-12ms each, the SC-walk paid once by "
+        "measure-ahead), so worst-first-reach collapses to ~1 band — under the 16ms budget even un-warmed. "
+        "The real-threads rows confirm the model and expose the worker/compositor contention it omits "
+        "(p50 under budget at every pace; p99 under the pace's inter-notch ceiling — 33ms at flick)."
     )
     if json_path:
         Path(json_path).write_text(

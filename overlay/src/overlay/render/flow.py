@@ -227,13 +227,74 @@ def _item_line_box(line: list[Item], scale: float) -> tuple[int, int, int]:
     return box, lead // 2 + ascent, ascent
 
 
+@dataclass
+class FlowLayout:
+    """The wrapped-but-not-drawn state of one flow: the line boxes + their heights. Layout (``walk``'s
+    downstream ``build_items`` + ``wrap_items``) is cheap; the ``getmask2`` draw is the cost — so
+    caching this lets the banded engine re-raster any y-window of a tall block without re-wrapping."""
+
+    block: Block
+    lines: list[list[Item]]
+    boxes: list[tuple[int, int, int]]  # (box_height, baseline_from_top, ascent) per line
+
+    @property
+    def height(self) -> int:
+        """Full flow-image height (matches :func:`new_panel_image`'s allocation)."""
+        return 2 * self.block.padding + sum(b[0] for b in self.boxes)
+
+    @property
+    def first_baseline(self) -> int:
+        """Y of the first line's baseline from the flow-image top — marker alignment."""
+        return self.boxes[0][1] if self.boxes else 0
+
+
+def layout_flow(flow: list[Inline], block: Block) -> FlowLayout:
+    """Wrap ``flow`` to line boxes WITHOUT drawing (no ``getmask2``) — the measure half of the render."""
+    items = build_items(flow)
+    lines = wrap_items(items, block.width)
+    boxes = [_item_line_box(line, block.line_height_scale) for line in lines]
+    return FlowLayout(block, lines, boxes)
+
+
+def render_flow_window(
+    lay: FlowLayout,
+    y0: int,
+    y1: int,
+    scan_out: list[ScanBox] | None = None,
+    link_out: list[LinkBox] | None = None,
+) -> Image.Image:
+    """Rasterise only the band ``[y0, y1)`` of an already-laid-out flow (see :func:`render_flow`'s
+    ``y_window``) — the reusable draw over a cached :class:`FlowLayout`."""
+    return _render_window(lay.block, lay.lines, lay.boxes, (y0, y1), scan_out, link_out)
+
+
+def flow_geometry(lay: FlowLayout) -> tuple[list[ScanBox], list[LinkBox]]:
+    """Scan/link hitboxes of a laid-out flow WITHOUT drawing (no ``getmask2``) — geometry depends only
+    on item x/line positions, so the banded engine retains a MEASURED row's hitboxes before any band
+    rasters (matching what :func:`_draw_flow_line` would emit line-by-line, so band renders just dedup)."""
+    scan_out: list[ScanBox] = []
+    link_out: list[LinkBox] = []
+    y = float(lay.block.padding)
+    for line, (box, _base, _a) in zip(lay.lines, lay.boxes, strict=True):
+        run: list[tuple[str, float, float]] = []
+        link: tuple[str, float, float] | None = None
+        x = float(lay.block.padding)
+        for it in line:
+            run = _update_scan_run(it, x, y, box, run, scan_out)
+            link = _update_link_run(it, x, y, box, link, link_out)
+            x += it.width
+        if run:
+            _flush_scan_run(run, scan_out, y, box)
+        if link is not None:
+            q, xs, xe = link
+            link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), box))
+        y += box
+    return scan_out, link_out
+
+
 def first_baseline(flow: list[Inline], block: Block) -> int:
     """Y of the first line's baseline (from the flow image top) — for aligning list markers."""
-    lines = wrap_items(build_items(flow), block.width)
-    if not lines:
-        return 0
-    _, base_from_top, _ = _item_line_box(lines[0], block.line_height_scale)
-    return base_from_top
+    return layout_flow(flow, block).first_baseline
 
 
 def _flush_scan_run(
@@ -407,9 +468,8 @@ def render_flow(
     fall in it, so the windowed engine materialises a viewport slice of a tall block in O(viewport).
     Overrides ``max_height``; ``scan_out``/``link_out`` coords come back in the window's space
     (offset by ``-y0``)."""
-    items = build_items(flow)
-    lines = wrap_items(items, block.width)
-    boxes = [_item_line_box(line, block.line_height_scale) for line in lines]
+    lay = layout_flow(flow, block)
+    lines, boxes = lay.lines, lay.boxes
     if y_window is not None:
         return _render_window(block, lines, boxes, y_window, scan_out, link_out)
     lines, boxes = _clip_lines_to_height(lines, boxes, max_height, block.padding, clipped_out)

@@ -17,7 +17,14 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from overlay.body_block import BodyRenderArgs, SCNode, render_body_block
+from overlay.body_block import (
+    BodyRenderArgs,
+    LaidOutBody,
+    SCNode,
+    layout_body_block,
+    raster_body_window,
+    render_body_block,
+)
 from overlay.draw.chip import ChipStyle
 from overlay.draw.icon_source import Icon, render_icon
 from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme
@@ -191,6 +198,19 @@ class Row:
     # Set only on def-body rows — lets a process-pool worker render this block from plain data
     # instead of the (unpicklable) closures above. See BodyRenderArgs/render_body_block.
     body_args: BodyRenderArgs | None = None
+    # Windowed (banded) API — set only on def-body rows, both closing over ONE memoised
+    # ``layout_body_block`` handle (walk + wrap once per row, then O(band) getmask2 rasters). ``measure``
+    # returns the row's full pixel height without any raster (seeds the scroll offset table);
+    # ``render_window(y0, y1)`` rasters just the band ``[y0, y1)`` (image + row-local scan/link boxes in
+    # band space). Non-body rows are small (one band, never split) and keep only ``render``.
+    measure: Callable[[], int] | None = None
+    render_window: Callable[[int, int], tuple[Image.Image, list[ScanBox], list[LinkBox]]] | None = (
+        None
+    )
+    # Whole-row scan/link hitboxes (row-local) from the layout, no raster — lets the banded engine
+    # retain a MEASURED-but-not-yet-rastered row's geometry (a scroll-jump to the bottom keeps the top
+    # hoverable). Set on def-body rows alongside ``measure``; both share the memoised layout handle.
+    geometry: Callable[[], tuple[list[ScanBox], list[LinkBox]]] | None = None
 
 
 def _emit_def_rows(
@@ -236,6 +256,16 @@ def _emit_def_rows(
         )
 
         def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)
+            # One memoised layout handle per row: the walk + wrap runs at most once (on the first
+            # measure/window call), then every band raster reuses it — the O(band)-not-O(block) crux.
+            # ``render`` stays the full-body source of truth (golden / finish / process pool).
+            laid: list[LaidOutBody] = []
+
+            def _laid() -> LaidOutBody:
+                if not laid:
+                    laid.append(layout_body_block(args))
+                return laid[0]
+
             def thunk():
                 img, scan, links, _complete = render_body_block(args)
                 return img, scan, links
@@ -243,11 +273,28 @@ def _emit_def_rows(
             def capped(max_h: int):
                 return render_body_block(args, max_h)
 
-            return thunk, capped
+            def measure() -> int:
+                return _laid().full_height
 
-        body_thunk, body_capped = _def_body(body_args)
+            def window(y0: int, y1: int):
+                return raster_body_window(_laid(), y0, y1)
+
+            def geometry():
+                return _laid().geometry()
+
+            return thunk, capped, measure, window, geometry
+
+        body_thunk, body_capped, body_measure, body_window, body_geometry = _def_body(body_args)
         rows.append(
-            Row(m + theme.body_indent, body_thunk, render_capped=body_capped, body_args=body_args)
+            Row(
+                m + theme.body_indent,
+                body_thunk,
+                render_capped=body_capped,
+                body_args=body_args,
+                measure=body_measure,
+                render_window=body_window,
+                geometry=body_geometry,
+            )
         )
 
 

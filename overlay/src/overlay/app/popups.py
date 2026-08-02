@@ -37,13 +37,13 @@ class Panel:
         each rendered block zlib-compressed, so a cached/warmed panel keeps the old blob's memory
         profile. Shared by the base tooltip and the nested/kanji/search popups."""
         # Lazy imports: overlay.body_block depends on render.document, so a module-level import of
-        # render_body_block would cycle back through .render at the package level. render_block_fn is
-        # injected for the same reason (see WindowedPanel).
-        from overlay.panel import render_body_block
+        # render_body_band would cycle back through .render at the package level. It's injected as the
+        # windowed engine's GIL-build process-pool band renderer for the same reason (see WindowedPanel).
+        from overlay.body_block import render_body_band
         from overlay.render.banded import WindowedPanel
 
         return cls(
-            WindowedPanel(rows, width, compress=True, render_block_fn=render_body_block), reading
+            WindowedPanel(rows, width, compress=True, render_block_fn=render_body_band), reading
         )
 
     @property

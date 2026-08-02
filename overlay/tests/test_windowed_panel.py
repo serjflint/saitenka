@@ -87,6 +87,25 @@ def test_construction_walks_no_content(monkeypatch):
     assert calls[0] == 0  # nothing rendered/walked at build time
 
 
+def test_def_body_rows_carry_the_windowed_api_and_agree_with_render():
+    # Stage 5: only def-body rows get measure/render_window; both close over ONE layout handle and
+    # agree with the full render (measure == render height, a band == the full crop).
+    import numpy as np
+
+    rows = panel_rows(_tall_entry(4), WIDTH)
+    body_rows = [r for r in rows if r.body_args is not None]
+    assert body_rows  # the def bodies
+    assert all(r.measure is not None and r.render_window is not None for r in body_rows)
+    # header/chip rows stay simple — no windowed API to split a one-band row
+    assert all(r.measure is None and r.render_window is None for r in rows if r.body_args is None)
+    row = body_rows[0]
+    assert row.measure is not None and row.render_window is not None
+    full = row.render()[0]
+    assert row.measure() == full.height  # measure matches the full raster, no getmask2
+    win, _scan, _links = row.render_window(0, full.height)
+    assert np.array_equal(np.asarray(win), np.asarray(full))
+
+
 def test_cold_first_paint_renders_only_the_head():
     entry = _tall_entry(8)
     wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
