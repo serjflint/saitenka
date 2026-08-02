@@ -487,6 +487,7 @@ def _build_run_deps(
     mine_model: str,
     mine_key: str,
     mine_all_key: str,
+    mine_normalize_audio: bool,
     known_cfg,
     known: str,
     color: bool,
@@ -525,7 +526,9 @@ def _build_run_deps(
         "freq": freq_titles,
         "pitch": pitch_titles,
         "known": known_cfg,
-        "mine": {"deck": mine_deck, "model": mine_model} if mine else {},
+        "mine": {"deck": mine_deck, "model": mine_model, "normalize_audio": mine_normalize_audio}
+        if mine
+        else {},
     }
     scorer, anki, mine_conf, dict_set = reader_deps.build_reader_deps(
         effective_cfg,
@@ -684,6 +687,7 @@ def run_impl(
     mine_model: str,
     mine_key: str,
     mine_all_key: str,
+    mine_normalize_audio: bool,
     preview_key: str,
     no_audio_play: bool,
     tip_height: float,
@@ -743,6 +747,7 @@ def run_impl(
             mine_model=mine_model,
             mine_key=mine_key,
             mine_all_key=mine_all_key,
+            mine_normalize_audio=mine_normalize_audio,
             known_cfg=known_cfg,
             known=known,
             color=color,

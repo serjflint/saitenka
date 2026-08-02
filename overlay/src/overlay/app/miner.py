@@ -145,7 +145,7 @@ class Miner:
             span = current_timespan(r.ipc)
             if video and span:
                 aud = r._tmp / f"{base}.m4a"
-                clip_audio(video, span, aud)
+                clip_audio(video, span, aud, normalize=r.mine_cfg.normalize_audio)
                 audio = r.anki.store_media(f"{base}.m4a", aud)
                 r._last_audio = aud
         except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:

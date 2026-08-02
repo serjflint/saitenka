@@ -177,7 +177,9 @@ def _build_mining(mc: dict, *, mine: bool):
 
             anki = Anki()
             mine_conf = MineConfig(
-                deck=mc.get("deck", "Saitenka::Mining"), model=mc.get("model", "Lapis")
+                deck=mc.get("deck", "Saitenka::Mining"),
+                model=mc.get("model", "Lapis"),
+                normalize_audio=bool(mc.get("normalize_audio", False)),
             )
             return anki, mine_conf
         except Exception:  # never let mining setup block attach

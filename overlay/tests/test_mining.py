@@ -97,6 +97,19 @@ def test_clip_audio_builds_ffmpeg(monkeypatch):
     assert cmd[0] == "ffmpeg" and "aac" in cmd
     assert "0:a:0" in cmd
     assert "9.500" in cmd and "12.500" in cmd  # padded span
+    assert "loudnorm" not in cmd[cmd.index("-af") + 1]  # normalization is opt-in
+
+
+def test_clip_audio_normalize_prepends_loudnorm(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        "overlay.app.media.subprocess.run", lambda cmd, **_kw: calls.__setitem__("cmd", cmd)
+    )
+    monkeypatch.setattr("overlay.mpvio.discover.find_tool", lambda name: name)
+    clip_audio("/v.mkv", Timespan(10, 12), "/out.m4a", normalize=True)
+    af = calls["cmd"][calls["cmd"].index("-af") + 1]
+    # loudnorm runs BEFORE the fades so it measures the raw span, not the faded-out tails
+    assert af.startswith("loudnorm=I=-23:") and af.index("loudnorm") < af.index("afade")
 
 
 def test_toast_renders_each_kind():

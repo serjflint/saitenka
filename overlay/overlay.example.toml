@@ -128,6 +128,8 @@ model = "Lapis"
 key = "Ctrl+m"
 all_key = "Shift+m"
 preview_key = "p"
+# normalize_audio = false     # even out card volume: −23 LUFS EBU R128 loudnorm on the mined clip
+                              # (adds one ffmpeg pass per mine)
 
 # ── [anki] AnkiConnect endpoint — only if you changed its defaults (stock: 127.0.0.1:8765, no key) ──
 # [anki]
