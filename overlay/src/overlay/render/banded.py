@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
 
+from overlay import otel_metrics
 from overlay.parallel import shared_executor
 
 if TYPE_CHECKING:
@@ -248,9 +249,16 @@ class WindowedPanel:
     def _ensure_block(self, i: int) -> CachedBlock:
         block = self._blocks.get(i)
         if block is None:
-            block = self._store(self._render_pixels(i))
+            rb = self._render_pixels(i)
+            block = self._store(rb)
+            if otel_metrics.block_cache_misses is not None:
+                otel_metrics.block_cache_misses.add(1)
+            if otel_metrics.block_rendered_px is not None:
+                otel_metrics.block_rendered_px.record(rb.image.height)
         else:
             self._blocks.move_to_end(i)  # LRU touch
+            if otel_metrics.block_cache_hits is not None:
+                otel_metrics.block_cache_hits.add(1)
         return block
 
     def _grow_prefix(self, target_y: int) -> None:
@@ -266,14 +274,25 @@ class WindowedPanel:
         up to the cap — evicting LRU beyond it, never a currently-visible block — so a small scroll
         reversal reuses a cached block instead of re-rendering it. Pixels only; heights are retained."""
         if self._cap is None:
-            for i in [i for i in self._blocks if not keep_start <= i < keep_end]:
-                del self._blocks[i]
-            return
+            victims = [i for i in self._blocks if not keep_start <= i < keep_end]
+        else:
+            victims = self._overflow_victims(keep_start, keep_end)
+        for i in victims:
+            del self._blocks[i]
+        if victims and otel_metrics.block_cache_evictions is not None:
+            otel_metrics.block_cache_evictions.add(len(victims))
+
+    def _overflow_victims(self, keep_start: int, keep_end: int) -> list[int]:
+        """LRU blocks to drop to bring the cache back to ``self._cap`` — oldest first, never a
+        currently-visible block."""
+        assert self._cap is not None  # only called from the capped branch of _evict
+        victims: list[int] = []
         for i in list(self._blocks):  # oldest first
-            if len(self._blocks) <= self._cap:
+            if len(self._blocks) - len(victims) <= self._cap:
                 break
-            if not keep_start <= i < keep_end:  # never evict a visible block
-                del self._blocks[i]
+            if not keep_start <= i < keep_end:
+                victims.append(i)
+        return victims
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> Image.Image:
         """Composite the ``[scroll, scroll+view_h)`` viewport, rendering + evicting blocks as needed."""
