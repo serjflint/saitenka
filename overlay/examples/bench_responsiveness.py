@@ -279,7 +279,6 @@ def _cold_reader(ds):
     """A fresh Reader on a fake IPC, head-path forced (as a live run with workers would)."""
     reader = Reader(FakeIPC(), dict_set=ds, prefetch=False)
     reader.osd = OSD
-    reader._finish_available = lambda: True
     return reader
 
 
@@ -297,7 +296,6 @@ def _bench_word(reader, term: str, reading: str, reps: int) -> dict:
         reader._tip_state = None
         reader.hover = 0
         reader._show_tooltip(0)
-        reader._finish_q.queue.clear()
 
     return measure(cold, reps, warmup=1)
 
@@ -437,14 +435,13 @@ def run_stress(
         for _ in range(4):  # scroll toward the bottom of a tall entry
             timed(lambda: reader._scroll_tip(step))
         st = reader._tip_state
-        boxes = st.lazy.scan_boxes if st else []
+        boxes = st.windowed.scan_boxes() if st else []
         if boxes:
             sb = boxes[len(boxes) // 3]  # a deterministic cell well inside the body
             timed(lambda: reader._show_nested(sb))
             timed(lambda: reader._scroll_tip(step))  # scroll while the nested popup is up
             timed(reader._hide_nested)
         timed(lambda: reader.set_hover(-1))  # dismiss the whole stack
-        reader._finish_q.queue.clear()  # model the worker draining it (no worker in --prefetch off)
 
     for term, reading in corpus:  # one warmup round before the memory baseline
         one_word(term, reading)
@@ -819,7 +816,6 @@ def run_timeline(
         head_prefetch_lookahead=head_prefetch,
     )
     reader.osd = OSD
-    reader._finish_available = lambda: True
     reader._sub_index = SubIndex(cues)
     reader.start_prefetch()
 
@@ -1139,10 +1135,6 @@ def main() -> int:
     words = [reader.tokens[i].surface for i in idxs]
     cap = reader._tip_cap()
 
-    # Force the viewport-first head path (pretend a prefetch worker exists to finish the tail later),
-    # so "first paint" measures head render + BGRA + upload — not the whole entry.
-    reader._finish_available = lambda: True
-
     rows = []
     cyc = {"cold": 0, "warm": 0}  # cycle through the words so each sample times ONE tooltip
 
@@ -1150,7 +1142,6 @@ def main() -> int:
         reader._panel_cache.clear()
         reader.set_hover(-1)
         reader._show_tooltip(i)
-        reader._finish_q.queue.clear()  # drop the enqueued finish job (no worker running)
 
     def show_warm(i):
         reader._show_tooltip(i)  # panel already fully cached → upload only
@@ -1170,28 +1161,16 @@ def main() -> int:
         ("first paint  (cold: head render + upload)", measure(cold_one, args.reps * len(idxs)))
     )
 
-    # 2) time to complete: render the deferred tail of a cold head
-    def complete_one():
-        reader._panel_cache.clear()
-        i = idxs[0]
-        reader.set_hover(-1)
-        reader._show_tooltip(i)
-        st = reader._tip_state
-        reader._finish_q.queue.clear()
-        st.finish()  # what a worker does; then the loop refreshes
-
-    rows.append(("time-to-complete  (finish deferred tail)", measure(complete_one, args.reps)))
-
-    # 3) warm hover: panel prefetched/cached → just re-slice + upload
+    # 2) warm hover: panel prefetched/cached → just re-slice + upload
     for i in idxs:  # warm the cache fully first
-        reader._panel_for(reader.tokens[i], reader._inflected_surface(i), finish=True)
+        reader._panel_for(reader.tokens[i], reader._inflected_surface(i))
     rows.append(
         ("warm hover  (prefetched → upload only)", measure(warm_one, args.reps * len(idxs)))
     )
 
-    # 4) scroll frame: one wheel step re-slice + scrollbar + upload on the tallest tooltip
+    # 3) scroll frame: one wheel step re-slice + scrollbar + upload on the tallest tooltip
     tall = _tallest(reader, idxs)
-    reader._panel_for(reader.tokens[tall], reader._inflected_surface(tall), finish=True)
+    reader._panel_for(reader.tokens[tall], reader._inflected_surface(tall))
     show_warm(tall)
     step = round(OSD[1] * 0.12)
 
@@ -1201,9 +1180,9 @@ def main() -> int:
 
     rows.append((f"scroll frame  (one {step}px step)", measure(scroll_frame, args.reps * 3)))
 
-    # 5) nested popup first paint: hover a word inside the tooltip
+    # 4) nested popup first paint: hover a word inside the tooltip
     show_warm(tall)
-    boxes = reader._tip_state.lazy.scan_boxes
+    boxes = reader._tip_state.windowed.scan_boxes()
     if boxes:
         sb = boxes[len(boxes) // 3]  # a cell well inside the body
 
@@ -1214,11 +1193,10 @@ def main() -> int:
                 reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface), None
             )
             reader._show_nested(sb)
-            reader._finish_q.queue.clear()
 
         rows.append(("nested popup first paint  (inner word)", measure(nested_cold, args.reps)))
 
-    # 6) per-tick hover hit-test: the poll-loop cost while the cursor sits on the tooltip body
+    # 5) per-tick hover hit-test: the poll-loop cost while the cursor sits on the tooltip body
     show_warm(tall)
     tx, ty, tw, th = reader._tip_rect
     reader.ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 8}
