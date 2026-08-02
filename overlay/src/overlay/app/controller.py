@@ -80,7 +80,7 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
-from overlay.app.subtitles import render_plain_subtitle, render_subtitle
+from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 from overlay.mpvio.osd import Overlay
@@ -126,11 +126,13 @@ class Reader:
         mine_cfg=None,
         dict_set=None,
         options: ReaderOptions | None = None,
+        renderer: SubtitleRenderer | NullRenderer | None = None,
         **legacy_kw,
     ):
         """``options`` is the canonical grouped-knobs object (see app/config.py; a new knob is one
         dataclass field). Legacy exploded kwargs (``mine_key=…``, ``tip_max_frac=…``) are still
-        accepted and routed onto the groups; unknown names raise TypeError."""
+        accepted and routed onto the groups; unknown names raise TypeError. ``renderer`` is the
+        subtitle-draw strategy (app/subtitle_render.py) — pass ``NullRenderer()`` to run headless."""
         o = options or ReaderOptions()
         if legacy_kw:
             o = o.with_overrides(**legacy_kw)
@@ -138,6 +140,7 @@ class Reader:
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
+        self.renderer = renderer or SubtitleRenderer()  # subtitle raster; NullRenderer() = headless
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
         self.scorer = scorer  # app.scoring.Scorer | None — per-word coloring
@@ -336,11 +339,12 @@ class Reader:
         self._observed: dict = {}
         self.osd = (1280, 720)
         # subtitle state (populated by set_subtitle; initialised for the live run() path)
+        self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
         self.sub_text = ""
         self.lines: list[list[Token]] = []
         self.tokens: list[Token] = []
         self.boxes: list = []
-        self.sub_origin = (0, 0)
+        self.sub_origin: tuple[int, int] = (0, 0)
         self.hover = -1
         # subtitle navigation: an index of the external sub file's cues (when known) lets Alt+←/→/↓
         # render the target line in the overlay INSTANTLY, decoupled from mpv's slow video seek. The
@@ -497,34 +501,7 @@ class Reader:
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
-        with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
-            if self.subtitle_language == "en":
-                sr = render_plain_subtitle(self.sub_text, self.osd[0], size=self.sub_size)
-            else:
-                annotated = self.annotation_mode == "full" or self._annotation_hover
-                # A phrase span highlights [start, end) — start can precede the hovered token (a leading
-                # お in お休み), so it drives the underline, not self.hover.
-                span = self._hover_span if annotated else None
-                sr = render_subtitle(
-                    self.lines,
-                    self.osd[0],
-                    size=self.sub_size,
-                    hover=span[0]
-                    if span
-                    else (self.hover if annotated and self.hover >= 0 else None),
-                    hover_end=span[1] if span else None,
-                    styles=self.styles if annotated else None,
-                )
-        self.boxes = sr.boxes
-        ox = (self.osd[0] - sr.image.width) // 2
-        oy = self.osd[1] - sr.image.height - self.bottom_margin
-        self.sub_origin = (ox, oy)
-        if not getattr(self, "_first_sub_logged", False):
-            self._first_sub_logged = True
-            log.info(
-                "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
-            )
-        self.ov.show(sr.image, ox, oy, oid=SUB_ID)
+        self.renderer.draw(self)
 
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:

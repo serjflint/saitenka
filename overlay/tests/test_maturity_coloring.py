@@ -3,7 +3,7 @@
 import pytest
 from PIL import Image
 
-from overlay.app import controller, reader_deps
+from overlay.app import reader_deps
 from overlay.app.config import ReaderOptions, TooltipOptions
 from overlay.app.controller import Reader
 from overlay.app.fsrs import KnownSnap
@@ -115,7 +115,7 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
         rendered.append(kwargs["styles"])
         return SubtitleRender(Image.new("RGBA", (10, 10)), [])
 
-    monkeypatch.setattr(controller, "render_subtitle", render)
+    monkeypatch.setattr("overlay.app.subtitle_render.render_subtitle", render)
 
     reader._draw_subtitle()
     reader.set_annotation_hover(revealed=True)

@@ -3,9 +3,9 @@
 import pytest
 from PIL import Image
 
-from overlay.app import controller
 from overlay.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from overlay.app.controller import Reader
+from overlay.app.subtitle_render import NullRenderer
 from overlay.app.subtitles import SubtitleRender
 from overlay.app.tooltip import update_hover_impl
 
@@ -20,6 +20,17 @@ class FakeIPC:
         if args[0] == "get_property":
             return {"data": self.props.get(args[1])}
         return {"data": None}
+
+
+class _SpyRenderer:
+    """A draw strategy that records each draw (via a callback taking the reader) instead of
+    rasterizing — the public seam for tests that assert a redraw happened or captured state at draw."""
+
+    def __init__(self, on_draw):
+        self._on_draw = on_draw
+
+    def draw(self, reader):
+        self._on_draw(reader)
 
 
 def test_full_annotations_remain_the_default():
@@ -45,7 +56,7 @@ def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
         rendered.append(kwargs)
         return SubtitleRender(Image.new("RGBA", (10, 10)), [])
 
-    monkeypatch.setattr(controller, "render_subtitle", render)
+    monkeypatch.setattr("overlay.app.subtitle_render.render_subtitle", render)
 
     reader._draw_subtitle()
     reader.set_annotation_hover(revealed=True)
@@ -69,7 +80,7 @@ def test_hover_mode_still_scores_each_new_cue(monkeypatch):
         scorer=Scorer(),
         options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),
     )
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(reader, "renderer", NullRenderer())
 
     reader.set_subtitle("猫")
 
@@ -102,7 +113,7 @@ def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatc
     reader = Reader(ipc, options=options)
     reader.tokens = [object()]
     redrawn = []
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: redrawn.append(True))
+    monkeypatch.setattr(reader, "renderer", _SpyRenderer(lambda _rd: redrawn.append(True)))
 
     reader.set_annotation_hover(revealed=True)
 
@@ -117,7 +128,9 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
     reader.tokens = [object()]
     reader._annotation_hover = True
     states = []
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: states.append(reader._annotation_hover))
+    monkeypatch.setattr(
+        reader, "renderer", _SpyRenderer(lambda rd: states.append(rd._annotation_hover))
+    )
 
     update_hover_impl(reader)
 
@@ -130,7 +143,9 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
     )
     reader._annotation_hover = True
     states = []
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: states.append(reader._annotation_hover))
+    monkeypatch.setattr(
+        reader, "renderer", _SpyRenderer(lambda rd: states.append(rd._annotation_hover))
+    )
 
     reader.set_subtitle("猫")
 
@@ -143,7 +158,9 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     reader.sub_text = "猫"
     drawn = []
     toasts = []
-    monkeypatch.setattr(reader, "_draw_subtitle", lambda: drawn.append(reader.annotation_mode))
+    monkeypatch.setattr(
+        reader, "renderer", _SpyRenderer(lambda rd: drawn.append(rd.annotation_mode))
+    )
     monkeypatch.setattr(reader, "_toast", lambda text: toasts.append(text))
 
     reader.toggle_annotation_mode()

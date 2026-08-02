@@ -29,14 +29,14 @@ class _FakeDS:
         return any(f in {"本命", "を", "読む", "命", "ほんめい", "よむ"} for f in forms)
 
 
-def _reader(monkeypatch):
+def _reader():
     # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product
     # default: a change to the default tooltip height must not silently move these interaction goldens.
     # osd = 1080p so the UI scale is 1.0 (REF_H) — the goldens capture the reference (unscaled) layout.
     r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
-    monkeypatch.setattr(r, "_draw_subtitle", r._draw_subtitle)  # keep real subtitle boxes
-    r.set_subtitle("本命を読む")  # → 本命 / を / 読む, with real per-word boxes
+    # the default SubtitleRenderer produces the real per-word boxes these goldens hit-test against
+    r.set_subtitle("本命を読む")  # → 本命 / を / 読む
     return r
 
 
@@ -46,8 +46,8 @@ def _content_word(r) -> int:
     return next(i for i, t in enumerate(r.tokens) if t.is_content and t.pos not in SKIP_POS)
 
 
-def test_move_over_word_shows_tooltip_and_switching_words(monkeypatch):
-    r = _reader(monkeypatch)
+def test_move_over_word_shows_tooltip_and_switching_words():
+    r = _reader()
     ui = Driver(r)
     i = _content_word(r)
     ui.move_to_word(i)
@@ -62,7 +62,7 @@ def test_tooltip_keeps_lease_over_occluded_word(monkeypatch):
     word (inside the tip rect) must NOT hijack the tooltip onto it. Regression for the two-line cue
     where the lower line's tooltip is drawn up over the upper line. `instant` zeroes hover_switch_delay,
     so the pre-fix code (which only *delayed* the hijack) would switch immediately."""
-    r = _reader(monkeypatch)
+    r = _reader()
     ui = Driver(r)
     i = _content_word(r)
     ui.move_to_word(i)
@@ -84,7 +84,7 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     """Hovering the first token of a multi-token dictionary term (数ある-style) sets the hover span
     over the whole phrase — the underline covers both tokens, Yomitan-style longest-match. Moving off
     clears it."""
-    r = _reader(monkeypatch)  # subtitle 本命を読む → 本命 / を / 読む
+    r = _reader()  # subtitle 本命を読む → 本命 / を / 読む
     # pretend 本命を is a dictionary term so the phrase probe fires over tokens 0..1
     monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
     ui = Driver(r)
@@ -117,15 +117,15 @@ def test_phrase_reaches_panel_lookup(monkeypatch):
     assert seen["extra"] == ("本命を",), "phrase must reach the panel lookup"
 
 
-def test_move_off_words_does_not_hover(monkeypatch):
-    r = _reader(monkeypatch)
+def test_move_off_words_does_not_hover():
+    r = _reader()
     ui = Driver(r)
     ui.move(5, 5)  # top-left corner — no word there
     assert ui.hover == -1
 
 
-def test_move_inside_tooltip_opens_nested_scan_popup(monkeypatch):
-    r = _reader(monkeypatch)
+def test_move_inside_tooltip_opens_nested_scan_popup():
+    r = _reader()
     ui = Driver(r)  # instant → scan_delay 0
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
@@ -134,7 +134,7 @@ def test_move_inside_tooltip_opens_nested_scan_popup(monkeypatch):
 
 
 def test_empty_body_click_does_nothing(monkeypatch):
-    r = _reader(monkeypatch)
+    r = _reader()
     r.anki = object()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
@@ -148,8 +148,8 @@ def test_empty_body_click_does_nothing(monkeypatch):
     assert events == [], "a click in an empty body area must not mine or speak"
 
 
-def test_wheel_scrolls_the_tooltip(monkeypatch):
-    r = _reader(monkeypatch)
+def test_wheel_scrolls_the_tooltip():
+    r = _reader()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     ui.move_into_tip(0.5, 0.5)  # cursor over the tip so the wheel routes to it
@@ -170,13 +170,13 @@ def _full_panel_image(panel):
     return bgra_to_image(panel.viewport(0, panel.full_height))
 
 
-def test_golden_base_and_nested_render(monkeypatch):
+def test_golden_base_and_nested_render():
     """L2: pin the rendered BASE tooltip and NESTED popup bitmaps an interaction produces. A layout /
     geometry regression shows up as a golden diff. Both composite the whole panel from the windowed
     engine (== a render_panel crop)."""
     from util import assert_golden
 
-    r = _reader(monkeypatch)
+    r = _reader()
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
     assert r._tip_state is not None
