@@ -42,15 +42,6 @@ _STRESS_CACHE_CAP = (
 _SCROLL_JANK_STEPS = (
     40  # --scroll-jank: wheel steps DOWN into each entry (bounds tall-entry render time)
 )
-# Realistic per-notch reading pause: a real user rests on the revealed content before the next wheel
-# notch, and THAT idle window is when the prefetch worker renders the next blocks ahead (PR #132). The
-# synchronous cold/warm rows still measure the render itself; this dwell is what lets the off-thread
-# warm actually land, so the "prefetched" row reflects a live session, not a tight loop.
-_SCROLL_DWELL_S = 0.15
-_SCROLL_REALISTIC_STEPS = (
-    12  # notches per entry in the LIVE pass — real-time dwells make it wall-clock
-)
-_SCROLL_JANK_MS = 16.0  # a frame slower than this is perceptible stutter (kept-ahead threshold)
 
 # Hand-picked multi-sense words Serj still sees pathological first lookups on: very polysemous
 # common words whose monolingual entries are enormous (手 alone is ~100 senses in a big monolingual dict).
@@ -539,36 +530,93 @@ def run_stress(
     return rc
 
 
-def _scroll_trajectory(
-    reader, corpus, step: int, cap: int, reps: int, *, dwell: float
-) -> list[float]:
-    """Time each scroll frame over the SAME short top→down trajectory on ``reader``. ``dwell`` is the
-    per-notch reading pause — 0 for the synchronous baseline, >0 for the live pass where that idle is
-    when the prefetch worker warms the next blocks. Same steps + same panels on both readers, so the
-    live-vs-sync delta is purely the off-thread warming, not a sampling difference."""
+def _scroll_span_live(reader, subset, step: int, span_px: int, speed: float) -> list[float]:
+    """Scroll each entry the first ``span_px`` at ``speed`` px/s (dwell = step/speed between notches) on
+    a reader whose real prefetch workers run, timing each frame. The dwell is the wall-clock the worker
+    gets to render the next blocks ahead — so this captures both the off-thread warming AND the
+    worker/compositor contention the analytical model omits."""
     from overlay.app.subtitles import WordBox
 
+    dwell = step / speed
     frames: list[float] = []
-    for _ in range(max(1, reps)):
-        for term, reading in corpus:
-            reader._panel_cache.clear()
-            reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
-            reader.boxes = [WordBox(0, 400, 800, 60, 60)]
-            reader.sub_origin = (0, 0)
-            reader.hover = 0
-            reader._show_tooltip(0)
-            st = reader._tip_state
-            if st is None:
-                continue
-            reader._tip_scroll = 0
-            steps = min(_SCROLL_REALISTIC_STEPS, max(1, (st.full_height - cap) // step + 1))
-            for _s in range(steps):
-                t0 = time.perf_counter()
-                reader._scroll_tip(step)  # scroll_tip requests render-ahead in this direction
-                frames.append((time.perf_counter() - t0) * 1000.0)
-                if dwell:
-                    time.sleep(dwell)  # reading pause: the worker warms the next blocks
+    for term, reading, _tops, _times in subset:
+        reader._panel_cache.clear()
+        reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
+        reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+        reader.sub_origin = (0, 0)
+        reader.hover = 0
+        reader._show_tooltip(0)
+        if reader._tip_state is None:
+            continue
+        reader._tip_scroll = 0
+        for _s in range(max(1, span_px // step)):
+            t0 = time.perf_counter()
+            reader._scroll_tip(step)  # scroll_tip requests render-ahead in this direction
+            frames.append((time.perf_counter() - t0) * 1000.0)
+            time.sleep(dwell)
     return frames
+
+
+# Realistic scroll paces as px/s (a wheel notch is ``step`` px, so dwell = step/speed): a fast FLICK to
+# scan, a NORMAL spin, a slow READING crawl. The jank question is per-pace — the worker hides a block
+# only if it renders in the LEAD time the pace allows before the viewport reaches it.
+_SCROLL_SPEEDS = ((2600.0, "flick"), (1000.0, "normal"), (300.0, "reading"))
+_SCROLL_SPAN_PX = 6000  # realistic distance scrolled into an entry: head + the first big blocks
+
+
+def _block_profile(reader, term: str, reading: str, span_px: int) -> tuple[list[int], list[float]]:
+    """Render each block covering the first ``span_px`` of an entry ONCE, returning parallel lists of
+    (block-top px, block render ms). Reaches into WindowedPanel internals deliberately — this IS the
+    per-block render cost the scroll pays, measured directly rather than inferred from notch timings."""
+    from overlay.app.subtitles import WordBox
+
+    reader._panel_cache.clear()
+    reader.tokens = [Token(term, term, reading, "名詞", 0, len(term))]
+    reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+    reader.sub_origin = (0, 0)
+    reader.hover = 0
+    reader._show_tooltip(0)
+    st = reader._tip_state
+    if st is None:
+        return [], []
+    wp = st.windowed
+    tops: list[int] = []
+    times: list[float] = []
+    with wp._lock:
+        for i in range(wp.count):
+            top = wp._offsets.start(i)  # exact: every predecessor was stored just below
+            if top > span_px and i > 0:
+                break
+            t0 = time.perf_counter()
+            rb = wp._render_pixels(i)
+            times.append((time.perf_counter() - t0) * 1000.0)
+            wp._store(rb)
+            tops.append(top)
+    return tops, times
+
+
+def _simulate_jank(
+    tops: list[int], times: list[float], view_h: int, step: int, speed: float
+) -> tuple[int, float, int]:
+    """Discrete-event lead model: scroll at ``speed`` px/s while a single worker renders blocks in order,
+    starting each when render-ahead requests it (viewport within one screen of it) and it is free. A
+    block the viewport reaches before the worker finished is rendered synchronously on the main thread —
+    a jank frame. Returns (jank frames, worst synchronous ms, notches over the span). No contention
+    modelled — that is what the real-threading pass adds."""
+    lead_px = 2 * view_h  # render-ahead requests a block when viewport-bottom is one screen from it
+    worker_free = 0.0
+    jank: list[float] = []
+    for top, rms in zip(tops, times, strict=True):
+        t_enter = max(0.0, (top - view_h) / speed)  # viewport bottom reaches the block's top
+        t_request = max(0.0, (top - lead_px) / speed)  # render-ahead asks for it
+        finish = max(worker_free, t_request) + rms / 1000.0
+        if finish <= t_enter:
+            worker_free = finish  # worker rendered it ahead — hidden
+        else:
+            jank.append(rms)  # reached first → synchronous render on the scroll thread
+            worker_free = t_enter
+    span = (tops[-1] - tops[0]) if len(tops) > 1 else step
+    return len(jank), (max(jank) if jank else 0.0), max(1, span // step)
 
 
 def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None = None) -> int:
@@ -626,22 +674,39 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
             traverse(cold, term)  # top→bottom over cold blocks — the scroll jank
             traverse(warm, None)  # immediate re-traverse: blocks now cached — the warm floor
 
-    # Matched sync-vs-live comparison over one short trajectory: the SAME notches + panels, once with
-    # no workers (synchronous baseline) and once on a reader whose real prefetch workers run with a
-    # reading pause between notches (the live setup). Scroll-ahead (PR #132) warms the next blocks off
-    # the main thread during each pause, so live≪sync is the off-thread win; the frames live still can't
-    # hide are monster blocks the worker can't finish inside one dwell (what windowed rasterisation,
-    # PR #3, is meant to shrink). cold/warm above stay as the workers-off render-cost diagnostic.
-    sync = _scroll_trajectory(reader, corpus, step, cap, reps, dwell=0.0)
-    live_reader = _cold_reader(ds, prefetch=True)
-    try:
-        live = _scroll_trajectory(live_reader, corpus, step, cap, reps, dwell=_SCROLL_DWELL_S)
-    finally:
-        live_reader._stop.set()  # stop the workers before the run returns
+    # Analytical envelope: measure each block's one-time render cost, then simulate scrolling the span
+    # at each pace and count the frames where the viewport reaches a block before the worker warmed it
+    # (the lead model — a monster block is rendered ONCE and cruised through as cache hits, so what
+    # matters is lead time vs render time, not per-notch throughput). Covers every entry × every pace
+    # cheaply because it uses no real-time sleeps.
+    profiles = [
+        (term, reading, *_block_profile(reader, term, reading, _SCROLL_SPAN_PX))
+        for term, reading in corpus
+    ]
+    envelope: list[tuple[str, int, float, int]] = []  # (label, jank_frames, worst_ms, notches)
+    for speed, label in _SCROLL_SPEEDS:
+        jf = notches = 0
+        wmax = 0.0
+        for _term, _reading, tops, times in profiles:
+            j, wm, n = _simulate_jank(tops, times, cap, step, speed)
+            jf += j
+            wmax = max(wmax, wm)
+            notches += n
+        envelope.append((label, jf, wmax, notches))
 
-    c, w, s, p = _stats(cold), _stats(warm), _stats(sync), _stats(live)
-    kept_sync = 100.0 * sum(1 for x in sync if x <= _SCROLL_JANK_MS) / max(1, len(sync))
-    kept = 100.0 * sum(1 for x in live if x <= _SCROLL_JANK_MS) / max(1, len(live))
+    # Real-threading confirmation: scroll the worst entries a realistic span at the fastest paces with
+    # the real workers running, so the measured distribution includes the contention the model omits.
+    subset = sorted(profiles, key=lambda p: -(max(p[3]) if p[3] else 0.0))[:6]
+    live_reader = _cold_reader(ds, prefetch=True)
+    real: list[tuple[str, dict]] = []
+    try:
+        for speed, label in _SCROLL_SPEEDS[:2]:  # flick + normal (reading pace is slow wall-clock)
+            frames = _scroll_span_live(live_reader, subset, step, _SCROLL_SPAN_PX, speed)
+            real.append((label, _stats(frames)))
+    finally:
+        live_reader._stop.set()
+
+    c, w = _stats(cold), _stats(warm)
     gil_rc = finalize_runtime(rt, require_ft)
     print(
         f"\nSaitenka overlay — SCROLL JANK: base-tooltip scroll over {len(corpus)} pathological "
@@ -661,17 +726,24 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
         f"p99 {w['p99']:.1f}  MAX {w['max']:.1f} ms"
     )
     print(
-        f"\nmatched {_SCROLL_REALISTIC_STEPS}-notch trajectory   (sync = no workers · "
-        f"live = real workers + {_SCROLL_DWELL_S * 1000:.0f}ms reading pause → scroll-ahead)"
+        f"\nlead model — scroll the first {_SCROLL_SPAN_PX}px with the worker warming ahead "
+        f"(no contention modelled):"
     )
+    for label, jf, wmax, notches in envelope:
+        smooth = 100.0 * (1 - jf / max(1, notches))
+        print(
+            f"  {label:<8} {smooth:5.1f}% smooth   {jf:>3} jank frame(s) / {notches} notches   "
+            f"worst first-reach {wmax:.0f} ms"
+        )
     print(
-        f"  synchronous (no prefetch):  p50 {s['p50']:.1f}  p95 {s['p95']:.1f}  p99 {s['p99']:.1f}  "
-        f"MAX {s['max']:.1f} ms   {kept_sync:.0f}% <{_SCROLL_JANK_MS:.0f}ms"
+        f"\nreal threads — worst {len(subset)} entries, workers running, actual frame time "
+        f"(includes contention):"
     )
-    print(
-        f"  LIVE (workers warm ahead):  p50 {p['p50']:.1f}  p95 {p['p95']:.1f}  p99 {p['p99']:.1f}  "
-        f"MAX {p['max']:.1f} ms   {kept:.0f}% <{_SCROLL_JANK_MS:.0f}ms"
-    )
+    for label, r in real:
+        print(
+            f"  {label:<8} p50 {r['p50']:5.1f}  p95 {r['p95']:5.1f}  p99 {r['p99']:5.1f}  "
+            f"MAX {r['max']:6.1f} ms"
+        )
     print("\nworst cold scroll frames (word, ms, panel_px):")
     by_word: dict[str, tuple[float, int]] = {}
     for dt, word, px in worst:
@@ -680,13 +752,12 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     for word, (dt, px) in sorted(by_word.items(), key=lambda kv: -kv[1][0])[:8]:
         print(f"    {word:<10}{dt:>9.1f}{px:>10}")
     print(
-        "\ncold/warm isolate the synchronous render cost (NO workers): cold = first scroll into "
-        "un-rendered blocks, warm = immediate re-scroll of the cached panel. The matched trajectory "
-        "runs the SAME notches sync-vs-live: LIVE has the real prefetch workers warming the next blocks "
-        "off the main thread during each reading pause (PR #132). Read the two effects separately — a "
-        "lower LIVE tail (p99/MAX) = off-thread warming hid a big block; a HIGHER LIVE median = the "
-        "worker renders contend with the compositor (shared panel lock + CPU) on every frame. Windowed "
-        "rasterisation (PR #3) shrinks each render, which lifts both: fewer misses AND less contention."
+        "\ncold/warm isolate the synchronous per-block render (NO workers). The lead model then asks the "
+        "real question: scrolling the span at each pace, how many frames reach a block before the worker "
+        "warmed it? A monster block is rendered ONCE then cruised as cache hits, so a slow pace hides it "
+        "(long lead) and a fast flick may not (short lead vs a 500ms render) — that residual is the "
+        "worst-first-reach column, which windowed rasterisation (PR #3) shrinks to ~O(viewport). The "
+        "real-threads rows confirm the model and expose the worker/compositor contention it omits."
     )
     if json_path:
         Path(json_path).write_text(
@@ -695,9 +766,11 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
                     "runtime": rt,
                     "cold": c,
                     "warm": w,
-                    "sync": s,
-                    "live": p,
-                    "kept_ahead_pct": {"sync": kept_sync, "live": kept},
+                    "lead_model": [
+                        {"pace": label, "jank_frames": jf, "worst_ms": wmax, "notches": n}
+                        for label, jf, wmax, n in envelope
+                    ],
+                    "real_threads": [{"pace": label, **r} for label, r in real],
                     "corpus_size": len(corpus),
                 },
                 indent=2,
