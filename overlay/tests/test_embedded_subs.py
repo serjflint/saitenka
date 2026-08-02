@@ -131,6 +131,35 @@ def test_primary_selection_wins_over_secondary():
     assert track is EMBEDDED_JA
 
 
+# --- the ffmpeg extraction argv itself (the tests above monkeypatch extract_embedded_track away) ---
+
+
+def test_extract_embedded_track_builds_ffmpeg_argv(tmp_path, monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.subprocess.run", lambda cmd, **_kw: calls.__setitem__("cmd", cmd)
+    )
+    # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
+    monkeypatch.setattr("overlay.mpvio.discover.find_tool", lambda name: name)
+    dest = tmp_path / "out" / "track.srt"
+    assert es.extract_embedded_track("/v/ep.mkv", 10, dest) is True
+    cmd = calls["cmd"]
+    assert cmd[0] == "ffmpeg" and "/v/ep.mkv" in cmd
+    assert cmd[cmd.index("-map") + 1] == "0:10"  # mpv ff-index maps straight onto ffmpeg -map 0:<n>
+    assert cmd[cmd.index("-c:s") + 1] == "srt"  # transcode any codec to .srt
+    assert cmd[-1] == str(dest)
+    assert dest.parent.is_dir()  # destination dir created before the run
+
+
+def test_extract_embedded_track_failsoft_on_ffmpeg_error(tmp_path, monkeypatch):
+    def boom(*_a, **_kw):
+        raise es.subprocess.CalledProcessError(1, "ffmpeg")
+
+    monkeypatch.setattr("overlay.app.embedded_subs.subprocess.run", boom)
+    monkeypatch.setattr("overlay.mpvio.discover.find_tool", lambda name: name)
+    assert es.extract_embedded_track("/v/ep.mkv", 3, tmp_path / "o.srt") is False
+
+
 def test_cache_key_changes_with_track_and_is_stable_for_same_file(tmp_path):
     video = tmp_path / "ep.mkv"
     video.write_bytes(b"hello")

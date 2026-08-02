@@ -65,7 +65,13 @@ def kata_to_hira(s: str) -> str:
 
 
 def _has_kanji(s: str) -> bool:
-    return any(0x3400 <= ord(c) <= 0x9FFF or 0xF900 <= ord(c) <= 0xFAFF for c in s)
+    # last range = supplementary planes (Ext B–H + Compat Supplement): astral surrogate-pair kanji
+    return any(
+        0x3400 <= ord(c) <= 0x9FFF  # CJK Unified + Ext A
+        or 0xF900 <= ord(c) <= 0xFAFF  # CJK Compatibility Ideographs
+        or 0x20000 <= ord(c) <= 0x3FFFF
+        for c in s
+    )
 
 
 def _all_hira(s: str) -> bool:
