@@ -89,7 +89,6 @@ The ones worth touching:
   display.
 - `tip_height` (default `0.4`) — max tooltip height as a fraction of the video, if the default crops
   long entries.
-- `show_dict_tabs` (default `false`) — turn on a sticky per-dictionary tab strip.
 - `pause_on_tooltip` (default `true`) — freeze the frame while a tooltip is open (the mining default);
   set `false` if you'd rather keep playing.
 

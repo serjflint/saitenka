@@ -62,10 +62,9 @@ def rerender_nested(reader: Reader) -> None:
     if tok is None:
         return
     mined = reader._is_mined(tok)
-    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), finish=True, mined=mined)
+    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), mined=mined)
     reader._nest.state = st
     reader._nest.key = reader._panel_key(tok, tok.surface, mined=mined)
-    reader._nest.bgra = st.bgra()  # decompress the cached panel into the nested scroll buffer
     reader._render_nested_view()
 
 

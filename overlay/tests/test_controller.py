@@ -782,7 +782,6 @@ def test_prefetch_worker_warms_cache_then_close_joins():
             width=r.tip_width,
             anki_ok=False,  # no anki configured
             mined=False,
-            tabs=False,  # show_dict_tabs is OFF by default
         )
         for _ in range(300):
             if key in r._panel_cache:
@@ -836,44 +835,25 @@ def _tall_reader(ipc):
     return r
 
 
-def test_show_tooltip_finishes_synchronously_without_worker():
-    # Blob fallback (banded off): no prefetch worker running → the panel must be rendered whole, never
-    # left partial. (The banded default renders the head only and composites the tail lazily on scroll.)
+def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
+    # Viewport-first, windowed: a tall entry measures only the head that fills the viewport on show;
+    # the windowed engine composites (and measures) the deferred tail as the user scrolls down.
     r = _tall_reader(FakeIPC())
-    r._banded = False
-    r._show_tooltip(0)
-    assert r._tip_state.complete
-    assert r._finish_q.empty()
-    assert r._tip_bgra.shape[0] == r._tip_state.shape[0]
-
-
-def test_show_tooltip_defers_tail_when_worker_available(monkeypatch):
-    # With a worker available, first paint renders only the head that fills the viewport; the rest is
-    # queued for the worker and swapped in on completion.
-    r = _tall_reader(FakeIPC())
-    r._banded = False  # blob fallback: the head/tail split is the banded-off path
-    monkeypatch.setattr(r, "_finish_available", lambda: True)  # pretend a prefetch worker exists
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r._show_tooltip(0)
-    st = r._tip_state
-    assert not st.complete  # tall entry → head only
-    head_h = st.shape[0]
-    assert head_h >= r._tip_cap()  # …but the viewport is fully covered
-    assert r._finish_q.qsize() == 1  # the tail was queued for a worker
-
-    # run the finish job like a worker would, then let the poll loop refresh the view
-    job = r._finish_q.get()  # typed FinishItem (Stage 8b)
-    job.panel.finish()
-    r._tip_dirty = True
-    assert st.complete and st.shape[0] > head_h
-    r.poll_once()
-    assert r._tip_bgra.shape[0] == st.shape[0]  # the full, taller panel is now uploaded
+    wp = r._tip_state.windowed
+    assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
+    assert r._tip_view_h >= r._tip_cap() - 1  # …but the viewport is fully covered
+    assert r._tip_state.full_height >= r._tip_view_h  # estimate at least fills the viewport
+    before = wp.measured
+    r._scroll_tip(r._tip_state.full_height)  # wheel toward the bottom
+    assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
 
 
 def _click_center_of_add_button(r, ipc):
     from overlay.panel import header_add_rect
 
-    px, py, pw, ph = header_add_rect(r.tip_width, top_reserve=r._tip_reserve())
+    px, py, pw, ph = header_add_rect(r.tip_width)
     sx, sy = r._tip_xy
     cx = sx + px + pw / 2
     cy = sy + (py - r._tip_scroll) + ph / 2
@@ -923,7 +903,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     r._show_tooltip(0)
     events = []
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
-    px, py, pw, ph = header_speaker_rect(r.tip_width, top_reserve=r._tip_reserve())
+    px, py, pw, ph = header_speaker_rect(r.tip_width)
     sx, sy = r._tip_xy
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -974,7 +954,7 @@ def _scan_reader(ipc):
 
 def _hover_first_scan_cell(r, ipc):
     """Point the cursor at the first scan cell of the base tooltip; return the ScanBox."""
-    sb = r._tip_state.lazy.scan_boxes[0]
+    sb = r._tip_state.windowed.scan_boxes()[0]
     sx, sy = r._tip_xy
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -989,7 +969,7 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.hover = 0
     r._show_tooltip(0)
-    boxes = r._tip_state.lazy.scan_boxes
+    boxes = r._tip_state.windowed.scan_boxes()
     assert boxes
     sb = boxes[0]
     sx, sy = r._tip_xy
@@ -1036,7 +1016,7 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     r.set_hover(0)
-    boxes = r._tip_state.lazy.scan_boxes
+    boxes = r._tip_state.windowed.scan_boxes()
     sx, sy = r._tip_xy
 
     def hover(sb):
@@ -1107,7 +1087,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     assert r._nest.token is not None
     mined = []
     monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
-    px, py, pw, ph = header_add_rect(r.tip_width, top_reserve=r._tip_reserve())
+    px, py, pw, ph = header_add_rect(r.tip_width)
     nx, ny = r._nest.xy
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1144,7 +1124,7 @@ def _link_reader(ipc):
 
 
 def _point_at_link(r, ipc):
-    lb = r._tip_state.lazy.link_boxes[0]
+    lb = r._tip_state.windowed.link_boxes()[0]
     sx, sy = r._tip_xy
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1159,7 +1139,7 @@ def test_click_cross_reference_opens_target_in_nested(monkeypatch):
     r = _link_reader(ipc)
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
-    assert r._tip_state.lazy.link_boxes  # the def body exposed a clickable link
+    assert r._tip_state.windowed.link_boxes()  # the def body exposed a clickable link
     _point_at_link(r, ipc)
     r.on_click()
     assert r._nest.state is not None  # a nested popup opened…
@@ -1198,7 +1178,7 @@ def test_click_wildcard_link_opens_search_popup(monkeypatch):
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
-    lb = r._tip_state.lazy.link_boxes[0]
+    lb = r._tip_state.windowed.link_boxes()[0]
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
     sx, sy = r._tip_xy
     ipc.props["mouse-pos"] = {
@@ -1210,7 +1190,7 @@ def test_click_wildcard_link_opens_search_popup(monkeypatch):
     assert r._nest.state is not None and r._nest.word == "食べ*"  # opened a search-results popup
     assert r._nest.token is None  # results aren't one word → ⊕ mine disabled
     assert (
-        r._nest.state.lazy.link_boxes[0].query == "食べる"
+        r._nest.state.windowed.link_boxes()[0].query == "食べる"
     )  # each result drills into an exact term
 
 
@@ -1238,7 +1218,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
-    assert r._tip_state.lazy.link_boxes == []  # external link → no clickable region
+    assert r._tip_state.windowed.link_boxes() == []  # external link → no clickable region
 
 
 def test_nested_popup_shrinks_to_stay_above_inner_word():
@@ -1857,62 +1837,6 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup():
     assert len(jlpt_pills_2) == 1, f"second call: {len(jlpt_pills_2)} JLPT pills, want 1"
 
 
-def test_tip_panel_finish_does_not_block_render_head():
-    """_TipPanel.finish() must not hold the lock during the entire tail render so that a concurrent
-    render_head() call from the main thread can fast-path without waiting for the worker."""
-    import threading
-
-    from overlay.app.controller import _TipPanel
-
-    # Use a TallDS entry so finish() actually has work to do (lazy panel with deferred tail).
-    from overlay.app.subtitles import WordBox
-    from overlay.app.tokenize import Token
-
-    ipc = FakeIPC()
-    r = _tall_reader(ipc)
-    r.osd = (1280, 720)
-    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
-    r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    # Build the panel but only render head (leave tail deferred).
-    from overlay.panel import LazyPanel, panel_rows
-
-    entry = _TallDS().entry_for(r.tokens[0])
-    lazy = LazyPanel(panel_rows(entry, r.tip_width, add_button=False), r.tip_width)
-    st = _TipPanel(lazy, "ほんめい")
-    st.render_head(min_h=r._tip_cap())
-    initial_bgra = st.bgra()
-
-    blocked_for: list[float] = []
-
-    def do_finish():
-        st.finish()
-
-    def do_render_head():
-        t0 = time.monotonic()
-        st.render_head(min_h=r._tip_cap())  # should fast-path (image already set)
-        blocked_for.append(time.monotonic() - t0)
-
-    # Run finish() concurrently with render_head(); measure how long render_head blocks.
-    finish_thread = threading.Thread(target=do_finish)
-    finish_thread.start()
-    # Give finish a moment to acquire the lock (if it still holds it during render)
-    time.sleep(0.01)
-    do_render_head()
-    finish_thread.join()
-
-    # render_head should have fast-pathed and returned in microseconds, not waited for finish
-    assert blocked_for[0] < 0.05, (
-        f"render_head blocked for {blocked_for[0]:.3f}s — lock convoy detected"
-    )
-    # The top of the final bgra must match what render_head produced. Since Stage 6 the head's
-    # BOUNDARY row may be a partial strip that finish() re-renders fully, and the head's bottom
-    # margin (16px) is replaced by row content — so compare only the region safely above both
-    # (bottom margin + one ~48px line of slack).
-    head_h = initial_bgra.shape[0]
-    stable_h = head_h - 64
-    assert (st.bgra()[:stable_h] == initial_bgra[:stable_h]).all()
-
-
 def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):
     """_update_prefetch must pass the mined flag from the main thread so that prefetch workers
     never call _is_mined → card_for → jamdict from a worker thread."""
@@ -2084,34 +2008,25 @@ def test_prefetch_queue_items_are_typed_dataclasses():
     assert isinstance(item.gen, int) and isinstance(item.mined, bool)
 
 
-def test_finish_queue_items_are_typed_dataclasses(monkeypatch):
-    from overlay.app.prefetch import FinishItem
-
-    r = _tall_reader(FakeIPC())
-    r._banded = False  # the finish queue is the blob-fallback tail path
-    monkeypatch.setattr(r, "_finish_available", lambda: True)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
-    r._show_tooltip(0)
-    item = r._finish_q.get()
-    assert isinstance(item, FinishItem)
-    assert item.panel is r._tip_state and item.key == r._tip_key
-
-
-# --- Stage 8d: controller split — popups.py (PopupView/TipPanel) + miner.py (Miner) ---------------
+# --- controller split — popups.py (PopupView/Panel) + miner.py (Miner) ---------------------------
 
 
 def test_popups_module_unifies_popup_view_state():
-    from overlay.app.popups import PopupView, TipPanel
+    from overlay.app.popups import Panel, PopupView
+    from overlay.panel import Definition, Entry, panel_rows
 
     pv = PopupView()
-    # the unified per-popup view state (used by the nested popup today; base tip later)
+    # the unified per-popup view state (nested popup; base tip keeps its own exploded state)
     assert pv.state is None and pv.scroll == 0 and pv.rect is None and pv.hide_at == 0.0
-    # controller keeps aliases so existing internals/tests stay valid
-    assert C._TipPanel is TipPanel
     assert C._Nested is PopupView
     r = Reader(FakeIPC())
     assert isinstance(r._nest, PopupView)
-    assert isinstance(TipPanel.__init__, object)  # class exists and is constructible via LazyPanel
+    # Panel wraps the windowed engine and is constructible from rows
+    entry = Entry(
+        headword="本命", reading="ほんめい", defs=[Definition("辞書", ["これは定義です。"])]
+    )
+    panel = Panel.from_rows(panel_rows(entry, 384), 384, "ほんめい")
+    assert panel.reading == "ほんめい" and panel.width == 384 and panel.full_height > 0
 
 
 def test_miner_module_owns_the_mining_flow(monkeypatch):

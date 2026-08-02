@@ -9,7 +9,6 @@ _BASE_KWARGS = {
     "translate_key": "t",
     "preview_key": "p",
     "tip_height": 0.4,
-    "dict_tabs": False,
     "pause_on_tooltip": True,
     "hover_switch_delay": 0.15,
     "no_audio_play": False,

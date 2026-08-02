@@ -145,7 +145,7 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r.set_hover(0)
     # find the scan cell whose tail starts with 本
-    sb = next(b for b in r._tip_state.lazy.scan_boxes if b.text.startswith("本"))
+    sb = next(b for b in r._tip_state.windowed.scan_boxes() if b.text.startswith("本"))
     # make the term lookup miss so the fallback triggers (本 has no term entry in this fixture… it
     # actually might tokenize to 本 with a lemma the dict lacks — force the miss deterministically)
     monkeypatch.setattr(type(ds), "has_term", lambda _self, *_forms: False)

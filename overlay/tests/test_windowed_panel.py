@@ -95,6 +95,27 @@ def test_cold_first_paint_renders_only_the_head():
     assert wp.cached_blocks < wp.count
 
 
+def test_measure_to_warms_the_head_prefix_without_compositing():
+    entry = _tall_entry(8)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
+    wp.measure_to(300)  # warm/measure the head for placement — no viewport image built
+    assert 0 < wp.measured < wp.count  # only the head prefix measured, not all 17 blocks
+    assert wp.cached_blocks > 0  # the measured blocks are cached (a later hover is a hit)
+    # the estimate is now backed by real measured heights and matches a viewport composite's clamp
+    assert wp.full_height > 0
+
+
+def test_retained_nbytes_is_smaller_when_blocks_are_compressed():
+    entry = _tall_entry(8)
+    live = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, compress=False)
+    packed = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, compress=True)
+    live.viewport(0, 300)
+    packed.viewport(0, 300)
+    assert live.retained_nbytes > 0
+    # the mostly-transparent panel blocks compress hard → the warmed cache footprint is far smaller
+    assert packed.retained_nbytes < live.retained_nbytes
+
+
 @given(scroll_frac=st.floats(0, 1), view_h=st.integers(120, 500))
 @settings(max_examples=60, deadline=None)
 def test_viewport_is_pixel_identical_to_render_panel_crop(scroll_frac, view_h):

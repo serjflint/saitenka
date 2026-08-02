@@ -136,11 +136,10 @@ _ICON_GAP = 10
 
 
 def header_add_rect(
-    width: int, theme: Theme = _DEFAULT_THEME, top_reserve: int = 0, *, speak_button: bool = True
+    width: int, theme: Theme = _DEFAULT_THEME, *, speak_button: bool = True
 ) -> tuple[int, int, int, int]:
     """Panel-space (x, y, w, h) of the header ⊕ add-to-Anki button. Sits just left of the 🔊 speaker
-    when it's shown, else takes the speaker's rightmost slot (so hiding TTS doesn't leave a gap).
-    ``top_reserve`` must match the panel's tab-strip reserve so the hit-box tracks the drawn icon."""
+    when it's shown, else takes the speaker's rightmost slot (so hiding TTS doesn't leave a gap)."""
     spk, add, gap, top = (
         theme.px(_SPK_SIZE),
         theme.px(_ADD_SIZE),
@@ -150,19 +149,16 @@ def header_add_rect(
     content_w = width - 2 * theme.margin
     right = content_w - (spk + gap if speak_button else 0)
     x = theme.margin + right - add
-    y = theme.margin + top_reserve + top + theme.px(2)
+    y = theme.margin + top + theme.px(2)
     return (x, y, add, add)
 
 
-def header_speaker_rect(
-    width: int, theme: Theme = _DEFAULT_THEME, top_reserve: int = 0
-) -> tuple[int, int, int, int]:
-    """Panel-space (x, y, w, h) of the header 🔊 speaker button — the only click target that plays audio.
-    ``top_reserve`` must match the panel's tab-strip reserve so the hit-box tracks the drawn icon."""
+def header_speaker_rect(width: int, theme: Theme = _DEFAULT_THEME) -> tuple[int, int, int, int]:
+    """Panel-space (x, y, w, h) of the header 🔊 speaker button — the only click target that plays audio."""
     spk, top = theme.px(_SPK_SIZE), theme.px(_ICON_TOP)
     content_w = width - 2 * theme.margin
     x = theme.margin + content_w - spk
-    y = theme.margin + top_reserve + top
+    y = theme.margin + top
     return (x, y, spk, spk)
 
 
@@ -454,96 +450,6 @@ def compose_panel(
         canvas.alpha_composite(im, (x, y))
         y += im.height + (gaps[i] if i < n - 1 else 0)
     return canvas
-
-
-# Sticky dict-tab strip geometry. The strip WRAPS onto multiple rows so every dictionary tab stays
-# visible — a many-dict word (10+ monolingual dicts) overflowed a single row and hid all but ~4 tabs.
-_TAB_PAD_Y, _TAB_GAP, _TAB_ROW_GAP, _TAB_BOTTOM = 9, 11, 7, 7
-
-
-def _tab_chip_styles(theme: Theme):
-    from overlay.draw.chip import ChipStyle
-
-    sz, ph, pv, rad = theme.px(20), theme.px(11), theme.px(6), theme.px(9)
-    active_cs = ChipStyle(size=sz, weight=600, bg=theme.purple, pad_h=ph, pad_v=pv, radius=rad)
-    idle_cs = ChipStyle(
-        size=sz,
-        weight=500,
-        fg=theme.muted,
-        bg=(0, 0, 0, 0),
-        border=(170, 170, 170, 255),
-        pad_h=ph,
-        pad_v=pv,
-        radius=rad,
-    )
-    return active_cs, idle_cs
-
-
-def _tab_label(name: str) -> str:
-    return name if len(name) <= 10 else name[:9] + "…"
-
-
-def _tab_layout(
-    names: list[str], width: int, theme: Theme
-) -> tuple[list[tuple[int, int]], int, int]:
-    """Wrapped ``(x, y)`` per tab + total strip height + chip height. Chip widths are measured with the
-    IDLE style so the layout is STABLE regardless of which tab is active: the panel reserves this
-    height once at build time, and the active-highlight (drawn later) must not shift wrap points, or the
-    reserve would desync from the rendered strip (covering content / leaving a gap)."""
-    from overlay.draw.chip import render_chip
-
-    _, idle_cs = _tab_chip_styles(theme)
-    sprites = [render_chip(_tab_label(n), idle_cs) for n in names]
-    chip_h = max((sp.image.height for sp in sprites), default=0)
-    pad_y, gap, row_gap, bottom = (
-        theme.px(_TAB_PAD_Y),
-        theme.px(_TAB_GAP),
-        theme.px(_TAB_ROW_GAP),
-        theme.px(_TAB_BOTTOM),
-    )
-    pad_x = theme.margin
-    x, y = pad_x, pad_y
-    pos: list[tuple[int, int]] = []
-    for sp in sprites:
-        w = sp.image.width
-        if x > pad_x and x + w > width - pad_x:  # doesn't fit on this row → wrap to the next
-            x, y = pad_x, y + chip_h + row_gap
-        pos.append((x, y))
-        x += w + gap
-    total_h = (y + chip_h + bottom) if names else (pad_y + bottom)
-    return pos, total_h, chip_h
-
-
-def tab_strip_height(names: list[str], width: int, theme: Theme = _DEFAULT_THEME) -> int:
-    """Total height of the (possibly multi-row) sticky tab strip for these names at this width — the
-    exact space the panel reserves above its header so the wrapped strip never covers content."""
-    return _tab_layout(names, width, theme)[1]
-
-
-def tab_row_height(theme: Theme = _DEFAULT_THEME) -> int:
-    """Height of a SINGLE-row strip — the one-row baseline / minimum reserve. A kanji sample so JP
-    font metrics (taller than Latin) are reflected."""
-    return _tab_layout(["三"], 64, theme)[1]
-
-
-def render_tab_row(
-    names: list[str], active: int, width: int, theme: Theme = _DEFAULT_THEME
-) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
-    """The sticky dict-tab strip: one chip per dictionary, the active one highlighted, WRAPPING onto
-    multiple rows so all tabs stay visible for many-dict words. Opaque background (theme.bg) so it
-    occludes scrolled content when composited onto the viewport. Returns (image, per-chip rects)."""
-    from overlay.draw.chip import render_chip
-
-    active_cs, idle_cs = _tab_chip_styles(theme)
-    pos, total_h, _chip_h = _tab_layout(names, width, theme)
-    img = Image.new("RGBA", (width, max(total_h, 1)), theme.bg)
-    img.alpha_composite(Image.new("RGBA", (width, 1), (90, 90, 90, 120)), (0, total_h - 1))  # sep
-    rects: list[tuple[int, int, int, int]] = []
-    for i, (name, (x, y)) in enumerate(zip(names, pos, strict=True)):
-        sp = render_chip(_tab_label(name), active_cs if i == active else idle_cs)
-        img.alpha_composite(sp.image, (x, y))
-        rects.append((x, y, sp.image.width, sp.image.height))
-    return img, rects
 
 
 class LazyPanel:

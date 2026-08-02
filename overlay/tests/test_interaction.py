@@ -33,10 +33,8 @@ def _reader(monkeypatch):
     # Pin tip_max_frac so the fixed hit-points and layout goldens below are independent of the product
     # default: a change to the default tooltip height must not silently move these interaction goldens.
     # osd = 1080p so the UI scale is 1.0 (REF_H) — the goldens capture the reference (unscaled) layout.
-    # dict tabs default OFF now; force ON so the base-vs-nested reserve/band goldens still exercise it.
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5, show_dict_tabs=True)
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
-    r._finish_available = lambda: True  # render full panels (scan cells present)
     monkeypatch.setattr(r, "_draw_subtitle", r._draw_subtitle)  # keep real subtitle boxes
     r.set_subtitle("本命を読む")  # → 本命 / を / 読む, with real per-word boxes
     return r
@@ -99,13 +97,12 @@ def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
     assert r._hover_span is None and r._hover_terms == ()
 
 
-def test_phrase_reaches_panel_lookup_with_dict_tabs_off(monkeypatch):
-    """Regression: the phrase terms must reach the entry lookup even when the dict-tab strip is OFF
-    (the default). The build once gated extra_terms on ``tabs`` (= show_dict_tabs), so with tabs off
-    お休み never stacked — hovering お showed the bare 御 instead."""
-    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5, show_dict_tabs=False)
+def test_phrase_reaches_panel_lookup(monkeypatch):
+    """Regression: the hovered word's multi-token phrase terms must reach the entry lookup as
+    ``extra_terms``. The build once gated extra_terms on a visual toggle, so お休み never stacked —
+    hovering お showed the bare 御 instead."""
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
     r.osd = (1920, 1080)
-    r._finish_available = lambda: True
     r.set_subtitle("本命を読む")
     monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
     seen: dict[str, tuple] = {}
@@ -117,7 +114,7 @@ def test_phrase_reaches_panel_lookup_with_dict_tabs_off(monkeypatch):
 
     monkeypatch.setattr(r.dict_set, "entry_for", record)
     Driver(r).move_to_word(0)
-    assert seen["extra"] == ("本命を",), "phrase must reach the panel lookup with dict-tabs off"
+    assert seen["extra"] == ("本命を",), "phrase must reach the panel lookup"
 
 
 def test_move_off_words_does_not_hover(monkeypatch):
@@ -164,20 +161,27 @@ def test_wheel_scrolls_the_tooltip(monkeypatch):
 # --- L2: golden-pin the rendered bitmap that a hover produces ----------------------------------------
 
 
-def test_golden_base_vs_nested_layout(monkeypatch):
-    """L2: pin the panels an interaction produces — the BASE tooltip (with the reserved dict-tab band)
-    vs the NESTED popup (compact, no band). A geometry regression (e.g. the reserve leaking into the
-    nested popup, or the band vanishing from the base) shows up as a golden diff."""
-    from util import assert_golden, bgra_to_image
+def _full_panel_image(panel):
+    """The whole rendered panel as an image: measure every block, then composite the full height from
+    the windowed engine (pixel-identical to a one-shot render_panel crop)."""
+    from util import bgra_to_image
+
+    panel.windowed.measure_to(panel.full_height)
+    return bgra_to_image(panel.viewport(0, panel.full_height))
+
+
+def test_golden_base_and_nested_render(monkeypatch):
+    """L2: pin the rendered BASE tooltip and NESTED popup bitmaps an interaction produces. A layout /
+    geometry regression shows up as a golden diff. Both composite the whole panel from the windowed
+    engine (== a render_panel crop)."""
+    from util import assert_golden
 
     r = _reader(monkeypatch)
     ui = Driver(r)
     ui.move_to_word(_content_word(r))
-    assert r._tip_state is not None and r._tip_state.ready
-    assert r._tip_state.lazy.top_reserve > 0  # base reserves the dict-tab band
-    assert_golden(bgra_to_image(r._tip_state.bgra()), "interaction_base_tooltip.png", tol=3.0)
+    assert r._tip_state is not None
+    assert_golden(_full_panel_image(r._tip_state), "interaction_base_tooltip.png", tol=3.0)
 
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
-    assert r._nest.state is not None and r._nest.state.ready
-    assert r._nest.state.lazy.top_reserve == 0  # nested is compact — no reserved band
-    assert_golden(bgra_to_image(r._nest.state.bgra()), "interaction_nested_popup.png", tol=3.0)
+    assert r._nest.state is not None
+    assert_golden(_full_panel_image(r._nest.state), "interaction_nested_popup.png", tol=3.0)

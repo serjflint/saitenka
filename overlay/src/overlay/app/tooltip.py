@@ -1,8 +1,8 @@
-"""The base tooltip: hover a subtitle word → look up its dictionary entry → show a scrollable,
-per-dictionary-tabbed panel anchored to the word, with a header ⊕ (mine) / 🔊 (speak). Also owns the
-hover-hysteresis state machine (word switches need a brief dwell; leaving the tooltip/nested-popup
-area lingers before hiding), the panel cache (LRU, keyed by :class:`PanelKey`), and the windowed
-(banded) render path alongside the whole-panel blit path.
+"""The base tooltip: hover a subtitle word → look up its dictionary entry → show a scrollable panel
+anchored to the word, with a header ⊕ (mine) / 🔊 (speak). Also owns the hover-hysteresis state
+machine (word switches need a brief dwell; leaving the tooltip/nested-popup area lingers before
+hiding), the panel cache (LRU, keyed by :class:`PanelKey`), and the windowed (banded) render path —
+the sole tooltip compositor, shared by the base tooltip and every nested/kanji/search popup.
 
 Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating methods on Reader. This
 is the largest and most tightly-coupled extraction of the controller.py split (touches prefetch,
@@ -23,20 +23,9 @@ from overlay.app.media import copy_clipboard, speak
 from overlay.app.nested_popup import TIP_GAP
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import timed
-from overlay.app.popups import TipPanel
-from overlay.app.prefetch import FinishItem
+from overlay.app.popups import Panel
 from overlay.app.tokenize import phrase_terms
-from overlay.mpvio.osd import to_bgra_array
-from overlay.panel import (
-    Freq,
-    LazyPanel,
-    header_add_rect,
-    header_speaker_rect,
-    panel_rows,
-    render_body_block,
-    render_tab_row,
-    tab_strip_height,
-)
+from overlay.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
@@ -63,9 +52,6 @@ class PanelKey(NamedTuple):
     width: int
     anki_ok: bool  # is Anki reachable now → is the ⊕ button drawn (rechecked per show, ~3s TTL)
     mined: bool  # is the word already in the deck → its ⊕ shows ✓ (tests read this by name)
-    tabs: bool = (
-        True  # dict-tab strip reserved/drawn (base tooltip); a nested popup builds with tabs=False
-    )
     # Per-stacked-entry mined state (aligned to cards_for order): flips a group's ⊕→✓ and, as part of
     # the key, rebuilds the panel when one stacked entry gets mined. () for single-entry words.
     group_mined: tuple[bool, ...] = ()
@@ -306,11 +292,6 @@ def hit_header_region(
     return reader._in_rect((sx + px, sy + top, pw, ph), x, y)
 
 
-def tip_reserve(reader: Reader) -> int:
-    """The base tooltip's tab-strip top-reserve (0 when no tabs) — header hit-boxes must match it."""
-    return reader._tip_state.lazy.top_reserve if reader._tip_state is not None else 0
-
-
 def hit_header_add(reader: Reader, x: float, y: float) -> bool:
     if reader._tip_state is None or not anki_ok(reader):  # ⊕ only when Anki is reachable now
         return False
@@ -318,9 +299,7 @@ def hit_header_add(reader: Reader, x: float, y: float) -> bool:
         reader,
         x,
         y,
-        header_add_rect(
-            reader.tip_width, top_reserve=tip_reserve(reader), speak_button=reader._tts_ok
-        ),
+        header_add_rect(reader.tip_width, speak_button=reader._tts_ok),
         reader._tip_xy,
         reader._tip_scroll,
         reader._tip_view_h,
@@ -334,7 +313,7 @@ def hit_header_speaker(reader: Reader, x: float, y: float) -> bool:
         reader,
         x,
         y,
-        header_speaker_rect(reader.tip_width, top_reserve=tip_reserve(reader)),
+        header_speaker_rect(reader.tip_width),
         reader._tip_xy,
         reader._tip_scroll,
         reader._tip_view_h,
@@ -413,18 +392,12 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the base tooltip. Returns True if it did."""
     if reader._tip_rect is None or not reader._in_rect(reader._tip_rect, x, y):
         return False
-    # Header ⊕/🔊 are specific top-right affordances — they win over the general dict-tab band,
-    # which spans the full width and would otherwise steal a click that overlaps them.
     if hit_header_add(reader, x, y):
         reader.mine_current()  # ⊕ → mine the hovered word into Anki
         return True
     if hit_header_speaker(reader, x, y):
         reader.speak_hovered()  # 🔊 → hear the word (TTS)
         return True
-    for rect, off in zip(reader._tab_rects, reader._tab_offsets, strict=False):
-        if reader._in_rect(rect, x, y):  # dict tab → jump the viewport to that section
-            scroll_to_section(reader, off)
-            return True
     lb = reader._link_hit(x, y, reader._tip_state, reader._tip_xy, reader._tip_scroll)
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
@@ -456,14 +429,10 @@ def panel_key(
     inflected,
     *,
     mined: bool = False,
-    tabs: bool = True,
     phrase: tuple[str, ...] = (),
 ) -> PanelKey:
     # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
-    # ``tabs`` is the (visual) dict-tab reserve — part of the key so a reserve/no-reserve build of the
-    # same word can't share a cache entry. ``phrase`` is the base word's stacked multi-token terms
-    # (empty for nested/prefetch) — passed in, NOT derived from tabs: the dict-tab strip is off by
-    # default (visual flavor), which must not disable phrase stacking.
+    # ``phrase`` is the base word's stacked multi-token terms (empty for nested/prefetch).
     return PanelKey(
         tok.lemma,
         tok.surface,
@@ -472,7 +441,6 @@ def panel_key(
         reader.tip_width,
         anki_ok(reader),
         mined,
-        tabs,
         group_mined_of(reader=reader, tok=tok, extra_terms=phrase),
         # the stacked phrase terms are part of the base panel's identity (数 alone vs 数 under 数ある)
         phrase,
@@ -597,12 +565,6 @@ def entry_for_tok(reader: Reader, tok, inflected, *, extra_terms: tuple[str, ...
     return entry
 
 
-def finish_available(reader: Reader) -> bool:
-    """A running prefetch worker can render a tooltip's deferred tail. Without one (prefetch off,
-    or before the workers start) we finish synchronously so a partial panel never gets stuck."""
-    return bool(reader.prefetch and reader._prefetch_threads)
-
-
 def _build_panel(
     reader: Reader,
     _key: PanelKey,
@@ -610,17 +572,14 @@ def _build_panel(
     inflected,
     *,
     mined: bool,
-    tabs: bool,
     nested: bool = False,
     extra_terms: tuple[str, ...] = (),
-) -> TipPanel:
+) -> Panel:
     if otel_metrics.panel_cache_misses is not None:
         otel_metrics.panel_cache_misses.add(1)
-    # kind is the base/nested IDENTITY (an explicit flag, NOT ``tabs``): ``show_dict_tabs`` is visual
-    # flavor and off by default, so a base tooltip can legitimately build with tabs=False — that must
-    # not mislabel it as nested. during_scroll flags a render triggered by the scan-hit-test recomputing
-    # which cell is under a STATIONARY cursor after content moved under it (a nested popup opening as a
-    # side effect of scrolling the base tooltip in the same poll tick), not from the user moving the mouse.
+    # kind is the base/nested IDENTITY. during_scroll flags a render triggered by the scan-hit-test
+    # recomputing which cell is under a STATIONARY cursor after content moved under it (a nested popup
+    # opening as a side effect of scrolling the base tooltip in the same poll tick), not a mouse move.
     with otel_metrics.instrumented(
         otel_metrics.render_duration_ms,
         "render",
@@ -630,17 +589,7 @@ def _build_panel(
         # The base tooltip stacks the hovered word's longer phrase terms (passed in); nested popups
         # (inner scanned words) and prefetch pass none and look up the bare word only.
         entry = entry_for_tok(reader=reader, tok=tok, inflected=inflected, extra_terms=extra_terms)
-        # Reserve space for the sticky tab strip (base tooltip, ≥2 sections, tabs on) so it clears
-        # the header (reading + ⊕/🔊) instead of overlapping it. Sections are the per-reading stacked
-        # entries when grouped, else the dict names; use the WRAPPED height for those labels at this
-        # width so a strip that wraps onto several rows reserves enough. Nested popups reserve nothing.
-        sections = (
-            [g.reading for g in entry.groups] if entry.groups else [d.dict_name for d in entry.defs]
-        )
-        reserve = (
-            tab_strip_height(sections, reader.tip_width) if (tabs and len(sections) >= 2) else 0
-        )
-        lazy = LazyPanel(
+        return Panel.from_rows(
             panel_rows(
                 entry,
                 reader.tip_width,
@@ -650,28 +599,8 @@ def _build_panel(
                 group_mined=_key.group_mined,
             ),
             reader.tip_width,
-            top_reserve=reserve,
+            getattr(entry, "reading", "") or tok.reading,
         )
-        st = TipPanel(lazy, getattr(entry, "reading", "") or tok.reading)
-        if reader._banded:  # windowed renderer over the SAME rows (fresh thunks, cheap to rebuild)
-            from overlay.render.banded import WindowedPanel
-
-            st.windowed = WindowedPanel(
-                panel_rows(
-                    entry,
-                    reader.tip_width,
-                    add_button=anki_ok(reader),
-                    mined=mined,
-                    speak_button=reader._tts_ok,
-                    group_mined=_key.group_mined,
-                ),
-                reader.tip_width,
-                top_reserve=reserve,
-                # Injected, not imported by banded.py itself — overlay.body_block depends on
-                # render.document, so a module-level import inside render/ would cycle.
-                render_block_fn=render_body_block,
-            )
-        return st
 
 
 def _panel_cache_get(
@@ -681,10 +610,9 @@ def _panel_cache_get(
     inflected,
     *,
     mined: bool,
-    tabs: bool,
     nested: bool = False,
     extra_terms: tuple[str, ...] = (),
-) -> TipPanel:
+) -> Panel:
     st = reader._panel_cache.get(key)
     if st is None:
         st = _build_panel(
@@ -693,7 +621,6 @@ def _panel_cache_get(
             tok,
             inflected,
             mined=mined,
-            tabs=tabs,
             nested=nested,
             extra_terms=extra_terms,
         )
@@ -717,20 +644,15 @@ def panel_for(
     inflected=None,
     min_h: int | None = None,
     *,
-    finish: bool = False,
     mined: bool | None = None,
-    tabs: bool | None = None,
     nested: bool = False,
     extra_terms: tuple[str, ...] = (),
-):
-    """The memoised :class:`TipPanel` for a token. ``finish`` renders the whole entry (prefetch /
-    no-worker path); otherwise only the head that fills ``min_h`` px is rendered now (viewport-first)
-    and the tail is deferred. Re-hovering is instant and scrolling is cheap. ``mined`` (default: look
-    it up) selects the ⊕ vs ✓ header variant and is part of the cache key. ``tabs`` (default: the
-    ``show_dict_tabs`` config) reserves + will draw the sticky dict-tab strip — visual flavor, off by
-    default. ``nested`` is the base/nested IDENTITY (drives the perf ``kind`` label), kept separate from
-    ``tabs`` so a strip-off base tooltip isn't misrecorded as nested. A nested popup passes ``tabs=False,
-    nested=True``.
+) -> Panel:
+    """The memoised :class:`Panel` for a token: warm + measure the head that fills ``min_h`` px now;
+    the windowed engine composites the rest on scroll. Re-hovering is instant and scrolling is cheap.
+    ``mined`` (default: look it up) selects the ⊕ vs ✓ header variant and is part of the cache key.
+    ``nested`` is the base/nested IDENTITY (drives the perf ``kind`` label); a nested popup passes
+    ``nested=True``.
 
     Thread-safe: the panel is *built* lock-free (thread-local DB conns + fonts, each render owns its
     images), and only the tiny cache write/LRU update is locked. On a free-threaded (no-GIL) build,
@@ -738,20 +660,15 @@ def panel_for(
     Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
     if mined is None:
         mined = is_mined(reader, tok)
-    if tabs is None:
-        tabs = reader.show_dict_tabs
-    key = panel_key(reader, tok, inflected, mined=mined, tabs=tabs, phrase=extra_terms)
+    key = panel_key(reader, tok, inflected, mined=mined, phrase=extra_terms)
     st = _panel_cache_get(
-        reader, key, tok, inflected, mined=mined, tabs=tabs, nested=nested, extra_terms=extra_terms
+        reader, key, tok, inflected, mined=mined, nested=nested, extra_terms=extra_terms
     )
-    if finish:
-        st.finish()
-    else:
-        st.render_head(min_h if min_h is not None else reader._tip_cap())
+    st.render_head(min_h if min_h is not None else reader._tip_cap())
     return st
 
 
-def panel_cache_setdefault(reader: Reader, key: PanelKey, st: TipPanel) -> TipPanel:
+def panel_cache_setdefault(reader: Reader, key: PanelKey, st: Panel) -> Panel:
     """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over the cap.
     Must be called under ``reader._cache_lock``. First-writer-wins: if two workers race to build
     the same panel, the winner's result is kept and the loser is discarded (both are equivalent)."""
@@ -803,28 +720,14 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     tok = reader.tokens[index]
     inflected = reader._inflected_surface(index)
     cap = reader._tip_cap()
-    # Viewport-first: paint only the head that fills the viewport now; a worker renders the tail.
-    # Without a worker (prefetch off) finish synchronously so the panel is never left partial.
+    # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
+    # windowed engine composites the rest on scroll with overscan look-ahead.
     mined = is_mined(reader, tok)
     phrase = reader._hover_terms
     key = panel_key(reader, tok, inflected, mined=mined, phrase=phrase)
     reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
-    # Banded lazy path: render only the head blob (for shape/placement) and let the windowed engine
-    # composite the rest on scroll with overscan look-ahead — never eagerly finish the whole tail. The
-    # dict-tab strip is the one feature that still needs the full lazy layout (its section offsets), so
-    # tabs-on keeps the eager finish; tabs-off (the default) goes lazy.
-    lazy_tail = reader._banded and not reader.show_dict_tabs
-    st = panel_for(
-        reader,
-        tok,
-        inflected,
-        min_h=cap,
-        finish=(not lazy_tail) and not reader._finish_available(),
-        mined=mined,
-        extra_terms=phrase,
-    )
-    reader._tip_state, reader._tip_key, reader._tip_dirty = st, key, False
-    reader._tip_bgra = st.bgra()  # decompress the cached panel into the active scroll buffer
+    st = panel_for(reader, tok, inflected, min_h=cap, mined=mined, extra_terms=phrase)
+    reader._tip_state, reader._tip_key = st, key
     reader._hover_reading = st.reading
     reader._tip_scroll = 0
     log.debug(
@@ -840,16 +743,13 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     wx, wy = ox + b.x, oy + b.y
     # Safe area: keep clear of the OSC/window header at the top and the controls/edge at the bottom,
     # so the tooltip never spills under the window chrome. It scrolls, so we cap the height rather
-    # than trying to fit the whole (very tall) entry.
-    assert st.ready  # head render above guarantees the panel is stored
-    ph, pw = st.shape[0], st.shape[1]
+    # than trying to fit the whole (very tall) entry. full_height is the windowed engine's estimate,
+    # exact once the head measured the whole panel (short entry), converging otherwise.
+    ph, pw = st.full_height, st.width
     reader._tip_view_h = min(ph, cap)
     reader._tip_xy = place_panel(reader, pw, wx, wy, b.h, reader._tip_view_h)
-    update_tabs(reader)
     render_tip_view(reader)
-    reader._bind_tip_keys()  # LEFT/RIGHT/UP/DOWN/ESC live only while the tip shows
-    if not lazy_tail and not st.complete:
-        reader._finish_q.put(FinishItem(st, key))  # blob/tabs path: worker fills the tail → refresh
+    reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
     if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
         reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format; freeze the frame while you read
         reader._paused_by_tip = True
@@ -873,48 +773,21 @@ def place_panel(
     return int(tx), int(ty)
 
 
-def refresh_tip_full(reader: Reader) -> None:
-    """A background finish grew the shown panel (deferred bodies rendered) → re-upload the view so
-    the scrollbar reflects the true height and the below-the-fold content is scrollable."""
-    st = reader._tip_state
-    if st is None or not st.ready:
-        return
-    reader._tip_bgra = st.bgra()  # re-decompress the grown panel into the active scroll buffer
-    update_tabs(reader)  # the streamed tail may add sections / move offsets
-    render_tip_view(reader)
-
-
-def blit_panel(reader: Reader, bgra, scroll: int, view_h: int, xy, oid: int, header=None):
-    """Upload a scrolled viewport slice of a premultiplied BGRA panel to an OSD overlay, drawing a
-    scrollbar thumb when the panel is taller than the viewport. ``header`` is an opaque BGRA strip
-    composited over the TOP of the viewport — the sticky dict-tab row. Returns the shown screen rect."""
-    full_h = bgra.shape[0]
+def blit_panel(reader: Reader, panel: Panel, scroll: int, view_h: int, xy, oid: int):
+    """Composite the ``[y0, y0+vh)`` viewport from the windowed engine (O(viewport)) and decorate +
+    upload it. ``overscan`` renders one viewport of blocks BELOW the fold and keeps them warm, so the
+    next wheel notch composites without a hot-path render. The sole popup blit — base and nested."""
+    full_h = panel.full_height
     vh = min(view_h, full_h)
     y0 = max(0, min(scroll, max(0, full_h - vh)))
-    view = bgra[y0 : y0 + vh].copy()  # cheap slice of the pre-converted panel
-    return decorate_and_upload(reader, view, y0, full_h, xy, oid, header)
+    view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
+    return decorate_and_upload(reader, view, y0, full_h, xy, oid)
 
 
-def blit_panel_banded(
-    reader: Reader, wp, scroll: int, view_h: int, xy, oid: int, full_h: int, header=None
-):
-    """Banded path: composite the ``[y0, y0+vh)`` viewport straight from the windowed engine
-    (O(viewport)) instead of slicing a whole-panel blob, then decorate + upload identically. Yields
-    the same pixels as :func:`blit_panel` at every offset (windowed==crop parity). ``overscan`` renders
-    one viewport of blocks BELOW the fold and keeps them, so the next wheel notch composites a warm
-    window — cheap look-ahead that replaces the eager whole-panel finish()."""
-    vh = min(view_h, full_h)
-    y0 = max(0, min(scroll, max(0, full_h - vh)))
-    view = to_bgra_array(wp.viewport(y0, vh, overscan=vh))  # exact viewport + one screen look-ahead
-    return decorate_and_upload(reader, view, y0, full_h, xy, oid, header)
-
-
-def decorate_and_upload(reader: Reader, view, y0: int, full_h: int, xy, oid: int, header=None):
-    """Draw the sticky header, the scrollbar thumb, and the copy-flash border onto a viewport-sized
-    BGRA array, then upload it. Shared by the blob-slice and windowed-composite paths."""
+def decorate_and_upload(reader: Reader, view, y0: int, full_h: int, xy, oid: int):
+    """Draw the scrollbar thumb and the copy-flash border onto a viewport-sized BGRA array, then
+    upload it."""
     vh, full_w = view.shape[0], view.shape[1]
-    if header is not None and header.shape[0] < view.shape[0]:
-        view[: header.shape[0], : header.shape[1]] = header  # opaque → occludes scrolled rows
     if full_h > vh:  # scrollbar thumb (premultiplied BGRA gray)
         track = vh - 8
         th = max(28, int(track * vh / full_h))
@@ -929,93 +802,12 @@ def decorate_and_upload(reader: Reader, view, y0: int, full_h: int, xy, oid: int
     return (tx, ty, full_w, view.shape[0])
 
 
-# --- per-dictionary tabs -----------------------------------------------------------------------
-
-
-def update_tabs(reader: Reader) -> None:
-    """Recompute the dict-tab sections from the shown panel (≥2 sections → tabs). Off entirely when
-    ``show_dict_tabs`` is disabled — the panel is then built without the reserve too, so drawing a
-    strip would overlap content."""
-    st = reader._tip_state
-    offs = st.lazy.section_offsets() if (st is not None and reader.show_dict_tabs) else []
-    if len(offs) >= 2:
-        reader._tab_names = [name for name, _ in offs]
-        reader._tab_offsets = [y for _, y in offs]
-    else:
-        reader._tab_names, reader._tab_offsets, reader._tab_rects = [], [], []
-        reader._tab_bgra, reader._tab_h = None, 0
-    reader._tab_active = -1  # force a strip + screen-rect rebuild on the next render
-
-
-def active_section(reader: Reader) -> int:
-    """Index of the section the viewport currently shows (for the highlighted tab)."""
-    active = 0
-    for i, off in enumerate(reader._tab_offsets):
-        if off <= reader._tip_scroll + reader._tab_h + 1:
-            active = i
-    return active
-
-
-def scroll_to_section(reader: Reader, offset: int) -> None:
-    if reader._tip_bgra is None:
-        return
-    maxs = max(0, reader._tip_bgra.shape[0] - reader._tip_view_h)
-    # the FIRST section's target is the panel top (headword visible); later sections tuck their
-    # def-head just under the sticky tab row
-    target = (
-        0 if (reader._tab_offsets and offset <= reader._tab_offsets[0]) else offset - reader._tab_h
-    )
-    reader._tip_scroll = min(maxs, max(0, target))
-    reader._hide_at = 0.0  # navigating counts as interacting
-    reader._scan_target = None
-    render_tip_view(reader)
-
-
-def tab_step(reader: Reader, delta: int) -> None:
-    if not reader._tab_offsets:
-        return
-    idx = max(0, min(len(reader._tab_offsets) - 1, active_section(reader) + delta))
-    scroll_to_section(reader, reader._tab_offsets[idx])
-
-
 def render_tip_view(reader: Reader) -> None:
-    if reader._tip_bgra is None:
-        return
-    header = None
-    if reader._tab_names:
-        active = active_section(reader)
-        if active != reader._tab_active or reader._tab_bgra is None:
-            reader._tab_active = active
-            img, rects = render_tab_row(reader._tab_names, active, int(reader._tip_bgra.shape[1]))
-            reader._tab_bgra = to_bgra_array(img)
-            reader._tab_h = img.height
-            tx, ty = reader._tip_xy
-            reader._tab_rects = [(tx + x, ty + y, w, h) for x, y, w, h in rects]
-        header = reader._tab_bgra
-    wp = reader._tip_state.windowed if reader._tip_state is not None else None
-    if reader._banded and wp is not None:  # composite the viewport from the windowed engine
-        # lazy tail (tabs off): estimated full height from the windowed engine (no eager blob), converging
-        # as blocks render. tabs-on finished the whole blob, so use its exact height.
-        full_h = wp.full_height if not reader.show_dict_tabs else int(reader._tip_bgra.shape[0])
-        reader._tip_rect = blit_panel_banded(
-            reader,
-            wp,
-            reader._tip_scroll,
-            reader._tip_view_h,
-            reader._tip_xy,
-            OverlayId.TIP,
-            full_h,
-            header=header,
-        )
+    st = reader._tip_state
+    if st is None:
         return
     reader._tip_rect = blit_panel(
-        reader,
-        reader._tip_bgra,
-        reader._tip_scroll,
-        reader._tip_view_h,
-        reader._tip_xy,
-        OverlayId.TIP,
-        header=header,
+        reader, st, reader._tip_scroll, reader._tip_view_h, reader._tip_xy, OverlayId.TIP
     )
 
 
@@ -1024,17 +816,12 @@ def scroll_tip(reader: Reader, delta: int) -> None:
     if reader._nest.rect is not None and reader._in_rect(reader._nest.rect, *reader._last_mouse):
         reader._scroll_nested(delta)
         return
-    if reader._tip_bgra is None:
+    st = reader._tip_state
+    if st is None:
         return
-    wp = reader._tip_state.windowed if reader._tip_state is not None else None
-    # clamp to the windowed full height (converging estimate) when lazy — the head blob is only the first
-    # viewport. tabs-on finished the whole blob, so its height is exact.
-    full_h = (
-        wp.full_height
-        if (reader._banded and wp is not None and not reader.show_dict_tabs)
-        else reader._tip_bgra.shape[0]
-    )
-    maxs = max(0, full_h - reader._tip_view_h)
+    # clamp to the windowed full height (converging estimate) — the head is only the first viewport,
+    # so the windowed engine owns the true (growing) height.
+    maxs = max(0, st.full_height - reader._tip_view_h)
     ns = min(maxs, max(0, reader._tip_scroll + delta))
     if ns != reader._tip_scroll:
         reader._tip_scroll = ns
@@ -1055,11 +842,4 @@ def scan_hit(reader: Reader, mx: float, my: float):
     sx, sy = reader._tip_xy
     px = mx - sx
     py = (my - sy) + reader._tip_scroll
-    if (
-        reader._banded and st.windowed is not None
-    ):  # windowed hit-test (retained per-block geometry)
-        return st.windowed.scan_hit(int(px), int(py))
-    for sb in st.lazy.scan_boxes:
-        if sb.x <= px < sb.x + sb.w and sb.y <= py < sb.y + sb.h:
-            return sb
-    return None
+    return st.windowed.scan_hit(int(px), int(py))  # windowed hit-test (retained per-block geometry)

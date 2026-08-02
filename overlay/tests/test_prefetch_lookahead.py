@@ -124,7 +124,7 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
 
     class _Panel:
         def __init__(self, n):
-            self.packed_nbytes = n
+            self.retained_nbytes = n
 
     r._panel_cache["a"] = _Panel(100)
     r._panel_cache["b"] = _Panel(250)
