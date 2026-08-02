@@ -410,6 +410,12 @@ vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --pytho
 # which is what this profile is for. (For a true free-threaded sample py-spy is out; a nogil-aware
 # sampler would be needed.)
 vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --parallel --reps 3\"" }
+# TIMELINE: a realistic idle-paced session — real-time dwell between cues, prefetch/lookahead warming
+# ahead of hovers. Dwell-paced → the process is mostly SLEEPING, so on-CPU samples are sparse; the
+# bench's OWN report (misses / worker lead time / warm-vs-cold) is the primary SCHEDULING signal — does
+# prefetch keep ahead? py-spy just shows where the prefetch+render CPU goes. --rate 500 to catch enough
+# active samples; add `--timeline-dwell-s 0.05` for a dense CPU profile at the cost of realism.
+timeline-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/timeline-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --timeline --timeline-cues 120 --timeline-head-prefetch 1 --timeline-lookahead 2\"" }
 # Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
 # controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the
