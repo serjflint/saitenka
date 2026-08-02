@@ -373,7 +373,7 @@ timeline-bench = { shell = "PYTHON_GIL=0 uv run --extra full python examples/ben
 # with the banded (windowed) render path on (SAITENKA_BANDED=1 flips reader._banded, no config file) —
 # the only bench that mirrors a live session's hover-warmth + worker keep-ahead. Use it to measure the
 # engaged head-first render fix against the report baseline (2.8s full renders → queue-11 backlog).
-timeline-bench-banded = { shell = "SAITENKA_BANDED=1 PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline --timeline-head-prefetch 1 --timeline-lookahead 2" }
+timeline-bench-banded = { shell = "PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline --timeline-head-prefetch 1 --timeline-lookahead 2" }
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
 # No PYTHON_GIL=0 — the smoke tests input→OSD mapping, not free-threading, and forcing the GIL off is a
 # fatal `config_read_gil` error on a non-free-threaded interpreter (the E2E leg pins 3.13 for fugashi wheels).

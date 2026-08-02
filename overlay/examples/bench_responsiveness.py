@@ -272,7 +272,12 @@ def _timeline_scorer(words: list[list[str]]):
     from overlay.app.wordlists import KnownWords
 
     known = {w[0] for i, w in enumerate(words) if i % 8 != 0}
-    return Scorer(known=KnownWords(known), min_sentence_words=1)
+    # Surface-known with the "" (no-reading-taught) sentinel → matches any reading, i.e. the old flat
+    # set's unconditional-known semantics under the reading-aware KnownWords.
+    return Scorer(
+        known=KnownWords(by_surface={surface: {""} for surface in known}, readings=set()),
+        min_sentence_words=1,
+    )
 
 
 def _cold_reader(ds):
@@ -864,12 +869,10 @@ def run_timeline(
             tok = reader.tokens[idx]
             lemma = tok.lemma
             was_warm = lemma in warmed_at
-            # Mirror how panel_for() itself resolves the key (tabs = reader.show_dict_tabs, mined via
-            # the same main-thread-only path) so this check reflects the REAL cache panel_for() reads.
+            # Mirror how panel_for() itself resolves the key (mined via the same main-thread-only path)
+            # so this check reflects the REAL cache panel_for() reads.
             mined = reader._is_mined(tok)
-            key = reader._panel_key(
-                tok, reader._inflected_surface(idx), mined=mined, tabs=reader.show_dict_tabs
-            )
+            key = reader._panel_key(tok, reader._inflected_surface(idx), mined=mined)
             panel_already_warm = key in reader._panel_cache
             hovers += 1
             t0 = time.perf_counter()
