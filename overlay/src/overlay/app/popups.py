@@ -71,6 +71,14 @@ class Panel:
         renders one screen of blocks below the fold and keeps them warm for the next wheel notch."""
         return to_bgra_array(self.windowed.viewport(scroll, view_h, overscan=overscan))
 
+    def render_ahead(self, scroll: int, view_h: int, *, direction: int, should_cancel) -> int:
+        """Warm the blocks just beyond the viewport in the scroll ``direction`` — the off-main-thread
+        counterpart to :meth:`viewport`'s synchronous ``overscan``. ``overscan=view_h`` starts the
+        warm past the screen the blit already rendered, so a fast scroll finds them cached."""
+        return self.windowed.render_ahead(
+            scroll, view_h, direction=direction, overscan=view_h, should_cancel=should_cancel
+        )
+
 
 class PopupView:
     """State for one popup view — today the nested scan popup (a tooltip opened by hovering a word

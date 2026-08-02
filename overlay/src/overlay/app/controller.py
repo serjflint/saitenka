@@ -89,6 +89,7 @@ from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
+    from overlay.app.prefetch import RenderAheadReq
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
     from overlay.mpvio.ipc import MpvIPC
@@ -224,6 +225,11 @@ class Reader:
         )  # tiny lock: only the cache dict mutation (build is lock-free)
         self._prefetch_q: queue.Queue = queue.Queue()
         self._prefetch_gen = 0  # bumped on line change / resume / seek → cancels in-flight
+        # Scroll-ahead: a single slot (newest scroll wins) the prefetch worker drains to render the
+        # blocks just beyond the visible tooltip OFF the main thread, so the next notch composites a
+        # warm block instead of rasterising it on the scroll frame. Guarded by its own tiny lock.
+        self._render_ahead_req: RenderAheadReq | None = None
+        self._render_ahead_lock = threading.Lock()
         self._prefetch_key: tuple[str, bool] | None = None
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
