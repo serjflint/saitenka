@@ -34,6 +34,20 @@ class FakeIPC:
         return []
 
 
+def test_hover_view_snapshots_the_hover_stack():
+    r = Reader(FakeIPC())
+    r._paused_by_tip = True
+    r._nav_idx = 4
+    r._scan_target = "本"
+    r._nest.word = "読"
+    view = r.hover_view()
+    assert (view.paused, view.nav_idx, view.scan_target) == (True, 4, "本")
+    assert view.nested.word == "読"
+    # a frozen point-in-time copy: later mutation of the reader must not leak into a taken snapshot
+    r._paused_by_tip = False
+    assert view.paused is True
+
+
 def test_keybinds_use_single_string_command():
     # mpv `keybind` needs (keybind, KEY, "script-message <msg>") — one command string, not split args.
     ipc = FakeIPC()
@@ -378,12 +392,14 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
     r.set_subtitle("いち")  # cue 1
     ipc.props["sub-start"] = 1.0
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.sub_text == "に" and r._nav_idx == 1  # rendered target, chaining hint set
+    assert r.sub_text == "に" and r.hover_view().nav_idx == 1  # rendered target, chaining hint set
     r._reconcile_sub_text("いち")  # mpv transiently re-reports the pre-nav cue mid-seek
     assert r.sub_text == "に"  # swallowed — no revert flash
-    assert r._nav_idx == 1  # and, unlike a real set_subtitle call, chaining survives
+    assert r.hover_view().nav_idx == 1  # and, unlike a real set_subtitle call, chaining survives
     r._reconcile_sub_text("に")  # mpv settles on the matching (already-rendered) cue
-    assert r.sub_text == "に" and r._nav_idx == 1  # a no-op match — still doesn't reset the hint
+    assert (
+        r.sub_text == "に" and r.hover_view().nav_idx == 1
+    )  # a no-op match — still doesn't reset the hint
 
 
 def test_reader_has_subtitle_state_before_any_cue():
@@ -547,7 +563,7 @@ def test_transit_over_word_does_not_switch(monkeypatch):
     mouse(5, 50)  # brush word 1 briefly (transit)
     clock[0] += 0.03
     mouse(130, 130)  # arrive at the tooltip
-    assert r.hover == 0 and r._hide_at == 0.0  # never hijacked; tooltip alive
+    assert r.hover == 0 and r.hover_view().tip.hide_at == 0.0  # never hijacked; tooltip alive
 
 
 def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
@@ -566,16 +582,16 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
         r._update_hover()
 
     mouse(5, 5)  # on the word → hovered, no pending hide
-    assert r.hover == 0 and r._hide_at == 0.0
+    assert r.hover == 0 and r.hover_view().tip.hide_at == 0.0
 
     mouse(300, 300)  # left the word → schedule hide, still shown
-    assert r.hover == 0 and r._hide_at == 1000.0 + r.hide_delay
+    assert r.hover == 0 and r.hover_view().tip.hide_at == 1000.0 + r.hide_delay
 
     mouse(120, 120)  # reached the tooltip in time → stays alive
-    assert r._hide_at == 0.0 and r.hover == 0
+    assert r.hover_view().tip.hide_at == 0.0 and r.hover == 0
 
     mouse(300, 300)  # leave everything → reschedule hide
-    assert r._hide_at > 0.0
+    assert r.hover_view().tip.hide_at > 0.0
     clock[0] += r.hide_delay + 0.1  # …and let it elapse
     mouse(300, 300)
     assert seen[-1] == -1  # hidden only after the delay
@@ -695,7 +711,7 @@ def test_pause_on_tooltip_respects_manual_pause():
     ipc.props["pause"] = True  # user already paused
     r = _reader_with_word(ipc)
     r._show_tooltip(0)
-    assert not r._paused_by_tip  # never took ownership → won't resume
+    assert not r.hover_view().paused  # never took ownership → won't resume
 
 
 def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
@@ -804,7 +820,7 @@ def test_hover_off_window_still_lingers(monkeypatch):
     monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
     ipc.props["mouse-pos"] = {"hover": False, "x": -1, "y": -1}  # cursor left the window
     r._update_hover()
-    assert r.hover == 0 and r._hide_at > 0.0  # scheduled, not instant
+    assert r.hover == 0 and r.hover_view().tip.hide_at > 0.0  # scheduled, not instant
 
 
 class _TallDS:
@@ -845,7 +861,9 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     wp = r._tip_state.windowed
     assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
     assert r._tip_view_h >= r._tip_cap() - 1  # …but the viewport is fully covered
-    assert r._tip_state.full_height >= r._tip_view_h  # estimate at least fills the viewport
+    assert (
+        r.hover_view().tip.state.full_height >= r._tip_view_h
+    )  # estimate at least fills the viewport
     before = wp.measured
     r._scroll_tip(r._tip_state.full_height)  # wheel toward the bottom
     assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
@@ -985,9 +1003,9 @@ def test_hover_inner_word_opens_nested_popup(monkeypatch):
     r.set_hover(0)  # base tooltip on the subtitle word
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
-    assert r._nest.state is not None  # a nested popup opened…
-    assert r._nest.rect is not None
-    assert r._nest.word.startswith("追")  # …for the inner word under the cursor
+    assert r.hover_view().nested.state is not None  # a nested popup opened…
+    assert r.hover_view().nested.rect is not None
+    assert r.hover_view().nested.word.startswith("追")  # …for the inner word under the cursor
 
 
 def test_nested_scan_waits_for_dwell(monkeypatch):
@@ -1000,13 +1018,13 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
-    assert r._nest.state is None  # just arrived — nothing opens yet
+    assert r.hover_view().nested.state is None  # just arrived — nothing opens yet
     clock[0] += 0.1
     r._update_hover()
-    assert r._nest.state is None  # still settling
+    assert r.hover_view().nested.state is None  # still settling
     clock[0] += 0.2  # past the dwell now
     r._update_hover()
-    assert r._nest.state is not None  # opened only after the cursor rested
+    assert r.hover_view().nested.state is not None  # opened only after the cursor rested
 
 
 def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
@@ -1029,12 +1047,14 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
 
     hover(boxes[0])
     r._update_hover()
-    assert r._scan_target == boxes[0].text and r._scan_since == 1000.0
+    assert r.hover_view().scan_target == boxes[0].text and r._scan_since == 1000.0
     clock[0] += 0.2  # drift to a different cell before the dwell elapses
     hover(boxes[1])
     r._update_hover()
-    assert r._scan_target == boxes[1].text and r._scan_since == 1000.2  # timer restarted
-    assert r._nest.state is None  # no popup fired mid-drift
+    assert (
+        r.hover_view().scan_target == boxes[1].text and r._scan_since == 1000.2
+    )  # timer restarted
+    assert r.hover_view().nested.state is None  # no popup fired mid-drift
 
 
 def test_switch_base_word_drops_nested(monkeypatch):
@@ -1052,9 +1072,9 @@ def test_switch_base_word_drops_nested(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
-    assert r._nest.state is not None
+    assert r.hover_view().nested.state is not None
     r.set_hover(1)  # move to a different subtitle word
-    assert r._nest.state is None  # the stale scan popup is dropped
+    assert r.hover_view().nested.state is None  # the stale scan popup is dropped
 
 
 def test_nested_lingers_then_dismisses(monkeypatch):
@@ -1066,13 +1086,13 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
-    assert r._nest.state is not None
+    assert r.hover_view().nested.state is not None
     ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
     r._update_hover()
     assert r._nest.hide_at > 0  # scheduled, not instant
     clock[0] += r.hide_delay + 0.1
     r._update_hover()
-    assert r._nest.state is None  # dismissed after the linger
+    assert r.hover_view().nested.state is None  # dismissed after the linger
 
 
 def test_nested_add_button_mines_inner_word(monkeypatch):
@@ -1085,7 +1105,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
-    assert r._nest.token is not None
+    assert r.hover_view().nested.token is not None
     mined = []
     monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
     px, py, pw, ph = header_add_rect(r.tip_width)
@@ -1140,11 +1160,11 @@ def test_click_cross_reference_opens_target_in_nested(monkeypatch):
     r = _link_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    assert r._tip_state.windowed.link_boxes()  # the def body exposed a clickable link
+    assert r.hover_view().tip.state.windowed.link_boxes()  # the def body exposed a clickable link
     _point_at_link(r, ipc)
     r.on_click()
-    assert r._nest.state is not None  # a nested popup opened…
-    assert r._nest.word.startswith("見")  # …for the link's target term (見る)
+    assert r.hover_view().nested.state is not None  # a nested popup opened…
+    assert r.hover_view().nested.word.startswith("見")  # …for the link's target term (見る)
 
 
 class _WildcardDS:
@@ -1188,8 +1208,10 @@ def test_click_wildcard_link_opens_search_popup(monkeypatch):
         "y": sy + (lb.y - r._tip_scroll) + lb.h / 2,
     }
     r.on_click()
-    assert r._nest.state is not None and r._nest.word == "食べ*"  # opened a search-results popup
-    assert r._nest.token is None  # results aren't one word → ⊕ mine disabled
+    assert (
+        r.hover_view().nested.state is not None and r.hover_view().nested.word == "食べ*"
+    )  # opened a search-results popup
+    assert r.hover_view().nested.token is None  # results aren't one word → ⊕ mine disabled
     assert (
         r._nest.state.windowed.link_boxes()[0].query == "食べる"
     )  # each result drills into an exact term
@@ -1219,7 +1241,9 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    assert r._tip_state.windowed.link_boxes() == []  # external link → no clickable region
+    assert (
+        r.hover_view().tip.state.windowed.link_boxes() == []
+    )  # external link → no clickable region
 
 
 def test_nested_popup_shrinks_to_stay_above_inner_word():
@@ -1254,9 +1278,9 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     r.set_hover(0)
     _point_at_link(r, ipc)  # cursor on the link cell
     r._update_hover()
-    assert r._nest.state is None  # hover did NOT open a scan popup over the link
+    assert r.hover_view().nested.state is None  # hover did NOT open a scan popup over the link
     r.on_click()  # …but a click still opens it
-    assert r._nest.state is not None and r._nest.word.startswith("見")
+    assert r.hover_view().nested.state is not None and r.hover_view().nested.word.startswith("見")
 
 
 def test_scroll_resets_scan_dwell(monkeypatch):
@@ -1267,10 +1291,10 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
-    assert r._scan_target is not None  # a scan target is settling
+    assert r.hover_view().scan_target is not None  # a scan target is settling
     r._tip_view_h = 20  # make the panel scrollable
     r._scroll_tip(20)  # scrolling the panel…
-    assert r._scan_target is None  # …restarts the dwell so no popup fires mid-scroll
+    assert r.hover_view().scan_target is None  # …restarts the dwell so no popup fires mid-scroll
 
 
 def test_click_link_does_not_mine_or_speak(monkeypatch):
@@ -1285,7 +1309,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_link(r, ipc)
     r.on_click()
-    assert events == [] and r._nest.state is not None
+    assert events == [] and r.hover_view().nested.state is not None
 
 
 # --- copy: Shift+C (whole line) and right-click (word under cursor) + highlight flash ---------------
@@ -1460,9 +1484,9 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     r.anki = object()
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    assert r._tip_key.mined is False  # not mined yet → ⊕
+    assert r.hover_view().tip.key.mined is False  # not mined yet → ⊕
     r._mark_mined(card_for(r.tokens[0]).expression)
-    assert r._tip_key.mined is True  # tooltip rebuilt with ✓
+    assert r.hover_view().tip.key.mined is True  # tooltip rebuilt with ✓
 
 
 def test_seed_mined_preloads_deck_expressions():
@@ -1774,7 +1798,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     r = _scan_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)  # open a tooltip on the first subtitle
-    assert r._tip_rect is not None  # tooltip is shown
+    assert r.hover_view().tip.rect is not None  # tooltip is shown
     assert r.hover == 0
 
     # simulate a cue change while the tooltip is visible
@@ -1784,9 +1808,9 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     r.set_subtitle("別の字幕")
 
     assert C.TIP_ID in hidden  # tooltip was hidden
-    assert r._tip_rect is None  # _tip_rect reset
-    assert r._tip_state is None  # _tip_state reset
-    assert r._tip_key is None  # _tip_key reset
+    assert r.hover_view().tip.rect is None  # _tip_rect reset
+    assert r.hover_view().tip.state is None  # _tip_state reset
+    assert r.hover_view().tip.key is None  # _tip_key reset
     assert r.hover == -1  # hover index reset
 
 
@@ -1797,13 +1821,13 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
     r = _reader_with_word(ipc)  # pause_on_tooltip=True
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)  # opens tooltip and pauses mpv
-    assert r._paused_by_tip
+    assert r.hover_view().paused
 
     # new cue arrives
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 
-    assert not r._paused_by_tip
+    assert not r.hover_view().paused
     assert ("set_property", "pause", False) in ipc.commands
 
 
@@ -1875,14 +1899,14 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
-    assert r._nest.state is not None
+    assert r.hover_view().nested.state is not None
 
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 
-    assert C.NESTED_ID in hidden or r._nest.state is None  # nested cleared
+    assert C.NESTED_ID in hidden or r.hover_view().nested.state is None  # nested cleared
 
 
 # --- Stage 7c: event-driven property reads (observe_property instead of per-tick get_property) ----

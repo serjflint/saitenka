@@ -44,7 +44,7 @@ def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
     r._show_tooltip(_content_word(r))
     st = r._tip_state
     assert st is not None and st.windowed is not None  # the windowed engine composites the tooltip
-    assert r._tip_rect is not None  # first frame composited + uploaded without error
+    assert r.hover_view().tip.rect is not None  # first frame composited + uploaded without error
 
     wp = st.windowed
     assert wp.measured < wp.count  # lazy: show measured only the head, not the whole tall panel
@@ -53,7 +53,7 @@ def test_tooltip_renders_lazily_and_hit_tests_end_to_end():
     # Scrolling drives the windowed re-composite (and measures more blocks) without error.
     before = wp.measured
     r._scroll_tip(round(r.osd[1] * 0.12))
-    assert r._tip_scroll > 0 and r._tip_rect is not None
+    assert r._tip_scroll > 0 and r.hover_view().tip.rect is not None
     assert wp.measured >= before
 
     # Hit-testing: a point over a real scan cell resolves to that cell through the windowed path.

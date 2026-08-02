@@ -21,6 +21,7 @@ from overlay.app import (
     analysis_overlay,
     backlog,
     help_overlay,
+    hover_snapshot,
     miner_ui,
     nested_popup,
     prefetch,
@@ -356,6 +357,11 @@ class Reader:
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
+
+    def hover_view(self) -> hover_snapshot.HoverView:
+        """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
+        the public seam tests observe instead of the private ``_nest`` / ``_tip_*`` fields (#43)."""
+        return hover_snapshot.snapshot(self)
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
