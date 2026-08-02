@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-03
+
 ### Added
 
 - **Optional loudness normalization for mined audio (`[mine].normalize_audio`).** Off by default; when
