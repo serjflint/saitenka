@@ -207,10 +207,10 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         # coordinate space mpv reports mouse-pos in — the alignment the headless fakes can't see.
         tx, ty, tw, th = reader._tip_rect
         cx, cy = int(tx + tw / 2), int(ty + th / 2)
-        ow, ot, _on = _hover_targets(reader, cx, cy, inside=True)
-        assert ot and ow == -1, (
-            f"cursor over the tooltip must read over_tip (occlusion); got over_tip={ot} "
-            f"over_word={ow} — _tip_rect={reader._tip_rect} (windowed-renderer rect calc?)"
+        over_word, over_tip, _nest = _hover_targets(reader, cx, cy, inside=True)
+        assert over_tip and over_word == -1, (
+            f"cursor over the tooltip must read over_tip (occlusion); got over_tip={over_tip} "
+            f"over_word={over_word} — _tip_rect={reader._tip_rect} (windowed-renderer rect calc?)"
         )
 
         # real cursor onto the tooltip → the lease holds (hover stays on the aimed word, not hijacked)
@@ -239,10 +239,10 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
             reader.poll_once()
             time.sleep(0.02)
         sx, sy, sw, sh = reader._tip_rect
-        ow2, ot2, _ = _hover_targets(reader, int(sx + sw / 2), int(sy + sh / 2), inside=True)
-        assert ot2 and ow2 == -1, (
-            f"after scroll, tooltip centre must still read over_tip; got over_tip={ot2} "
-            f"over_word={ow2} — _tip_rect={reader._tip_rect} (post-scroll windowed rect calc?)"
+        word2, tip2, _ = _hover_targets(reader, int(sx + sw / 2), int(sy + sh / 2), inside=True)
+        assert tip2 and word2 == -1, (
+            f"after scroll, tooltip centre must still read over_tip; got over_tip={tip2} "
+            f"over_word={word2} — _tip_rect={reader._tip_rect} (post-scroll windowed rect calc?)"
         )
 
 
