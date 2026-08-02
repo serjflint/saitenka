@@ -297,5 +297,5 @@ def finish(reader: Reader) -> str | None:
     if recorder is None:
         return None
     reader._session_recorder = None
-    snapshot = recorder.finish(analysis=reader._episode_analysis)
+    snapshot = recorder.finish(analysis=reader.analysis.current)
     return summary(snapshot)

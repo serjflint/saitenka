@@ -150,7 +150,7 @@ def test_rows_use_shared_episode_analysis_when_ready():
     reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
     reader.sub_text = "私は本を読む。"
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
-    reader._episode_analysis = analyze_cues(list(reader._sub_index.cues), reader.scorer)
+    reader.analysis.current = analyze_cues(list(reader._sub_index.cues), reader.scorer)
 
     rows, _total = sidebar._track_rows(reader, 0, 1, 0)
 
@@ -162,7 +162,7 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader.jp_sid = 1
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
-    reader._episode_analysis = analyze_cues(list(reader._sub_index.cues), reader.scorer)
+    reader.analysis.current = analyze_cues(list(reader._sub_index.cues), reader.scorer)
     reader.sidebar.open = True
     reader._loading = True
     calls = _capture_render(monkeypatch)

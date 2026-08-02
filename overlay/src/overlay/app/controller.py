@@ -88,7 +88,6 @@ from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
-    from overlay.app.episode_analysis import AnalysisKey, EpisodeAnalysis
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
     from overlay.mpvio.ipc import MpvIPC
@@ -252,14 +251,7 @@ class Reader:
         self._subtitle_retry_lock = threading.Lock()
         self._backlog_store: backlog.BacklogStore | None = None
         self.sidebar = sidebar.SidebarState()
-        self._analysis_open = False
-        self._analysis_status = "Analyzing…"
-        self._episode_analysis: EpisodeAnalysis | None = None
-        self._analysis_cache: dict[AnalysisKey, EpisodeAnalysis] = {}
-        self._analysis_results: queue.SimpleQueue = queue.SimpleQueue()
-        self._analysis_threads: list[threading.Thread] = []
-        self._analysis_generation = 0
-        self._analysis_active_key: AnalysisKey | None = None
+        self.analysis = analysis_overlay.AnalysisState()
         self._session_recorder: SessionRecorder | None = None
         self._help_open = False
         self._help_page = 0
@@ -1193,7 +1185,7 @@ class Reader:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         for th in self._subtitle_fetch_threads:
             th.join(timeout=2.0)
-        for th in self._analysis_threads:
+        for th in self.analysis.threads:
             th.join(timeout=2.0)
         stats_summary = session_stats.finish(self)
         if stats_summary and self.options.stats.summary:
