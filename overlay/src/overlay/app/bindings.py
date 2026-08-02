@@ -43,8 +43,12 @@ TIP_UP_MSG = "saitenka-tip-up"
 TIP_DOWN_MSG = "saitenka-tip-down"
 TIP_CLOSE_MSG = "saitenka-tip-close"
 
-Scope = Literal["global", "tooltip", "help", "mpv", "preview"]
+Scope = Literal["global", "tooltip", "help", "mpv", "preview", "mouse"]
 Requirement = Literal["always", "anki", "tts"]
+
+# "mouse"-scoped bindings live in this FORCED mpv input section, enabled only while a saitenka surface
+# is up (controller._sync_mouse_capture) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
+MOUSE_SECTION = "saitenka-mouse"
 
 
 @dataclass(frozen=True)
@@ -151,12 +155,18 @@ BINDINGS: tuple[BindingSpec, ...] = (
         requires="anki",
     ),
     BindingSpec(
-        "Tooltip actions", "Scroll up", SCROLL_UP_MSG, key="WHEEL_UP", context="tooltip / sidebar"
+        "Tooltip actions",
+        "Scroll up",
+        SCROLL_UP_MSG,
+        scope="mouse",
+        key="WHEEL_UP",
+        context="tooltip / sidebar",
     ),
     BindingSpec(
         "Tooltip actions",
         "Scroll down",
         SCROLL_DOWN_MSG,
+        scope="mouse",
         key="WHEEL_DOWN",
         context="tooltip / sidebar",
     ),
@@ -177,6 +187,7 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Tooltip actions",
         "Activate control",
         CLICK_MSG,
+        scope="mouse",
         key="MBTN_LEFT",
         context="tooltip / sidebar",
     ),
@@ -184,6 +195,7 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Tooltip actions",
         "Copy word under pointer",
         COPY_CLICK_MSG,
+        scope="mouse",
         key="MBTN_RIGHT",
         context="tooltip",
     ),

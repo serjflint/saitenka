@@ -34,23 +34,55 @@ log = logging.getLogger(__name__)
 _DEPS_DAG_WIDTH = 4
 
 
+_ANKI_WATCH_S = 60.0  # background watcher's patience for an auto-launched Anki to answer
+
+
 def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -> None:
-    """If mining or Anki-backed coloring is configured, try to start Anki for the user (warn, never
-    block) so they don't have to remember to launch it before playing. ``on_unreachable`` lets an
-    interactive caller (``run``) print a console note instead of the default log-only warning
-    (``attach`` is detached, so logging is all it can do)."""
+    """If mining or Anki-backed coloring is configured and AnkiConnect isn't up, launch Anki
+    fire-and-forget and warn — never block startup on the poll. A background watcher (see
+    :func:`_spawn_anki_seed_watcher`) backfills mining once Anki answers, so the up-to-20s launch poll
+    stays off the dict/coloring critical path (it used to gate the whole dep build → apply_deps → the
+    'dictionaries loaded' feedback by the full wait). ``on_unreachable`` lets an interactive caller
+    (``run``) print a console note instead of the default log-only warning (``attach`` is detached)."""
     if not ((mine and mc) or known_cfg):
         return
-    from overlay.app.anki import ensure_anki_running
+    from overlay.app.anki import anki_reachable, launch_anki
 
     with otel_metrics.traced("anki_ensure_running"):
-        if not ensure_anki_running():
-            if on_unreachable is not None:
-                on_unreachable()
-            else:
-                log.warning(
-                    "Anki not reachable — coloring falls back to freq+JLPT, mining disabled"
-                )
+        if anki_reachable():
+            return
+        launch_anki()  # fire-and-forget; the seed watcher polls for it to come up
+        if on_unreachable is not None:
+            on_unreachable()
+        else:
+            log.warning("Anki not reachable — launching it; mining enables once it's up")
+
+
+def _anki_seed_watch(reader: Reader) -> None:
+    """Wait for AnkiConnect to answer, then flag the reader to backfill the mined ⊕→✓ set on its next
+    poll tick (:meth:`Reader._apply_pending_anki_seed`). Instant when Anki is already up; otherwise
+    polls the just-launched Anki up to ``_ANKI_WATCH_S`` and logs a console warning on timeout. The
+    seed itself must run on the main thread, so this only sets the cross-thread flag."""
+    from overlay.app.anki import anki_reachable, wait_until_anki_up
+
+    if anki_reachable():
+        reader._pending_anki_seed = True
+        return
+    if wait_until_anki_up(wait=_ANKI_WATCH_S):
+        log.info("Anki is up — mining enabled")
+        reader._pending_anki_seed = True
+    else:
+        log.warning(
+            "Anki didn't come up within %.0fs — mining stays off until you start it", _ANKI_WATCH_S
+        )
+
+
+def _spawn_anki_seed_watcher(reader: Reader) -> None:
+    """Fire-and-forget the Anki seed watcher on a daemon thread so it never holds up the poll loop or
+    shutdown."""
+    threading.Thread(
+        target=_anki_seed_watch, args=(reader,), name="saitenka-anki-seed", daemon=True
+    ).start()
 
 
 def _build_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_titles: list[str]):
@@ -354,8 +386,10 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     analysis_overlay.on_vocabulary_changed(reader)
     if reader.sub_text:  # re-tokenise + re-score the CURRENT cue so coloring appears now
         reader.set_subtitle(reader.sub_text)
-    if reader.anki:
-        reader._seed_mined()  # ⊕→✓ from past mining
+    if reader.anki is not None:
+        # Backfill ⊕→✓ from past mining once Anki answers — off the critical path so a not-yet-up
+        # (auto-launched) Anki never stalls startup; the watcher flips it on when Anki comes up.
+        _spawn_anki_seed_watcher(reader)
     reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
     reader._announce_runtime()  # workers are up now — print the banner with the real count (once)
 

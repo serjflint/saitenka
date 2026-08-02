@@ -13,6 +13,7 @@ requirement. Everything else — the Python interpreter, ffmpeg, the mpv plugin 
 | **[uv](https://docs.astral.sh/uv/)** | required | Provides the Python interpreter (3.13+) and dependencies. The install script bootstraps it for you. |
 | **[Anki](https://apps.ankiweb.net/)** + **[AnkiConnect](https://ankiweb.net/shared/info/2055492159)** | optional | FSRS-aware coloring and one-key mining. Without it you can still color from a manual known-word set. |
 | **[Yomitan](https://github.com/yomidevs/yomitan)** dictionaries | optional | Your own `.zip` dictionaries (or a full database export) drive the tooltip; [import them once](#dictionary-import). |
+| A curated **mpv config** — e.g. [Zabooby/mpv-config](https://github.com/Zabooby/mpv-config) | optional | Saitenka layers onto your own mpv setup: a UI/shader preset (uosc, thumbfast, Anime4K) coexists with it, and tooltip clicks are captured even when the preset force-binds the mouse. |
 
 !!! note "You don't need a clone"
     Both install paths fetch the published PyPI package — no `git clone`, no build step. Cloning is only

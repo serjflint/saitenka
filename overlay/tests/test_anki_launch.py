@@ -80,3 +80,40 @@ def test_find_anki_prefers_configured_executable(tmp_path):
     exe = tmp_path / "Anki custom.exe"
     exe.write_bytes(b"")
     assert anki_mod.find_anki({"anki": {"executable": str(exe)}}) == str(exe)
+
+
+def test_launch_anki_is_fire_and_forget_without_polling(monkeypatch):
+    launched = []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda cmd, **_k: launched.append(cmd))
+    reachable = []
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: reachable.append(True))
+    assert anki_mod.launch_anki() is True
+    assert launched == [["open", "-a", "Anki"]]
+    assert reachable == []  # launch never polls — that's the watcher's job
+
+
+def test_launch_anki_false_when_popen_fails(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def boom(*_a, **_k):
+        raise OSError("no such app")
+
+    monkeypatch.setattr(anki_mod.subprocess, "Popen", boom)
+    assert anki_mod.launch_anki() is False
+
+
+def test_wait_until_anki_up_true_on_first_reachable(monkeypatch):
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: True)
+    slept = []
+    monkeypatch.setattr(anki_mod.time, "sleep", slept.append)
+    assert anki_mod.wait_until_anki_up(wait=5) is True
+    assert slept == []  # already up on the first probe → no sleeping
+
+
+def test_wait_until_anki_up_false_on_timeout(monkeypatch):
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
+    monkeypatch.setattr(anki_mod.time, "sleep", lambda _s: None)
+    assert (
+        anki_mod.wait_until_anki_up(wait=0) is False
+    )  # deadline already passed → no launch, no hang

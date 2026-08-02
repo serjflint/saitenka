@@ -413,11 +413,28 @@ def on_click(reader: Reader) -> None:
     # Clicking an empty area does NOTHING: audio must not fire on a stray body click.
     mp = reader._get("mouse-pos") or {}
     x, y = mp.get("x", -1), mp.get("y", -1)
+    in_tip = reader._tip_rect is not None and reader._in_rect(reader._tip_rect, x, y)
     if reader._click_preview(x, y):
-        return
-    if _click_nested(reader, x, y):  # the nested popup sits on top → test it first
-        return
-    _click_tip(reader, x, y)
+        captured = "preview"
+    elif _click_nested(reader, x, y):  # the nested popup sits on top → test it first
+        captured = "nested"
+    elif _click_tip(reader, x, y):
+        captured = "tip"
+    else:
+        captured = "none"  # fell through — nothing under the click
+    # Diagnostic: correlate a click with whether it landed on the tip rect and the pause lease, so the
+    # report shows if a click while paused misses _tip_rect (mouse-pos↔OSD mismatch) or tears the tip down.
+    log.debug(
+        "click at (%.0f,%.0f) hover=%s in_tip=%s captured=%s tip_rect=%s paused_by_tip=%s mpv_pause=%s",
+        x,
+        y,
+        bool(mp.get("hover")),
+        in_tip,
+        captured,
+        reader._tip_rect,
+        reader._paused_by_tip,
+        reader._prop("pause"),
+    )
 
 
 # --- panel building ----------------------------------------------------------------------------
