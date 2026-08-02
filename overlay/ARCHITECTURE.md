@@ -77,6 +77,71 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | **`ScanBox` / `LinkBox`** | `model.py` | Per-CJK-char hover hitboxes and per-`<a>` click regions, in panel space — retained past pixel eviction so a scrolled-away word still hovers. |
 | **`CachedBlock` / `BlockGeom`** | `render/banded.py` | A cached band's pixels (`zlib`-packed) at its `(row, band)` key; `BlockGeom` is the row's retained hit geometry, never evicted. |
 
+### Containment (what's inside what)
+
+The entities nest three ways — too deep to draw as one matryoshka, so read them as three
+"what's inside what" views. The **runtime panel** (the object that lives in the cache) and the
+**layout inside one def-body Row** (the deep dolls, rebuilt from a memoised handle) are the two
+render-side hierarchies; the **content model** is the input that `panel_rows()` turns into the rows.
+
+*Runtime panel — the outer shells (one per shown word, held in `panel_cache`):*
+
+```
+┌─ Panel  (app/popups.py — the cached tooltip) ─────────────────────┐
+│ reading + one WindowedPanel                                       │
+│ ┌─ WindowedPanel  (render/banded.py — banded compositor) ────────┐│
+│ │ rows: list[Row]          ← built once by panel_rows(Entry)     ││
+│ │ _offsets: LazyOffsets    ← per-row heights + gaps → scroll math││
+│ │ ┌─ _blocks: {(row, band) -> CachedBlock}  ← LRU pixel cache ──┐││
+│ │ │ one band's image, zlib-packed; + row-local scan/links       │││
+│ │ │ bounded O(viewport) — even a 34x-viewport row keeps ~2-3    │││
+│ │ └─────────────────────────────────────────────────────────────┘││
+│ │ ┌─ _geom: {row -> BlockGeom}  ← retained hit geometry ──┐      ││
+│ │ │ ScanBox/LinkBox in panel space; never evicted, so a   │      ││
+│ │ │ scrolled-away word still hovers                       │      ││
+│ │ └───────────────────────────────────────────────────────┘      ││
+│ └────────────────────────────────────────────────────────────────┘│
+└───────────────────────────────────────────────────────────────────┘
+```
+
+*Inside ONE def-body Row — the deep layout dolls (behind `measure`/`render_window`, all off one
+memoised `LaidOutBody`; the row is rasterised across `ceil(height / 256px)` bands → one `CachedBlock`
+each):*
+
+```
+┌─ Row  (def-body; panel.py)  — one memoised layout handle ─────────┐
+│ measure() · render_window(y0,y1) · geometry() · render()          │
+│ ┌─ LaidOutBody  (body_block.py)  — walk()+wrap once, cached ─────┐│
+│ │ ┌─ DocLayout  (render/document.py)  — stacked blocks + tops ──┐││
+│ │ │ ┌─ LaidBlock[]  — one per block (paragraph / list-item) ──┐ │││
+│ │ │ │ ┌─ FlowLayout  (render/flow.py)  — the wrapped flow ──┐ │ │││
+│ │ │ │ │ ┌─ line[]  — one wrapped visual line ──┐            │ │ │││
+│ │ │ │ │ │ Item[]:  text | ruby | img | chip    │            │ │ │││
+│ │ │ │ │ └──────────────────────────────────────┘            │ │ │││
+│ │ │ │ └─────────────────────────────────────────────────────┘ │ │││
+│ │ │ └─────────────────────────────────────────────────────────┘ │││
+│ │ └─────────────────────────────────────────────────────────────┘││
+│ └────────────────────────────────────────────────────────────────┘│
+└───────────────────────────────────────────────────────────────────┘
+```
+
+*Content model — the INPUT (`panel_rows(Entry)` flattens it into the `Row[]` above), and where its
+glossary comes from:*
+
+```
+Entry  (one hovered term's whole tooltip content)
+├─ headword(ruby) · reading · tags · freqs[] · pitches[] · inflection_chain[]
+├─ defs: Definition[]      ← FUSED layout: one per configured Dictionary
+│    └─ Definition { dict_name · content = SC node · tags[] }
+└─ groups: EntryGroup[]    ← only ≥2 readings: one block/reading, its own ⊕
+     └─ EntryGroup { headword · reading · defs: Definition[] }
+
+  Definition.content is decoded from:
+  dictionaries.sqlite  (one consolidated DB, opened read-only at play time)
+  └─ Dictionary[]  scoped by dict_id
+       └─ DictEntry { term · reading · glossary = SC nodes · tags }  (LRU 256/dict)
+```
+
 ### Stage 1 — speculative prefetch (before the hover) · `app/prefetch.py`
 
 Every subtitle-line change enqueues background work on the persistent prefetch worker pool
