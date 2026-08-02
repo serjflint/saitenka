@@ -18,6 +18,7 @@ import time
 from typing import TYPE_CHECKING, NamedTuple
 
 from overlay import otel_metrics
+from overlay.app import prefetch
 from overlay.app.lookup import card_for, entry_for
 from overlay.app.media import copy_clipboard, speak
 from overlay.app.nested_popup import TIP_GAP
@@ -841,10 +842,12 @@ def scroll_tip(reader: Reader, delta: int) -> None:
     maxs = max(0, st.full_height - reader._tip_view_h)
     ns = min(maxs, max(0, reader._tip_scroll + delta))
     if ns != reader._tip_scroll:
+        going = 1 if delta > 0 else -1
         reader._tip_scroll = ns
         reader._hide_at = 0.0  # scrolling counts as interacting → keep it up
         reader._scan_target = None  # content moved under the cursor → restart the scan dwell
         render_tip_view(reader)
+        prefetch.request_render_ahead(reader, going)  # warm the next blocks off the main thread
 
 
 # --- nested scanning: hover a word INSIDE the tooltip → its own popup ---------------------------

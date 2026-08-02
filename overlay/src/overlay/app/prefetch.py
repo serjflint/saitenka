@@ -21,6 +21,7 @@ from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
+    from overlay.app.popups import Panel
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,20 @@ class HeadPrefetchItem:
     token: Token
     inflected: str
     mined: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RenderAheadReq:
+    """The latest scroll-ahead warm for the on-screen tooltip: render the blocks just beyond the
+    viewport in the scroll ``direction`` (+1 down / -1 up) off the main thread. Held in a single slot
+    on the Reader (newest scroll wins — only the current position matters), not a queue. ``gen`` is the
+    prefetch generation at request time, so a word switch / seek drops a stale request."""
+
+    gen: int
+    panel: Panel
+    scroll: int
+    view_h: int
+    direction: int
 
 
 def prefetch_worker_count(reader: Reader) -> int:
@@ -167,9 +182,47 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
 
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
+        if _try_render_ahead(reader):  # on-screen scroll warm first — highest priority
+            continue
         if _try_head_prefetch_item(reader):
             continue
         _try_prefetch_item(reader)
+
+
+def request_render_ahead(reader: Reader, direction: int) -> None:
+    """Record a scroll-ahead warm for the current tooltip in ``direction`` (newest wins). Main-thread
+    and cheap: just stores the request; a worker does the render. No-op when prefetch is off or no
+    tooltip is up."""
+    st = reader._tip_state
+    if st is None or not reader.prefetch:
+        return
+    req = RenderAheadReq(
+        reader._prefetch_gen, st, reader._tip_scroll, reader._tip_view_h, direction
+    )
+    with reader._render_ahead_lock:
+        reader._render_ahead_req = req
+
+
+def _try_render_ahead(reader: Reader) -> bool:
+    """Drain the scroll-ahead slot and warm the next blocks off the main thread. ``True`` when a
+    request was handled (so the worker re-checks the on-screen warm before the cheaper decode queue)."""
+    with reader._render_ahead_lock:
+        req = reader._render_ahead_req
+        reader._render_ahead_req = None
+    if req is None:
+        return False
+    if reader._stop.is_set() or req.gen != reader._prefetch_gen:
+        return True  # stale (word changed / seek / closing) — handled, keep looping
+    try:
+        req.panel.render_ahead(
+            req.scroll,
+            req.view_h,
+            direction=req.direction,
+            should_cancel=lambda: reader._stop.is_set() or req.gen != reader._prefetch_gen,
+        )
+    except Exception:
+        log.debug("render-ahead failed", exc_info=True)  # a bad block must never kill the worker
+    return True
 
 
 def _enqueue(reader: Reader, item: PrefetchItem) -> None:
