@@ -41,85 +41,62 @@ configuration, keyboard shortcuts, the CLI reference, and how it compares.
 
 ## Why
 
-Sentence-mining from native video is the highest-leverage way to grow vocabulary, but the usual rig is
-a fragile chain of a browser texthooker, a clipboard bridge, a separate overlay window, and manual card
-assembly. The overlay-window approach in particular fights the OS: on Windows it flickers, loses hover
-focus, and breaks in fullscreen because a second window can never share the video's airspace.
+Sentence-mining from native video is the highest-leverage way to grow vocabulary, but the usual rig is a
+fragile chain — a browser texthooker, a clipboard bridge, a separate overlay window, and manual card
+assembly. The overlay window is the worst of it: a second window can never share the video's airspace, so
+on Windows it flickers, loses hover focus, and breaks in fullscreen.
 
-This practice isn't new, and Saitenka didn't invent it — the guides that popularized it are what taught
-the author to mine from native video around the **N3** level.
-**[TheMoeWay](https://learnjapanese.moe/animejp/)** makes the *why*: anime is authentic input made **by
-natives, for natives** — scripted native speech across every register (via *yakuwarigo*, role language),
-not textbook Japanese watered down for learners. **[Anacreon's original mpv script](https://anacreondjt.gitlab.io/docs/mpvscript/)**
-and the **[Animecards "Mine from anime"](https://animecards.site/minefromanime/)** workflow make the
-*how*: while you watch, capture the sentence, its audio, a screenshot, and the target word straight into
-Anki — turning passive viewing into vocabulary you actually encountered. Saitenka is a direct descendant
-of that loop; it keeps the method and removes the friction that was still in it.
+Saitenka keeps the method taught by **[TheMoeWay](https://learnjapanese.moe/animejp/)**,
+**[Anacreon's mpv script](https://anacreondjt.gitlab.io/docs/mpvscript/)**, and the
+**[Animecards](https://animecards.site/minefromanime/)** workflow — and removes the friction that was
+still in it:
 
-Saitenka solves three problems:
-
-- **No second window.** The dictionary tooltip, colored subtitles, and mining UI are composited into
-  mpv's own OSD surface over its JSON-IPC connection — one surface, airspace-safe, fullscreen-safe.
-- **No busywork loop.** Watch → colored subs → hover → dictionary → one-key mine (sentence audio +
-  clean screenshot + reading/pitch/frequency, deduped, FSRS-tagged) happens without leaving the video.
-- **Study you already forgot resurfaces.** Word coloring is sourced from your Anki/**FSRS** (Anki's
-  spaced-repetition scheduler) review state, so "known" means *actually remembered right now*, and
-  **N+1** sentences — those with exactly one unknown word, the ideal thing to mine — are highlighted.
+- **No second window.** Tooltip, colored subtitles, and mining UI composite into mpv's own OSD surface
+  over JSON-IPC — one surface, airspace- and fullscreen-safe.
+- **No busywork loop.** Watch → colored subs → hover → dictionary → one-key mine, without leaving the video.
+- **Study you forgot resurfaces.** Coloring comes from your Anki/**FSRS** review state, so "known" means
+  *remembered right now*, and **N+1** sentences (exactly one unknown word) are highlighted.
 
 ## How it works
 
-- **Renderer:** Python + [Pillow](https://python-pillow.org/) rasterizes the rich tooltip (structured
-  content, ruby furigana, pitch/frequency pills, inflection chain) to a BGRA bitmap and bolts it into
-  mpv via `overlay-add` over JSON IPC — no GL, no FFI, no second process drawing on screen.
-- **Cross-platform IPC:** a background reader thread speaks mpv's JSON-IPC over a Unix socket
-  (macOS/Linux) or a Windows **named pipe**, and *joins* a shared socket so it coexists with other mpv
-  scripts.
-- **Plugin mode (full-auto):** an installed `saitenka.lua` user-script makes **every** mpv launch
-  auto-start the overlay in attach mode — open any video in mpv and the overlay is just there.
-- **Language pipeline:** [fugashi](https://github.com/polm/fugashi) + UniDic tokenize; a Yomitan-derived
-  deinflector recovers dictionary forms; lookups hit an on-disk **SQLite** index built once from your
-  Yomitan dictionaries (low, near-constant RAM even for large monolingual dictionaries).
-- **Free-threaded (optional):** on a free-threaded Python **3.14t** build the renderer parallelizes
-  across cores; it also runs fine on a standard build (single-threaded rendering). The minimum is 3.13,
-  and `uv` fetches the right interpreter for you.
+Python + [Pillow](https://python-pillow.org/) rasterizes the tooltip to a bitmap and bolts it into mpv via
+`overlay-add` over JSON-IPC — no GL, no FFI, no second process drawing on screen. A background thread
+speaks mpv's IPC over a Unix socket or a Windows named pipe and *joins* a shared socket, so it coexists
+with other mpv scripts; an installed `saitenka.lua` makes every mpv launch auto-start the overlay.
+Tokenization is [fugashi](https://github.com/polm/fugashi) + UniDic with a Yomitan-derived deinflector,
+over an on-disk **SQLite** index built once from your dictionaries (near-constant RAM). On a free-threaded
+Python **3.14t** build the renderer parallelizes across cores (3.13 minimum; `uv` fetches the interpreter).
+
+Full design → **[`overlay/README.md`](overlay/README.md)** and the
+[architecture docs](https://saitenka.readthedocs.io/en/latest/contributing/architecture/).
 
 ## Features
 
-- FSRS-aware subtitle **word coloring** + JLPT underlines + N+1 targeting. An optional copy of Anki's
-  database distinguishes learning, young, mature-known, and forgotten words without touching the live
-  collection.
-- Hover → **multi-dictionary tooltip**: ordered definitions, ruby, frequency pills, pitch-accent,
-  clickable cross-references, in-tooltip word scanning, wildcard search.
-- **One-key + bulk mining** to Anki (Lapis-style cards — a popular community Anki note type): sentence
-  audio, clean screenshot, reading, glossary, frequency, structured provenance tags — with dedup and a
-  post-mine card preview.
-- **Watch-party controls:** toggle hover auto-pause, switch between JP-only, EN-only, and JP+EN, or
-  fall back to English immediately while Japanese providers search without pausing or switching tracks.
-- A whole-episode **subtitle panel**, move-safe deferred-capture backlog, playback-neutral episode
-  analysis, and opt-in local session history. Press `F1` for the effective shortcut reference.
-- Background subtitle fetch from **jimaku.cc** and the opt-in **TsukiHime** provider, with an explicit
-  non-switching retry shortcut.
-- Import dictionaries from **Yomitan** — both standard dictionary `.zip`s and a full Yomitan database
-  export (streamed, so a multi-GB export never loads into memory).
-- A `doctor` command that checks the whole environment and a one-command `setup` wizard.
+FSRS-aware subtitle **word coloring** (JLPT underlines, N+1 targeting) · hover **multi-dictionary tooltip**
+(ordered definitions, ruby, pitch-accent, frequency pills, clickable cross-refs, wildcard search) ·
+**one-key + bulk mining** to Anki (Lapis-style cards, dedup, post-mine preview) · JP/EN reveal controls ·
+whole-episode **subtitle panel** + playback-neutral analysis + opt-in session history · background subtitle
+fetch (**jimaku.cc**, opt-in TsukiHime) · automatic **resync** (alass) · **Yomitan** dictionary import
+(streamed) · `doctor`/`setup`. Watch-party-safe: study actions never pause or seek a Syncplay room.
+
+📖 **Full tour with keys and screenshots → [Features](https://saitenka.readthedocs.io/en/latest/usage/features/)**
+· [keyboard shortcuts](https://saitenka.readthedocs.io/en/latest/usage/shortcuts/).
 
 ## How it compares
 
-Saitenka, **[SubMiner](https://github.com/ksyasuda/SubMiner)**, and
-**[Autocards](https://learnjapanese.moe/autocards/)** all get Japanese vocabulary from video into Anki,
-from three different angles: Saitenka is a **grounded, FSRS-driven engine composited inside mpv's own
-surface**; SubMiner is a **feature-broad Electron app** with turn-key desktop installers and a large
-integration surface; Autocards is a **retroactive back-filler** that attaches media to text-only cards
-you made elsewhere. It's a map of trade-offs across different jobs, not a scoreboard.
+Saitenka, **[SubMiner](https://github.com/ksyasuda/SubMiner)**,
+**[Autocards](https://learnjapanese.moe/autocards/)**, and
+**[Anki Miner](https://github.com/0xzerolight/anki_miner)** all get Japanese vocabulary from video into
+Anki from four different angles: Saitenka is a **grounded, FSRS-driven engine composited inside mpv's own
+surface**; SubMiner a **feature-broad Electron app**; Autocards a **retroactive back-filler**; Anki Miner
+a **batch-mining desktop GUI**. Trade-offs across different jobs, not a scoreboard.
 
 **Why reach for Saitenka:** a fast, single-surface engine that draws straight into mpv — no second window,
 fullscreen/airspace-safe; **live FSRS review-state coloring** so forgotten words resurface and **N+1**
 sentences are highlighted; a multi-dictionary Yomitan tooltip; and one-key + bulk mining, all grounded
-(readings/pitch from dictionaries, never an LLM). Reach for **SubMiner** for the widest set of turn-key
-integrations and a packaged desktop app; reach for **Autocards** to bulk-attach media to cards after the
-fact (Windows-only). The workflows compose.
+(readings/pitch from dictionaries, never an LLM).
 
-📊 **Full capability matrix, and where Saitenka fits in a media-server / watch-tracking rig →
+📊 **Full capability matrix (all four) and where Saitenka fits in a media-server / watch-tracking rig →
 [Why Saitenka → How it compares](https://saitenka.readthedocs.io/en/latest/why/comparisons/).**
 
 ## Quick start
