@@ -61,9 +61,6 @@ def test_keybinds_use_single_string_command():
     assert {
         "a",
         "c",
-        "WHEEL_UP",
-        "WHEEL_DOWN",
-        "MBTN_LEFT",
         "Ctrl+m",
         "Alt+p",
         "Alt+t",
@@ -74,6 +71,32 @@ def test_keybinds_use_single_string_command():
         "F1",
         "Ctrl+Shift+T",
     } <= keys
+    # mouse controls are NOT plain keybinds — they go into a forced input section (see below)
+    assert {"MBTN_LEFT", "WHEEL_UP", "WHEEL_DOWN"}.isdisjoint(keys)
+
+
+def test_mouse_controls_live_in_a_forced_section():
+    """Clicks/wheel go into a FORCED mpv section so they outrank other scripts' forced MBTN_LEFT
+    (uosc/inputevent); it's enabled only while a saitenka surface is up and released otherwise."""
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    r._register_keybinds()
+    defs = [c for c in ipc.commands if c and c[0] == "define-section"]
+    assert len(defs) == 1
+    _cmd, name, contents, flags = defs[0]
+    assert flags == "force"
+    assert "MBTN_LEFT script-message saitenka-click" in contents
+    assert "WHEEL_UP script-message saitenka-scroll-up" in contents
+
+    # no surface up → not enabled; a tooltip up → enabled; gone → disabled
+    r._sync_mouse_capture()
+    assert not any(c[0] == "enable-section" and c[1] == name for c in ipc.commands)
+    r._tip_rect = (0, 0, 10, 10)
+    r._sync_mouse_capture()
+    assert ipc.commands[-1][:2] == ("enable-section", name)
+    r._tip_rect = None
+    r._sync_mouse_capture()
+    assert ipc.commands[-1] == ("disable-section", name)
 
 
 def test_hover_pause_key_is_configurable():

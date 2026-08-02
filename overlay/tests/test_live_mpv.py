@@ -248,6 +248,55 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
 
 @pytest.mark.live
 @pytest.mark.timeout(30)
+def test_live_forced_mouse_section_beats_a_rival_forced_mbtn_left():
+    """The real-world bug: a script (uosc/inputevent) force-binds MBTN_LEFT, so saitenka's plain
+    keybind never fires. saitenka's own FORCED section, enabled while a tooltip is up, must win the
+    click back. Simulate the rival with a forced 'MBTN_LEFT cycle pause' and verify a click over the
+    tooltip does NOT toggle pause (saitenka intercepted it), while one over bare video still does."""
+
+    def pause_state() -> bool:
+        return bool(ipc.command("get_property", "pause").get("data"))
+
+    with _live_reader() as (_tmp, reader, ipc):
+        ipc.command("define-section", "rival", "MBTN_LEFT cycle pause\n", "force")
+        ipc.command("enable-section", "rival", "allow-hide-cursor+allow-vo-dragging")
+
+        # baseline: no tooltip → saitenka's section is off → the rival owns the click and toggles pause
+        ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
+        reader.poll_once()  # _sync_mouse_capture: nothing up → section stays disabled
+        ipc.command("mouse", 5, 5)  # bare video, no word
+        ipc.command("keypress", "MBTN_LEFT")
+        for _ in range(5):
+            reader.poll_once()
+            time.sleep(0.02)
+        assert pause_state() is False, "rival forced MBTN_LEFT should toggle pause off the tooltip"
+
+        # hover a word → tooltip up → poll enables saitenka's forced section on top of the rival
+        i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
+        box = next(b for b in reader.boxes if b.index == i)
+        ox, oy = reader.sub_origin
+        ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
+        _poll_until(
+            reader,
+            lambda: reader._tip_rect is not None and reader._mouse_captured,
+            "tooltip did not show / mouse section not captured",
+        )
+
+        # a click on the tooltip must reach saitenka, NOT the rival → pause unchanged
+        ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC wire value
+        tx, ty, tw, th = reader._tip_rect
+        ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
+        ipc.command("keypress", "MBTN_LEFT")
+        for _ in range(5):
+            reader.poll_once()
+            time.sleep(0.02)
+        assert pause_state() is True, (
+            "saitenka's forced section must capture the click, not the rival"
+        )
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
 def test_live_overlay_toggle_removes_and_restores_saitenka_surfaces():
     with _live_reader() as (tmp, reader, ipc):
         shown = _screenshot(ipc, tmp / "overlay-shown.png")

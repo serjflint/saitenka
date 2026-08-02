@@ -51,6 +51,7 @@ from overlay.app.bindings import (
     KANJI_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
+    MOUSE_SECTION,
     OVERLAY_TOGGLE_MSG,
     PREVIEW_CLOSE_MSG,
     PREVIEW_MSG,
@@ -268,6 +269,10 @@ class Reader:
         )  # (checked_at, reachable) — see _anki_ok
         # card-preview interaction (clickable regions in screen coords; None when hidden)
         self._preview_rect: tuple | None = None
+        # Forced mouse-section state (see _sync_mouse_capture).
+        self._mouse_section_defined = False
+        self._mouse_captured = False
+        self._mouse_reassert_at = 0.0
         self._preview_close_rect: tuple | None = None
         self._preview_audio_rect: tuple | None = None
         self._preview_image_rect: tuple | None = None
@@ -688,6 +693,52 @@ class Reader:
                 "keybind", binding.key, "ignore"
             )  # valid no-op; "" would be rejected by mpv
 
+    def _define_mouse_section(self) -> None:
+        """Define (once) the FORCED mpv section for the ``mouse``-scoped bindings; once enabled it
+        outranks other scripts' forced MBTN_LEFT (uosc/inputevent). Enabled per _sync_mouse_capture."""
+        lines = [f"{b.key} script-message {b.spec.message}" for b in active_bindings(self, "mouse")]
+        self._mouse_section_defined = bool(lines)
+        if lines:
+            self.ipc.command("define-section", MOUSE_SECTION, "\n".join(lines) + "\n", "force")
+
+    def _wants_mouse_capture(self) -> bool:
+        return (
+            self._tip_rect is not None
+            or self.sidebar.open
+            or self._help_open
+            or self._preview_rect is not None
+        )
+
+    def _sync_mouse_capture(self) -> None:
+        """Own clicks/wheel while a saitenka surface is up (re-asserting the forced section every 0.5s
+        so a script re-forcing its own can't reclaim it), release it otherwise."""
+        if not self._mouse_section_defined:
+            return
+        want = self._wants_mouse_capture()
+        try:
+            if want:
+                now = time.monotonic()
+                if not self._mouse_captured or now >= self._mouse_reassert_at:
+                    self.ipc.command(
+                        "enable-section", MOUSE_SECTION, "allow-hide-cursor+allow-vo-dragging"
+                    )
+                    self._mouse_captured, self._mouse_reassert_at = True, now + 0.5
+            elif self._mouse_captured:
+                self.ipc.command("disable-section", MOUSE_SECTION)
+                self._mouse_captured = False
+        except (OSError, ValueError):
+            pass  # mpv went away mid-tick — poll_once will notice
+
+    def _release_mouse_capture(self) -> None:
+        """Drop the forced section on teardown so a detached mpv can't route clicks to a dead saitenka."""
+        if not self._mouse_captured:
+            return
+        try:
+            self.ipc.command("disable-section", MOUSE_SECTION)
+        except (OSError, ValueError):
+            pass
+        self._mouse_captured = False
+
     def _render_tip_view(self) -> None:
         tooltip.render_tip_view(self)
 
@@ -945,6 +996,7 @@ class Reader:
             message = binding.spec.message
             if message is not None:
                 bind(binding.key, message)
+        self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
     # msg -> handler(reader). Subtitle-nav entries render the target cue from the index INSTANTLY
     # (if we have one), then issue the real sub-seek so the video catches up behind it (read the
@@ -1024,6 +1076,7 @@ class Reader:
             analysis_overlay.apply_results(self)
             sidebar.update(self)
             self._update_hover()
+            self._sync_mouse_capture()  # own clicks/wheel while a surface is up (this tick, no gap)
             self._update_prefetch()
             if self._translation_visible() and self._secondary_text() != self._trans_text:
                 self._draw_translation()  # keep the (manual or auto) translation current as subs change
@@ -1189,6 +1242,7 @@ class Reader:
     def close(self) -> None:
         import shutil
 
+        self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
         for th in self._prefetch_threads:
