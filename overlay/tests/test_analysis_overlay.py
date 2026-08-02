@@ -28,8 +28,8 @@ def _reader() -> Reader:
 
 
 def _finish(reader: Reader) -> None:
-    reader._analysis_threads[-1].join(timeout=2)
-    assert not reader._analysis_threads[-1].is_alive()
+    reader.analysis.threads[-1].join(timeout=2)
+    assert not reader.analysis.threads[-1].is_alive()
     analysis_overlay.apply_results(reader)
 
 
@@ -37,11 +37,11 @@ def test_toggle_shows_analyzing_then_result_without_pause_or_seek():
     reader = _reader()
 
     reader._handle(ANALYSIS_MSG)
-    assert reader._analysis_status == "Analyzing…"
+    assert reader.analysis.status == "Analyzing…"
     _finish(reader)
 
-    assert reader._episode_analysis is not None
-    assert reader._analysis_status == "Ready"
+    assert reader.analysis.current is not None
+    assert reader.analysis.status == "Ready"
     assert OverlayId.ANALYSIS in reader.ov._live
     forbidden = {"sub-seek", "seek"}
     assert not any(command and command[0] in forbidden for command in reader.ipc.commands)
@@ -55,13 +55,13 @@ def test_cache_hit_does_not_start_another_worker():
     reader = _reader()
     analysis_overlay.toggle(reader)
     _finish(reader)
-    workers = len(reader._analysis_threads)
+    workers = len(reader.analysis.threads)
 
     analysis_overlay.toggle(reader)
     analysis_overlay.toggle(reader)
 
-    assert len(reader._analysis_threads) == workers
-    assert reader._episode_analysis is not None
+    assert len(reader.analysis.threads) == workers
+    assert reader.analysis.current is not None
 
 
 def test_track_analysis_completes_while_overlay_is_closed():
@@ -70,8 +70,8 @@ def test_track_analysis_completes_while_overlay_is_closed():
     analysis_overlay.on_index_changed(reader)
     _finish(reader)
 
-    assert reader._episode_analysis is not None
-    assert not reader._analysis_open
+    assert reader.analysis.current is not None
+    assert not reader.analysis.open
     assert OverlayId.ANALYSIS not in reader.ov._live
 
 
@@ -80,12 +80,12 @@ def test_dependency_loading_defers_analysis_until_vocabulary_arrives():
     reader._loading = True
 
     analysis_overlay.on_index_changed(reader)
-    assert not reader._analysis_threads
+    assert not reader.analysis.threads
 
     reader._loading = False
     analysis_overlay.on_vocabulary_changed(reader)
     _finish(reader)
-    assert reader._episode_analysis is not None
+    assert reader.analysis.current is not None
 
 
 def test_vocabulary_and_track_changes_invalidate_and_restart():
@@ -94,13 +94,13 @@ def test_vocabulary_and_track_changes_invalidate_and_restart():
     _finish(reader)
 
     analysis_overlay.on_vocabulary_changed(reader)
-    assert reader._analysis_status == "Analyzing…"
-    assert len(reader._analysis_threads) == 2
+    assert reader.analysis.status == "Analyzing…"
+    assert len(reader.analysis.threads) == 2
     _finish(reader)
 
     reader._sub_index = SubIndex([SubCue(0, 1, "彼は映画を見る。")])
     analysis_overlay.on_index_changed(reader)
-    assert len(reader._analysis_threads) == 3
+    assert len(reader.analysis.threads) == 3
     _finish(reader)
     assert analysis_overlay.cue_result(reader, 0) is not None
 
@@ -111,9 +111,9 @@ def test_english_or_missing_japanese_track_is_unavailable():
 
     analysis_overlay.toggle(reader)
 
-    assert reader._analysis_status == "Japanese track unavailable"
-    assert reader._episode_analysis is None
-    assert not reader._analysis_threads
+    assert reader.analysis.status == "Japanese track unavailable"
+    assert reader.analysis.current is None
+    assert not reader.analysis.threads
 
 
 def test_ui_scale_enlarges_episode_analysis_window():
