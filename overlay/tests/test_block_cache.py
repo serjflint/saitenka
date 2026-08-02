@@ -54,8 +54,8 @@ def test_cached_block_compress_is_lossless():
     from PIL import Image
 
     img = render_panel(_fabricated(2), width=WIDTH)
-    live = CachedBlock.make(16, img, [], [], compress=False)
-    packed = CachedBlock.make(16, img, [], [], compress=True)
+    live = CachedBlock.make(16, 0, img, [], [], compress=False)
+    packed = CachedBlock.make(16, 0, img, [], [], compress=True)
     assert np.array_equal(np.asarray(live.image()), np.asarray(packed.image().convert("RGBA")))
     assert isinstance(packed.image(), Image.Image)
 

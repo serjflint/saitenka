@@ -144,6 +144,14 @@ class LazyOffsets:
     def known(self, i: int) -> bool:
         return self._heights[i] is not None
 
+    def height(self, i: int) -> int:
+        """The measured height of block ``i`` (raises if not yet measured) — the banded engine tiles a
+        row into bands from it without recomputing the whole cumulative table."""
+        h = self._heights[i]
+        if h is None:
+            raise ValueError(f"block {i} not measured")
+        return h
+
     @property
     def prefix_len(self) -> int:
         """Number of leading blocks whose heights — hence exact offsets — are all known."""
