@@ -388,6 +388,7 @@ def render_flow(
     link_out: list[LinkBox] | None = None,
     max_height: int | None = None,
     clipped_out: list | None = None,
+    y_window: tuple[int, int] | None = None,
 ) -> Image.Image:
     """Wrap and render an inline stream (text + ruby) into a fixed-width panel image.
 
@@ -399,10 +400,18 @@ def render_flow(
     px (layout/wrapping of the whole flow still runs — it's cheap; drawing is the cost) — so a
     pathologically tall single block first-paints O(viewport), not O(block). When lines were
     dropped, ``True`` is appended to ``clipped_out``. ``max_height=None`` is the byte-identical
-    full render."""
+    full render.
+
+    ``y_window=(y0, y1)``: rasterise ONLY the band ``[y0, y1)`` into a ``(y1 - y0)``-tall image —
+    pixel-identical to the full render cropped to that band, but drawing (the cost) only the lines that
+    fall in it, so the windowed engine materialises a viewport slice of a tall block in O(viewport).
+    Overrides ``max_height``; ``scan_out``/``link_out`` coords come back in the window's space
+    (offset by ``-y0``)."""
     items = build_items(flow)
     lines = wrap_items(items, block.width)
     boxes = [_item_line_box(line, block.line_height_scale) for line in lines]
+    if y_window is not None:
+        return _render_window(block, lines, boxes, y_window, scan_out, link_out)
     lines, boxes = _clip_lines_to_height(lines, boxes, max_height, block.padding, clipped_out)
 
     img, draw, y = new_panel_image(block, boxes)
@@ -418,5 +427,39 @@ def render_flow(
             link_out=link_out,
             padding=block.padding,
         )
+        y += box
+    return img
+
+
+def _render_window(
+    block: Block,
+    lines: list[list[Item]],
+    boxes: list[tuple[int, int, int]],
+    y_window: tuple[int, int],
+    scan_out: list[ScanBox] | None,
+    link_out: list[LinkBox] | None,
+) -> Image.Image:
+    """Draw only the lines overlapping ``[y0, y1)`` into a ``(y1 - y0)``-tall image, each at ``y - y0``
+    (PIL clips the partial top/bottom lines) — the crop-equivalent slice, without drawing the rest."""
+    from PIL import Image, ImageDraw
+
+    y0, y1 = y_window
+    w = block.width + 2 * block.padding
+    img = Image.new("RGBA", (w, max(1, y1 - y0)), block.background)
+    draw = ImageDraw.Draw(img)
+    y = block.padding
+    for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
+        if y < y1 and y + box > y0:  # line's band overlaps the window
+            _draw_flow_line(
+                img,
+                draw,
+                line,
+                box,
+                base_from_top,
+                y - y0,
+                scan_out=scan_out,
+                link_out=link_out,
+                padding=block.padding,
+            )
         y += box
     return img
