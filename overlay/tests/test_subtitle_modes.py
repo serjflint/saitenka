@@ -400,7 +400,7 @@ def test_lang_matches_prefix_rule_and_wildcard_edges(lang, wants, expected):
 def test_foreign_only_tracks_use_the_selected_one_as_primary():
     ipc = FakeIPC(
         [
-            {"id": 4, "type": "sub", "lang": "fre"},
+            {"id": 4, "type": "sub", "lang": "kor"},
             {"id": 3, "type": "sub", "lang": "ger", "selected": True, "main-selection": 0},
         ]
     )
@@ -409,7 +409,7 @@ def test_foreign_only_tracks_use_the_selected_one_as_primary():
 
 def test_foreign_only_tracks_default_to_first_when_none_selected():
     ipc = FakeIPC(
-        [{"id": 5, "type": "sub", "lang": "ger"}, {"id": 6, "type": "sub", "lang": "fre"}]
+        [{"id": 5, "type": "sub", "lang": "ger"}, {"id": 6, "type": "sub", "lang": "kor"}]
     )
     assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(jp_sid=5, en_sid=6)
 

@@ -27,7 +27,7 @@ below for you. It still requires a human at two points: the changelog entry (wri
 $EDITOR RELEASE_NOTES.md              # curate the changelog entry (bullets, no heading)
 uv run poe release-prepare             # steps 1-5: bump version (auto patch/minor/major from
                                         # Conventional Commits, capped at minor pre-1.0), insert
-                                        # the changelog section, `poe all`, build+smoke-test the
+                                        # the changelog section, `poe pre-release`, build+smoke-test the
                                         # wheel, commit `chore(overlay): release X.Y.Z`
 git push && gh pr create               # step 6: open the PR, get it reviewed, merge it
 
@@ -56,8 +56,12 @@ wrap `uv run install/release.py prepare|publish --help` for the full set.
    ```sh
    uvx --from overlay/dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
    ```
-   This catches packaging breakage (missing data files, entry point, deps) that `poe all` can't.
-5. **Gate:** `uv run poe all` green; update any version-referenced docs.
+   This catches packaging breakage (missing data files, entry point, deps) that `poe pre-release` can't.
+5. **Gate:** `uv run poe pre-release` green — the fast `poe all` plus the release-only checks pulled
+   from the PR loop (supply-chain `audit`/`licenses`, installer `shell`) and the heavier `links-net`
+   (network), `smoke-live` (real mpv), and `bench` smokes; needs mpv + network. The advisory tier
+   (`hygiene`/`ps1`/`perf-risk`) is human-triage — run it separately, it doesn't gate. Update any
+   version-referenced docs.
 6. **Merge the PR** into the default branch.
 
 `overlay/dist/` is git-ignored — the wheel is **not** committed; `uv publish` uploads it to PyPI.
