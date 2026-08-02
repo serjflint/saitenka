@@ -9,6 +9,7 @@ import overlay.app.controller as C
 from overlay.app import miner_ui, nested_popup, tooltip
 from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId
+from overlay.app.subtitle_render import NullRenderer
 from overlay.app.tooltip import PanelKey
 
 
@@ -175,7 +176,7 @@ def _reader_with_index(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
     r.osd = (1280, 720)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)  # skip the raster; assert state only
+    monkeypatch.setattr(r, "renderer", NullRenderer())  # skip the raster; assert state only
     r._sub_index = SubIndex(parse_srt(_NAV_SRT))
     r._register_keybinds()
     return r, ipc
@@ -334,7 +335,7 @@ def test_reconcile_records_otel_sub_text_reconcile_metric(monkeypatch):
 def test_sub_nav_without_index_only_seeks(monkeypatch):
     ipc = FakeIPC()
     r = Reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("いち")
     r._register_keybinds()
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
@@ -681,7 +682,7 @@ def test_pause_on_tooltip_pauses_then_resumes(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)  # keep our boxes
+    monkeypatch.setattr(r, "renderer", NullRenderer())  # keep our boxes
     r._show_tooltip(0)  # tooltip shown → pause
     assert ("set_property", "pause", True) in ipc.commands
     r.hover = 0
@@ -839,7 +840,7 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     # Viewport-first, windowed: a tall entry measures only the head that fills the viewport on show;
     # the windowed engine composites (and measures) the deferred tail as the user scrolls down.
     r = _tall_reader(FakeIPC())
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     wp = r._tip_state.windowed
     assert wp.measured < wp.count  # head only — the whole tall panel was NOT rendered up front
@@ -866,7 +867,7 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     r = _tall_reader(ipc)
     r.anki = object()  # mining available → ⊕ drawn and hit-testable
     r.hover = 0
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
@@ -882,7 +883,7 @@ def test_tooltip_empty_click_does_nothing(monkeypatch):
     r = _tall_reader(ipc)
     r.anki = object()
     r.hover = 0
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
@@ -899,7 +900,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
     r.hover = 0
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     events = []
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
@@ -918,7 +919,7 @@ def test_header_add_button_absent_without_anki(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)  # no anki
     r.hover = 0
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
     cx, cy = _click_center_of_add_button(r, ipc)
     assert not r._hit_header_add(cx, cy)  # no ⊕ button when mining is unavailable
@@ -966,7 +967,7 @@ def _hover_first_scan_cell(r, ipc):
 
 def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     r = _scan_reader(FakeIPC())
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.hover = 0
     r._show_tooltip(0)
     boxes = r._tip_state.windowed.scan_boxes()
@@ -980,7 +981,7 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
 def test_hover_inner_word_opens_nested_popup(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)  # base tooltip on the subtitle word
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
@@ -993,7 +994,7 @@ def test_nested_scan_waits_for_dwell(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     r.scan_delay = 0.25  # require the cursor to settle before opening
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     r.set_hover(0)
@@ -1012,7 +1013,7 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     r.scan_delay = 0.25
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     r.set_hover(0)
@@ -1047,7 +1048,7 @@ def test_switch_base_word_drops_nested(monkeypatch):
         Token("読む", "読む", "よむ", "動詞", 2, 4),
     ]
     r.boxes = [WordBox(0, 100, 300, 40, 40), WordBox(1, 500, 300, 40, 40)]
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
@@ -1059,7 +1060,7 @@ def test_switch_base_word_drops_nested(monkeypatch):
 def test_nested_lingers_then_dismisses(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     r.set_hover(0)
@@ -1080,7 +1081,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     r.anki = object()
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
@@ -1137,7 +1138,7 @@ def _point_at_link(r, ipc):
 def test_click_cross_reference_opens_target_in_nested(monkeypatch):
     ipc = FakeIPC()
     r = _link_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     assert r._tip_state.windowed.link_boxes()  # the def body exposed a clickable link
     _point_at_link(r, ipc)
@@ -1176,7 +1177,7 @@ def test_click_wildcard_link_opens_search_popup(monkeypatch):
     r.sub_origin = (0, 0)
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     lb = r._tip_state.windowed.link_boxes()[0]
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
@@ -1216,7 +1217,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     r.sub_origin = (0, 0)
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     assert r._tip_state.windowed.link_boxes() == []  # external link → no clickable region
 
@@ -1249,7 +1250,7 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     ipc = FakeIPC()
     r = _link_reader(ipc)
     r.scan_delay = 0.0  # would fire immediately if not suppressed
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _point_at_link(r, ipc)  # cursor on the link cell
     r._update_hover()
@@ -1262,7 +1263,7 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     r.scan_delay = 0.25
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
@@ -1277,7 +1278,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     ipc = FakeIPC()
     r = _link_reader(ipc)
     r.anki = object()
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     events = []
     monkeypatch.setattr(r, "mine_current", lambda: events.append("mine"))
@@ -1307,7 +1308,7 @@ def test_copy_line_copies_all_lines(monkeypatch):
 def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
@@ -1325,7 +1326,7 @@ def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
@@ -1343,7 +1344,7 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
 
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     clock = [1000.0]
     monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda _s: None)
@@ -1446,7 +1447,7 @@ def test_preview_close_button_dismisses():
 def test_new_cue_dismisses_preview(monkeypatch):
     ipc = FakeIPC()
     r = _preview_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")  # a new subtitle cue
     assert r._preview_rect is None
 
@@ -1457,7 +1458,7 @@ def test_mark_mined_flips_hovered_tooltip_to_check(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)  # dict_set present
     r.anki = object()
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     assert r._tip_key.mined is False  # not mined yet → ⊕
     r._mark_mined(card_for(r.tokens[0]).expression)
@@ -1502,7 +1503,7 @@ def _auto_trans_reader(ipc):
 def test_auto_translate_shows_on_hover_and_hides_on_leave(monkeypatch):
     ipc = FakeIPC()
     r = _auto_trans_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     shown = []
     monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
     hidden = []
@@ -1525,7 +1526,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     shown = []
     monkeypatch.setattr(r.ov, "show", lambda _img, *_a, oid=0, **_kw: shown.append(oid))
     r.set_hover(0)
@@ -1535,7 +1536,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
 def test_manual_toggle_overrides_auto_and_persists(monkeypatch):
     ipc = FakeIPC()
     r = _auto_trans_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.toggle_translation()  # force it ON with `t`
     assert r._translate_on and r._translation_visible()
     r.set_hover(-1)  # …and it stays even with nothing hovered
@@ -1771,7 +1772,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     old word, and so pause_on_tooltip does not stay stuck."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)  # open a tooltip on the first subtitle
     assert r._tip_rect is not None  # tooltip is shown
     assert r.hover == 0
@@ -1779,7 +1780,7 @@ def test_cue_change_while_hovered_hides_tooltip_and_resets_state(monkeypatch):
     # simulate a cue change while the tooltip is visible
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 
     assert C.TIP_ID in hidden  # tooltip was hidden
@@ -1794,12 +1795,12 @@ def test_cue_change_while_paused_by_tip_resumes_mpv(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = False
     r = _reader_with_word(ipc)  # pause_on_tooltip=True
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)  # opens tooltip and pauses mpv
     assert r._paused_by_tip
 
     # new cue arrives
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 
     assert not r._paused_by_tip
@@ -1870,7 +1871,7 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     """A cue change with a nested popup open must also clear NESTED_ID and _nest state."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()  # open the nested popup
@@ -1878,7 +1879,7 @@ def test_cue_change_nested_also_cleared(monkeypatch):
 
     hidden = []
     monkeypatch.setattr(r.ov, "hide", lambda oid: hidden.append(oid))
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_subtitle("別の字幕")
 
     assert C.NESTED_ID in hidden or r._nest.state is None  # nested cleared
@@ -1920,7 +1921,7 @@ def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
     ipc = EventIPC()
     ipc.props["sub-text"] = ""
     r = Reader(ipc, prefetch=False)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.start_observing()
     ipc.commands.clear()
     r.poll_once()
@@ -1939,7 +1940,7 @@ def test_property_change_event_drives_subtitle_update(monkeypatch):
 
     ipc = EventIPC()
     r = Reader(ipc, prefetch=False)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.start_observing()
     seen = []
     monkeypatch.setattr(r, "set_subtitle", lambda t: seen.append(t))

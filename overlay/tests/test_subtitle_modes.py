@@ -210,7 +210,7 @@ def test_english_primary_is_plain_and_noninteractive(monkeypatch):
         lambda _text: (_ for _ in ()).throw(AssertionError("English must not be tokenized")),
     )
     monkeypatch.setattr(
-        "overlay.app.controller.render_plain_subtitle",
+        "overlay.app.subtitle_render.render_plain_subtitle",
         lambda *_args, **_kwargs: SubtitleRender(Image.new("RGBA", (20, 10)), []),
     )
 

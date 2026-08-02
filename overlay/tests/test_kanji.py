@@ -8,6 +8,7 @@ import dicthelp
 from util import FakeIPC, assert_golden
 
 from overlay.app.controller import Reader
+from overlay.app.subtitle_render import NullRenderer
 from overlay.app.subtitles import WordBox
 from overlay.app.tokenize import Token
 
@@ -99,7 +100,7 @@ def _kanji_reader(tmp_path):
 
 def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.hover = 0
     r._handle("saitenka-kanji")
     assert r._nest.state is not None
@@ -119,7 +120,7 @@ def test_k_key_bound_globally():
 
 def test_k_key_without_kanji_or_hover_is_safe(monkeypatch, tmp_path):
     r = _kanji_reader(tmp_path)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     toasts = []
     monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     r._handle("saitenka-kanji")  # nothing hovered → no crash, no popup
@@ -142,7 +143,7 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     r.sub_origin = (0, 0)
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     # find the scan cell whose tail starts with 本
     sb = next(b for b in r._tip_state.windowed.scan_boxes() if b.text.startswith("本"))

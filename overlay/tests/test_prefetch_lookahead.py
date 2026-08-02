@@ -6,6 +6,7 @@ import queue
 from overlay.app.config import PerfOptions, ReaderOptions
 from overlay.app.controller import Reader
 from overlay.app.sub_index import SubIndex, parse_srt
+from overlay.app.subtitle_render import NullRenderer
 from overlay.panel import Definition, Entry
 
 _SRT = (
@@ -48,7 +49,7 @@ def _reader(monkeypatch, *, lookahead, props=None):
     ipc = _FakeIPC(props)
     r = Reader(ipc, dict_set=_FakeDS())
     r.osd = (1280, 720)
-    monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
     r._sub_index = SubIndex(parse_srt(_SRT))
     r.prefetch_lookahead = lookahead
     return r
