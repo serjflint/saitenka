@@ -80,9 +80,14 @@ def test_banded_tooltip_renders_and_hit_tests_end_to_end():
     assert st is not None and st.windowed is not None  # the windowed engine is wired in
     assert r._tip_rect is not None  # first frame composited + uploaded without error
 
-    # Parity: the windowed viewport == the blob slice at every offset the tooltip can scroll to.
+    # Lazy tail (tabs off): show renders only the head blob (≈ one viewport), NOT the whole panel — the
+    # windowed engine composites the rest on scroll. Capture the head, then materialize the full-panel
+    # blob explicitly as the parity reference.
+    head_h = st.bgra().shape[0]
+    st.finish()
     blob = st.bgra()
     full_h, vh = blob.shape[0], r._tip_view_h
+    assert head_h < full_h, "lazy show must render only the head, not the whole tail"
     assert full_h > vh, "entry should be tall enough to scroll"
     for scroll in range(0, full_h - vh + 1, max(1, (full_h - vh) // 6)):
         windowed = to_bgra_array(st.windowed.viewport(scroll, vh))

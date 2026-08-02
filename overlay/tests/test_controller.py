@@ -837,8 +837,10 @@ def _tall_reader(ipc):
 
 
 def test_show_tooltip_finishes_synchronously_without_worker():
-    # No prefetch worker running → the panel must be rendered whole, never left partial.
+    # Blob fallback (banded off): no prefetch worker running → the panel must be rendered whole, never
+    # left partial. (The banded default renders the head only and composites the tail lazily on scroll.)
     r = _tall_reader(FakeIPC())
+    r._banded = False
     r._show_tooltip(0)
     assert r._tip_state.complete
     assert r._finish_q.empty()
@@ -849,6 +851,7 @@ def test_show_tooltip_defers_tail_when_worker_available(monkeypatch):
     # With a worker available, first paint renders only the head that fills the viewport; the rest is
     # queued for the worker and swapped in on completion.
     r = _tall_reader(FakeIPC())
+    r._banded = False  # blob fallback: the head/tail split is the banded-off path
     monkeypatch.setattr(r, "_finish_available", lambda: True)  # pretend a prefetch worker exists
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r._show_tooltip(0)
@@ -2085,6 +2088,7 @@ def test_finish_queue_items_are_typed_dataclasses(monkeypatch):
     from overlay.app.prefetch import FinishItem
 
     r = _tall_reader(FakeIPC())
+    r._banded = False  # the finish queue is the blob-fallback tail path
     monkeypatch.setattr(r, "_finish_available", lambda: True)
     monkeypatch.setattr(r, "_draw_subtitle", lambda: None)
     r._show_tooltip(0)
