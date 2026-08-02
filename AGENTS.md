@@ -38,9 +38,9 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate (no CI):** `uv run poe all` is the fast pre-push gate; `uv run poe pre-release` is the
-  slower pre-tag superset (adds the supply-chain, installer, network-link, real-mpv, and bench checks;
-  `release.py` gates on it). Both are defined in `[tool.poe.tasks]` (the source of truth). `cov` is the
+- **Dev gate:** `uv run poe all` is the fast pre-push gate (CI mirrors it — `.github/workflows/ci.yml`
+  runs `poe all` on PRs + pushes to main); `uv run poe pre-release` is the slower pre-tag superset (adds
+  the supply-chain, installer, network-link, real-mpv, and bench checks; `release.py` gates on it). Both are defined in `[tool.poe.tasks]` (the source of truth). `cov` is the
   functional run too (a superset marker set), so the standalone `test` stays the inner loop, not a third
   suite run. Run the gate before
   pushing. How to read each failure, the advisory tiers, and the
@@ -56,6 +56,12 @@ scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python`
   dependency-graph reverse-closure + full-run fallback on blind spots) — seconds instead of the ~32s full
   `poe test`, for the edit→feedback cycle. It over-approximates, never under-selects; `poe all`/`poe
   test-ft` stays the correctness net before push. `--base origin/main` to check a committed branch.
+- **Releasing:** `RELEASING.md` is canonical. Locally: curate `RELEASE_NOTES.md` (or lift `##
+  [Unreleased]` verbatim) → `poe release-prepare` → merge PR. Then **pushing the `vX.Y.Z` tag is the
+  whole publish** — `.github/workflows/release.yml` builds once and ships the GitHub Release **and** PyPI
+  (Trusted Publishing, no token). Do NOT run `release.py publish` / `uv publish` — CI owns both; they're
+  a CI-down fallback only. Tag the *merged* commit by SHA (works from a worktree, where `main` is
+  checked out elsewhere).
 
 ## Refactoring
 

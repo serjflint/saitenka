@@ -1,5 +1,5 @@
 # Tag-triggered release: build ONCE, then publish to two places from the same artifacts —
-#   1. a GitHub Release carrying the self-contained bundle zip (wheel + GPL deinflect sdist + installers)
+#   1. a notes-only GitHub Release (changelog section for the tag; no binary assets — install is via PyPI)
 #   2. PyPI, the `saitenka` + GPL `saitenka-deinflect` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
 # The build↔publish split is a supply-chain best practice: the publish jobs do nothing but upload the
 # already-built artifacts, so nothing can tamper with them in between.
@@ -30,7 +30,7 @@ permissions:
 jobs:
   build:
     name: Build artifacts
-    runs-on: ubuntu-latest # bundle is py3-none-any — OS-independent
+    runs-on: ubuntu-latest # pure-Python wheels (py3-none-any) — OS-independent
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -59,13 +59,9 @@ jobs:
           uv build overlay --out-dir dist-pypi
           uv build deinflect --out-dir dist-pypi
 
-      - name: Build GitHub-Release bundle (→ dist/saitenka-<ver>.zip)
-        working-directory: overlay
-        run: uv run poe bundle
-
-      - name: Checksum + release notes
+      - name: Release notes (changelog section for this tag)
         run: |
-          (cd dist && shasum -a 256 saitenka-*.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          mkdir -p dist
           ver="${GITHUB_REF_NAME#v}"
           awk -v v="$ver" '
             $0 ~ "^## \\[" v "\\]" {grab=1; next}
@@ -88,7 +84,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') # tag only, never the manual dry-run
     runs-on: ubuntu-latest
     permissions:
-      contents: write # create the Release + upload assets
+      contents: write # create the Release (notes only)
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -96,10 +92,7 @@ jobs:
       - name: Publish
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          files: |
-            dist/saitenka-*.zip
-            dist/SHA256SUMS.txt
-          body_path: dist/RELEASE_BODY.md
+          body_path: dist/RELEASE_BODY.md # notes only — no binary assets (install is via PyPI)
           draft: false # "ok on tag" — publish immediately; the human gate is deciding to push the tag
           prerelease: ${{ contains(github.ref_name, '-') }} # v0.8.0-rc1 etc.
 
