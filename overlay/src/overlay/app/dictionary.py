@@ -37,10 +37,10 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 
 from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
-from overlay.panel import Definition, Entry, Freq
+from overlay.panel import Definition, Entry, EntryGroup, Freq
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Container, Sequence
 
     from overlay.app.dictdb import DictionaryDb, DictRow
     from overlay.app.tokenize import Token
@@ -103,6 +103,24 @@ class DictEntry:
 def _to_glob(pattern: str) -> str:
     """Normalise a user wildcard pattern to a SQLite GLOB pattern: fullwidth ＊/？ → ASCII ``*``/``?``."""
     return pattern.replace("＊", "*").replace("？", "?")
+
+
+def _reading_affinity(dict_reading: str, ctx_reading: str) -> int:
+    """How well a dictionary headword reading matches the token's contextual (surface) reading, so a
+    multi-reading kanji picks the reading actually used. Exact match wins; otherwise the longest common
+    kana prefix — 退いた's surface reading のいた shares の with のく but nothing with しりぞく. Survives
+    inflection because the stem reading is a prefix of the conjugated surface reading for godan/ichidan
+    verbs (irregulars like する/来る carry a single reading, so there is nothing to disambiguate)."""
+    if not dict_reading or not ctx_reading:
+        return 0
+    if dict_reading == ctx_reading:
+        return len(dict_reading) + 1  # exact reading beats any prefix
+    n = 0
+    for a, b in zip(dict_reading, ctx_reading, strict=False):
+        if a != b:
+            break
+        n += 1
+    return n
 
 
 def _glosses_of(glossary: list) -> list[str]:
@@ -433,28 +451,80 @@ class DictionarySet:
         nums = [int(n) for _, value in rows for n in re.findall(r"\d+", value)]
         return html, (str(min(nums)) if nums else "")
 
-    def card_for(self, token: Token) -> CardData:
+    def _freq_rank(self, term: str, reading: str) -> int | None:
+        """Lowest (most-common) frequency rank across the freq sources for this ``(term, reading)`` —
+        the tie-breaker's commonness signal. ``None`` when no source ranks it."""
+        ranks = [r for fs in self.freqs if (r := fs.rank((term,), reading)) is not None]
+        return min(ranks) if ranks else None
+
+    def _rank_key(self, term: str, reading: str, token: Token, formset: set[str]):
+        """Sort key for choosing/ordering entries: exact-headword first (like Yomitan and
+        :meth:`Dictionary.lookup`), then the LONGEST term (a multi-token phrase 数ある stacks above the
+        bare 数 — Yomitan shows longest-match first), then the reading closest to the token's contextual
+        reading (退いた prefers のく over しりぞく), then the more common reading by frequency rank."""
+        return (
+            term not in formset,
+            -len(term),
+            -_reading_affinity(reading, token.reading),
+            self._freq_rank(term, reading) or float("inf"),
+        )
+
+    def _best_hit(self, hits: list[DictEntry], token: Token, formset: set[str]) -> DictEntry:
+        """The single entry ``card_for`` mines from one dict's hits. ``min`` is stable, so a full tie
+        falls back to the dict's own order — the prior ``hits[0]`` behaviour."""
+        return min(hits, key=lambda h: self._rank_key(h.term, h.reading, token, formset))
+
+    @staticmethod
+    def _card_from_hit(hit: DictEntry, token: Token) -> CardData:
+        glosses = _glosses_of(hit.glossary)
+        return CardData(
+            expression=hit.term or token.lemma or token.surface,
+            reading=hit.reading or token.reading,
+            glossary_html="<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>",
+            glosses=tuple(glosses),
+        )
+
+    def card_for(self, token: Token, *, extra_terms: Sequence[str] = ()) -> CardData:
         """Mined-card fields (expression / reading / glossary) from the USER's dictionaries — the
-        dict-first mining path. Returns the first dictionary that has the word with a non-empty
-        glossary; otherwise an expression-only CardData (empty ``glossary_html``) so the caller can
-        fall back to the JMdict/jamdict source. No JMdict sequence id — Yomitan terms carry none."""
-        forms = (token.lemma, token.surface, token.reading)
+        dict-first mining path. Returns the best entry (see :meth:`_best_hit`) of the first dictionary
+        that has the word with a non-empty glossary; otherwise an expression-only CardData (empty
+        ``glossary_html``) so the caller can fall back to the JMdict/jamdict source. No JMdict sequence
+        id — Yomitan terms carry none. ``extra_terms`` are longer phrases (数ある) that outrank the bare
+        word, so a hovered phrase mines the phrase by default."""
+        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        formset = {f for f in forms if f}
         for d in self.dicts:
-            hits = d.lookup(*forms)
-            if not hits:
-                continue
-            glosses = _glosses_of(hits[0].glossary)
-            if not glosses:
-                continue
-            glossary_html = "<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>"
-            return CardData(
-                expression=hits[0].term or token.lemma or token.surface,
-                reading=hits[0].reading or token.reading,
-                glossary_html=glossary_html,
-                glosses=tuple(glosses),
-            )
+            hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
+            if hits:
+                return self._card_from_hit(self._best_hit(hits, token, formset), token)
         return CardData(
             expression=token.lemma or token.surface, reading=token.reading, glossary_html=""
+        )
+
+    def cards_for(self, token: Token, *, extra_terms: Sequence[str] = ()) -> list[CardData]:
+        """Every distinct entry (term + reading) across the user's dicts as a mineable CardData,
+        best-first (same ranking ``card_for`` picks its default from) — the choices a per-entry mine
+        button offers, mirroring Yomitan's stacked entries. The glossary for a (term, reading) comes
+        from the first dict that has it with a non-empty glossary. Empty when no dict has a glossed hit,
+        so the caller falls back to the JMdict source. ``cards_for(token)[0] == card_for(token)`` for a
+        single dictionary. ``extra_terms`` (longer phrases 数ある) are looked up too and, being longer,
+        sort ahead of the bare word."""
+        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        formset = {f for f in forms if f}
+        termforms = {f for f in (*extra_terms, token.lemma, token.surface) if f}
+        batched = self._batch_exact(forms)  # one query for all dicts (no per-dict _fetch)
+        by_key: dict[tuple[str, str], CardData] = {}
+        for d in self.dicts:
+            hits = [
+                h
+                for h in d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
+                if _glosses_of(h.glossary)
+            ]
+            hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
+            for h in hits:
+                by_key.setdefault((h.term, h.reading), self._card_from_hit(h, token))
+        return sorted(
+            by_key.values(), key=lambda c: self._rank_key(c.expression, c.reading, token, formset)
         )
 
     def _collect_search_hits(self, glob: str, limit: int) -> list[tuple[str, str, str]]:
@@ -494,7 +564,7 @@ class DictionarySet:
             reading="",
         )
 
-    def _freq_pills(self, forms, reading: str | None) -> list[Freq]:
+    def _freq_pills(self, forms: tuple[str, ...], reading: str | None) -> list[Freq]:
         pills: list[Freq] = []
         for fs in self.freqs:
             disp = fs.display(forms, reading)
@@ -533,7 +603,7 @@ class DictionarySet:
         return out
 
     def _dict_defs(
-        self, forms: tuple[str, str, str], termforms: set[str], default_reading: str
+        self, forms: tuple[str, ...], termforms: set[str], default_reading: str
     ) -> tuple[list[Definition], str | None, str]:
         # Yomitan groups results on the EXPRESSION (term), never the reading, so a reading collision
         # (き → 気/木/生/期/器…) is shown as separate entries, not fused into one. We anchor on the
@@ -570,8 +640,70 @@ class DictionarySet:
             defs.append(Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags)))
         return defs, headword, reading
 
+    @staticmethod
+    def _group_dict_defs(
+        d: Dictionary, hits: list[DictEntry], keep: Container[tuple[str, str]]
+    ) -> dict[tuple[str, str], Definition]:
+        """One dictionary's glossed hits → a :class:`Definition` per (term, reading) in ``keep``, with
+        the same kanji+kana raw-JSON gloss dedup ``_dict_defs`` uses. First hit's tags win per key."""
+        nodes_by_key: dict[tuple[str, str], list] = {}
+        seen_by_key: dict[tuple[str, str], set] = {}
+        tags_by_key: dict[tuple[str, str], str] = {}
+        for h in hits:
+            key = (h.term, h.reading)
+            if key not in keep:
+                continue
+            seen = seen_by_key.setdefault(key, set())
+            if h.raw_glossary in seen:  # kanji+kana duplicate rows share raw JSON — dedup
+                continue
+            seen.add(h.raw_glossary)
+            nodes_by_key.setdefault(key, []).extend(_glossary_to_nodes(h.glossary))
+            tags_by_key.setdefault(key, h.tags)
+        return {
+            key: Definition(d.title, nodes, tags=d.resolve_deftags(tags_by_key[key]))
+            for key, nodes in nodes_by_key.items()
+        }
+
+    def _entry_groups(
+        self,
+        forms: tuple[str, ...],
+        termforms: set[str],
+        token: Token,
+        *,
+        extra_terms: Sequence[str] = (),
+    ) -> list[EntryGroup]:
+        """Yomitan-style stacked entries: one :class:`EntryGroup` per distinct (term, reading), each
+        with its own ruby'd headword and per-dictionary definitions. Aligned to :meth:`cards_for` order
+        (and its ``card_index``) so a group's ⊕ mines that exact entry. With ``extra_terms`` the longer
+        phrases (数ある) stack above the bare word. Empty for a single-entry word — then the fused
+        single-header panel is used, unchanged."""
+        cards = self.cards_for(token, extra_terms=extra_terms)
+        if len(cards) < 2:
+            return []
+        order = {(c.expression, c.reading): i for i, c in enumerate(cards)}
+        defs_by_key: dict[tuple[str, str], list[Definition]] = {}
+        batched = self._batch_exact(forms)
+        for d in self.dicts:
+            hits = [
+                h
+                for h in d.lookup(*forms, rows_by_key=batched.get(d.dict_id, {}))
+                if _glosses_of(h.glossary)
+            ]
+            hits = [h for h in hits if h.term in termforms] or hits  # exact-term preference
+            for key, definition in self._group_dict_defs(d, hits, order.keys()).items():
+                defs_by_key.setdefault(key, []).append(definition)
+        return [
+            EntryGroup(
+                headword=furigana(term, reading),
+                reading=reading,
+                defs=defs_by_key[(term, reading)],
+                card_index=order[(term, reading)],
+            )
+            for term, reading in sorted(defs_by_key, key=lambda k: order[k])
+        ]
+
     def _pitch_accents(
-        self, forms: tuple[str, str, str], reading: str
+        self, forms: tuple[str, ...], reading: str
     ) -> list[tuple[str, tuple[int, ...]]]:
         pitches: list[tuple[str, tuple[int, ...]]] = []
         for ps in self.pitches:
@@ -583,21 +715,33 @@ class DictionarySet:
                     pitches.append(item)
         return pitches
 
-    def entry_for(self, token: Token, inflected: str | None = None) -> Entry:
+    def entry_for(
+        self, token: Token, inflected: str | None = None, *, extra_terms: Sequence[str] = ()
+    ) -> Entry:
         # `inflected` is the full inflected surface incl. trailing auxiliaries (習わ + ぬ → 習わぬ) so
         # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
-        forms = (token.lemma, token.surface, token.reading)
-        termforms = {f for f in (token.lemma, token.surface) if f}
+        # `extra_terms` are longer multi-token phrases starting at this word (数ある over 数); being
+        # longer they outrank the bare word and stack above it as their own entries.
+        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        termforms = {f for f in (*extra_terms, token.lemma, token.surface) if f}
         defs, headword, reading = self._dict_defs(forms, termforms, token.reading)
         if headword is None:
             headword = token.lemma or token.surface
+        groups = self._entry_groups(forms, termforms, token, extra_terms=extra_terms)
+        # When stacked, the fused header (big ruby + its TTS reading + pitch/freq pills) tracks the
+        # best (first) entry, so it agrees with the block directly below it: 退いた shows しりぞく, not
+        # an arbitrary homophone from _dict_defs' hits[0].
+        header = groups[0].headword if groups else furigana(headword, reading)
+        if groups:
+            reading = groups[0].reading
         pitches = self._pitch_accents(forms, reading)
         return Entry(
-            headword=furigana(headword, reading),
+            headword=header,
             tags=[],
             freqs=self._freq_pills(forms, reading),
             defs=defs or [Definition("—", ["（辞書に見つかりませんでした）"])],
             inflection_chain=inflection_chain(inflected or token.surface, token.lemma, headword),
             reading=reading or token.reading,
             pitches=pitches,
+            groups=groups,
         )

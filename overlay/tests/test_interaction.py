@@ -15,7 +15,7 @@ from overlay.panel import Definition, Entry
 
 
 class _FakeDS:
-    def entry_for(self, tok, _inflected=None):
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
         para = "とても長い定義の本文で" * 8  # tall + dense → scrollable, yields scan cells
         return Entry(
             headword=[tok.surface],
@@ -23,8 +23,10 @@ class _FakeDS:
             defs=[Definition(f"辞書{i}", [para]) for i in range(3)],
         )
 
-    def has_term(self, *_forms):
-        return True
+    def has_term(self, *forms):
+        # Only the individual subtitle words are terms — never a multi-token concatenation — so the
+        # phrase-merge probe stays off and these geometry goldens keep their single-token hover.
+        return any(f in {"本命", "を", "読む", "命", "ほんめい", "よむ"} for f in forms)
 
 
 def _reader(monkeypatch):
@@ -55,6 +57,46 @@ def test_move_over_word_shows_tooltip_and_switching_words(monkeypatch):
     j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
     ui.move_to_word(j)
     assert ui.hover == j, "resting on a different word must switch the tooltip to it"
+
+
+def test_tooltip_keeps_lease_over_occluded_word(monkeypatch):
+    """A tooltip drawn over another subtitle word keeps the lease: resting the cursor on the covered
+    word (inside the tip rect) must NOT hijack the tooltip onto it. Regression for the two-line cue
+    where the lower line's tooltip is drawn up over the upper line. `instant` zeroes hover_switch_delay,
+    so the pre-fix code (which only *delayed* the hijack) would switch immediately."""
+    r = _reader(monkeypatch)
+    ui = Driver(r)
+    i = _content_word(r)
+    ui.move_to_word(i)
+    assert ui.hover == i and ui.tip_shown
+    j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
+    # simulate a subtitle word (j) sitting UNDER the shown tooltip: _hit reports j everywhere now
+    monkeypatch.setattr(r, "_hit", lambda *_a: j)
+    ui.move_into_tip(0.5, 0.5)  # cursor over the tip — and, per _hit, over word j beneath it
+    assert ui.hover == i, (
+        "cursor over the tooltip must keep its lease, not switch to the covered word"
+    )
+    ui.move(
+        5, 5
+    )  # off the tooltip (top-left) — the same _hit now DOES switch, proving the lease held it
+    assert ui.hover == j, "off the tooltip, the word under the cursor is hovered normally"
+
+
+def test_hover_over_phrase_start_spans_the_multi_token_term(monkeypatch):
+    """Hovering the first token of a multi-token dictionary term (数ある-style) sets the hover span
+    over the whole phrase — the underline covers both tokens, Yomitan-style longest-match. Moving off
+    clears it."""
+    r = _reader(monkeypatch)  # subtitle 本命を読む → 本命 / を / 読む
+    # pretend 本命を is a dictionary term so the phrase probe fires over tokens 0..1
+    monkeypatch.setattr(r.dict_set, "has_term", lambda *forms: "本命を" in forms)
+    ui = Driver(r)
+    ui.move_to_word(0)
+    assert r._hover_terms == ("本命を",)
+    assert r._hover_span == (0, 2), (
+        "the highlight must span the hovered token and its phrase partner"
+    )
+    ui.move_to_word(2)  # switch to 読む — a word with no following phrase term
+    assert r._hover_span is None and r._hover_terms == ()
 
 
 def test_move_off_words_does_not_hover(monkeypatch):

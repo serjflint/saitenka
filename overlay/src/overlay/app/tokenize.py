@@ -10,6 +10,10 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # fugashi/MeCab wraps a C extension that has NOT declared free-threaded safety, so on a free-threaded
 # build we run with PYTHON_GIL=0 (see examples/mpv_reader._ensure_free_threaded). Tokenising is
@@ -179,6 +183,64 @@ def inflected_in(tokens: list[Token], index: int) -> str:
         s += tokens[j].surface
         j += 1
     return s
+
+
+_MAX_MERGE_SPAN = 4  # forward longest-match window; unidic over-splits compounds/set phrases by 2-3
+_PREFIX_POS = {
+    "接頭辞",
+    "接頭詞",
+}  # honorific/attached prefix (お・ご) — fold into the word it precedes
+
+
+def _scan_from(
+    tokens: list[Token], start: int, index: int, has_term: Callable[[str], bool]
+) -> list[tuple[int, int, int, str]]:
+    """Dictionary terms that begin at ``start`` and reach the hovered ``index``, as
+    ``(ntokens, start, end, surface)``. Stops at punctuation/space or a line break (per-line offsets
+    restart, so a next-start below the previous end means a different source line — not adjacent)."""
+    surface, prev_end = tokens[start].surface, tokens[start].end
+    out: list[tuple[int, int, int, str]] = []
+    for k in range(start + 1, min(len(tokens), start + _MAX_MERGE_SPAN)):
+        nxt = tokens[k]
+        if nxt.pos in SKIP_POS or not nxt.surface.strip() or nxt.start < prev_end:
+            break
+        surface += nxt.surface
+        prev_end = nxt.end
+        if k >= index and has_term(surface):  # the span must cover the hovered token
+            out.append((k + 1 - start, start, k + 1, surface))
+    return out
+
+
+def phrase_terms(
+    tokens: list[Token], index: int, has_term: Callable[[str], bool]
+) -> tuple[list[str], int, int] | None:
+    """Multi-token dictionary terms covering ``tokens[index]``, longest first. unidic over-splits set
+    phrases and compounds (数+ある → 数ある) and detaches honorific prefixes (お+休み → お休み); before a
+    tooltip, probe whether the hovered token plus its neighbours concatenate to terms the dictionaries
+    actually have, so the tooltip can stack them above the bare word — Yomitan-style longest-match-first.
+    The scan runs forward from the hovered token, and also from an immediately-preceding prefix (お/ご) so
+    hovering the content word 休み — not the tiny 接頭辞 お — still finds お休み. Returns
+    ``(terms, start, end)`` (``terms`` longest-first, ``[start, end)`` the token span of the longest) or
+    ``None`` when no multi-token term covers the hovered word.
+
+    ``has_term`` is the dict-set membership seam, kept a callable so this stays dict-free and the whole
+    search strategy is swappable (a future char-level line scanner drops in here). These surfaces are
+    fed to :meth:`DictionarySet.entry_for` as extra lookup terms; the dictionary supplies each reading."""
+    starts = [index]
+    prev = tokens[index - 1] if index > 0 else None
+    if prev is not None and prev.pos in _PREFIX_POS and prev.end == tokens[index].start:
+        starts.append(index - 1)
+    hits = [h for s in starts for h in _scan_from(tokens, s, index, has_term)]
+    if not hits:
+        return None
+    hits.sort(key=lambda h: -h[0])  # longest (most tokens) first
+    seen: set[str] = set()
+    terms: list[str] = []
+    for *_, surface in hits:
+        if surface not in seen:
+            seen.add(surface)
+            terms.append(surface)
+    return terms, hits[0][1], hits[0][2]
 
 
 def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> list[Token]:

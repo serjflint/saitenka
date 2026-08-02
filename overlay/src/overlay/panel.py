@@ -53,6 +53,18 @@ class Definition:
 
 
 @dataclass
+class EntryGroup:
+    """One Yomitan-style stacked entry: a distinct (term, reading) with its own ruby'd headword and
+    per-dictionary definitions, drawn as its own block with its own ⊕ mine button. ``card_index``
+    indexes ``DictionarySet.cards_for(token)`` so the button mines exactly this entry."""
+
+    headword: object  # structured-content node (ruby'd)
+    reading: str
+    defs: list[Definition] = field(default_factory=list)
+    card_index: int = 0
+
+
+@dataclass
 class Entry:
     headword: object  # structured-content node (ruby'd)
     tags: list[str] = field(default_factory=list)
@@ -64,12 +76,20 @@ class Entry:
     # Distinct pitch accents as (reading, positions) — drawn as compact graphs in a header-area row;
     # the purple text pill in the freq row stays as the compact fallback.
     pitches: list[tuple[str, tuple[int, ...]]] = field(default_factory=list)
+    # Yomitan-style stacked entries: when a headword has ≥2 distinct readings (退く = のく / しりぞく),
+    # one EntryGroup per reading, each rendered as its own block with its own ⊕. Empty for the common
+    # single-entry case — the fused header path above is unchanged (goldens preserved).
+    groups: list[EntryGroup] = field(default_factory=list)
 
 
 def _hex(s: str) -> RGBA:
     from overlay.sc.walk import _parse_color
 
     return _parse_color(s, (90, 122, 160, 255))
+
+
+def _load_defs(items: list) -> list[Definition]:
+    return [Definition(d["dict"], d["content"], tags=d.get("tags", [])) for d in items]
 
 
 def load_entry(path: str | Path) -> Entry:
@@ -81,7 +101,19 @@ def load_entry(path: str | Path) -> Entry:
         reading_label=(
             tuple(data["reading_label"].values()) if data.get("reading_label") else None
         ),
-        defs=[Definition(d["dict"], d["content"]) for d in data.get("defs", [])],
+        defs=_load_defs(data.get("defs", [])),
+        reading=data.get("reading", ""),
+        # Yomitan-style stacked entries (退く = のく / しりぞく): one block per reading, each with its
+        # own ruby'd headword + ⊕. Absent in single-entry fixtures → the fused header path.
+        groups=[
+            EntryGroup(
+                headword=g["headword"],
+                reading=g.get("reading", ""),
+                defs=_load_defs(g.get("defs", [])),
+                card_index=g.get("card_index", i),
+            )
+            for i, g in enumerate(data.get("groups", []))
+        ],
     )
 
 
@@ -165,6 +197,100 @@ class Row:
     body_args: BodyRenderArgs | None = None
 
 
+def _emit_def_rows(
+    rows: list[Row],
+    defs: list[Definition],
+    content_w: int,
+    m: int,
+    theme: Theme,
+    *,
+    sectioned: bool,
+) -> None:
+    """Numbered per-dictionary definitions: a cheap def-name chip head row + one deferred def-BODY row
+    each. Shared by the fused single-header panel and each stacked group. ``sectioned`` keys the
+    def-head on its dict name for tabs/keyboard-nav (fused layout); stacked groups carry the section on
+    their group-head instead, so their def-heads pass ``sectioned=False``."""
+    body_style = Style(size=theme.px(23), color=theme.text)
+    for i, d in enumerate(defs, 1):
+
+        def _def_head(i=i, d=d):
+            dh: list = [Span(f"{i}. ", Style(size=theme.px(20), weight=700, color=theme.text))]
+            for tag in d.tags:  # defTag pills: ★ / priority form
+                dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
+                dh.append(Span(" ", Style(size=theme.px(19))))
+            dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
+            return _flow_row(dh, content_w, scale=1.7), [], []
+
+        rows.append(Row(m, _def_head, section=d.dict_name if sectioned else None))
+
+        # ONE row per def body, fully deferred: the SC-walk itself is NOT cheap for pathological
+        # entries (a 取る-class def walks in 200+ ms), so both the walk AND the rasterisation live
+        # inside the thunk — building rows costs nothing, and the head only walks/rasters the defs the
+        # viewport actually shows. ``render_capped`` bounds the raster mid-def (block budget + mid-block
+        # line clip via render_document/render_flow max_height) so cold first paint is O(viewport) even
+        # when the first visible def body is enormous. render_document stacks the walked blocks with the
+        # same 3px inter-block gap, so the composed full panel is byte-identical.
+        body_args = BodyRenderArgs(
+            content=d.content,
+            body_style=body_style,
+            body_w=content_w - theme.body_indent,
+            gap_px=theme.px(3),
+            indent_px=theme.px(INDENT_PX),
+            gutter_px=theme.px(GUTTER_PX),
+        )
+
+        def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)
+            def thunk():
+                img, scan, links, _complete = render_body_block(args)
+                return img, scan, links
+
+            def capped(max_h: int):
+                return render_body_block(args, max_h)
+
+            return thunk, capped
+
+        body_thunk, body_capped = _def_body(body_args)
+        rows.append(
+            Row(m + theme.body_indent, body_thunk, render_capped=body_capped, body_args=body_args)
+        )
+
+
+def _emit_group_rows(
+    rows: list[Row],
+    groups: list[EntryGroup],
+    content_w: int,
+    m: int,
+    theme: Theme,
+    *,
+    add_button: bool,
+    group_mined: tuple[bool, ...],
+) -> None:
+    """Yomitan-style stacked entries: one block per :class:`EntryGroup` — a ruby'd headword row with
+    its own ⊕ (emitted as a ``LinkBox('mine:<card_index>')`` so it rides the existing link hit-test in
+    both render paths), followed by that group's per-dict definitions. The group-head row carries the
+    tab/keyboard-nav ``section`` (per reading); its def-heads don't."""
+    for gi, g in enumerate(groups):
+        mined = gi < len(group_mined) and group_mined[gi]
+
+        def _group_head(g=g, mined=mined):
+            flow: list = [
+                Span("・ ", Style(size=theme.px(30), color=theme.accent)),
+                *inline_flow(g.headword, Style(size=theme.px(30), weight=700, color=theme.text)),
+            ]
+            img = _flow_row(flow, content_w)
+            links: list[LinkBox] = []
+            if add_button:
+                add = theme.px(_ADD_SIZE)
+                btn = check(add) if mined else plus(add)
+                bx, by = content_w - add, theme.px(2)
+                img.alpha_composite(btn, (bx, by))
+                links.append(LinkBox(f"mine:{g.card_index}", bx, by, add, add))
+            return img, [], links
+
+        rows.append(Row(m, _group_head, section=g.reading))
+        _emit_def_rows(rows, g.defs, content_w, m, theme, sectioned=False)
+
+
 def panel_rows(
     entry: Entry,
     width: int = 384,
@@ -173,15 +299,19 @@ def panel_rows(
     add_button: bool = False,
     mined: bool = False,
     speak_button: bool = True,
+    group_mined: tuple[bool, ...] = (),
 ) -> list[Row]:
     """Build the panel's rows as deferred thunks (same order/content as ``render_panel``).
 
     ``add_button`` draws the header add-to-Anki button (only when mining is available); ``mined`` makes
     it a ✓ instead of ⊕ for a word already in the deck. ``speak_button`` draws the 🔊 TTS button — set
-    False to hide it when no Japanese TTS voice is installed (it would silently do nothing). Defaults
-    keep ``render_panel`` and its golden unchanged."""
+    False to hide it when no Japanese TTS voice is installed (it would silently do nothing). When
+    ``entry.groups`` is set (Yomitan-style stacked entries), the fused header ⊕ is suppressed and each
+    group gets its own ⊕ (``group_mined[i]`` → ✓ for an already-mined group). Defaults keep
+    ``render_panel`` and its golden unchanged."""
     m = theme.margin
     content_w = width - 2 * m
+    header_add = add_button and not entry.groups  # groups carry their own per-entry ⊕
     rows: list[Row] = []
 
     # --- header: ▶ + big ruby headword, ⊕/✓ add + 🔊 speaker top-right ---
@@ -198,7 +328,7 @@ def panel_rows(
             spk = speaker(theme.px(_SPK_SIZE))
             hdr.alpha_composite(spk, (right - spk.width, top))
             right -= theme.px(_SPK_SIZE) + theme.px(_ICON_GAP)
-        if add_button:
+        if header_add:
             add = theme.px(_ADD_SIZE)
             btn = check(add) if mined else plus(add)
             hdr.alpha_composite(btn, (right - add, top + theme.px(2)))
@@ -290,51 +420,12 @@ def panel_rows(
         rows.append(Row(m, _reading))
 
     # --- numbered definitions --- (def-name chip row is cheap; the body row is the expensive one)
-    body_style = Style(size=theme.px(23), color=theme.text)
-    for i, d in enumerate(entry.defs, 1):
-
-        def _def_head(i=i, d=d):
-            dh: list = [Span(f"{i}. ", Style(size=theme.px(20), weight=700, color=theme.text))]
-            for tag in d.tags:  # defTag pills: ★ / priority form
-                dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
-                dh.append(Span(" ", Style(size=theme.px(19))))
-            dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
-            return _flow_row(dh, content_w, scale=1.7), [], []
-
-        rows.append(Row(m, _def_head, section=d.dict_name))
-
-        # ONE row per def body, fully deferred: the SC-walk itself is NOT cheap for pathological
-        # entries (a 取る-class def walks in 200+ ms), so both the walk AND the rasterisation live
-        # inside the thunk — building rows costs nothing, and the head only walks/rasters the defs
-        # the viewport actually shows. ``render_capped`` bounds the raster mid-def (block budget +
-        # mid-block line clip via render_document/render_flow max_height) so cold first paint is
-        # O(viewport) even when the first visible def body is enormous. render_document stacks the
-        # walked blocks with the same 3px inter-block gap, so the composed full panel is
-        # byte-identical.
-        body_w = content_w - theme.body_indent
-        body_args = BodyRenderArgs(
-            content=d.content,
-            body_style=body_style,
-            body_w=body_w,
-            gap_px=theme.px(3),
-            indent_px=theme.px(INDENT_PX),
-            gutter_px=theme.px(GUTTER_PX),
+    if entry.groups:
+        _emit_group_rows(
+            rows, entry.groups, content_w, m, theme, add_button=add_button, group_mined=group_mined
         )
-
-        def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)
-            def thunk():
-                img, scan, links, _complete = render_body_block(args)
-                return img, scan, links
-
-            def capped(max_h: int):
-                return render_body_block(args, max_h)
-
-            return thunk, capped
-
-        body_thunk, body_capped = _def_body(body_args)
-        rows.append(
-            Row(m + theme.body_indent, body_thunk, render_capped=body_capped, body_args=body_args)
-        )
+    else:
+        _emit_def_rows(rows, entry.defs, content_w, m, theme, sectioned=True)
 
     return rows
 
@@ -659,8 +750,11 @@ def render_panel(
     *,
     add_button: bool = False,
     mined: bool = False,
+    group_mined: tuple[bool, ...] = (),
 ) -> Image.Image:
-    rows = panel_rows(entry, width, theme, add_button=add_button, mined=mined)
+    rows = panel_rows(
+        entry, width, theme, add_button=add_button, mined=mined, group_mined=group_mined
+    )
     rendered = [(r.x, r.render()[0]) for r in rows]
     gaps = [theme.gap if r.gap is None else r.gap for r in rows]
     canvas = compose_panel(rendered, width, theme, gaps)

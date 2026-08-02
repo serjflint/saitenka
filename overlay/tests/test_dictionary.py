@@ -280,6 +280,161 @@ def test_card_for_uses_user_dictionary(tmp_path):
     assert card.glosses == ("to read", "to peruse")
 
 
+def test_card_for_prefers_contextual_reading_over_dict_order(tmp_path):
+    """退いた: both 退く entries are exact-headword hits, so the tie-break falls to the reading closest
+    to the token's contextual (surface) reading — のいた shares の with のく, picking it over the
+    first-listed しりぞく (which the old ``hits[0]`` rule would have mined)."""
+    d = _make_dict(
+        tmp_path / "nk.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    card = ds.card_for(tok)
+    assert card.reading == "のく"
+    assert card.glosses == ("to step aside",)
+
+
+def test_card_for_breaks_reading_tie_by_frequency(tmp_path):
+    """No entry's reading matches the (absent) context reading → the tie falls through to commonness:
+    the lower freq rank (おもて) wins over the first-listed ひょう."""
+    d = _make_dict(
+        tmp_path / "fq.zip",
+        "Multi",
+        [["表", "ひょう", ["table"]], ["表", "おもて", ["surface"]]],
+    )
+    freq = dicthelp.meta_zip(
+        tmp_path / "fr.zip",
+        "Freq",
+        "freq",
+        [
+            ["表", {"reading": "おもて", "frequency": 500}],
+            ["表", {"reading": "ひょう", "frequency": 9000}],
+        ],
+    )
+    ds = dicthelp.load_set([d], [freq])
+    tok = Token(surface="表", lemma="表", reading="", pos="名詞", start=0, end=1)
+    card = ds.card_for(tok)
+    assert card.reading == "おもて"
+
+
+def test_cards_for_returns_one_card_per_reading_best_first(tmp_path):
+    """The per-entry mine choices: one CardData per distinct (term, reading), ordered best-first —
+    退いた's contextual reading のいた puts のく ahead of the first-listed しりぞく, and each card carries
+    only its own reading's glosses. cards_for[0] is card_for's default."""
+    d = _make_dict(
+        tmp_path / "cff.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    cards = ds.cards_for(tok)
+    assert [(c.reading, c.glosses) for c in cards] == [
+        ("のく", ("to step aside",)),
+        ("しりぞく", ("to retreat",)),
+    ]
+    assert cards[0] == ds.card_for(tok)  # default == first offered
+
+
+def test_entry_for_builds_stacked_groups_for_multi_reading(tmp_path):
+    """entry_for exposes one EntryGroup per distinct reading, ordered like cards_for (退いた context →
+    のく first), each carrying its card_index for the per-entry ⊕ and only its reading's definition."""
+    d = _make_dict(
+        tmp_path / "grp.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    entry = ds.entry_for(tok)
+    assert [(g.reading, g.card_index) for g in entry.groups] == [("のく", 0), ("しりぞく", 1)]
+    cards = ds.cards_for(tok)
+    # each group's card_index points at its own entry in cards_for
+    assert all(cards[g.card_index].reading == g.reading for g in entry.groups)
+    assert "to step aside" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+    assert "to retreat" not in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+
+
+def test_entry_for_header_reading_agrees_with_first_stacked_group(tmp_path):
+    """The fused header (big ruby + TTS reading) tracks the best stacked entry, so it doesn't show an
+    arbitrary homophone above a differently-read first block — 退いた's header reads のく, like group 0."""
+    d = _make_dict(
+        tmp_path / "hdr.zip",
+        "Multi",
+        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    entry = ds.entry_for(tok)
+    assert entry.reading == entry.groups[0].reading == "のく"
+    assert entry.headword is entry.groups[0].headword
+
+
+def test_entry_for_stacks_phrase_terms_longest_first(tmp_path):
+    """A multi-token phrase (数ある) passed as an extra term stacks ABOVE the bare word (数), longest
+    first — Yomitan shows the longest match first. Hovering 数 in 数ある must surface 数ある, not just 数."""
+    d = _make_dict(
+        tmp_path / "ph.zip",
+        "Phrase",
+        [["数ある", "かずある", ["many; numerous"]], ["数", "かず", ["number"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="数", lemma="数", reading="かず", pos="名詞", start=0, end=1)
+    entry = ds.entry_for(tok, extra_terms=("数ある",))
+    assert [g.reading for g in entry.groups] == ["かずある", "かず"]  # phrase first, then bare word
+    assert "many; numerous" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+    assert entry.reading == "かずある"  # fused header tracks the longest (top) entry
+
+
+def test_entry_for_stacks_honorific_phrase_from_the_content_word(tmp_path):
+    """お休み splits into お(prefix)+休み; hovering 休み folds the leading お back in, so passing お休み as
+    an extra term stacks it ABOVE the bare 休み — the natural hover (the kanji, not the tiny お) surfaces
+    the whole word."""
+    d = _make_dict(
+        tmp_path / "oy.zip",
+        "Honorific",
+        [["お休み", "おやすみ", ["rest; good night"]], ["休み", "やすみ", ["holiday"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="休み", lemma="休む", reading="やすみ", pos="動詞", start=1, end=3)
+    entry = ds.entry_for(tok, extra_terms=("お休み",))
+    assert [g.reading for g in entry.groups] == ["おやすみ", "やすみ"]  # お休み first, then 休み
+    assert "rest; good night" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
+
+
+def test_phrase_cards_align_with_groups_for_mining(tmp_path):
+    """The per-entry ⊕ mines cards_for(...)[card_index]; with phrase terms the card list must span the
+    same stacked entries in the same order, so a group's ⊕ mines that exact entry (phrase default first)."""
+    d = _make_dict(
+        tmp_path / "phm.zip",
+        "Phrase",
+        [["数ある", "かずある", ["many"]], ["数", "かず", ["number"]]],
+    )
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="数", lemma="数", reading="かず", pos="名詞", start=0, end=1)
+    entry = ds.entry_for(tok, extra_terms=("数ある",))
+    cards = ds.cards_for(tok, extra_terms=("数ある",))
+    assert cards[0].expression == "数ある"  # default mine is the longest match
+    assert all(cards[g.card_index].reading == g.reading for g in entry.groups)
+
+
+def test_entry_for_single_reading_has_no_groups(tmp_path):
+    """A single-reading word keeps the fused single-header panel (no stacking) — groups is empty."""
+    d = _make_dict(tmp_path / "one.zip", "One", [["読む", "よむ", ["to read"]]])
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    assert ds.entry_for(tok).groups == []
+
+
+def test_cards_for_empty_when_no_glossed_hit(tmp_path):
+    d = _make_dict(tmp_path / "cfe.zip", "TestDict", [["猫", "ねこ", ["cat"]]])
+    ds = dicthelp.load_set([d])
+    tok = Token(surface="犬", lemma="犬", reading="いぬ", pos="名詞", start=0, end=1)
+    assert ds.cards_for(tok) == []
+
+
 def test_card_for_miss_returns_empty_glossary(tmp_path):
     """A word in no configured dict → expression-only card with empty glossary_html, so the miner
     can fall back to the JMdict/jamdict source."""
@@ -494,6 +649,41 @@ def test_freq_source_joins_multiple_entries(tmp_path):
     )
     fs = dicthelp.load_freqsource(p)
     assert fs.display(("本命",), "ほんめい") == "12813, 14117, 14086"
+
+
+def test_freq_source_rank_returns_min_numeric_rank(tmp_path):
+    # SUW+LUW give two entries for one term → the blend consumes the most-frequent (min) rank.
+    p = _make_meta(
+        tmp_path / "freqr.zip",
+        "FreqR",
+        "freq",
+        [
+            ["本命", {"reading": "ほんめい", "frequency": 14117}],
+            ["本命", {"reading": "ほんめい", "frequency": 12813}],
+        ],
+    )
+    fs = dicthelp.load_freqsource(p)
+    assert fs.rank(("本命", "本命", "ほんめい"), "ほんめい") == 12813
+
+
+def test_freq_source_rank_none_when_absent(tmp_path):
+    p = _make_meta(tmp_path / "freqr2.zip", "FreqR2", "freq", [["猫", {"frequency": 500}]])
+    fs = dicthelp.load_freqsource(p)
+    assert fs.rank(("存在しない語",), None) is None
+
+
+def test_freq_source_records_original_frequency_mode(tmp_path):
+    # The blend must know a dict's ORIGINAL mode even though occurrence counts are converted to
+    # ranks at import — persisted per dict so occurrence-based lists can be excluded.
+    rank_zip = dicthelp.meta_zip(
+        tmp_path / "rank.zip", "RankDict", "freq", [["猫", {"frequency": 500}]]
+    )
+    occ_zip = dicthelp.meta_zip(
+        tmp_path / "occ.zip", "OccDict", "freq", [["猫", 99999]], frequency_mode="occurrence-based"
+    )
+    on = dicthelp.db()
+    assert dicthelp.load_freqsource(rank_zip, on=on).occurrence_based is False
+    assert dicthelp.load_freqsource(occ_zip, on=on).occurrence_based is True
 
 
 def test_pitch_source_reading_and_positions(tmp_path):

@@ -1600,6 +1600,60 @@ def test_no_jlpt_pill_without_level_or_scorer():
     assert Reader(FakeIPC(), dict_set=_FakeDS())._jlpt_pill(tok) is None
 
 
+def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
+    """The blended pill's rank is the harmonic mean of the word's rank across every loaded freq dict,
+    and it leads the frequency row (before the per-dict pills)."""
+    import dicthelp
+
+    from overlay.app.fsrs import harmonic_of, rareness_color
+    from overlay.app.tokenize import Token
+
+    fa = dicthelp.meta_zip(tmp_path / "fa.zip", "FreqA", "freq", [["猫", {"frequency": 1000}]])
+    fb = dicthelp.meta_zip(tmp_path / "fb.zip", "FreqB", "freq", [["猫", {"frequency": 2000}]])
+    ds = dicthelp.load_set(freq_zips=[fa, fb])
+    r = Reader(FakeIPC(), dict_set=ds)
+    tok = Token("猫", "猫", "ねこ", "名詞", 0, 1)
+    pill = r._rareness_pill(tok)
+    assert pill is not None and pill.name == "diff"
+    assert pill.color == rareness_color(harmonic_of([1000.0, 2000.0]))  # ≈1333 → common (green)
+
+
+def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
+    """Only rank-based dicts may be blended. An occurrence-based dict (its count converts to a dense
+    per-corpus rank of 1) would crush the harmonic mean if included — it must be skipped, so the pill
+    reflects the rank-based dict alone."""
+    import dicthelp
+
+    from overlay.app.tokenize import Token
+
+    rank_z = dicthelp.meta_zip(tmp_path / "r.zip", "RankF", "freq", [["猫", {"frequency": 1500}]])
+    occ_z = dicthelp.meta_zip(
+        tmp_path / "o.zip", "OccF", "freq", [["猫", 99999]], frequency_mode="occurrence-based"
+    )
+    ds = dicthelp.load_set(freq_zips=[rank_z, occ_z])
+    r = Reader(FakeIPC(), dict_set=ds)
+    pill = r._rareness_pill(Token("猫", "猫", "ねこ", "名詞", 0, 1))
+    assert pill is not None and pill.value == "1.5k"  # blend of {1500} alone, not pulled toward 1
+
+
+def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
+    import dicthelp
+
+    from overlay.app.tokenize import Token
+
+    fa = dicthelp.meta_zip(tmp_path / "fc.zip", "FreqC", "freq", [["猫", {"frequency": 1000}]])
+    ds = dicthelp.load_set(freq_zips=[fa])
+    r = Reader(FakeIPC(), dict_set=ds)
+    assert r._rareness_pill(Token("存在しない語", "存在しない語", "", "名詞", 0, 6)) is None
+    # no freq sources at all → no pill
+    assert (
+        Reader(FakeIPC(), dict_set=_FakeDS())._rareness_pill(
+            Token("猫", "猫", "ねこ", "名詞", 0, 1)
+        )
+        is None
+    )
+
+
 def test_no_jlpt_pill_for_function_words_even_on_reading_collision():
     """Particles/aux (は, ね) share a bare-kana reading with N1 kanji words in the JLPT map. The pill
     must gate on content POS like the underline does, so は (助詞) gets NO pill even though its reading

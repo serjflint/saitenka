@@ -344,6 +344,11 @@ class Reader:
         )
         self._flash_until = 0.0
         self._hover_reading = ""  # dict-form reading of the hovered word, for TTS
+        # Multi-token dictionary terms starting at the hovered word (数ある over 数), longest-first, and
+        # the token span the longest covers: the tooltip stacks them above the bare word and the
+        # underline spans the match. Empty / None when no longer term starts here.
+        self._hover_terms: tuple[str, ...] = ()
+        self._hover_span: tuple[int, int] | None = None
         self._kanji_index = 0  # `k` cycles the hovered word's kanji
         # Per-dictionary tabs (sticky row over the tooltip viewport) + tooltip keys
         self._tab_names: list[str] = []
@@ -468,6 +473,8 @@ class Reader:
         self._tip_key = None
         self._tip_dirty = False
         self._hover_reading = ""
+        self._hover_terms = ()
+        self._hover_span = None
         self._kanji_index = 0
         self._tab_names, self._tab_offsets, self._tab_rects = [], [], []
         self._tab_bgra, self._tab_h, self._tab_active = None, 0, -1
@@ -536,11 +543,17 @@ class Reader:
                 sr = render_plain_subtitle(self.sub_text, self.osd[0], size=self.sub_size)
             else:
                 annotated = self.annotation_mode == "full" or self._annotation_hover
+                # A phrase span highlights [start, end) — start can precede the hovered token (a leading
+                # お in お休み), so it drives the underline, not self.hover.
+                span = self._hover_span if annotated else None
                 sr = render_subtitle(
                     self.lines,
                     self.osd[0],
                     size=self.sub_size,
-                    hover=self.hover if annotated and self.hover >= 0 else None,
+                    hover=span[0]
+                    if span
+                    else (self.hover if annotated and self.hover >= 0 else None),
+                    hover_end=span[1] if span else None,
                     styles=self.styles if annotated else None,
                 )
         self.boxes = sr.boxes
@@ -660,6 +673,9 @@ class Reader:
 
     def _jlpt_pill(self, tok) -> Freq | None:
         return tooltip.jlpt_pill(self, tok)
+
+    def _rareness_pill(self, tok) -> Freq | None:
+        return tooltip.rareness_pill(self, tok)
 
     def _entry_for(self, tok, inflected):
         return tooltip.entry_for_tok(self, tok, inflected)
@@ -871,9 +887,9 @@ class Reader:
         with otel_metrics.traced("anki_mine", source="base"):
             self._miner.mine_token(self.tokens[idx])
 
-    def _mine_token(self, tok) -> None:
+    def _mine_token(self, tok, *, card=None) -> None:
         with otel_metrics.traced("anki_mine", source="nested"):
-            self._miner.mine_token(tok)
+            self._miner.mine_token(tok, card=card)
 
     def _mark_mined(self, expression: str) -> None:
         miner_ui.mark_mined(self, expression)

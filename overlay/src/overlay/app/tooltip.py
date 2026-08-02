@@ -24,6 +24,7 @@ from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import timed
 from overlay.app.popups import TipPanel
 from overlay.app.prefetch import FinishItem
+from overlay.app.tokenize import phrase_terms
 from overlay.mpvio.osd import to_bgra_array
 from overlay.panel import (
     Freq,
@@ -63,6 +64,12 @@ class PanelKey(NamedTuple):
     tabs: bool = (
         True  # dict-tab strip reserved/drawn (base tooltip); a nested popup builds with tabs=False
     )
+    # Per-stacked-entry mined state (aligned to cards_for order): flips a group's ⊕→✓ and, as part of
+    # the key, rebuilds the panel when one stacked entry gets mined. () for single-entry words.
+    group_mined: tuple[bool, ...] = ()
+    # Longer multi-token phrase terms stacked above the bare word (数ある over 数); part of the key so
+    # the same word hovered mid-phrase vs standalone caches distinctly. () when no longer term.
+    phrase_terms: tuple[str, ...] = ()
 
 
 # --- hover -----------------------------------------------------------------------------------------
@@ -88,10 +95,16 @@ def update_hover(reader: Reader) -> None:
 
 def _hover_targets(reader: Reader, mx: float, my: float, *, inside: bool):
     """Which of (subtitle word, base tooltip, nested popup) the cursor is currently over."""
-    over_word = reader._hit(mx, my) if (inside and reader.tokens) else -1
     over_tip = inside and reader._tip_rect is not None and reader._in_rect(reader._tip_rect, mx, my)
     over_nest = (
         inside and reader._nest.rect is not None and reader._in_rect(reader._nest.rect, mx, my)
+    )
+    # The popups are drawn ON TOP of the subtitle, so a hit on a popup occludes the word beneath it:
+    # keep the lease on the open tooltip instead of switching to the word it happens to cover (e.g. the
+    # tooltip for the lower line, drawn up over the upper line of a two-line cue). Without this the base
+    # hit-test still sees that covered word and `hover_switch_delay` only *delays* the hijack.
+    over_word = (
+        reader._hit(mx, my) if (inside and reader.tokens and not (over_tip or over_nest)) else -1
     )
     return over_word, over_tip, over_nest
 
@@ -189,14 +202,37 @@ def update_hover_impl(reader: Reader) -> None:
     _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
 
 
+def resolve_hover(reader: Reader, index: int) -> None:
+    """Set the hovered word's stacked phrase terms + highlight span. Multi-token dictionary terms
+    starting at ``index`` (数ある over 数) are looked up as extra terms on the hovered word, so the
+    tooltip stacks them above the bare word and the underline spans the longest. Runs before the
+    subtitle redraw so the highlight covers the span on the first paint."""
+    terms: tuple[str, ...] = ()
+    span: tuple[int, int] | None = None
+    has_term = getattr(
+        reader.dict_set, "has_term", None
+    )  # phrase merge is an optional dict capability
+    if has_term is not None:
+        got = phrase_terms(tokens=reader.tokens, index=index, has_term=has_term)
+        if got is not None:
+            term_list, start, end = got
+            terms, span = tuple(term_list), (start, end)
+    reader._hover_terms = terms
+    reader._hover_span = span
+
+
 def set_hover(reader: Reader, index: int) -> None:
     if index == reader.hover:
         return
     reader.hover = index
-    reader._draw_subtitle()
     if index < 0:
+        reader._hover_terms = ()
+        reader._hover_span = None
+        reader._draw_subtitle()
         reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
         return
+    resolve_hover(reader, index)  # sets _hover_terms/_hover_span BEFORE the draw highlights it
+    reader._draw_subtitle()
     show_tooltip(reader, index)
     if reader._session_recorder is not None:
         reader._session_recorder.record_lookup()
@@ -334,6 +370,27 @@ def hit_nested_speaker(reader: Reader, x: float, y: float) -> bool:
 # --- click routing -----------------------------------------------------------------------------
 
 
+def _mine_link(reader: Reader, lb, tok) -> bool:
+    """A stacked entry's ⊕ arrives as a ``LinkBox('mine:<card_index>')`` (it rides the normal link
+    hit-test). Mine that exact entry via ``cards_for(tok)[i]`` and report handled, so the caller does
+    not treat it as a cross-reference navigation. Not a mine link → False."""
+    if (
+        tok is None
+        or not isinstance(getattr(lb, "query", None), str)
+        or not lb.query.startswith("mine:")
+    ):
+        return False
+    # Same expanded card list the stacked panel was built from (phrase terms included), so the ⊕'s
+    # card_index aligns with the group it sits on.
+    cards = (
+        reader.dict_set.cards_for(tok, extra_terms=reader._hover_terms) if reader.dict_set else []
+    )
+    idx = int(lb.query[len("mine:") :])
+    if 0 <= idx < len(cards):
+        reader._mine_token(tok, card=cards[idx])
+    return True
+
+
 def _click_nested(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the nested popup. Returns True if it did (regardless of what, if
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
@@ -345,7 +402,7 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
         speak(reader._nest.state.reading)  # 🔊 → read the inner word aloud
     else:
         lb = reader._link_hit(x, y, reader._nest.state, reader._nest.xy, reader._nest.scroll)
-        if lb is not None:
+        if lb is not None and not _mine_link(reader, lb, reader._nest.token):
             reader._open_link(lb, reader._nest.xy, reader._nest.scroll)  # cross-ref → navigate
     return True
 
@@ -368,7 +425,9 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
             return True
     lb = reader._link_hit(x, y, reader._tip_state, reader._tip_xy, reader._tip_scroll)
     if lb is not None:
-        reader._open_link(lb, reader._tip_xy, reader._tip_scroll)  # cross-ref → nested popup
+        tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
+        if not _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
+            reader._open_link(lb, reader._tip_xy, reader._tip_scroll)  # cross-ref → nested popup
     else:
         reader._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
     return True
@@ -395,6 +454,7 @@ def panel_key(
     # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
     # ``tabs`` distinguishes the base build (with the dict-tab reserve) from a nested build (none),
     # so the same word shown in both places doesn't share the wrong reserve.
+    phrase = reader._hover_terms if tabs else ()  # phrase stacking is base-tooltip only
     return PanelKey(
         tok.lemma,
         tok.surface,
@@ -404,6 +464,9 @@ def panel_key(
         anki_ok(reader),
         mined,
         tabs,
+        group_mined_of(reader=reader, tok=tok, extra_terms=phrase),
+        # the stacked phrase terms are part of the base panel's identity (数 alone vs 数 under 数ある)
+        phrase,
     )
 
 
@@ -416,6 +479,22 @@ def is_mined(reader: Reader, tok) -> bool:
         return card_for(tok).expression in reader._mined
     except Exception:  # noqa: BLE001  # render hot path - any lookup hiccup just hides the mined mark
         return False
+
+
+def group_mined_of(reader: Reader, tok, *, extra_terms: tuple[str, ...] = ()) -> tuple[bool, ...]:
+    """Per-stacked-entry mined flags (aligned to ``cards_for`` order) for a multi-reading word — each
+    entry's ⊕ shows ✓ when that exact (expression, reading) is already in the deck. () when nothing is
+    mined yet (cheap short-circuit) or the word has fewer than two entries (no stacking).
+    ``extra_terms`` must match the panel's phrase stacking so the flags align with the shown groups."""
+    if not reader._mined or reader.dict_set is None:
+        return ()
+    try:
+        cards = reader.dict_set.cards_for(tok, extra_terms=extra_terms)
+    except Exception:  # noqa: BLE001  # render hot path - a lookup hiccup just hides the mined marks
+        return ()
+    if len(cards) < 2:
+        return ()
+    return tuple(c.expression in reader._mined for c in cards)
 
 
 def anki_ok(reader: Reader) -> bool:
@@ -465,17 +544,47 @@ def jlpt_pill(reader: Reader, tok) -> Freq | None:
     return Freq("JLPT", level, _darken(base))
 
 
-def entry_for_tok(reader: Reader, tok, inflected):
-    """Look up the panel entry and fold in the JLPT pill (near the frequency pills) when the word
-    carries a JLPT level, so it mirrors the subtitle underline.
+def rareness_pill(reader: Reader, tok) -> Freq | None:
+    """The blended-rareness "diff" pill: harmonic mean of the word's rank across every loaded freq
+    dict, colored by band (:func:`fsrs.rareness_color`). Summarizes the row of 7+ per-dict pills into
+    one rareness read. ``None`` when no freq dict has the word, so the caller skips it cleanly."""
+    from overlay.app.fsrs import diff_pill, harmonic_of
+
+    ds = reader.dict_set
+    sources = getattr(ds, "freqs", None)
+    if not sources:
+        return None
+    # Only rank-based dicts may be blended — an occurrence-based dict's converted rank is a per-corpus
+    # dense rank on an incomparable scale (see FreqSource.occurrence_based); it stays in the per-dict
+    # pill row but never in the harmonic mean.
+    forms = (tok.lemma, tok.surface, tok.reading)
+    ranks = [
+        r
+        for fs in sources
+        if not getattr(fs, "occurrence_based", False)
+        and (r := fs.rank(forms, tok.reading)) is not None
+    ]
+    return diff_pill(harmonic_of([float(r) for r in ranks]))
+
+
+def entry_for_tok(reader: Reader, tok, inflected, *, extra_terms: tuple[str, ...] = ()):
+    """Look up the panel entry and fold in the blended-rareness pill and the JLPT pill (leading the
+    frequency pills) when the word has them, so they mirror the subtitle underline / freq row.
+    ``extra_terms`` are longer multi-token phrases starting at this word (数ある over 数); the dict set
+    stacks them above the bare word.
 
     Never mutates the lru_cached Entry from lookup.lookup_entry / dict_set.entry_for — returns
     a shallow copy with a new freqs list so repeated calls do not accumulate pills."""
-    entry = reader.dict_set.entry_for(tok, inflected) if reader.dict_set else entry_for(tok)
-    pill = jlpt_pill(reader, tok)
-    if pill is not None and hasattr(entry, "freqs"):
+    if reader.dict_set is None:
+        entry = entry_for(tok)
+    elif extra_terms:  # only the phrase path needs the expanded lookup
+        entry = reader.dict_set.entry_for(tok, inflected=inflected, extra_terms=extra_terms)
+    else:
+        entry = reader.dict_set.entry_for(tok, inflected)
+    extra = [p for p in (rareness_pill(reader, tok), jlpt_pill(reader, tok)) if p is not None]
+    if extra and hasattr(entry, "freqs"):
         # Build the pill list into a shallow copy — never mutate the cached original.
-        entry = _dc.replace(entry, freqs=[pill, *entry.freqs])
+        entry = _dc.replace(entry, freqs=[*extra, *entry.freqs])
     return entry
 
 
@@ -500,15 +609,23 @@ def _build_panel(
         kind="base" if tabs else "nested",
         during_scroll="1" if reader._scrolled_this_tick else "0",
     ):
-        entry = entry_for_tok(reader, tok, inflected)
-        # Reserve space for the sticky dict-tab strip (base tooltip, ≥2 dicts, tabs on) so it clears
-        # the header (reading + ⊕/🔊) instead of overlapping it. Use the WRAPPED height for this
-        # word's dict names at this width, so a many-dict strip that wraps onto several rows
-        # reserves enough. Nested popups (tabs=False) reserve nothing.
+        # The base tooltip stacks the hovered word's longer phrase terms; nested popups (inner scanned
+        # words) and prefetch look up the bare word only.
+        entry = entry_for_tok(
+            reader=reader,
+            tok=tok,
+            inflected=inflected,
+            extra_terms=reader._hover_terms if tabs else (),
+        )
+        # Reserve space for the sticky tab strip (base tooltip, ≥2 sections, tabs on) so it clears
+        # the header (reading + ⊕/🔊) instead of overlapping it. Sections are the per-reading stacked
+        # entries when grouped, else the dict names; use the WRAPPED height for those labels at this
+        # width so a strip that wraps onto several rows reserves enough. Nested popups reserve nothing.
+        sections = (
+            [g.reading for g in entry.groups] if entry.groups else [d.dict_name for d in entry.defs]
+        )
         reserve = (
-            tab_strip_height([d.dict_name for d in entry.defs], reader.tip_width)
-            if (tabs and len(entry.defs) >= 2)
-            else 0
+            tab_strip_height(sections, reader.tip_width) if (tabs and len(sections) >= 2) else 0
         )
         lazy = LazyPanel(
             panel_rows(
@@ -517,6 +634,7 @@ def _build_panel(
                 add_button=anki_ok(reader),
                 mined=mined,
                 speak_button=reader._tts_ok,
+                group_mined=_key.group_mined,
             ),
             reader.tip_width,
             top_reserve=reserve,
@@ -532,6 +650,7 @@ def _build_panel(
                     add_button=anki_ok(reader),
                     mined=mined,
                     speak_button=reader._tts_ok,
+                    group_mined=_key.group_mined,
                 ),
                 reader.tip_width,
                 top_reserve=reserve,

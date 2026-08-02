@@ -218,45 +218,50 @@ sources, mined-audio loudness normalization, and a hosted docs site (the `❌*` 
 
 ## Quick start
 
-**1. Install from the latest release** — no clone, no prerequisites; the bundled installer fetches
-everything, `uv` included.
+**1. Install.** The standalone installer bootstraps [`uv`](https://docs.astral.sh/uv/), installs
+`saitenka[full]` from PyPI, and runs the `setup` wizard — no clone, no prerequisites:
 
-1. Download **`saitenka-<version>.zip`** from the
-   [latest release](https://github.com/serjflint/saitenka/releases/latest) and unzip it.
-2. From inside the unzipped folder, run the installer for your OS:
-
-```bash
+```sh
 # macOS / Linux
-bash overlay-install.sh                 # add --dry-run to preview without changing anything
+curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-powershell -ExecutionPolicy Bypass -File overlay-install.ps1
+powershell -ExecutionPolicy ByPass -c "irm https://serjflint.github.io/saitenka/install.ps1 | iex"
 ```
 
-The installer bootstraps `uv`, installs the overlay (with the inflection add-on), then hands off to the
-`setup` wizard, which installs **mpv + ffmpeg** (or prints your distro's install command) and the mpv
+> Prefer to read it first? Download and inspect before running:
+> `curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh -o install.sh`,
+> then `less install.sh && sh install.sh`.
+
+Already have `uv` (or `pipx`)? Skip the script and install from **PyPI** directly:
+
+```sh
+uv tool install "saitenka[full]"        # or: pipx install "saitenka[full]"
+saitenka setup                          # mpv + ffmpeg, config, and the auto-start mpv plugin
+```
+
+The `setup` wizard installs **mpv + ffmpeg** (or prints your distro's install command) and the mpv
 plugin so **every future mpv launch auto-starts the overlay**.
 
 **2. Watch.** Open any video in mpv — the overlay attaches automatically. Or launch a file directly:
 
-```bash
+```sh
 saitenka run video.mkv          # hover a word → tooltip; Ctrl+m → mine
 ```
 
-**3. Update & maintain.** Once installed, the tool self-updates from the latest release — no
-re-download, and your extras are preserved:
+**3. Update & maintain.** `update` upgrades to the latest, keeping your extras (like `uv self update`):
 
-```bash
-saitenka reinstall              # pull the latest release, keeping your extras (--yes to skip the prompt)
+```sh
+saitenka update                 # upgrade to the latest, extras preserved (wraps uv tool upgrade)
 saitenka doctor                 # re-check the whole environment any time
 saitenka setup                  # re-run the setup wizard (mpv/ffmpeg, config, plugin)
 saitenka install-plugin         # (re)install just the auto-start mpv plugin
 ```
 
-**Feature extras.** The bundle installs the full feature set; `reinstall` keeps whatever you have. To
-change the set, `uv tool install --reinstall 'saitenka[<extra>]'`:
+**Feature extras.** `[full]` installs everything below; `update` keeps whatever you have. To change the
+set, `uv tool install --reinstall "saitenka[<extra>]"`:
 
 | Extra | Adds | License |
 |------|------|--------|
@@ -283,8 +288,8 @@ Full docs: **[saitenka.readthedocs.io](https://saitenka.readthedocs.io)** (insta
 - **[`tools/`](tools/)** — the Anki/FSRS deck engine: FSRS-based dictionary ranking, field
   normalization, provenance annotation, deck building, refile-by-review-state, anime chooser.
   Frequency dictionaries are user-supplied (`tools/freq/` or `--freq-dir` / `$SAITENKA_FREQ_DIR`).
-- **[`install/`](install/)** — cross-platform installers (macOS / Windows / Linux), the `doctor` health
-  check, and `make_bundle.py`, which builds a single self-contained zip you can hand to a friend.
+- **[`install/`](install/)** — the cross-platform install scripts (`overlay-install.{sh,ps1}`, served
+  from GitHub Pages) and the release helper (`release.py`).
 - **[`deinflect/`](deinflect/)** — *optional* **GPL-3.0** add-on (`saitenka-deinflect`): the
   Yomitan-derived inflection-chain display (🧩 `-て « -いる « -た`). Kept separate so the core stays
   Apache-2.0; the overlay runs fine without it. See [LICENSING.md](LICENSING.md).

@@ -397,3 +397,39 @@ def test_integer_y_band_split_is_pixel_exact():
     assert (
         diff.max() == 0
     )  # the two clipped halves reconstitute the original exactly, seam included
+
+
+def test_stacked_groups_emit_per_entry_mine_boxes_and_reading_sections():
+    """A grouped Entry (Yomitan-style stacked entries) renders one block per reading, each with its
+    own ⊕ as a 'mine:<card_index>' LinkBox and its reading as a nav section — the wiring a per-entry
+    mine click rides. group_mined toggles a block's ⊕→✓ (both rendered, no crash)."""
+    from overlay.app.lookup import furigana
+    from overlay.panel import EntryGroup
+
+    groups = [
+        EntryGroup(furigana("退く", "のく"), "のく", [Definition("D", ["to step aside"])], 0),
+        EntryGroup(furigana("退く", "しりぞく"), "しりぞく", [Definition("D", ["to retreat"])], 1),
+    ]
+    entry = Entry(headword=furigana("退く", "のく"), reading="のく", groups=groups)
+    rows = panel_rows(entry, WIDTH, add_button=True, group_mined=(True, False))
+    lazy = LazyPanel(rows, WIDTH)
+    lazy.finish()
+    assert [lb.query for lb in lazy.link_boxes] == ["mine:0", "mine:1"]
+    # each ⊕ sits at the right edge, in reading (top-to-bottom) order
+    assert [lb.query for lb in sorted(lazy.link_boxes, key=lambda b: b.y)] == ["mine:0", "mine:1"]
+    assert [sec for sec, _ in lazy.section_offsets()] == ["のく", "しりぞく"]
+
+
+def test_no_groups_keeps_single_header_add_button_geometry():
+    """Without groups the fused header ⊕ path is unchanged — no per-entry LinkBoxes leak in."""
+    entry = Entry(headword=furigana_headword(), defs=[Definition("D", ["x"])])
+    rows = panel_rows(entry, WIDTH, add_button=True)
+    lazy = LazyPanel(rows, WIDTH)
+    lazy.finish()
+    assert [lb.query for lb in lazy.link_boxes if lb.query.startswith("mine:")] == []
+
+
+def furigana_headword():
+    from overlay.app.lookup import furigana
+
+    return furigana("読む", "よむ")

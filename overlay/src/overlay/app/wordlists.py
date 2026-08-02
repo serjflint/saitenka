@@ -175,6 +175,10 @@ class FreqSource:
         self.db = db
         self.dict_id = row.id
         self.title = row.title
+        # ORIGINAL frequency mode, persisted at import. Occurrence-based dicts store a per-corpus
+        # dense rank that is not comparable across dicts, so the harmonic-blend pill excludes them —
+        # only true rank-based lists may be blended. Missing key (pre-persist imports) → rank-based.
+        self.occurrence_based = db.meta_get(f"freqmode:{row.id}") == "occurrence"
 
     def _entries_for_form(self, conn, form: str) -> list[tuple[str | None, str]]:
         rows = conn.execute(
@@ -207,6 +211,30 @@ class FreqSource:
             if not ents:
                 continue
             return self._dedup_preferring_reading(ents, reading)
+        return None
+
+    def rank(self, forms, reading: str | None = None) -> int | None:
+        """Numeric rank for the first matching form (min across its entries) — the raw signal the
+        harmonic-blend pill consumes, parallel to :meth:`display` which formats it for the row. When
+        ``reading`` is given, entries whose reading matches it are preferred (so a multi-reading term
+        like 退く scores のく separately from しりぞく for the card tie-breaker), falling back to all
+        entries for the term when none match."""
+        conn = self.db._conn()
+        for f in forms:
+            if not f:
+                continue
+            rows = conn.execute(
+                "SELECT reading, rank FROM term_meta WHERE dict_id=? AND mode='freq' AND term=?",
+                (self.dict_id, f),
+            ).fetchall()
+            ranks = [
+                rk
+                for r, rk in rows
+                if rk is not None and rk > 0 and (reading is None or r is None or r == reading)
+            ]
+            use = ranks or [rk for _, rk in rows if rk is not None and rk > 0]
+            if use:
+                return min(use)
         return None
 
 

@@ -48,3 +48,29 @@ def test_panel_not_blank_and_sized():
 def test_panel_yomu_golden():
     img = render_panel(load_entry(FIX / "yomu.json"), width=384)
     assert_golden(img, "panel_yomu.png", tol=2.5)
+
+
+def test_entry_loads_stacked_groups():
+    e = load_entry(FIX / "noku.json")
+    assert [(g.reading, g.card_index) for g in e.groups] == [("のく", 0), ("しりぞく", 1)]
+    assert [d.dict_name for d in e.groups[0].defs] == ["三省堂国語辞典", "JMdict"]
+
+
+def test_panel_noku_stacked_golden():
+    """Yomitan-style stacked entries for 退く: one block per reading (のく / しりぞく), each with its own
+    ruby'd headword and its own ⊕ — のく not yet mined (⊕), しりぞく already in the deck (✓). This golden
+    is the behaviour review for the per-entry mine layout; re-bless deliberately if the layout changes.
+
+    ``fixtures/yomitan_noku_reference.png`` is a real Yomitan 退く render kept alongside as the visual
+    reference this layout emulates — NOT pixel-compared (different renderer, width, and aspect)."""
+    img = render_panel(
+        load_entry(FIX / "noku.json"), width=460, add_button=True, group_mined=(False, True)
+    )
+    assert_golden(img, "panel_noku.png", tol=2.5)
+
+
+def test_yomitan_reference_asset_present():
+    """Rot-guard: the Yomitan 退く reference (the layout our stacked golden emulates) must stay in the
+    tree so it can't be silently dropped. It's documentation, not a pixel oracle — see the golden above."""
+    ref = FIX / "yomitan_noku_reference.png"
+    assert ref.exists() and ref.stat().st_size > 10_000

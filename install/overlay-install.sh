@@ -1,49 +1,42 @@
-#!/usr/bin/env bash
-# saitenka bootstrap (macOS / Linux) — Stage 17b.
-# The ONLY job the shell does: get `uv`, install the overlay from the wheel next to this script, then
-# hand off to the Python `setup` wizard (which owns all real logic). Non-destructive; --dry-run prints.
-set -euo pipefail
+#!/usr/bin/env sh
+# saitenka installer (macOS / Linux). Bootstraps `uv`, installs `saitenka[full]` from PyPI, then hands
+# off to the `setup` wizard (mpv/ffmpeg, config, the auto-start mpv plugin). Non-destructive; `--dry-run`
+# previews. The whole body is wrapped in main() and invoked on the last line, so a truncated `curl | sh`
+# download runs NOTHING rather than a half-script.
+#
+#   curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh | sh
+#
+# Prefer to read it first:
+#   curl --proto '=https' --tlsv1.2 -LsSf https://serjflint.github.io/saitenka/install.sh -o install.sh
+#   less install.sh && sh install.sh
+set -eu
 
-DRY_RUN=false
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=true
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
-have() { command -v "$1" >/dev/null 2>&1; }
-run() { if $DRY_RUN; then printf 'DRY:'; printf ' %q' "$@"; echo; else "$@"; fi; }
+main() {
+    dry_run=false
+    [ "${1:-}" = "--dry-run" ] && dry_run=true
+    have() { command -v "$1" >/dev/null 2>&1; }
+    run() { if $dry_run; then printf 'DRY:'; printf ' %s' "$@"; echo; else "$@"; fi; }
 
-# 1. uv — the only hard bootstrap (it then owns Python 3.14t + all deps).
-# Methods per uv's guide: https://docs.astral.sh/uv/getting-started/installation/
-if ! have uv; then
-  echo "[saitenka] installing uv…"
-  $DRY_RUN || curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+    # 1. uv — the only bootstrap. It then owns Python 3.13+ and every dependency, verifying PyPI hashes.
+    #    (uv's own installer is hardened + checksummed; see https://docs.astral.sh/uv/.)
+    if ! have uv; then
+        echo "[saitenka] installing uv…"
+        $dry_run || curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/install.sh | sh
+        # uv installs to ~/.local/bin, not on PATH in this shell — add it for the setup handoff below.
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
 
-# 2. install the overlay from the wheel next to this stub, WITH the JMdict fallback extra ([jmdict],
-# resolved from PyPI). The GPL-3.0 deinflect add-on (inflection chains) isn't on PyPI, so it rides in
-# the bundle as an SDIST (source — GPLv3's Corresponding Source) and installs via --with. Together this
-# mirrors the checkout installers' [full].
-# shellcheck disable=SC2012  # ls -t picks the newest by mtime (BSD find lacks -printf); our own
-# wheel/sdist filenames are controlled — no whitespace/newline surprises for ls to mishandle.
-WHEEL="$(ls -t "$SELF_DIR"/saitenka-*.whl 2>/dev/null | head -1 || true)"
-# shellcheck disable=SC2012  # (same rationale) controlled sdist filename, ls -t = newest by mtime
-DEINFLECT="$(ls -t "$SELF_DIR"/saitenka_deinflect-*.tar.gz 2>/dev/null | head -1 || true)"
-if [ -z "${WHEEL:-}" ]; then
-  echo "[saitenka] no overlay wheel found next to this installer — is the bundle intact?" >&2
-  # under --dry-run this is just a preview outside a bundle; don't hard-fail
-  $DRY_RUN || exit 1
-else
-  with=()
-  if [ -n "${DEINFLECT:-}" ]; then
-    echo "[saitenka] including GPL-3.0 deinflect add-on, from source ($DEINFLECT)"
-    with=(--with "$DEINFLECT")
-  fi
-  echo "[saitenka] installing ${WHEEL}[jmdict]"
-  run uv tool install --reinstall "${WHEEL}[jmdict]" ${with[@]+"${with[@]}"}
-fi
+    # 2. install saitenka with every portable feature (deinflect + jmdict + telemetry) from PyPI.
+    #    --reinstall makes re-running this installer an in-place upgrade.
+    echo "[saitenka] installing saitenka[full] from PyPI…"
+    run uv tool install --reinstall "saitenka[full]"
 
-# 3. hand off to the Python wizard (mpv/ffmpeg hints, doctor, init, import, plugin).
-if $DRY_RUN; then
-  echo "DRY: saitenka setup --dry-run"
-else
-  exec saitenka setup
-fi
+    # 3. hand off to the setup wizard (installs mpv+ffmpeg or prints your distro's command; config; plugin).
+    if $dry_run; then
+        echo "DRY: saitenka setup --dry-run"
+    else
+        exec saitenka setup
+    fi
+}
+
+main "$@"
