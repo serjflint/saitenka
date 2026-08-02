@@ -395,11 +395,13 @@ stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist te
 # (not a hand-rolled `uv venv`/`uv pip install`) manages `/tmp/venv-py-spy`; `py-spy` is already a
 # `full`-extra dependency (pyproject `[project.optional-dependencies]`), so the sync also installs it
 # INTO `/tmp/venv-py-spy` — no Homebrew/uvx py-spy needed, one fewer moving part.
-stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record -o /tmp/stress-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --stress --reps 3\"" }
+stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/stress-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --stress --reps 3\"" }
 # Same 3.13 crutch, but profiling the VOCAB render benchmark (examples/vocab.json — real-episode words,
 # parser out of the loop) so the sampled hot frames are pure lookup/decode/SC-walk/document-layout: the
-# whole-panel render tail this is meant to dissect. Prints the sudo line to run yourself.
-vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record -o /tmp/vocab-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
+# windowed render tail this is meant to dissect. Prints the sudo line to run yourself.
+# `--subprocesses` on all py-spy tasks: harmless single-process, but never silently miss a worker (the
+# GIL-fallback process pool that `--vocab --parallel` uses — see vocab-pyspy-mp).
+vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
 # END-STATE profile of the fixed + banded + PARALLEL render. py-spy CANNOT introspect the free-threaded
 # 3.14t build ("Failed to find a python interpreter in the .data section" — the interpreter state isn't
 # where py-spy scans on nogil; benfred/py-spy#460), so profile on GIL 3.13 where pick_executor falls back
