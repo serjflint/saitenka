@@ -22,8 +22,8 @@ enough to be safe serializes ~all rendering = 0x parallelism). The real fix is u
 Run (deliberately crashes — that is the point):
 
     SAITENKA_RUN_SUBINTERP_CRASH=1 \
-      UV_PROJECT_ENVIRONMENT=.venv-subint314 \
-      uv run --python /opt/homebrew/bin/python3.14 python examples/subinterpreter_crash_repro.py
+      uv run --no-project --python /opt/homebrew/bin/python3.14 --with-editable '.[full]' \
+      python examples/subinterpreter_crash_repro.py
 """
 
 from __future__ import annotations

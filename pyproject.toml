@@ -13,6 +13,9 @@ requires-python = ">=3.13"
 
 [tool.uv]
 package = false
+# Store this (poe-only) env in uv's managed cache with a lightweight `.venv` symlink, matching
+# overlay/. Keeps the tree free of heavy in-tree venv dirs. See overlay/pyproject.toml [tool.uv].
+preview-features = ["centralized-project-envs"]
 
 [dependency-groups]
 dev = ["poethepoet>=0.30"]

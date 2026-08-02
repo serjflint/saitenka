@@ -17,6 +17,8 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
   discovers this directory directly. For Claude Code auto-discovery, create a **local** symlink
   (`.claude/` is git-ignored, never committed):
   `ln -s ../.agents/skills .claude/skills`.
+- **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
+  `searching.md` (don't `find … | xargs grep`; prefer Grep/Glob or `git grep`).
 
 ## Python: always `uv`
 
@@ -182,8 +184,8 @@ random bytes, and symbolic solving — so they find different classes of bug.
   an SMT solver finds exact-boundary counterexamples random search misses. Slow (~15 s/property) → opt-in.
   Do **not** adopt HypoFuzz — its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS),
   unfit to commit here, and the trio already covers pure-core adequacy.
-- **Both `fuzz` and `crosshair` are pinned to CPython 3.13 in SEPARATE envs** (`.venv-fuzz` / `.venv-cx`
-  via `UV_PROJECT_ENVIRONMENT`): atheris (libFuzzer) and z3 are C-extensions that can't load under the
-  free-threaded 3.14t default — the same out-of-process 3.13 crutch as `invariants-taint`. The target
-  code is pure-Python and runs fine on 3.13. **Never run `uv run --python 3.13` against the default
-  env** — it recreates `.venv` as 3.13; always set `UV_PROJECT_ENVIRONMENT=.venv-{fuzz,cx}`.
+- **`fuzz`/`crosshair` need CPython 3.13** — atheris (libFuzzer) and z3 are C-extensions that can't load
+  under the free-threaded 3.14t default; the pure-Python target runs fine on 3.13. **Never run `uv run
+  --python 3.13` against the default project env** (it recreates the project `.venv` as 3.13). How each
+  task pins its own 3.13 env is defined in the poe task itself (`pyproject.toml [tool.poe.tasks]`) — the
+  single source of truth; don't duplicate the invocation here.

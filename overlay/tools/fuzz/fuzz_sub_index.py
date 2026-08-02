@@ -6,7 +6,7 @@ possibly-empty list of cues and NEVER raises. A crash here is a real robustness 
 file loaded mid-anime must never take down the overlay. This complements the Hypothesis property tests
 (structured, generator-driven) with coverage-guided byte mutation that reaches paths a generator won't.
 
-Run via ``uv run poe fuzz`` — pinned to CPython 3.13 in a SEPARATE ``.venv-fuzz`` because atheris is a
+Run via ``uv run poe fuzz`` — pinned to CPython 3.13 (see the poe task) because atheris is a
 C-extension (libFuzzer) that re-enables / can't load under the free-threaded 3.14t default runtime; the
 target code itself is pure-Python and runs fine on 3.13. Opt-in, NOT part of ``poe all``.
 """

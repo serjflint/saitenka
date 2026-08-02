@@ -69,6 +69,15 @@ full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
 [project.scripts]
 saitenka = "overlay.app.cli:main"
 
+[tool.uv]
+# Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
+# lightweight `.venv` symlink for editor / basedpyright discovery, instead of a heavy in-tree `.venv`
+# dir — so `overlay/` holds no env dir. The pinned-3.13 opt-in tasks manage their own envs: `fuzz` /
+# `crosshair` run ephemerally (`uv run --no-project --with-editable '.[full]' --with …`, uvx-style,
+# cached, no dir); `pyspy` uses `/tmp/venv-py-spy` because it prints a stable
+# `sudo /tmp/venv-py-spy/bin/py-spy` path a hashed cache env can't give (a reboot just re-syncs it).
+preview-features = ["centralized-project-envs"]
+
 [dependency-groups]
 # libcst is a codemod-authoring tool (see AGENTS.md "Refactoring") — nothing in src/tests/gate imports
 # it. Its pyo3 native build has no free-threaded 3.15t wheel yet, and keeping it in `dev` made every
@@ -307,7 +316,7 @@ DEP003 = ["saitenka_deinflect"]  # GPL add-on via the `deinflect` extra (PyPI) �
 # steps of `poe all`.
 [tool.poe.tasks]
 lint = { shell = "uv run --extra full ruff check --fix src tests examples && uv run --extra full ruff format src tests examples" }
-types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && (uv run --extra full pyrefly check src/overlay || true) && (uv run --extra full ty check src/overlay || true)" }
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/overlay && (uv run --extra full ty check src/overlay || true)" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
@@ -372,23 +381,24 @@ smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdis
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
 # py-spy can't introspect the free-threaded 3.14t build ("Failed to find python version from target
-# process") — same out-of-process 3.13 crutch as fuzz/crosshair/invariants-taint, in a repo-local
-# `.venv-pyspy` (gitignored, like `.venv-fuzz`/`.venv-cx` — NOT /tmp, which a reboot/tmp-cleaner wipes,
-# and NOT `uv run --isolated` — that forks the interpreter as a CHILD of the `uv` process, so py-spy
+# process") — same out-of-process 3.13 crutch as fuzz/crosshair/invariants-taint, in
+# `/tmp/venv-py-spy` (a reboot/tmp-cleaner just wipes it and the next run re-syncs; a stable ABSOLUTE
+# path is what the printed `sudo …/bin/py-spy` line needs — a hashed uv-cache env can't give one).
+# NOT `uv run --isolated` either — that forks the interpreter as a CHILD of the `uv` process, so py-spy
 # needs `--subprocesses` to see it, which measured ~10x slower sampling (100-300 Hz → 10-30 Hz) — too
 # coarse for the ms-scale jank this profiles. A stable venv lets py-spy attach to the interpreter
 # directly, no wrapper, full rate).
 # `sudo` needs a real controlling tty that poe's subprocess doesn't give it ("a terminal is required to
 # read the password" even run from an interactive shell), so this task only syncs the env and PRINTS
 # the profiling command — copy-paste and run the printed line yourself, NOT through poe. `uv sync`
-# (not a hand-rolled `uv venv`/`uv pip install`) manages `.venv-pyspy` the same way fuzz/crosshair do;
-# `py-spy` is already a `full`-extra dependency (pyproject `[project.optional-dependencies]`), so the
-# sync also installs it INTO `.venv-pyspy` — no Homebrew/uvx py-spy needed, one fewer moving part.
-stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo $(pwd)/.venv-pyspy/bin/py-spy record -o /tmp/stress-profile.raw -f raw --rate 100 --idle -- $(pwd)/.venv-pyspy/bin/python examples/bench_responsiveness.py --stress --reps 20\"" }
+# (not a hand-rolled `uv venv`/`uv pip install`) manages `/tmp/venv-py-spy`; `py-spy` is already a
+# `full`-extra dependency (pyproject `[project.optional-dependencies]`), so the sync also installs it
+# INTO `/tmp/venv-py-spy` — no Homebrew/uvx py-spy needed, one fewer moving part.
+stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record -o /tmp/stress-profile.raw -f raw --rate 100 --idle -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --stress --reps 20\"" }
 # Same 3.13 crutch, but profiling the VOCAB render benchmark (examples/vocab.json — real-episode words,
 # parser out of the loop) so the sampled hot frames are pure lookup/decode/SC-walk/document-layout: the
 # whole-panel render tail this is meant to dissect. Prints the sudo line to run yourself.
-vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo $(pwd)/.venv-pyspy/bin/py-spy record -o /tmp/vocab-profile.raw -f raw --rate 200 --idle -- $(pwd)/.venv-pyspy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
+vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record -o /tmp/vocab-profile.raw -f raw --rate 200 --idle -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
 # END-STATE profile of the fixed + banded + PARALLEL render. py-spy CANNOT introspect the free-threaded
 # 3.14t build ("Failed to find a python interpreter in the .data section" — the interpreter state isn't
 # where py-spy scans on nogil; benfred/py-spy#460), so profile on GIL 3.13 where pick_executor falls back
@@ -396,7 +406,7 @@ vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.1
 # shipped threads, but the per-render hot-spots (getmask2/getlength, banded block layout) are identical —
 # which is what this profile is for. (For a true free-threaded sample py-spy is out; a nogil-aware
 # sampler would be needed.)
-vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=.venv-pyspy uv sync --python 3.13 --extra full -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo $(pwd)/.venv-pyspy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 --idle -- $(pwd)/.venv-pyspy/bin/python examples/bench_responsiveness.py --vocab --banded --parallel --reps 3\"" }
+vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 --idle -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --banded --parallel --reps 3\"" }
 # Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
 # controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the
@@ -406,21 +416,23 @@ arch-report = { shell = "uvx pyscn analyze --select complexity,cbo --no-open src
 # minutes/module. `poe mutate` runs all targets; `poe mutate sub_index` narrows. Survivors → harden
 # with Hypothesis properties, re-run to confirm. See tools/mutate/run.py + AGENTS.md "Mutation auditing".
 mutate = { cmd = "uv run --extra full --with cosmic-ray python tools/mutate/run.py" }
-# Coverage-guided fuzzing of the subtitle parser (atheris/libFuzzer). Opt-in, NOT in `all`. Pinned to
-# CPython 3.13 in a SEPARATE .venv-fuzz (UV_PROJECT_ENVIRONMENT) — atheris is a libFuzzer C-extension
-# that can't load under the free-threaded 3.14t default; the parser itself is pure-Python, fine on 3.13
+# Coverage-guided fuzzing of the subtitle parser (atheris/libFuzzer). Opt-in, NOT in `all`. Runs in an
+# EPHEMERAL uvx-style env (`uv run --no-project --with-editable '.[full]' --with atheris`, uv-cached, no
+# dir) pinned to CPython 3.13 — atheris is a libFuzzer C-extension that can't load under the
+# free-threaded 3.14t default; the parser itself is pure-Python, fine on 3.13
 # (same out-of-process 3.13 pattern as `invariants-taint`). 60s bounded default; a crasher drops a
 # `crash-*` repro → shrink it, add as a regression golden, fix. Complements the Hypothesis property tests.
-fuzz = { shell = "UV_PROJECT_ENVIRONMENT=.venv-fuzz uv run --python 3.13 --extra full --with atheris python tools/fuzz/fuzz_sub_index.py -max_total_time=60 -artifact_prefix=tools/fuzz/" }
+fuzz = { shell = "uv run --no-project --python 3.13 --with-editable '.[full]' --with atheris python tools/fuzz/fuzz_sub_index.py -max_total_time=60 -artifact_prefix=tools/fuzz/" }
 # Symbolic-execution adequacy pass over the pure-core property tests (CrossHair via the Hypothesis
 # `crosshair` backend) — a THIRD technique next to mutation (cosmic-ray) and coverage-guided fuzzing
 # (atheris): a z3 SMT solver finds exact-boundary counterexamples random search misses. Opt-in, NOT in
-# `all` (slow). Pinned CPython 3.13 in a SEPARATE .venv-cx (z3 is a C-ext, no free-threading); the
+# `all` (slow). Runs in an EPHEMERAL uvx-style env (`uv run --no-project`, uv-cached, no dir) pinned to
+# CPython 3.13 (z3 is a C-ext, no free-threading); the
 # crosshair backend is registered in conftest only when hypothesis-crosshair is present. HypoFuzz was
 # TEST-DRIVEN (ran clean on the property suite, found nothing atheris/crosshair didn't) but NOT adopted:
 # its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS) — unfit to commit into a
 # licence-careful Apache-2.0 repo — and atheris+crosshair already cover the pure-core adequacy angle.
-crosshair = { shell = "UV_PROJECT_ENVIRONMENT=.venv-cx uv run --python 3.13 --extra full --with hypothesis-crosshair pytest -q -p no:randomly --hypothesis-profile=crosshair tests/test_sub_index_properties.py tests/test_properties.py tests/test_property.py" }
+crosshair = { shell = "uv run --no-project --python 3.13 --with-editable '.[full]' --with hypothesis-crosshair pytest -q -p no:randomly --hypothesis-profile=crosshair tests/test_sub_index_properties.py tests/test_properties.py tests/test_property.py" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
