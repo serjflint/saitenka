@@ -28,6 +28,9 @@ _reader: InMemoryMetricReader | None = None
 
 # Histograms — render/upload/hit-test/dict-sql/ipc-roundtrip/sub-seek, all in milliseconds.
 render_duration_ms: Histogram | None = None
+# Pixel height of one materialised block — the render-budget signal. A def body is one block, so this
+# distribution's tail exposes the coarse-block jank (a single reach rasterises the whole body).
+block_rendered_px: Histogram | None = None
 upload_duration_ms: Histogram | None = None
 hit_test_duration_ms: Histogram | None = None
 dict_sql_duration_ms: Histogram | None = None
@@ -58,6 +61,12 @@ panel_cache_evictions: Counter | None = (
 )
 dict_cache_hits: Counter | None = None
 dict_cache_misses: Counter | None = None
+# Per-block pixel cache (WindowedPanel._blocks), the layer under panel_cache: a miss rasterises the
+# block, a hit reuses a still-retained one, an eviction drops it (O(viewport) retention → a re-scroll
+# re-renders). The jank lives here, so it gets its own counters distinct from the per-word panel_cache.
+block_cache_hits: Counter | None = None
+block_cache_misses: Counter | None = None
+block_cache_evictions: Counter | None = None
 dropped_telemetry_spans: Counter | None = None
 cold_first_paint_overshoot: Counter | None = None
 osd_paused_draw: Counter | None = (
@@ -221,6 +230,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global scroll_frame_duration_ms, show_tooltip_duration_ms
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
     global dict_cache_hits, dict_cache_misses
+    global block_rendered_px, block_cache_hits, block_cache_misses, block_cache_evictions
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -277,6 +287,16 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         )
         dict_cache_hits = meter.create_counter("saitenka.dict_cache.hits")
         dict_cache_misses = meter.create_counter("saitenka.dict_cache.misses")
+        block_rendered_px = meter.create_histogram(
+            "saitenka.block_cache.rendered_px", description="pixel height of one materialised block"
+        )
+        block_cache_hits = meter.create_counter("saitenka.block_cache.hits")
+        block_cache_misses = meter.create_counter(
+            "saitenka.block_cache.misses", description="blocks rasterised on demand (a render)"
+        )
+        block_cache_evictions = meter.create_counter(
+            "saitenka.block_cache.evictions", description="retained block pixels dropped"
+        )
         dropped_telemetry_spans = meter.create_counter("saitenka.telemetry.dropped_spans")
         cold_first_paint_overshoot = meter.create_counter(
             "saitenka.render.cold_first_paint_overshoot"
@@ -308,6 +328,7 @@ def unregister() -> None:
     global scroll_frame_duration_ms, show_tooltip_duration_ms
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
     global dict_cache_hits, dict_cache_misses
+    global block_rendered_px, block_cache_hits, block_cache_misses, block_cache_evictions
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -329,6 +350,10 @@ def unregister() -> None:
         panel_cache_evictions = None
         dict_cache_hits = None
         dict_cache_misses = None
+        block_rendered_px = None
+        block_cache_hits = None
+        block_cache_misses = None
+        block_cache_evictions = None
         dropped_telemetry_spans = None
         cold_first_paint_overshoot = None
         osd_paused_draw = None
