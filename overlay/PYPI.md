@@ -44,4 +44,4 @@ The optional inflection-chain display is a **GPL-3.0** add-on (derived from Yomi
 ## Full documentation
 
 Everything — how it works, how it compares, where it fits in a media-server setup, requirements, and the
-feature tour — lives in the **[full README on GitHub](https://github.com/serjflint/saitenka#readme)**.
+feature tour — lives in the **[documentation site](https://saitenka.readthedocs.io)**.
