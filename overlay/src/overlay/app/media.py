@@ -35,6 +35,12 @@ def screenshot(ipc, path: str | Path) -> Path:
     return Path(path)
 
 
+# EBU R128 target for opt-in loudness normalization: broadcast −23 LUFS, −1.5 dBTP ceiling, 11 LU
+# range. Single-pass (measure+correct in one ffmpeg run) — two-pass would double mining latency for a
+# few-second clip and buys little on speech.
+_LOUDNORM = "loudnorm=I=-23:TP=-1.5:LRA=11"
+
+
 def clip_audio(
     video: str | Path,
     span: Timespan,
@@ -42,14 +48,19 @@ def clip_audio(
     pad: float = 0.5,
     fade: float = 0.1,
     track: int = 0,
+    *,
+    normalize: bool = False,
 ) -> Path:
     """Extract [start-pad, end+pad] of audio track `track` as mono AAC (.m4a) with fades.
 
     AAC is ffmpeg's built-in encoder (no libmp3lame dependency) and plays on every current Anki
-    client. Pass an ``.m4a`` output path so the container matches the codec."""
+    client. Pass an ``.m4a`` output path so the container matches the codec. ``normalize`` prepends an
+    EBU R128 ``loudnorm`` pass (:data:`_LOUDNORM`) so card-to-card playback loudness is even — before
+    the fades, so loudnorm measures the raw span, not the faded-out tails."""
     p = span.padded(pad)
     dur = p.duration
-    af = f"afade=t=in:st=0:d={fade},afade=t=out:st={max(0.0, dur - fade):.3f}:d={fade}"
+    fades = f"afade=t=in:st=0:d={fade},afade=t=out:st={max(0.0, dur - fade):.3f}:d={fade}"
+    af = f"{_LOUDNORM},{fades}" if normalize else fades
     from overlay.mpvio.discover import find_tool
 
     cmd = [

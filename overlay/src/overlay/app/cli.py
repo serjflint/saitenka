@@ -209,6 +209,13 @@ def run(
     ] = bool(_mine_cfg.get("enabled", bool(_mine_cfg))),
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
     mine_model: str = _mine_cfg.get("model", "Lapis"),
+    mine_normalize_audio: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative="--no-mine-normalize-audio",
+            help="normalize mined clip loudness to −23 LUFS (EBU R128) so cards play at an even volume",
+        ),
+    ] = bool(_mine_cfg.get("normalize_audio", False)),
     mine_key: Annotated[
         str, cyclopts.Parameter(help="mpv key that mines the hovered word")
     ] = _mine_cfg.get("key", "Ctrl+m"),
@@ -303,6 +310,7 @@ def run(
         mine=mine,
         mine_deck=mine_deck,
         mine_model=mine_model,
+        mine_normalize_audio=mine_normalize_audio,
         mine_key=mine_key,
         mine_all_key=mine_all_key,
         preview_key=preview_key,

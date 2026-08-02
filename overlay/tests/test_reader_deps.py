@@ -37,11 +37,22 @@ def test_mining_built_when_anki_up(monkeypatch):
     import overlay.app.anki as anki_mod
 
     monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
-    monkeypatch.setattr(anki_mod, "MineConfig", lambda deck, model: f"{deck}/{model}")
     _, anki, mine_conf, _ = reader_deps.build_reader_deps(
         {"mine": {"deck": "Saitenka::Mining", "model": "Lapis"}}, color=False
     )
-    assert anki == "ANKI" and mine_conf == "Saitenka::Mining/Lapis"
+    assert anki == "ANKI"
+    assert mine_conf.deck == "Saitenka::Mining" and mine_conf.model == "Lapis"
+    assert mine_conf.normalize_audio is False  # off unless [mine].normalize_audio is set
+
+
+def test_mining_threads_normalize_audio_flag(monkeypatch):
+    import overlay.app.anki as anki_mod
+
+    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
+    _, _, mine_conf, _ = reader_deps.build_reader_deps(
+        {"mine": {"deck": "D", "model": "Lapis", "normalize_audio": True}}, color=False
+    )
+    assert mine_conf.normalize_audio is True
 
 
 def test_color_builds_scorer_even_without_known(monkeypatch):

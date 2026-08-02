@@ -171,6 +171,7 @@ class MineConfig:
     deck: str = "Saitenka::Mining"
     model: str = "Lapis"
     tags: tuple[str, ...] = ("saitenka",)
+    normalize_audio: bool = False  # opt-in −23 LUFS loudnorm on the mined clip
     # logical name -> real field on the note type (Lapis defaults)
     fields: dict = field(
         default_factory=lambda: {

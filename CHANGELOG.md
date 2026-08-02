@@ -9,6 +9,10 @@ logs.
 
 ### Added
 
+- **Optional loudness normalization for mined audio (`[mine].normalize_audio`).** Off by default; when
+  on, the mined clip runs an EBU R128 `loudnorm` pass (−23 LUFS) so cards captured from quiet and loud
+  lines play back at an even volume instead of lurching between them. It adds one ffmpeg pass per mine,
+  hence opt-in — set it in `[mine]` or pass `--mine-normalize-audio` for a single run.
 - **Pick which entry to mine (Yomitan-style stacked entries).** A word with several readings (退く =
   のく / しりぞく) now shows each entry as its own block with its own reading and its own ⊕, so you mine
   the exact reading and gloss you mean — not one fused card. Each block's ⊕ flips to ✓ once the word is
