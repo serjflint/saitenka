@@ -133,7 +133,9 @@ def _run_item(reader: Reader, item: PrefetchItem) -> None:
             # pathological entries. Same viewport cap + panel_for()/cache path a hover uses, so the
             # warmed head is a hit. item.mined came from the main thread — never call _is_mined/card_for
             # from a worker (jamdict is not thread-safe on free-threaded builds).
-            reader._panel_for(item.token, item.inflected, min_h=reader._tip_cap(), mined=item.mined)
+            cap = reader._tip_cap()
+            st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
+            st.precompose_head(cap)  # composite the first viewport now → warm hover = copy + upload
         elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
             reader.dict_set.entry_for(item.token, item.inflected)
 
@@ -171,7 +173,11 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
         # kind="head_ahead" distinguishes the speculative lookahead render from the engaged current
         # line's kind="head" — without a span here it was invisible, folding into anonymous `render`.
         with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
-            reader._panel_for(item.token, item.inflected, min_h=reader._tip_cap(), mined=item.mined)
+            cap = reader._tip_cap()
+            st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
+            st.precompose_head(
+                cap
+            )  # first viewport composited in idle → warm hover = copy + upload
         reader._head_built += 1
     except Exception:
         log.debug(

@@ -79,6 +79,36 @@ def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
     assert results[True] == results[False]  # same block count + measured prefix either way
 
 
+def test_precompose_first_viewport_matches_render_panel_crop():
+    # Step 2 end-to-end over REAL content: precompose's cached first viewport is byte-identical to the
+    # one-shot render_panel crop (and to a fresh viewport_bgra), so the warm-hover copy is exact.
+    from overlay.bgra import to_bgra_array
+
+    entry = _entry(20)
+    ref = to_bgra_array(render_panel(entry, width=WIDTH).crop((0, 0, WIDTH, 260)))
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
+    wp.precompose(260, overscan=260)
+    warm = wp.viewport_bgra(0, 260, overscan=260)
+    assert wp.last_frame_rasters == 0  # served from the idle-composed cache
+    assert np.array_equal(warm, ref)  # pixel-identical to the one-shot crop
+
+
+def test_panel_precompose_head_warms_the_capped_first_viewport():
+    # Panel.precompose_head maps the show's cap to view_h = min(full_height, cap) and precomposes; a
+    # subsequent viewport at that cap is then a zero-raster cache hit (the prefetch-worker → warm-hover
+    # contract). A tall entry caps at `cap`; the copy the show reads is isolated.
+    from overlay.app.popups import Panel
+
+    entry = _entry(20)
+    panel = Panel.from_rows(panel_rows(entry, WIDTH), WIDTH, "かける")
+    cap = 260
+    panel.render_head(cap)  # measure the head (what the prefetch full path does before precompose)
+    panel.precompose_head(cap)
+    vh = min(panel.full_height, cap)
+    panel.viewport(0, vh, overscan=vh)
+    assert panel.last_frame_rasters == 0  # served from the idle precompose
+
+
 def test_render_ahead_is_cancellable_between_blocks():
     entry = _entry(16)
     wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)

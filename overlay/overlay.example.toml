@@ -26,10 +26,13 @@
 # hover_switch_delay = 0.15  # dwell before the tooltip switches to a NEW word
 # scan_delay = 1.0           # dwell before a nested (scan) popup opens; scrolling resets this timer too
 # panel_cache_max = 128      # LRU cap on cached (compressed) rendered tooltip panels
-# band_cache_max = 64        # LRU cap on retained 256px render bands *per* panel (the layer under
-#                            # panel_cache_max). 64 ≈ 16k px kept warm — a scroll-back window well past
+# band_cache_max = 128       # LRU cap on retained 256px render bands *per* panel (the layer under
+#                            # panel_cache_max). 128 ≈ 32k px kept warm — a scroll-back window well past
 #                            # the viewport (a bounded fraction of a worst-case ~87k-px entry), so short
 #                            # scrolls back hit the cache; raise for a wider warm window (more RAM)
+# raw_band_ceiling_mb = 100  # keep bands uncompressed (skips the ~9→4ms first-scroll-reach decompress)
+#                            # until a panel's estimate exceeds this many MB, then compress it (raw is
+#                            # ~10× the zlib size, so this caps one giant entry); 0 = always compress
 # layout_engine = "default"  # tooltip block-geometry backend: "default" (pure-Python) or "taffy" (the
 #                            # optional taffylite Rust flexbox engine — `pip install
 #                            # 'saitenka[layout-engine]'`). Byte-identical geometry; "taffy" trades a Rust

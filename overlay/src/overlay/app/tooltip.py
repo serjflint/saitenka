@@ -621,6 +621,7 @@ def _build_panel(
             reader.tip_width,
             getattr(entry, "reading", "") or tok.reading,
             band_cache_max=reader.band_cache_max,
+            raw_band_ceiling=reader.raw_band_ceiling,
             layout_backend=reader.layout_backend,
         )
 
@@ -686,7 +687,11 @@ def panel_for(
     st = _panel_cache_get(
         reader, key, tok, inflected, mined=mined, nested=nested, extra_terms=extra_terms
     )
-    st.render_head(min_h if min_h is not None else reader._tip_cap())
+    # The head walk+wrap (offset measure for placement) — runs on every hover, cold or warm, and was
+    # the untraced bulk of tooltip_show's self-time (#158 territory). Cheap on a re-measured cached
+    # panel, a full walk on a fresh one. Nests under tooltip_show / prefetch_decode.
+    with otel_metrics.traced("measure"):
+        st.render_head(min_h if min_h is not None else reader._tip_cap())
     return st
 
 
@@ -715,10 +720,19 @@ def show_tooltip(reader: Reader, index: int) -> None:
     # label (cold vs warm) — only known after impl builds/hits the panel — can split the histogram.
     start = time.perf_counter()
     with (
-        otel_metrics.traced("tooltip_show", layout_backend=reader.layout_engine),
+        otel_metrics.traced("tooltip_show", layout_backend=reader.layout_engine) as span,
         timed("show_tooltip"),
     ):
         show_tooltip_impl(reader, index)
+        # Attribute a slow (usually cold) hover: whether it was a panel build vs a cache hit, the word
+        # length + panel height (a tall multi-dict entry is the coldest), and bands rastered on the
+        # first paint. All low-cardinality — no raw word surface. Sort spans by dur → read the why.
+        st = reader._tip_state
+        span.set("cold", reader._tip_show_cold)
+        span.set("chars", len(reader.tokens[index].surface))
+        if st is not None:
+            span.set("full_h", st.full_height)
+            span.set("bands", st.last_frame_rasters)
     _record_show_metrics(reader, (time.perf_counter() - start) * 1000.0)
 
 
@@ -748,7 +762,10 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     cap = reader._tip_cap()
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.
-    mined = is_mined(reader, tok)
+    # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the
+    # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
+    with otel_metrics.traced("mined"):
+        mined = is_mined(reader, tok)
     phrase = reader._hover_terms
     key = panel_key(reader, tok, inflected, mined=mined, phrase=phrase)
     reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
@@ -776,9 +793,13 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     reader._tip_xy = place_panel(reader, pw, wx, wy, b.h, reader._tip_view_h)
     render_tip_view(reader)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
-    if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
-        reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format; freeze the frame while you read
-        reader._paused_by_tip = True
+    # Pause-on-hover IPC: a _prop("pause") round-trip every hover + a set_property when it pauses —
+    # two synchronous mpv round-trips, the untraced remainder of tooltip_show's self-time (the trace
+    # showed ~876 round-trips at ~5ms). Its own span so that IPC cost stops hiding inside the parent.
+    with otel_metrics.traced("pause_ipc"):
+        if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
+            reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format; freeze the frame while you read
+            reader._paused_by_tip = True
 
 
 def place_panel(
@@ -806,7 +827,12 @@ def blit_panel(reader: Reader, panel: Panel, scroll: int, view_h: int, xy, oid: 
     full_h = panel.full_height
     vh = min(view_h, full_h)
     y0 = max(0, min(scroll, max(0, full_h - vh)))
-    view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
+    # The first-paint composite + any SYNCHRONOUS overscan band raster runs here on the calling
+    # thread, was untraced, and is the bulk of tooltip_show's wall time that neither `render` (panel
+    # build) nor `upload` (IPC) covered — a cold hover's tooltip_show read ~130ms of on-thread CPU
+    # outside every child span until this span existed. Nests under tooltip_show / scroll_frame.
+    with otel_metrics.traced("tip_compose"):
+        view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
     return decorate_and_upload(reader, view, y0, full_h, xy, oid)
 
 
@@ -882,6 +908,7 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
         reader.tip_width,
         reading,
         band_cache_max=reader.band_cache_max,
+        raw_band_ceiling=reader.raw_band_ceiling,
         layout_backend=reader.layout_backend,
     )
 
