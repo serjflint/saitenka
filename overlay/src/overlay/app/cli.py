@@ -275,6 +275,14 @@ def run(
             "(0 = instant)"
         ),
     ] = 0.15,
+    layout_engine: Annotated[
+        Literal["default", "taffy"],
+        cyclopts.Parameter(
+            help="tooltip block-geometry backend: 'default' (pure-Python) or 'taffy' (the optional "
+            "taffylite Rust flexbox engine — needs `pip install 'saitenka[layout-engine]'`; "
+            "byte-identical output, falls back to default if the wheel is absent)"
+        ),
+    ] = TooltipOptions().layout_engine,
     mpv_arg: Annotated[
         list[str] | None,
         cyclopts.Parameter(
@@ -329,6 +337,7 @@ def run(
         prefetch=prefetch,
         auto_translate=auto_translate,
         hover_switch_delay=hover_switch_delay,
+        layout_engine=layout_engine,
         mpv_arg=mpv_arg,
     )
 
@@ -979,6 +988,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             hide_delay=cfg.get("hide_delay", tt.hide_delay),
             flash_secs=cfg.get("flash_secs", tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", tt.panel_cache_max),
+            layout_engine=cfg.get("layout_engine", tt.layout_engine),
         ),
         mining=MiningOptions(
             play_audio=not bool(cfg.get("no_audio_play", False)),

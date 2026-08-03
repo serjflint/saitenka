@@ -1178,16 +1178,23 @@ def _point_at_link(r, ipc):
     return lb
 
 
-def test_click_cross_reference_opens_target_in_nested(monkeypatch):
+def test_click_cross_reference_navigates_base_in_place(monkeypatch):
+    # Yomitan historyMode:new — a cross-reference click REPLACES the base tooltip content in place and
+    # pushes the previous view for back, instead of spawning a fragile floating nested popup.
+    from overlay.app import tooltip
+
     ipc = FakeIPC()
     r = _link_reader(ipc)
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     assert r.hover_view().tip.state.windowed.link_boxes()  # the def body exposed a clickable link
+    base = r._tip_state
     _point_at_link(r, ipc)
     r.on_click()
-    assert r.hover_view().nested.state is not None  # a nested popup opened…
-    assert r.hover_view().nested.word.startswith("見")  # …for the link's target term (見る)
+    assert r.hover_view().nested.state is None  # NOT a nested popup
+    assert r._tip_state is not None and r._tip_state is not base  # base content replaced in place
+    assert len(r._tip_nav) == 1  # the previous view is pushed for back
+    assert tooltip.tip_back(r) is True and r._tip_state is base  # back restores the original entry
 
 
 class _WildcardDS:
@@ -1210,7 +1217,7 @@ class _WildcardDS:
         )
 
 
-def test_click_wildcard_link_opens_search_popup(monkeypatch):
+def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     from overlay.app.subtitles import WordBox
     from overlay.app.tokenize import Token
 
@@ -1231,13 +1238,12 @@ def test_click_wildcard_link_opens_search_popup(monkeypatch):
         "y": sy + (lb.y - r._tip_scroll) + lb.h / 2,
     }
     r.on_click()
+    # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
+    assert r.hover_view().nested.state is None
+    assert len(r._tip_nav) == 1
     assert (
-        r.hover_view().nested.state is not None and r.hover_view().nested.word == "食べ*"
-    )  # opened a search-results popup
-    assert r.hover_view().nested.token is None  # results aren't one word → ⊕ mine disabled
-    assert (
-        r._nest.state.windowed.link_boxes()[0].query == "食べる"
-    )  # each result drills into an exact term
+        r._tip_state.windowed.link_boxes()[0].query == "食べる"
+    )  # the base now shows results, each drilling into an exact term
 
 
 def test_external_link_is_not_a_clickable_region(monkeypatch):
@@ -1267,6 +1273,47 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     assert (
         r.hover_view().tip.state.windowed.link_boxes() == []
     )  # external link → no clickable region
+
+
+class _RubyLinkDS:
+    """A def body whose cross-reference target carries furigana (a ruby'd <a>) — the 思し召し-in-考え
+    case. It must still be a clickable link, not merely blue-styled hover-scan text."""
+
+    def entry_for(self, tok, _inflected=None):
+        from overlay.panel import Definition, Entry
+
+        ref = {
+            "tag": "a",
+            "href": "?query=思し召し",
+            "content": {
+                "tag": "ruby",
+                "content": [
+                    {"tag": "rb", "content": "思し召し"},
+                    {"tag": "rt", "content": "おぼしめし"},
+                ],
+            },
+        }
+        return Entry(
+            headword=tok.surface,
+            reading="かんがえ",
+            defs=[Definition("MonoA", ["敬語は", ref, "。"])],
+        )
+
+
+def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
+    from overlay.app.subtitles import WordBox
+    from overlay.app.tokenize import Token
+
+    ipc = FakeIPC()
+    r = Reader(ipc, dict_set=_RubyLinkDS())
+    r.osd = (1280, 720)
+    r.sub_origin = (0, 0)
+    r.tokens = [Token("考え", "考え", "かんがえ", "名詞", 0, 2)]
+    r.boxes = [WordBox(0, 100, 300, 40, 40)]
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    r.set_hover(0)
+    links = r._tip_state.windowed.link_boxes()
+    assert any(lb.query == "思し召し" for lb in links)  # the furigana'd cross-ref IS clickable
 
 
 def test_nested_popup_shrinks_to_stay_above_inner_word():
@@ -1302,8 +1349,8 @@ def test_hover_over_link_does_not_open_scan_popup(monkeypatch):
     _point_at_link(r, ipc)  # cursor on the link cell
     r._update_hover()
     assert r.hover_view().nested.state is None  # hover did NOT open a scan popup over the link
-    r.on_click()  # …but a click still opens it
-    assert r.hover_view().nested.state is not None and r.hover_view().nested.word.startswith("見")
+    r.on_click()  # …a click navigates the base in place (no floating popup)
+    assert r.hover_view().nested.state is None and len(r._tip_nav) == 1
 
 
 def test_scroll_resets_scan_dwell(monkeypatch):
@@ -1332,7 +1379,7 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     monkeypatch.setattr(r, "speak_hovered", lambda: events.append("speak"))
     _point_at_link(r, ipc)
     r.on_click()
-    assert events == [] and r.hover_view().nested.state is not None
+    assert events == [] and len(r._tip_nav) == 1  # navigated the base, no mine/speak fallthrough
 
 
 # --- copy: Shift+C (whole line) and right-click (word under cursor) + highlight flash ---------------

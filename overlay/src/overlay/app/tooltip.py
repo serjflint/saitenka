@@ -25,7 +25,7 @@ from overlay.app.nested_popup import TIP_GAP
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import timed
 from overlay.app.popups import Panel
-from overlay.app.tokenize import phrase_terms
+from overlay.app.tokenize import phrase_terms, tokenize
 from overlay.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
 
 if TYPE_CHECKING:
@@ -403,7 +403,7 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
         if not _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
-            reader._open_link(lb, reader._tip_xy, reader._tip_scroll)  # cross-ref → nested popup
+            reader._navigate_tip(lb.query)  # cross-ref → replace base content in place (Yomitan)
     else:
         reader._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
     return True
@@ -450,7 +450,8 @@ def panel_key(
     phrase: tuple[str, ...] = (),
 ) -> PanelKey:
     # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
-    # ``phrase`` is the base word's stacked multi-token terms (empty for nested/prefetch).
+    # ``phrase`` is the word's stacked multi-token terms — the base word's, or a nested scan's
+    # longest-match under the cursor (コンサート over コン); empty for prefetch and clicked links.
     return PanelKey(
         tok.lemma,
         tok.surface,
@@ -603,6 +604,7 @@ def _build_panel(
         "render",
         kind="nested" if nested else "base",
         during_scroll="1" if reader._scrolled_this_tick else "0",
+        layout_backend=reader.layout_engine,
     ):
         # The base tooltip stacks the hovered word's longer phrase terms (passed in); nested popups
         # (inner scanned words) and prefetch pass none and look up the bare word only.
@@ -619,6 +621,7 @@ def _build_panel(
             reader.tip_width,
             getattr(entry, "reading", "") or tok.reading,
             band_cache_max=reader.band_cache_max,
+            layout_backend=reader.layout_backend,
         )
 
 
@@ -711,7 +714,10 @@ def show_tooltip(reader: Reader, index: int) -> None:
     # perf ring buffer stays for doctor/crashlog. Metrics recorded outside the spans so the kind
     # label (cold vs warm) — only known after impl builds/hits the panel — can split the histogram.
     start = time.perf_counter()
-    with otel_metrics.traced("tooltip_show"), timed("show_tooltip"):
+    with (
+        otel_metrics.traced("tooltip_show", layout_backend=reader.layout_engine),
+        timed("show_tooltip"),
+    ):
         show_tooltip_impl(reader, index)
     _record_show_metrics(reader, (time.perf_counter() - start) * 1000.0)
 
@@ -735,6 +741,7 @@ def _record_show_metrics(reader: Reader, elapsed_ms: float) -> None:
 
 def show_tooltip_impl(reader: Reader, index: int) -> None:
     reader._hide_nested()  # switching the base word drops any stale scan popup
+    reader._tip_nav = []  # a newly hovered word abandons any link-navigation back-history
     reader._kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = reader.tokens[index]
     inflected = reader._inflected_surface(index)
@@ -828,6 +835,85 @@ def render_tip_view(reader: Reader) -> None:
     reader._tip_rect = blit_panel(
         reader, st, reader._tip_scroll, reader._tip_view_h, reader._tip_xy, OverlayId.TIP
     )
+
+
+def _capture_tip_view(reader: Reader) -> tuple:
+    """Snapshot the base tooltip's renderable view for the link-navigation back-stack."""
+    return (
+        reader._tip_state,
+        reader._tip_key,
+        reader._hover_reading,
+        reader._tip_view_h,
+        reader._tip_xy,
+        reader._tip_scroll,
+    )
+
+
+def _restore_tip_view(reader: Reader, view: tuple) -> None:
+    (
+        reader._tip_state,
+        reader._tip_key,
+        reader._hover_reading,
+        reader._tip_view_h,
+        reader._tip_xy,
+        reader._tip_scroll,
+    ) = view
+
+
+def _navigated_panel(reader: Reader, query: str) -> Panel | None:
+    """The read-only Panel for a navigation target: a wildcard/prefix query → search results, else the
+    exact term. No ⊕ — the header mine button acts on the hovered SUBTITLE word, which the navigated
+    term is not, so mining stays on the base word (reachable via back)."""
+    if reader.dict_set is None:
+        return None
+    if any(c in query for c in "*?＊？"):
+        entry = reader.dict_set.search(query)
+        reading = ""
+    else:
+        tokens = tokenize(query)
+        tok = tokens[0] if tokens else None
+        if tok is None or not tok.surface.strip():
+            return None
+        entry = entry_for_tok(reader, tok, tok.surface)
+        reading = getattr(entry, "reading", "") or tok.reading
+    rows = panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok)
+    return Panel.from_rows(
+        rows,
+        reader.tip_width,
+        reading,
+        band_cache_max=reader.band_cache_max,
+        layout_backend=reader.layout_backend,
+    )
+
+
+def navigate_tip(reader: Reader, query: str) -> None:
+    """Replace the base tooltip's content with the entry for ``query`` (a clicked cross-reference),
+    pushing the current view onto the back-stack (Esc/back returns). The popup stays put — same anchor,
+    same TIP slot — so this reads as an in-place navigation, not a new floating popup."""
+    if reader.dict_set is None:
+        return
+    st = _navigated_panel(reader, query)
+    if st is None:
+        return
+    st.render_head(reader._tip_cap())  # warm the head so full_height sizes the viewport correctly
+    reader._hide_nested()  # the old content's scan popup is stale
+    reader._tip_nav.append(_capture_tip_view(reader))
+    reader._tip_state = st
+    reader._tip_key = None  # a navigated view isn't keyed to a hovered subtitle token
+    reader._hover_reading = st.reading
+    reader._tip_scroll = 0
+    reader._tip_view_h = min(st.full_height, reader._tip_cap())
+    render_tip_view(reader)
+
+
+def tip_back(reader: Reader) -> bool:
+    """Pop one link-navigation step, restoring the previous base view. Returns False when there is no
+    history (a plain hovered word) so the caller falls through to closing the tooltip."""
+    if not reader._tip_nav:
+        return False
+    _restore_tip_view(reader, reader._tip_nav.pop())
+    render_tip_view(reader)
+    return True
 
 
 def scroll_tip(reader: Reader, delta: int) -> None:

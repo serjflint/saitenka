@@ -185,3 +185,57 @@ def test_golden_base_and_nested_render():
     ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
     assert r.hover_view().nested.state is not None
     assert_golden(_full_panel_image(r._nest.state), "interaction_nested_popup.png", tol=3.0)
+
+
+def test_link_click_navigates_the_base_tooltip_in_place_with_back():
+    """A cross-reference click replaces the base tooltip's content in place (Yomitan historyMode:new)
+    and pushes the previous view; back restores it. No fragile floating popup, no auto-hide race."""
+    from overlay.app import tooltip
+
+    r = _reader()
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))
+    assert ui.tip_shown
+    base = r._tip_state
+
+    tooltip.navigate_tip(r, "本命")  # what _click_tip routes a link to
+    assert r._tip_state is not None and r._tip_state is not base
+    assert len(r._tip_nav) == 1, "the previous view is pushed for back"
+    assert ui.tip_shown, "the same base slot stays shown — an in-place navigation"
+
+    assert tooltip.tip_back(r) is True
+    assert r._tip_state is base and r._tip_nav == []
+    assert tooltip.tip_back(r) is False, "no history left → caller falls through to close"
+
+
+def test_navigation_history_resets_when_hovering_a_new_subtitle_word():
+    from overlay.app import tooltip
+
+    r = _reader()
+    ui = Driver(r)
+    i = _content_word(r)
+    ui.move_to_word(i)
+    tooltip.navigate_tip(r, "本命")
+    assert r._tip_nav
+
+    j = next(k for k in range(len(r.tokens)) if k != i and r.tokens[k].is_content)
+    ui.move_to_word(j)  # a newly hovered word abandons the link-navigation
+    assert r._tip_nav == []
+
+
+def test_esc_steps_back_through_navigation_then_closes():
+    r = _reader()
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))
+    from overlay.app import tooltip
+
+    tooltip.navigate_tip(r, "本命")
+    tooltip.navigate_tip(r, "読む")
+    assert len(r._tip_nav) == 2
+
+    r._tip_close_or_back()
+    assert len(r._tip_nav) == 1 and ui.tip_shown
+    r._tip_close_or_back()
+    assert r._tip_nav == [] and ui.tip_shown
+    r._tip_close_or_back()  # at the root → close
+    assert not ui.tip_shown

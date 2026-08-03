@@ -20,6 +20,7 @@ from overlay.render.layout_backend import (
     FlexColumnBackend,
     LayoutBackend,
     TaffyLayoutBackend,
+    resolve_backend,
 )
 
 _FIXTURES = json.loads(
@@ -45,6 +46,35 @@ def test_both_backends_are_layout_backends():
 @requires_taffy
 def test_taffy_backend_is_a_layout_backend():
     assert isinstance(TaffyLayoutBackend(), LayoutBackend)
+
+
+def test_resolve_backend_default_is_the_shared_default():
+    assert resolve_backend("default") is DEFAULT_BACKEND
+
+
+def test_resolve_backend_unknown_name_falls_back_to_default():
+    assert resolve_backend("nonsense") is DEFAULT_BACKEND
+
+
+@requires_taffy
+def test_resolve_backend_taffy_selects_the_taffy_engine():
+    assert isinstance(resolve_backend("taffy"), TaffyLayoutBackend)
+
+
+def test_resolve_backend_taffy_falls_back_to_default_when_wheel_absent(monkeypatch):
+    # Simulate a missing wheel even where it IS installed: force the chokepoint's taffylite import to
+    # fail, so the degrade-to-default path is exercised deterministically in every env.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _no_taffylite(name, *args, **kwargs):
+        if name == "taffylite":
+            raise ImportError("simulated missing layout-engine wheel")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _no_taffylite)
+    assert resolve_backend("taffy") is DEFAULT_BACKEND
 
 
 @given(

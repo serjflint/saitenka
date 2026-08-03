@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel, PopupView
 from overlay.app.prefetch import cap_for
-from overlay.app.tokenize import SKIP_POS, tokenize
+from overlay.app.tokenize import SKIP_POS, phrase_terms, tokenize
 from overlay.panel import panel_rows
 
 if TYPE_CHECKING:
@@ -78,18 +78,44 @@ def show_nested(reader: Reader, sb) -> None:
     if tok.surface == reader._nest.word and reader._nest.state is not None:
         reader._nest.tail = sb.text  # same word, new cell → don't re-scan it
         return
+    # Longest-match, Yomitan-style: stack any multi-token dictionary term starting under the cursor
+    # (コンサート over the over-split コン) — the same forward longest-match the base tooltip applies to a
+    # hovered cue word, so an inner katakana/compound word opens whole instead of as its first morpheme.
+    extra = _phrase_extra_terms(reader, tokens)
     sx, sy = reader._tip_xy  # anchor to the inner word's screen cell
     wx = sx + sb.x
     wy = sy + (sb.y - reader._tip_scroll)
-    open_nested(reader, tok, tok.surface, wx, wy, sb.h, tail=sb.text)
+    open_nested(reader, tok, tok.surface, wx, wy, sb.h, tail=sb.text, extra_terms=extra)
 
 
-def open_nested(reader: Reader, tok, inflected, wx: float, wy: float, wh: float, tail=None) -> None:
+def _phrase_extra_terms(reader: Reader, tokens) -> tuple[str, ...]:
+    """Longest-first multi-token dict terms starting at the scanned tail's first token (index 0), via
+    the same ``phrase_terms`` seam the base tooltip uses. Empty when the dict set has no phrase probe."""
+    has_term = getattr(reader.dict_set, "has_term", None)
+    if has_term is None:
+        return ()
+    got = phrase_terms(tokens=tokens, index=0, has_term=has_term)
+    return tuple(got[0]) if got is not None else ()
+
+
+def open_nested(
+    reader: Reader,
+    tok,
+    inflected,
+    wx: float,
+    wy: float,
+    wh: float,
+    tail=None,
+    extra_terms: tuple[str, ...] = (),
+) -> None:
     """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
-    Shared by scan-hover and a clicked cross-reference link."""
+    Shared by scan-hover and a clicked cross-reference link. ``extra_terms`` are the longest-match
+    phrases stacked above the bare word (empty for a clicked link, whose query is already exact)."""
     mined = reader._is_mined(tok)
-    key = reader._panel_key(tok, inflected, mined=mined)
-    st = reader._panel_for(tok, inflected, min_h=reader._tip_cap(), mined=mined, nested=True)
+    key = reader._panel_key(tok, inflected, mined=mined, phrase=extra_terms)
+    st = reader._panel_for(
+        tok, inflected, min_h=reader._tip_cap(), mined=mined, nested=True, extra_terms=extra_terms
+    )
     place_nested(reader, st, key, tok, tok.surface, wx, wy, wh, tail)
 
 
@@ -145,6 +171,7 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
             reader.tip_width,
             "",
             band_cache_max=reader.band_cache_max,
+            layout_backend=reader.layout_backend,
         )
         with reader._cache_lock:
             st = reader._panel_cache_setdefault(key, st)
@@ -189,6 +216,7 @@ def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None
             reader.tip_width,
             entry.reading,
             band_cache_max=reader.band_cache_max,
+            layout_backend=reader.layout_backend,
         )
         with reader._cache_lock:
             st = reader._panel_cache_setdefault(key, st)

@@ -15,12 +15,23 @@ _BASE_KWARGS = {
     "mine_preview": True,
     "auto_translate": False,
     "prefetch": True,
+    "layout_engine": "default",
 }
 
 
 def test_scan_delay_defaults_when_absent_from_config():
     opts = _build_run_options({}, **_BASE_KWARGS)
     assert opts.tooltip.scan_delay == 1.0
+
+
+def test_run_options_pass_layout_engine_through():
+    opts = _build_run_options({}, **{**_BASE_KWARGS, "layout_engine": "taffy"})
+    assert opts.tooltip.layout_engine == "taffy"
+
+
+def test_attach_options_read_layout_engine_from_config():
+    opts = _build_attach_options({"layout_engine": "taffy"}, mine={})
+    assert opts.tooltip.layout_engine == "taffy"
 
 
 def test_scan_delay_reads_from_config():
