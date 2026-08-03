@@ -172,3 +172,12 @@ def test_estimated_table_matches_visible_range_binary_search(gaps, top, bottom, 
     lo, hi = 100, 400
     assert start == bisect_right(t.ends, lo)
     assert end == max(start, bisect_left(t.starts, hi))
+
+
+def test_read_reflects_a_height_set_after_a_prior_read():
+    # A read caches the offset table; a later set_height must invalidate it, so the next read is not stale.
+    lazy = LazyOffsets([0, 0], top_pad=10, bottom_pad=5, seed_height=100)
+    before = lazy.start(1)  # both unknown → estimated from the seed
+    lazy.set_height(0, 30)
+    assert lazy.start(1) != before
+    assert lazy.start(1) == 10 + 30  # top_pad + block 0's measured height (gap 0)
