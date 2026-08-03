@@ -5,6 +5,18 @@ Optional add-on for saitenka: when installed, the overlay shows Yomitan's inflec
 See ``LICENSE`` (GPL-3.0-or-later) and ``NOTICE`` (Yomitan attribution).
 """
 
-from saitenka_deinflect.engine import Deinflection, deinflect, inflection_chain
+from saitenka_deinflect.engine import (
+    Deinflection,
+    condition_flags,
+    conditions_match,
+    deinflect,
+    inflection_chain,
+)
 
-__all__ = ["Deinflection", "deinflect", "inflection_chain"]
+__all__ = [
+    "Deinflection",
+    "condition_flags",
+    "conditions_match",
+    "deinflect",
+    "inflection_chain",
+]
