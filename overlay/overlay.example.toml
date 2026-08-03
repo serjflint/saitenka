@@ -30,6 +30,10 @@
 #                            # panel_cache_max). 64 ≈ 16k px kept warm — a scroll-back window well past
 #                            # the viewport (a bounded fraction of a worst-case ~87k-px entry), so short
 #                            # scrolls back hit the cache; raise for a wider warm window (more RAM)
+# layout_engine = "default"  # tooltip block-geometry backend: "default" (pure-Python) or "taffy" (the
+#                            # optional taffylite Rust flexbox engine — `pip install
+#                            # 'saitenka[layout-engine]'`). Byte-identical geometry; "taffy" trades a Rust
+#                            # wheel for a mature CSS engine. Missing wheel falls back to "default".
 # pause_on_tooltip = true    # freeze the frame while a tooltip is shown (the mining default)
 # hover_pause_key = "Alt+p"  # toggle hover auto-pause for the current session
 # overlay_toggle_key = "Alt+o"  # hide/show Saitenka; hidden mode restores mpv subtitles and OSD

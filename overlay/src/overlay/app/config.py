@@ -109,6 +109,12 @@ class TooltipOptions:
     # hit the cache, but a bounded fraction of a worst-case ~87k-px entry (retaining all of that would
     # defeat the O(viewport) memory bound banding exists for). The visible window is always protected
     # regardless of the cap; raise it to widen the warm window (more RAM), lower it to shrink it.
+    layout_engine: Literal["default", "taffy"] = (
+        "default"  # tooltip block-geometry backend. "default"
+    )
+    # = the always-available pure-Python DefaultLayoutBackend. "taffy" = the optional taffylite Rust
+    # flexbox engine (needs saitenka[layout-engine]); byte-identical geometry, chosen for a mature CSS
+    # engine's robustness, not speed. An unset/missing wheel falls back to "default", logged, never fatal.
 
 
 @dataclass(frozen=True)

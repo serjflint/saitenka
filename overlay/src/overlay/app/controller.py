@@ -195,6 +195,17 @@ class Reader:
             o.tooltip.panel_cache_max
         )  # LRU cap on cached rendered tooltip panels
         self.band_cache_max = o.tooltip.band_cache_max  # LRU cap on retained render bands per panel
+        from overlay.render.layout_backend import backend_label, resolve_backend
+
+        # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
+        # import chokepoint; missing → default). Threaded to every Panel.from_rows so all popups agree.
+        self.layout_backend = resolve_backend(o.tooltip.layout_engine)
+        self.layout_engine = backend_label(
+            self.layout_backend
+        )  # effective tag for logs + span attrs
+        # Positive, truthful signal in the report bundle (overlay.log): the EFFECTIVE backend vs what was
+        # requested — a "taffy" request landing on 'default' is a silent-fallback flag.
+        log.info("layout backend: %s (requested %r)", self.layout_engine, o.tooltip.layout_engine)
         self.max_bulk = o.mining.max_bulk  # cap on words mined in one "mine all" bulk action
         self.anki_ok_ttl = (
             o.mining.anki_ok_ttl
@@ -296,6 +307,10 @@ class Reader:
         self._tip_xy: tuple[int, int] = (0, 0)
         self._tip_state: Panel | None = None  # Panel currently shown
         self._tip_key: tooltip.PanelKey | None = None  # its cache key
+        # Yomitan-style in-place link navigation: clicking a cross-reference replaces the base
+        # tooltip's content and pushes the previous view here; Esc/back pops it. Cleared when hovering
+        # a new subtitle word (show_tooltip_impl) or on teardown. Empty ⇒ the base is a hovered word.
+        self._tip_nav: list = []
         self._nest = _Nested()  # nested scan popup (hover a word inside the tooltip → its entry)
         # Yomitan-style scan delay: the cursor must dwell on a word inside the tooltip before its
         # popup opens, so drifting across the definition doesn't fire a flurry of popups.
@@ -442,6 +457,7 @@ class Reader:
         self._tip_rect = None
         self._tip_state = None
         self._tip_key = None
+        self._tip_nav = []  # drop any link-navigation history with the tooltip
         self._hover_reading = ""
         self._hover_terms = ()
         self._hover_span = None
@@ -594,8 +610,10 @@ class Reader:
             return
         tooltip.on_click(self)
 
-    def _panel_key(self, tok, inflected, *, mined: bool = False) -> tooltip.PanelKey:
-        return tooltip.panel_key(self, tok, inflected, mined=mined)
+    def _panel_key(
+        self, tok, inflected, *, mined: bool = False, phrase: tuple[str, ...] = ()
+    ) -> tooltip.PanelKey:
+        return tooltip.panel_key(self, tok, inflected, mined=mined, phrase=phrase)
 
     def _is_mined(self, tok) -> bool:
         return tooltip.is_mined(self, tok)
@@ -624,8 +642,11 @@ class Reader:
         *,
         mined: bool | None = None,
         nested: bool = False,
+        extra_terms: tuple[str, ...] = (),
     ):
-        return tooltip.panel_for(self, tok, inflected, min_h, mined=mined, nested=nested)
+        return tooltip.panel_for(
+            self, tok, inflected, min_h, mined=mined, nested=nested, extra_terms=extra_terms
+        )
 
     def _panel_cache_setdefault(self, key, st) -> Panel:
         return tooltip.panel_cache_setdefault(self, key, st)
@@ -763,6 +784,7 @@ class Reader:
             otel_metrics.scroll_frame_jank,
             otel_metrics.SCROLL_JANK_THRESHOLD_MS,
             "scroll_frame",
+            layout_backend=self.layout_engine,
         ):
             tooltip.scroll_tip(self, delta)
 
@@ -791,6 +813,17 @@ class Reader:
 
     def _open_link(self, lb, xy, scroll: int) -> None:
         nested_popup.open_link(self, lb, xy, scroll)
+
+    def _navigate_tip(self, query: str) -> None:
+        """Yomitan-style: a cross-reference clicked in the BASE tooltip replaces its content in place
+        and pushes the previous view onto the back-stack (Esc/back returns)."""
+        tooltip.navigate_tip(self, query)
+
+    def _tip_close_or_back(self) -> None:
+        """Esc while link-navigated steps back one entry; at the root (or a plain hovered word) it
+        closes the tooltip — the browser-back-then-close feel Yomitan's history gives."""
+        if not tooltip.tip_back(self):
+            self.set_hover(-1)
 
     def _open_search(self, pattern: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_search(self, pattern, wx, wy, wh)
@@ -1048,7 +1081,7 @@ class Reader:
         KANJI_MSG: lambda r: r.kanji_current(),
         TIP_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
         TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
-        TIP_CLOSE_MSG: lambda r: r.set_hover(-1),
+        TIP_CLOSE_MSG: lambda r: r._tip_close_or_back(),
         SUB_DELAY_RESET_MSG: lambda r: r.ipc.command("set_property", "sub-delay", "0"),
     }
 

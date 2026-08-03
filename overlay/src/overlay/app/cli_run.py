@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Literal
 
 from overlay.app.config import config_path, load_config
 from overlay.app.embedded_subs import build_sub_index_for_current_track
@@ -351,6 +352,7 @@ def _build_run_options(
     mine_preview: bool,
     auto_translate: bool,
     prefetch: bool,
+    layout_engine: Literal["default", "taffy"],
 ):
     from overlay.app.config import (
         KeyOptions,
@@ -395,6 +397,7 @@ def _build_run_options(
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
+            layout_engine=layout_engine,
         ),
         mining=MiningOptions(
             play_audio=not no_audio_play,
@@ -698,6 +701,7 @@ def run_impl(
     prefetch: bool,
     auto_translate: bool,
     hover_switch_delay: float,
+    layout_engine: Literal["default", "taffy"] = "default",
     mpv_arg: list[str] | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
@@ -815,6 +819,7 @@ def run_impl(
         mine_preview=mine_preview,
         auto_translate=auto_translate,
         prefetch=prefetch,
+        layout_engine=layout_engine,
     )
 
     # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /

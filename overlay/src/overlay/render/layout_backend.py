@@ -213,3 +213,31 @@ class TaffyLayoutBackend:
 
 
 DEFAULT_BACKEND: LayoutBackend = DefaultLayoutBackend()
+
+
+def backend_label(backend: LayoutBackend) -> str:
+    """Short tag for a backend instance ('taffy' | 'flex' | 'default') — the EFFECTIVE engine, for log
+    lines and span attributes (so a taffy request that fell back reads 'default', the truth)."""
+    return {"TaffyLayoutBackend": "taffy", "FlexColumnBackend": "flex"}.get(
+        type(backend).__name__, "default"
+    )
+
+
+def resolve_backend(engine: str) -> LayoutBackend:
+    """Map a ``[tooltip] layout_engine`` name to a backend instance. ``"taffy"`` needs the optional
+    ``taffylite`` wheel (``saitenka[layout-engine]``) — probed HERE, the sole chokepoint, so a missing
+    wheel degrades to :data:`DEFAULT_BACKEND` (logged) instead of failing the reader. Any other value
+    (incl. ``"default"``) is the pure-Python default."""
+    if engine == "taffy":
+        try:
+            import taffylite  # noqa: F401  # availability probe; the real use is in TaffyLayoutBackend
+        except ImportError:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "layout_engine='taffy' but the taffylite wheel is not installed "
+                "(pip install 'saitenka[layout-engine]'); using the default layout backend"
+            )
+            return DEFAULT_BACKEND
+        return TaffyLayoutBackend()
+    return DEFAULT_BACKEND
