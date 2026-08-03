@@ -29,6 +29,7 @@ _FONT_CACHE_MAX = 64
 _WIDTH_CACHE_MAX = (
     20_000  # (font, text) → getlength memo; bounds the CJK working set + a few styles
 )
+_MASK_CACHE_MAX = 8192  # (font, text) → getmask2 alpha memo; heavier than widths, so a tighter cap
 
 # Fallback order: JP first (it also carries Latin + most symbols, so mixed strings stay in one font
 # and look consistent), Latin Noto as a secondary, monochrome Noto Emoji LAST — it only catches glyphs
@@ -102,6 +103,42 @@ def text_width(font: ImageFont.FreeTypeFont, text: str) -> float:
     if len(cache) > _WIDTH_CACHE_MAX:
         cache.popitem(last=False)
     return w
+
+
+def glyph_mask(
+    font: ImageFont.FreeTypeFont, text: str, mode: str, start: tuple[float, float]
+) -> tuple[object, tuple[int, int]]:
+    """Cached ``font.getmask2`` — the glyph's alpha bitmap core + placement offset — reproducing exactly
+    the call ``ImageDraw.text`` makes (upright, no stroke), so ``draw_bitmap`` of the result is
+    byte-identical to ``draw.text``.
+
+    ``getmask2`` (FreeType rasterisation) is ~half the render CPU and is otherwise recomputed on every
+    glyph draw; glyphs repeat massively across words, so a memo is near-all hits after warmup. The mask
+    depends on the glyph, the font *object* (which encodes file+size+weight), the render ``mode``, and
+    the **subpixel** ``start`` (``draw.text`` passes ``(frac(x), frac(y))`` — CJK's fixed advance keeps
+    the phase set small, so the key space stays bounded). Colour is applied by ``draw_bitmap`` at paint
+    time, not baked in — so colour variants share. Per thread, like :func:`text_width` (FreeType faces
+    are thread-local — a shared cache would race and cross faces). LRU-bounded; the returned core is
+    used read-only (``draw_bitmap`` treats it as a stencil)."""
+    cache: OrderedDict[tuple, tuple[object, tuple[int, int]]] | None = getattr(_tls, "masks", None)
+    if cache is None:
+        cache = _tls.masks = OrderedDict()
+    key = (font, text, mode, start)
+    hit = cache.get(key)
+    if hit is not None:
+        cache.move_to_end(key)
+        return hit
+    # Positional signature mirrors ImageDraw.text's own getmask2 call (direction/features/language
+    # unused here; stroke_width 0; ink 0 — for a non-"RGBA" mode ink only tints an embedded-colour
+    # glyph, which this upright text path never has, so the alpha coverage is ink-independent).
+    core, offset = font.getmask2(
+        text, mode, None, None, None, 0, "ls", 0, start, stroke_filled=True
+    )
+    hit = (core, offset)
+    cache[key] = hit
+    if len(cache) > _MASK_CACHE_MAX:
+        cache.popitem(last=False)
+    return hit
 
 
 def covers(file: str, ch: str) -> bool:
