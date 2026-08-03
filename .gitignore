@@ -22,6 +22,8 @@ overlay/tools/fuzz/corpus/
 .ruff_cache/
 .hypothesis/
 .coverage
+# lychee link-checker cache (written by `poe links-net`); a regeneratable local cache like the above
+.lycheecache
 # cosmic-ray campaign DBs (poe mutate) — expensive to build, reused across runs
 .mutation-cache/
 
