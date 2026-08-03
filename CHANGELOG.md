@@ -7,6 +7,17 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **Optional taffy layout engine behind the `LayoutBackend` seam (`saitenka[layout-engine]`).** A new
+  `TaffyLayoutBackend` computes the tooltip's row-stack geometry with the mature [taffy](https://github.com/DioxusLabs/taffy)
+  CSS-flexbox solver instead of hand-rolled arithmetic, packaged as the in-repo `taffylite` Rust
+  extension (a thin PyO3 binding, MIT/Apache-2.0). It is **opt-in and parity-gated** — byte-identical to
+  the always-available pure-Python `DefaultLayoutBackend` (a differential test proves it across random
+  inputs, the vendored column fixtures, and a real panel's full scroll) — chosen for a maintained
+  engine's robustness, not speed (both are µs-scale, dominated by Pillow raster). Kept out of the `full`
+  extra because free-threaded `cp314t` wheels are still niche; the default install stays pure-Python.
+
 ## [1.2.1] - 2026-08-03
 
 ### Fixed

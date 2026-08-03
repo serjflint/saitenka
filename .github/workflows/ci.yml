@@ -60,6 +60,41 @@ jobs:
         working-directory: overlay
         run: uv run poe all
 
+  layout-engine:
+    name: taffylite wheel (Linux, 3.14t)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install MeCab (fugashi build dep)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      # Proves the DoD: the optional Rust engine's cp314t wheel builds on the free-threaded interpreter
+      # (cargo ships on the runner; maturin is pulled per taffylite's build-system) and drives the full
+      # parity gate — the `layout-engine` extra is DELIBERATELY absent from `poe all` (the gate job),
+      # so this job is where the Rust path is exercised.
+      - name: Sync (3.14t, full + layout-engine → builds taffylite)
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full --extra layout-engine --no-default-groups --group test
+
+      - name: taffylite's own tests (column parity + vendored flex fixtures)
+        working-directory: overlay
+        run: uv run --no-sync pytest -q ../taffylite/tests
+
+      - name: TaffyLayoutBackend parity against the default backend
+        working-directory: overlay
+        env:
+          PYTHON_GIL: "0"
+        run: uv run --no-sync pytest -q tests/test_layout_backend.py
+
   tests:
     name: tests (${{ matrix.python }})
     runs-on: ubuntu-latest

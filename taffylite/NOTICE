@@ -1,0 +1,15 @@
+taffylite
+Copyright 2026 Sergei Iakhnitskii and saitenka contributors
+
+This product is licensed under either of Apache License, Version 2.0 or the MIT
+license, at your option.
+
+It is a binding of, and vendors at build time, the following third-party crates:
+
+- taffy (https://github.com/DioxusLabs/taffy) — MIT license.
+  The flexbox layout solver. taffylite is a thin wrapper over its public API.
+- pyo3 (https://github.com/PyO3/pyo3) — Apache-2.0 OR MIT license.
+  The Rust ↔ Python binding layer.
+
+Vendored Taffy conformance fixtures under `tests/fixtures/` are derived from taffy's
+own test suite (MIT); see the header of each fixture file.

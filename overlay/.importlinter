@@ -70,3 +70,13 @@ ignore_imports =
     overlay.app.dictionary -> saitenka_deinflect
     overlay.app.doctor -> saitenka_deinflect
 
+[importlinter:contract:layout-engine-chokepoint]
+name = only render.layout_backend may import the optional taffylite layout engine
+type = forbidden
+source_modules =
+    overlay
+forbidden_modules =
+    taffylite
+ignore_imports =
+    overlay.render.layout_backend -> taffylite
+

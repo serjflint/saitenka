@@ -1875,6 +1875,9 @@ jmdict = [
     { name = "jamdict-data", marker = "sys_platform != 'win32'" },
     { name = "jamdict-data-fix", marker = "sys_platform == 'win32'" },
 ]
+layout-engine = [
+    { name = "taffylite" },
+]
 linux-keyring = [
     { name = "keyring", marker = "sys_platform == 'linux'" },
 ]
@@ -1951,10 +1954,11 @@ requires-dist = [
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", specifier = ">=0.1.0" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
+    { name = "taffylite", marker = "extra == 'layout-engine'", editable = "../taffylite" },
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
+provides-extras = ["deinflect", "layout-engine", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
 [package.metadata.requires-dev]
 codemod = [{ name = "libcst", specifier = ">=1.8.6" }]
@@ -2064,6 +2068,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/5e/89/b4a0bcfdf4f71a3de
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/18/489c97b834dfff9cf2fc2507cede4bcd4b11e67f84bc462acd1992496f86/structlog-26.1.0-py3-none-any.whl", hash = "sha256:e081a26d6c373e6d201eca24eede26d8ffab07f88f477822e679183428d3d91e", size = 73764, upload-time = "2026-06-06T07:33:38.046Z" },
 ]
+
+[[package]]
+name = "taffylite"
+version = "0.1.0"
+source = { editable = "../taffylite" }
 
 [[package]]
 name = "tenacity"

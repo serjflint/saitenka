@@ -171,4 +171,45 @@ class FlexColumnBackend:
         return _solve(self, rows, width, measure, gaps, top_pad, bottom_pad, x)
 
 
+class TaffyLayoutBackend:
+    """Row-stack geometry via taffy's flexbox solver — the optional ``taffylite`` Rust engine (#146).
+
+    A ``flex-direction: column`` of fixed-height rows with per-row ``margin-bottom`` gaps inside
+    ``top_pad`` top padding, which taffy places identically to :func:`_cumulative` (integer-exact for
+    integer inputs). Opt-in and parity-gated: the differential test proves it agrees byte-for-byte with
+    :class:`DefaultLayoutBackend` on random and real panels, and it satisfies the vendored column
+    fixtures — so it is a true drop-in, chosen for a mature CSS engine's robustness, not speed (both are
+    µs-scale, dominated by Pillow raster).
+
+    ``taffylite`` is imported lazily HERE and only here — the single chokepoint mirroring the GPL
+    ``saitenka_deinflect`` add-on, enforced by the ``.importlinter`` ``layout-engine-chokepoint``
+    forbidden contract and the ruff ``TID251`` banned-api (per-file-ignored only for this module); deptry
+    stays green with no ignore, since taffylite is a declared optional dep. The lazy import keeps the
+    pure-Python default from ever pulling the Rust extension; the wheel is an opt-in extra
+    (``saitenka[layout-engine]``)."""
+
+    def cumulative(
+        self, heights: Sequence[int], gaps: Sequence[int], top_pad: int
+    ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        import taffylite  # lazy chokepoint import (see class docstring); TID251 per-file-ignored here
+
+        starts, ends = taffylite.column(
+            [float(h) for h in heights], [float(g) for g in gaps], float(top_pad)
+        )
+        return tuple(starts), tuple(ends)
+
+    def solve(
+        self,
+        rows: Sequence[int],
+        width: int,
+        measure: Callable[[int], int] | None = None,
+        *,
+        gaps: Sequence[int],
+        top_pad: int,
+        bottom_pad: int,
+        x: Sequence[int] | int = 0,
+    ) -> LayoutResult:
+        return _solve(self, rows, width, measure, gaps, top_pad, bottom_pad, x)
+
+
 DEFAULT_BACKEND: LayoutBackend = DefaultLayoutBackend()
