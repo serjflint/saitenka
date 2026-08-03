@@ -3,8 +3,10 @@
 Two contracts:
 1. ``column`` reproduces the reference row-stack cumulative arithmetic exactly (fixtures + random),
    which is what makes ``TaffyLayoutBackend`` a byte-identical drop-in behind the seam.
-2. The generic ``Tree`` reproduces taffy's flexbox layout on the vendored fixed-size fixtures — proof
-   that the thin wrapper does not distort the engine it binds.
+2. The generic ``Tree`` reproduces taffy's flexbox layout on two fixture sets — authored,
+   CSS-spec-verified cases (``flex_cases.json``) and taffy's own vendored gentest corpus
+   (``taffy_gentest_flex.json``, Chrome-derived) — proof the thin wrapper does not distort the
+   engine it binds.
 """
 
 from __future__ import annotations
@@ -91,13 +93,24 @@ def _build(nodes: list[dict]) -> tuple[taffylite.Tree, list[int]]:
     return tree, handles
 
 
-@pytest.mark.parametrize(
-    "case",
-    json.loads((_FIXTURES / "flex_cases.json").read_text(encoding="utf-8"))["cases"],
-    ids=lambda c: c["name"],
-)
-def test_generic_tree_matches_vendored_flex_fixtures(case):
+def _cases(filename: str) -> list[dict]:
+    return json.loads((_FIXTURES / filename).read_text(encoding="utf-8"))["cases"]
+
+
+def _assert_case(case: dict) -> None:
     tree, handles = _build(case["nodes"])
     tree.set_root(handles[case["root"]])
     rects = [tuple(round(v) for v in r) for r in tree.compute()]
     assert rects == [tuple(r) for r in case["rects"]], case["name"]
+
+
+@pytest.mark.parametrize("case", _cases("flex_cases.json"), ids=lambda c: c["name"])
+def test_generic_tree_matches_authored_flex_fixtures(case):
+    _assert_case(case)
+
+
+@pytest.mark.parametrize("case", _cases("taffy_gentest_flex.json"), ids=lambda c: c["name"])
+def test_generic_tree_matches_taffy_gentest_corpus(case):
+    """The external oracle: taffy's own gentest expected rects are Chrome-derived, so passing them
+    proves taffylite reproduces a real browser's flexbox, not just our own spec reading."""
+    _assert_case(case)
