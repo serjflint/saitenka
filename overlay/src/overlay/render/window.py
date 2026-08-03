@@ -128,6 +128,9 @@ class LazyOffsets:
         self._heights: list[int | None] = [None] * self._n
         self._seed = seed_height  # placeholder height before any real block is measured
         self._backend = backend  # LayoutBackend seam (#113); default is byte-identical arithmetic
+        # Memoised (starts, ends), shared by start/end/total_estimate/estimated_table until the next
+        # set_height (the filled heights are the only input that changes). Under the caller's lock.
+        self._table: tuple[tuple[int, ...], tuple[int, ...]] | None = None
 
     @property
     def count(self) -> int:
@@ -137,6 +140,7 @@ class LazyOffsets:
         if height < 0:
             raise ValueError("block height must be non-negative")
         self._heights[i] = height
+        self._table = None  # offsets changed → drop the memo
 
     def known(self, i: int) -> bool:
         return self._heights[i] is not None
@@ -168,29 +172,30 @@ class LazyOffsets:
     def _fill(self, avg: float) -> list[int]:
         return [h if h is not None else round(avg) for h in self._heights]
 
+    def _offsets(self) -> tuple[tuple[int, ...], tuple[int, ...]]:
+        if self._table is None:
+            self._table = self._backend.cumulative(self._fill(self._avg()), self._gaps, self._top)
+        return self._table
+
     def start(self, i: int) -> int:
         """Start y of block ``i`` — exact when :meth:`start_exact`, else estimated. Depends only on
         blocks before ``i``, so a visited-prefix offset never moves as later heights arrive."""
-        starts, _ = self._backend.cumulative(self._fill(self._avg()), self._gaps, self._top)
+        starts, _ = self._offsets()
         return starts[i] if i < self._n else self.total_estimate() - self._bottom
 
     def end(self, i: int) -> int:
-        avg = self._avg()
-        _, ends = self._backend.cumulative(self._fill(avg), self._gaps, self._top)
+        _, ends = self._offsets()
         return ends[i]
 
     def total_estimate(self) -> int:
         """Estimated full content height; exact once every block is measured."""
-        avg = self._avg()
-        heights = self._fill(avg)
-        _, ends = self._backend.cumulative(heights, self._gaps, self._top)
+        _, ends = self._offsets()
         return (ends[-1] if ends else self._top) + self._bottom
 
     def estimated_table(self) -> OffsetTable:
         """Snapshot :class:`OffsetTable` filling unknown heights with the running average — drives
         :meth:`OffsetTable.visible_range` for incremental scroll before every block is measured."""
-        heights = self._fill(self._avg())
-        starts, ends = self._backend.cumulative(heights, self._gaps, self._top)
+        starts, ends = self._offsets()
         return OffsetTable(starts, ends, self._top, self._bottom)
 
     def exact_table(self) -> OffsetTable:
