@@ -1,0 +1,12 @@
+{
+  "_comment": "Column-stack layout fixtures for the LayoutBackend seam (#113). Each case is a flex-column of rows with fixed main-size (height) and a trailing gap after every row but the last, inside top/bottom padding. `starts`/`ends` are content-space row tops/bottoms; `total` includes both pads. Hand-verified; every LayoutBackend (default arithmetic + flex) must reproduce them exactly.",
+  "cases": [
+    {"name": "empty", "heights": [], "gaps": [], "top_pad": 12, "bottom_pad": 12, "starts": [], "ends": [], "total": 24},
+    {"name": "single-no-gap", "heights": [100], "gaps": [7], "top_pad": 12, "bottom_pad": 12, "starts": [12], "ends": [112], "total": 124},
+    {"name": "two-rows", "heights": [100, 80], "gaps": [7, 7], "top_pad": 12, "bottom_pad": 12, "starts": [12, 119], "ends": [112, 199], "total": 211},
+    {"name": "three-rows-varied-gaps", "heights": [40, 60, 20], "gaps": [5, 10, 99], "top_pad": 8, "bottom_pad": 8, "starts": [8, 53, 123], "ends": [48, 113, 143], "total": 151},
+    {"name": "zero-gaps", "heights": [30, 30, 30], "gaps": [0, 0, 0], "top_pad": 0, "bottom_pad": 0, "starts": [0, 30, 60], "ends": [30, 60, 90], "total": 90},
+    {"name": "zero-height-row", "heights": [50, 0, 50], "gaps": [4, 4, 4], "top_pad": 10, "bottom_pad": 6, "starts": [10, 64, 68], "ends": [60, 64, 118], "total": 124},
+    {"name": "tall-single", "heights": [90000], "gaps": [8], "top_pad": 16, "bottom_pad": 16, "starts": [16], "ends": [90016], "total": 90032}
+  ]
+}
