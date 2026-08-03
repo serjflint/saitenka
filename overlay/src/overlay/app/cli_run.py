@@ -348,6 +348,7 @@ def _build_run_options(
     pause_on_tooltip: bool,
     hover_switch_delay: float,
     no_audio_play: bool,
+    mine_preview: bool,
     auto_translate: bool,
     prefetch: bool,
 ):
@@ -397,6 +398,7 @@ def _build_run_options(
         ),
         mining=MiningOptions(
             play_audio=not no_audio_play,
+            show_preview=mine_preview,
             max_bulk=cfg.get("max_bulk", _mo.max_bulk),
             anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
             anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
@@ -690,6 +692,7 @@ def run_impl(
     mine_normalize_audio: bool,
     preview_key: str,
     no_audio_play: bool,
+    mine_preview: bool,
     tip_height: float,
     pause_on_tooltip: bool,
     prefetch: bool,
@@ -809,6 +812,7 @@ def run_impl(
         pause_on_tooltip=pause_on_tooltip,
         hover_switch_delay=hover_switch_delay,
         no_audio_play=no_audio_play,
+        mine_preview=mine_preview,
         auto_translate=auto_translate,
         prefetch=prefetch,
     )

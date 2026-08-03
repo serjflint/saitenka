@@ -12,6 +12,7 @@ _BASE_KWARGS = {
     "pause_on_tooltip": True,
     "hover_switch_delay": 0.15,
     "no_audio_play": False,
+    "mine_preview": True,
     "auto_translate": False,
     "prefetch": True,
 }
@@ -35,6 +36,17 @@ def test_run_options_read_utility_ui_scale():
 def test_attach_options_read_utility_ui_scale():
     opts = _build_attach_options({"ui_scale": 1.5}, mine={})
     assert opts.panels.scale == 1.5
+
+
+def test_attach_options_read_mine_preview_toggle():
+    assert _build_attach_options({}, mine={}).mining.show_preview is True  # default on
+    opts = _build_attach_options({}, mine={"preview": False})
+    assert opts.mining.show_preview is False  # [mine] preview = false disables the panel
+
+
+def test_run_options_read_mine_preview_toggle():
+    kwargs = {**_BASE_KWARGS, "mine_preview": False}
+    assert _build_run_options({}, **kwargs).mining.show_preview is False
 
 
 def test_run_options_read_hover_pause_key():

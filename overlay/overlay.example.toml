@@ -132,6 +132,8 @@ model = "Lapis"
 key = "Ctrl+m"
 all_key = "Shift+m"
 preview_key = "p"
+# preview = true              # set false to skip the card-preview panel after a mine (a toast
+                              # confirms instead; Ctrl+m/Shift+m still mine, ⊕→✓ still flips)
 # normalize_audio = false     # even out card volume: −23 LUFS EBU R128 loudnorm on the mined clip
                               # (adds one ffmpeg pass per mine)
 

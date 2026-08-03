@@ -228,6 +228,14 @@ def run(
     no_audio_play: Annotated[
         bool, cyclopts.Parameter(negative=(), help="don't auto-play the mined clip")
     ] = False,
+    mine_preview: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative="--no-mine-preview",  # on by default → explicit off switch
+            help="auto-pop the card-preview panel after a mine (--no-mine-preview mines silently "
+            "with a toast instead)",
+        ),
+    ] = bool(_mine_cfg.get("preview", True)),
     tip_height: Annotated[
         float,
         cyclopts.Parameter(
@@ -315,6 +323,7 @@ def run(
         mine_all_key=mine_all_key,
         preview_key=preview_key,
         no_audio_play=no_audio_play,
+        mine_preview=mine_preview,
         tip_height=tip_height,
         pause_on_tooltip=pause_on_tooltip,
         prefetch=prefetch,
@@ -973,6 +982,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         ),
         mining=MiningOptions(
             play_audio=not bool(cfg.get("no_audio_play", False)),
+            show_preview=bool(mine.get("preview", mo.show_preview)),
             max_bulk=cfg.get("max_bulk", mo.max_bulk),
             anki_ok_ttl=cfg.get("anki_ok_ttl", mo.anki_ok_ttl),
             anki_ping_timeout=cfg.get("anki_ping_timeout", mo.anki_ping_timeout),

@@ -116,6 +116,9 @@ class MiningOptions:
     """Mining-flow behaviour (the Anki client/deck config stays in anki.MineConfig)."""
 
     play_audio: bool = True
+    show_preview: bool = (
+        True  # auto-pop the card-preview panel after a mine (Esc/next-cue dismisses)
+    )
     max_bulk: int = 12  # cap on words mined in one "mine all" bulk action
     anki_ok_ttl: float = 3.0  # seconds an AnkiConnect reachability check is cached for
     anki_ping_timeout: float = 0.4  # timeout for the reachability ping (hot hover path)
