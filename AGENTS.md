@@ -23,7 +23,30 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
   format exists); `agent-setup`'s `render.py` emits each agent's dialect. The generated `.mcp.json` is
   git-ignored.
 - **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
-  `searching.md` (don't `find … | xargs grep`; prefer Grep/Glob or `git grep`).
+  `searching.md` (**never** shell-search — `grep`/`find`/`rg`/`pgrep` fork-bomb the env mock; a
+  `PreToolUse` hook `.agents/hooks/block-shell-search.py` enforces it). Full routing → **Tooling** below.
+
+## Tooling — route by intent
+
+Reach for the tool that answers the question, not the reflex. **Never shell-search**
+(`grep`/`find`/`rg`/`pgrep`/`ag` fork-bomb here — a `PreToolUse` hook denies them; see
+`.agents/rules/searching.md`). Which tool answers what → the **`agent-tooling`** skill; turning the
+stack on → **`agent-setup`**.
+
+| When you want to… | Use | Not |
+| --- | --- | --- |
+| find text / a filename | **Grep / Glob** tools, or `git grep` / `git ls-files` | `grep`/`find` in Bash |
+| where defined · who-calls · references · call hierarchy | **LSP** tool (`findReferences`, `documentSymbol`, `incomingCalls`) | grep-and-read |
+| what/why is this code · blast radius · cross-module design | **repowise** (`get_context`, `get_why`, `get_risk`, `search_codebase`) | guessing, or a wide blind read |
+| "where does X happen" when the naming is unknown | **repowise `search_codebase`** (semantic) | grep (needs the exact term) |
+| what did we decide · prior context · working notes | **Basic Memory** (`search_notes`, `read_note`) | re-deriving from scratch |
+| read a known file | **Read** tool | `cat`/`head`/`tail` |
+| process work | `pkill` / `killall` / `kill` | `ps \| grep` / `pgrep` |
+
+repowise is a **grounded summary, not ground truth** — its synthesis can be stale or wrong (the
+module/onboarding pages especially; a fresh fact-check found several mislabeled). Trust it for
+orientation, *why*, and blast-radius; **confirm any correctness-critical claim against the code** (LSP /
+Read). It only helps while the index is fresh (`repowise update`) and the MCP server is up.
 
 ## Python: always `uv`
 

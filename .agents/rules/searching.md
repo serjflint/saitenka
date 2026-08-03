@@ -1,17 +1,16 @@
 # Rule: searching the tree
 
-Prefer the harness **Grep/Glob tools** or **`git grep`** — they honor `.gitignore`, so they skip the
-untracked env/cache trees entirely.
+`grep` / `find` / `rg` / `pgrep` / `ag` are **PATH-shimmed to a mock** in this environment; invoking any
+of them in Bash fork-bombs — and reaching for `ps | grep` / `pgrep` to diagnose the runaway just spawns
+more. So this is a hard line, not a style preference:
 
-The real hazard is **fan-out**, not any single command: `find . | xargs grep` from the repo/workspace
-root enumerates thousands of files under `.venv*`/caches and spawns a `grep` **per batch**. That once
-ran away — and the cleanup made it worse, because reaching for `ps | grep` / `pgrep` to diagnose a
-runaway just spawns more of the same. (Search binaries on a given machine may also be PATH-shimmed to a
-wrapper, which amplifies the fan-out, but the pipeline is the root cause either way.)
+- **Never invoke `grep`/`find`/`rg`/`pgrep`/`ag` in Bash** — not even scoped to a subdir, not via
+  `xargs`/`sudo`/`time`. A `PreToolUse` hook (`.agents/hooks/block-shell-search.py`, wired in
+  `.claude/settings.json`) **denies** these; if you hit that denial, switch tools — don't work around it.
+- **Text / filename search →** the harness **Grep / Glob tools** (they honor `.gitignore`, skipping the
+  untracked env/cache trees), or **`git grep`** / **`git ls-files`** in Bash (tracked files only).
+- **Symbol nav** (where-defined / who-calls / references) **→ the LSP tool** (`findReferences`,
+  `documentSymbol`, `incomingCalls`) — exact, and cheaper than grep-and-read.
+- **Process work:** `pkill` / `killall` / `kill` by name or PID. Never `ps | grep` / `pgrep`.
 
-**Rules**
-
-- Never `find … | xargs grep`.
-- Scope shell searches to a concrete subdir (e.g. `overlay/src/overlay/app`) — never the repo/workspace
-  root; or use `git grep` / `git ls-files` (tracked files only).
-- Process work: `pkill` / `killall` / `kill`. Don't diagnose or fix a runaway with `ps | grep` / `pgrep`.
+See AGENTS.md **"Tooling — route by intent"** for the full intent→tool table (repowise / Basic Memory too).
