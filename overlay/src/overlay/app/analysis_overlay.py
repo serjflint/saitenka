@@ -49,7 +49,12 @@ def _show(reader: Reader) -> None:
 
 
 def _unavailable(reader: Reader) -> bool:
-    return reader.subtitle_language != "jp" or reader.jp_sid is None or reader._sub_index is None
+    # SSOT: analysis reads reader._sub_index.cues — the SAME parsed index the subtitle draw + hover
+    # render from — so availability is exactly "a JP index is loaded", nothing more. jp_sid (an mpv
+    # embedded-track id, used only for track SWITCHING) is None whenever the JP subs come from an
+    # external / extracted / jimaku .srt loaded straight into _sub_index — so gating on it wrongly
+    # reported "Japanese track unavailable" while we were visibly showing (and could analyse) those subs.
+    return reader.subtitle_language != "jp" or reader._sub_index is None
 
 
 def request(reader: Reader) -> None:

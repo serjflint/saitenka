@@ -51,6 +51,28 @@ def test_toggle_shows_analyzing_then_result_without_pause_or_seek():
     assert OverlayId.ANALYSIS not in reader.ov._live
 
 
+def test_external_srt_without_mpv_sid_is_still_analyzable():
+    # Regression: JP subs from an external / extracted / jimaku .srt carry no mpv jp_sid, but _sub_index
+    # holds the cues we render AND analyse — so analysis must run, not report "Japanese track unavailable".
+    reader = _reader()
+    reader.jp_sid = None  # external index → no embedded-track sid
+
+    reader._handle(ANALYSIS_MSG)
+    assert reader.analysis.status == "Analyzing…"
+    _finish(reader)
+    assert reader.analysis.status == "Ready"
+    assert reader.analysis.current is not None
+
+
+def test_no_index_reports_unavailable():
+    reader = _reader()
+    reader._sub_index = None  # the real SSOT for "no analysable JP cues"
+
+    reader._handle(ANALYSIS_MSG)
+    assert reader.analysis.status == "Japanese track unavailable"
+    assert not reader.analysis.threads  # no worker spawned
+
+
 def test_cache_hit_does_not_start_another_worker():
     reader = _reader()
     analysis_overlay.toggle(reader)
