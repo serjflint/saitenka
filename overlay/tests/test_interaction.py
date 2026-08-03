@@ -46,6 +46,78 @@ def _content_word(r) -> int:
     return next(i for i, t in enumerate(r.tokens) if t.is_content and t.pos not in SKIP_POS)
 
 
+class _RecSpan:
+    """Records span name, entry attributes, and post-hoc ``.set(...)`` attributes — a test double for
+    the SpanSetter that ``traced`` yields, so a Driver-driven hover can be inspected without a real
+    OTel provider (which is a once-per-process global)."""
+
+    def __init__(self, name, attrs):
+        self.name = name
+        self.attrs = dict(attrs)
+
+    def set(self, key, value):
+        self.attrs[key] = value
+
+
+def _patch_traced(monkeypatch, sink):
+    import contextlib
+
+    from overlay import otel_metrics
+
+    @contextlib.contextmanager
+    def _record(name, **attrs):
+        rec = _RecSpan(name, attrs)
+        sink.append(rec)
+        yield rec
+
+    monkeypatch.setattr(otel_metrics, "traced", _record)
+
+
+def test_hover_composite_is_traced_under_tooltip_show(monkeypatch):
+    # The first-viewport composite (blit_panel → panel.viewport) is the bulk of a cold hover's
+    # wall time and used to be untraced — invisible between the `render` and `upload` spans. It now
+    # opens a `tip_compose` span on the same synchronous call path as tooltip_show.
+    spans: list = []
+    _patch_traced(monkeypatch, spans)
+    r = _reader()
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))
+    assert ui.tip_shown
+    names = [s.name for s in spans]
+    assert "tip_compose" in names  # the composite is now attributable
+    assert "tooltip_show" in names  # and shares the hover's synchronous span stack
+    assert "measure" in names  # the head walk+wrap, split out of tooltip_show self-time
+    assert "mined" in names  # the jamdict card_for lookup, likewise
+    assert "pause_ipc" in names  # the pause-on-hover mpv round-trips, likewise
+
+
+def test_tooltip_show_span_attributes_the_cold_hover(monkeypatch):
+    # The coldest hover is diagnosable from its span: a build vs a hit (cold), the word length, the
+    # panel height, and bands rastered on first paint — all low-cardinality, no raw word surface.
+    spans: list = []
+    _patch_traced(monkeypatch, spans)
+    r = _reader()
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))
+    show = next(s for s in spans if s.name == "tooltip_show")
+    assert show.attrs["cold"] is True  # first hover of this word builds the panel
+    assert show.attrs["chars"] >= 1
+    assert show.attrs["full_h"] > 0
+    assert show.attrs["bands"] >= 1  # a cold first paint rasters at least one band
+
+
+def test_scroll_frame_span_attributes_bands_and_height(monkeypatch):
+    spans: list = []
+    r = _reader()
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))  # show first (real spans), THEN patch for the scroll
+    _patch_traced(monkeypatch, spans)
+    ui.wheel(1)  # one notch down
+    scroll = next(s for s in spans if s.name == "scroll_frame")
+    assert "bands" in scroll.attrs and scroll.attrs["bands"] >= 0
+    assert scroll.attrs["full_h"] > 0
+
+
 def test_move_over_word_shows_tooltip_and_switching_words():
     r = _reader()
     ui = Driver(r)

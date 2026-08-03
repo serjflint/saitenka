@@ -507,6 +507,52 @@ def test_lookup_cache_evicts_oldest_beyond_entry_cache_max(tmp_path):
     assert len(dic._entry_cache) == 3
 
 
+def test_dict_sql_span_always_on_foreground_sampled_on_prefetch_workers():
+    # dict_sql keeps full step-resolution on the interactive path but is sampled on the background
+    # prefetch workers, where it floods the trace and prefetch_decode already covers the phase.
+    import threading
+
+    from overlay.app.dictionary import _BG_SQL_SPAN_SAMPLE, _emit_sql_span
+
+    assert _emit_sql_span() is True  # main thread → always traced
+
+    results: list[bool] = []
+
+    def worker():
+        results.extend(_emit_sql_span() for _ in range(_BG_SQL_SPAN_SAMPLE * 2))
+
+    t = threading.Thread(target=worker, name="saitenka-prefetch-0")
+    t.start()
+    t.join()
+    # exactly 1-in-N on a prefetch worker (2 of 2N calls)
+    assert sum(results) == 2
+    assert results[0] is True  # first call of the worker samples in
+
+
+def test_lookup_records_dict_cache_eviction_counter(tmp_path):
+    # An eviction is a CAPACITY miss — the signal for whether raising entry_cache_max would cut the
+    # 10k+ misses a real session shows into hits, vs them being unavoidable cold first-decodes.
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay import otel_metrics
+
+    entries = [[f"語{i}", f"ご{i}", [f"gloss {i}"]] for i in range(5)]
+    dic = dicthelp.load_dict(_make_dict(tmp_path / "evict.zip", "C", entries))
+    dic._entry_cache_max = 3
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        for i in range(5):
+            dic.lookup(f"語{i}")  # 5 distinct decodes over a cap of 3 → 2 evictions
+        assert otel_metrics.snapshot()["saitenka.dict_cache.evictions"]["value"] == 2
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
 def test_deftags_resolved_ordered_and_normalized(tmp_path):
     p = tmp_path / "d.zip"
     # the multi-word tag code uses an nbsp (\xa0) internally; defTags separate codes with a plain space

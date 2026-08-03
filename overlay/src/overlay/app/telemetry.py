@@ -113,6 +113,26 @@ def set_gauge_provider(fn: Callable[[], dict[str, float]] | None) -> None:
     _gauge_provider = fn
 
 
+def _metric_series(name: str, summary: dict, spanless: frozenset[str]) -> dict[str, float]:
+    """One instrument's trace series. A counter/gauge → its scalar ``value``. A histogram → its
+    count/p50/p95/p99/max, but ONLY when it has no span (``name in spanless``): a span-backed
+    histogram's percentiles are derivable from the spans it already emits, so exporting the series too
+    is pure duplication (it was ~70% of counter volume for zero added step-resolution). Deriving by
+    instrument SHAPE, not a hand-kept name list, means a new counter graphs automatically — the old
+    allowlist once silently dropped block_cache.* for a release."""
+    value = summary.get("value")
+    if isinstance(value, int | float):
+        return {name.removeprefix("saitenka."): float(value)}
+    if "count" not in summary or name not in spanless:
+        return {}
+    base = name.removeprefix("saitenka.")
+    return {
+        f"{base}.{stat}": float(summary[stat])
+        for stat in ("count", "p50", "p95", "p99", "max")
+        if isinstance(summary.get(stat), int | float)
+    }
+
+
 def _sample_counters() -> dict[str, float]:
     """The writer thread's ``sample_fn``: the curated instrument values from the last
     ``otel_metrics.snapshot()``, plus the span queue's live dropped-count (not itself an OTel
@@ -130,9 +150,7 @@ def _sample_counters() -> dict[str, float]:
     snap = otel_metrics.snapshot()
     out: dict[str, float] = {}
     for name, summary in snap.items():
-        value = summary.get("value")
-        if isinstance(value, int | float):
-            out[name.removeprefix("saitenka.")] = float(value)
+        out.update(_metric_series(name, summary, otel_metrics.SPANLESS_HISTOGRAMS))
     out["telemetry.dropped_spans"] = float(dropped_span_count())
     rss = perf.rss_mb()
     if rss is not None:

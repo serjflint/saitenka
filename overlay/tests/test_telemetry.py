@@ -123,6 +123,28 @@ def test_sample_counters_reads_gil_enabled_and_dropped_spans(tmp_path):
     assert values["telemetry.dropped_spans"] == 0.0
 
 
+def test_sample_counters_exports_only_spanless_histogram_summaries(tmp_path):
+    # block_cache.rendered_px (band pixel height) has NO span — its summary is its only trace
+    # representation, so it IS exported. render.duration_ms is span-backed — its percentiles are
+    # derivable from the spans, so exporting the series too is pure duplication and must NOT happen.
+    from overlay import otel_metrics
+
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
+    for px in (64, 128, 256):
+        otel_metrics.block_rendered_px.record(px)
+    otel_metrics.render_duration_ms.record(5.0)
+    values = telemetry._sample_counters()
+    # spanless → exported
+    assert values["block_cache.rendered_px.count"] == 3.0
+    assert values["block_cache.rendered_px.max"] == 256
+    assert "block_cache.rendered_px.p95" in values
+    # span-backed → NOT exported (the span carries it)
+    assert "render.duration_ms.p95" not in values
+    assert "render.duration_ms.count" not in values
+    # a scalar counter still exports as its bare value, no per-stat suffixes
+    assert "panel_cache.hits.count" not in values
+
+
 def test_sample_counters_has_no_otel_counters_when_not_configured():
     # snapshot() is empty without providers, so no OTel counter keys — but the process-global RSS
     # gauge and the dropped-span count are read directly and always present.

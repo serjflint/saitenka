@@ -145,3 +145,31 @@ def test_glyph_mask_cache_is_bounded(monkeypatch):
             _font(fonts.FONT_FILES[0], Style(size=24)), chr(0x4E00 + i), "L", (0.0, 0.0)
         )
     assert len(fonts._tls.masks) == 4
+
+
+def test_glyph_mask_eviction_counter_separates_capacity_from_cold_misses(monkeypatch):
+    # An eviction is a CAPACITY miss (bigger cap would have kept it), distinct from a cold first-see.
+    # Over a cap of 4 with 20 distinct glyphs, 16 fall out — the signal for whether raising the cap helps.
+    from overlay.app import telemetry
+
+    monkeypatch.setattr(fonts, "_MASK_CACHE_MAX", 4)
+    fonts._tls.masks = None
+    font = _font(fonts.FONT_FILES[0], Style(size=24))
+    with _telemetry():
+        for i in range(20):
+            fonts.glyph_mask(font, chr(0x4E00 + i), "L", (0.0, 0.0))
+        sampled = telemetry._sample_counters()
+    assert sampled.get("glyph_mask.evictions", 0) == 16
+
+
+def test_glyph_width_eviction_counter_records_capacity_drops(monkeypatch):
+    from overlay.app import telemetry
+
+    monkeypatch.setattr(fonts, "_WIDTH_CACHE_MAX", 4)
+    fonts._tls.widths = None
+    font = _font(fonts.FONT_FILES[0], Style(size=24))
+    with _telemetry():
+        for i in range(20):
+            fonts.text_width(font, chr(0x4E00 + i))
+        sampled = telemetry._sample_counters()
+    assert sampled.get("glyph_width.evictions", 0) == 16

@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -61,6 +61,7 @@ panel_cache_evictions: Counter | None = (
 )
 dict_cache_hits: Counter | None = None
 dict_cache_misses: Counter | None = None
+dict_cache_evictions: Counter | None = None  # decoded entries dropped over entry_cache_max
 # Per-block pixel cache (WindowedPanel._blocks), the layer under panel_cache: a miss rasterises the
 # block, a hit reuses a still-retained one, an eviction drops it (O(viewport) retention → a re-scroll
 # re-renders). The jank lives here, so it gets its own counters distinct from the per-word panel_cache.
@@ -71,10 +72,16 @@ block_cache_evictions: Counter | None = None
 # raster / getlength measure / premul-BGRA convert), so the hit:miss ratio is the memo's payoff.
 glyph_mask_hits: Counter | None = None  # font.glyph_mask memo (#156) — getmask2 is ~half render CPU
 glyph_mask_misses: Counter | None = None
+glyph_mask_evictions: Counter | None = None  # LRU raster drops — a capacity miss vs a cold one
 glyph_width_hits: Counter | None = None  # font.text_width memo (#125) — getlength
 glyph_width_misses: Counter | None = None
+glyph_width_evictions: Counter | None = (
+    None  # LRU width drops — separates cap thrash from first-see
+)
 bgra_memo_hits: Counter | None = None  # WindowedPanel per-band premul-BGRA memo (#138)
 bgra_memo_misses: Counter | None = None
+precompose_hits: Counter | None = None  # warm hover served the idle-precomposed first viewport
+precompose_builds: Counter | None = None  # first viewports composited in idle by a prefetch worker
 dropped_telemetry_spans: Counter | None = None
 cold_first_paint_overshoot: Counter | None = None
 osd_paused_draw: Counter | None = (
@@ -95,18 +102,17 @@ COLD_FIRST_PAINT_BUDGET_MS = 100.0
 # Gauges (prefetch queue depth is push-updated by the caller; gil_enabled is observed on read).
 prefetch_queue_depth: UpDownCounter | None = None
 
-_ALL_HISTOGRAM_NAMES = (
-    "saitenka.render.duration_ms",
-    "saitenka.upload.duration_ms",
-    "saitenka.hit_test.duration_ms",
-    "saitenka.dict_sql.duration_ms",
-    "saitenka.ipc.roundtrip_ms",
-    "saitenka.sub_seek.duration_ms",
-    "saitenka.cue_redraw.duration_ms",
-    "saitenka.subtitle_render.duration_ms",
-    "saitenka.sub_text_reconcile.duration_ms",
-    "saitenka.scroll_frame.duration_ms",
-    "saitenka.show_tooltip.duration_ms",
+# Histograms with NO corresponding span: their summary (count/p50/p95/p99/max) is their ONLY trace
+# representation, so the writer exports it as counter-series. A span-backed histogram (render, upload,
+# dict_sql, scroll_frame, …) is deliberately absent — its percentiles are derivable from the spans it
+# already emits, so exporting the summary too just duplicates bytes for zero extra step-resolution.
+# Staleness fails safe: a newly-added spanless histogram simply won't graph until listed here (the same
+# state as before this existed) — it never silently drops a counter that has no other representation.
+SPANLESS_HISTOGRAMS = frozenset(
+    {
+        "saitenka.ipc.roundtrip_ms",  # timed() only — no ipc span (would flood at poll cadence)
+        "saitenka.block_cache.rendered_px",  # band pixel height — a measure, not a duration span
+    }
 )
 
 
@@ -148,20 +154,43 @@ def _resolve_trace_module() -> ModuleType | None:
     return _trace_module if _trace_available else None
 
 
+class SpanSetter:
+    """Handle yielded by :func:`traced`/:func:`instrumented` so a caller can attach an attribute
+    computed *during* the block (e.g. how many bands a scroll frame rasterised — known only after the
+    work). ``None`` span → a no-op, so ``with traced(...) as s: s.set(...)`` is safe with telemetry off
+    and with the extra absent. Low-cardinality values only, same rule as counters: a count/height/bool,
+    never a per-word/per-entry string."""
+
+    __slots__ = ("_span",)
+
+    def __init__(self, span: Any | None) -> None:
+        self._span: Any | None = span
+
+    def set(self, key: str, value: object) -> None:
+        if self._span is not None:
+            self._span.set_attribute(key, value)
+
+
+_NOOP_SPAN = SpanSetter(None)
+
+
 @contextmanager
-def traced(name: str, **attributes: str) -> Generator[None]:
+def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
     """A real OTel span via the global tracer API — a no-op (not just an unrecorded span, but no
     `opentelemetry` import attempt beyond the first) when the ``telemetry`` extra isn't
     installed, so every call site stays safe to wrap unconditionally, same contract as :func:`timed`.
     When the extra IS installed but telemetry isn't configured, `trace.get_tracer()` itself returns
     OTel's built-in no-op tracer — cheap, not a crash.
 
+    Yields a :class:`SpanSetter` for attributes computed inside the block; ``with traced(...):`` that
+    ignores it stays valid.
+
     Bug this exists to prevent: an earlier direct ``from opentelemetry import trace`` at a call site
     crashed a background thread on any install without the extra — found via live end-to-end testing,
     not by any test in this suite (the dev/test env always has the extra installed via `[full]`)."""
     trace = _resolve_trace_module()
     if trace is None:
-        yield
+        yield _NOOP_SPAN
         return
     with trace.get_tracer("saitenka.overlay").start_as_current_span(name) as span:
         # otel_export._span_to_ctf_event reads this back for the CTF event's "tid" — without it,
@@ -178,20 +207,30 @@ def traced(name: str, **attributes: str) -> Generator[None]:
         # the GIL, so ~180ms of it is contention, not freq work (invisible without this).
         cpu0 = time.thread_time()
         try:
-            yield
+            yield SpanSetter(span)
         finally:
             span.set_attribute("cpu_ms", round((time.thread_time() - cpu0) * 1000.0, 3))
 
 
 @contextmanager
-def instrumented(histogram: Histogram | None, span_name: str, **attributes: str) -> Generator[None]:
+def instrumented(
+    histogram: Histogram | None, span_name: str, *, emit_span: bool = True, **attributes: str
+) -> Generator[SpanSetter]:
     """:func:`traced` + :func:`timed` together — a span AND a histogram sample from the same block,
     for anchors where both a live percentile and a visible Perfetto timeline entry are useful.
     Deliberately NOT used at every anchor: a very-high-frequency call site (e.g. the mpv IPC
     round-trip, called on effectively every poll tick) would flood trace.json with spans — it stays
-    on :func:`timed` alone."""
-    with traced(span_name, **attributes), timed(histogram, **attributes):
-        yield
+    on :func:`timed` alone.
+
+    ``emit_span=False`` records only the histogram (the percentile still lands) and skips the span —
+    for a call site whose phase a parent span already covers on the hot path (dict_sql inside a
+    background prefetch_decode), so the per-call spans don't flood the trace off the critical path."""
+    if not emit_span:
+        with timed(histogram, **attributes):
+            yield _NOOP_SPAN
+        return
+    with traced(span_name, **attributes) as span, timed(histogram, **attributes):
+        yield span
 
 
 @contextmanager
@@ -201,19 +240,19 @@ def instrumented_jank(
     jank_threshold_ms: float,
     span_name: str,
     **attributes: str,
-) -> Generator[None]:
+) -> Generator[SpanSetter]:
     """:func:`instrumented` plus a jank counter bump when the block runs past *jank_threshold_ms* —
     for interactive paths (e.g. scroll) where the tail, not the mean, is what a user perceives as
     stutter. Both instruments share one timer so a jank frame's duration always matches what the
     histogram recorded for it."""
     if histogram is None and jank_counter is None:
-        with traced(span_name, **attributes):
-            yield
+        with traced(span_name, **attributes) as span:
+            yield span
         return
     start = time.perf_counter()
-    with traced(span_name, **attributes):
+    with traced(span_name, **attributes) as span:
         try:
-            yield
+            yield span
         finally:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             if histogram is not None:
@@ -237,10 +276,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global scroll_frame_duration_ms, show_tooltip_duration_ms
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
-    global dict_cache_hits, dict_cache_misses
+    global dict_cache_hits, dict_cache_misses, dict_cache_evictions
     global block_rendered_px, block_cache_hits, block_cache_misses, block_cache_evictions
-    global glyph_mask_hits, glyph_mask_misses, glyph_width_hits, glyph_width_misses
-    global bgra_memo_hits, bgra_memo_misses
+    global glyph_mask_hits, glyph_mask_misses, glyph_mask_evictions
+    global glyph_width_hits, glyph_width_misses, glyph_width_evictions
+    global bgra_memo_hits, bgra_memo_misses, precompose_hits, precompose_builds
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -297,6 +337,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         )
         dict_cache_hits = meter.create_counter("saitenka.dict_cache.hits")
         dict_cache_misses = meter.create_counter("saitenka.dict_cache.misses")
+        dict_cache_evictions = meter.create_counter(
+            "saitenka.dict_cache.evictions",
+            description="decoded entries dropped over entry_cache_max",
+        )
         block_rendered_px = meter.create_histogram(
             "saitenka.block_cache.rendered_px", description="pixel height of one materialised block"
         )
@@ -311,13 +355,27 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         glyph_mask_misses = meter.create_counter(
             "saitenka.glyph_mask.misses", description="getmask2 rasterisations (glyph memo miss)"
         )
+        glyph_mask_evictions = meter.create_counter(
+            "saitenka.glyph_mask.evictions", description="LRU raster drops (a capacity miss)"
+        )
         glyph_width_hits = meter.create_counter("saitenka.glyph_width.hits")
         glyph_width_misses = meter.create_counter(
             "saitenka.glyph_width.misses", description="getlength measurements (width memo miss)"
         )
+        glyph_width_evictions = meter.create_counter(
+            "saitenka.glyph_width.evictions", description="LRU width drops (a capacity miss)"
+        )
         bgra_memo_hits = meter.create_counter("saitenka.bgra_memo.hits")
         bgra_memo_misses = meter.create_counter(
             "saitenka.bgra_memo.misses", description="per-band premul-BGRA conversions (memo miss)"
+        )
+        precompose_hits = meter.create_counter(
+            "saitenka.precompose.hits",
+            description="warm hovers served the idle-precomposed viewport",
+        )
+        precompose_builds = meter.create_counter(
+            "saitenka.precompose.builds",
+            description="first viewports composited in idle by a worker",
         )
         dropped_telemetry_spans = meter.create_counter("saitenka.telemetry.dropped_spans")
         cold_first_paint_overshoot = meter.create_counter(
@@ -349,10 +407,11 @@ def unregister() -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global scroll_frame_duration_ms, show_tooltip_duration_ms
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
-    global dict_cache_hits, dict_cache_misses
+    global dict_cache_hits, dict_cache_misses, dict_cache_evictions
     global block_rendered_px, block_cache_hits, block_cache_misses, block_cache_evictions
-    global glyph_mask_hits, glyph_mask_misses, glyph_width_hits, glyph_width_misses
-    global bgra_memo_hits, bgra_memo_misses
+    global glyph_mask_hits, glyph_mask_misses, glyph_mask_evictions
+    global glyph_width_hits, glyph_width_misses, glyph_width_evictions
+    global bgra_memo_hits, bgra_memo_misses, precompose_hits, precompose_builds
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -374,16 +433,21 @@ def unregister() -> None:
         panel_cache_evictions = None
         dict_cache_hits = None
         dict_cache_misses = None
+        dict_cache_evictions = None
         block_rendered_px = None
         block_cache_hits = None
         block_cache_misses = None
         block_cache_evictions = None
         glyph_mask_hits = None
         glyph_mask_misses = None
+        glyph_mask_evictions = None
         glyph_width_hits = None
         glyph_width_misses = None
+        glyph_width_evictions = None
         bgra_memo_hits = None
         bgra_memo_misses = None
+        precompose_hits = None
+        precompose_builds = None
         dropped_telemetry_spans = None
         cold_first_paint_overshoot = None
         osd_paused_draw = None
@@ -451,6 +515,7 @@ def _summarize_metric(metric) -> dict[str, object]:
         return {
             "count": count,
             "sum": total,
+            "max": dp_max,  # exact recorded max (the percentiles are bucket-bound estimates)
             **_percentiles(bucket_counts, points[0].explicit_bounds, dp_max, count),
         }
     return {"value": sum(p.value for p in points)}
