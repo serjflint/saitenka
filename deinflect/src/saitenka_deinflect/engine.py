@@ -122,6 +122,20 @@ def deinflect(text: str) -> list[Deinflection]:
     return results
 
 
+def condition_flags(*names: str) -> int:
+    """Bitset for Yomitan condition / part-of-speech names (port of Yomitan's
+    ``getConditionFlagsFromConditionType``) — e.g. ``condition_flags("v1")`` for an ichidan verb.
+    A dictionary term of that POS accepts a :class:`Deinflection` iff :func:`conditions_match`."""
+    return _flags(names)
+
+
+def conditions_match(current: int, expected: int) -> bool:
+    """Yomitan's ``LanguageTransformer.conditionsMatch``: an unconstrained result (``current == 0``)
+    fits any POS, else the flags must overlap. Pairs a :attr:`Deinflection.conditions` with the
+    :func:`condition_flags` of a candidate dictionary POS."""
+    return _match(current, expected)
+
+
 def inflection_chain(surface: str, *targets: str) -> list[str]:
     """Transform-name chain that reduces ``surface`` to one of ``targets`` (usually the lemma), in the
     order Yomitan displays (dict→surface). Empty if the surface is already a target (uninflected) or no
