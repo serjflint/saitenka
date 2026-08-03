@@ -10,6 +10,7 @@ wrapped paragraph can mix bold / colour / size. Line height adapts to the talles
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -135,7 +136,17 @@ def draw_token(
             [(x, uy), (x + tok.width, uy)], fill=tok.style.color, width=max(1, tok.style.size // 18)
         )
     if not tok.style.italic:
-        draw.text((x, baseline), tok.text, font=font, fill=tok.style.color, anchor="ls")
+        # Split draw.text's upright path: cache the getmask2 alpha (the FreeType cost) via
+        # fonts.glyph_mask, then blit through PIL's own draw_bitmap — a verbatim replay of
+        # ImageDraw.text (int pen part + subpixel start baked into the mask), so it stays byte-identical
+        # (and keeps draw_bitmap's edge clipping, which windowed bands rely on).
+        ink, fill_ink = draw._getink(tok.style.color)
+        if ink is None:
+            ink = fill_ink
+        core, (ox, oy) = fonts.glyph_mask(
+            font, tok.text, draw.fontmode, (math.modf(x)[0], math.modf(baseline)[0])
+        )
+        draw.draw.draw_bitmap((int(x) + ox, int(baseline) + oy), core, ink)
         return
     a, d = font.getmetrics()
     pad = int(a * ITALIC_SHEAR) + 2
