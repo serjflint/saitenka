@@ -1,0 +1,48 @@
+{
+  "_comment": "Fixed-size flexbox conformance fixtures for taffylite (issue #146), modelled on taffy's own MIT gentest suite (https://github.com/DioxusLabs/taffy, test_fixtures/, MIT). Each case builds a tree from `nodes` (in handle order — a node is {\"leaf\":[w,h]} or {\"leaf\":[w,h,[l,t,r,b]]} or {\"flex\":{...}}), sets `root`, computes, and asserts absolute `rects` [x,y,w,h] index-aligned to handles. Values are CSS-flexbox-correct (align-items:stretch default; fixed-size leaves do not stretch) and taffy-computed — a drift means taffylite diverged from taffy.",
+  "cases": [
+    {
+      "name": "row-gap",
+      "nodes": [
+        {"leaf": [40, 20]},
+        {"leaf": [40, 20]},
+        {"flex": {"children": [0, 1], "direction": "row", "gap": 8}}
+      ],
+      "root": 2,
+      "rects": [[0, 0, 40, 20], [48, 0, 40, 20], [0, 0, 88, 20]]
+    },
+    {
+      "name": "column-gap-padding",
+      "nodes": [
+        {"leaf": [30, 40]},
+        {"leaf": [50, 20]},
+        {"flex": {"children": [0, 1], "direction": "column", "gap": 10, "padding": [4, 12, 4, 6]}}
+      ],
+      "root": 2,
+      "rects": [[4, 12, 30, 40], [4, 62, 50, 20], [0, 0, 58, 88]]
+    },
+    {
+      "name": "wrap-row-cross-gap",
+      "nodes": [
+        {"leaf": [40, 20]},
+        {"leaf": [40, 20]},
+        {"leaf": [40, 20]},
+        {"flex": {"children": [0, 1, 2], "direction": "row", "gap": 6, "width": 100, "wrap": true}}
+      ],
+      "root": 3,
+      "rects": [[0, 0, 40, 20], [46, 0, 40, 20], [0, 26, 40, 20], [0, 0, 100, 46]]
+    },
+    {
+      "name": "nested-column-of-row-stretches-child",
+      "nodes": [
+        {"leaf": [20, 10]},
+        {"leaf": [20, 10]},
+        {"flex": {"children": [0, 1], "direction": "row", "gap": 4}},
+        {"leaf": [60, 30]},
+        {"flex": {"children": [2, 3], "direction": "column", "padding": [0, 8, 0, 0]}}
+      ],
+      "root": 4,
+      "rects": [[0, 8, 20, 10], [24, 8, 20, 10], [0, 8, 60, 10], [0, 18, 60, 30], [0, 0, 60, 48]]
+    }
+  ]
+}

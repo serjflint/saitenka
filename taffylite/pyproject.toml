@@ -1,0 +1,20 @@
+[project]
+name = "taffylite"
+version = "0.1.0"
+description = "Thin fixed-size PyO3 binding of taffy — the optional layout engine behind saitenka's LayoutBackend seam"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = []
+
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+# Mixed layout: the compiled crate lands as the inner `taffylite.taffylite` submodule; the thin
+# `python/taffylite/` package re-exports it and ships the hand-written `__init__.pyi` stub + `py.typed`
+# so type checkers resolve the API (`column`, `Tree`) without the Rust source.
+module-name = "taffylite.taffylite"
+python-source = "python"

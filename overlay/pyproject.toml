@@ -36,6 +36,13 @@ Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
 # GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
 # core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
 deinflect = ["saitenka-deinflect>=0.1.0"]
+# Optional layout engine: the taffy (CSS flexbox) row-stack solver behind the LayoutBackend seam
+# (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0) — kept OUT of `full` and its own
+# extra because free-threaded cp314t wheels are still niche (needs a prebuilt wheel or a Rust
+# toolchain), so a default install stays pure-Python. The pure-Python DefaultLayoutBackend is the
+# always-available, byte-identical fallback; this is additive and parity-gated. `[tool.uv.sources]`
+# resolves it from the in-repo ../taffylite for dev; it is not yet published to PyPI.
+layout-engine = ["taffylite>=0.1.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
 # default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
@@ -69,6 +76,13 @@ full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
 
 [project.scripts]
 saitenka = "overlay.app.cli:main"
+
+[tool.uv.sources]
+# Dev editable resolution of the in-repo optional layout engine (the `layout-engine` extra above).
+# Only pulled when that extra is selected, so the default `--extra full` env never builds the Rust
+# wheel. Stripped from published metadata — a PyPI install of `saitenka[layout-engine]` needs taffylite
+# on PyPI (future work), same additive-optional posture as the extra note above.
+taffylite = { path = "../taffylite", editable = true }
 
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
@@ -238,6 +252,9 @@ ignore = [
 # GPL-3.0 chokepoint: only these two modules may import the optional saitenka_deinflect add-on.
 # Defense-in-depth alongside the .importlinter gpl-chokepoint contract.
 "src/overlay/app/dictionary.py" = ["TID251"]
+# layout-engine chokepoint: only this module may import the optional taffylite Rust engine.
+# Defense-in-depth alongside the .importlinter layout-engine-chokepoint contract.
+"src/overlay/render/layout_backend.py" = ["TID251"]
 # T201: doctor is a user-invoked diagnostic subcommand — print() IS its report output.
 "src/overlay/app/doctor.py" = ["TID251", "T201"]
 # T201: user-invoked import subcommand — print() reports progress/results to the terminal.
@@ -277,6 +294,7 @@ ignore = [
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "saitenka_deinflect".msg = "GPL-3.0 add-on — only overlay/app/dictionary.py and overlay/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
+"taffylite".msg = "Optional layout engine — only overlay/render/layout_backend.py (TaffyLayoutBackend) may import it (see .importlinter's layout-engine-chokepoint contract)."
 
 [tool.mypy]
 python_version = "3.13"

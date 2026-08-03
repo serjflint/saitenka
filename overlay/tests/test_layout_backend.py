@@ -3,10 +3,12 @@ satisfy the vendored column-layout fixtures, and a real panel renders pixel-iden
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -17,6 +19,7 @@ from overlay.render.layout_backend import (
     DefaultLayoutBackend,
     FlexColumnBackend,
     LayoutBackend,
+    TaffyLayoutBackend,
 )
 
 _FIXTURES = json.loads(
@@ -27,10 +30,21 @@ _FIXTURES = json.loads(
 
 WIDTH = 384
 
+# TaffyLayoutBackend is the optional `layout-engine` extra: importable always (its taffylite import is
+# lazy), but only exercisable when the cp314t wheel is installed. Skipped in the default `poe` env; the
+# CI free-threaded-wheel job installs the extra and runs the full parity gate against the Rust engine.
+_HAS_TAFFY = importlib.util.find_spec("taffylite") is not None
+requires_taffy = pytest.mark.skipif(not _HAS_TAFFY, reason="taffylite (layout-engine extra) absent")
+
 
 def test_both_backends_are_layout_backends():
     assert isinstance(DefaultLayoutBackend(), LayoutBackend)
     assert isinstance(FlexColumnBackend(), LayoutBackend)
+
+
+@requires_taffy
+def test_taffy_backend_is_a_layout_backend():
+    assert isinstance(TaffyLayoutBackend(), LayoutBackend)
 
 
 @given(
@@ -104,3 +118,53 @@ def test_real_panel_is_pixel_identical_under_either_backend():
         a = np.asarray(default.viewport(scroll, 240))
         b = np.asarray(flex.viewport(scroll, 240))
         assert np.array_equal(a, b), f"backends diverged at scroll {scroll}"
+
+
+@requires_taffy
+@given(
+    data=st.lists(st.tuples(st.integers(0, 90_000), st.integers(0, 200)), min_size=0, max_size=40),
+    top_pad=st.integers(0, 64),
+    bottom_pad=st.integers(0, 64),
+)
+@settings(max_examples=300, deadline=None)
+def test_taffy_backend_agrees_with_default(data, top_pad, bottom_pad):
+    # The parity gate for the Rust engine: taffy's flexbox solver must reproduce the default arithmetic
+    # exactly (cumulative + full solve), so TaffyLayoutBackend is a byte-identical drop-in.
+    heights = [h for h, _ in data]
+    gaps = [g for _, g in data]
+    assert TaffyLayoutBackend().cumulative(
+        heights, gaps, top_pad
+    ) == DefaultLayoutBackend().cumulative(heights, gaps, top_pad)
+    ts = TaffyLayoutBackend().solve(
+        heights, WIDTH, gaps=gaps, top_pad=top_pad, bottom_pad=bottom_pad, x=16
+    )
+    ds = DefaultLayoutBackend().solve(
+        heights, WIDTH, gaps=gaps, top_pad=top_pad, bottom_pad=bottom_pad, x=16
+    )
+    assert ts == ds
+
+
+@requires_taffy
+def test_taffy_backend_satisfies_the_vendored_fixtures():
+    backend = TaffyLayoutBackend()
+    for case in _FIXTURES:
+        starts, ends = backend.cumulative(case["heights"], case["gaps"], case["top_pad"])
+        total = (ends[-1] if ends else case["top_pad"]) + case["bottom_pad"]
+        assert list(starts) == case["starts"], case["name"]
+        assert list(ends) == case["ends"], case["name"]
+        assert total == case["total"], case["name"]
+
+
+@requires_taffy
+def test_real_panel_is_pixel_identical_under_taffy_backend():
+    # The differential on a real panel across the full scroll: the Rust engine renders byte-identically
+    # to the pure-Python default, so it is a true drop-in behind the WindowedPanel seam.
+    entry = _tall_entry(6)
+    rows = panel_rows(entry, WIDTH)
+    total = render_panel(entry, width=WIDTH).height
+    default = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, layout_backend=DefaultLayoutBackend())
+    taffy = WindowedPanel(rows, WIDTH, layout_backend=TaffyLayoutBackend())
+    for scroll in range(0, max(1, total - 200), 137):
+        a = np.asarray(default.viewport(scroll, 240))
+        b = np.asarray(taffy.viewport(scroll, 240))
+        assert np.array_equal(a, b), f"taffy diverged from default at scroll {scroll}"

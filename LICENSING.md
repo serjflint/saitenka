@@ -7,9 +7,11 @@ This repository is **mixed-license**. Read this before redistributing.
 | `overlay/` (`saitenka`) | **Apache-2.0** | The core: renderer, reader, mining, CLI, installers. |
 | `tools/`, `install/` | **Apache-2.0** | Anki/FSRS engine + installers. |
 | `deinflect/` (`saitenka-deinflect`) | **GPL-3.0-or-later** | Derived from [Yomitan](https://github.com/yomidevs/yomitan) — see `deinflect/NOTICE`. |
+| `taffylite/` (`taffylite`) | **MIT OR Apache-2.0** | Optional layout engine — a PyO3 binding of [taffy](https://github.com/DioxusLabs/taffy) (MIT) + [pyo3](https://github.com/PyO3/pyo3) (Apache-2.0/MIT). Permissive, so the `layout-engine` extra keeps the install Apache-2.0-clean — unlike `deinflect`. See `taffylite/NOTICE`. |
 
 The top-level [`LICENSE`](LICENSE) is Apache-2.0 and governs everything **except** `deinflect/`,
-which carries its own [`deinflect/LICENSE`](deinflect/LICENSE) (GPL-3.0).
+which carries its own [`deinflect/LICENSE`](deinflect/LICENSE) (GPL-3.0). `taffylite/` is permissively
+licensed (MIT/Apache-2.0), so it does not change that boundary.
 
 ## Why the split — and what it means for you
 
