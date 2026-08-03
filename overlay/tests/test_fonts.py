@@ -2,11 +2,35 @@
 
 from __future__ import annotations
 
+import contextlib
+from typing import TYPE_CHECKING
+
 from PIL import Image, ImageDraw
 
 from overlay import fonts
 from overlay.model import Style
 from overlay.render.layout import Token, _font, draw_token
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+
+@contextlib.contextmanager
+def _telemetry() -> Iterator[None]:
+    """Register an in-memory OTel reader so the glyph memo counters can be sampled."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from overlay import otel_metrics
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        yield
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
 
 
 def _clear_cache():
@@ -85,6 +109,32 @@ def test_glyph_mask_memoises_and_colour_variants_share_the_key():
         _cjk_token(color=(200, 0, 0, 255)), 10.0
     )  # colour is applied at blit → same key
     assert len(fonts._tls.masks) == n_after_first == 1
+
+
+def test_glyph_mask_counters_record_miss_then_hit():
+    from overlay.app import telemetry
+
+    fonts._tls.masks = None
+    font = _font(fonts.FONT_FILES[0], Style(size=24))
+    with _telemetry():
+        fonts.glyph_mask(font, "考", "L", (0.0, 0.0))  # miss (rasters + populates)
+        fonts.glyph_mask(font, "考", "L", (0.0, 0.0))  # hit
+        sampled = telemetry._sample_counters()
+    assert sampled.get("glyph_mask.misses", 0) >= 1
+    assert sampled.get("glyph_mask.hits", 0) >= 1
+
+
+def test_glyph_width_counters_record_miss_then_hit():
+    from overlay.app import telemetry
+
+    fonts._tls.widths = None
+    font = _font(fonts.FONT_FILES[0], Style(size=24))
+    with _telemetry():
+        fonts.text_width(font, "考")  # miss (measures + populates)
+        fonts.text_width(font, "考")  # hit
+        sampled = telemetry._sample_counters()
+    assert sampled.get("glyph_width.misses", 0) >= 1
+    assert sampled.get("glyph_width.hits", 0) >= 1
 
 
 def test_glyph_mask_cache_is_bounded(monkeypatch):

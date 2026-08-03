@@ -449,10 +449,14 @@ class WindowedPanel:
 
         arr = self._bgra.get(key)
         if arr is None:
+            if otel_metrics.bgra_memo_misses is not None:
+                otel_metrics.bgra_memo_misses.add(1)
             canvas = Image.new("RGBA", (self.width, cb.h), self.theme.bg)
             canvas.alpha_composite(cb.image(), (cb.x, 0))
             arr = to_bgra_array(canvas)
             self._bgra[key] = arr
+        elif otel_metrics.bgra_memo_hits is not None:
+            otel_metrics.bgra_memo_hits.add(1)
         return arr
 
     def _assemble_bgra(

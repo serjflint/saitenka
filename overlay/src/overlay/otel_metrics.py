@@ -67,6 +67,14 @@ dict_cache_misses: Counter | None = None
 block_cache_hits: Counter | None = None
 block_cache_misses: Counter | None = None
 block_cache_evictions: Counter | None = None
+# Font/pixel memos added during the post-1.0.0 render campaign — a miss is the real work (getmask2
+# raster / getlength measure / premul-BGRA convert), so the hit:miss ratio is the memo's payoff.
+glyph_mask_hits: Counter | None = None  # font.glyph_mask memo (#156) — getmask2 is ~half render CPU
+glyph_mask_misses: Counter | None = None
+glyph_width_hits: Counter | None = None  # font.text_width memo (#125) — getlength
+glyph_width_misses: Counter | None = None
+bgra_memo_hits: Counter | None = None  # WindowedPanel per-band premul-BGRA memo (#138)
+bgra_memo_misses: Counter | None = None
 dropped_telemetry_spans: Counter | None = None
 cold_first_paint_overshoot: Counter | None = None
 osd_paused_draw: Counter | None = (
@@ -231,6 +239,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
     global dict_cache_hits, dict_cache_misses
     global block_rendered_px, block_cache_hits, block_cache_misses, block_cache_evictions
+    global glyph_mask_hits, glyph_mask_misses, glyph_width_hits, glyph_width_misses
+    global bgra_memo_hits, bgra_memo_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -297,6 +307,18 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         block_cache_evictions = meter.create_counter(
             "saitenka.block_cache.evictions", description="retained block pixels dropped"
         )
+        glyph_mask_hits = meter.create_counter("saitenka.glyph_mask.hits")
+        glyph_mask_misses = meter.create_counter(
+            "saitenka.glyph_mask.misses", description="getmask2 rasterisations (glyph memo miss)"
+        )
+        glyph_width_hits = meter.create_counter("saitenka.glyph_width.hits")
+        glyph_width_misses = meter.create_counter(
+            "saitenka.glyph_width.misses", description="getlength measurements (width memo miss)"
+        )
+        bgra_memo_hits = meter.create_counter("saitenka.bgra_memo.hits")
+        bgra_memo_misses = meter.create_counter(
+            "saitenka.bgra_memo.misses", description="per-band premul-BGRA conversions (memo miss)"
+        )
         dropped_telemetry_spans = meter.create_counter("saitenka.telemetry.dropped_spans")
         cold_first_paint_overshoot = meter.create_counter(
             "saitenka.render.cold_first_paint_overshoot"
@@ -329,6 +351,8 @@ def unregister() -> None:
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
     global dict_cache_hits, dict_cache_misses
     global block_rendered_px, block_cache_hits, block_cache_misses, block_cache_evictions
+    global glyph_mask_hits, glyph_mask_misses, glyph_width_hits, glyph_width_misses
+    global bgra_memo_hits, bgra_memo_misses
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
 
@@ -354,6 +378,12 @@ def unregister() -> None:
         block_cache_hits = None
         block_cache_misses = None
         block_cache_evictions = None
+        glyph_mask_hits = None
+        glyph_mask_misses = None
+        glyph_width_hits = None
+        glyph_width_misses = None
+        bgra_memo_hits = None
+        bgra_memo_misses = None
         dropped_telemetry_spans = None
         cold_first_paint_overshoot = None
         osd_paused_draw = None

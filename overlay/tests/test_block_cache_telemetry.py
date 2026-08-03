@@ -89,6 +89,20 @@ def test_block_cache_counters_reach_the_ctf_trace_export():
     assert "block_cache.rendered_px" not in sampled  # histogram stays a span, not a counter track
 
 
+def test_bgra_memo_counters_record_miss_then_hit():
+    # The per-band premul-BGRA memo (#138): the first viewport_bgra converts each band (miss), a warm
+    # re-read reuses it (hit). Both reach the trace export like the block-cache counters.
+    from overlay.app import telemetry
+
+    with _telemetry():
+        wp = _fixed_panel(3)
+        wp.viewport_bgra(0, 300)  # cold: convert each visible band → misses
+        wp.viewport_bgra(0, 300)  # warm: same bands reused → hits
+        sampled = telemetry._sample_counters()
+    assert sampled.get("bgra_memo.misses", 0) > 0
+    assert sampled.get("bgra_memo.hits", 0) > 0
+
+
 def test_cold_viewport_records_a_miss_and_the_rasterised_px_per_block():
     with _telemetry():
         wp = _fixed_panel(20)
