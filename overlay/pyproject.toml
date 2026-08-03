@@ -435,6 +435,11 @@ vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --py
 # prefetch keep ahead? py-spy just shows where the prefetch+render CPU goes. --rate 500 to catch enough
 # active samples; add `--timeline-dwell-s 0.05` for a dense CPU profile at the cost of realism.
 timeline-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/timeline-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --timeline --timeline-cues 120 --timeline-head-prefetch 1 --timeline-lookahead 2\"" }
+# TRACE REPLAY: the truthful stress profile — replays a real diagnostics report's event cadence with
+# idle COMPRESSED (--idle-scale), so the sampled CPU is the actual hover/scroll/cue mix a session
+# produced, not a synthetic guess. Auto-picks the newest report; squeeze --idle-scale down to starve
+# prefetch. Same 3.14t→3.13 crutch as the others; --rate 500 since idle-compressed still sleeps some.
+trace-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/trace-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --trace \\\"\\$(ls -t ~/.local/share/saitenka/reports/*.zip | head -1)\\\" --idle-scale 0.05 --trace-loops 5\"" }
 # --scroll-jank CPU profile: WHERE the scroll-frame tail goes — getmask2 in the scrolled-into block, or
 # the viewport re-composite? Synchronous single-process render (prefetch=False) → CPU-dense, no --idle.
 scroll-jank-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/scroll-jank-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --scroll-jank --reps 3\"" }

@@ -1153,6 +1153,267 @@ def run_timeline(
     return gil_rc
 
 
+def _parse_trace_events(zip_path: str) -> tuple[list[dict], dict]:
+    """Extract the ordered interactive event stream from a diagnostics report's ``trace.json``: each
+    hover / scroll / cue-change with the idle gap before it. This is the REAL cadence a session
+    produced (event mix + timing), so replaying it — with the idle *compressed* — stresses the pipeline
+    with a truthful workload instead of a hand-authored guess that rots. Words aren't in the trace
+    (low-cardinality telemetry), so content comes from the real episode vocab; only the timing does."""
+    import zipfile
+
+    with zipfile.ZipFile(zip_path) as z:
+        name = next(n for n in z.namelist() if n.endswith("trace.json"))
+        data = json.loads(z.read(name))
+    kind = {
+        "tooltip_show": "hover",
+        "scroll_frame": "scroll",
+        "cue_redraw": "cue",
+        "sub_text_reconcile": "cue",
+    }
+    evs = sorted(
+        (e for e in data["traceEvents"] if e.get("ph") == "X" and e["name"] in kind),
+        key=lambda e: e["ts"],
+    )
+    out: list[dict] = []
+    prev_end: float | None = None
+    for e in evs:
+        gap = 0.0 if prev_end is None else max(0.0, (e["ts"] - prev_end) / 1000.0)
+        prev_end = e["ts"] + e["dur"]
+        out.append({"kind": kind[e["name"]], "gap_ms": gap})
+    mix = {k: sum(1 for x in out if x["kind"] == k) for k in ("cue", "hover", "scroll")}
+    meta = {"events": len(out), "mix": mix, "idle_total_s": sum(x["gap_ms"] for x in out) / 1000.0}
+    return out, meta
+
+
+def run_trace(
+    zip_path: str,
+    rt: dict,
+    *,
+    idle_scale: float,
+    idle_cap_ms: float,
+    loops: int,
+    lookahead: int,
+    head_prefetch: int,
+    workers: int,
+    raw_ceiling_mb: int,
+    require_ft: bool,
+    json_path: str | None,
+) -> int:
+    """Replay a report's real event cadence with the idle gaps compressed by ``idle_scale`` (and
+    optionally capped) — a stressful-but-real session: the real hover/scroll/cue mix and ordering, the
+    real background prefetch workers warming during the (now shorter) gaps, real dict content. Compress
+    idle *enough* to starve the workers' keep-ahead margin, not to zero (a machine-gun no user matches).
+    Attach py-spy to this process to see where the main-thread critical path goes under load."""
+    ds, tag = _load_dict_set()
+    if ds is None:
+        print("--trace needs the real dict set (overlay.toml) — nothing to measure")
+        return 1
+    events, meta = _parse_trace_events(zip_path)
+    if not events:
+        print(f"no interactive events in {zip_path}")
+        return 1
+    vocab_words = _load_vocab_words()
+    cues = _timeline_cues(vocab_words, cue_words=4, max_cues=0, dwell_s=0.3)
+    # head_prefetch>0 needs a scorer (its n+1 selective head-render marks the lone unknown word);
+    # the engaged current-line head render also only fires when head_prefetch_lookahead>0.
+    scorer = _timeline_scorer(vocab_words) if head_prefetch > 0 else None
+
+    # Same warm-tracking seam as --timeline: wrap the instance entry_for both the hover (main) and the
+    # prefetch workers call, so a hover can be classed warm (worker pre-decoded it) vs cold.
+    warmed: dict[str, bool] = {}
+    wl = threading.Lock()
+    orig_entry_for = ds.entry_for
+
+    def traced_entry_for(token, inflected=None, **kwargs):
+        r = orig_entry_for(token, inflected, **kwargs)
+        with wl:
+            warmed[token.lemma] = True
+        return r
+
+    ds.entry_for = traced_entry_for
+
+    reader = Reader(
+        FakeIPC(),
+        dict_set=ds,
+        scorer=scorer,
+        prefetch=True,
+        prefetch_lookahead=lookahead,
+        head_prefetch_lookahead=head_prefetch,
+    )
+    reader.osd = OSD
+    reader._sub_index = SubIndex(cues)
+    if (
+        workers > 0
+    ):  # >0 pins the worker count (sweep the idle-warm capacity lever); 0 = per-build auto
+        reader.prefetch_workers = workers
+    if raw_ceiling_mb >= 0:  # >=0 overrides the config default (A/B raw bands vs always-compress)
+        reader.raw_band_ceiling = raw_ceiling_mb * 1024 * 1024
+    reader.start_prefetch()
+    step = round(OSD[1] * 0.12)
+    rss_base = _rss_mb()
+    rss_peak = rss_base
+
+    def scaled(gap_ms: float) -> float:
+        g = gap_ms * idle_scale
+        return min(g, idle_cap_ms) if idle_cap_ms > 0 else g
+
+    hov_warm: list[float] = []
+    hov_cold: list[float] = []
+    panel_warm: list[float] = []  # PANEL (composited head) prebuilt → the upload-only target
+    panel_cold: list[float] = []  # panel built on the hover (head_prefetch didn't reach it)
+    panel_precomposed: list[float] = []  # warm AND first viewport precomposed in idle (0 rasters)
+    panel_recomposed: list[float] = []  # warm head but the show re-composited (precompose missed)
+    scroll_ms: list[float] = []
+    jank: list[float] = []
+    ci = hov_i = 0
+    compressed_s = 0.0
+    try:
+        for _loop in range(loops):
+            for ev in events:
+                pause = scaled(ev["gap_ms"])
+                compressed_s += pause / 1000.0
+                if pause > 0:
+                    time.sleep(pause / 1000.0)  # the (compressed) idle the prefetch workers run in
+                if ev["kind"] == "cue":
+                    ci = (ci + 1) % len(cues)
+                    reader.set_subtitle(cues[ci].text)
+                    reader._mouse_in = True
+                    reader._update_prefetch()  # engaged: workers warm the current line's heads
+                    rss_peak = max(rss_peak, _rss_mb())
+                elif ev["kind"] == "hover":
+                    idxs = _content_indices(reader)
+                    if not idxs:
+                        continue
+                    idx = idxs[hov_i % len(idxs)]  # cycle targets → real word-weight variety
+                    hov_i += 1
+                    tok = reader.tokens[idx]
+                    warm = tok.lemma in warmed
+                    # PANEL-warm: was the composited head already in panel_cache (upload-only hover)?
+                    # Resolve the key the same main-thread way panel_for() does (mined path included).
+                    key = reader._panel_key(
+                        tok, reader._inflected_surface(idx), mined=reader._is_mined(tok)
+                    )
+                    panel_already_warm = key in reader._panel_cache
+                    t0 = time.perf_counter()
+                    reader.set_hover(idx)  # tip stays up so a following scroll event can scroll it
+                    dt = (time.perf_counter() - t0) * 1000.0
+                    (hov_warm if warm else hov_cold).append(dt)
+                    (panel_warm if panel_already_warm else panel_cold).append(dt)
+                    if panel_already_warm and reader._tip_state is not None:
+                        # Step 2: a warm hover whose first viewport was precomposed in idle rasters 0
+                        # bands on the show (served from the cached BGRA copy); one that only had its
+                        # head built still re-composites overscan bands synchronously (>0).
+                        precomposed = reader._tip_state.last_frame_rasters == 0
+                        (panel_precomposed if precomposed else panel_recomposed).append(dt)
+                elif ev["kind"] == "scroll":
+                    if reader._tip_state is None:
+                        continue  # nothing shown to scroll (a scroll before the first hover)
+                    t0 = time.perf_counter()
+                    reader._scroll_tip(step)
+                    dt = (time.perf_counter() - t0) * 1000.0
+                    scroll_ms.append(dt)
+                    if dt > 16.0:
+                        jank.append(dt)
+    finally:
+        reader._stop.set()
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(f"\nSaitenka overlay — TRACE REPLAY (stress: idle compressed)   ({tag})")
+    print(format_runtime(rt))
+    print(
+        f"source: {Path(zip_path).name}   {meta['events']} events "
+        f"(cue {meta['mix']['cue']} / hover {meta['mix']['hover']} / scroll {meta['mix']['scroll']}) "
+        f"× {loops} loops\n"
+        f"idle: real {meta['idle_total_s']:.0f}s × {idle_scale}"
+        f"{f' cap {idle_cap_ms:.0f}ms' if idle_cap_ms > 0 else ''} → {compressed_s:.0f}s "
+        f"(the smaller this is, the more the prefetch workers are starved)\n"
+    )
+
+    def prow(label: str, samples: list[float]) -> dict:
+        if not samples:
+            print(f"{label:44} n/a")
+            return {}
+        m = _stats(samples)
+        print(f"{label:44} {m['p50']:7.1f} {m['p95']:7.1f} {m['max']:7.1f} {m['n']:5d}n   (ms)")
+        return m
+
+    hdr = f"{'metric':44} {'p50':>7} {'p95':>7} {'max':>7} {'n':>6}"
+    print(hdr)
+    print("-" * len(hdr))
+    workers_label = f"{workers} (pinned)" if workers > 0 else "auto"
+    ceil_label = f"{reader.raw_band_ceiling // (1024 * 1024)}MB"
+    print(
+        f"prefetch: lookahead {lookahead}   head_prefetch {head_prefetch}   workers {workers_label}   "
+        f"raw_band_ceiling {ceil_label}\n"
+    )
+    m_hw = prow("hover — DECODE idle-warm (word pre-decoded)", hov_warm)
+    m_hc = prow("hover — DECODE cold (decoded on hover)", hov_cold)
+    print("-" * len(hdr))
+    m_pw = prow("hover — PANEL warm (head prebuilt → upload-only)", panel_warm)
+    m_pc = prow("hover — PANEL cold (head built on hover)", panel_cold)
+    print("-" * len(hdr))
+    m_pp = prow("  ├ PRECOMPOSED (first viewport idle-composed, 0 raster)", panel_precomposed)
+    m_pr = prow("  └ recomposed (warm head, show re-composited)", panel_recomposed)
+    print("-" * len(hdr))
+    m_sc = prow("scroll frame", scroll_ms)
+    print("-" * len(hdr))
+    total_scroll = len(scroll_ms)
+    if total_scroll:
+        print(
+            f"scroll jank (>16ms): {len(jank)}/{total_scroll} ({100 * len(jank) / total_scroll:.0f}%)"
+        )
+    else:
+        print("no scroll frames")
+    rss_growth = rss_peak - rss_base
+    print(
+        f"speculative heads built: {reader._head_built}   "
+        f"RSS: base {rss_base:.0f}MB → peak {rss_peak:.0f}MB (+{rss_growth:.0f}MB)"
+    )
+    print(
+        "\nPRECOMPOSED is the 8ms target: the first viewport was composited in idle (step 2), so the "
+        "warm hover is a BGRA copy + decorate + upload — 0 synchronous rasters. The `recomposed` split "
+        "is a warm head whose first viewport precompose did NOT reach (worker starved / evicted): the "
+        "show still rasters overscan bands + converts BGRA, the old PANEL-warm ceiling. Compress "
+        "--idle-scale until PRECOMPOSED coverage drops — that is where the workers fall behind (raise "
+        "prefetch_workers to push it back). RSS is the memory this trades for it."
+    )
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {
+                    "runtime": rt,
+                    "tag": tag,
+                    "source": Path(zip_path).name,
+                    "events": meta["events"],
+                    "mix": meta["mix"],
+                    "loops": loops,
+                    "idle_scale": idle_scale,
+                    "idle_cap_ms": idle_cap_ms,
+                    "idle_real_s": meta["idle_total_s"],
+                    "idle_compressed_s": compressed_s,
+                    "lookahead": lookahead,
+                    "head_prefetch": head_prefetch,
+                    "hover_decode_warm": m_hw,
+                    "hover_decode_cold": m_hc,
+                    "hover_panel_warm": m_pw,
+                    "hover_panel_cold": m_pc,
+                    "hover_panel_precomposed": m_pp,
+                    "hover_panel_recomposed": m_pr,
+                    "scroll": m_sc,
+                    "scroll_jank": len(jank),
+                    "scroll_total": total_scroll,
+                    "heads_built": reader._head_built,
+                    "rss_base_mb": rss_base,
+                    "rss_peak_mb": rss_peak,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote trace-replay baseline → {json_path}")
+    return gil_rc
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--reps", type=int, default=10)
@@ -1256,12 +1517,84 @@ def main() -> int:
         "head_prefetch_lookahead) for this many upcoming cues (0 = off, the default/shipped "
         "behavior); splits hover latency by PANEL warmth (not just decode) and reports RSS growth",
     )
+    ap.add_argument(
+        "--trace",
+        metavar="REPORT.zip",
+        help="replay a diagnostics report's REAL event cadence (hover/scroll/cue mix + ordering from "
+        "its trace.json) over the real vocab + prefetch workers, with idle compressed by --idle-scale "
+        "— the truthful stress bench. Attach py-spy to see the main-thread critical path under load "
+        "(add --subprocesses for the GIL-build render pool)",
+    )
+    ap.add_argument(
+        "--idle-scale",
+        type=float,
+        default=0.15,
+        help="--trace: multiply real inter-event idle by this (1.0 = real cadence, 0.15 = a fast "
+        "hover/scrub session). Squeeze it DOWN until cold hovers + scroll jank climb — that crossover "
+        "is where prefetch stops keeping ahead. Not 0: back-to-back is a machine no user matches",
+    )
+    ap.add_argument(
+        "--idle-cap-ms",
+        type=float,
+        default=0.0,
+        help="--trace: also cap each idle gap at this many ms after scaling (0 = no cap) — bounds the "
+        "few multi-second real gaps so the run stays dense",
+    )
+    ap.add_argument(
+        "--trace-loops",
+        type=int,
+        default=3,
+        help="--trace: replay the event stream this many times (a longer, steadier py-spy sample)",
+    )
+    ap.add_argument(
+        "--trace-lookahead",
+        type=int,
+        default=2,
+        help="--trace: decode-warm this many cues ahead (PerfOptions.prefetch_lookahead)",
+    )
+    ap.add_argument(
+        "--trace-head-prefetch",
+        type=int,
+        default=1,
+        help="--trace: selective head-prefetch lookahead (PerfOptions.head_prefetch_lookahead) — "
+        "prebuild the composited head in idle. Splits the hover report by PANEL warmth and reports "
+        "RSS. 0 = decode-warm only (no head prebuild)",
+    )
+    ap.add_argument(
+        "--trace-workers",
+        type=int,
+        default=0,
+        help="--trace: pin the prefetch worker count (idle-warm capacity lever; 0 = per-build auto, "
+        "~8 on free-threaded). Sweep 8→12 to see if more idle workers push PRECOMPOSED coverage up.",
+    )
+    ap.add_argument(
+        "--trace-raw-ceiling-mb",
+        type=int,
+        default=-1,
+        help="--trace: override tooltip.raw_band_ceiling_mb (A/B step 3). -1 = config default (100); "
+        "0 = always compress (pre-1.3); a big value = keep all bands raw. Compare scroll jank + RSS.",
+    )
     args = ap.parse_args()
 
     # Snapshot the runtime; the GIL state is re-read AFTER the workload (finalize_runtime), because
     # fugashi re-enables the GIL only when first USED, not at startup — a start-of-run check would
     # miss exactly the regression --require-ft is meant to catch.
     rt = runtime_info()
+
+    if args.trace:
+        return run_trace(
+            args.trace,
+            rt,
+            idle_scale=args.idle_scale,
+            idle_cap_ms=args.idle_cap_ms,
+            loops=args.trace_loops,
+            lookahead=args.trace_lookahead,
+            head_prefetch=args.trace_head_prefetch,
+            workers=args.trace_workers,
+            raw_ceiling_mb=args.trace_raw_ceiling_mb,
+            require_ft=args.require_ft,
+            json_path=args.json,
+        )
 
     if args.timeline:
         return run_timeline(
