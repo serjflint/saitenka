@@ -101,38 +101,15 @@ def tokenize_rich(rich: RichText) -> list[Token]:
     return tokens
 
 
-def _flush_overflow_line(line: list[Token], tok: Token) -> tuple[list[Token], list[Token], float]:
-    """`tok` doesn't fit on `line`: pull any trailing NO_END tokens off `line` to carry onto the
-    new one with `tok` (an opening bracket must never end a line). Returns
-    ``(flushed_line, new_line, new_x)``."""
-    carry: list[Token] = []
-    while line and line[-1].kind == "cjk" and line[-1].text in NO_END:
-        carry.insert(0, line.pop())
-    new_line = [*carry, tok]
-    return line, new_line, sum(t.width for t in new_line)
-
-
 def wrap(tokens: list[Token], max_width: float) -> list[list[Token]]:
-    """Greedily pack tokens into lines ≤ max_width, honouring hard breaks + minimal kinsoku."""
-    lines: list[list[Token]] = []
-    line: list[Token] = []
-    x = 0.0
-    for tok in tokens:
-        if tok.text == "\n":
-            lines.append(line)
-            line, x = [], 0.0
-            continue
-        if tok.kind == "space" and not line:
-            continue
-        if line and x + tok.width > max_width and not (tok.kind == "cjk" and tok.text in NO_START):
-            flushed, line, x = _flush_overflow_line(line, tok)
-            lines.append(flushed)
-            continue
-        line.append(tok)
-        x += tok.width
-    if line:
-        lines.append(line)
-    return lines
+    """Pack tokens into lines ≤ max_width via the pure UAX #14 breaker (:func:`wrap_units`), honouring
+    hard breaks (``\\n``) and kinsoku. The single-style counterpart to :func:`overlay.render.flow.wrap_items`."""
+    from overlay.render.linebreak import wrap_units
+
+    widths = [t.width for t in tokens]
+    texts = [t.text for t in tokens]
+    idx_lines = wrap_units(widths, texts, max_width, force_break=lambda k: tokens[k].text == "\n")
+    return [[tokens[k] for k in line] for line in idx_lines]
 
 
 def line_metrics(line: list[Token]) -> tuple[int, int]:

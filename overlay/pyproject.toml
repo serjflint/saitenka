@@ -266,6 +266,7 @@ ignore = [
                # carries an explicit check=False after the 2026-07-25 sweep.)
 ]
 "examples/**" = ["T201", "S", "INP001", "BLE001", "E731", "FBT001", "FBT002", "FBT003"]  # demo/bench
+"tools/**" = ["T201", "INP001"]  # dev codegen scripts: print() is the output; not an importable package
 # scripts: print() is the output, security/init noise N/A, terse blind-except/lambda-assign is
 # normal for ad-hoc benchmarking harnesses that must never crash mid-run and don't need named
 # helpers, and positional bool flags calling internal-only helpers don't warrant keyword ceremony.
