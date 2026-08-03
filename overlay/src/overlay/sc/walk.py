@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from overlay.model import RGBA, Span, Style
 from overlay.render.flow import ChipBox, ImgBox, ruby
+from overlay.render.ruby import RubyBox
 from overlay.sc.model import Block
 
 _EXTERNAL_SCHEMES = ("http:", "https:", "mailto:", "//", "ftp:", "tel:")
@@ -224,6 +225,11 @@ class _Walker:
                 seg = self.cur.flow[i]
                 if isinstance(seg, Span):
                     self.cur.flow[i] = replace(seg, href=query)
+                elif isinstance(seg, RubyBox):
+                    # A ruby'd cross-ref (思し召し with furigana) becomes a RubyBox, not a Span — put
+                    # the href on its base spans so the ruby base is a clickable link run, not merely
+                    # blue-styled text (flow._update_link_run reads span.href off the base).
+                    seg.base = [replace(s, href=query) for s in seg.base]
 
     def _chip_for(self, node: dict, style: Style) -> ChipBox | None:
         # Style gate FIRST: an unstyled node can never be a chip, so skip the (potentially deep)
