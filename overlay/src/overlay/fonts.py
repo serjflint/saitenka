@@ -16,6 +16,7 @@ from functools import cache
 from fontTools.ttLib import TTFont
 from PIL import ImageFont
 
+from overlay import otel_metrics
 from overlay.resources import asset
 
 ASSETS = asset("fonts")  # importlib.resources so the wheel path works too
@@ -97,7 +98,11 @@ def text_width(font: ImageFont.FreeTypeFont, text: str) -> float:
     w = cache.get(key)
     if w is not None:
         cache.move_to_end(key)
+        if otel_metrics.glyph_width_hits is not None:
+            otel_metrics.glyph_width_hits.add(1)
         return w
+    if otel_metrics.glyph_width_misses is not None:
+        otel_metrics.glyph_width_misses.add(1)
     w = font.getlength(text)
     cache[key] = w
     if len(cache) > _WIDTH_CACHE_MAX:
@@ -127,7 +132,11 @@ def glyph_mask(
     hit = cache.get(key)
     if hit is not None:
         cache.move_to_end(key)
+        if otel_metrics.glyph_mask_hits is not None:
+            otel_metrics.glyph_mask_hits.add(1)
         return hit
+    if otel_metrics.glyph_mask_misses is not None:
+        otel_metrics.glyph_mask_misses.add(1)
     # Positional signature mirrors ImageDraw.text's own getmask2 call (direction/features/language
     # unused here; stroke_width 0; ink 0 — for a non-"RGBA" mode ink only tints an embedded-colour
     # glyph, which this upright text path never has, so the alpha coverage is ink-independent).
