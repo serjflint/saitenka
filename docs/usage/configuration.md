@@ -68,11 +68,14 @@ model = "Lapis"              # Anki note type / model
 key       = "Ctrl+m"         # mine the hovered word
 all_key   = "Shift+m"        # bulk-mine the current line
 preview_key = "p"            # replay the last card preview
+preview = true               # auto-pop the card-preview panel after a mine (--no-mine-preview off)
 normalize_audio = false      # −23 LUFS loudnorm on the mined clip (off by default)
 ```
 
 Set `enabled = false` to keep the config but turn mining off (the `--no-mine` flag does the same for a
-single run). `normalize_audio` runs an EBU R128 `loudnorm` pass (−23 LUFS) so cards mined from quiet
+single run). `preview = false` (or `--no-mine-preview`) mines silently — a toast confirms instead of the
+verify panel popping up; mining and the ⊕→✓ flip are unaffected. `normalize_audio` runs an EBU R128
+`loudnorm` pass (−23 LUFS) so cards mined from quiet
 and loud lines play back at an even volume; it adds one ffmpeg pass per mine, so it's off by default. If your AnkiConnect endpoint isn't the stock `127.0.0.1:8765`, override it in the separate
 `[anki]` table.
 

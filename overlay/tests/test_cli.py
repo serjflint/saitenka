@@ -135,6 +135,16 @@ def test_negation_flags_keep_argparse_semantics():
     assert kw2["prefetch"] is True
 
 
+def test_no_mine_preview_flag_toggles_the_panel():
+    """--no-mine-preview turns off the post-mine card-preview panel; default is on."""
+    app = _cli_app()
+    _, bound, *_ = app.parse_args(["run", "--no-mine-preview"])
+    assert bound.arguments["mine_preview"] is False
+    _, bound2, *_ = app.parse_args(["run"])
+    bound2.apply_defaults()
+    assert bound2.arguments["mine_preview"] is True
+
+
 def test_defaults_match_legacy(tmp_path, monkeypatch):
     # Isolate from the developer's real overlay.toml (cyclopts config.Toml feeds it as defaults) by
     # pointing at an absent file and reloading — this tests the PARAMETER defaults, deterministically.

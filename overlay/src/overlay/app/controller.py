@@ -174,6 +174,7 @@ class Reader:
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
+        self.show_preview = o.mining.show_preview  # auto-pop the card-preview panel after a mine
         # 🔊 TTS button is drawn only when the OS has a Japanese voice — else it silently does nothing.
         # Computed once (voices don't change mid-session; tts_available is itself cached).
         self._tts_ok = tts_available()
@@ -854,6 +855,9 @@ class Reader:
         return miner_ui.footer(self, video)
 
     def _preview_mined(self, card, tok, video, status: str = "mined") -> None:
+        if not self.show_preview:
+            self._toast(f"mined {card.expression}")  # preview off → a terse confirmation instead
+            return
         miner_ui.preview_mined(self, card, tok, video, status)
 
     def _add_duplicate(self) -> None:
@@ -863,6 +867,9 @@ class Reader:
             self._miner.mine_token(self._dup_tok, force=True)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
+        if not self.show_preview:
+            self._toast(f"already have {card.expression}")
+            return
         miner_ui.preview_existing(self, note_id, card, status)
 
     def _media_image(self, name):
