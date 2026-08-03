@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from overlay.mpvio.osd import to_bgra_array
-
 if TYPE_CHECKING:
     import numpy as np
 
@@ -77,9 +75,9 @@ class Panel:
         self.windowed.measure_to(min_h)
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
-        """Composite the ``[scroll, scroll+view_h)`` viewport as a premultiplied BGRA array. ``overscan``
-        renders one screen of blocks below the fold and keeps them warm for the next wheel notch."""
-        return to_bgra_array(self.windowed.viewport(scroll, view_h, overscan=overscan))
+        """Composite the ``[scroll, scroll+view_h)`` viewport as a premultiplied BGRA array via the
+        per-band BGRA fast path (#138). ``overscan`` warms one screen of blocks below the fold."""
+        return self.windowed.viewport_bgra(scroll, view_h, overscan=overscan)
 
     def render_ahead(self, scroll: int, view_h: int, *, direction: int, should_cancel) -> int:
         """Warm the blocks just beyond the viewport in the scroll ``direction`` — the off-main-thread

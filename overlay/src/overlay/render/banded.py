@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 from overlay import otel_metrics
@@ -206,6 +207,10 @@ class WindowedPanel:
         # viewport-sized bands so even one pathologically tall block holds only O(viewport) pixels.
         # Heights live in self._offsets and are never dropped, so offsets stay exact after eviction.
         self._blocks: OrderedDict[tuple[int, int], CachedBlock] = OrderedDict()
+        # Per-band opaque premul-BGRA, converted once (#138) so a warm scroll frame is disjoint numpy
+        # row-copies, not a per-frame whole-viewport convert. Keyed like _blocks; dropped on re-store/evict.
+        self._bgra: dict[tuple[int, int], np.ndarray] = {}
+        self._bg_bgra: np.ndarray | None = None  # theme.bg as a (4,) premul-BGRA pixel; memoised
         # Retained per-ROW hit geometry, accumulated across the row's bands (row-local boxes), NEVER
         # evicted — so a hover resolves even when a band's pixels are gone. _geom_seen dedups a line
         # drawn in two adjacent bands at their shared seam.
@@ -290,6 +295,7 @@ class WindowedPanel:
         key = (rb.index, rb.band)
         self._blocks[key] = block
         self._blocks.move_to_end(key)  # LRU touch
+        self._bgra.pop(key, None)  # a re-store replaces the pixels → the BGRA memo is stale
         return block
 
     def _render_band(self, i: int, b: int, y0: int, y1: int) -> RenderedBlock:
@@ -384,6 +390,7 @@ class WindowedPanel:
             victims = self._overflow_victims(lo, hi)
         for k in victims:
             del self._blocks[k]
+            self._bgra.pop(k, None)  # drop the fast-path memo alongside the pixels
         if victims and otel_metrics.block_cache_evictions is not None:
             otel_metrics.block_cache_evictions.add(len(victims))
 
@@ -427,6 +434,66 @@ class WindowedPanel:
         return composite_window(
             blocks, band_table, scroll, view_h, width=self.width, background=self.theme.bg
         )
+
+    def _band_bgra(self, key: tuple[int, int], cb: CachedBlock) -> np.ndarray:
+        """The band as a full-width opaque premul-BGRA array — composited over bg at its ``x`` (→ opaque,
+        so an overwrite-copy is exact), converted once and memoised (#138). Call under ``self._lock``."""
+        from overlay.bgra import to_bgra_array
+
+        arr = self._bgra.get(key)
+        if arr is None:
+            canvas = Image.new("RGBA", (self.width, cb.h), self.theme.bg)
+            canvas.alpha_composite(cb.image(), (cb.x, 0))
+            arr = to_bgra_array(canvas)
+            self._bgra[key] = arr
+        return arr
+
+    def _assemble_bgra(
+        self, table: OffsetTable, start: int, end: int, scroll: int, view_h: int
+    ) -> np.ndarray:
+        """Assemble the viewport as premul-BGRA by disjoint numpy row-copies of the visible bands over a
+        bg fill — byte-identical to ``to_bgra_array(self._composite_bands(...))`` (bands opaque over the
+        same bg; proven in ``tests/test_banded_composite.py`` + the equivalence test)."""
+        from overlay.bgra import to_bgra_array
+
+        bg = self._bg_bgra
+        if bg is None:
+            bg = to_bgra_array(Image.new("RGBA", (1, 1), self.theme.bg))[0, 0]
+            self._bg_bgra = bg
+        out = np.empty((max(view_h, 1), self.width, 4), np.uint8)
+        out[:] = bg
+        for i in range(start, end):
+            if not self._offsets.known(i):
+                continue
+            row_top = table.starts[i]
+            for b, y0, _y1 in _row_bands(self._offsets.height(i)):
+                cb = self._blocks.get((i, b))
+                if cb is None:
+                    continue
+                band_top = row_top + y0 - scroll  # in viewport space (may be off either edge)
+                src_y0 = max(0, -band_top)
+                dst_y = max(0, band_top)
+                h = min(cb.h - src_y0, view_h - dst_y)  # band rows inside the viewport
+                if h <= 0:
+                    continue
+                out[dst_y : dst_y + h] = self._band_bgra((i, b), cb)[src_y0 : src_y0 + h]
+        return out
+
+    def viewport_bgra(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
+        """The viewport as premul-BGRA via per-band BGRA row-copies (#138) — no per-frame whole-viewport
+        convert. Byte-identical to ``to_bgra_array(self.viewport(...))``; RGBA :meth:`viewport` stays for
+        goldens/skeleton."""
+        with self._lock:
+            self._grow_prefix(scroll + view_h + overscan)
+            table = self._offsets.estimated_table()
+            start, end = table.visible_range(scroll, view_h, overscan)
+            lo, hi = scroll - overscan, scroll + view_h + overscan
+            for i in range(start, end):
+                row_top = table.starts[i]
+                self._ensure_bands(i, lo - row_top, hi - row_top)  # re-raster evicted bands in view
+            out = self._assemble_bgra(table, start, end, scroll, view_h)
+            self._evict(lo, hi)
+            return out
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> Image.Image:
         """Composite the ``[scroll, scroll+view_h)`` viewport, rendering + evicting BANDS as needed — a

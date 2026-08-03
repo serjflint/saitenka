@@ -139,9 +139,11 @@ def test_premul_lut_exists_and_matches_formula():
     value*alpha//255."""
     import numpy as np
 
-    from overlay.mpvio import osd
+    from overlay import bgra
 
-    lut = osd._PREMUL_LUT
+    lut = (
+        bgra._PREMUL_LUT
+    )  # moved from mpvio.osd to the overlay.bgra leaf (#138), re-exported by osd
     assert lut.shape == (256, 256) and lut.dtype == np.uint8
     a = np.arange(256, dtype=np.uint16)
     for alpha in (0, 1, 127, 128, 254, 255):
