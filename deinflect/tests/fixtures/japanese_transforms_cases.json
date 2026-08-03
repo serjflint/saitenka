@@ -1,5 +1,5 @@
 {
- "_source": "Transcribed from Yomitan's test/language/japanese-transforms.test.js @ 3af775bda1df (github.com/yomidevs/yomitan, GPL-3.0). Each row is one conformance vector: `deinflect(source)` must (valid=true) / must not (valid=false) yield a candidate reaching `term` whose condition flags match `rule` and whose transform chain equals `reasons`. Regenerate with deinflect/tools/gen_yomitan_cases.py; the vendored source is tests/fixtures/yomitan/.",
+ "_source": "Transcribed from Yomitan's test/language/japanese-transforms.test.js @ 3af775bda1df (github.com/yomidevs/yomitan, GPL-3.0). Each row is one conformance vector: `deinflect(source)` must (valid=true) / must not (valid=false) yield a candidate reaching `term` whose condition flags match `rule` and whose transform chain equals `reasons`. Regenerate from a Yomitan checkout at that commit with deinflect/tools/gen_yomitan_cases.py (see its docstring).",
  "cases": [
   {
    "category": "adjectives",

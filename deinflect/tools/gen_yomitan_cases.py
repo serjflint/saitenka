@@ -11,26 +11,31 @@ are the *external* oracle: passing them proves the port reproduces upstream, not
 of the grammar. Same "steal the real corpus" move as overlay's vendored UAX #14 `LineBreakTest.txt`
 (issue #112) and taffylite's vendored gentest fixtures (#150).
 
-Both packages are GPL-3.0, so vendoring Yomitan's (GPL) test file here is license-clean. It sits
-verbatim (its GPL header is the attribution) at `tests/fixtures/yomitan/japanese-transforms.test.js`;
-this reads that array and emits `tests/fixtures/japanese_transforms_cases.json` (one flat row per
-vector). Re-run after refreshing the vendored file:
+The GPL test file is NOT vendored (it is fully derivable from the pinned commit, and the committed
+JSON is the reviewable artifact — like taffylite #150 reading a taffy checkout rather than committing
+taffy's 533 source files). This reads it from a Yomitan checkout at `YOMITAN_COMMIT` and emits
+`tests/fixtures/japanese_transforms_cases.json` (one flat row per vector). Regenerate after bumping
+the pin (keep it in sync with the `japanese_transforms.json` dump's Yomitan version):
 
-    uv run deinflect/tools/gen_yomitan_cases.py
+    git clone https://github.com/yomidevs/yomitan /tmp/yomitan-src
+    git -C /tmp/yomitan-src checkout 3af775bda1df
+    uv run deinflect/tools/gen_yomitan_cases.py /tmp/yomitan-src
 """
 
 from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
-# Pin: the vendored file was taken from yomidevs/yomitan at this commit.
+# Pin: read the test file from a yomidevs/yomitan checkout at this commit (the version the shipped
+# japanese_transforms.json was dumped from — the corpus must match the data, not Yomitan HEAD).
 YOMITAN_COMMIT = "3af775bda1df"
 
-_FIX = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
-SRC = _FIX / "yomitan" / "japanese-transforms.test.js"
-OUT = _FIX / "japanese_transforms_cases.json"
+_CHECKOUT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/yomitan-src")
+SRC = _CHECKOUT / "test" / "language" / "japanese-transforms.test.js"
+OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "japanese_transforms_cases.json"
 
 # One category object: `{ category: '..', valid: true|false, tests: [ {term..}, .. ] }`. The lookahead
 # split keys on the category objects (vectors start `{term:`), so each chunk carries one valid flag.
@@ -74,8 +79,8 @@ def main() -> None:
         f"Transcribed from Yomitan's test/language/japanese-transforms.test.js @ {YOMITAN_COMMIT} "
         "(github.com/yomidevs/yomitan, GPL-3.0). Each row is one conformance vector: `deinflect(source)` "
         "must (valid=true) / must not (valid=false) yield a candidate reaching `term` whose condition "
-        "flags match `rule` and whose transform chain equals `reasons`. Regenerate with "
-        "deinflect/tools/gen_yomitan_cases.py; the vendored source is tests/fixtures/yomitan/."
+        "flags match `rule` and whose transform chain equals `reasons`. Regenerate from a Yomitan "
+        "checkout at that commit with deinflect/tools/gen_yomitan_cases.py (see its docstring)."
     )
     OUT.write_text(
         json.dumps({"_source": header, "cases": cases}, ensure_ascii=False, indent=1)

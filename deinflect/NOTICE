@@ -15,9 +15,9 @@ Derived components:
         Dumped verbatim from Yomitan's `ext/js/language/ja/japanese-transforms.js`
         (regenerate with `overlay/compare/dump_transforms.mjs`).
 
-  - tests/fixtures/yomitan/japanese-transforms.test.js
-        Vendored verbatim from Yomitan's `test/language/japanese-transforms.test.js`
-        (the conformance corpus the port is tested against; transcribed to JSON by
+  - tests/fixtures/japanese_transforms_cases.json
+        The conformance vectors the port is tested against, transcribed from Yomitan's
+        `test/language/japanese-transforms.test.js` (pinned commit in
         `tools/gen_yomitan_cases.py`). Test-only, not shipped in the wheel.
 
 Because this package is licensed GPL-3.0-or-later, any distribution that combines it
