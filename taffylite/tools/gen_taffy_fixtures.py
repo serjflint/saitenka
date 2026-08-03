@@ -233,7 +233,7 @@ def _parse_expected(body: str) -> dict[str, tuple[float, float, float, float]]:
 
 def _absolute(nodes: list[dict], root: str, rel: dict[str, tuple]) -> dict[str, tuple]:
     """taffylite returns absolute rects; taffy asserts parent-relative — accumulate down the tree."""
-    parent = {c: nd["var"] for nd in nodes for c in nd["children"]}
+    parent = {c: node["var"] for node in nodes for c in node["children"]}
     abs_pos: dict[str, tuple[float, float]] = {}
 
     def resolve(var: str) -> tuple[float, float]:
@@ -248,8 +248,8 @@ def _absolute(nodes: list[dict], root: str, rel: dict[str, tuple]) -> dict[str, 
         return abs_pos[var]
 
     rects = {}
-    for nd in nodes:
-        v = nd["var"]
+    for node in nodes:
+        v = node["var"]
         w, h, _, _ = rel[v]
         ax, ay = resolve(v)
         rects[v] = (round(ax), round(ay), round(w), round(h))
@@ -262,28 +262,28 @@ def build_case(path: Path) -> dict | None:
     nodes = _parse_nodes(body)
     if not nodes:
         return None
-    handle = {nd["var"]: i for i, nd in enumerate(nodes)}
-    child_vars = {c for nd in nodes for c in nd["children"]}
+    handle = {node["var"]: i for i, node in enumerate(nodes)}
+    child_vars = {c for node in nodes for c in node["children"]}
     if not child_vars <= handle.keys():
         raise Unsupported(
             "child of an unparsed node kind"
         )  # e.g. new_leaf_with_context (measure)
-    roots = [nd["var"] for nd in nodes if nd["var"] not in child_vars]
+    roots = [node["var"] for node in nodes if node["var"] not in child_vars]
     if len(roots) != 1:
         raise Unsupported(f"{len(roots)} roots")
     root = roots[0]
 
     json_nodes: list[dict] = []
-    for nd in nodes:
-        if nd["kind"] == "new_leaf":
-            leaf = _to_leaf(nd["props"])
+    for node in nodes:
+        if node["kind"] == "new_leaf":
+            leaf = _to_leaf(node["props"])
             entry = [leaf["w"], leaf["h"]]
             if "margin" in leaf:
                 entry.append(list(leaf["margin"]))
             json_nodes.append({"leaf": entry})
         else:
-            flex = _to_flex(nd["props"])
-            spec: dict = {"children": [handle[c] for c in nd["children"]]}
+            flex = _to_flex(node["props"])
+            spec: dict = {"children": [handle[c] for c in node["children"]]}
             spec["direction"] = flex["direction"]
             if flex["gap"]:
                 spec["gap"] = flex["gap"]
@@ -300,10 +300,10 @@ def build_case(path: Path) -> dict | None:
             json_nodes.append({"flex": spec})
 
     rel = _parse_expected(body)
-    if set(rel) != {nd["var"] for nd in nodes}:
+    if set(rel) != {node["var"] for node in nodes}:
         raise Unsupported("assert/node mismatch")
     abs_rects = _absolute(nodes, root, rel)
-    rects = [list(abs_rects[nd["var"]]) for nd in nodes]
+    rects = [list(abs_rects[node["var"]]) for node in nodes]
 
     return {"name": stem, "nodes": json_nodes, "root": handle[root], "rects": rects}
 
