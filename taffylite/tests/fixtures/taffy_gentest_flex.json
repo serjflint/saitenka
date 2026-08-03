@@ -1,0 +1,463 @@
+{
+ "_source": "Vendored from taffy v0.7.7 (https://github.com/DioxusLabs/taffy), MIT. Chrome-derived expected rects from the `__border_box` variant of `tests/generated/flex/*.rs`. Regenerate + excluded-subset rationale: see tests/fixtures/README.md and taffylite/tools/gen_taffy_fixtures.py.",
+ "cases": [
+  {
+   "name": "nested_overflowing_child",
+   "nodes": [
+    {
+     "leaf": [
+      200.0,
+      200.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row"
+     }
+    },
+    {
+     "flex": {
+      "children": [
+       1
+      ],
+      "direction": "row",
+      "width": 100.0,
+      "height": 100.0
+     }
+    }
+   ],
+   "root": 2,
+   "rects": [
+    [
+     0,
+     0,
+     200,
+     200
+    ],
+    [
+     0,
+     0,
+     200,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "nested_overflowing_child_in_constraint_parent",
+   "nodes": [
+    {
+     "leaf": [
+      200.0,
+      200.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row",
+      "width": 100.0,
+      "height": 100.0
+     }
+    },
+    {
+     "flex": {
+      "children": [
+       1
+      ],
+      "direction": "row",
+      "width": 100.0,
+      "height": 100.0
+     }
+    }
+   ],
+   "root": 2,
+   "rects": [
+    [
+     0,
+     0,
+     100,
+     200
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "overflow_cross_axis",
+   "nodes": [
+    {
+     "leaf": [
+      100.0,
+      200.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row",
+      "width": 100.0,
+      "height": 100.0
+     }
+    }
+   ],
+   "root": 1,
+   "rects": [
+    [
+     0,
+     0,
+     100,
+     200
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "padding_container_match_child",
+   "nodes": [
+    {
+     "leaf": [
+      10.0,
+      10.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "column",
+      "padding": [
+       10.0,
+       10.0,
+       10.0,
+       10.0
+      ]
+     }
+    }
+   ],
+   "root": 1,
+   "rects": [
+    [
+     10,
+     10,
+     10,
+     10
+    ],
+    [
+     0,
+     0,
+     30,
+     30
+    ]
+   ]
+  },
+  {
+   "name": "size_defined_by_child",
+   "nodes": [
+    {
+     "leaf": [
+      100.0,
+      100.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row"
+     }
+    }
+   ],
+   "root": 1,
+   "rects": [
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "size_defined_by_child_with_padding",
+   "nodes": [
+    {
+     "leaf": [
+      10.0,
+      10.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row",
+      "padding": [
+       10.0,
+       10.0,
+       10.0,
+       10.0
+      ]
+     }
+    }
+   ],
+   "root": 1,
+   "rects": [
+    [
+     10,
+     10,
+     10,
+     10
+    ],
+    [
+     0,
+     0,
+     30,
+     30
+    ]
+   ]
+  },
+  {
+   "name": "size_defined_by_grand_child",
+   "nodes": [
+    {
+     "leaf": [
+      100.0,
+      100.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row"
+     }
+    },
+    {
+     "flex": {
+      "children": [
+       1
+      ],
+      "direction": "row"
+     }
+    }
+   ],
+   "root": 2,
+   "rects": [
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "wrap_child",
+   "nodes": [
+    {
+     "leaf": [
+      100.0,
+      100.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "column"
+     }
+    }
+   ],
+   "root": 1,
+   "rects": [
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "wrap_column",
+   "nodes": [
+    {
+     "leaf": [
+      30.0,
+      31.0
+     ]
+    },
+    {
+     "leaf": [
+      30.0,
+      32.0
+     ]
+    },
+    {
+     "leaf": [
+      30.0,
+      33.0
+     ]
+    },
+    {
+     "leaf": [
+      30.0,
+      34.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "direction": "column",
+      "width": 100.0,
+      "height": 100.0,
+      "wrap": true
+     }
+    }
+   ],
+   "root": 4,
+   "rects": [
+    [
+     0,
+     0,
+     30,
+     31
+    ],
+    [
+     0,
+     31,
+     30,
+     32
+    ],
+    [
+     0,
+     63,
+     30,
+     33
+    ],
+    [
+     50,
+     0,
+     30,
+     34
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  },
+  {
+   "name": "wrap_grandchild",
+   "nodes": [
+    {
+     "leaf": [
+      100.0,
+      100.0
+     ]
+    },
+    {
+     "flex": {
+      "children": [
+       0
+      ],
+      "direction": "row"
+     }
+    },
+    {
+     "flex": {
+      "children": [
+       1
+      ],
+      "direction": "row"
+     }
+    }
+   ],
+   "root": 2,
+   "rects": [
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ],
+    [
+     0,
+     0,
+     100,
+     100
+    ]
+   ]
+  }
+ ]
+}
