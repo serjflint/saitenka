@@ -14,8 +14,6 @@ from typing import TYPE_CHECKING
 from overlay import fonts
 from overlay.model import LinkBox, ScanBox, Span, Style
 from overlay.render.layout import (
-    NO_END,
-    NO_START,
     Block,
     Token,
     _font,
@@ -23,6 +21,7 @@ from overlay.render.layout import (
     draw_token,
     new_panel_image,
 )
+from overlay.render.linebreak import wrap_units
 from overlay.render.ruby import RubyBox, _base_size, layout_ruby
 
 if TYPE_CHECKING:
@@ -128,22 +127,12 @@ class Item:
     img: ImgBox | None = None
     chip: ChipBox | None = None
 
-    def no_start(self) -> bool:
-        # kind == "text" guarantees tok is set (build_items invariant)
-        return (
-            self.kind == "text"
-            and self.tok is not None
-            and self.tok.kind == "cjk"
-            and self.tok.text in NO_START
-        )
-
-    def no_end(self) -> bool:
-        return (
-            self.kind == "text"
-            and self.tok is not None
-            and self.tok.kind == "cjk"
-            and self.tok.text in NO_END
-        )
+    def text(self) -> str:
+        """The unit's underlying text for :func:`wrap_units`' boundary decisions — a ruby group is its
+        base run, a text/space token its chars, an image/chip empty (breakable on either side)."""
+        if self.kind == "ruby" and self.box is not None:
+            return "".join(span.text for span in self.box.base)
+        return self.tok.text if self.tok is not None else ""
 
     def metrics(self) -> tuple[int, int, int]:
         """(ascent, descent, nominal_size) for line-height computation."""
@@ -181,36 +170,13 @@ def build_items(flow: list[Inline]) -> list[Item]:
     return items
 
 
-def _flush_overflow_line(line: list[Item], it: Item) -> tuple[list[Item], list[Item], float]:
-    """`it` doesn't fit on `line`: pull any trailing NO_END items off `line` to carry onto the new
-    one with `it`. Returns ``(flushed_line, new_line, new_x)``."""
-    carry: list[Item] = []
-    while line and line[-1].no_end():
-        carry.insert(0, line.pop())
-    new_line = [*carry, it]
-    return line, new_line, sum(i.width for i in new_line)
-
-
 def wrap_items(items: list[Item], max_width: float) -> list[list[Item]]:
-    lines: list[list[Item]] = []
-    line: list[Item] = []
-    x = 0.0
-    for it in items:
-        if it.kind == "break":
-            lines.append(line)
-            line, x = [], 0.0
-            continue
-        if it.kind == "space" and not line:
-            continue
-        if line and x + it.width > max_width and not it.no_start():
-            flushed, line, x = _flush_overflow_line(line, it)
-            lines.append(flushed)
-            continue
-        line.append(it)
-        x += it.width
-    if line:
-        lines.append(line)
-    return lines
+    """Wrap the inline stream to lines via the pure UAX #14 breaker (:func:`wrap_units`), which applies
+    kinsoku and keeps each ruby group atomic. A ``break`` item is a hard newline (consumed, not drawn)."""
+    widths = [it.width for it in items]
+    texts = [it.text() for it in items]
+    idx_lines = wrap_units(widths, texts, max_width, force_break=lambda k: items[k].kind == "break")
+    return [[items[k] for k in line] for line in idx_lines]
 
 
 def _item_line_box(line: list[Item], scale: float) -> tuple[int, int, int]:

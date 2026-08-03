@@ -1,6 +1,11 @@
 # Spell-check allowlist for `poe spell` (typos, run repo-wide from here). Config lives at the repo root,
 # not in overlay/pyproject.toml, because the scan covers the whole repo (overlay + deinflect + docs) and
 # typos resolves config from the scan root. These are intentional/valid tokens, not corrections to make.
+[files]
+# Vendored Unicode UAX #14 data (property table + conformance corpus) — verbatim upstream text whose
+# Line_Break class codes (BA, ID, Nd, …) trip the spell checker. Never hand-edit; regenerate from source.
+extend-exclude = ["overlay/tests/fixtures/uax14/"]
+
 [default.extend-words]
 unparseable = "unparseable"   # valid variant of "unparsable"; used in our error strings
 entrie = "entrie"             # deliberate `entrie(s)` pluralisation in CLI output
@@ -8,3 +13,4 @@ mis = "mis"                   # appears in compounds/prefixes, not a standalone 
 certifi = "certifi"           # the package name, not "certify"
 PN = "PN"                     # proper-noun pos tag / notation, not "ON"
 Hime = "Hime"                 # TsukiHime — a subtitle source's proper name, not "Him"
+BA = "BA"                     # UAX #14 Line_Break class code (Break After), used in render.linebreak
