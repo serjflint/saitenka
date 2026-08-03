@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from overlay.body_block import BodyRenderArgs
     from overlay.model import RGBA, LinkBox, ScanBox, Theme
     from overlay.panel import Row
+    from overlay.render.layout_backend import LayoutBackend
 
 # The def-body renderer is injected by the caller (app/popups.py, which builds WindowedPanel) rather
 # than imported here: body_block.py depends on render.document, so a module-level import would cycle
@@ -185,8 +186,10 @@ class WindowedPanel:
         max_cached_blocks: int | None = None,
         compress: bool = False,
         render_block_fn: Callable[[BodyRenderArgs, int, int], tuple] | None = None,
+        layout_backend: LayoutBackend | None = None,
     ):
         from overlay.model import _DEFAULT_THEME
+        from overlay.render.layout_backend import DEFAULT_BACKEND
         from overlay.render.window import LazyOffsets
 
         self.theme = theme if theme is not None else _DEFAULT_THEME
@@ -201,7 +204,11 @@ class WindowedPanel:
         self._render_block_fn = render_block_fn
         gaps = [r.gap if r.gap is not None else self.theme.gap for r in self._rows]
         self._offsets = LazyOffsets(
-            gaps, self.theme.margin + top_reserve, self.theme.margin, seed_height=seed_height
+            gaps,
+            self.theme.margin + top_reserve,
+            self.theme.margin,
+            seed_height=seed_height,
+            backend=layout_backend if layout_backend is not None else DEFAULT_BACKEND,
         )
         # LRU pixel cache (oldest first), keyed by (row, band): a row is rasterised + retained in
         # viewport-sized bands so even one pathologically tall block holds only O(viewport) pixels.

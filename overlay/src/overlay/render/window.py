@@ -24,24 +24,15 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from overlay.render.layout_backend import DEFAULT_BACKEND
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from overlay.render.layout_backend import LayoutBackend
 
-def _cumulative(
-    heights: Sequence[int], gaps: Sequence[int], top_pad: int
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """Start/end y of each block: ``start_i = top_pad + Σ_{j<i}(h_j + gap_j)``, ``end_i = start_i+h_i``.
-    Gap after the last block is never added (``gaps[n-1]`` ignored)."""
-    n = len(heights)
-    starts: list[int] = []
-    ends: list[int] = []
-    y = top_pad
-    for i, h in enumerate(heights):
-        starts.append(y)
-        ends.append(y + h)
-        y += h + (gaps[i] if i < n - 1 else 0)
-    return tuple(starts), tuple(ends)
+# Row-stack geometry lives behind the LayoutBackend seam (#113): build_offsets takes a backend and
+# LazyOffsets routes through its own; the default is byte-identical to the old cumulative arithmetic.
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,12 +94,16 @@ class OffsetTable:
 
 
 def build_offsets(
-    heights: Sequence[int], gaps: Sequence[int], top_pad: int, bottom_pad: int
+    heights: Sequence[int],
+    gaps: Sequence[int],
+    top_pad: int,
+    bottom_pad: int,
+    backend: LayoutBackend = DEFAULT_BACKEND,
 ) -> OffsetTable:
-    """Exact offset table from fully-known block heights + trailing gaps + margins."""
+    """Exact offset table from fully-known block heights + trailing gaps + margins, via ``backend``."""
     if len(gaps) != len(heights):
         raise ValueError("gaps must be per-block (one trailing gap per block; the last is ignored)")
-    starts, ends = _cumulative(heights, gaps, top_pad)
+    starts, ends = backend.cumulative(heights, gaps, top_pad)
     return OffsetTable(starts, ends, top_pad, bottom_pad)
 
 
@@ -124,6 +119,7 @@ class LazyOffsets:
         bottom_pad: int,
         *,
         seed_height: int = 0,
+        backend: LayoutBackend = DEFAULT_BACKEND,
     ):
         self._gaps = tuple(gaps)
         self._n = len(self._gaps)
@@ -131,6 +127,7 @@ class LazyOffsets:
         self._bottom = bottom_pad
         self._heights: list[int | None] = [None] * self._n
         self._seed = seed_height  # placeholder height before any real block is measured
+        self._backend = backend  # LayoutBackend seam (#113); default is byte-identical arithmetic
 
     @property
     def count(self) -> int:
@@ -174,26 +171,26 @@ class LazyOffsets:
     def start(self, i: int) -> int:
         """Start y of block ``i`` — exact when :meth:`start_exact`, else estimated. Depends only on
         blocks before ``i``, so a visited-prefix offset never moves as later heights arrive."""
-        starts, _ = _cumulative(self._fill(self._avg()), self._gaps, self._top)
+        starts, _ = self._backend.cumulative(self._fill(self._avg()), self._gaps, self._top)
         return starts[i] if i < self._n else self.total_estimate() - self._bottom
 
     def end(self, i: int) -> int:
         avg = self._avg()
-        _, ends = _cumulative(self._fill(avg), self._gaps, self._top)
+        _, ends = self._backend.cumulative(self._fill(avg), self._gaps, self._top)
         return ends[i]
 
     def total_estimate(self) -> int:
         """Estimated full content height; exact once every block is measured."""
         avg = self._avg()
         heights = self._fill(avg)
-        _, ends = _cumulative(heights, self._gaps, self._top)
+        _, ends = self._backend.cumulative(heights, self._gaps, self._top)
         return (ends[-1] if ends else self._top) + self._bottom
 
     def estimated_table(self) -> OffsetTable:
         """Snapshot :class:`OffsetTable` filling unknown heights with the running average — drives
         :meth:`OffsetTable.visible_range` for incremental scroll before every block is measured."""
         heights = self._fill(self._avg())
-        starts, ends = _cumulative(heights, self._gaps, self._top)
+        starts, ends = self._backend.cumulative(heights, self._gaps, self._top)
         return OffsetTable(starts, ends, self._top, self._bottom)
 
     def exact_table(self) -> OffsetTable:
@@ -201,5 +198,9 @@ class LazyOffsets:
         if any(h is None for h in self._heights):
             raise ValueError("exact_table requires every block height to be set")
         return build_offsets(
-            [h for h in self._heights if h is not None], self._gaps, self._top, self._bottom
+            [h for h in self._heights if h is not None],
+            self._gaps,
+            self._top,
+            self._bottom,
+            self._backend,
         )
