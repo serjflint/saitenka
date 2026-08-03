@@ -365,12 +365,18 @@ def _update_link_run(
     link_out: list[LinkBox],
 ) -> tuple[str, float, float] | None:
     """Extend the current internal-link run (``(query, x_start, x_end)``), flushing it to
-    ``link_out`` as one :class:`LinkBox` when the href changes or ends."""
-    href = it.tok.href if (it.kind == "text" and it.tok is not None) else None
+    ``link_out`` as one :class:`LinkBox` when the href changes or ends. A ruby'd cross-ref carries its
+    href on the base spans (set in the SC walker); its link box covers the BASE extent (``base_x`` +
+    base width), matching where the visible kanji and the scan boxes sit under the furigana."""
+    if it.kind == "ruby" and it.box is not None:
+        href = next((s.href for s in it.box.base if getattr(s, "href", None)), None)
+        bx = it.box.base_x(x)
+        x0, x1 = bx, bx + sum(t.width for t in _ruby_base_tokens(it.box))
+    else:
+        href = it.tok.href if (it.kind == "text" and it.tok is not None) else None
+        x0, x1 = x, x + it.width
     if href:
-        return (
-            (href, link[1], x + it.width) if (link and link[0] == href) else (href, x, x + it.width)
-        )
+        return (href, link[1], x1) if (link and link[0] == href) else (href, x0, x1)
     if link is not None:
         q, xs, xe = link
         link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), line_box_h))
