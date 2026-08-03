@@ -150,6 +150,38 @@ def test_viewport_is_pixel_identical_to_render_panel_crop(scroll_frac, view_h):
     assert diff.max() == 0
 
 
+@given(scroll_frac=st.floats(0, 1), view_h=st.integers(120, 500))
+@settings(max_examples=60, deadline=None)
+def test_viewport_bgra_equals_to_bgra_array_of_viewport(scroll_frac, view_h):
+    # #138 fast path: the per-band BGRA assembly (disjoint numpy row-copies) is byte-identical to
+    # converting the whole RGBA viewport per frame — the invariant that lets blit_panel skip the
+    # per-frame whole-viewport RGBA→BGRA convert.
+    from overlay.mpvio.osd import to_bgra_array
+
+    entry = _tall_entry(8)
+    total = _full_height(entry)
+    view_h = min(view_h, total)
+    scroll = int(scroll_frac * max(0, total - view_h))
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
+    fast = wp.viewport_bgra(scroll, view_h)
+    ref = to_bgra_array(wp.viewport(scroll, view_h))
+    assert np.array_equal(fast, ref)
+
+
+def test_viewport_bgra_matches_after_scroll_away_and_back():
+    # A re-stored (scrolled-away-then-back) band must invalidate the BGRA memo, so the fast path never
+    # serves stale pixels. Scroll to the bottom, back to the top, and the top frame must still match.
+    from overlay.mpvio.osd import to_bgra_array
+
+    entry = _tall_entry(8)
+    total = _full_height(entry)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
+    wp.viewport_bgra(max(0, total - 200), 200)  # bottom → evicts the top bands
+    fast = wp.viewport_bgra(0, 200)  # back to the top → top bands re-rastered
+    ref = to_bgra_array(wp.viewport(0, 200))
+    assert np.array_equal(fast, ref)
+
+
 def test_overscan_does_not_change_the_visible_pixels():
     entry = _tall_entry(8)
     total = _full_height(entry)
