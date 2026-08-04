@@ -54,12 +54,36 @@ def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
 
 
 @pytest.mark.parametrize("scale", _SCALES)
-def test_blit_composited_native_not_soft(scale, monkeypatch):
-    r = _reader(scale, monkeypatch)
-    assert r._crisp_miss == ""  # a hi-dpi show composited crisp natively (no soft-miss reason)
-    # the uploaded rect is display px: the reference panel width × the (bucketed) display scale
+def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkeypatch):
+    # Soft-first (plan B3): a cold hi-dpi show paints SOFT instantly (the main thread never rasters
+    # native), flags a pending upgrade, and the poll loop swaps to crisp once a worker warms the bands.
+    r = _reader(scale, monkeypatch)  # no worker in the test → the show paints soft
+    assert r._crisp_miss == "warming" and r._crisp_pending  # cold → soft, upgrade pending
+
+    st = r._tip_state
+    vh = min(r._tip_view_h, st.full_height)
+    y0 = max(0, min(r._tip_scroll, max(0, st.full_height - vh)))
+    st.viewport(y0, vh, scale=r._raster_scale)  # simulate the worker warming the native viewport
+    tooltip.apply_pending_crisp(r)  # the poll-loop upgrade
+
+    assert r._crisp_miss == "" and not r._crisp_pending  # now composited crisp
     assert r._tip_rect is not None
-    assert r._tip_rect[2] == round(r.tip_width * r._raster_scale)
+    assert r._tip_rect[2] == round(r.tip_width * r._raster_scale)  # native display width
+
+
+@pytest.mark.parametrize("scale", _SCALES)
+def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
+    # When the bands are already warm (worker ran ahead), the show composites crisp on the first paint.
+    r = hidpi_reader(scale)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    r.hover = 0
+    r._show_tooltip(0)  # first paint (soft) also measures the panel
+    st = r._tip_state
+    vh = min(r._tip_view_h, st.full_height)
+    y0 = max(0, min(r._tip_scroll, max(0, st.full_height - vh)))
+    st.viewport(y0, vh, scale=r._raster_scale)  # warm the native viewport
+    tooltip.render_tip_view(r)  # re-blit with warm bands
+    assert r._crisp_miss == "" and not r._crisp_pending
 
 
 def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):

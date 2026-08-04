@@ -253,6 +253,9 @@ class Reader:
         self._crisp_miss = (
             ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
         )
+        self._crisp_pending = (
+            False  # a soft first paint is up; poll upgrades to crisp once bands warm
+        )
         self._tip_tok: Token | None = (
             None  # the base tooltip's source token (for the crisp re-render)
         )
@@ -1386,6 +1389,7 @@ class Reader:
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
             self._apply_pending_anki_seed()
+            tooltip.apply_pending_crisp(self)  # upgrade a soft first paint to crisp once bands warm
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)
             sidebar.update(self)
@@ -1535,6 +1539,11 @@ class Reader:
         log.info("runtime: %s, %d prefetch worker(s)", mode, len(self._prefetch_threads))
 
     def run(self, interval: float | None = None) -> None:
+        from overlay.render.banded import guard_main_render
+
+        guard_main_render(
+            on=True
+        )  # this IS the render loop — native rasterisation must run on a worker
         interval = interval if interval is not None else self.poll_interval
         self.refresh_osd()
         self.start_observing()  # event-driven property reads from here on
