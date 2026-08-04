@@ -6,25 +6,19 @@ so scrolling back over an evicted block still hovers."""
 
 from __future__ import annotations
 
+import pytest
+import util
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from overlay.panel import Definition, Entry, LazyPanel, panel_rows, render_panel
+from overlay.panel import Entry, LazyPanel, panel_rows, render_panel
 from overlay.render.banded import WindowedPanel
 
 WIDTH = 384
 
 
 def _cjk_entry(n_defs: int = 8) -> Entry:
-    body = [
-        "追いかけると同義語は",
-        {"tag": "a", "href": "?query=見る", "content": "見る"},
-        "。長い説明文が続く。" * 2,
-    ]
-    return Entry(
-        headword=["掛ける", {"tag": "rt", "content": "かける"}],
-        defs=[Definition(f"辞書{i}", body) for i in range(n_defs)],
-    )
+    return util.cjk_links_entry(n_defs)  # canonical shape lives in the shared matrix (anti-drift)
 
 
 def _drive_full_scroll(wp: WindowedPanel, total: int, vh: int) -> None:
@@ -61,10 +55,14 @@ def test_hit_parity_at_every_point(px, py):
     assert wp.link_hit(px, py) == _ref_hit(ref.link_boxes, px, py)  # same link hit
 
 
-def test_point_inside_a_cell_round_trips_to_that_cell():
-    entry = _cjk_entry(6)
-    total = render_panel(entry, width=WIDTH).height
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
+@pytest.mark.parametrize("profile", util.PROFILES, ids=[p.id for p in util.PROFILES])
+def test_point_inside_a_cell_round_trips_to_that_cell(profile):
+    # The picking invariant, now ACROSS the scale × width × entry matrix: a point in any drawn cell's
+    # interior hit-tests back to that cell. At hi-dpi the scan geometry is built at Theme(scale)/width×
+    # scale — the wrap that the display↔hit seam has to agree on, which the old scale-1.0 run never hit.
+    theme, width, entry = profile.theme, profile.width, profile.entry()
+    total = render_panel(entry, width=width, theme=theme).height
+    wp = WindowedPanel(panel_rows(entry, width, theme), width, theme)
     _drive_full_scroll(wp, total, 260)
     boxes = wp.scan_boxes()
     assert boxes

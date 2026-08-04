@@ -10,10 +10,11 @@ import contextlib
 
 import numpy as np
 import pytest
-from hypothesis import given, settings
+import util
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from overlay.panel import Definition, Entry, LazyPanel, panel_rows, render_panel
+from overlay.panel import Entry, LazyPanel, panel_rows, render_panel
 from overlay.render.banded import WindowedPanel
 
 WIDTH = 384
@@ -57,11 +58,7 @@ def _real_many_homograph_entry(width: int) -> tuple[Entry, str] | None:
 
 
 def _tall_entry(n_defs: int = 8) -> Entry:
-    para = "これはとても長い定義の説明でありスクロールが必要になるほど縦に伸びる本文です。" * 2
-    return Entry(
-        headword=["本命", {"tag": "rt", "content": "ほんめい"}],
-        defs=[Definition(f"辞書{i}", [para]) for i in range(n_defs)],
-    )
+    return util.tall_entry(n_defs)  # canonical shape lives in the shared matrix (anti-drift)
 
 
 def _full_height(entry: Entry) -> int:
@@ -135,16 +132,24 @@ def test_retained_nbytes_is_smaller_when_blocks_are_compressed():
     assert packed.retained_nbytes < live.retained_nbytes
 
 
+@pytest.mark.parametrize("profile", util.PROFILES, ids=[p.id for p in util.PROFILES])
 @given(scroll_frac=st.floats(0, 1), view_h=st.integers(120, 500))
-@settings(max_examples=60, deadline=None)
-def test_viewport_is_pixel_identical_to_render_panel_crop(scroll_frac, view_h):
-    entry = _tall_entry(8)
-    total = _full_height(entry)
+@settings(max_examples=30, deadline=None)
+# Pinned regression: at scale 2.0 the header row is >_BAND_PX(256) tall, so scrolling it partly off the
+# top exposed the composite's non-body band-split bug (2nd band left blank). Deterministic on every run.
+@example(scroll_frac=0.078125, view_h=120)
+def test_viewport_is_pixel_identical_to_render_panel_crop(profile, scroll_frac, view_h):
+    # windowed viewport == one-shot render_panel crop, now ACROSS the scale × width × entry matrix (was
+    # only Theme() @ WIDTH). The engine must window byte-identically at hi-dpi — the crisp native panel
+    # rasters at Theme(scale)/width×scale, a path the old scale-1.0 property never exercised.
+    theme, width, entry = profile.theme, profile.width, profile.entry()
+    ref_full = render_panel(entry, width=width, theme=theme)
+    total = ref_full.height
     view_h = min(view_h, total)
     scroll = int(scroll_frac * max(0, total - view_h))
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
+    wp = WindowedPanel(panel_rows(entry, width, theme), width, theme)
     win = wp.viewport(scroll, view_h)
-    ref = render_panel(entry, width=WIDTH).crop((0, scroll, WIDTH, scroll + view_h))
+    ref = ref_full.crop((0, scroll, width, scroll + view_h))
     assert win.size == ref.size
     diff = np.abs(np.asarray(win, np.int16) - np.asarray(ref, np.int16))
     assert diff.max() == 0

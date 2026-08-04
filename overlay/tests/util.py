@@ -1,8 +1,12 @@
-"""Golden-image test helpers: tolerance diff + update-on-demand.
+"""Golden-image test helpers + the shared render-profile matrix.
 
-Anti-aliasing varies subtly across Pillow/FreeType versions, so goldens are compared with a
-per-pixel mean-absolute-error tolerance rather than byte-exact. Set ``SAITENKA_UPDATE_GOLDEN=1`` to
-(re)write goldens instead of asserting — always eyeball the change before committing.
+Golden helpers: anti-aliasing varies subtly across Pillow/FreeType versions, so goldens are compared
+with a per-pixel mean-absolute-error tolerance rather than byte-exact. Set ``SAITENKA_UPDATE_GOLDEN=1``
+to (re)write goldens instead of asserting — always eyeball the change before committing.
+
+Render-profile matrix (``PROFILES`` / ``ENTRY_FACTORIES``): the one place the scale × width × entry
+axes live, so a property extended to a new mode inherits the corners instead of drifting. Lives here,
+NOT in ``conftest.py`` (which 131 test modules depend on) — see the section below.
 """
 
 from __future__ import annotations
@@ -12,10 +16,14 @@ import os
 import sys
 import threading
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pytest
 from PIL import Image
+
+from overlay.model import Theme
+from overlay.panel import Definition, Entry
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
@@ -245,3 +253,96 @@ class FakeTransport:
         with self._cond:
             self._closed = True
             self._cond.notify_all()
+
+
+# --- Shared render-profile matrix (scale × width × entry shape) -------------------------------------
+# The banded-engine PBT was written at ``Theme()`` (scale 1.0) and a single fixed ``WIDTH``, so every
+# earlier property ran where the crisp NATIVE path (only live at scale>1) is a no-op. These factories +
+# curated PROFILES carry the scale/width/entry axes the later modes added. Extend the LIST, not each
+# test — a new mode/cache = one appended row and every property that draws from PROFILES inherits it.
+
+
+def short_entry() -> Entry:
+    """A stubby entry (one short def) — a width change with almost no scroll range."""
+    return Entry(
+        headword=["手", {"tag": "rt", "content": "て"}],
+        defs=[Definition("辞書", ["からだの先の部分。"])],
+    )
+
+
+def tall_entry(n_defs: int = 8) -> Entry:
+    """Many long paragraphs → a real scroll range (the canonical banded-PBT shape)."""
+    para = "これはとても長い定義の説明でありスクロールが必要になるほど縦に伸びる本文です。" * 2
+    return Entry(
+        headword=["本命", {"tag": "rt", "content": "ほんめい"}],
+        defs=[Definition(f"辞書{i}", [para]) for i in range(n_defs)],
+    )
+
+
+def cjk_links_entry(n_defs: int = 8) -> Entry:
+    """CJK body with an inline cross-reference link → scan cells AND link boxes (the hit-parity shape)."""
+    body = [
+        "追いかけると同義語は",
+        {"tag": "a", "href": "?query=見る", "content": "見る"},
+        "。長い説明文が続く。" * 2,
+    ]
+    return Entry(
+        headword=["掛ける", {"tag": "rt", "content": "かける"}],
+        defs=[Definition(f"辞書{i}", body) for i in range(n_defs)],
+    )
+
+
+def many_homograph_entry(n_defs: int = 12) -> Entry:
+    """A synthetic polysemous word: many varied CJK defs + links, the tallest-wrap shape. (The real
+    掛ける/する parity is the skip-if-no-DB integration test — this is its deterministic stand-in.)"""
+    bodies = [
+        ["ある動作をすること。", {"tag": "a", "href": "?query=為る", "content": "為る"}, "の意。"],
+        ["水などを上からそそぐ。「水を—」" * 2],
+        [
+            "ある状態にする。「鍵を—」また、",
+            {"tag": "a", "href": "?query=掛かる", "content": "掛かる"},
+        ],
+        ["長い説明文がここに続いて縦に伸びる本文。" * 3],
+    ]
+    return Entry(
+        headword=["掛ける", {"tag": "rt", "content": "かける"}],
+        defs=[Definition(f"語義{i}", bodies[i % len(bodies)]) for i in range(n_defs)],
+    )
+
+
+ENTRY_FACTORIES = {
+    "short": short_entry,
+    "tall": tall_entry,
+    "cjk_links": cjk_links_entry,
+    "many_homograph": many_homograph_entry,
+}
+
+
+class Profile(NamedTuple):
+    """A (theme, width, entry-shape) corner of the render config space. Carries the production ``Theme``
+    itself (not a bare scale float) — so ``profile.theme`` is passed straight through to ``panel_rows`` /
+    the windowed engine with no re-construction, and a profile can vary any theme axis, not just scale.
+    ``width`` stays a sibling: it's the OTHER, independent geometry axis (one theme renders many widths)."""
+
+    theme: Theme
+    width: int
+    entry_key: str
+
+    def entry(self) -> Entry:
+        return ENTRY_FACTORIES[self.entry_key]()
+
+    @property
+    def id(self) -> str:  # a readable pytest node-id suffix
+        return f"s{self.theme.scale}-w{self.width}-{self.entry_key}"
+
+
+# Curated corners, NOT the 3×2×4 Cartesian product — each row targets a distinct interaction the
+# post-PBT modes added. ``Profile(Theme(), 384, "tall")`` reproduces the exact pre-existing assertions.
+PROFILES: list[Profile] = [
+    Profile(Theme(), 384, "tall"),  # the pre-existing baseline — keeps old coverage byte-identical
+    Profile(Theme(scale=2.0), 640, "cjk_links"),  # hi-dpi crisp path + links + reference tip width
+    Profile(
+        Theme(scale=1.76), 640, "many_homograph"
+    ),  # the real fractional bug scale, tallest wrap
+    Profile(Theme(), 640, "short"),  # width change WITHOUT scale — isolates wrap-by-width
+]
