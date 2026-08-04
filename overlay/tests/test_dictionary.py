@@ -66,13 +66,38 @@ SC = {"type": "structured-content", "content": [{"tag": "div", "content": "定�
 
 
 def test_glossary_unwrap():
-    nodes = _glossary_to_nodes(
-        ["plain", SC, {"type": "text", "text": "t"}, {"type": "image", "path": "x.png"}]
-    )
-    assert nodes[0] == "plain"
-    assert nodes[1] == SC["content"]  # structured-content unwrapped
-    assert nodes[2] == "t"
-    assert nodes[3]["tag"] == "img"
+    # Per-type extraction, exercised one item at a time (a single-item glossary is NOT block-wrapped, so
+    # this asserts the raw unwrap: sc→content, text→str, image→img tag).
+    assert _glossary_to_nodes(["plain"]) == ["plain"]
+    assert _glossary_to_nodes([SC]) == [SC["content"]]  # structured-content unwrapped
+    assert _glossary_to_nodes([{"type": "text", "text": "t"}]) == ["t"]
+    assert _glossary_to_nodes([{"type": "image", "path": "x.png"}])[0]["tag"] == "img"
+
+
+def test_multi_item_glossary_blocks_each_sense_on_its_own_line():
+    # Regression (大辞林 相手 → 相手方/相手次第/相手役): each glossary ARRAY item is a separate cross-ref;
+    # they must render as separate blocks, not one flowing underlined run. Multi-item ⇒ each div-wrapped.
+    from overlay.sc.walk import walk
+
+    glossary = [
+        {
+            "type": "structured-content",
+            "content": {"tag": "a", "href": "?query=相手方", "content": "相手方"},
+        },
+        {
+            "type": "structured-content",
+            "content": {"tag": "a", "href": "?query=相手次第", "content": "相手次第"},
+        },
+        {
+            "type": "structured-content",
+            "content": {"tag": "a", "href": "?query=相手役", "content": "相手役"},
+        },
+    ]
+    nodes = _glossary_to_nodes(glossary)
+    assert all(n.get("tag") == "div" for n in nodes)  # each sense block-wrapped
+    blocks = walk(nodes)
+    texts = ["".join(getattr(s, "text", "") for s in b.flow) for b in blocks]
+    assert texts == ["相手方", "相手次第", "相手役"]  # three separate lines, not one run
 
 
 def test_glosses_of_separates_block_and_chip_items():
