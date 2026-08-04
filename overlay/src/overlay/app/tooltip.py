@@ -759,6 +759,13 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     tok = reader.tokens[index]
     inflected = reader._inflected_surface(index)
     cap = reader._tip_cap()
+    # Freeze the frame FIRST — before the (main-thread) panel build + compose — so a hover pauses
+    # instantly and the cue can't advance while the tooltip is still rendering. Its own span so the IPC
+    # cost stays attributable; the round-trips are ~5ms, negligible vs the build/compose it now precedes.
+    with otel_metrics.traced("pause_ipc"):
+        if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
+            reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough
+            reader._paused_by_tip = True
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.
     # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the
@@ -804,16 +811,13 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
         reader._tip_xy = place_panel(reader, st.width, wx, wy, b.h, reader._tip_view_h)
         render_tip_view(reader)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
-    # Pause-on-hover IPC: a _prop("pause") round-trip every hover + a set_property when it pauses —
-    # two synchronous mpv round-trips, the untraced remainder of tooltip_show's self-time (the trace
-    # showed ~876 round-trips at ~5ms). Its own span so that IPC cost stops hiding inside the parent.
-    with otel_metrics.traced("pause_ipc"):
-        if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
-            reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format; freeze the frame while you read
-            reader._paused_by_tip = True
-    # One panel: the blit above already composited native (crisp) at hi-dpi; the scroll-ahead worker
-    # warms upcoming native bands. Keep the source token for the scroll path's warm requests.
+    # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
+    # direct-paint (#149) path is soft too. Ask the scroll-ahead worker to warm the native bands and let
+    # the poll loop (apply_pending_crisp) upgrade soft→crisp. Keep the source token for scroll warms.
     reader._tip_tok, reader._tip_inflected = tok, inflected
+    if painted:
+        reader._crisp_pending = True  # direct-paint is soft → poll upgrades once bands warm
+    prefetch.request_render_ahead(reader, 1)  # warm the current native viewport off the main thread
 
 
 def place_panel(
@@ -952,6 +956,25 @@ def render_tip_view(reader: Reader) -> None:
     )
 
 
+def apply_pending_crisp(reader: Reader) -> None:
+    """Poll loop: once a soft first paint's native bands are warmed by the scroll-ahead worker, re-blit
+    the base tooltip ONCE to upgrade soft→crisp (``_blit_native`` composites crisp when warm and clears
+    the flag). No-op until warm / when nothing is pending — so it costs a cheap warmth check per tick,
+    never a re-blit-per-tick churn."""
+    if not reader._crisp_pending:
+        return
+    st = reader._tip_state
+    if st is None:
+        reader._crisp_pending = False
+        return
+    vh = min(reader._tip_view_h, st.full_height)
+    y0 = max(0, min(reader._tip_scroll, max(0, st.full_height - vh)))
+    if st.native_viewport_warm(y0, vh, reader._raster_scale):
+        render_tip_view(
+            reader
+        )  # warm now → _blit_native composites crisp and clears _crisp_pending
+
+
 def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: int):
     """One-panel (scale-boundary) blit: composite the ONE reference panel's viewport at the display scale
     — native crisp glyph masks over the 1× geometry — and upload 1:1. Soft below the crisp threshold
@@ -962,18 +985,30 @@ def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: i
     )  # bucketed → matches hit_target's inverse; reuses cached native bands
     if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
         reader._crisp_miss = "not_hidpi"
+        reader._crisp_pending = False
         return blit_panel(reader, st, scroll, view_h, xy, oid)
     full_h = st.full_height
     vh = min(view_h, full_h)
     y0 = max(0, min(scroll, max(0, full_h - vh)))
+    # SOFT-FIRST (plan B3): a cold native viewport rasters O(viewport) glyph masks synchronously (~scale²
+    # px) — too slow for the hot path. Paint the instant 1× upscale now, flag the poll loop to upgrade,
+    # and let the scroll-ahead worker warm the native bands. Only composite crisp when they're already warm
+    # (a cheap memoised assemble). This keeps show/scroll responsive; crisp lands a frame or two later.
+    if not st.native_viewport_warm(y0, vh, scale):
+        reader._crisp_miss = "warming"
+        reader._crisp_pending = True  # poll's apply_pending_crisp re-blits once the bands warm
+        return blit_panel(reader, st, scroll, view_h, xy, oid)
     try:
-        # crisp=native (soft_reason="" — this IS the crisp path, not a soft fallback)
+        # crisp=native (soft_reason="" — this IS the crisp path, not a soft fallback). warm_only: the
+        # main thread NEVER rasters — the bands are warm (gated above); a raced eviction shows bg, not a
+        # synchronous raster. All rasterisation is a worker job (structural, not a thread check).
         with otel_metrics.traced("tip_compose", soft_reason="", scale=f"{scale:.4f}"):
-            arr = st.viewport(y0, vh, overscan=vh, scale=scale)  # native BGRA over 1× geometry
+            arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
         log.debug("native compose failed", exc_info=True)
         return blit_panel(reader, st, scroll, view_h, xy, oid)
     reader._crisp_miss = ""
+    reader._crisp_pending = False
     if otel_metrics.crisp_swaps is not None:
         otel_metrics.crisp_swaps.add(1)
     # y0/full_h are display px so decorate_and_upload's scrollbar-thumb geometry stays right; the array

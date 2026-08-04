@@ -48,6 +48,32 @@ if TYPE_CHECKING:
 # vibe/windowed-raster-pr3-plan.md). Small rows (header/chip/freq) are one band — never split.
 _BAND_PX = 256
 
+# Fail-fast guard: NATIVE (crisp) rasterisation must run on a WORKER, never the render loop. The main
+# path is structurally warm-only (it reads cached bands, never calls the raster leaf), so this only
+# CATCHES a regression. The predicate is main-PROCESS main-thread — a worker thread (different thread)
+# and a pool SUBPROCESS (``parent_process() is not None``) both read False, so it's correct for the
+# free-threaded thread pool AND the GIL build's ProcessPoolExecutor (a bare ``main_thread()`` check would
+# false-trip inside a subprocess's own main thread). The app arms it at startup; tests leave it off
+# (they drive the engine synchronously on the main thread on purpose).
+_GUARD_MAIN_RENDER = False
+
+
+def guard_main_render(on: bool = True) -> None:  # noqa: FBT001, FBT002
+    """Arm/disarm the native-raster-on-the-render-loop guard (the run loop arms it; tests leave it off)."""
+    global _GUARD_MAIN_RENDER
+    _GUARD_MAIN_RENDER = on
+
+
+def _on_render_loop() -> bool:
+    """True only on the MAIN process's MAIN thread (the render loop) — excludes worker threads and pool
+    subprocesses. See :func:`guard_main_render`."""
+    import multiprocessing
+
+    return (
+        threading.current_thread() is threading.main_thread()
+        and multiprocessing.parent_process() is None
+    )
+
 
 def _row_bands(height: int, band_px: int = _BAND_PX) -> list[tuple[int, int, int]]:
     """Tile a row of ``height`` px into ``(band_index, y0, y1)`` bands of ≤ ``band_px`` — the render +
@@ -577,7 +603,13 @@ class WindowedPanel:
         return out
 
     def viewport_bgra(
-        self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
+        self,
+        scroll: int,
+        view_h: int,
+        overscan: int = 0,
+        *,
+        scale: float = 1.0,
+        warm_only: bool = False,
     ) -> np.ndarray:
         """The viewport as premul-BGRA via per-band BGRA row-copies (#138) — no per-frame whole-viewport
         convert. Byte-identical to ``to_bgra_array(self.viewport(...))``; RGBA :meth:`viewport` stays for
@@ -589,7 +621,8 @@ class WindowedPanel:
         separate cache/code path, so ``scale == 1.0`` stays byte-identical."""
         if scale != 1.0:
             with self._lock:
-                return self._scaled_assemble_bgra(_NativeView(scroll, view_h, overscan, scale))
+                v = _NativeView(scroll, view_h, overscan, scale)
+                return self._scaled_assemble_bgra(v, warm_only=warm_only)
         with self._lock:
             if scroll == 0 and self._first_view is not None:
                 vh, ov, arr = self._first_view
@@ -683,6 +716,11 @@ class WindowedPanel:
         if cb is not None:
             self._scaled_blocks.move_to_end(key)
             return cb
+        if _GUARD_MAIN_RENDER and _on_render_loop():  # regression guard — main path is warm-only
+            raise RuntimeError(
+                "native band raster reached the render loop — crisp rasterisation must run on a worker "
+                "(the main thread composites warm bands only; see guard_main_render / warm_only)"
+            )
         row = self._rows[i]
         if (
             row.render_window is not None
@@ -737,10 +775,30 @@ class WindowedPanel:
             otel_metrics.bgra_memo_hits.add(1)
         return arr
 
-    def _scaled_placements(self, v: _NativeView):
+    def native_viewport_warm(self, scroll: int, view_h: int, scale: float) -> bool:
+        """True when every native band the viewport ``[scroll, scroll+view_h)`` needs is already cached at
+        ``scale`` — so a native compose is a cheap memoised assemble, not a synchronous raster. The blit
+        uses this to paint SOFT (instant) on a cold viewport and upgrade to crisp once the bands warm."""
+        with self._lock:
+            v = _NativeView(scroll, view_h, 0, scale)
+            table, start, end = self._scaled_visible(v)
+            lo, hi = scroll, scroll + view_h
+            for i in range(start, end):
+                if not self._offsets.known(i):
+                    return False
+                row_top = table.starts[i]
+                for b, y0, y1 in self._row_band_spans(i):
+                    overlaps = row_top + y1 > lo and row_top + y0 < hi
+                    if overlaps and (i, b, v.skey) not in self._scaled_blocks:
+                        return False
+            return True
+
+    def _scaled_placements(self, v: _NativeView, *, warm_only: bool):
         """Yield ``(i, span, cb, band_top)`` for every visible native band, placed by CUMULATIVE device
         height within each row (seam-exact). Shared by the BGRA and RGBA compositors so their geometry
-        can't drift. Call under ``self._lock``."""
+        can't drift. ``warm_only`` (the MAIN-thread path) reads cached bands only — a miss yields ``cb=None``
+        (composited as background), NEVER a synchronous raster; a worker warms them. ``warm_only=False``
+        rasters misses (worker-only). Call under ``self._lock``."""
         table, start, end = self._scaled_visible(v)
         _dev_w, _dev_vh, dev_scroll = v.dims(self.width)
         for i in range(start, end):
@@ -750,17 +808,24 @@ class WindowedPanel:
             cum = 0
             for span in self._row_band_spans(i):
                 _b, y0, y1 = span
-                cb = self._scaled_band(i, span, v.scale)
+                cb = (
+                    self._scaled_blocks.get((i, span[0], v.skey))
+                    if warm_only
+                    else self._scaled_band(i, span, v.scale)
+                )
                 yield i, span, cb, r_i + cum - dev_scroll
                 cum += round((y1 - y0) * v.scale)  # next band abuts (device band height)
 
-    def _scaled_assemble_bgra(self, v: _NativeView) -> np.ndarray:
+    def _scaled_assemble_bgra(self, v: _NativeView, *, warm_only: bool = False) -> np.ndarray:
         """Assemble the native viewport as premul-BGRA (``round(view_h×scale) × round(width×scale)``) by
-        disjoint device-px row-copies of the visible native bands. Call under ``self._lock``."""
+        disjoint device-px row-copies of the visible native bands. ``warm_only`` never rasters (main path).
+        Call under ``self._lock``."""
         dev_w, dev_vh, _dev_scroll = v.dims(self.width)
         out = np.empty((dev_vh, dev_w, 4), np.uint8)
         out[:] = self._scaled_bg()
-        for i, span, cb, band_top in self._scaled_placements(v):
+        for i, span, cb, band_top in self._scaled_placements(v, warm_only=warm_only):
+            if cb is None:  # warm_only miss → leave background; a worker will warm this band
+                continue
             src_y0, dst_y = max(0, -band_top), max(0, band_top)
             h = min(cb.h - src_y0, dev_vh - dst_y)
             if h <= 0:
@@ -770,12 +835,14 @@ class WindowedPanel:
         self._trim_scaled()
         return out
 
-    def _scaled_composite_bands(self, v: _NativeView) -> Image.Image:
+    def _scaled_composite_bands(self, v: _NativeView, *, warm_only: bool = False) -> Image.Image:
         """The native viewport as an RGBA image (goldens/skeleton parity with :meth:`viewport`). Same
         cumulative device placement as :meth:`_scaled_assemble_bgra`. Call under ``self._lock``."""
         dev_w, dev_vh, _dev_scroll = v.dims(self.width)
         out = Image.new("RGBA", (dev_w, dev_vh), self.theme.bg)
-        for _i, _span, cb, band_top in self._scaled_placements(v):
+        for _i, _span, cb, band_top in self._scaled_placements(v, warm_only=warm_only):
+            if cb is None:  # warm_only miss → background; a worker will warm this band
+                continue
             src_y0, dst_y = max(0, -band_top), max(0, band_top)
             h = min(cb.h - src_y0, dev_vh - dst_y)
             if h <= 0:

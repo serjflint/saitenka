@@ -167,12 +167,27 @@ class Panel:
         return True
 
     def viewport(
-        self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
+        self,
+        scroll: int,
+        view_h: int,
+        overscan: int = 0,
+        *,
+        scale: float = 1.0,
+        warm_only: bool = False,
     ) -> np.ndarray:
         """Composite the ``[scroll, scroll+view_h)`` viewport as a premultiplied BGRA array via the
         per-band BGRA fast path (#138). ``overscan`` warms one screen of blocks below the fold. ``scale``
-        > 1 composites the crisp NATIVE viewport over the same 1× geometry (scale-boundary arch)."""
-        return self.windowed.viewport_bgra(scroll, view_h, overscan=overscan, scale=scale)
+        > 1 composites the crisp NATIVE viewport over the same 1× geometry (scale-boundary arch).
+        ``warm_only`` (the main-thread path) composites cached bands only — a miss is background, never a
+        synchronous raster; a worker warms it."""
+        return self.windowed.viewport_bgra(
+            scroll, view_h, overscan=overscan, scale=scale, warm_only=warm_only
+        )
+
+    def native_viewport_warm(self, scroll: int, view_h: int, scale: float) -> bool:
+        """True when the native ``[scroll, scroll+view_h)`` viewport is already cached at ``scale`` — a
+        cheap crisp compose. The blit paints soft on a cold viewport and upgrades once this goes true."""
+        return self.windowed.native_viewport_warm(scroll, view_h, scale)
 
     def render_ahead(
         self, scroll: int, view_h: int, *, direction: int, should_cancel, scale: float = 1.0
