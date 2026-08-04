@@ -222,6 +222,11 @@ class WindowedPanel:
         # Per-band opaque premul-BGRA, converted once (#138) so a warm scroll frame is disjoint numpy
         # row-copies, not a per-frame whole-viewport convert. Keyed like _blocks; dropped on re-store/evict.
         self._bgra: dict[tuple[int, int], np.ndarray] = {}
+        # NATIVE (scale>1) band pixels, keyed (row, band, scale) — kept SEPARATE from the 1× cache so the
+        # reference hot path is byte-for-byte untouched (the scale-boundary rewrite, Stage 2). Geometry
+        # (_geom) stays 1×/scale-free, so hit-testing is unchanged. Bounded by _scaled_cap (LRU).
+        self._scaled_blocks: OrderedDict[tuple[int, int, float], CachedBlock] = OrderedDict()
+        self._scaled_cap = 64
         self._bg_bgra: np.ndarray | None = None  # theme.bg as a (4,) premul-BGRA pixel; memoised
         # Retained per-ROW hit geometry, accumulated across the row's bands (row-local boxes), NEVER
         # evicted — so a hover resolves even when a band's pixels are gone. _geom_seen dedups a line
@@ -539,11 +544,20 @@ class WindowedPanel:
                 out[dst_y : dst_y + h] = self._band_bgra((i, b), cb)[src_y0 : src_y0 + h]
         return out
 
-    def viewport_bgra(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
+    def viewport_bgra(
+        self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
+    ) -> np.ndarray:
         """The viewport as premul-BGRA via per-band BGRA row-copies (#138) — no per-frame whole-viewport
         convert. Byte-identical to ``to_bgra_array(self.viewport(...))``; RGBA :meth:`viewport` stays for
         goldens/skeleton. A scroll=0 request matching an idle :meth:`precompose` returns a copy of the
-        cached composite (0 synchronous rasters) — the warm-hover fast path."""
+        cached composite (0 synchronous rasters) — the warm-hover fast path.
+
+        ``scale`` > 1 is the crisp NATIVE viewport (scale-boundary arch): a ``round(view_h×scale) ×
+        round(width×scale)`` device buffer assembled from native bands over the SAME 1× geometry — a
+        separate cache/code path, so ``scale == 1.0`` stays byte-identical."""
+        if scale != 1.0:
+            with self._lock:
+                return self._scaled_assemble_bgra(scroll, view_h, overscan, scale)
         with self._lock:
             if scroll == 0 and self._first_view is not None:
                 vh, ov, arr = self._first_view
@@ -598,9 +612,15 @@ class WindowedPanel:
         with self._lock:
             self._first_view = (view_h, overscan, array)
 
-    def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> Image.Image:
+    def viewport(
+        self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
+    ) -> Image.Image:
         """Composite the ``[scroll, scroll+view_h)`` viewport, rendering + evicting BANDS as needed — a
-        cold reach or warm scroll frame touches O(band) getmask2, never O(block)."""
+        cold reach or warm scroll frame touches O(band) getmask2, never O(block). ``scale`` > 1 composites
+        the crisp NATIVE viewport over the same 1× geometry (a separate path; 1.0 is byte-identical)."""
+        if scale != 1.0:
+            with self._lock:
+                return self._scaled_composite_bands(scroll, view_h, overscan, scale)
         with self._lock:
             n0 = self._sync_rasters
             self._grow_prefix(scroll + view_h + overscan)
@@ -614,6 +634,135 @@ class WindowedPanel:
             self._evict(lo, hi)
             self._last_frame_rasters = self._sync_rasters - n0
             return img
+
+    # --- Native (scale>1) crisp path (scale-boundary Stage 2) -------------------------------------
+    # A SEPARATE code path so the 1× hot path above is byte-for-byte untouched. Native bands are placed
+    # by CUMULATIVE device height within a row (seam-exact — no absolute-edge rounding gaps; rows abut
+    # only across bg gaps). Geometry (_geom) stays 1×, so scan_hit/link_hit are unchanged.
+
+    def _scaled_band(self, i: int, b: int, y0: int, y1: int, scale: float) -> CachedBlock:
+        """Native band pixels for row ``i`` band ``[y0, y1)`` at ``scale``, cached in ``_scaled_blocks``
+        (LRU). Body rows raster natively via ``render_window(scale=)``; a non-body row (header/chip) has
+        no windowed renderer, so its 1× full image is upscaled (a pre-composed sprite, not a glyph mask —
+        native non-body rendering is a follow-up). Call under ``self._lock``."""
+        key = (i, b, round(scale, 3))
+        cb = self._scaled_blocks.get(key)
+        if cb is not None:
+            self._scaled_blocks.move_to_end(key)
+            return cb
+        row = self._rows[i]
+        if (
+            row.render_window is not None
+        ):  # body → crisp native band raster (glyph masks at size×scale)
+            img, _scan, _links = row.render_window(y0, y1, scale=scale)
+        else:  # non-body single band → upscale the 1× row image (follow-up: native non-body render)
+            ref, _s, _l = row.render()
+            img = ref.resize(
+                (max(1, round(ref.width * scale)), max(1, round(ref.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+        cb = CachedBlock.make(row.x, y0, img, [], [], compress=False)
+        self._scaled_blocks[key] = cb
+        return cb
+
+    def _trim_scaled(self) -> None:
+        """LRU-bound the native band cache. Visible bands were just touched (moved to the end), so the
+        oldest dropped are off-viewport. Call under ``self._lock``."""
+        while len(self._scaled_blocks) > self._scaled_cap:
+            self._scaled_blocks.popitem(last=False)
+
+    def _scaled_visible(self, scroll: int, view_h: int, overscan: int):
+        """``(table, start, end)`` for the native path — grows the measured prefix like the 1× path."""
+        self._grow_prefix(scroll + view_h + overscan)
+        table = self._offsets.estimated_table()
+        start, end = table.visible_range(scroll, view_h, overscan)
+        return table, start, end
+
+    def _scaled_bg(self) -> np.ndarray:
+        from overlay.bgra import to_bgra_array
+
+        bg = self._bg_bgra
+        if bg is None:
+            bg = to_bgra_array(Image.new("RGBA", (1, 1), self.theme.bg))[0, 0]
+            self._bg_bgra = bg
+        return bg
+
+    def _scaled_band_bgra(self, cb: CachedBlock, dev_w: int, scale: float) -> np.ndarray:
+        """A native band as a full-device-width opaque premul-BGRA array — composited over bg at
+        ``round(x×scale)`` (so an overwrite-copy is exact), matching the 1× ``_band_bgra`` contract."""
+        from overlay.bgra import to_bgra_array
+
+        canvas = Image.new("RGBA", (dev_w, cb.h), self.theme.bg)
+        canvas.alpha_composite(cb.image(), (round(cb.x * scale), 0))
+        return to_bgra_array(canvas)
+
+    def _scaled_assemble_bgra(
+        self, scroll: int, view_h: int, overscan: int, scale: float
+    ) -> np.ndarray:
+        """Assemble the native viewport as premul-BGRA (``round(view_h×scale) × round(width×scale)``) by
+        disjoint device-px row-copies of the visible native bands. Bands within a row are placed by
+        CUMULATIVE device height, so they tile seam-exactly. Call under ``self._lock``."""
+        table, start, end = self._scaled_visible(scroll, view_h, overscan)
+        dev_w, dev_vh, dev_scroll = (
+            round(self.width * scale),
+            max(1, round(view_h * scale)),
+            round(scroll * scale),
+        )
+        out = np.empty((dev_vh, dev_w, 4), np.uint8)
+        out[:] = self._scaled_bg()
+        for i in range(start, end):
+            if not self._offsets.known(i):
+                continue
+            r_i = round(table.starts[i] * scale)
+            cum = 0
+            for b, y0, y1 in self._row_band_spans(i):
+                band_h = round((y1 - y0) * scale)
+                cb = self._scaled_band(i, b, y0, y1, scale)
+                band_top = r_i + cum - dev_scroll
+                cum += band_h  # advance by device band height → next band abuts (seam-exact)
+                src_y0, dst_y = max(0, -band_top), max(0, band_top)
+                h = min(cb.h - src_y0, dev_vh - dst_y)
+                if h <= 0:
+                    continue
+                out[dst_y : dst_y + h] = self._scaled_band_bgra(cb, dev_w, scale)[
+                    src_y0 : src_y0 + h
+                ]
+        self._trim_scaled()
+        return out
+
+    def _scaled_composite_bands(
+        self, scroll: int, view_h: int, overscan: int, scale: float
+    ) -> Image.Image:
+        """The native viewport as an RGBA image (goldens/skeleton parity with :meth:`viewport`). Same
+        cumulative device placement as :meth:`_scaled_assemble_bgra`. Call under ``self._lock``."""
+        table, start, end = self._scaled_visible(scroll, view_h, overscan)
+        dev_w, dev_vh, dev_scroll = (
+            round(self.width * scale),
+            max(1, round(view_h * scale)),
+            round(scroll * scale),
+        )
+        out = Image.new("RGBA", (dev_w, dev_vh), self.theme.bg)
+        for i in range(start, end):
+            if not self._offsets.known(i):
+                continue
+            r_i = round(table.starts[i] * scale)
+            cum = 0
+            for b, y0, y1 in self._row_band_spans(i):
+                band_h = round((y1 - y0) * scale)
+                cb = self._scaled_band(i, b, y0, y1, scale)
+                band_top = r_i + cum - dev_scroll
+                cum += band_h
+                src_y0, dst_y = max(0, -band_top), max(0, band_top)
+                h = min(cb.h - src_y0, dev_vh - dst_y)
+                if h <= 0:
+                    continue
+                im = cb.image()
+                crop = (
+                    im if src_y0 == 0 and h == cb.h else im.crop((0, src_y0, im.width, src_y0 + h))
+                )
+                out.alpha_composite(crop, (round(cb.x * scale), dst_y))
+        self._trim_scaled()
+        return out
 
     def render_ahead(
         self,

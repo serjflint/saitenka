@@ -204,9 +204,8 @@ class Row:
     # ``render_window(y0, y1)`` rasters just the band ``[y0, y1)`` (image + row-local scan/link boxes in
     # band space). Non-body rows are small (one band, never split) and keep only ``render``.
     measure: Callable[[], int] | None = None
-    render_window: Callable[[int, int], tuple[Image.Image, list[ScanBox], list[LinkBox]]] | None = (
-        None
-    )
+    # ``render_window(y0, y1, *, scale=1.0)`` — scale>1 rasters the band natively (scale-boundary arch).
+    render_window: Callable[..., tuple[Image.Image, list[ScanBox], list[LinkBox]]] | None = None
     # Whole-row scan/link hitboxes (row-local) from the layout, no raster — lets the banded engine
     # retain a MEASURED-but-not-yet-rastered row's geometry (a scroll-jump to the bottom keeps the top
     # hoverable). Set on def-body rows alongside ``measure``; both share the memoised layout handle.
@@ -276,8 +275,8 @@ def _emit_def_rows(
             def measure() -> int:
                 return _laid().full_height
 
-            def window(y0: int, y1: int):
-                return raster_body_window(_laid(), y0, y1)
+            def window(y0: int, y1: int, *, scale: float = 1.0):
+                return raster_body_window(_laid(), y0, y1, scale=scale)
 
             def geometry():
                 return _laid().geometry()
