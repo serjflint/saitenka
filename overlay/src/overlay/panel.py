@@ -124,10 +124,15 @@ def load_entry(path: str | Path) -> Entry:
     )
 
 
-def _flow_row(flow, content_w: int, scale: float = 1.35) -> Image.Image:
+def _flow_row(
+    flow, content_w: int, scale: float = 1.35, *, render_scale: float = 1.0
+) -> Image.Image:
+    # ``scale`` is the LINE-HEIGHT scale (a layout knob); ``render_scale`` > 1 is the display factor
+    # that rasters the row NATIVELY (crisp non-body rows for the scale-boundary arch).
     return render_flow(
         flow,
         FlowBlock(width=content_w, padding=0, line_height_scale=scale, background=(0, 0, 0, 0)),
+        scale=render_scale,
     )
 
 
@@ -181,7 +186,8 @@ class Row:
     paint its visible top first and finish the below-the-fold bodies in the background."""
 
     x: int
-    render: Callable[[], tuple[Image.Image, list[ScanBox], list[LinkBox]]]
+    # ``render(*, scale=1.0)`` — scale>1 rasters the row NATIVELY (crisp non-body; scale-boundary arch).
+    render: Callable[..., tuple[Image.Image, list[ScanBox], list[LinkBox]]]
     gap: int | None = None  # trailing gap after this row (None = theme.gap); lets a split def body
     # keep its 3px inter-block spacing while other rows use the 7px row gap
     # The dictionary section this row STARTS (set on def-head rows) — the tab row and keyboard
@@ -228,13 +234,13 @@ def _emit_def_rows(
     body_style = Style(size=theme.px(23), color=theme.text)
     for i, d in enumerate(defs, 1):
 
-        def _def_head(i=i, d=d):
+        def _def_head(i=i, d=d, *, scale: float = 1.0):
             dh: list = [Span(f"{i}. ", Style(size=theme.px(20), weight=700, color=theme.text))]
             for tag in d.tags:  # defTag pills: ★ / priority form
                 dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
                 dh.append(Span(" ", Style(size=theme.px(19))))
             dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
-            return _flow_row(dh, content_w, scale=1.7), [], []
+            return _flow_row(dh, content_w, 1.7, render_scale=scale), [], []
 
         rows.append(Row(m, _def_head, section=d.dict_name if sectioned else None))
 
@@ -314,18 +320,18 @@ def _emit_group_rows(
     for gi, g in enumerate(groups):
         mined = gi < len(group_mined) and group_mined[gi]
 
-        def _group_head(g=g, mined=mined):
+        def _group_head(g=g, mined=mined, *, scale: float = 1.0):
             flow: list = [
                 Span("・ ", Style(size=theme.px(30), color=theme.accent)),
                 *inline_flow(g.headword, Style(size=theme.px(30), weight=700, color=theme.text)),
             ]
-            img = _flow_row(flow, content_w)
+            img = _flow_row(flow, content_w, render_scale=scale)
             links: list[LinkBox] = []
             if add_button:
                 add = theme.px(_ADD_SIZE)
-                btn = render_icon(Icon.MINED if mined else Icon.ADD, add)
-                bx, by = content_w - add, theme.px(2)
-                img.alpha_composite(btn, (bx, by))
+                btn = render_icon(Icon.MINED if mined else Icon.ADD, round(add * scale))
+                bx, by = content_w - add, theme.px(2)  # LinkBox stays REFERENCE px (hit geometry)
+                img.alpha_composite(btn, (round(bx * scale), round(by * scale)))
                 links.append(LinkBox(f"mine:{g.card_index}", bx, by, add, add))
             return img, [], links
 
@@ -357,23 +363,26 @@ def panel_rows(
     rows: list[Row] = []
 
     # --- header: ▶ + big ruby headword, ⊕/✓ add + 🔊 speaker top-right ---
-    def _header() -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
+    def _header(*, scale: float = 1.0) -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
         hw = [
             Span("▶", Style(size=theme.px(28), color=theme.accent)),
             Span(" ", Style(size=theme.px(46))),
         ]
         hw += inline_flow(entry.headword, Style(size=theme.px(46), weight=700, color=theme.text))
-        hdr = _flow_row(hw, content_w)
+        hdr = _flow_row(hw, content_w, render_scale=scale)  # native big ruby word at scale
         right = content_w
         top = theme.px(_ICON_TOP)
-        if speak_button:
-            spk = render_icon(Icon.SPEAKER, theme.px(_SPK_SIZE))
-            hdr.alpha_composite(spk, (right - spk.width, top))
-            right -= theme.px(_SPK_SIZE) + theme.px(_ICON_GAP)
+        if speak_button:  # icons render at native size, composited at scaled positions
+            sz = theme.px(_SPK_SIZE)
+            spk = render_icon(Icon.SPEAKER, round(sz * scale))
+            hdr.alpha_composite(spk, (round((right - sz) * scale), round(top * scale)))
+            right -= sz + theme.px(_ICON_GAP)
         if header_add:
             add = theme.px(_ADD_SIZE)
-            btn = render_icon(Icon.MINED if mined else Icon.ADD, add)
-            hdr.alpha_composite(btn, (right - add, top + theme.px(2)))
+            btn = render_icon(Icon.MINED if mined else Icon.ADD, round(add * scale))
+            hdr.alpha_composite(
+                btn, (round((right - add) * scale), round((top + theme.px(2)) * scale))
+            )
         return hdr, [], []
 
     rows.append(Row(m, _header))
@@ -382,7 +391,7 @@ def panel_rows(
     # the reading; the purple text pill in the freq row stays as the fallback ---
     if entry.pitches:
 
-        def _pitch_row(pitches=tuple(entry.pitches)):
+        def _pitch_row(pitches=tuple(entry.pitches), *, scale: float = 1.0):
             from overlay.draw.pitch import render_pitch_graph
 
             flow: list = []
@@ -394,14 +403,14 @@ def panel_rows(
                     flow.append(
                         ImgBox(width=g.width, height=g.height, sprite=g, baseline_drop=theme.px(4))
                     )
-            return _flow_row(flow, content_w, scale=1.5), [], []
+            return _flow_row(flow, content_w, 1.5, render_scale=scale), [], []
 
         rows.append(Row(m, _pitch_row))
 
     # --- inflection chain: dot marker + one chip per Yomitan transform name (● [-て][-いる][-た]) ---
     if entry.inflection_chain:
 
-        def _chain(chain=tuple(entry.inflection_chain)):
+        def _chain(chain=tuple(entry.inflection_chain), *, scale: float = 1.0):
             pz = theme.px(18)
             cflow: list = [
                 ImgBox(
@@ -418,14 +427,14 @@ def panel_rows(
                 cflow.append(
                     ChipBox(name, ChipStyle(size=theme.px(18), weight=600, bg=INFLECTION_BG))
                 )
-            return _flow_row(cflow, content_w, scale=1.7), [], []
+            return _flow_row(cflow, content_w, 1.7, render_scale=scale), [], []
 
         rows.append(Row(m, _chain))
 
     # --- grammar tags: dot marker + muted text ---
     for tag in entry.tags:
 
-        def _tag(tag=tag):
+        def _tag(tag=tag, *, scale: float = 1.0):
             pz = theme.px(18)
             tflow = [
                 ImgBox(
@@ -436,14 +445,14 @@ def panel_rows(
                 ),
                 Span("  " + tag, Style(size=theme.px(20), color=theme.muted)),
             ]
-            return _flow_row(tflow, content_w), [], []
+            return _flow_row(tflow, content_w, render_scale=scale), [], []
 
         rows.append(Row(m, _tag))
 
     # --- frequency pills: two-tone (colored name + light value), SubMiner-style ---
     if entry.freqs:
 
-        def _freqs(freqs=tuple(entry.freqs)):
+        def _freqs(freqs=tuple(entry.freqs), *, scale: float = 1.0):
             fflow: list = []
             for f in freqs:
                 # freq pills are secondary signal → render a notch smaller than the def pills (px19)
@@ -454,20 +463,20 @@ def panel_rows(
                     )
                 )
                 fflow.append(Span("  ", Style(size=theme.px(16))))
-            return _flow_row(fflow, content_w, scale=1.7), [], []
+            return _flow_row(fflow, content_w, 1.7, render_scale=scale), [], []
 
         rows.append(Row(m, _freqs))
 
     # --- reading label (dict-name pill + reading, e.g. よむ[1]) ---
     if entry.reading_label:
 
-        def _reading(rl=entry.reading_label):
+        def _reading(rl=entry.reading_label, *, scale: float = 1.0):
             dn, txt = rl
             flow = [
                 ChipBox(dn, ChipStyle(size=theme.px(19), bg=theme.purple)),
                 Span("  " + txt, Style(size=theme.px(20), color=theme.text)),
             ]
-            return _flow_row(flow, content_w, scale=1.7), [], []
+            return _flow_row(flow, content_w, 1.7, render_scale=scale), [], []
 
         rows.append(Row(m, _reading))
 

@@ -17,7 +17,7 @@ import util
 from PIL import Image
 
 from overlay.model import Span, Style
-from overlay.render.flow import layout_flow, render_flow_window
+from overlay.render.flow import layout_flow, render_flow, render_flow_window
 from overlay.render.layout import Block
 
 _WIDTH, _PAD = 300, 8
@@ -65,3 +65,15 @@ def test_downscaled_native_band_matches_the_reference_band():
     native = render_flow_window(lay, 0, h, scale=2.0)
     down = native.resize(ref.size, Image.Resampling.LANCZOS)
     assert util.mae(down, ref) < 5.0  # ~1.0 measured — comfortably a faithful scaled render
+
+
+def test_full_flow_native_render_is_a_faithful_scaled_render():
+    # The non-body raster leaf (render_flow full path, Stage 2b) — headers/chips render natively at
+    # scale instead of upscaling their 1× image. Native size = scaled reference; downscale ≈ 1×.
+    flow = [Span("見出し語", Style(size=40, weight=700)), Span("  タグ", Style(size=20))]
+    block = Block(width=300, padding=8)
+    ref = render_flow(flow, block)
+    native = render_flow(flow, block, scale=2.0)
+    assert native.size == (round(ref.width * 2), round(ref.height * 2))
+    down = native.resize(ref.size, Image.Resampling.LANCZOS)
+    assert util.mae(down, ref) < 8.0

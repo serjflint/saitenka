@@ -474,8 +474,14 @@ def render_flow(
     max_height: int | None = None,
     clipped_out: list | None = None,
     y_window: tuple[int, int] | None = None,
+    *,
+    scale: float = 1.0,
 ) -> Image.Image:
     """Wrap and render an inline stream (text + ruby) into a fixed-width panel image.
+
+    ``scale`` > 1 rasters the whole flow NATIVELY (``round(w×scale) × round(h×scale)``, glyphs at
+    ``size×scale``) over the 1× layout — the crisp non-body raster leaf (scale-boundary arch). 1.0 is
+    byte-identical.
 
     When ``scan_out`` is given, append a per-CJK-character :class:`ScanBox` (flow-image coords) for
     nested scanning. When ``link_out`` is given, append one :class:`LinkBox` per internal ``<a>``
@@ -495,10 +501,19 @@ def render_flow(
     lay = layout_flow(flow, block)
     lines, boxes = lay.lines, lay.boxes
     if y_window is not None:
-        return _render_window(block, lines, boxes, y_window, scan_out, link_out)
+        return _render_window(block, lines, boxes, y_window, scan_out, link_out, scale=scale)
     lines, boxes = _clip_lines_to_height(lines, boxes, max_height, block.padding, clipped_out)
 
-    img, draw, y = new_panel_image(block, boxes)
+    if scale == 1.0:
+        img, draw, y = new_panel_image(block, boxes)
+    else:  # native full render — scaled buffer, glyphs drawn at size×scale via _draw_flow_line
+        from PIL import Image, ImageDraw
+
+        w = block.width + 2 * block.padding
+        h = 2 * block.padding + sum(b[0] for b in boxes)
+        img = Image.new("RGBA", (round(w * scale), max(1, round(h * scale))), block.background)
+        draw = ImageDraw.Draw(img)
+        y = block.padding
     for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
         _draw_flow_line(
             img,
@@ -510,6 +525,7 @@ def render_flow(
             scan_out=scan_out,
             link_out=link_out,
             padding=block.padding,
+            scale=scale,
         )
         y += box
     return img

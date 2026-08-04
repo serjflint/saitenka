@@ -655,12 +655,8 @@ class WindowedPanel:
             row.render_window is not None
         ):  # body → crisp native band raster (glyph masks at size×scale)
             img, _scan, _links = row.render_window(y0, y1, scale=scale)
-        else:  # non-body single band → upscale the 1× row image (follow-up: native non-body render)
-            ref, _s, _l = row.render()
-            img = ref.resize(
-                (max(1, round(ref.width * scale)), max(1, round(ref.height * scale))),
-                Image.Resampling.LANCZOS,
-            )
+        else:  # non-body single band → native full-row render (crisp header/chips at size×scale)
+            img, _s, _l = row.render(scale=scale)
         cb = CachedBlock.make(row.x, y0, img, [], [], compress=False)
         self._scaled_blocks[key] = cb
         return cb
