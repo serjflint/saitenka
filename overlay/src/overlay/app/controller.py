@@ -243,6 +243,7 @@ class Reader:
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
         # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
         self._crisp_on = o.tooltip.crisp_upscale
+        self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes _tip_display_scale (see config)
         self._crisp_lock = threading.Lock()
         self._crisp_req: dict | None = None  # latest build/warm request (newest scroll wins)
         # SSOT: render_tip_view / render_nested_view composite the current viewport crisp DIRECTLY from the
@@ -469,6 +470,8 @@ class Reader:
         at 1080p, 2.0 at 4K. Applied to the composited BGRA at upload and inverted in the hit-test, so
         one 1080p-prewarmed render cache serves every resolution and the tooltip tracks the vertical
         viewport size."""
+        if self._tip_scale_override > 0:  # [tooltip] tip_scale — a fixed cosmetic preference
+            return self._tip_scale_override
         return self.osd[1] / prefetch.REF_H
 
     @property

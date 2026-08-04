@@ -89,6 +89,11 @@ class TooltipOptions:
     """Tooltip geometry + hover feel."""
 
     sub_size: int | None = None  # subtitle font override (None = scale to video)
+    tip_scale: float = 0.0  # reference→display factor for the tooltip crisp render. 0 = AUTO
+    # (osd_h/REF_H: 1.0 @1080p, 2.0 @4K — tracks the video viewport). A positive value FIXES it
+    # regardless of resolution — 1.5 renders crisp native glyph masks at 1.5× on any display, a
+    # cosmetic preference independent of playback res. Also the scale `saitenka prewarm` builds the
+    # mask atlas at, so the crisp upgrade lands from disk instead of paying getmask2 on first native raster.
     bottom_margin_frac: float = 0.06
     tip_max_frac: float = 0.4  # BASE tooltip viewport ≤ this fraction of the video height
     nested_max_frac: float = (
