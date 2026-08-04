@@ -35,8 +35,8 @@ class _RecordingPanel:
     def __init__(self):
         self.calls = []
 
-    def render_ahead(self, scroll, view_h, *, direction, should_cancel):
-        self.calls.append((scroll, view_h, direction, should_cancel()))
+    def render_ahead(self, scroll, view_h, *, direction, should_cancel, scale=1.0):
+        self.calls.append((scroll, view_h, direction, should_cancel(), scale))
         return len(self.calls)
 
 
@@ -88,7 +88,9 @@ def test_worker_drains_the_slot_and_warms_off_thread():
 
     assert handled is True
     assert r._render_ahead_req is None  # slot drained
-    assert panel.calls == [(120, 300, 1, False)]  # warmed at the scroll pos, not cancelled
+    assert panel.calls == [
+        (120, 300, 1, False, 1.0)
+    ]  # warmed at the scroll pos, not cancelled, 1× (flag off)
 
 
 def test_empty_slot_is_not_handled():

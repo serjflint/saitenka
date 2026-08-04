@@ -174,12 +174,20 @@ class Panel:
         > 1 composites the crisp NATIVE viewport over the same 1× geometry (scale-boundary arch)."""
         return self.windowed.viewport_bgra(scroll, view_h, overscan=overscan, scale=scale)
 
-    def render_ahead(self, scroll: int, view_h: int, *, direction: int, should_cancel) -> int:
+    def render_ahead(
+        self, scroll: int, view_h: int, *, direction: int, should_cancel, scale: float = 1.0
+    ) -> int:
         """Warm the blocks just beyond the viewport in the scroll ``direction`` — the off-main-thread
         counterpart to :meth:`viewport`'s synchronous ``overscan``. ``overscan=view_h`` starts the
-        warm past the screen the blit already rendered, so a fast scroll finds them cached."""
+        warm past the screen the blit already rendered, so a fast scroll finds them cached. ``scale`` > 1
+        warms NATIVE bands (one-panel crisp path)."""
         return self.windowed.render_ahead(
-            scroll, view_h, direction=direction, overscan=view_h, should_cancel=should_cancel
+            scroll,
+            view_h,
+            direction=direction,
+            overscan=view_h,
+            should_cancel=should_cancel,
+            scale=scale,
         )
 
 

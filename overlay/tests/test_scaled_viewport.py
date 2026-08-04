@@ -58,6 +58,22 @@ def test_downscaled_native_viewport_matches_the_reference_viewport():
     assert util.mae(down.convert("RGBA"), ref.convert("RGBA")) < 8.0  # ~2.0 measured
 
 
+def test_native_render_ahead_warms_bands_and_matches_a_cold_composite():
+    # Stage 4: render_ahead(scale) warms NATIVE bands off-thread; a warmed composite is byte-identical
+    # to a cold one (cache equivalence) — so pre-warming only removes synchronous rasters, never changes
+    # pixels.
+    cold, total = _panel()
+    _warm_1x(cold, total)
+    cold_img = cold.viewport(0, _VH, scale=2.0)
+
+    warm, wtotal = _panel()
+    _warm_1x(warm, wtotal)
+    warm.render_ahead(0, _VH, direction=1, scale=2.0)  # native warm-ahead
+    assert len(warm._scaled_blocks) > 0  # bands landed in the native cache
+    warm_img = warm.viewport(0, _VH, scale=2.0)
+    assert np.array_equal(to_bgra_array(cold_img), to_bgra_array(warm_img))
+
+
 def test_scaled_composite_leaves_hit_geometry_scale_free():
     # The native path must not disturb the 1× geometry — scan boxes are identical whether or not a
     # scaled viewport was composited (geometry is reference px, the seam invariant).
