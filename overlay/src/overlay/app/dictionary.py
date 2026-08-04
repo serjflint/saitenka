@@ -174,21 +174,32 @@ def _first_gloss(glossary: list, limit: int = 40) -> str:
 
 
 def _glossary_to_nodes(glossary: list) -> list:
-    """Flatten a term's glossary items into structured-content nodes the walker understands."""
+    """Flatten a term's glossary items into structured-content nodes the walker understands.
+
+    Each glossary ARRAY item is a SEPARATE sense / cross-reference — Yomitan renders them as distinct
+    list entries (``display-generator`` ``_appendMultiple`` over the entries). Block-wrap each in a ``div``
+    so consecutive items don't flow into one run: 大辞林's 相手 → 相手方 / 相手次第 / 相手役 cross-ref items
+    were rendering as a single underlined blob. Only when there are 2+ items, so the overwhelmingly common
+    single-item entry stays byte-identical (no golden churn)."""
+    wrap = len(glossary) > 1  # multi-sense entry → each item its own line, like Yomitan
     nodes: list = []
     for it in glossary:
+        node: object
         if isinstance(it, str):
-            nodes.append(it)
+            node = it
         elif isinstance(it, dict):
             t = it.get("type")
             if t == "structured-content":
-                nodes.append(it.get("content"))
+                node = it.get("content")
             elif t == "text":
-                nodes.append(it.get("text", ""))
+                node = it.get("text", "")
             elif t == "image":
-                nodes.append({"tag": "img", "path": it.get("path", "")})
+                node = {"tag": "img", "path": it.get("path", "")}
             else:
-                nodes.append(it)
+                node = it
+        else:
+            continue
+        nodes.append({"tag": "div", "content": node} if wrap else node)
     return nodes
 
 
