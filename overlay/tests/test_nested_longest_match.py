@@ -8,7 +8,7 @@ from util import FakeIPC
 from overlay.app import nested_popup
 from overlay.app.controller import Reader
 from overlay.app.tokenize import Token
-from overlay.model import ScanBox
+from overlay.model import LinkBox, ScanBox
 from overlay.panel import Definition, Entry
 
 
@@ -42,6 +42,47 @@ def test_phrase_extra_terms_returns_the_longest_dictionary_match():
 def test_phrase_extra_terms_is_empty_when_the_dict_set_has_no_phrase_probe():
     reader = Reader(FakeIPC(), dict_set=object())
     assert nested_popup._phrase_extra_terms(reader, _SPLIT) == ()
+
+
+class _RecordingDS:
+    """Records the surface of every entry lookup, so a test can assert WHAT term was looked up."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
+        self.seen.append(tok.surface)
+        return Entry(headword=[tok.surface], reading="", defs=[Definition("辞書", ["定義"])])
+
+
+def test_link_query_is_looked_up_whole_not_tokenized():
+    # Regression (それにしては → その): a cross-reference link ``?query=それにしては`` must look up the WHOLE
+    # compound, not tokenize it and take the first token (それ). Both nav paths build a whole-query token.
+    from overlay.app import tooltip
+    from overlay.app.tokenize import query_token
+
+    assert query_token("それにしては").surface == "それにしては"
+    assert query_token("  ") is None
+
+    ds = _RecordingDS()
+    reader = Reader(FakeIPC(), dict_set=ds)
+    tooltip._navigated_panel(reader, "それにしては")
+    assert ds.seen == ["それにしては"]  # the WHOLE query reached the lookup, not それ
+
+
+def test_open_link_navigates_the_whole_query(monkeypatch):
+    reader = Reader(FakeIPC(), dict_set=_RecordingDS())
+    captured: dict = {}
+    monkeypatch.setattr(
+        nested_popup,
+        "open_nested",
+        lambda _r, tok, inflected, *_a, **_k: captured.update(
+            surface=tok.surface, inflected=inflected
+        ),
+    )
+    lb = LinkBox("それにつけても", 0, 0, 10, 10)
+    nested_popup.open_link(reader, lb, (0, 0), 0)
+    assert captured == {"surface": "それにつけても", "inflected": "それにつけても"}
 
 
 def test_phrase_extra_terms_is_empty_off_a_known_phrase():

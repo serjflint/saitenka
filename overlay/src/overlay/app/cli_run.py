@@ -398,6 +398,10 @@ def _build_run_options(
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
             layout_engine=layout_engine,
+            render_cache=bool(cfg.get("render_cache", _tt.render_cache)),
+            mask_atlas=bool(cfg.get("mask_atlas", _tt.mask_atlas)),
+            render_cache_max_mb=cfg.get("render_cache_max_mb", _tt.render_cache_max_mb),
+            render_cache_min_height=cfg.get("render_cache_min_height", _tt.render_cache_min_height),
         ),
         mining=MiningOptions(
             play_audio=not no_audio_play,

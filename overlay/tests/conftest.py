@@ -37,6 +37,15 @@ def _hermetic_dict_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_cache_dir(tmp_path, monkeypatch):
+    """Point ``cache_dir()`` at a fresh per-test dir so the default-on render cache / mask atlas (#149,
+    used-when-available) never open, read, or write the user's real ``~/…/Caches/saitenka`` — a test dir
+    has no prebuilt ``render-cache.sqlite`` / ``mask-atlas.sqlite``, so both stay inert. Tests that want
+    the caches build their own under ``tmp_path`` and inject/enable them explicitly."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+
+
+@pytest.fixture(autouse=True)
 def _anki_reachable(monkeypatch):
     """Default: AnkiConnect answers, so the ⊕ button shows when mining is configured (existing tests
     assume it) and _anki_ok() stays hermetic — no real localhost:8765 ping. Tests for the Anki-closed

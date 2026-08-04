@@ -388,6 +388,231 @@ def run_pathological(
     return gil_rc
 
 
+def run_render_cache(
+    reps: int, rt: dict, require_ft: bool = False, json_path: str | None = None
+) -> int:
+    """A/B the persistent render cache (#149) on the pathological cold-first-paint corpus: for each word,
+    the COLD first paint with no disk entry (full head raster) vs. after a prior session's precompose was
+    persisted to disk (the seed → copy+upload fast path, skipping the raster). Isolates exactly what the
+    cache buys on the > 16 ms cold tail."""
+    import os
+    import tempfile
+
+    from overlay.app.config import ReaderOptions, TooltipOptions
+
+    ds, tag = _load_dict_set()
+    if ds is None:
+        print("render-cache A/B needs the real dict set (overlay.toml) — nothing to measure")
+        return 1
+
+    cache_dir = tempfile.mkdtemp(prefix="saitenka-bench-render-cache-")
+    os.environ["SAITENKA_CACHE_DIR"] = cache_dir  # paths.cache_dir() reads this each call
+    opts = ReaderOptions(tooltip=TooltipOptions(render_cache=True), prefetch=False)
+    reader = Reader(FakeIPC(), dict_set=ds, options=opts)
+    reader.osd = OSD
+    cap = reader._tip_cap()
+    # The render cache is USE-WHEN-AVAILABLE (opens only if the file exists; prewarm is the builder), so
+    # create the file up front — otherwise prime's store is a no-op and every peek misses. Mirrors prewarm.
+    from pathlib import Path
+
+    from overlay.app.render_cache import RenderCache
+
+    _rc = RenderCache.open(
+        Path(cache_dir) / "render-cache.sqlite", max_bytes=reader._render_cache_max_bytes
+    )
+    if _rc is not None:
+        _rc.close()
+    corpus = _pathological_corpus(ds)
+
+    from overlay.app.subtitles import WordBox
+
+    def prime(term: str, reading: str) -> None:
+        """Simulate a prior session / `saitenka prewarm`: build + precompose + persist the head, using
+        the SAME (inflected, mined, phrase) the show computes so the content_key matches at hover time."""
+        tok = Token(term, term, reading, "名詞", 0, len(term))
+        reader.tokens = [tok]
+        reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+        reader.sub_origin = (0, 0)
+        inflected = reader._inflected_surface(0)
+        st = reader._panel_for(tok, inflected, min_h=cap, mined=False)
+        reader._precompose_head(st, tok, inflected, mined=False, cap=cap)
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(f"\nSaitenka overlay — RENDER CACHE A/B (#149)   ({tag})")
+    print(format_runtime(rt))
+    print(
+        f"osd: {OSD[0]}x{OSD[1]}   tip_width: {reader.tip_width}   cap: {cap}px   "
+        f"gate: full_h ≥ {reader._render_cache_min_height()}px   reps/word: {reps}"
+    )
+    from overlay.app import tooltip as _tt
+
+    def perceived_paint(term: str, reading: str) -> float | None:
+        """Time-to-pixels the user actually feels on a cold cache HIT: place + decorate + upload the
+        cached first viewport (the direct-paint path), skipping the build that now runs AFTER the paint.
+        ``None`` when the entry is below the cost gate (not stored) — a cheap-cold word the cache skips."""
+        tok = Token(term, term, reading, "名詞", 0, len(term))
+        reader.tokens = [tok]
+        reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+        reader.sub_origin = (0, 0)
+        reader._hover_terms = ()
+        key = reader._panel_key(tok, reader._inflected_surface(0), mined=False)
+        if reader._peek_render_cache(key) is None:
+            return None  # below the cost gate — not persisted
+
+        def paint() -> None:
+            _tt._paint_from_cache(reader, key, cap, 0, 400, 60)
+
+        return measure(paint, reps, warmup=1)["p50"]
+
+    hdr = f"{'word':10} {'source':26} {'cold-show':>9} {'paint':>8} {'Δ':>8} {'hit?':>5}   (ms)"
+    print(hdr)
+    print("-" * len(hdr))
+    all_un, all_ca, collected = [], [], {}
+    for source, term, reading in corpus:
+        un = _bench_word(reader, term, reading, reps)[
+            "p50"
+        ]  # cold: full build+measure+raster+upload
+        prime(term, reading)  # persist this head to disk (same key the show computes)
+        ca = perceived_paint(term, reading)  # cold cache-hit: what the user actually waits for
+        all_un.append(un)
+        if ca is not None:
+            all_ca.append(ca)
+        collected[f"{term} ({source})"] = {"cold_show_p50": un, "paint_p50": ca}
+        ca_s = f"{ca:8.1f}" if ca is not None else f"{'—':>8}"
+        d_s = f"{un - ca:8.1f}" if ca is not None else f"{'—':>8}"
+        print(
+            f"{term:10} {source[:26]:26} {un:9.1f} {ca_s} {d_s} {'yes' if ca is not None else 'no':>5}"
+        )
+    print("-" * len(hdr))
+    print(
+        f"{'MEDIAN':10} {'over all words':26} {statistics.median(all_un):9.1f} "
+        f"{statistics.median(all_ca):8.1f} {statistics.median(all_un) - statistics.median(all_ca):8.1f}"
+    )
+    print(
+        "\ncold-show = full cold pipeline (build+measure+raster+upload); paint = perceived first-paint on"
+        "\na cache hit (place+decorate+upload cached pixels — the real panel builds AFTER, off this path)."
+    )
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps({"runtime": rt, "osd": OSD, "metrics": collected}, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\nwrote metrics → {json_path}")
+    return gil_rc
+
+
+def _atlas_render_pass(reader, corpus, cap, *, count_rasters: bool):
+    """Render every corpus word's first viewport once (fresh glyph memo per word so the atlas, not the
+    in-proc memo, is what's exercised). Returns ``(total_getmask2_calls, per_word_render_ms)``."""
+    import time as _time
+
+    from overlay import fonts
+    from overlay.app.subtitles import WordBox
+
+    n = {"r": 0}
+    orig = fonts.ImageFont.FreeTypeFont.getmask2
+
+    def counting(self, *a, **k):
+        n["r"] += 1
+        return orig(self, *a, **k)
+
+    if count_rasters:
+        fonts.ImageFont.FreeTypeFont.getmask2 = counting
+    times: list[float] = []
+    try:
+        for _source, term, reading in corpus:
+            fonts._tls.__dict__.pop("masks", None)  # cold per-thread memo → measure atlas vs raster
+            tok = Token(term, term, reading, "名詞", 0, len(term))
+            reader.tokens = [tok]
+            reader.boxes = [WordBox(0, 400, 800, 60, 60)]
+            reader.sub_origin = (0, 0)
+            t0 = _time.perf_counter()
+            reader._panel_for(tok, term, min_h=cap, mined=False).precompose_head(cap)
+            times.append((_time.perf_counter() - t0) * 1000)
+    finally:
+        fonts.ImageFont.FreeTypeFont.getmask2 = orig
+    return n["r"], times
+
+
+def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = None) -> int:
+    """A/B the persistent glyph mask atlas (#149 Tier-1) on the pathological corpus: a COLD render
+    rasterises every glyph via getmask2 (~half the render CPU); with a disk-loaded atlas those masks come
+    from RAM, so getmask2 is skipped. Isolates the raster-skip rate + render wall-time the atlas buys. A
+    FRESH reader per phase keeps the panel cache from hiding the effect (a cached panel wouldn't re-raster)."""
+    import os
+    import tempfile
+
+    from overlay import fonts, mask_atlas
+    from overlay.app.config import ReaderOptions, TooltipOptions
+    from overlay.app.paths import cache_dir as _cd
+
+    ds, tag = _load_dict_set()
+    if ds is None:
+        print("mask-atlas A/B needs the real dict set (overlay.toml) — nothing to measure")
+        return 1
+
+    os.environ["SAITENKA_CACHE_DIR"] = tempfile.mkdtemp(prefix="saitenka-bench-mask-atlas-")
+    opts = ReaderOptions(
+        tooltip=TooltipOptions(render_cache=False, mask_atlas=True), prefetch=False
+    )
+    corpus = _pathological_corpus(ds)
+    atlas_path = _cd() / "mask-atlas.sqlite"
+
+    # Phase A — COLD: render with atlas WRITE on (builds the atlas), counting getmask2 rasterisations.
+    reader_a = Reader(FakeIPC(), dict_set=ds, options=opts)
+    reader_a.osd = OSD
+    cap = reader_a._tip_cap()
+    atlas = mask_atlas.MaskAtlas.open(atlas_path)
+    fonts.set_mask_atlas(None, atlas)
+    cold_rasters, cold_ms = _atlas_render_pass(reader_a, corpus, cap, count_rasters=True)
+    atlas.checkpoint()
+
+    # Phase B — WARM: fresh reader (empty panel cache) + the atlas bulk-loaded into RAM, atlas READ on.
+    mem: dict = {}
+    n_masks = atlas.load_into(mem)
+    fonts.set_mask_atlas(mem, None)
+    reader_b = Reader(FakeIPC(), dict_set=ds, options=opts)
+    reader_b.osd = OSD
+    warm_rasters, warm_ms = _atlas_render_pass(reader_b, corpus, cap, count_rasters=True)
+    fonts.set_mask_atlas(None, None)
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(f"\nSaitenka overlay — MASK ATLAS A/B (#149 Tier-1)   ({tag})")
+    print(format_runtime(rt))
+    atlas_mb = atlas_path.stat().st_size / 1e6
+    print(
+        f"osd: {OSD[0]}x{OSD[1]}   words: {len(corpus)}   atlas: {n_masks:,} masks / {atlas_mb:.1f} MB"
+    )
+    skip = 100 * (1 - warm_rasters / cold_rasters) if cold_rasters else 0.0
+    print(
+        f"getmask2 rasterisations:  cold {cold_rasters:,}  →  warm {warm_rasters:,}   "
+        f"(raster-skip {skip:.1f}%)"
+    )
+    print(
+        f"render wall-time median:  cold {statistics.median(cold_ms):.1f} ms  →  "
+        f"warm {statistics.median(warm_ms):.1f} ms"
+    )
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {
+                    "runtime": rt,
+                    "atlas_masks": n_masks,
+                    "atlas_mb": atlas_mb,
+                    "cold_rasters": cold_rasters,
+                    "warm_rasters": warm_rasters,
+                    "raster_skip_pct": skip,
+                    "cold_ms_median": statistics.median(cold_ms),
+                    "warm_ms_median": statistics.median(warm_ms),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote metrics → {json_path}")
+    return gil_rc
+
+
 def _rss_mb() -> float:
     """Resident set size in MB (cross-platform via psutil, a runtime dep) — captures the numpy/Pillow
     C buffers that tracemalloc, being Python-only, misses. The primary memory signal for the stress."""
@@ -1424,6 +1649,18 @@ def main() -> int:
         "+ hand-picked multi-sense words)",
     )
     ap.add_argument(
+        "--render-cache",
+        action="store_true",
+        help="A/B the persistent render cache (#149) on the pathological corpus: cold head raster vs. "
+        "a disk-seeded first viewport (copy+upload)",
+    )
+    ap.add_argument(
+        "--mask-atlas",
+        action="store_true",
+        help="A/B the persistent glyph mask atlas (#149 Tier-1) on the pathological corpus: cold "
+        "getmask2 rasterisation vs. a disk-loaded mask (raster-skip rate + render wall-time)",
+    )
+    ap.add_argument(
         "--json",
         metavar="PATH",
         help="also write the metrics (with runtime info) as JSON, for baseline diffing over time",
@@ -1626,6 +1863,10 @@ def main() -> int:
         )
     if args.pathological:
         return run_pathological(args.reps, rt, args.require_ft, args.json)
+    if args.render_cache:
+        return run_render_cache(args.reps, rt, args.require_ft, args.json)
+    if args.mask_atlas:
+        return run_mask_atlas(rt, args.require_ft, args.json)
 
     ds, tag = _load_dict_set()
     if ds is None:

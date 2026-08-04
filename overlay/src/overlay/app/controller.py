@@ -90,8 +90,10 @@ from overlay.mpvio.osd import Overlay
 if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
     from overlay.app.prefetch import RenderAheadReq
+    from overlay.app.render_cache import RenderCache
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
+    from overlay.mask_atlas import MaskAtlas
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
 
@@ -110,6 +112,29 @@ NESTED_ID = OverlayId.NESTED
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text", "sid")
+
+# Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
+# (osd_h/REF_H) jitters: which source is stable (a candidate to key scale off) vs which wobbles. Unknown
+# props return None (mpv errors → data None) — harmless. video-out-params is a dict (dw/dh/w/h/aspect).
+_DISPLAY_PROBE_PROPS = (
+    "osd-width",
+    "osd-height",
+    "osd-par",
+    "dwidth",
+    "dheight",
+    "width",
+    "height",
+    "window-scale",
+    "current-window-scale",
+    "display-hidpi-scale",
+    "display-fps",
+    "display-names",
+    "fullscreen",
+    "window-maximized",
+    "window-minimized",
+    "focused",
+    "video-out-params",
+)
 
 
 # Popup view/panel classes live in app/popups.py; the _Nested alias is kept because the controller
@@ -198,6 +223,49 @@ class Reader:
         self.raw_band_ceiling = (
             o.tooltip.raw_band_ceiling_mb * 1024 * 1024
         )  # bytes; 0 = always compress
+        # Cross-session persistent render cache (#149): opt-in; seeds a cold hover's first viewport from
+        # disk for cost-gated (tall) entries. Built lazily on first use so a non-dict session (or the
+        # opt-out) never touches disk. render_cache_min_height gates writes to the pathological tail.
+        self._render_cache_on = o.tooltip.render_cache
+        self._render_cache_max_bytes = o.tooltip.render_cache_max_mb * 1024 * 1024
+        self._render_cache_min_height_px = o.tooltip.render_cache_min_height
+        self._render_cache_obj: RenderCache | None = None
+        self._render_cache_built = False
+        self._render_config_sig: str | None = None
+        self._render_sig_key: tuple[int, int] | None = None
+        self._mask_atlas_on = (
+            o.tooltip.mask_atlas
+        )  # persistent glyph mask atlas (#149 Tier-1), opt-out
+        self._mask_atlas: MaskAtlas | None = (
+            None  # write-back handle (kept alive), or None off/no atlas
+        )
+        # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
+        # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
+        # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
+        self._crisp_on = o.tooltip.crisp_upscale
+        self._crisp_lock = threading.Lock()
+        self._crisp_req: dict | None = None  # latest build/warm request (newest scroll wins)
+        # SSOT: render_tip_view / render_nested_view composite the current viewport crisp DIRECTLY from the
+        # cached native-scale panel (its bands warmed off-thread) when one is built for that word, else the
+        # soft upscale — so scrolling stays crisp and nothing can flip it back to blurry. An LRU (not a
+        # single slot) so a word warmed AHEAD by the idle lookahead is crisp on its very first paint, and
+        # the base tooltip + nested popup + prefetch all share the one cache. Keyed (PanelKey, scale).
+        self._crisp_cache: OrderedDict[tuple, Panel] = OrderedDict()
+        self._crisp_cache_max = max(1, o.tooltip.crisp_cache_max)
+        self._crisp_dirty = (
+            False  # native panel just became available → the poll loop re-blits once
+        )
+        self._crisp_wake = threading.Event()
+        self._crisp_thread: threading.Thread | None = None
+        self._crisp_miss = (
+            ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
+        )
+        self._tip_tok: Token | None = (
+            None  # the base tooltip's source token (for the crisp re-render)
+        )
+        self._tip_inflected: str | None = (
+            None  # its inflected surface (re-rendered on show AND scroll)
+        )
         from overlay.render.layout_backend import backend_label, resolve_backend
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
@@ -387,8 +455,27 @@ class Reader:
 
     @property
     def tip_width(self) -> int:
-        # wider than before so the frequency pill row fits on fewer lines (SubMiner-like proportions)
-        return int(min(self.osd[0] * 0.36, 640))
+        # FIXED to the 1920×1080 REFERENCE (16:9), NOT the live OSD, so the render cache is
+        # resolution-independent (a 1080p prewarm hits at any playback res). The tooltip is a
+        # VIDEO-OVERLAY element: like the subtitle it scales with the vertical viewport (_tip_display_scale
+        # = osd_h/REF_H) at upload, NOT with the app-chrome ui_scale — so displayed width ≈ 0.59 × osd_h,
+        # calculated from the vertical viewport (narrow on an ultra-wide, unlike an osd_WIDTH formula).
+        # Its fonts are theme scale 1.0 (panel_rows gets no ui_scale), so width must stay 1.0 too.
+        return int(min(prefetch.REF_W * 0.36, 640))
+
+    @property
+    def _tip_display_scale(self) -> float:
+        """Factor from the tooltip's REFERENCE render space to the live display: ``osd_h / REF_H`` — 1.0
+        at 1080p, 2.0 at 4K. Applied to the composited BGRA at upload and inverted in the hit-test, so
+        one 1080p-prewarmed render cache serves every resolution and the tooltip tracks the vertical
+        viewport size."""
+        return self.osd[1] / prefetch.REF_H
+
+    @property
+    def _tip_ref_h(self) -> int:
+        """The tooltip's reference render height (``REF_H``) — the panel-content coordinate space (scroll
+        amounts, viewport caps live here, not in OSD pixels; the display scale maps it to the screen)."""
+        return prefetch.REF_H
 
     @property
     def bottom_margin(self) -> int:
@@ -419,6 +506,8 @@ class Reader:
                 "osd-dimensions seed is None — mpv isn't returning get_property replies (dead pipe / "
                 "attached to a not-yet-ready mpv); the overlay won't draw until that recovers"
             )
+        else:
+            self._probe_display_sources("seed", self._observed.get("osd-dimensions") or {})
 
     def _prop(self, name: str):
         """Latest value of a property: the observed (event-driven) state when observing, else a
@@ -445,8 +534,41 @@ class Reader:
         w, h = int(d.get("w") or self.osd[0]), int(d.get("h") or self.osd[1])
         if (w, h) != self.osd and w > 0 and h > 0:
             self.osd = (w, h)
+            self._probe_display_sources("osd-change", d)
             return True
         return False
+
+    def _probe_display_sources(self, reason: str, osd: dict) -> None:
+        """Snapshot EVERY mpv size/scale source at an osd-dimensions change, so a report pinpoints WHICH
+        one makes the tooltip scale (osd_h/REF_H) jitter — e.g. on retina the OSD backing-pixel height
+        wobbles a few px while ``display-hidpi-scale`` stays a clean 2.0 (→ key scale off the stable one).
+        Emits a low-cardinality ``osd_probe`` span (trace_report breaks down each source's distinct values)
+        + a full-fidelity log line. Cheap: only fires on an actual osd change (minutes apart in practice)."""
+        probe = {p: self._get(p) for p in _DISPLAY_PROBE_PROPS}
+        vop = probe.get("video-out-params") or {}
+        span_attrs = {
+            "reason": reason,
+            "tip_scale": f"{self._tip_display_scale:.4f}",
+            "osd_w": str(osd.get("w")),
+            "osd_h": str(osd.get("h")),
+            "osd_mt": str(osd.get("mt")),
+            "osd_mb": str(osd.get("mb")),
+            "hidpi_scale": str(probe.get("display-hidpi-scale")),
+            "window_scale": str(probe.get("current-window-scale") or probe.get("window-scale")),
+            "dwidth": str(probe.get("dwidth")),
+            "dheight": str(probe.get("dheight")),
+            "vop_dh": str(vop.get("dh")),
+            "fullscreen": str(probe.get("fullscreen")),
+        }
+        with otel_metrics.traced("osd_probe", **span_attrs):
+            pass
+        log.info(
+            "display sources (%s): tip_scale=%s osd=%r probe=%r",
+            reason,
+            span_attrs["tip_scale"],
+            osd,
+            probe,
+        )
 
     # --- subtitle -----------------------------------------------------------------------------
     def _teardown_tip(self) -> None:
@@ -460,6 +582,12 @@ class Reader:
         self._tip_rect = None
         self._tip_state = None
         self._tip_key = None
+        with self._crisp_lock:  # abandon any in-flight crisp work for the closed tooltip
+            self._crisp_req = None
+            self._crisp_dirty = False
+            # The native-panel cache PERSISTS across teardown — that's what lets an idle-warmed upcoming
+            # word paint crisp on first hover (keyed by PanelKey+scale, so stale entries just age out).
+        self._tip_tok = self._tip_inflected = None
         self._tip_nav = []  # drop any link-navigation history with the tooltip
         self._hover_reading = ""
         self._hover_terms = ()
@@ -654,6 +782,121 @@ class Reader:
     def _panel_cache_setdefault(self, key, st) -> Panel:
         return tooltip.panel_cache_setdefault(self, key, st)
 
+    # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
+    def _render_cache(self) -> RenderCache | None:
+        """The cross-session render cache, USED WHEN AVAILABLE: opened lazily only if a prebuilt
+        ``render-cache.sqlite`` already exists (``saitenka prewarm`` builds it). ``None`` when opted out,
+        no dict set, or no prebuilt cache — so a fresh install creates nothing and costs nothing."""
+        if not self._render_cache_on or self.dict_set is None:
+            return None
+        if not self._render_cache_built:
+            self._render_cache_built = True
+            from overlay.app.paths import cache_dir
+            from overlay.app.render_cache import RenderCache
+
+            path = cache_dir() / "render-cache.sqlite"
+            if path.exists():  # use-when-available — prewarm is the builder, not a live session
+                self._render_cache_obj = RenderCache.open(
+                    path, max_bytes=self._render_cache_max_bytes
+                )
+        return self._render_cache_obj
+
+    def _enable_mask_atlas(self) -> None:
+        """Install the persistent glyph mask atlas WHEN AVAILABLE (a prebuilt ``mask-atlas.sqlite``
+        exists): wire fonts' write-back now, then bulk-load the masks into a shared read dict on a
+        background thread and atomically swap it in (never mutating a dict another thread reads). Once at
+        session start; no-op when opted out or no prebuilt atlas."""
+        import threading
+
+        from overlay import fonts
+        from overlay.app.paths import cache_dir
+        from overlay.mask_atlas import MaskAtlas
+
+        if not self._mask_atlas_on or self._mask_atlas is not None:
+            return
+        path = cache_dir() / "mask-atlas.sqlite"
+        if not path.exists():  # use-when-available — prewarm builds it
+            return
+        atlas = MaskAtlas.open(path)
+        if atlas is None:
+            return
+        self._mask_atlas = atlas
+        fonts.set_mask_atlas(None, atlas)  # write-back active immediately; reads join once loaded
+
+        def _load() -> None:
+            loaded: dict = {}
+            n = atlas.load_into(loaded)
+            fonts.set_mask_atlas(
+                loaded, atlas
+            )  # atomic swap → glyph_mask sees the whole dict at once
+            log.info("mask atlas: loaded %d masks", n)
+
+        threading.Thread(target=_load, name="saitenka-mask-atlas-load", daemon=True).start()
+
+    def _render_cache_sig(self) -> str:
+        """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
+        resolution change recomputes it. Only called when the cache is on (dict_set present)."""
+        cap = self._tip_cap()
+        ck = (self.tip_width, cap)
+        if self._render_config_sig is None or self._render_sig_key != ck:
+            from overlay.app.render_cache import config_signature, dict_set_signature
+
+            assert (
+                self.dict_set is not None
+            )  # _render_cache() gated on it before any caller reaches here
+            self._render_config_sig = config_signature(
+                width=self.tip_width, cap=cap, dict_sig=dict_set_signature(self.dict_set)
+            )
+            self._render_sig_key = ck
+        return self._render_config_sig
+
+    def _render_cache_min_height(self) -> int:
+        """Cost gate (px): only heads at least this tall — a non-trivial entry that needs scrolling, the
+        pathological tail whose cold build+raster blows the budget — are persisted."""
+        return self._render_cache_min_height_px
+
+    def _peek_render_cache(self, key):
+        """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None``. Lets a
+        cold pathological show paint the cached pixels + place by ``full_h`` BEFORE building the panel."""
+        cache = self._render_cache()
+        if cache is None:
+            return None
+        from overlay.app.render_cache import content_key
+
+        return cache.peek(self._render_cache_sig(), content_key(key))
+
+    def _seed_precomposed(self, st: Panel, key, cap: int) -> bool:
+        """Seed ``st``'s first viewport from the persistent cache (cold-show fast path). ``False`` when
+        the cache is off or misses. Main thread — one indexed SELECT + inflate on a hit."""
+        cache = self._render_cache()
+        if cache is None:
+            return False
+        from overlay.app.render_cache import content_key
+
+        return st.load_precomposed_head(cap, cache, self._render_cache_sig(), content_key(key))
+
+    def _precompose_head(
+        self, st: Panel, tok, inflected, *, mined: bool, cap: int, protected: bool = False
+    ) -> None:
+        """Precompose ``st``'s first viewport in idle (the prefetch worker path) and, when the persistent
+        cache is on, write a cost-gated head to disk for a later session's cold hover. ``protected`` (the
+        offline prewarm) marks the popular set eviction-last so live write-back can't thrash it."""
+        cache = self._render_cache()
+        if cache is None:
+            st.precompose_head(cap)
+            return
+        from overlay.app.render_cache import content_key
+
+        key = self._panel_key(tok, inflected, mined=mined)
+        st.precompose_head(
+            cap,
+            cache=cache,
+            config_sig=self._render_cache_sig(),
+            content_key=content_key(key),
+            min_height=self._render_cache_min_height(),
+            protected=protected,
+        )
+
     # --- background prefetch (warm the current/next line's tooltips) — logic in app/prefetch.py --
     def start_prefetch(self) -> None:
         prefetch.start_prefetch(self)
@@ -698,6 +941,23 @@ class Reader:
 
     def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
         return tooltip.blit_panel(self, panel, scroll, view_h, xy, oid)
+
+    def _blit_crisp_or_soft(self, panel, key, scroll: int, view_h: int, xy, oid: int):
+        # Crisp-from-native-cache-when-built, else soft upscale (the SSOT both popups blit through).
+        # Delegated here so nested_popup reaches it via the Reader seam, not a nested_popup→tooltip
+        # import (which would cycle — tooltip already imports nested_popup for TIP_GAP).
+        return tooltip._blit_crisp_or_soft(self, panel, key, scroll, view_h, xy, oid)
+
+    def _request_crisp(
+        self, tok, inflected, key, cap: int, scroll: int, view_h: int, *, mined: bool, target: str
+    ) -> None:
+        tooltip.request_crisp(
+            self, tok, inflected, key, cap, scroll, view_h, mined=mined, target=target
+        )
+
+    def _warm_crisp_lookahead(self, tok, inflected, *, mined: bool) -> None:
+        # Reached from a prefetch worker via the Reader seam (avoids a prefetch→tooltip import cycle).
+        tooltip.warm_crisp_lookahead(self, tok, inflected, mined=mined)
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
@@ -796,6 +1056,10 @@ class Reader:
                 # the panel's height. A warm frame is bands=0; the jank tail is the frames with bands>0.
                 span.set("bands", st.last_frame_rasters)
                 span.set("full_h", st.full_height)
+                # Crisp health per scroll frame: the display scale (does it jitter mid-scroll?) and the
+                # soft-fallback reason ("" = composited crisp) — so a soft run is attributable to a cause.
+                span.set("scale", f"{self._tip_display_scale:.4f}")
+                span.set("crisp_miss", self._crisp_miss or "n/a")
 
     def _scroll_nested(self, delta: int) -> None:
         nested_popup.scroll_nested(self, delta)
@@ -816,9 +1080,15 @@ class Reader:
         nested_popup.place_nested(self, st, key, token, word, wx, wy, wh, tail)
 
     # --- clickable cross-reference links ---------------------------------------------------------
-    @staticmethod
-    def _link_hit(mx: float, my: float, state, xy, scroll: int):
-        return nested_popup.link_hit(mx, my, state, xy, scroll)
+    def _tip_link_hit(self, mx: float, my: float):
+        # Hit-test the panel actually DRAWN for the base tooltip (crisp native when shown, else reference)
+        # so a clicked/hovered cross-reference link lands right despite native-vs-reference wrap drift.
+        panel, scale, scroll = tooltip.hit_target(self, nested=False)
+        return nested_popup.link_hit(mx, my, panel, self._tip_xy, scroll, scale=scale)
+
+    def _nest_link_hit(self, mx: float, my: float):
+        panel, scale, scroll = tooltip.hit_target(self, nested=True)
+        return nested_popup.link_hit(mx, my, panel, self._nest.xy, scroll, scale=scale)
 
     def _open_link(self, lb, xy, scroll: int) -> None:
         nested_popup.open_link(self, lb, xy, scroll)
@@ -1075,8 +1345,8 @@ class Reader:
         HELP_CLOSE_MSG: lambda r: help_overlay.close_help(r),
         PREVIEW_MSG: lambda r: r.replay_preview(),
         PREVIEW_CLOSE_MSG: lambda r: r._hide_preview(),
-        SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
-        SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
+        SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r._tip_ref_h * 0.12)),
+        SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r._tip_ref_h * 0.12)),
         SPEAK_MSG: lambda r: r.speak_hovered(),
         COPY_MSG: lambda r: r.copy_hovered(),
         COPY_LINE_MSG: lambda r: r.copy_line(),
@@ -1088,8 +1358,8 @@ class Reader:
         SUB_DELAY_MINUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "-0.1"),
         SUB_DELAY_PLUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "0.1"),
         KANJI_MSG: lambda r: r.kanji_current(),
-        TIP_UP_MSG: lambda r: r._scroll_tip(-round(r.osd[1] * 0.12)),
-        TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r.osd[1] * 0.12)),
+        TIP_UP_MSG: lambda r: r._scroll_tip(-round(r._tip_ref_h * 0.12)),
+        TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r._tip_ref_h * 0.12)),
         TIP_CLOSE_MSG: lambda r: r._tip_close_or_back(),
         SUB_DELAY_RESET_MSG: lambda r: r.ipc.command("set_property", "sub-delay", "0"),
     }
@@ -1116,7 +1386,7 @@ class Reader:
                 and not help_overlay.scroll(self, scroll_steps)
                 and not sidebar.scroll(self, scroll_steps)
             ):
-                self._scroll_tip(scroll_steps * round(self.osd[1] * 0.14))
+                self._scroll_tip(scroll_steps * round(self._tip_ref_h * 0.14))
             self._expire_toast()
             self._expire_flash()
             if self.refresh_osd():
@@ -1128,6 +1398,9 @@ class Reader:
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
             self._apply_pending_anki_seed()
+            tooltip.apply_pending_crisp(
+                self
+            )  # swap in a background native-res tooltip render if ready
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)
             sidebar.update(self)
@@ -1283,6 +1556,7 @@ class Reader:
         self._register_keybinds()
         self._seed_mined()
         self.start_prefetch()
+        self._enable_mask_atlas()  # load a prebuilt glyph mask atlas (bg) if one exists — #149 Tier-1
         session_stats.start(self)
         telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
         # In run/attach the deps (and thus prefetch workers) load ASYNC — dict_set is still None here,

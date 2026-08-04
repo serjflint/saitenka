@@ -59,6 +59,20 @@ def _coverage(file: str) -> frozenset[int]:
 
 _tls = threading.local()  # FreeType faces aren't thread-safe → one font cache per thread
 
+# Persistent glyph mask atlas (#149 Tier-1), opt-in and default-OFF here: a process that enables it
+# (set_mask_atlas) gets cross-session getmask2 reuse. _ATLAS_MEM is a SHARED read-only dict (bulk-loaded
+# once at startup — free-threading-safe after load) consulted on a per-thread cache miss; _ATLAS_WRITE
+# is the store a live miss writes back to. Both None → the hot path is byte-for-byte the pre-atlas path.
+_ATLAS_MEM: dict | None = None
+_ATLAS_WRITE = None
+
+
+def set_mask_atlas(mem: dict | None, write) -> None:
+    """Install the shared in-memory mask atlas (read) + the write-back store, or clear with ``(None,
+    None)``. Called once at startup (see the mask-atlas wiring); the ``mem`` dict is read-only afterward."""
+    global _ATLAS_MEM, _ATLAS_WRITE
+    _ATLAS_MEM, _ATLAS_WRITE = mem, write
+
 
 def load(spec: FontSpec) -> ImageFont.FreeTypeFont:
     """A PIL font for the given spec, with the variable weight axis applied. Cached **per thread** so
@@ -77,6 +91,9 @@ def load(spec: FontSpec) -> ImageFont.FreeTypeFont:
         font.set_variation_by_axes([spec.weight])
     except (OSError, AttributeError):
         pass  # not a variable font / no wght axis — use as-is
+    # stable id for the mask atlas key, stamped on the font object (getattr'd back in glyph_mask);
+    # setattr, not `font.x =`, so the type checkers don't flag an attr FreeTypeFont doesn't declare.
+    setattr(font, "_satk_font_id", f"{spec.file}:{spec.size}:{spec.weight}")  # noqa: B010
     cache[spec] = font
     if len(cache) > _FONT_CACHE_MAX:
         cache.popitem(last=False)
@@ -139,6 +156,14 @@ def glyph_mask(
         return hit
     if otel_metrics.glyph_mask_misses is not None:
         otel_metrics.glyph_mask_misses.add(1)
+    gid = getattr(font, "_satk_font_id", None) if (_ATLAS_MEM is not None or _ATLAS_WRITE) else None
+    # Persistent atlas HIT (bulk-loaded at startup): reuse the disk mask, no getmask2 this session.
+    if gid is not None:
+        amask = _atlas_read(gid, text, mode, start)
+        if amask is not None:
+            cache[key] = amask
+            _evict_masks(cache)
+            return amask
     # Positional signature mirrors ImageDraw.text's own getmask2 call (direction/features/language
     # unused here; stroke_width 0; ink 0 — for a non-"RGBA" mode ink only tints an embedded-colour
     # glyph, which this upright text path never has, so the alpha coverage is ink-independent).
@@ -147,11 +172,43 @@ def glyph_mask(
     )
     hit = (core, offset)
     cache[key] = hit
+    if gid is not None:
+        _atlas_write(gid, text, mode, start, hit)  # persist for a later session (build the atlas)
+    _evict_masks(cache)
+    return hit
+
+
+def _atlas_read(gid: str, text: str, mode: str, start: tuple[float, float]):
+    """A persistent-atlas lookup for a bulk-loaded mask — the mask, or None if the atlas is off / misses.
+    Counts the atlas hit:miss ratio (the "was the prewarm worth it?" telemetry)."""
+    if _ATLAS_MEM is None:
+        return None
+    from overlay.mask_atlas import mem_key
+
+    amask = _ATLAS_MEM.get(mem_key(gid, text, mode, start))
+    if amask is not None:
+        if otel_metrics.mask_atlas_hits is not None:
+            otel_metrics.mask_atlas_hits.add(1)
+        return amask
+    if otel_metrics.mask_atlas_misses is not None:
+        otel_metrics.mask_atlas_misses.add(1)  # atlas loaded but this glyph/phase wasn't in it
+    return None
+
+
+def _atlas_write(gid: str, text: str, mode: str, start: tuple[float, float], hit) -> None:
+    """Persist a freshly rasterised mask to the write-back atlas (builds it for a later session)."""
+    if _ATLAS_WRITE is None:
+        return
+    _ATLAS_WRITE.put(gid, text, mode, start, hit)
+    if otel_metrics.mask_atlas_writebacks is not None:
+        otel_metrics.mask_atlas_writebacks.add(1)
+
+
+def _evict_masks(cache: OrderedDict) -> None:
     if len(cache) > _MASK_CACHE_MAX:
         cache.popitem(last=False)
         if otel_metrics.glyph_mask_evictions is not None:
             otel_metrics.glyph_mask_evictions.add(1)
-    return hit
 
 
 def covers(file: str, ch: str) -> bool:

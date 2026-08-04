@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import numpy as np
 
+    from overlay.app.render_cache import RenderCache
     from overlay.app.tokenize import Token
+    from overlay.model import Theme
     from overlay.render.banded import WindowedPanel
     from overlay.render.layout_backend import LayoutBackend
 
@@ -37,6 +39,7 @@ class Panel:
         width: int,
         reading: str,
         *,
+        theme: Theme | None = None,
         band_cache_max: int | None = None,
         raw_band_ceiling: int = 0,
         layout_backend: LayoutBackend | None = None,
@@ -45,7 +48,10 @@ class Panel:
         first scroll-reach until the panel's estimate crosses ``raw_band_ceiling`` bytes, when they zlib
         so a giant entry can't blow the retained budget (``0`` = always compress). ``band_cache_max``
         caps retained render bands per panel (``None`` = keep exactly the viewport±overscan).
-        ``layout_backend`` picks the block-geometry engine (``None`` = the default). Shared by the base
+        ``layout_backend`` picks the block-geometry engine (``None`` = the default). ``theme`` MUST match
+        the one the rows were built at — the windowed engine takes the top/bottom margin and inter-row
+        gaps from it, so a scaled native panel (``Theme(scale)``) needs it forwarded or its vertical
+        geometry silently falls back to scale-1.0 while the row content is scaled. Shared by the base
         tooltip and the nested/kanji/search popups."""
         # Lazy imports: overlay.body_block depends on render.document, so a module-level import of
         # render_body_band would cycle back through .render at the package level. It's injected as the
@@ -57,6 +63,7 @@ class Panel:
             WindowedPanel(
                 rows,
                 width,
+                theme,
                 compress=True,
                 max_cached_blocks=band_cache_max,
                 raw_band_ceiling=raw_band_ceiling,
@@ -92,14 +99,72 @@ class Panel:
         hit (also the speculative-prefetch entry point). Cheap: renders only the head blocks."""
         self.windowed.measure_to(min_h)
 
-    def precompose_head(self, cap: int) -> None:
+    def precompose_head(
+        self,
+        cap: int,
+        *,
+        cache: RenderCache | None = None,
+        config_sig: str | None = None,
+        content_key: str | None = None,
+        min_height: int = 0,
+        protected: bool = False,
+    ) -> None:
         """Composite the FIRST viewport (scroll=0) in idle so a warm hover is copy + decorate + upload,
         not a synchronous re-composite. ``cap`` is the show's viewport-height cap; the composited height
         matches the show's ``view_h = min(full_height, cap)`` and its ``overscan = view_h`` look-ahead.
-        Call after :meth:`render_head`/a full build has measured the head (so ``full_height`` is set)."""
+        Call after :meth:`render_head`/a full build has measured the head (so ``full_height`` is set).
+
+        With a persistent ``cache`` + keys, a cost-gated head (``full_height >= min_height`` — the
+        pathological tail #149 targets) is also written to disk here, so a *later session*'s cold hover
+        seeds it via :meth:`load_precomposed_head` and skips the raster. ``protected`` marks the offline
+        prewarm's popular set as eviction-last (see :meth:`RenderCache.put`)."""
         view_h = min(self.full_height, cap)
-        if view_h > 0:
-            self.windowed.precompose(view_h, overscan=view_h)
+        if view_h <= 0:
+            return
+        self.windowed.precompose(view_h, overscan=view_h)
+        if cache is not None and config_sig is not None and content_key is not None:
+            self._store_precomposed(cache, config_sig, content_key, min_height, protected=protected)
+
+    def _store_precomposed(
+        self,
+        cache: RenderCache,
+        config_sig: str,
+        content_key: str,
+        min_height: int,
+        *,
+        protected: bool,
+    ) -> None:
+        """Persist the just-composited first viewport iff it clears the cost gate (``full_height >=
+        min_height``). Off the main thread (the prefetch worker / offline builder call this)."""
+        if self.full_height < min_height:
+            return
+        fv = self.windowed.first_view
+        if fv is not None:
+            cache.put(
+                config_sig, content_key, fv[0], fv[1], self.full_height, fv[2], protected=protected
+            )
+            if (
+                not protected
+            ):  # a LIVE write-back (prewarm's protected fills aren't session telemetry)
+                from overlay import otel_metrics
+
+                if otel_metrics.render_cache_writebacks is not None:
+                    otel_metrics.render_cache_writebacks.add(1)
+
+    def load_precomposed_head(
+        self, cap: int, cache: RenderCache, config_sig: str, content_key: str
+    ) -> bool:
+        """Seed the first viewport from the persistent cache so a cold hover is copy+upload with no head
+        raster. ``True`` on a hit. Call after the head is measured (``full_height`` set) so the requested
+        ``view_h`` matches the show's; a differing height / config simply misses (safe → live render)."""
+        view_h = min(self.full_height, cap)
+        if view_h <= 0:
+            return False
+        loaded = cache.get(config_sig, content_key, view_h, view_h)
+        if loaded is None:
+            return False
+        self.windowed.install_first_view(loaded.view_h, loaded.overscan, loaded.array)
+        return True
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
         """Composite the ``[scroll, scroll+view_h)`` viewport as a premultiplied BGRA array via the
