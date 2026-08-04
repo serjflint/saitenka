@@ -977,6 +977,10 @@ def hit_target(reader: Reader, *, nested: bool):
         key, ref, scroll = reader._nest.key, reader._nest.state, reader._nest.scroll
     else:
         key, ref, scroll = reader._tip_key, reader._tip_state, reader._tip_scroll
+    if reader._scale_boundary:
+        # One panel: the DRAWN panel IS the reference panel (composited natively) — no second-panel
+        # branch, so geometry is always the 1× reference and the inverse is a single (mx-sx)/scale.
+        return ref, reader._tip_display_scale, scroll
     panel = crisp_lookup(reader, key)
     if panel is not None:
         s = reader._tip_display_scale
@@ -1017,10 +1021,40 @@ def render_tip_view(reader: Reader) -> None:
     )
 
 
+def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: int):
+    """One-panel (scale-boundary) blit: composite the ONE reference panel's viewport at the display scale
+    — native crisp glyph masks over the 1× geometry — and upload 1:1. Soft below the crisp threshold
+    (≈1080p, where native == the upscale). No second panel, no crisp cache: the drawn panel IS the
+    reference panel, so it can't disagree with the hit-test (which reads the same 1× geometry)."""
+    scale = reader._tip_display_scale
+    if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
+        reader._crisp_miss = "not_hidpi"
+        return blit_panel(reader, st, scroll, view_h, xy, oid)
+    full_h = st.full_height
+    vh = min(view_h, full_h)
+    y0 = max(0, min(scroll, max(0, full_h - vh)))
+    try:
+        with otel_metrics.traced("tip_compose", soft_reason="native", scale=f"{scale:.4f}"):
+            arr = st.viewport(y0, vh, overscan=vh, scale=scale)  # native BGRA over 1× geometry
+    except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
+        log.debug("native compose failed", exc_info=True)
+        return blit_panel(reader, st, scroll, view_h, xy, oid)
+    reader._crisp_miss = ""
+    if otel_metrics.crisp_swaps is not None:
+        otel_metrics.crisp_swaps.add(1)
+    # y0/full_h are display px so decorate_and_upload's scrollbar-thumb geometry stays right; the array
+    # is already native (prescaled) so no scale_bgra.
+    return decorate_and_upload(
+        reader, arr, round(y0 * scale), round(full_h * scale), xy, oid, prescaled=True
+    )
+
+
 def _blit_crisp_or_soft(reader: Reader, st: Panel, key, scroll: int, view_h: int, xy, oid: int):
     """Composite ``[scroll, scroll+view_h)`` of popup ``st`` and return its display-px rect: crisp from
     the cached native panel for ``key`` when built, else the soft reference upscale. The one path both the
     base tooltip and the nested popup blit through, so each is crisp exactly when its native panel exists."""
+    if reader._scale_boundary:
+        return _blit_native(reader, st, scroll, view_h, xy, oid)
     panel = crisp_lookup(reader, key)
     if panel is not None:
         view = _crisp_compose(reader, panel, scroll, view_h)  # bands warmed off-thread → cheap
@@ -1080,7 +1114,8 @@ def request_crisp(
     keyless view (a link-navigated / search popup, ``key is None``) is skipped — its content isn't an
     ``entry_for_tok``."""
     if (
-        not reader._crisp_on
+        reader._scale_boundary  # one-panel: the blit composites native directly, no 2nd panel to warm
+        or not reader._crisp_on
         or reader._tip_display_scale <= _CRISP_MIN_SCALE
         or tok is None
         or key is None
@@ -1315,6 +1350,10 @@ def _install_nav_crisp(reader: Reader, query: str) -> PanelKey | None:
     navigated tooltip composites crisp like a hovered one. None off hi-dpi / crisp-off — the caller
     then leaves ``_tip_key`` None (soft). Built here (not by the crisp worker) because a navigated view
     can be a wildcard SEARCH result, which ``build_native_panel``'s ``entry_for_tok`` can't reproduce."""
+    if (
+        reader._scale_boundary
+    ):  # one-panel: the nav view composites native from its own reference panel
+        return None
     if not reader._crisp_on:
         return None
     scale = reader._tip_display_scale

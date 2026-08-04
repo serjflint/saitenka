@@ -166,10 +166,13 @@ class Panel:
         self.windowed.install_first_view(loaded.view_h, loaded.overscan, loaded.array)
         return True
 
-    def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
+    def viewport(
+        self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
+    ) -> np.ndarray:
         """Composite the ``[scroll, scroll+view_h)`` viewport as a premultiplied BGRA array via the
-        per-band BGRA fast path (#138). ``overscan`` warms one screen of blocks below the fold."""
-        return self.windowed.viewport_bgra(scroll, view_h, overscan=overscan)
+        per-band BGRA fast path (#138). ``overscan`` warms one screen of blocks below the fold. ``scale``
+        > 1 composites the crisp NATIVE viewport over the same 1× geometry (scale-boundary arch)."""
+        return self.windowed.viewport_bgra(scroll, view_h, overscan=overscan, scale=scale)
 
     def render_ahead(self, scroll: int, view_h: int, *, direction: int, should_cancel) -> int:
         """Warm the blocks just beyond the viewport in the scroll ``direction`` — the off-main-thread
