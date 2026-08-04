@@ -132,22 +132,10 @@ class TooltipOptions:
     # on a cost-gated (tall/pathological) entry paints its precomposed first viewport straight from disk
     # (copy+upload, skipping the build+raster) and live hovers extend it. No prebuilt cache → nothing is
     # created and it costs nothing. Set false to ignore an existing cache. Miss/resolution change → live.
-    scale_boundary: bool = False  # EXPERIMENTAL one-panel crisp: composite the ONE reference panel at the display scale
-    # (native glyph masks over 1× geometry) instead of building a SECOND native panel. Off by default
-    # while the scale-as-boundary rewrite lands stage by stage; flips to on (and deletes the second-panel
-    # path) once complete. No effect at 1080p (display scale 1.0).
-    crisp_upscale: bool = (
-        True  # OPT-OUT: on a hi-dpi display the tooltip paints instantly by upscaling
-    )
-    # its 1920×1080-reference render (soft glyph edges), then — WHEN WORKERS ARE IDLE — re-renders the
-    # first viewport at NATIVE resolution on a background thread and swaps the crisp pixels in place. No
-    # effect at 1080p (display scale 1.0). Set false to keep only the instant soft upscale.
-    crisp_cache_max: int = (
-        8  # LRU cap on retained NATIVE-scale panels (the crisp compose source, shared by the base
-    )
-    # tooltip, nested popup, and the head-prefetch lookahead). >1 (vs the old single slot) so an upcoming
-    # word warmed in idle is crisp on its FIRST paint, not soft-then-swapped. Each holds one native-scale
-    # first viewport (~a few MB on hi-dpi); raise for more crisp-from-start coverage, lower to spend less RAM.
+    crisp_upscale: bool = True  # OPT-OUT: on a hi-dpi display the tooltip composites its ONE reference panel at NATIVE
+    # resolution (crisp glyph masks over the 1× geometry — the scale-as-boundary arch), scroll-ahead
+    # warming the next native bands off the main thread. Set false to paint only the soft 1× upscale. No
+    # effect at 1080p (display scale 1.0, where native == the upscale).
     mask_atlas: bool = (
         True  # persistent glyph mask atlas (#149 Tier-1), OPT-OUT: USED WHEN AVAILABLE —
     )

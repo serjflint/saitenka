@@ -246,23 +246,10 @@ class Reader:
         # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
         # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
+        # One-panel crisp (scale-as-boundary): the ONE reference panel composites at the display scale
+        # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
-        self._scale_boundary = o.tooltip.scale_boundary  # one-panel crisp (scale-boundary rewrite)
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes _tip_display_scale (see config)
-        self._crisp_lock = threading.Lock()
-        self._crisp_req: dict | None = None  # latest build/warm request (newest scroll wins)
-        # SSOT: render_tip_view / render_nested_view composite the current viewport crisp DIRECTLY from the
-        # cached native-scale panel (its bands warmed off-thread) when one is built for that word, else the
-        # soft upscale — so scrolling stays crisp and nothing can flip it back to blurry. An LRU (not a
-        # single slot) so a word warmed AHEAD by the idle lookahead is crisp on its very first paint, and
-        # the base tooltip + nested popup + prefetch all share the one cache. Keyed (PanelKey, scale).
-        self._crisp_cache: OrderedDict[tuple, Panel] = OrderedDict()
-        self._crisp_cache_max = max(1, o.tooltip.crisp_cache_max)
-        self._crisp_dirty = (
-            False  # native panel just became available → the poll loop re-blits once
-        )
-        self._crisp_wake = threading.Event()
-        self._crisp_thread: threading.Thread | None = None
         self._crisp_miss = (
             ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
         )
@@ -485,7 +472,7 @@ class Reader:
         composites, AND inverts the hit-test at (all three must agree). Bucketing means mpv's osd-
         dimensions wobble (``osd_h`` ±few px → a jitter in the 3rd decimal) reuses cached native bands
         instead of re-rastering. Geometry is already scale-free, so this is a pure raster-cache concern.
-        Only the ``scale_boundary`` path uses it; the legacy two-panel path keeps the exact scale."""
+        The tooltip rasters, composites, and hit-tests at this one bucketed value."""
         return round(self._tip_display_scale / _SCALE_BUCKET) * _SCALE_BUCKET
 
     @property
@@ -599,11 +586,6 @@ class Reader:
         self._tip_rect = None
         self._tip_state = None
         self._tip_key = None
-        with self._crisp_lock:  # abandon any in-flight crisp work for the closed tooltip
-            self._crisp_req = None
-            self._crisp_dirty = False
-            # The native-panel cache PERSISTS across teardown — that's what lets an idle-warmed upcoming
-            # word paint crisp on first hover (keyed by PanelKey+scale, so stale entries just age out).
         self._tip_tok = self._tip_inflected = None
         self._tip_nav = []  # drop any link-navigation history with the tooltip
         self._hover_reading = ""
@@ -964,17 +946,6 @@ class Reader:
         # Delegated here so nested_popup reaches it via the Reader seam, not a nested_popup→tooltip
         # import (which would cycle — tooltip already imports nested_popup for TIP_GAP).
         return tooltip._blit_crisp_or_soft(self, panel, key, scroll, view_h, xy, oid)
-
-    def _request_crisp(
-        self, tok, inflected, key, cap: int, scroll: int, view_h: int, *, mined: bool, target: str
-    ) -> None:
-        tooltip.request_crisp(
-            self, tok, inflected, key, cap, scroll, view_h, mined=mined, target=target
-        )
-
-    def _warm_crisp_lookahead(self, tok, inflected, *, mined: bool) -> None:
-        # Reached from a prefetch worker via the Reader seam (avoids a prefetch→tooltip import cycle).
-        tooltip.warm_crisp_lookahead(self, tok, inflected, mined=mined)
 
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
@@ -1415,9 +1386,6 @@ class Reader:
             self._maybe_log_stall()
             self._apply_pending_deps_or_spinner()
             self._apply_pending_anki_seed()
-            tooltip.apply_pending_crisp(
-                self
-            )  # swap in a background native-res tooltip render if ready
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)
             sidebar.update(self)

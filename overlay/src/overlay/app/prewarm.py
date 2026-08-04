@@ -204,17 +204,18 @@ class _PrewarmJob:
         self._tick()
 
     def _raster_native(self, r, tok, term: str) -> None:
-        """Raster the word's NATIVE-scale panel head so its size×scale glyph masks land in the atlas —
-        no-op at scale ≤ 1 or without an atlas. The panel/pixels are discarded; only the atlas keeps."""
+        """Raster the word's reference panel at the native scale so its size×scale glyph masks land in
+        the atlas — no-op at scale ≤ 1 or without an atlas. The composited pixels are discarded; only the
+        atlas write-back keeps. One-panel arch: the SAME reference panel, composited natively (no second
+        panel)."""
         if self.native_scale <= 1.0 or self.atlas is None:
             return
-        from overlay.app import tooltip
-
         try:
-            key = r._panel_key(tok, term, mined=False)
-            tooltip.build_native_panel(
-                r, tok, term, key, r._tip_cap(), self.native_scale, mined=False, anki=False
-            )
+            cap = r._tip_cap()
+            st = r._panel_for(tok, term, min_h=cap, mined=False)
+            st.viewport(
+                0, cap, scale=self.native_scale
+            )  # native compose → glyph masks to the atlas
         except Exception:  # never abort the prebuild over one pathological native raster
             log.debug("prewarm(native %.2f) failed for %r", self.native_scale, term, exc_info=True)
 

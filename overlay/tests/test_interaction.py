@@ -271,24 +271,22 @@ def test_wheel_scrolls_the_tooltip():
     assert r._tip_scroll > before, "wheeling over a scrollable tooltip must scroll it down"
 
 
-def test_scroll_re_requests_a_crisp_render_at_hidpi():
-    # The reported bug: only the first band was crisp; scrolling stayed blurry. On a hi-dpi display every
-    # scroll must re-request a native re-render for the NEW viewport (not just the first).
+def test_scroll_warms_native_bands_ahead_at_hidpi():
+    # One-panel: a scroll must warm the NEXT native bands off the main thread (render-ahead), so continued
+    # scrolling composites crisp without a synchronous raster (the old bug: only the first band was crisp).
     from overlay.app import tooltip
 
     r = _reader()
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
-    r._crisp_thread = (
-        object()
-    )  # pretend the worker runs so request_crisp doesn't spawn a real thread
-    Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip → sets _tip_tok
+    Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
     assert r._tip_state.full_height > r._tip_view_h  # scrollable
-    r._crisp_req = None  # clear the show-time request; isolate the scroll's
+    r._render_ahead_req = None  # clear the show-time request; isolate the scroll's
     tooltip.scroll_tip(r, 200)  # what the wheel drives
     assert r._tip_scroll > 0  # scrolled
+    req = r._render_ahead_req
     assert (
-        r._crisp_req is not None and r._crisp_req["scroll"] == r._tip_scroll
-    )  # crisp follows scroll
+        req is not None and req.scroll == r._tip_scroll and req.direction == 1
+    )  # warm follows scroll
 
 
 # --- L2: golden-pin the rendered bitmap that a hover produces ----------------------------------------
