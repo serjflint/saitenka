@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
+import numpy as np
 from PIL import Image
 
 if TYPE_CHECKING:
@@ -149,6 +150,95 @@ def test_show_render_budget_is_bounded_to_the_viewport_not_the_whole_panel():
     rendered = snap["saitenka.block_cache.rendered_px"]["sum"]
     assert rendered < wp.full_height  # rendered the head, not the whole panel
     assert rendered <= 2 * (view_h + BLOCK_H)  # ~one viewport (+ overscan slack), not 4000px
+
+
+def test_last_frame_rasters_counts_synchronous_bands_then_zero_when_warm():
+    # The jank driver the scroll_frame/tooltip_show span attributes: a cold frame rasters its visible
+    # bands synchronously (render_ahead was behind), a warm re-composite of the same offset rasters 0.
+    wp = _banded_panel([600])  # one row → bands [0,256),[256,512),[512,600)
+    wp.viewport_bgra(0, 300, overscan=0)  # [0,300) overlaps bands 0 and 1
+    assert wp.last_frame_rasters == 2
+    wp.viewport_bgra(0, 300, overscan=0)  # identical offset → every band warm
+    assert wp.last_frame_rasters == 0
+
+
+def _stored_compressed(wp: WindowedPanel, key: tuple[int, int]) -> bool:
+    return (
+        wp._blocks[key]._packed is not None
+    )  # a compressed band holds the zlib blob, not a live img
+
+
+def test_raw_band_ceiling_keeps_small_panel_bands_uncompressed():
+    # Step 3: below the ceiling, bands are retained RAW (a live image, no zlib) so the first scroll-reach
+    # skips the decompress. A ~1MB panel under a 10MB ceiling stays raw despite compress=True.
+    wp = _banded_panel([600], compress=True, raw_band_ceiling=10 * 1024 * 1024)
+    wp.viewport_bgra(0, 300)
+    assert wp._blocks  # bands were stored
+    assert not any(_stored_compressed(wp, k) for k in wp._blocks)  # all raw
+
+
+def test_raw_band_ceiling_compresses_a_giant_panel():
+    # Over the ceiling, bands compress so one pathological entry can't blow the retained budget. A 600px
+    # panel at WIDTH*4 ≈ 1MB estimate exceeds a tiny 100KB ceiling → its bands are zlib'd.
+    wp = _banded_panel([600], compress=True, raw_band_ceiling=100 * 1024)
+    wp.viewport_bgra(0, 300)
+    assert wp._blocks
+    assert all(_stored_compressed(wp, k) for k in wp._blocks)  # all compressed (over ceiling)
+
+
+def test_raw_band_ceiling_zero_honours_the_compress_flag():
+    # The ceiling disabled (0) restores the fixed-flag behaviour: compress=True → every band zlib'd.
+    wp = _banded_panel([600], compress=True, raw_band_ceiling=0)
+    wp.viewport_bgra(0, 300)
+    assert all(_stored_compressed(wp, k) for k in wp._blocks)
+
+
+def test_precompose_then_warm_hover_is_byte_identical_and_rasters_zero_bands():
+    # Step 2: an idle precompose composites the first viewport (scroll=0); a matching viewport_bgra
+    # then returns a COPY of it with ZERO synchronous rasters — byte-identical to computing it fresh.
+    fresh = _banded_panel([600]).viewport_bgra(0, 300, overscan=300)
+    wp = _banded_panel([600])
+    wp.precompose(300, overscan=300)  # idle: composite + cache the first viewport
+    warm = wp.viewport_bgra(0, 300, overscan=300)
+    assert np.array_equal(warm, fresh)  # pixel-identical to a fresh compose
+    assert wp.last_frame_rasters == 0  # the warm hover rastered nothing — the whole point
+
+
+def test_precompose_hit_returns_an_isolated_copy():
+    # The show mutates its viewport in place (scrollbar/flash); the cache must survive that.
+    wp = _banded_panel([600])
+    wp.precompose(300, overscan=300)
+    a = wp.viewport_bgra(0, 300, overscan=300)
+    a[:] = 0  # simulate decorate_and_upload's in-place mutation
+    b = wp.viewport_bgra(0, 300, overscan=300)
+    assert b.any()  # the second read is NOT the zeroed buffer — the cache was isolated
+
+
+def test_precompose_view_h_mismatch_recomputes():
+    # A differing view_h/overscan doesn't hit the cache — it composites the requested window instead.
+    wp = _banded_panel([600])
+    wp.precompose(300, overscan=300)
+    out = wp.viewport_bgra(0, 200, overscan=200)  # different view_h → miss → fresh compose
+    assert out.shape[0] == 200
+
+
+def test_precompose_counters_record_build_then_hit():
+    from overlay.app import telemetry
+
+    with _telemetry():
+        wp = _banded_panel([600])
+        wp.precompose(300, overscan=300)  # build
+        wp.viewport_bgra(0, 300, overscan=300)  # hit
+        sampled = telemetry._sample_counters()
+    assert sampled.get("precompose.builds", 0) == 1
+    assert sampled.get("precompose.hits", 0) == 1
+
+
+def test_precompose_nbytes_counts_toward_retained():
+    wp = _banded_panel([600])
+    before = wp.retained_nbytes
+    wp.precompose(300, overscan=300)
+    assert wp.retained_nbytes >= before + 300 * WIDTH * 4  # the cached first viewport is accounted
 
 
 def test_first_reach_into_a_tall_block_rasters_at_most_one_band():

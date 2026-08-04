@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,24 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
 from overlay.panel import Definition, Entry, EntryGroup, Freq
+
+# dict_sql step-resolution is kept on the interactive path but SAMPLED in the background prefetch
+# workers, where a per-word SQL span floods the trace (~1000/session) and the enclosing prefetch_decode
+# span already covers the phase. The histogram (percentiles) still records every call, sampled or not.
+_BG_SQL_SPAN_SAMPLE = 8
+_sql_tls = threading.local()
+
+
+def _emit_sql_span() -> bool:
+    """True → this ``dict_sql`` call gets a trace span. Always on the foreground (hover/cue) threads
+    for full step resolution; 1-in-``_BG_SQL_SPAN_SAMPLE`` on ``saitenka-prefetch-*`` workers. The
+    per-thread tick is race-free under free-threading (no shared counter)."""
+    if not threading.current_thread().name.startswith("saitenka-prefetch"):
+        return True
+    n = getattr(_sql_tls, "tick", 0)
+    _sql_tls.tick = n + 1
+    return n % _BG_SQL_SPAN_SAMPLE == 0
+
 
 if TYPE_CHECKING:
     from collections.abc import Container, Sequence
@@ -259,6 +278,8 @@ class Dictionary:
         self._entry_cache[eid] = entry
         if len(self._entry_cache) > self._entry_cache_max:
             self._entry_cache.popitem(last=False)
+            if otel_metrics.dict_cache_evictions is not None:
+                otel_metrics.dict_cache_evictions.add(1)
         return entry
 
     # ORDER BY e.id makes row order deterministic so DictionarySet._batch_exact (one IN-list query
@@ -330,7 +351,10 @@ class Dictionary:
         conn = self.db._conn()
         did = self.dict_id
         with otel_metrics.instrumented(
-            otel_metrics.dict_sql_duration_ms, "dict_sql", dict=self.title
+            otel_metrics.dict_sql_duration_ms,
+            "dict_sql",
+            emit_span=_emit_sql_span(),
+            dict=self.title,
         ):
             cursor = (
                 conn.execute(self._GLOB_Q, (did, did, _to_glob(form), limit))
@@ -624,7 +648,9 @@ class DictionarySet:
             f"WHERE k.dict_id IN ({din}) AND k.key IN ({kin}) ORDER BY e.id"
         )
         conn = self.dicts[0].db._conn()
-        with otel_metrics.instrumented(otel_metrics.dict_sql_duration_ms, "dict_sql"):
+        with otel_metrics.instrumented(
+            otel_metrics.dict_sql_duration_ms, "dict_sql", emit_span=_emit_sql_span()
+        ):
             rows = conn.execute(query, (*dids, *keys)).fetchall()
         out: dict[int, dict[str, list]] = {}
         for r in rows:  # r = (dict_id, key, e.id, e.term, e.reading, e.glossary, e.tags)

@@ -45,6 +45,26 @@ def test_snapshot_reports_histogram_percentiles():
 
 
 @pytest.mark.usefixtures("registered")
+def test_instrumented_emit_span_false_still_records_histogram():
+    # The sampled path (emit_span=False) drops the trace span but must still record the histogram —
+    # the percentile is what survives, so aggregate SQL/IPC cost stays visible even when unsampled.
+    with otel_metrics.instrumented(otel_metrics.dict_sql_duration_ms, "dict_sql", emit_span=False):
+        pass
+    assert otel_metrics.snapshot()["saitenka.dict_sql.duration_ms"]["count"] == 1
+
+
+@pytest.mark.usefixtures("registered")
+def test_snapshot_histogram_reports_exact_max():
+    # p50/p95/p99 are bucket-bound estimates; max is the exact largest sample — the band-size tail
+    # the trace consumer needs, so it's summarized alongside the percentiles.
+    for px in (64, 128, 200, 256):
+        otel_metrics.block_rendered_px.record(px)
+    hist = otel_metrics.snapshot()["saitenka.block_cache.rendered_px"]
+    assert hist["max"] == 256
+    assert hist["count"] == 4
+
+
+@pytest.mark.usefixtures("registered")
 def test_snapshot_reports_gil_enabled_gauge():
     snap = otel_metrics.snapshot()
     assert snap["saitenka.runtime.gil_enabled"]["value"] in (0, 1)

@@ -107,6 +107,8 @@ def text_width(font: ImageFont.FreeTypeFont, text: str) -> float:
     cache[key] = w
     if len(cache) > _WIDTH_CACHE_MAX:
         cache.popitem(last=False)
+        if otel_metrics.glyph_width_evictions is not None:
+            otel_metrics.glyph_width_evictions.add(1)
     return w
 
 
@@ -147,6 +149,8 @@ def glyph_mask(
     cache[key] = hit
     if len(cache) > _MASK_CACHE_MAX:
         cache.popitem(last=False)
+        if otel_metrics.glyph_mask_evictions is not None:
+            otel_metrics.glyph_mask_evictions.add(1)
     return hit
 
 

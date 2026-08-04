@@ -171,6 +171,7 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
             reader.tip_width,
             "",
             band_cache_max=reader.band_cache_max,
+            raw_band_ceiling=reader.raw_band_ceiling,
             layout_backend=reader.layout_backend,
         )
         with reader._cache_lock:
@@ -216,6 +217,7 @@ def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None
             reader.tip_width,
             entry.reading,
             band_cache_max=reader.band_cache_max,
+            raw_band_ceiling=reader.raw_band_ceiling,
             layout_backend=reader.layout_backend,
         )
         with reader._cache_lock:

@@ -185,6 +185,7 @@ class WindowedPanel:
         seed_height: int = 200,
         max_cached_blocks: int | None = None,
         compress: bool = False,
+        raw_band_ceiling: int = 0,
         render_block_fn: Callable[[BodyRenderArgs, int, int], tuple] | None = None,
         layout_backend: LayoutBackend | None = None,
     ):
@@ -198,6 +199,10 @@ class WindowedPanel:
         self._rows = list(rows)
         self._cap = max_cached_blocks  # LRU pixel-cache cap (None = keep exactly visible±overscan)
         self._compress = compress
+        # Keep bands raw (no zlib) UNLESS the panel's estimated uncompressed size exceeds this byte
+        # ceiling — then compress so one giant entry can't blow the retained budget (raw is ~10× zlib).
+        # 0 disables the exception (honour _compress for every band, the pre-1.3 always-compress path).
+        self._raw_band_ceiling = raw_band_ceiling
         # A truthy value ENABLES the GIL-build process pool in render_ahead (the actual band renderer,
         # render_body_band, is a function-scope import — module-level would cycle body_block →
         # render.document → back through .render). None keeps render_ahead in-process (hermetic tests).
@@ -228,10 +233,29 @@ class WindowedPanel:
         # calls the lock-free internal helpers freely. FreeType faces are already thread-local, but the
         # lock is what keeps _blocks/_geom/_offsets race-free under free-threading.
         self._lock = threading.RLock()
+        # Synchronous band rasters, bumped in _ensure_bands (the viewport/precompose path — render_ahead
+        # workers raster via _render_band, never here), under the lock the call already holds. The
+        # per-frame delta (_last_frame_rasters) is the jank driver: a warm frame rasters 0, a janky one
+        # rasters the bands render_ahead couldn't warm in time. A precompose off the main thread bumps it
+        # too, but each call snapshots its own delta inside the lock — race-free, no new lock.
+        self._sync_rasters = 0
+        self._last_frame_rasters = 0
+        # The first viewport (scroll=0) composited once in idle by a prefetch worker (precompose), so a
+        # warm hover is a copy + decorate + upload — no synchronous re-composite/overscan-raster/BGRA
+        # convert on the main thread (~59% of the show floor). (view_h, overscan, premul-BGRA); a copy is
+        # returned on hit so decorate_and_upload's in-place scrollbar/flash mutation stays isolated. Band-
+        # eviction-independent (a composited snapshot); recomputed only when view_h/overscan changes.
+        self._first_view: tuple[int, int, np.ndarray] | None = None
 
     @property
     def count(self) -> int:
         return len(self._rows)
+
+    @property
+    def last_frame_rasters(self) -> int:
+        """Bands rasterised synchronously in the most recent ``viewport``/``viewport_bgra`` call — the
+        per-frame jank driver, for the scroll_frame/tooltip_show span to attribute a slow frame."""
+        return self._last_frame_rasters
 
     @property
     def measured(self) -> int:
@@ -257,9 +281,10 @@ class WindowedPanel:
     def retained_nbytes(self) -> int:
         """On-heap pixel footprint of the retained blocks (compressed when ``compress=True``). The
         panel-cache gauge sums this across cached panels — the windowed successor to the old blob's
-        ``packed_nbytes``."""
+        ``packed_nbytes``. Includes the idle-precomposed first viewport (raw premul-BGRA)."""
         with self._lock:
-            return sum(b.nbytes for b in self._blocks.values())
+            fv = self._first_view[2].nbytes if self._first_view is not None else 0
+            return sum(b.nbytes for b in self._blocks.values()) + fv
 
     def measure_to(self, px: int) -> None:
         """Render + cache blocks top-down until the exact-offset prefix covers ``px`` px — warms the
@@ -298,12 +323,24 @@ class WindowedPanel:
         scan_rl = [ScanBox(s.text, s.x, s.y + rb.y0, s.w, s.h) for s in rb.scan]  # band → row-local
         links_rl = [LinkBox(k.query, k.x, k.y + rb.y0, k.w, k.h) for k in rb.links]
         self._add_geom(rb.index, rb.x, scan_rl, links_rl)
-        block = CachedBlock.make(rb.x, rb.y0, rb.image, scan_rl, links_rl, compress=self._compress)
+        block = CachedBlock.make(
+            rb.x, rb.y0, rb.image, scan_rl, links_rl, compress=self._compress_bands()
+        )
         key = (rb.index, rb.band)
         self._blocks[key] = block
         self._blocks.move_to_end(key)  # LRU touch
         self._bgra.pop(key, None)  # a re-store replaces the pixels → the BGRA memo is stale
         return block
+
+    def _compress_bands(self) -> bool:
+        """Whether to zlib a band on store. With a ``raw_band_ceiling`` set, keep bands RAW (fast first
+        scroll-reach) until the panel's estimated uncompressed size crosses the ceiling — then compress,
+        so one pathological entry can't blow the retained-pixel budget. Without a ceiling, honour the
+        fixed ``compress`` flag (the pre-1.3 always-compress behaviour). Call under ``self._lock``
+        (reads the offset estimate)."""
+        if self._raw_band_ceiling <= 0:
+            return self._compress
+        return self._offsets.total_estimate() * self.width * 4 > self._raw_band_ceiling
 
     def _render_band(self, i: int, b: int, y0: int, y1: int) -> RenderedBlock:
         """Rasterise row ``i``'s band ``[y0, y1)`` WITHOUT touching shared state — safe on a worker
@@ -359,6 +396,7 @@ class WindowedPanel:
                 img, scan, links = row.render()
                 self._store(RenderedBlock(i, 0, row.x, 0, img, scan, links))
                 self._miss(img.height)
+                self._sync_rasters += 1
             return
         for b, y0, y1 in _row_bands(h):
             if y1 <= lo or y0 >= hi:  # band outside the requested window
@@ -369,6 +407,7 @@ class WindowedPanel:
             else:
                 self._store(self._render_band(i, b, y0, y1))
                 self._miss(y1 - y0)
+                self._sync_rasters += 1
 
     def _grow_prefix(self, target_y: int, *, cache_nonbody: bool = True) -> None:
         """Measure rows forward (top-down) until the exact-offset prefix covers ``target_y`` px — the
@@ -493,23 +532,51 @@ class WindowedPanel:
     def viewport_bgra(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
         """The viewport as premul-BGRA via per-band BGRA row-copies (#138) — no per-frame whole-viewport
         convert. Byte-identical to ``to_bgra_array(self.viewport(...))``; RGBA :meth:`viewport` stays for
-        goldens/skeleton."""
+        goldens/skeleton. A scroll=0 request matching an idle :meth:`precompose` returns a copy of the
+        cached composite (0 synchronous rasters) — the warm-hover fast path."""
         with self._lock:
-            self._grow_prefix(scroll + view_h + overscan)
-            table = self._offsets.estimated_table()
-            start, end = table.visible_range(scroll, view_h, overscan)
-            lo, hi = scroll - overscan, scroll + view_h + overscan
-            for i in range(start, end):
-                row_top = table.starts[i]
-                self._ensure_bands(i, lo - row_top, hi - row_top)  # re-raster evicted bands in view
-            out = self._assemble_bgra(table, start, end, scroll, view_h)
-            self._evict(lo, hi)
-            return out
+            if scroll == 0 and self._first_view is not None:
+                vh, ov, arr = self._first_view
+                if vh == view_h and ov == overscan:
+                    if otel_metrics.precompose_hits is not None:
+                        otel_metrics.precompose_hits.add(1)
+                    self._last_frame_rasters = 0
+                    return (
+                        arr.copy()
+                    )  # caller mutates it in place (scrollbar/flash) — isolate the cache
+            return self._viewport_bgra_locked(scroll, view_h, overscan)
+
+    def _viewport_bgra_locked(self, scroll: int, view_h: int, overscan: int) -> np.ndarray:
+        """Assemble the viewport as premul-BGRA; caller holds ``self._lock``. The shared body of
+        :meth:`viewport_bgra` (which adds the precompose fast path) and :meth:`precompose`."""
+        n0 = self._sync_rasters
+        self._grow_prefix(scroll + view_h + overscan)
+        table = self._offsets.estimated_table()
+        start, end = table.visible_range(scroll, view_h, overscan)
+        lo, hi = scroll - overscan, scroll + view_h + overscan
+        for i in range(start, end):
+            row_top = table.starts[i]
+            self._ensure_bands(i, lo - row_top, hi - row_top)  # re-raster evicted bands in view
+        out = self._assemble_bgra(table, start, end, scroll, view_h)
+        self._evict(lo, hi)
+        self._last_frame_rasters = self._sync_rasters - n0
+        return out
+
+    def precompose(self, view_h: int, overscan: int = 0) -> None:
+        """Composite the first viewport (scroll=0) NOW and cache it, so a later warm hover is a copy —
+        the pixels+overscan-raster+BGRA-convert move off the main thread into the prefetch worker that
+        built the head. Idempotent; a differing ``view_h``/``overscan`` recomputes. Under ``self._lock``."""
+        with self._lock:
+            out = self._viewport_bgra_locked(0, view_h, overscan)  # fresh array — store it directly
+            self._first_view = (view_h, overscan, out)
+            if otel_metrics.precompose_builds is not None:
+                otel_metrics.precompose_builds.add(1)
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> Image.Image:
         """Composite the ``[scroll, scroll+view_h)`` viewport, rendering + evicting BANDS as needed — a
         cold reach or warm scroll frame touches O(band) getmask2, never O(block)."""
         with self._lock:
+            n0 = self._sync_rasters
             self._grow_prefix(scroll + view_h + overscan)
             table = self._offsets.estimated_table()  # exact for the measured prefix
             start, end = table.visible_range(scroll, view_h, overscan)
@@ -519,6 +586,7 @@ class WindowedPanel:
                 self._ensure_bands(i, lo - row_top, hi - row_top)  # re-raster evicted bands in view
             img = self._composite_bands(table, start, end, scroll, view_h)
             self._evict(lo, hi)
+            self._last_frame_rasters = self._sync_rasters - n0
             return img
 
     def render_ahead(

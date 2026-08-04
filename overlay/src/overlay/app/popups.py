@@ -38,13 +38,15 @@ class Panel:
         reading: str,
         *,
         band_cache_max: int | None = None,
+        raw_band_ceiling: int = 0,
         layout_backend: LayoutBackend | None = None,
     ) -> Panel:
-        """Wrap ``rows`` in the windowed engine (the sole tooltip compositor). ``compress=True`` retains
-        each rendered block zlib-compressed, so a cached/warmed panel keeps the old blob's memory
-        profile. ``band_cache_max`` caps retained render bands per panel (``None`` = keep exactly the
-        viewport±overscan). ``layout_backend`` picks the block-geometry engine (``None`` = the default).
-        Shared by the base tooltip and the nested/kanji/search popups."""
+        """Wrap ``rows`` in the windowed engine (the sole tooltip compositor). Bands stay raw for a fast
+        first scroll-reach until the panel's estimate crosses ``raw_band_ceiling`` bytes, when they zlib
+        so a giant entry can't blow the retained budget (``0`` = always compress). ``band_cache_max``
+        caps retained render bands per panel (``None`` = keep exactly the viewport±overscan).
+        ``layout_backend`` picks the block-geometry engine (``None`` = the default). Shared by the base
+        tooltip and the nested/kanji/search popups."""
         # Lazy imports: overlay.body_block depends on render.document, so a module-level import of
         # render_body_band would cycle back through .render at the package level. It's injected as the
         # windowed engine's GIL-build process-pool band renderer for the same reason (see WindowedPanel).
@@ -57,6 +59,7 @@ class Panel:
                 width,
                 compress=True,
                 max_cached_blocks=band_cache_max,
+                raw_band_ceiling=raw_band_ceiling,
                 render_block_fn=render_body_band,
                 layout_backend=layout_backend,
             ),
@@ -78,10 +81,25 @@ class Panel:
         """On-heap footprint of the retained (compressed) blocks — the panel-cache gauge."""
         return self.windowed.retained_nbytes
 
+    @property
+    def last_frame_rasters(self) -> int:
+        """Bands rasterised synchronously by the last :meth:`viewport` — the jank driver a slow
+        scroll_frame/tooltip_show span records (0 = a warm frame; N = render_ahead was behind)."""
+        return self.windowed.last_frame_rasters
+
     def render_head(self, min_h: int) -> None:
         """Warm + measure the head prefix so placement has a real height and a later hover is a cache
         hit (also the speculative-prefetch entry point). Cheap: renders only the head blocks."""
         self.windowed.measure_to(min_h)
+
+    def precompose_head(self, cap: int) -> None:
+        """Composite the FIRST viewport (scroll=0) in idle so a warm hover is copy + decorate + upload,
+        not a synchronous re-composite. ``cap`` is the show's viewport-height cap; the composited height
+        matches the show's ``view_h = min(full_height, cap)`` and its ``overscan = view_h`` look-ahead.
+        Call after :meth:`render_head`/a full build has measured the head (so ``full_height`` is set)."""
+        view_h = min(self.full_height, cap)
+        if view_h > 0:
+            self.windowed.precompose(view_h, overscan=view_h)
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> np.ndarray:
         """Composite the ``[scroll, scroll+view_h)`` viewport as a premultiplied BGRA array via the

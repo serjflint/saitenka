@@ -103,12 +103,19 @@ class TooltipOptions:
     hide_delay: float = 0.6  # seconds the tooltip lingers after the cursor leaves the word
     flash_secs: float = 0.22  # how long the "copied" highlight border pulses on a popup
     panel_cache_max: int = 128  # LRU cap on cached (compressed) rendered tooltip panels
-    band_cache_max: int = 64  # LRU cap on retained 256px render BANDS *per* windowed panel — the
+    band_cache_max: int = 128  # LRU cap on retained 256px render BANDS *per* windowed panel — the
     # layer under panel_cache_max. Bounds a single tall tooltip's warm pixels to a scroll-back WINDOW,
-    # not the whole block: 64 bands ≈ 16k px kept warm — well past the viewport so short scrolls back
+    # not the whole block: 128 bands ≈ 32k px kept warm — well past the viewport so short scrolls back
     # hit the cache, but a bounded fraction of a worst-case ~87k-px entry (retaining all of that would
     # defeat the O(viewport) memory bound banding exists for). The visible window is always protected
     # regardless of the cap; raise it to widen the warm window (more RAM), lower it to shrink it.
+    raw_band_ceiling_mb: int = (
+        100  # keep a panel's render bands UNCOMPRESSED (skips the one-time zlib
+    )
+    # decompress on the first scroll-reach of a band — measured ~9→4ms off the cold-band frame tail)
+    # UNLESS the panel's estimated uncompressed size exceeds this many MB, when its bands compress so one
+    # pathological entry can't blow the retained-pixel budget (raw is ~10× the zlib size). 0 = always
+    # compress (the pre-1.3 behavior). The visible/warm window is bounded by band_cache_max either way.
     layout_engine: Literal["default", "taffy"] = (
         "default"  # tooltip block-geometry backend. "default"
     )

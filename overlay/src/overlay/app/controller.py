@@ -195,6 +195,9 @@ class Reader:
             o.tooltip.panel_cache_max
         )  # LRU cap on cached rendered tooltip panels
         self.band_cache_max = o.tooltip.band_cache_max  # LRU cap on retained render bands per panel
+        self.raw_band_ceiling = (
+            o.tooltip.raw_band_ceiling_mb * 1024 * 1024
+        )  # bytes; 0 = always compress
         from overlay.render.layout_backend import backend_label, resolve_backend
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
@@ -785,8 +788,14 @@ class Reader:
             otel_metrics.SCROLL_JANK_THRESHOLD_MS,
             "scroll_frame",
             layout_backend=self.layout_engine,
-        ):
+        ) as span:
             tooltip.scroll_tip(self, delta)
+            st = self._tip_state
+            if st is not None:
+                # Attribute a janky frame: bands rastered synchronously (render_ahead was behind) and
+                # the panel's height. A warm frame is bands=0; the jank tail is the frames with bands>0.
+                span.set("bands", st.last_frame_rasters)
+                span.set("full_h", st.full_height)
 
     def _scroll_nested(self, delta: int) -> None:
         nested_popup.scroll_nested(self, delta)
@@ -1138,7 +1147,8 @@ class Reader:
             return
         self._nudge_pending = False
         self.ov.repaint()
-        log.debug("paused OSD nudge: re-flushed %d overlay(s)", len(self.ov._live))
+        # No per-nudge log line — the osd_paused_nudge counter below carries the count (this fired
+        # ~1600×/session at debug, 67% of the log, duplicating the counter for zero added detail).
         if otel_metrics.osd_paused_nudge is not None:
             otel_metrics.osd_paused_nudge.add(1)
 
