@@ -47,10 +47,21 @@ class RubyBox:
     def reading_x(self, x: float) -> float:
         return x + (self.box_width - self.reading_width) / 2
 
-    def draw(self, img: Image.Image, draw: ImageDraw.ImageDraw, x: float, baseline: float) -> None:
-        draw_inline(img, draw, self.base_x(x), baseline, self.base)
+    def draw(
+        self,
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        x: float,
+        baseline: float,
+        *,
+        scale: float = 1.0,
+    ) -> None:
+        # Positions stay reference px (base_x/reading_x from the 1× box); draw_inline projects by scale.
+        draw_inline(img, draw, self.base_x(x), baseline, self.base, scale=scale)
         rb = baseline - self.reading_baseline_dy
-        draw_inline(img, draw, self.reading_x(x), rb, [Span(self.reading, self.reading_style)])
+        draw_inline(
+            img, draw, self.reading_x(x), rb, [Span(self.reading, self.reading_style)], scale=scale
+        )
 
 
 def _base_size(base: RichText) -> int:

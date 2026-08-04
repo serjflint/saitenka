@@ -83,27 +83,28 @@ def layout_body_block(args: BodyRenderArgs) -> LaidOutBody:
 
 
 def raster_body_window(
-    laid: LaidOutBody, y0: int, y1: int
+    laid: LaidOutBody, y0: int, y1: int, *, scale: float = 1.0
 ) -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
     """Rasterise the ``[y0, y1)`` band of an already-laid-out body — pixel-identical to
-    :func:`render_body_block`'s full image cropped to that band, but drawing O(band) not O(block)."""
+    :func:`render_body_block`'s full image cropped to that band, but drawing O(band) not O(block).
+    ``scale`` > 1 rasters the band natively (crisp glyph masks); scan/link boxes stay 1× reference px."""
     from overlay.render.document import render_layout_window
 
     scan: list[ScanBox] = []
     links: list[LinkBox] = []
-    img = render_layout_window(laid.doc, y0, y1, scan, links)
+    img = render_layout_window(laid.doc, y0, y1, scan, links, scale=scale)
     return img, scan, links
 
 
 def render_body_band(
-    args: BodyRenderArgs, y0: int, y1: int
+    args: BodyRenderArgs, y0: int, y1: int, *, scale: float = 1.0
 ) -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
     """Picklable one-shot band render from plain args — ``layout_body_block`` then
     ``raster_body_window``. The process-pool (GIL-build) render-ahead path uses this: it re-walks per
     call (no shared handle across processes), but bands are the target unit so the free-threaded and GIL
     paths warm the SAME bands. On free-threading the in-process ``Row.render_window`` (memoised layout)
     is used instead — no re-walk."""
-    return raster_body_window(layout_body_block(args), y0, y1)
+    return raster_body_window(layout_body_block(args), y0, y1, scale=scale)
 
 
 def render_body_block(

@@ -144,39 +144,51 @@ def line_metrics(line: list[Token]) -> tuple[int, int]:
 
 
 def draw_token(
-    base: Image.Image, draw: ImageDraw.ImageDraw, x: float, baseline: float, tok: Token
+    base: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    baseline: float,
+    tok: Token,
+    *,
+    scale: float = 1.0,
 ) -> None:
-    """Draw one token at pen (x, baseline). Faux-italic via shear when style.italic."""
-    font = _font(tok.file, tok.style)
-    if tok.style.underline and tok.kind != "space":
-        uy = round(baseline + max(1, tok.style.size * 0.08))
-        draw.line(
-            [(x, uy), (x + tok.width, uy)], fill=tok.style.color, width=max(1, tok.style.size // 18)
-        )
-    if not tok.style.italic:
+    """Draw one token at pen (x, baseline). Faux-italic via shear when style.italic.
+
+    ``scale`` > 1 is the crisp NATIVE raster leaf (the scale-boundary arch): the 1× layout position
+    ``(x, baseline)`` is projected to device px (``×scale``) and the glyph drawn at ``size×scale`` — a
+    native mask, not an upscale. ``scale == 1.0`` is the byte-identical reference path."""
+    style = (
+        tok.style if scale == 1.0 else tok.style.with_(size=max(1, round(tok.style.size * scale)))
+    )
+    font = _font(tok.file, style)
+    px, pbaseline, width = x * scale, baseline * scale, tok.width * scale
+    if style.underline and tok.kind != "space":
+        uy = round(pbaseline + max(1, style.size * 0.08))
+        draw.line([(px, uy), (px + width, uy)], fill=style.color, width=max(1, style.size // 18))
+    if not style.italic:
         # Split draw.text's upright path: cache the getmask2 alpha (the FreeType cost) via
         # fonts.glyph_mask, then blit through PIL's own draw_bitmap — a verbatim replay of
         # ImageDraw.text (int pen part + subpixel start baked into the mask), so it stays byte-identical
         # (and keeps draw_bitmap's edge clipping, which windowed bands rely on).
-        ink, fill_ink = draw._getink(tok.style.color)
+        ink, fill_ink = draw._getink(style.color)
         if ink is None:
             ink = fill_ink
         core, (ox, oy) = fonts.glyph_mask(
-            font, tok.text, draw.fontmode, (math.modf(x)[0], math.modf(baseline)[0])
+            font, tok.text, draw.fontmode, (math.modf(px)[0], math.modf(pbaseline)[0])
         )
-        draw.draw.draw_bitmap((int(x) + ox, int(baseline) + oy), core, ink)
+        draw.draw.draw_bitmap((int(px) + ox, int(pbaseline) + oy), core, ink)
         return
     a, d = font.getmetrics()
     pad = int(a * ITALIC_SHEAR) + 2
-    stamp = Image.new("RGBA", (int(tok.width) + pad + 2, a + d), (0, 0, 0, 0))
-    ImageDraw.Draw(stamp).text((0, a), tok.text, font=font, fill=tok.style.color, anchor="ls")
+    stamp = Image.new("RGBA", (int(width) + pad + 2, a + d), (0, 0, 0, 0))
+    ImageDraw.Draw(stamp).text((0, a), tok.text, font=font, fill=style.color, anchor="ls")
     stamp = stamp.transform(
         stamp.size,
         Image.Transform.AFFINE,
         (1, ITALIC_SHEAR, -ITALIC_SHEAR * a, 0, 1, 0),
         resample=Image.Resampling.BILINEAR,
     )
-    base.alpha_composite(stamp, (int(x), int(baseline - a)))
+    base.alpha_composite(stamp, (int(px), int(pbaseline - a)))
 
 
 def inline_width(rich: RichText) -> float:
@@ -184,12 +196,19 @@ def inline_width(rich: RichText) -> float:
 
 
 def draw_inline(
-    base: Image.Image, draw: ImageDraw.ImageDraw, x: float, baseline: float, rich: RichText
+    base: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    baseline: float,
+    rich: RichText,
+    *,
+    scale: float = 1.0,
 ) -> float:
-    """Draw un-wrapped styled inline content at (x, baseline). Returns the end x (pen advance)."""
+    """Draw un-wrapped styled inline content at (x, baseline). Returns the end x (pen advance) in
+    REFERENCE px — ``x`` advances by the 1× token width; ``draw_token`` projects each glyph by ``scale``."""
     for tok in tokenize_rich(rich):
         if tok.kind != "space":
-            draw_token(base, draw, x, baseline, tok)
+            draw_token(base, draw, x, baseline, tok, scale=scale)
         x += tok.width
     return x
 

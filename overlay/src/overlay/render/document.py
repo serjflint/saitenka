@@ -216,18 +216,21 @@ def _draw_window_block(
     y1: int,
     scan_out: list[ScanBox] | None,
     link_out: list[LinkBox] | None,
+    *,
+    scale: float = 1.0,
 ) -> None:
     """Draw one block's overlapping band into the window canvas at its stacked top minus ``y0``, and
-    append its scan/link boxes in window space (see :func:`_composite_window`)."""
+    append its scan/link boxes in window space (see :func:`_composite_window`). ``scale`` > 1 draws the
+    band natively and places it at ``round(pos×scale)``; scan/link boxes stay 1× (offset math unchanged)."""
     from overlay.render.layout import draw_inline
 
     local_y0 = max(0, y0 - lb.top)  # first block-local row inside the window
     local_y1 = min(lb.height, y1 - lb.top)
     local_scan: list[ScanBox] | None = [] if scan_out is not None else None
     local_link: list[LinkBox] | None = [] if link_out is not None else None
-    img = render_flow_window(lb.layout, local_y0, local_y1, local_scan, local_link)
-    dst_y = lb.top + local_y0 - y0  # where the drawn band lands in the window
-    canvas.alpha_composite(img, (lb.x, dst_y))
+    img = render_flow_window(lb.layout, local_y0, local_y1, local_scan, local_link, scale=scale)
+    dst_y = lb.top + local_y0 - y0  # where the drawn band lands in the window (reference px)
+    canvas.alpha_composite(img, (round(lb.x * scale), round(dst_y * scale)))
     if lb.marker:
         draw_inline(
             canvas,
@@ -235,6 +238,7 @@ def _draw_window_block(
             lb.x - doc.gutter_px,
             lb.top + lb.baseline - y0,
             [Span(lb.marker, doc.base)],
+            scale=scale,
         )
     if scan_out is not None and local_scan is not None:
         scan_out.extend(ScanBox(s.text, s.x + lb.x, s.y + dst_y, s.w, s.h) for s in local_scan)
@@ -248,18 +252,23 @@ def _composite_window(
     y1: int,
     scan_out: list[ScanBox] | None,
     link_out: list[LinkBox] | None,
+    *,
+    scale: float = 1.0,
 ) -> Image.Image:
     """Assemble the document band ``[y0, y1)`` into a ``(y1 - y0)``-tall image — pixel-identical to the
     full render cropped to that band, but drawing only the blocks (and the lines within them) that fall
     in the window. Each block is drawn at its stacked top minus ``y0``; scan/link boxes come back in the
-    window's space (offset by ``-y0``), matching :func:`_composite`."""
+    window's space (offset by ``-y0``), matching :func:`_composite`. ``scale`` > 1 makes the image
+    native (``round(w×scale) × round((y1-y0)×scale)``); at 1.0 it's byte-identical."""
     from PIL import ImageDraw
 
-    canvas = Image.new("RGBA", (doc.width, max(1, y1 - y0)), doc.background)
+    canvas = Image.new(
+        "RGBA", (round(doc.width * scale), max(1, round((y1 - y0) * scale))), doc.background
+    )
     draw = ImageDraw.Draw(canvas)
     for lb in doc.blocks:
         if lb.top < y1 and lb.top + lb.height > y0:  # block's band overlaps the window
-            _draw_window_block(canvas, draw, doc, lb, y0, y1, scan_out, link_out)
+            _draw_window_block(canvas, draw, doc, lb, y0, y1, scan_out, link_out, scale=scale)
     return canvas
 
 
@@ -269,10 +278,13 @@ def render_layout_window(
     y1: int,
     scan_out: list[ScanBox] | None = None,
     link_out: list[LinkBox] | None = None,
+    *,
+    scale: float = 1.0,
 ) -> Image.Image:
     """Raster the band ``[y0, y1)`` of an already-laid-out :class:`DocLayout` — the reusable draw the
-    banded engine calls per row/band without re-walking or re-wrapping (see :func:`layout_document`)."""
-    return _composite_window(doc, y0, y1, scan_out, link_out)
+    banded engine calls per row/band without re-walking or re-wrapping (see :func:`layout_document`).
+    ``scale`` > 1 rasters natively (crisp glyph masks at ``size×scale``); geometry stays 1×."""
+    return _composite_window(doc, y0, y1, scan_out, link_out, scale=scale)
 
 
 def render_document(
