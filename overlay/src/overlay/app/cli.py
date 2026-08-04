@@ -245,6 +245,14 @@ def run(
         # The default lives once, on TooltipOptions.tip_max_frac. cyclopts still layers
         # defaults < config < CLI (token-based), so sourcing the floor here changes nothing but DRY.
     ] = TooltipOptions().tip_max_frac,
+    tip_scale: Annotated[
+        float,
+        cyclopts.Parameter(
+            help="fixed tooltip crisp render scale (0 = auto from resolution; e.g. 1.5 renders "
+            "crisp native glyph masks at 1.5× on any display — a cosmetic preference). Match "
+            "`saitenka prewarm --scale` to preload native masks"
+        ),
+    ] = TooltipOptions().tip_scale,
     pause_on_tooltip: Annotated[
         bool,
         cyclopts.Parameter(
@@ -333,6 +341,7 @@ def run(
         no_audio_play=no_audio_play,
         mine_preview=mine_preview,
         tip_height=tip_height,
+        tip_scale=tip_scale,
         pause_on_tooltip=pause_on_tooltip,
         prefetch=prefetch,
         auto_translate=auto_translate,
@@ -462,6 +471,15 @@ def prewarm(
     workers: Annotated[
         int, cyclopts.Parameter(help="parallel render threads (0 = auto, ~cpu count)")
     ] = 0,
+    atlas_scale: Annotated[
+        float,
+        cyclopts.Parameter(
+            help="also build native CJK/Latin glyph masks at this display scale into the MASK ATLAS, so "
+            "the hi-dpi crisp tooltip loads from disk instead of rastering on first paint (0 = read "
+            "[tooltip] tip_scale; match your runtime tip_scale). 1.0 = reference masks only. The render "
+            "cache is unaffected — it stays 1×-reference-only (storage/wall-time; #149)"
+        ),
+    ] = 0.0,
     *,
     atlas_only: Annotated[
         bool,
@@ -484,6 +502,11 @@ def prewarm(
     from overlay.app.config import load_config
     from overlay.app.prewarm import prewarm as _prewarm
 
+    cfg = load_config()
+    if atlas_scale <= 0:  # 0 = inherit the runtime display-scale preference so the atlas matches it
+        atlas_scale = float(
+            cfg.get("tip_scale") or (cfg.get("tooltip", {}) or {}).get("tip_scale") or 0.0
+        )
     if (
         not atlas_only
         and not load_config().get("tooltip", {}).get("render_cache")
@@ -499,7 +522,13 @@ def prewarm(
 
     try:
         result = _prewarm(
-            width, height, limit, on_progress=_progress, workers=workers, atlas_only=atlas_only
+            width,
+            height,
+            limit,
+            on_progress=_progress,
+            workers=workers,
+            atlas_only=atlas_only,
+            atlas_scale=atlas_scale or 1.0,
         )
     except RuntimeError as e:
         print(f"prewarm: {e}")
@@ -1053,6 +1082,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         ),
         tooltip=TooltipOptions(
             tip_max_frac=cfg.get("tip_height", tt.tip_max_frac),
+            tip_scale=cfg.get("tip_scale", tt.tip_scale),
             nested_max_frac=cfg.get("nested_max_frac", tt.nested_max_frac),
             pause_on_tooltip=bool(cfg.get("pause_on_tooltip", tt.pause_on_tooltip)),
             annotation_mode=cfg.get("annotation_mode", tt.annotation_mode),

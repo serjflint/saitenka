@@ -9,6 +9,7 @@ _BASE_KWARGS = {
     "translate_key": "t",
     "preview_key": "p",
     "tip_height": 0.4,
+    "tip_scale": 0.0,
     "pause_on_tooltip": True,
     "hover_switch_delay": 0.15,
     "no_audio_play": False,
@@ -37,6 +38,18 @@ def test_attach_options_read_layout_engine_from_config():
 def test_scan_delay_reads_from_config():
     opts = _build_run_options({"scan_delay": 1.5}, **_BASE_KWARGS)
     assert opts.tooltip.scan_delay == 1.5
+
+
+def test_run_options_pass_tip_scale_through():
+    opts = _build_run_options({}, **{**_BASE_KWARGS, "tip_scale": 1.5})
+    assert opts.tooltip.tip_scale == 1.5
+
+
+def test_attach_options_read_tip_scale_from_config():
+    # The attach path reads it from config (not a CLI kwarg) — must match the run path or the knob
+    # silently no-ops when attaching to a running mpv.
+    assert _build_attach_options({}, mine={}).tooltip.tip_scale == 0.0  # default = auto
+    assert _build_attach_options({"tip_scale": 1.5}, mine={}).tooltip.tip_scale == 1.5
 
 
 def test_run_options_read_utility_ui_scale():

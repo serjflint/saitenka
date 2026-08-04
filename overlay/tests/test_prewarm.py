@@ -36,12 +36,15 @@ class _FakeReader:
             raise ValueError("pathological entry")
         return self.panel
 
+    def _panel_key(self, *_args, **_kwargs):  # only the native-raster path reaches this
+        return ("key",)
 
-def _job(reader_factory, **kw) -> _PrewarmJob:
+
+def _job(reader_factory, *, atlas=None, **kw) -> _PrewarmJob:
     return _PrewarmJob(
         reader_factory=reader_factory,
         cache=None,  # atlas-only opens no render cache
-        atlas=None,
+        atlas=atlas,
         gate=512,
         sig="sig",
         ceiling=1 << 30,
@@ -65,6 +68,45 @@ def test_atlas_only_survives_a_pathological_entry():
     # a single failing render must not abort the whole prebuild (best-effort per-word)
     job = _job(lambda: _FakeReader(fail=True))
     job.render(("boom", ""))  # does not raise
+    assert job.measured == 1
+
+
+def test_native_scale_rasters_the_native_panel_into_the_atlas(monkeypatch):
+    # scale > 1 → each word also builds its native-scale panel, so size×scale glyph masks land in the
+    # atlas and the hi-dpi crisp upgrade loads from disk instead of paying getmask2 on first paint.
+    from overlay.app import tooltip
+
+    seen: list[float] = []
+    monkeypatch.setattr(
+        tooltip,
+        "build_native_panel",
+        lambda *a, **_k: seen.append(a[5]),  # a[5] == scale
+    )
+    reader = _FakeReader()
+    job = _job(lambda: reader, atlas=object(), native_scale=1.5)
+    job.render(("cat", "kyatto"))
+    assert seen == [1.5]  # rastered once at the configured native scale
+
+
+def test_native_scale_is_a_noop_at_reference_scale(monkeypatch):
+    from overlay.app import tooltip
+
+    seen: list = []
+    monkeypatch.setattr(tooltip, "build_native_panel", lambda *a, **_k: seen.append(a))
+    job = _job(lambda: _FakeReader(), atlas=object(), native_scale=1.0)  # default = reference only
+    job.render(("cat", "kyatto"))
+    assert seen == []  # no native raster at scale 1.0
+
+
+def test_native_scale_survives_a_pathological_native_raster(monkeypatch):
+    from overlay.app import tooltip
+
+    def _boom(*_a, **_k):
+        raise ValueError("bad native raster")
+
+    monkeypatch.setattr(tooltip, "build_native_panel", _boom)
+    job = _job(lambda: _FakeReader(), atlas=object(), native_scale=1.5)
+    job.render(("boom", ""))  # must not raise — best-effort per word
     assert job.measured == 1
 
 

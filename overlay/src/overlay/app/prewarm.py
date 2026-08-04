@@ -127,11 +127,16 @@ class _PrewarmJob:
         on_progress,
         *,
         atlas_only: bool = False,
+        native_scale: float = 1.0,
     ):
         self._make = reader_factory  # () -> a fresh headless Reader with the shared cache
         self.cache = cache  # None in atlas-only mode (the render cache is left untouched)
         self.atlas = atlas  # mask atlas (getmask2 write-back builds it too); None if unavailable
         self.atlas_only = atlas_only
+        # >1.0 → ALSO raster each word's NATIVE-scale panel so its size×scale glyph masks land in the
+        # atlas (the atlas keys on file:size:weight, so native masks are distinct entries). This makes
+        # the hi-dpi crisp upgrade load from disk instead of paying getmask2 on the first native raster.
+        self.native_scale = native_scale
         # If the atlas is empty it still needs building — then a word already in the render cache is NOT
         # skipped (we raster it to fill the atlas, just don't re-store the head). Both fresh → normal.
         # atlas_only forces the raster path for EVERY word (no render-cache side).
@@ -170,6 +175,7 @@ class _PrewarmJob:
                 )
             except Exception:  # a single pathological entry must never abort the whole prebuild
                 log.debug("prewarm(atlas) failed for %r", term, exc_info=True)
+            self._raster_native(r, tok, term)
             self._tick()
             return
         assert self.cache is not None  # non-atlas_only always has a render cache
@@ -194,7 +200,23 @@ class _PrewarmJob:
                 st.precompose_head(cap)
         except Exception:  # a single pathological entry must never abort the whole prebuild
             log.debug("prewarm failed for %r", term, exc_info=True)
+        self._raster_native(r, tok, term)
         self._tick()
+
+    def _raster_native(self, r, tok, term: str) -> None:
+        """Raster the word's NATIVE-scale panel head so its size×scale glyph masks land in the atlas —
+        no-op at scale ≤ 1 or without an atlas. The panel/pixels are discarded; only the atlas keeps."""
+        if self.native_scale <= 1.0 or self.atlas is None:
+            return
+        from overlay.app import tooltip
+
+        try:
+            key = r._panel_key(tok, term, mined=False)
+            tooltip.build_native_panel(
+                r, tok, term, key, r._tip_cap(), self.native_scale, mined=False, anki=False
+            )
+        except Exception:  # never abort the prebuild over one pathological native raster
+            log.debug("prewarm(native %.2f) failed for %r", self.native_scale, term, exc_info=True)
 
     def _tick(self) -> None:
         with self._lock:
@@ -259,6 +281,7 @@ def prewarm(
     workers: int = 0,
     *,
     atlas_only: bool = False,
+    atlas_scale: float = 1.0,
 ) -> PrewarmResult:
     """Build the render cache for the top ``limit`` popular words at the given resolution, rendering in
     PARALLEL across ``workers`` threads (0 = auto) — the free-threaded build renders concurrently, so a
@@ -270,7 +293,12 @@ def prewarm(
     ``atlas_only`` fills ONLY the mask atlas (every word rasters → its glyphs/words land in the atlas) and
     NEVER touches the render cache — so ``--limit 0`` can saturate the atlas over the whole corpus without
     growing the byte-ceiling-bounded render cache. Not incremental (the atlas has no per-word probe), but
-    idempotent."""
+    idempotent.
+
+    ``atlas_scale`` > 1.0 ALSO rasters each word's native-scale panel so its ``size×scale`` glyph masks
+    land in the MASK ATLAS (CJK/Latin glyphs) — match it to ``[tooltip] tip_scale`` so the hi-dpi crisp
+    upgrade loads from disk. The RENDER cache is unaffected: it stays 1×-reference-only (the #149 size
+    decision — per-resolution blobs would ~4× its storage and wall-time), keyed on the fixed tip_width."""
     from overlay.app.config import load_config
 
     cfg = load_config()
@@ -299,6 +327,7 @@ def prewarm(
         ceiling=template._render_cache_max_bytes,
         on_progress=on_progress,
         atlas_only=atlas_only,
+        native_scale=atlas_scale,
     )
     n_workers = workers if workers > 0 else min(8, (os.cpu_count() or 4))
     try:

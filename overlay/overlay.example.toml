@@ -19,6 +19,9 @@
 # ── Tooltip geometry & feel ──────────────────────────────────────────────────────────────────────
 # ui_scale = 1.0             # help, sidebar, and episode-analysis size (0.75–2.0)
 # tip_height = 0.4           # BASE tooltip max height as a fraction of the video height
+# tip_scale = 0.0            # fixed tooltip crisp render scale (0 = auto from resolution; e.g. 1.5
+#                            # renders crisp native glyph masks at 1.5× on any display — a cosmetic
+#                            # preference). Match `saitenka prewarm --atlas-scale` to preload the masks
 # nested_max_frac = 0.6      # nested (scan) popup max height fraction — deliberately roomier
 # show_dict_tabs = false     # sticky per-dictionary tab strip on the base tooltip
 # hide_delay = 0.6           # seconds the tooltip lingers after the cursor leaves the word
