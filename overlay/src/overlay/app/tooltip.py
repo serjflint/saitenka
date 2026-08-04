@@ -979,8 +979,9 @@ def hit_target(reader: Reader, *, nested: bool):
         key, ref, scroll = reader._tip_key, reader._tip_state, reader._tip_scroll
     if reader._scale_boundary:
         # One panel: the DRAWN panel IS the reference panel (composited natively) — no second-panel
-        # branch, so geometry is always the 1× reference and the inverse is a single (mx-sx)/scale.
-        return ref, reader._tip_display_scale, scroll
+        # branch, so geometry is always the 1× reference and the inverse is a single (mx-sx)/scale. The
+        # BUCKETED raster scale (what the blit drew at) is the inverse, so hit-test == draw exactly.
+        return ref, reader._raster_scale, scroll
     panel = crisp_lookup(reader, key)
     if panel is not None:
         s = reader._tip_display_scale
@@ -1026,7 +1027,9 @@ def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: i
     — native crisp glyph masks over the 1× geometry — and upload 1:1. Soft below the crisp threshold
     (≈1080p, where native == the upscale). No second panel, no crisp cache: the drawn panel IS the
     reference panel, so it can't disagree with the hit-test (which reads the same 1× geometry)."""
-    scale = reader._tip_display_scale
+    scale = (
+        reader._raster_scale
+    )  # bucketed → matches hit_target's inverse; reuses cached native bands
     if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
         reader._crisp_miss = "not_hidpi"
         return blit_panel(reader, st, scroll, view_h, xy, oid)

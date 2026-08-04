@@ -226,11 +226,15 @@ def _try_render_ahead(reader: Reader) -> bool:
     if reader._stop.is_set() or req.gen != reader._prefetch_gen:
         return True  # stale (word changed / seek / closing) — handled, keep looping
     try:
+        # One-panel crisp: warm NATIVE bands at the display scale so a scroll composites crisp without a
+        # synchronous raster (soft stays the sub-threshold / cold path).
+        scale = reader._raster_scale if reader._scale_boundary else 1.0
         req.panel.render_ahead(
             req.scroll,
             req.view_h,
             direction=req.direction,
             should_cancel=lambda: reader._stop.is_set() or req.gen != reader._prefetch_gen,
+            scale=scale,
         )
     except Exception:
         log.debug("render-ahead failed", exc_info=True)  # a bad block must never kill the worker

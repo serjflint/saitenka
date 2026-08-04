@@ -760,6 +760,62 @@ class WindowedPanel:
         self._trim_scaled()
         return out
 
+    def _scaled_band_beyond(self, i: int, threshold: int, direction: int, skey: float) -> list:
+        """Row ``i``'s NATIVE bands (reference spans) beyond ``threshold`` in ``direction`` not yet in
+        ``_scaled_blocks``. Call under ``self._lock``."""
+        row_top = self._offsets.start(i)
+        out = []
+        for b, y0, y1 in self._row_band_spans(i):
+            beyond = (row_top + y1 > threshold) if direction >= 0 else (row_top + y0 < threshold)
+            if beyond and (i, b, skey) not in self._scaled_blocks:
+                out.append((i, b, y0, y1))
+        return out
+
+    def _scaled_ahead_targets(
+        self, scroll: int, view_h: int, direction: int, overscan: int, max_blocks: int, skey: float
+    ) -> list[tuple[int, int, int, int]]:
+        """Up to ``max_blocks`` NATIVE bands just beyond the viewport in ``direction``. Grows the measured
+        prefix first. Call under ``self._lock``."""
+        self._grow_prefix(scroll + view_h + overscan)
+        threshold = scroll + view_h + overscan if direction >= 0 else scroll - overscan
+        rows = (
+            range(len(self._rows)) if direction >= 0 else reversed(range(self._offsets.prefix_len))
+        )
+        targets: list[tuple[int, int, int, int]] = []
+        for i in rows:
+            if self._offsets.known(i):
+                targets.extend(self._scaled_band_beyond(i, threshold, direction, skey))
+            if len(targets) >= max_blocks:
+                break
+        return targets[:max_blocks]
+
+    def _scaled_render_ahead(
+        self,
+        scroll: int,
+        view_h: int,
+        direction: int,
+        overscan: int,
+        max_blocks: int,
+        scale: float,
+        should_cancel: Callable[[], bool] | None,
+    ) -> int:
+        """Warm up to ``max_blocks`` NATIVE bands just beyond the viewport in ``direction`` into
+        ``_scaled_blocks`` — the crisp counterpart to ``render_ahead``'s 1× overscan, so a scroll under
+        the one-panel path composites native without a synchronous raster. Serial (crisp is opportunistic;
+        no process-pool needed) and cancellable."""
+        with self._lock:
+            targets = self._scaled_ahead_targets(
+                scroll, view_h, direction, overscan, max_blocks, round(scale, 3)
+            )
+        warmed = 0
+        for i, b, y0, y1 in targets:
+            if should_cancel is not None and should_cancel():
+                break
+            with self._lock:
+                self._scaled_band(i, b, y0, y1, scale)  # warms into _scaled_blocks
+            warmed += 1
+        return warmed
+
     def render_ahead(
         self,
         scroll: int,
@@ -770,11 +826,14 @@ class WindowedPanel:
         max_blocks: int = 4,
         workers: int = 4,
         should_cancel: Callable[[], bool] | None = None,
+        scale: float = 1.0,
     ) -> int:
         """Pre-render up to ``max_blocks`` BANDS just beyond the visible window in the scroll
         ``direction`` (+1 down / -1 up) — one screen of overscan — so a subsequent scroll composites
         them with no hot-path render. A band is ~9ms, warmable within the ~0.16s flick lead (the whole
         point of banding: the worker keeps ahead where it couldn't on a ~500ms whole block).
+
+        ``scale`` > 1 warms NATIVE bands (the one-panel crisp path) instead of 1× bands.
 
         First MEASURES ahead (grows the offset prefix past the viewport WITHOUT caching non-body pixels)
         so a row's first band never pays the ~200ms walk synchronously, then warms the ahead bands.
@@ -785,6 +844,10 @@ class WindowedPanel:
         GIL build submits the picklable :func:`overlay.body_block.render_body_band` per band to a process
         pool (threads there serialise for worse than serial). ``should_cancel`` is checked between
         completions and cancels not-yet-started renders. Returns how many bands rendered."""
+        if scale != 1.0:
+            return self._scaled_render_ahead(
+                scroll, view_h, direction, overscan, max_blocks, scale, should_cancel
+            )
         with self._lock:
             targets = self._band_targets(scroll, view_h, overscan, direction, max_blocks)
         if not targets:

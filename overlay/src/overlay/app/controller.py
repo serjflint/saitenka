@@ -113,6 +113,10 @@ NESTED_ID = OverlayId.NESTED
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text", "sid")
 
+# The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
+# reuses cached native bands instead of re-rastering (see Reader._raster_scale).
+_SCALE_BUCKET = 0.05
+
 # Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
 # (osd_h/REF_H) jitters: which source is stable (a candidate to key scale off) vs which wobbles. Unknown
 # props return None (mpv errors → data None) — harmless. video-out-params is a dict (dw/dh/w/h/aspect).
@@ -474,6 +478,15 @@ class Reader:
         if self._tip_scale_override > 0:  # [tooltip] tip_scale — a fixed cosmetic preference
             return self._tip_scale_override
         return self.osd[1] / prefetch.REF_H
+
+    @property
+    def _raster_scale(self) -> float:
+        """The display scale SNAPPED to a 0.05 bucket — the scale the one-panel crisp path rasters,
+        composites, AND inverts the hit-test at (all three must agree). Bucketing means mpv's osd-
+        dimensions wobble (``osd_h`` ±few px → a jitter in the 3rd decimal) reuses cached native bands
+        instead of re-rastering. Geometry is already scale-free, so this is a pure raster-cache concern.
+        Only the ``scale_boundary`` path uses it; the legacy two-panel path keeps the exact scale."""
+        return round(self._tip_display_scale / _SCALE_BUCKET) * _SCALE_BUCKET
 
     @property
     def _tip_ref_h(self) -> int:
