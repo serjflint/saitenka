@@ -967,7 +967,8 @@ def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: i
     vh = min(view_h, full_h)
     y0 = max(0, min(scroll, max(0, full_h - vh)))
     try:
-        with otel_metrics.traced("tip_compose", soft_reason="native", scale=f"{scale:.4f}"):
+        # crisp=native (soft_reason="" — this IS the crisp path, not a soft fallback)
+        with otel_metrics.traced("tip_compose", soft_reason="", scale=f"{scale:.4f}"):
             arr = st.viewport(y0, vh, overscan=vh, scale=scale)  # native BGRA over 1× geometry
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
         log.debug("native compose failed", exc_info=True)
