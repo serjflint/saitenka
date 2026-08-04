@@ -1020,6 +1020,47 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     assert hit is not None and hit.text.startswith("追")
 
 
+def _tall_nested_reader(ipc):
+    """Scan reader whose inner-word lookup returns a TALL entry, so the nested popup must scroll."""
+    from overlay.app.subtitles import WordBox
+    from overlay.app.tokenize import Token
+
+    r = Reader(ipc, dict_set=_TallDS(), scan_delay=0.0)
+    r.osd = (3840, 2160)  # 4K → the hi-dpi native compose path the report was captured on
+    r.sub_origin = (0, 0)
+    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
+    r.boxes = [WordBox(0, 100, 300, 40, 40)]
+    return r
+
+
+def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
+    # Regression (report 20260805): the nested popup wouldn't scroll past ~the middle — its clamp read a
+    # full_height that never converged, because the OLD crisp path composited a SEPARATE native panel
+    # while the reference panel it clamped against stayed head-only. The one-panel scale-boundary arch
+    # composites the SAME panel on every scroll, so each notch measures more of the tail (full_height
+    # grows) and the wheel reaches the true bottom. Driven at 4K to exercise the native compose path.
+    r = _tall_nested_reader(FakeIPC())
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    tok = r.tokens[0]
+    r._open_nested(
+        tok, tok.surface, 300.0, 2000.0, 40.0
+    )  # anchor low → nested_view_h keeps full height
+    st = r._nest.state
+    assert st is not None
+    assert st.windowed.measured < st.windowed.count  # head only on open — the tall tail is deferred
+    # Wheel toward the bottom until the clamp stops moving; each notch grows the converging estimate.
+    prev = -1
+    for _ in range(200):
+        r._scroll_nested(10_000)
+        if r._nest.scroll == prev:
+            break
+        prev = r._nest.scroll
+    assert (
+        st.windowed.measured == st.windowed.count
+    )  # whole panel measured — the estimate never froze
+    assert r._nest.scroll == max(0, st.full_height - r._nest.view_h)  # reached the true bottom
+
+
 def test_tooltip_geometry_is_resolution_independent():
     # The tooltip renders at the 1920×1080 REFERENCE, so its geometry — and thus the render cache key —
     # is IDENTICAL at 1080p and 4K. Only _tip_display_scale changes, so a 1080p prewarm hits at any
