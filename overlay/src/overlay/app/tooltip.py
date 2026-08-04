@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import dataclasses as _dc
 import logging
-import threading
 import time
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -812,14 +811,9 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
         if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
             reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format; freeze the frame while you read
             reader._paused_by_tip = True
-    # Hi-dpi: the paint above upscaled the reference render (soft). Request a native re-render in idle.
-    reader._tip_tok, reader._tip_inflected = (
-        tok,
-        inflected,
-    )  # source for the native re-render (+ on scroll)
-    request_crisp(
-        reader, tok, inflected, key, cap, reader._tip_scroll, reader._tip_view_h, mined=mined
-    )
+    # One panel: the blit above already composited native (crisp) at hi-dpi; the scroll-ahead worker
+    # warms upcoming native bands. Keep the source token for the scroll path's warm requests.
+    reader._tip_tok, reader._tip_inflected = tok, inflected
 
 
 def place_panel(
@@ -927,80 +921,16 @@ _CRISP_MIN_SCALE = (
 )
 
 
-def _crisp_cache_key(key, scale: float) -> tuple:
-    """The native-panel cache key: the reference PanelKey plus the display scale it was rastered at (so
-    a window resize to a new scale re-warms rather than composing a stale-resolution panel)."""
-    return (key, round(scale, 3))
-
-
-def crisp_lookup(reader: Reader, key) -> Panel | None:
-    """The cached native-scale panel for ``key`` at the current display scale, or None (crisp off, not
-    hi-dpi, no key — a navigated/search view — or not built yet). Shared by the base tooltip and the
-    nested popup; a hit means this word can composite crisp on THIS paint (incl. its very first, when the
-    idle lookahead built it ahead of the hover)."""
-    if key is None or not reader._crisp_on:
-        return None
-    scale = reader._tip_display_scale
-    if scale <= _CRISP_MIN_SCALE:
-        return None
-    with (
-        reader._crisp_lock
-    ):  # workers insert/evict concurrently — OrderedDict.get isn't atomic (no-GIL)
-        return reader._crisp_cache.get(_crisp_cache_key(key, scale))
-
-
-def _crisp_miss_reason(reader: Reader, key) -> str:
-    """Why a blit for ``key`` can't composite crisp (→ soft upscale), for telemetry. "" means a crisp
-    HIT. ``stale_scale`` is the diagnostic one: the word's native panel IS built, but at a DIFFERENT
-    display scale than the current one — i.e. the OSD scale moved and orphaned the cached panel."""
-    if not reader._crisp_on:
-        return "off"
-    scale = reader._tip_display_scale
-    if scale <= _CRISP_MIN_SCALE:
-        return "not_hidpi"
-    if key is None:
-        return "no_key"  # a navigated/search view with no synthetic key installed
-    with reader._crisp_lock:
-        if reader._crisp_cache.get(_crisp_cache_key(key, scale)) is not None:
-            return ""  # hit
-        built_other_scale = any(k == key for k, _s in reader._crisp_cache)
-    return "stale_scale" if built_other_scale else "not_built"
-
-
 def hit_target(reader: Reader, *, nested: bool):
-    """The ``(panel, scale, scroll)`` to hit-test a popup against — MUST be the panel actually drawn, or
-    hover/click land on the wrong element. When the crisp NATIVE panel is on screen its wrap can differ
-    from the reference's (real glossary text wraps differently at 640 vs 640×scale px, and the drift
-    accumulates down the panel), so hit-test IT at 1:1 (native px == display px, scroll in native px);
-    else the reference panel at display scale. Same ``(mx-sx)/scale + scroll`` formula serves both."""
+    """The ``(panel, scale, scroll)`` to hit-test a popup against — the ONE reference panel, always. It's
+    composited natively (glyph masks over 1× geometry), so the DRAWN panel IS the hit-tested panel and the
+    inverse is a single ``(mx-sx)/scale + scroll`` against 1× geometry — the two-geometry seam bug can't
+    occur. ``scale`` is the BUCKETED raster scale the blit drew at, so hit-test == draw exactly."""
     if nested:
-        key, ref, scroll = reader._nest.key, reader._nest.state, reader._nest.scroll
+        ref, scroll = reader._nest.state, reader._nest.scroll
     else:
-        key, ref, scroll = reader._tip_key, reader._tip_state, reader._tip_scroll
-    if reader._scale_boundary:
-        # One panel: the DRAWN panel IS the reference panel (composited natively) — no second-panel
-        # branch, so geometry is always the 1× reference and the inverse is a single (mx-sx)/scale. The
-        # BUCKETED raster scale (what the blit drew at) is the inverse, so hit-test == draw exactly.
-        return ref, reader._raster_scale, scroll
-    panel = crisp_lookup(reader, key)
-    if panel is not None:
-        s = reader._tip_display_scale
-        return panel, 1.0, round(scroll * s)
-    return ref, reader._tip_display_scale, scroll
-
-
-def _crisp_store(reader: Reader, key, scale: float, panel: Panel) -> Panel:
-    """Insert ``panel`` under (key, scale) with LRU eviction; return the retained panel (first-writer-wins
-    if two threads race to build the same word). Held briefly under ``_crisp_lock``."""
-    ck = _crisp_cache_key(key, scale)
-    with reader._crisp_lock:
-        if ck in reader._crisp_cache:
-            reader._crisp_cache.move_to_end(ck)
-            return reader._crisp_cache[ck]
-        while len(reader._crisp_cache) >= reader._crisp_cache_max:
-            reader._crisp_cache.popitem(last=False)  # evict least-recently-used native panel
-        reader._crisp_cache[ck] = panel
-        return panel
+        ref, scroll = reader._tip_state, reader._tip_scroll
+    return ref, reader._raster_scale, scroll
 
 
 def render_tip_view(reader: Reader) -> None:
@@ -1052,231 +982,12 @@ def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: i
     )
 
 
-def _blit_crisp_or_soft(reader: Reader, st: Panel, key, scroll: int, view_h: int, xy, oid: int):
-    """Composite ``[scroll, scroll+view_h)`` of popup ``st`` and return its display-px rect: crisp from
-    the cached native panel for ``key`` when built, else the soft reference upscale. The one path both the
-    base tooltip and the nested popup blit through, so each is crisp exactly when its native panel exists."""
-    if reader._scale_boundary:
-        return _blit_native(reader, st, scroll, view_h, xy, oid)
-    panel = crisp_lookup(reader, key)
-    if panel is not None:
-        view = _crisp_compose(reader, panel, scroll, view_h)  # bands warmed off-thread → cheap
-        if view is not None:
-            reader._crisp_miss = ""
-            if otel_metrics.crisp_swaps is not None:
-                otel_metrics.crisp_swaps.add(1)
-            y0, full_h, arr = view
-            return decorate_and_upload(reader, arr, y0, full_h, xy, oid, prescaled=True)
-        reader._crisp_miss = "compose_failed"
-    else:
-        reader._crisp_miss = _crisp_miss_reason(reader, key)
-    return blit_panel(reader, st, scroll, view_h, xy, oid)  # soft — until the native panel is built
-
-
-def _crisp_compose(reader: Reader, panel: Panel, scroll: int, view_h: int):
-    """Composite the current viewport from a native-scale ``panel`` → ``(y0, full_h, BGRA)`` in display px,
-    or None on failure. Overscan warms the next viewport's bands; the WindowedPanel's own lock makes this
-    safe to run while the crisp worker render-aheads the same panel (as the reference panel already does)."""
-    scale = reader._tip_display_scale
-    y0 = round(scroll * scale)
-    vh = min(round(view_h * scale), panel.full_height)
-    try:
-        arr = panel.viewport(y0, vh, overscan=vh)  # premultiplied BGRA (per-band fast path)
-    except Exception:  # a composite failure just falls back to the soft upscale
-        log.debug("crisp composite failed", exc_info=True)
-        return None
-    return y0, panel.full_height, arr
-
-
-# --- idle crisp post-render (hi-dpi) -----------------------------------------------------------------
-# On a hi-dpi display a popup paints instantly by upscaling its 1920×1080-reference render (soft glyph
-# edges). A single background worker then re-renders the CURRENT viewport at NATIVE resolution into a
-# shared native-panel cache (keyed PanelKey+scale, reused across scrolls of the same word), and the poll
-# loop swaps the crisp pixels in. Requested on every show AND scroll (newest wins, coalesced). Because
-# the same cache is also filled by the idle lookahead (prefetch), an upcoming word is often ALREADY
-# crisp on its first paint. The interactive _tip_state / _nest.state stays the REFERENCE panel (hit-test
-# is unchanged); this is a display-only pass over both the base tooltip and the nested popup.
-
-
-def request_crisp(
-    reader: Reader,
-    tok,
-    inflected,
-    key,
-    cap: int,
-    scroll: int,
-    view_h: int,
-    *,
-    mined: bool,
-    direction: int = 1,
-    target: str = "tip",
-) -> None:
-    """Ask the crisp worker to build the native-scale panel for this word (if not cached) and warm its
-    bands AHEAD of ``scroll`` in ``direction``, for ``target`` ("tip" | "nest"). Called on show and on
-    every scroll of either popup. The blit path then composites crisp directly from that warm panel. A
-    keyless view (a link-navigated / search popup, ``key is None``) is skipped — its content isn't an
-    ``entry_for_tok``."""
-    if (
-        reader._scale_boundary  # one-panel: the blit composites native directly, no 2nd panel to warm
-        or not reader._crisp_on
-        or reader._tip_display_scale <= _CRISP_MIN_SCALE
-        or tok is None
-        or key is None
-    ):
-        return
-    with reader._crisp_lock:
-        reader._crisp_req = {
-            "tok": tok,
-            "inflected": inflected,
-            "key": key,
-            "cap": cap,
-            "scroll": scroll,
-            "dir": direction,
-            "scale": reader._tip_display_scale,
-            "view_h": view_h,
-            "mined": mined,
-            "anki": anki_ok(reader),
-            "target": target,
-        }
-        if reader._crisp_thread is None:  # start the single worker lazily on first hi-dpi hover
-            reader._crisp_thread = threading.Thread(
-                target=_crisp_loop, args=(reader,), name="saitenka-tip-crisp", daemon=True
-            )
-            reader._crisp_thread.start()
-    reader._crisp_wake.set()
-
-
-def _crisp_active_key(reader: Reader, target: str):
-    """The key currently shown on ``target`` — the render-ahead bails the moment the popup switches word."""
-    return reader._nest.key if target == "nest" else reader._tip_key
-
-
-def _crisp_loop(reader: Reader) -> None:
-    """The single crisp worker: build the native-scale panel for the requested word (once, into the shared
-    cache), then keep its bands warmed AHEAD of the scroll off the main thread — so the blit path
-    composites the current viewport crisp cheaply on the hot path (no separate swap, no soft flash on
-    scroll). When a panel is first built it flags one re-blit so an already-shown soft paint upgrades."""
-    while True:
-        reader._crisp_wake.wait()
-        reader._crisp_wake.clear()
-        with reader._crisp_lock:
-            req, reader._crisp_req = reader._crisp_req, None
-        if req is None:
-            continue
-        try:
-            with otel_metrics.traced(
-                "crisp_render", scroll=str(req["scroll"]), scale=f"{req['scale']:.4f}"
-            ) as span:
-                panel, fresh = _crisp_native_panel(reader, req)
-                span.set("fresh", 1 if fresh else 0)  # fresh build vs a cache hit (warm-only)
-                scale = req["scale"]
-                target = req["target"]
-                panel.windowed.render_ahead(  # warm the bands the main-thread composite will need
-                    round(req["scroll"] * scale),
-                    round(req["view_h"] * scale),
-                    direction=req.get("dir", 1),
-                    overscan=round(req["view_h"] * scale),
-                    should_cancel=lambda k=req["key"], t=target: (
-                        _crisp_active_key(reader, t) != k
-                    ),  # bail if that popup switched word
-                )
-            if fresh:  # native panel now exists → upgrade an already-shown soft paint to crisp
-                with reader._crisp_lock:
-                    reader._crisp_dirty = True
-        except Exception:  # a single failure must never take down the worker/hover
-            log.debug(
-                "crisp warm failed for %r", getattr(req["tok"], "surface", None), exc_info=True
-            )
-
-
-def _crisp_native_panel(reader: Reader, req: dict):
-    """The native-scale panel for ``req``'s word from the shared cache — built once, reused for every
-    scroll and across popups. Returns ``(panel, fresh)`` where ``fresh`` is True on a first build (→ the
-    caller flags a re-blit to upgrade soft→crisp)."""
-    scale = req["scale"]
-    with reader._crisp_lock:
-        cached = reader._crisp_cache.get(_crisp_cache_key(req["key"], scale))
-    if cached is not None:
-        return cached, False
-    panel = build_native_panel(
-        reader,
-        req["tok"],
-        req["inflected"],
-        req["key"],
-        req["cap"],
-        scale,
-        mined=req["mined"],
-        anki=req["anki"],
-    )
-    stored = _crisp_store(reader, req["key"], scale, panel)
-    return stored, stored is panel
-
-
-def build_native_panel(
-    reader: Reader, tok, inflected, key, cap: int, scale: float, *, mined: bool, anki: bool
-) -> Panel:
-    """Render the NATIVE-scale (``Theme(scale)``, ``tip_width × scale``) panel for a word and warm its
-    head. Pure (no ``_tip_*`` reads) so the crisp worker AND the idle lookahead both call it. ``key``'s
-    ``phrase_terms`` / ``group_mined`` reproduce the reference panel's stacking so the crisp content
-    matches byte-for-byte."""
-    from overlay.model import Theme
-
-    native_w = round(reader.tip_width * scale)
-    theme = Theme(scale=scale)
-    entry = entry_for_tok(reader=reader, tok=tok, inflected=inflected, extra_terms=key.phrase_terms)
-    panel = Panel.from_rows(
-        panel_rows(
-            entry,
-            native_w,
-            theme,
-            add_button=anki,
-            mined=mined,
-            speak_button=reader._tts_ok,
-            group_mined=key.group_mined,
-        ),
-        native_w,
-        getattr(entry, "reading", "") or tok.reading,
-        theme=theme,  # the windowed engine needs the scaled margin/gap, else vertical geometry is 1.0
-        band_cache_max=reader.band_cache_max,
-        raw_band_ceiling=reader.raw_band_ceiling,
-        layout_backend=reader.layout_backend,
-    )
-    panel.render_head(round(cap * scale))
-    return panel
-
-
-def warm_crisp_lookahead(reader: Reader, tok, inflected, *, mined: bool) -> None:
-    """Build the native-scale panel for an UPCOMING word into the shared cache during idle prefetch, so
-    its first hover paints crisp immediately (the ``_crisp_panel`` single slot could only ever upgrade
-    soft→crisp AFTER the hover). No-op off hi-dpi / crisp-off, or when already cached. Runs on a prefetch
-    worker — ``anki_ok`` / ``group_mined`` there is the same contract the reference head prefetch uses."""
-    if not reader._crisp_on:
-        return
-    scale = reader._tip_display_scale
-    if scale <= _CRISP_MIN_SCALE:
-        return
-    key = panel_key(reader, tok, inflected, mined=mined)
-    with reader._crisp_lock:
-        already = reader._crisp_cache.get(_crisp_cache_key(key, scale)) is not None
-    if already:
-        return
-    panel = build_native_panel(
-        reader, tok, inflected, key, reader._tip_cap(), scale, mined=mined, anki=anki_ok(reader)
-    )
-    _crisp_store(reader, key, scale, panel)
-
-
-def apply_pending_crisp(reader: Reader) -> None:
-    """Main thread (poll loop): when a native panel first becomes available, re-blit each shown popup once
-    through its SSOT so an initial soft paint upgrades to crisp (later scrolls composite crisp directly)."""
-    with reader._crisp_lock:
-        dirty, reader._crisp_dirty = reader._crisp_dirty, False
-    if not dirty:
-        return
-    if reader._tip_state is not None:
-        render_tip_view(reader)
-    if reader._nest.state is not None:
-        reader._render_nested_view()
+def _blit_crisp_or_soft(reader: Reader, st: Panel, _key, scroll: int, view_h: int, xy, oid: int):
+    """Composite ``[scroll, scroll+view_h)`` of popup ``st`` and return its display-px rect. One panel:
+    the reference panel composites natively at the display scale (``_blit_native``), soft below the crisp
+    threshold. ``_key`` is unused now (kept for the base/nested call signature). The SSOT both popups blit
+    through, so each is crisp exactly when hi-dpi."""
+    return _blit_native(reader, st, scroll, view_h, xy, oid)
 
 
 def _capture_tip_view(reader: Reader) -> tuple:
@@ -1307,11 +1018,11 @@ def _restore_tip_view(reader: Reader, view: tuple) -> None:
     ) = view
 
 
-def _navigated_panel(reader: Reader, query: str, *, scale: float = 1.0) -> Panel | None:
-    """The read-only Panel for a navigation target: a wildcard/prefix query → search results, else the
-    exact term. No ⊕ — the header mine button acts on the hovered SUBTITLE word, which the navigated
-    term is not, so mining stays on the base word (reachable via back). ``scale`` > 1 builds the panel at
-    native resolution (``Theme(scale)``, ``tip_width × scale``) for the crisp compose on a hi-dpi display."""
+def _navigated_panel(reader: Reader, query: str) -> Panel | None:
+    """The read-only reference Panel for a navigation target: a wildcard/prefix query → search results,
+    else the exact term. No ⊕ — the header mine button acts on the hovered SUBTITLE word, which the
+    navigated term is not, so mining stays on the base word (reachable via back). Built at 1× like every
+    panel; the one-panel blit composites it natively at the display scale."""
     if reader.dict_set is None:
         return None
     if any(c in query for c in "*?＊？"):
@@ -1325,50 +1036,15 @@ def _navigated_panel(reader: Reader, query: str, *, scale: float = 1.0) -> Panel
             return None
         entry = entry_for_tok(reader, tok, tok.surface)
         reading = getattr(entry, "reading", "") or tok.reading
-    width = round(reader.tip_width * scale)
-    from overlay.model import Theme
-
-    theme = Theme(scale=scale)
-    rows = panel_rows(entry, width, theme, add_button=False, speak_button=reader._tts_ok)
+    rows = panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok)
     return Panel.from_rows(
         rows,
-        width,
+        reader.tip_width,
         reading,
-        theme=theme,  # scaled margin/gap for the windowed engine — a navigated view is crisp too
         band_cache_max=reader.band_cache_max,
         raw_band_ceiling=reader.raw_band_ceiling,
         layout_backend=reader.layout_backend,
     )
-
-
-def _nav_key(reader: Reader, query: str) -> PanelKey:
-    """A synthetic PanelKey identifying a navigated (link/search) view by its query — NOT a hovered
-    subtitle token, so it never collides with a real word's key (distinct reading="" field). Lets the
-    crisp cache / hit-test treat a navigated view exactly like a hovered one."""
-    return PanelKey(query, query, "", query, reader.tip_width, False, False)  # noqa: FBT003
-
-
-def _install_nav_crisp(reader: Reader, query: str) -> PanelKey | None:
-    """Build the navigated view's NATIVE-scale panel and cache it, returning its synthetic key so the
-    navigated tooltip composites crisp like a hovered one. None off hi-dpi / crisp-off — the caller
-    then leaves ``_tip_key`` None (soft). Built here (not by the crisp worker) because a navigated view
-    can be a wildcard SEARCH result, which ``build_native_panel``'s ``entry_for_tok`` can't reproduce."""
-    if (
-        reader._scale_boundary
-    ):  # one-panel: the nav view composites native from its own reference panel
-        return None
-    if not reader._crisp_on:
-        return None
-    scale = reader._tip_display_scale
-    if scale <= _CRISP_MIN_SCALE:
-        return None
-    native = _navigated_panel(reader, query, scale=scale)
-    if native is None:
-        return None
-    native.render_head(round(reader._tip_cap() * scale))
-    key = _nav_key(reader, query)
-    _crisp_store(reader, key, scale, native)
-    return key
 
 
 def navigate_tip(reader: Reader, query: str) -> None:
@@ -1384,9 +1060,9 @@ def navigate_tip(reader: Reader, query: str) -> None:
     reader._hide_nested()  # the old content's scan popup is stale
     reader._tip_nav.append(_capture_tip_view(reader))
     reader._tip_state = st
-    # A navigated view keys to its query (not a subtitle token), so it caches + composites crisp like a
-    # hovered word; _tip_tok=None so the scroll path doesn't try to rebuild it from a stale token.
-    reader._tip_key = _install_nav_crisp(reader, query)
+    # A navigated view is keyless (not a subtitle token) — the one panel composites native from its own
+    # reference panel, so no synthetic key is needed. _tip_tok=None so scroll won't rebuild from a token.
+    reader._tip_key = None
     reader._tip_tok = reader._tip_inflected = None
     reader._hover_reading = st.reading
     reader._tip_scroll = 0
@@ -1421,26 +1097,10 @@ def scroll_tip(reader: Reader, delta: int) -> None:
         reader._tip_scroll = ns
         reader._hide_at = 0.0  # scrolling counts as interacting → keep it up
         reader._scan_target = None  # content moved under the cursor → restart the scan dwell
-        render_tip_view(
-            reader
-        )  # composites crisp directly if the native panel is built (else soft)
-        prefetch.request_render_ahead(
-            reader, going
-        )  # warm the next reference blocks off the main thread
-        # Hi-dpi: warm the native panel's bands ahead in this scroll direction so the crisp composite above
-        # stays cheap as you keep scrolling.
-        if reader._tip_key is not None and reader._tip_tok is not None:
-            request_crisp(
-                reader,
-                reader._tip_tok,
-                reader._tip_inflected,
-                reader._tip_key,
-                reader._tip_cap(),
-                ns,
-                reader._tip_view_h,
-                mined=reader._tip_key.mined,
-                direction=going,
-            )
+        render_tip_view(reader)  # composites native (crisp) at hi-dpi, soft below the threshold
+        # Warm the next NATIVE bands off the main thread (render_ahead uses the bucketed display scale),
+        # so continued scrolling composites crisp without a synchronous raster.
+        prefetch.request_render_ahead(reader, going)
 
 
 # --- nested scanning: hover a word INSIDE the tooltip → its own popup ---------------------------

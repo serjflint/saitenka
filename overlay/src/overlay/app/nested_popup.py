@@ -58,26 +58,6 @@ def render_nested_view(reader: Reader) -> None:
         reader._nest.xy,
         OverlayId.NESTED,
     )
-    _request_nested_crisp(reader)
-
-
-def _request_nested_crisp(reader: Reader) -> None:
-    """Ask the crisp worker to build/warm the nested word's native panel (hi-dpi only; no-op for a
-    wildcard-search popup whose ``token`` is None). On show it upgrades soft→crisp; on scroll it warms
-    the bands ahead so the crisp composite stays cheap."""
-    nest = reader._nest
-    if nest.token is None or nest.key is None:
-        return
-    reader._request_crisp(
-        nest.token,
-        nest.word,
-        nest.key,
-        reader._tip_cap(),
-        nest.scroll,
-        nest.view_h,
-        mined=reader._is_mined(nest.token),  # matches the reference nested panel's ⊕/✓ variant
-        target="nest",
-    )
 
 
 def scroll_nested(reader: Reader, delta: int) -> None:

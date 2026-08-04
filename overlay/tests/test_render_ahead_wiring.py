@@ -88,9 +88,8 @@ def test_worker_drains_the_slot_and_warms_off_thread():
 
     assert handled is True
     assert r._render_ahead_req is None  # slot drained
-    assert panel.calls == [
-        (120, 300, 1, False, 1.0)
-    ]  # warmed at the scroll pos, not cancelled, 1× (flag off)
+    # warmed at the scroll pos, not cancelled, at the (bucketed) display scale — native bands (one panel)
+    assert panel.calls == [(120, 300, 1, False, r._raster_scale)]
 
 
 def test_empty_slot_is_not_handled():

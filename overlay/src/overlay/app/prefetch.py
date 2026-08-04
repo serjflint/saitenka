@@ -180,10 +180,13 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
             # first viewport composited in idle → warm hover = copy + upload; persists a cost-gated head
             # to the render cache (#149) when on.
             reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
-            # Hi-dpi: also build this upcoming word's NATIVE-scale panel into the shared crisp cache, so
-            # its first hover paints crisp immediately instead of soft-then-swap (no-op off hi-dpi). Via
-            # the Reader seam — a direct prefetch→tooltip import would cycle (tooltip imports prefetch).
-            reader._warm_crisp_lookahead(item.token, item.inflected, mined=item.mined)
+            # Hi-dpi one-panel: warm this upcoming word's NATIVE first-viewport bands (into the panel's
+            # own _scaled_blocks) so its first hover composites crisp without a synchronous raster. No-op
+            # below the crisp threshold (≈1080p, where the blit takes the soft 1× path anyway).
+            if reader._crisp_on and reader._raster_scale > 1.05:
+                st.viewport(
+                    0, cap, scale=reader._raster_scale
+                )  # discard — warms the native band cache
         reader._head_built += 1
     except Exception:
         log.debug(
@@ -226,15 +229,14 @@ def _try_render_ahead(reader: Reader) -> bool:
     if reader._stop.is_set() or req.gen != reader._prefetch_gen:
         return True  # stale (word changed / seek / closing) — handled, keep looping
     try:
-        # One-panel crisp: warm NATIVE bands at the display scale so a scroll composites crisp without a
-        # synchronous raster (soft stays the sub-threshold / cold path).
-        scale = reader._raster_scale if reader._scale_boundary else 1.0
+        # One-panel crisp: warm NATIVE bands at the (bucketed) display scale so a scroll composites crisp
+        # without a synchronous raster (soft stays the sub-threshold / cold path).
         req.panel.render_ahead(
             req.scroll,
             req.view_h,
             direction=req.direction,
             should_cancel=lambda: reader._stop.is_set() or req.gen != reader._prefetch_gen,
-            scale=scale,
+            scale=reader._raster_scale,
         )
     except Exception:
         log.debug("render-ahead failed", exc_info=True)  # a bad block must never kill the worker

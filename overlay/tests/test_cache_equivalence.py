@@ -15,10 +15,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import tip_fakes
 import util
 
-from overlay.app import tooltip
 from overlay.model import Theme
 from overlay.panel import panel_rows, render_panel
 from overlay.render.banded import WindowedPanel
@@ -42,26 +40,21 @@ def _bgra_band_case():
 
 
 def _native_crisp_case():
-    """Native-crisp compose: composing the SAME native panel a second time (its bands now warm) vs a
-    freshly rebuilt panel (cold bands) must yield the same display-scale BGRA."""
-    r = tip_fakes.hidpi_reader(2.0)
-    tok = r.tokens[0]
-    key = r._panel_key(tok, tok.surface, mined=False)
-    scale, cap = r._tip_display_scale, r._tip_cap()
-
-    def _build():
-        return tooltip.build_native_panel(
-            r, tok, tok.surface, key, cap, scale, mined=False, anki=False
-        )
-
-    warm = _build()
-    tooltip._crisp_compose(r, warm, 0, cap)  # warm its bands
-    a = tooltip._crisp_compose(r, warm, 0, cap)[2]  # served from the warm bands
-    cold = _build()
-    b = tooltip._crisp_compose(r, cold, 0, cap)[2]  # cold bands, rebuilt from scratch
-    warm.windowed.viewport(0, 1_000_000)
-    cold.windowed.viewport(0, 1_000_000)
-    return a, b, warm.windowed.scan_boxes(), cold.windowed.scan_boxes()
+    """One-panel native compose: compositing the reference panel at the display scale a second time (its
+    native bands now warm) vs a fresh panel (cold bands) must yield the same native-scale BGRA."""
+    theme, width, entry, scale = Theme(), 640, util.cjk_links_entry(6), 2.0
+    total = render_panel(entry, width=width, theme=theme).height
+    vh = 240
+    warm = WindowedPanel(panel_rows(entry, width, theme), width, theme)
+    for s in range(0, max(1, total - vh) + 1, 40):  # measure the whole panel (offset table)
+        warm.viewport(s, vh)
+    warm.viewport_bgra(0, vh, scale=scale)  # warm the native bands…
+    a = warm.viewport_bgra(0, vh, scale=scale)  # …served from the warm native cache
+    cold = WindowedPanel(panel_rows(entry, width, theme), width, theme)
+    b = cold.viewport_bgra(0, vh, scale=scale)  # native bands rastered fresh this call
+    warm.viewport(0, total)
+    cold.viewport(0, total)
+    return a, b, warm.scan_boxes(), cold.scan_boxes()
 
 
 @pytest.mark.parametrize(
