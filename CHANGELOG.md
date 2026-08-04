@@ -7,16 +7,62 @@ logs.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-04
+
 ### Added
 
-- **Optional taffy layout engine behind the `LayoutBackend` seam (`saitenka[layout-engine]`).** A new
-  `TaffyLayoutBackend` computes the tooltip's row-stack geometry with the mature [taffy](https://github.com/DioxusLabs/taffy)
-  CSS-flexbox solver instead of hand-rolled arithmetic, packaged as the in-repo `taffylite` Rust
-  extension (a thin PyO3 binding, MIT/Apache-2.0). It is **opt-in and parity-gated** — byte-identical to
-  the always-available pure-Python `DefaultLayoutBackend` (a differential test proves it across random
-  inputs, the vendored column fixtures, and a real panel's full scroll) — chosen for a maintained
-  engine's robustness, not speed (both are µs-scale, dominated by Pillow raster). Kept out of the `full`
-  extra because free-threaded `cp314t` wheels are still niche; the default install stays pure-Python.
+- **Faster tooltips — warm hovers and scrolls now stay under one frame (~16 ms), most under 8 ms.**
+  Two idle/memory levers, driven by real diagnostics-report telemetry:
+  - **Idle pre-compose.** The background prefetch worker that already builds an upcoming word's tooltip
+    head now also composites its first viewport in idle, so the actual hover is a buffer copy + upload
+    with zero synchronous rasterisation — the bulk of a warm hover's cost (BGRA convert + overscan
+    raster + assemble) moves off the hot path into otherwise-idle CPU. Measured warm-hover p50 fell
+    ~24 ms → ~6 ms on the trace replay.
+  - **Uncompressed render bands, with a per-panel ceiling.** A tooltip keeps its render bands
+    uncompressed (skipping the one-time decompress on the first scroll-reach of a band — ~9 → ~4 ms off
+    the cold-band frame tail) until the panel's estimated size exceeds the new
+    `[tooltip] raw_band_ceiling_mb` (default 100), when its bands compress so one pathological entry
+    can't blow the retained-pixel budget. `0` restores the previous always-compress behaviour.
+- **Optional [taffy](https://github.com/DioxusLabs/taffy) layout engine behind a `LayoutBackend` seam
+  (`saitenka[layout-engine]`, `[tooltip] layout_engine = "taffy"`).** The tooltip's row-stack geometry
+  can be computed by the mature taffy CSS-flexbox solver (packaged as the in-repo `taffylite` Rust/PyO3
+  extension) instead of hand-rolled arithmetic. It is **opt-in and parity-gated** — byte-identical to
+  the always-available pure-Python default (a differential test proves it across random inputs, vendored
+  fixtures, and a real panel's full scroll) — chosen for a maintained engine's robustness, not speed.
+  Kept out of `full` because free-threaded `cp314t` wheels are still niche; the default install stays
+  pure-Python.
+- **Correct Japanese line-breaking (UAX-14 + kinsoku) in tooltips.** A pure line-break module keeps a
+  closing bracket, small kana, or punctuation from starting or ending a wrapped line, so long glosses
+  wrap the way Japanese text should.
+- **Opt out of the post-mine card-preview panel** — `saitenka --no-mine-preview` or `[mine] preview =
+  false` skips the auto-preview after mining a card.
+- **Tooltip performance observability.** New OpenTelemetry spans attribute where a hover/scroll spends
+  its time (compose, measure, mining lookup, pause-on-hover IPC), plus cache hit/eviction and
+  pre-compose counters, all surfaced in the diagnostics report — so a slow hover can be explained rather
+  than guessed.
+
+### Changed
+
+- **Lower-latency glyph and layout rendering.** Rendered glyph masks are cached behind a split text
+  drawer, per-band pixels convert to BGRA once instead of per frame, and a tooltip's offset table is
+  computed once per measure rather than on every read — cutting the residual per-frame cost that
+  banding left behind.
+
+### Fixed
+
+- **Furigana'd cross-references are clickable again** — a reference decorated with reading annotations
+  now hit-tests correctly.
+- **Whole-track episode analysis is gated on the subtitle index**, not a Japanese track id, so it runs
+  in more setups.
+
+### Development
+
+- **External conformance corpora as test oracles** — the tooltip layout, de-inflection, subtitle-index
+  parser, and FSRS retrievability are now asserted against upstream projects' own test vectors (taffy,
+  Yomitan, SubMiner, py-fsrs), catching drift a hand-written test would miss.
+- **Trace-replay benchmark knobs** — the responsiveness bench can replay a real diagnostics report's
+  event cadence and sweep the prefetch worker count and the raw-band ceiling, splitting the warm-hover
+  report by whether the idle pre-compose reached it.
 
 ## [1.2.1] - 2026-08-03
 
