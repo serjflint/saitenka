@@ -243,6 +243,7 @@ class Reader:
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
         # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
         self._crisp_on = o.tooltip.crisp_upscale
+        self._scale_boundary = o.tooltip.scale_boundary  # one-panel crisp (scale-boundary rewrite)
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes _tip_display_scale (see config)
         self._crisp_lock = threading.Lock()
         self._crisp_req: dict | None = None  # latest build/warm request (newest scroll wins)

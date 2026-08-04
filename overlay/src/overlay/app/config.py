@@ -132,6 +132,10 @@ class TooltipOptions:
     # on a cost-gated (tall/pathological) entry paints its precomposed first viewport straight from disk
     # (copy+upload, skipping the build+raster) and live hovers extend it. No prebuilt cache → nothing is
     # created and it costs nothing. Set false to ignore an existing cache. Miss/resolution change → live.
+    scale_boundary: bool = False  # EXPERIMENTAL one-panel crisp: composite the ONE reference panel at the display scale
+    # (native glyph masks over 1× geometry) instead of building a SECOND native panel. Off by default
+    # while the scale-as-boundary rewrite lands stage by stage; flips to on (and deletes the second-panel
+    # path) once complete. No effect at 1080p (display scale 1.0).
     crisp_upscale: bool = (
         True  # OPT-OUT: on a hi-dpi display the tooltip paints instantly by upscaling
     )
