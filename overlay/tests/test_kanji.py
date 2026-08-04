@@ -91,7 +91,7 @@ def test_kanji_panel_golden(tmp_path):
 def _kanji_reader(tmp_path):
     ds = _fixture_ds(tmp_path)
     r = Reader(FakeIPC(), dict_set=ds)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("読本", "読本", "とくほん", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -139,7 +139,7 @@ def test_scan_cell_click_falls_back_to_kanji(monkeypatch, tmp_path):
     # no useful term context) — clicking its scan cell opens the KANJI entry in the nested popup.
     ds = _fixture_ds(tmp_path, terms=(("読む", "よむ", ["本のことだ。"]),))
     r = Reader(FakeIPC(), dict_set=ds)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("読む", "読む", "よむ", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]

@@ -447,6 +447,78 @@ def telemetry(
 
 
 @app.command
+def prewarm(
+    width: Annotated[
+        int, cyclopts.Parameter(help="video/window width in px (your play resolution)")
+    ] = 1920,
+    height: Annotated[int, cyclopts.Parameter(help="video/window height in px")] = 1080,
+    limit: Annotated[
+        int,
+        cyclopts.Parameter(
+            help="how many of the most-frequent words to prebuild (popularity cap; 0 = ALL freq-ranked "
+            "words — full mask-atlas coverage, the render cache stays bounded by its byte ceiling)"
+        ),
+    ] = 32000,
+    workers: Annotated[
+        int, cyclopts.Parameter(help="parallel render threads (0 = auto, ~cpu count)")
+    ] = 0,
+    *,
+    atlas_only: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative=(),
+            help="fill ONLY the glyph mask atlas (leave the render cache untouched) — pair with "
+            "`--limit 0` to saturate the atlas over the whole corpus without growing the render cache",
+        ),
+    ] = False,
+) -> int:  # pragma: no cover — thin CLI wrapper; prewarm() logic is unit-tested
+    """Prebuild the persistent tooltip render cache (#149) so even a FIRST-session cold hover on a
+    pathological word is instant (copy+upload), not a 40–170 ms build+raster.
+
+    Renders the top ``--limit`` most-frequent words (episode-agnostic, population-aware) at ``--width``
+    ×``--height`` — MUST match your play resolution, or a live hover computes a different key and misses —
+    most-popular first, until the ``[tooltip] render_cache_max_mb`` byte ceiling is reached. Needs
+    ``[tooltip] render_cache`` on and dictionaries imported. Re-run after a resolution or dictionary
+    change (both invalidate the cache signature).
+    """
+    from overlay.app.config import load_config
+    from overlay.app.prewarm import prewarm as _prewarm
+
+    if (
+        not atlas_only
+        and not load_config().get("tooltip", {}).get("render_cache")
+        and not load_config().get("render_cache")
+    ):
+        print(
+            "note: [tooltip] render_cache is off — prewarm still builds the cache, but enable it to use it"
+        )
+
+    def _progress(measured: int, rows: int, nbytes: int) -> None:
+        unit = "masks" if atlas_only else f"heads, {nbytes / 1e6:.0f} MB"
+        print(f"  … measured {measured:,} words → {rows:,} {unit}", flush=True)
+
+    try:
+        result = _prewarm(
+            width, height, limit, on_progress=_progress, workers=workers, atlas_only=atlas_only
+        )
+    except RuntimeError as e:
+        print(f"prewarm: {e}")
+        return 1
+    if atlas_only:
+        print(
+            f"prewarm(atlas): rendered {result.candidates:,} words → {result.rows:,} masks "
+            f"in the glyph atlas (render cache untouched)"
+        )
+    else:
+        print(
+            f"prewarm: rendered {result.candidates:,} popular words → stored {result.stored:,} non-trivial "
+            f"heads ({result.rows:,} rows, {result.bytes / 1e6:.0f} MB on disk"
+            + (", stopped at the byte ceiling)" if result.stopped_at_ceiling else ")")
+        )
+    return 0
+
+
+@app.command
 def stats(
     limit: Annotated[int, cyclopts.Parameter(help="number of recent sessions to show")] = 20,
 ) -> int:
@@ -989,6 +1061,10 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             flash_secs=cfg.get("flash_secs", tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", tt.panel_cache_max),
             layout_engine=cfg.get("layout_engine", tt.layout_engine),
+            render_cache=bool(cfg.get("render_cache", tt.render_cache)),
+            mask_atlas=bool(cfg.get("mask_atlas", tt.mask_atlas)),
+            render_cache_max_mb=cfg.get("render_cache_max_mb", tt.render_cache_max_mb),
+            render_cache_min_height=cfg.get("render_cache_min_height", tt.render_cache_min_height),
         ),
         mining=MiningOptions(
             play_audio=not bool(cfg.get("no_audio_play", False)),

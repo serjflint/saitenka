@@ -135,7 +135,9 @@ def _run_item(reader: Reader, item: PrefetchItem) -> None:
             # from a worker (jamdict is not thread-safe on free-threaded builds).
             cap = reader._tip_cap()
             st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-            st.precompose_head(cap)  # composite the first viewport now → warm hover = copy + upload
+            # composite the first viewport now → warm hover = copy + upload; also persists a cost-gated
+            # head to the render cache (#149) when it's on, for a later session's cold hover.
+            reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
         elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
             reader.dict_set.entry_for(item.token, item.inflected)
 
@@ -175,9 +177,13 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
         with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
             cap = reader._tip_cap()
             st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-            st.precompose_head(
-                cap
-            )  # first viewport composited in idle → warm hover = copy + upload
+            # first viewport composited in idle → warm hover = copy + upload; persists a cost-gated head
+            # to the render cache (#149) when on.
+            reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
+            # Hi-dpi: also build this upcoming word's NATIVE-scale panel into the shared crisp cache, so
+            # its first hover paints crisp immediately instead of soft-then-swap (no-op off hi-dpi). Via
+            # the Reader seam — a direct prefetch→tooltip import would cycle (tooltip imports prefetch).
+            reader._warm_crisp_lookahead(item.token, item.inflected, mined=item.mined)
         reader._head_built += 1
     except Exception:
         log.debug(
@@ -373,10 +379,21 @@ def upcoming_cue_texts(reader: Reader, n: int) -> list[str]:
     return [idx.cues[i].text for i in range(current + 1, min(len(idx), current + 1 + n))]
 
 
-def cap_for(reader: Reader, frac: float) -> int:
-    """A viewport-height cap: ``frac`` of the video, but always clear of the header/footer margin."""
-    margin = max(16, round(reader.osd[1] * 0.05))
-    return min(round(reader.osd[1] * frac), reader.osd[1] - 2 * margin)
+# The tooltip's FIXED reference resolution. Tooltip geometry (width, viewport-height cap) is computed
+# against this, NOT the live OSD, so the persistent render cache is resolution-independent: a 1080p
+# prewarm hits at any playback resolution, and osd_h/REF_H scales the composited bitmap to the actual
+# display at upload time (Reader._tip_display_scale). The tooltip is a VIDEO-OVERLAY element that tracks
+# the vertical viewport, NOT the app-chrome ui_scale (its fonts are theme scale 1.0). Matches the
+# interaction goldens pinned at 1080p (scale 1.0 = the reference, unscaled).
+REF_W, REF_H = 1920, 1080
+
+
+def cap_for(reader: Reader, frac: float) -> int:  # noqa: ARG001 — reader kept for the call-site shape
+    """A viewport-height cap: ``frac`` of the REFERENCE height, clear of the header/footer margin.
+    REFERENCE-based (not the live OSD, not ui_scale) so the tooltip render cache is resolution-independent;
+    the display scale (osd_h/REF_H) then maps ``frac`` onto the ACTUAL viewport at upload."""
+    margin = max(16, round(REF_H * 0.05))
+    return min(round(REF_H * frac), REF_H - 2 * margin)
 
 
 def tip_cap(reader: Reader) -> int:

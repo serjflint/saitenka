@@ -89,6 +89,23 @@ osd_paused_draw: Counter | None = (
 )
 osd_paused_nudge: Counter | None = None  # paused-OSD re-flushes issued to un-throttle mpv
 scroll_frame_jank: Counter | None = None  # scroll frames slower than SCROLL_JANK_THRESHOLD_MS
+# Persistent cross-session caches (#149). Their hit:miss ratio IS the "is the prewarm worth it?" signal:
+# a render_cache hit is a cold pathological hover direct-painted from disk (the 40-170ms → <2ms win); an
+# atlas hit is a getmask2 raster skipped by a disk-loaded mask. Writebacks/evictions show the live cache
+# earning its keep / churning under the byte ceiling.
+render_cache_hits: Counter | None = None  # cold hover direct-painted from the on-disk render cache
+render_cache_misses: Counter | None = None  # cold hover with no cached head → full build+raster
+render_cache_writebacks: Counter | None = None  # live-built head persisted to disk for next session
+render_cache_evictions: Counter | None = None  # on-disk heads LRU-dropped over render_cache_max_mb
+mask_atlas_hits: Counter | None = None  # getmask2 served from the disk-loaded glyph mask atlas
+mask_atlas_misses: Counter | None = None  # atlas active but glyph absent → rasterised this session
+mask_atlas_writebacks: Counter | None = (
+    None  # rasterised glyph persisted to the atlas for next session
+)
+# Idle crisp post-render (hi-dpi): swaps = a native re-render replaced the soft upscale; stale = it
+# finished after the user switched word / scrolled, so it was discarded (idle work that didn't pay off).
+crisp_swaps: Counter | None = None
+crisp_stale: Counter | None = None
 
 # ~one frame at 60Hz. The tail (p95/p99 jank-frame rate), not the mean, is what a user perceives
 # as scroll stutter — see scroll_frame_jank.
@@ -283,6 +300,9 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global bgra_memo_hits, bgra_memo_misses, precompose_hits, precompose_builds
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
+    global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
+    global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
+    global crisp_swaps, crisp_stale
 
     with _lock:
         _reader = reader
@@ -392,6 +412,36 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.scroll_frame.jank",
             description=f"scroll frames slower than {SCROLL_JANK_THRESHOLD_MS:.0f}ms",
         )
+        render_cache_hits = meter.create_counter(
+            "saitenka.render_cache.hits",
+            description="cold hovers direct-painted from the on-disk render cache",
+        )
+        render_cache_misses = meter.create_counter(
+            "saitenka.render_cache.misses",
+            description="cold hovers with no cached head (full build)",
+        )
+        render_cache_writebacks = meter.create_counter(
+            "saitenka.render_cache.writebacks", description="live heads persisted to disk"
+        )
+        render_cache_evictions = meter.create_counter(
+            "saitenka.render_cache.evictions", description="on-disk heads LRU-dropped over the cap"
+        )
+        mask_atlas_hits = meter.create_counter(
+            "saitenka.mask_atlas.hits", description="getmask2 served from the disk-loaded atlas"
+        )
+        mask_atlas_misses = meter.create_counter(
+            "saitenka.mask_atlas.misses", description="atlas active but glyph absent (rasterised)"
+        )
+        mask_atlas_writebacks = meter.create_counter(
+            "saitenka.mask_atlas.writebacks", description="rasterised glyphs persisted to the atlas"
+        )
+        crisp_swaps = meter.create_counter(
+            "saitenka.crisp.swaps", description="native re-renders swapped in over the soft upscale"
+        )
+        crisp_stale = meter.create_counter(
+            "saitenka.crisp.stale",
+            description="native re-renders discarded (word switched/scrolled)",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -414,6 +464,9 @@ def unregister() -> None:
     global bgra_memo_hits, bgra_memo_misses, precompose_hits, precompose_builds
     global dropped_telemetry_spans, cold_first_paint_overshoot, prefetch_queue_depth
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
+    global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
+    global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
+    global crisp_swaps, crisp_stale
 
     with _lock:
         _reader = None
@@ -453,6 +506,15 @@ def unregister() -> None:
         osd_paused_draw = None
         osd_paused_nudge = None
         scroll_frame_jank = None
+        render_cache_hits = None
+        render_cache_misses = None
+        render_cache_writebacks = None
+        render_cache_evictions = None
+        mask_atlas_hits = None
+        mask_atlas_misses = None
+        mask_atlas_writebacks = None
+        crisp_swaps = None
+        crisp_stale = None
         prefetch_queue_depth = None
 
 

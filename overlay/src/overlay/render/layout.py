@@ -11,6 +11,7 @@ wrapped paragraph can mix bold / colour / size. Line height adapts to the talles
 from __future__ import annotations
 
 import math
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,13 @@ def _is_cjk(ch: str) -> bool:
         or 0xF900 <= o <= 0xFAFF  # CJK compatibility ideographs
         or 0xFF00 <= o <= 0xFFEF  # fullwidth / halfwidth forms
     )
+
+
+def _is_word_char(ch: str) -> bool:
+    """A character that stays inside a Latin word run: a letter, or a combining mark (so a decomposed
+    diacritic like the ́ in a NFD "Śakra" doesn't split the word). Digits/punctuation/symbols are not
+    word chars — each becomes its own token so the word vocabulary saturates (see :func:`_tokenize_span`)."""
+    return ch.isalpha() or unicodedata.category(ch)[0] == "M"
 
 
 @dataclass
@@ -81,9 +89,12 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
             f = fonts.font_for_char(ch)
             tokens.append(Token(ch, f, "cjk", fonts.text_width(_font(f, style), ch), style, href))
             i += 1
-        else:
+        elif _is_word_char(ch):
+            # A maximal LETTER run (with its combining marks) = one word token — kerning is a no-op
+            # here (Pillow has no libraqm; layout is pure advance), so drawing this run is byte-identical
+            # to drawing its glyphs individually, but keeping it whole lets the atlas key on real words.
             j = i
-            while j < n and not text[j].isspace() and not _is_cjk(text[j]):
+            while j < n and _is_word_char(text[j]):
                 j += 1
             seg = text[i:j]
             f = fonts.font_for_char(seg[0])
@@ -91,6 +102,13 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
                 Token(seg, f, "word", fonts.text_width(_font(f, style), seg), style, href)
             )
             i = j
+        else:
+            # A digit / punctuation / symbol becomes its OWN token, so "cat," and "[1]" no longer mint
+            # unique atlas runs — the Latin word set then saturates to the finite defining vocabulary
+            # while these bounded glyphs are shared (the atlas-saturation fix; #149).
+            f = fonts.font_for_char(ch)
+            tokens.append(Token(ch, f, "word", fonts.text_width(_font(f, style), ch), style, href))
+            i += 1
     return tokens
 
 

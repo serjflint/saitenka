@@ -56,6 +56,17 @@ class Token:
         )
 
 
+def query_token(query: str) -> Token | None:
+    """A single Token spanning the WHOLE query — a cross-reference / search link (``?query=X``) targets X
+    as ONE exact term, so it is looked up whole and NEVER tokenized. Tokenizing + taking the first token
+    capped それにしては → それ (the longest-match/segmentation picks the short prefix), so every compound
+    link resolved to その instead of its own entry. ``None`` for a blank query."""
+    q = query.strip()
+    if not q:
+        return None
+    return Token(surface=q, lemma=q, reading="", pos="", start=0, end=len(q))
+
+
 def kata_to_hira(s: str) -> str:
     out = []
     for ch in s or "":

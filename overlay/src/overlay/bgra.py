@@ -40,3 +40,17 @@ def to_bgra(img: Image.Image, *, premultiply: bool = True) -> tuple[bytes, int, 
     """Convert an RGBA image to the (data, w, h, stride) mpv's ``overlay-add bgra`` expects."""
     bgra = to_bgra_array(img, premultiply=premultiply)
     return bgra.tobytes(), img.width, img.height, img.width * 4
+
+
+def scale_bgra(bgra: np.ndarray, scale: float) -> np.ndarray:
+    """Bilinear-resize a premultiplied-BGRA viewport by ``scale`` — the tooltip's reference→display
+    factor (the panel is composited at the 1920×1080 reference then upscaled to the live OSD at upload).
+    Premultiplied alpha is the correct space to interpolate in, so glyph edges stay clean; the per-channel
+    resize is agnostic to BGRA-vs-RGBA channel order. Returns a contiguous BGRA array."""
+    from PIL import Image
+
+    h, w = bgra.shape[0], bgra.shape[1]
+    out = Image.fromarray(bgra).resize(
+        (max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.BILINEAR
+    )
+    return np.ascontiguousarray(out)

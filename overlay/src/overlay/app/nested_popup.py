@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel, PopupView
 from overlay.app.prefetch import cap_for
-from overlay.app.tokenize import SKIP_POS, phrase_terms, tokenize
+from overlay.app.tokenize import SKIP_POS, phrase_terms, query_token, tokenize
 from overlay.panel import panel_rows
 
 if TYPE_CHECKING:
@@ -42,13 +42,41 @@ def nested_view_h(reader: Reader, full_h: int, wy: float) -> int:
 
 
 def render_nested_view(reader: Reader) -> None:
-    # The nested popup is a compact depth-1 quick look, scrolled with the wheel — composited from the
-    # same windowed engine as the base tooltip.
+    # The nested popup is a compact depth-1 quick look, scrolled with the wheel — composited crisp from
+    # its cached native panel (built by the crisp worker, or ahead of time by the lookahead) when hi-dpi,
+    # else the soft reference upscale. Same SSOT blit path as the base tooltip, keyed on _nest.key.
+    # Reached via the Reader seam (not a direct tooltip import — tooltip already imports this module for
+    # TIP_GAP, so the reverse edge would cycle).
     st = reader._nest.state
     if st is None:
         return
-    reader._nest.rect = reader._blit_panel(
-        st, reader._nest.scroll, reader._nest.view_h, reader._nest.xy, OverlayId.NESTED
+    reader._nest.rect = reader._blit_crisp_or_soft(
+        st,
+        reader._nest.key,
+        reader._nest.scroll,
+        reader._nest.view_h,
+        reader._nest.xy,
+        OverlayId.NESTED,
+    )
+    _request_nested_crisp(reader)
+
+
+def _request_nested_crisp(reader: Reader) -> None:
+    """Ask the crisp worker to build/warm the nested word's native panel (hi-dpi only; no-op for a
+    wildcard-search popup whose ``token`` is None). On show it upgrades soft→crisp; on scroll it warms
+    the bands ahead so the crisp composite stays cheap."""
+    nest = reader._nest
+    if nest.token is None or nest.key is None:
+        return
+    reader._request_crisp(
+        nest.token,
+        nest.word,
+        nest.key,
+        reader._tip_cap(),
+        nest.scroll,
+        nest.view_h,
+        mined=reader._is_mined(nest.token),  # matches the reference nested panel's ⊕/✓ variant
+        target="nest",
     )
 
 
@@ -133,12 +161,14 @@ def place_nested(
     render_nested_view(reader)
 
 
-def link_hit(mx: float, my: float, state, xy, scroll: int):
-    """The :class:`~overlay.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test."""
+def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
+    """The :class:`~overlay.model.LinkBox` of ``state`` under (mx, my), via the windowed hit-test.
+    ``scale`` is the reference→display factor (``_tip_display_scale``): the panel is composited at the
+    reference size then upscaled to the display, so the screen offset is divided back to panel px."""
     if state is None:
         return None
     sx, sy = xy
-    return state.windowed.link_hit(int(mx - sx), int((my - sy) + scroll))
+    return state.windowed.link_hit(int((mx - sx) / scale), int((my - sy) / scale + scroll))
 
 
 def open_link(reader: Reader, lb, xy, scroll: int) -> None:
@@ -151,9 +181,8 @@ def open_link(reader: Reader, lb, xy, scroll: int) -> None:
     if reader.dict_set is not None and any(c in q for c in "*?＊？"):
         open_search(reader, q, wx, wy, lb.h)
         return
-    tokens = tokenize(q)
-    tok = tokens[0] if tokens else None
-    if tok is None or not tok.surface.strip():
+    tok = query_token(q)  # look up the WHOLE query as one term — never tokenize a link target
+    if tok is None:
         return
     open_nested(reader, tok, tok.surface, wx, wy, lb.h, tail=None)
 

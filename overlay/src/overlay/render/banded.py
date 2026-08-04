@@ -457,6 +457,16 @@ class WindowedPanel:
                 victims.append(k)
         return victims
 
+    def _row_band_spans(self, i: int) -> list[tuple[int, int, int]]:
+        """The ``(band, y0, y1)`` spans row ``i`` is actually STORED as — must match ``_ensure_bands``:
+        a BODY row tiles into ``_row_bands`` slices; a non-body row (header/chip/freq) is ONE band
+        ``(0, 0, height)`` however tall. Without this the composite split a >``_BAND_PX`` non-body row
+        (e.g. a hi-dpi header ≥256px) into two bands, found only band 0 stored, and left band 1 blank."""
+        h = self._offsets.height(i)
+        if self._rows[i].render_window is None:  # non-body → single stored image, never split
+            return [(0, 0, h)]
+        return _row_bands(h)
+
     def _composite_bands(
         self, table: OffsetTable, start: int, end: int, scroll: int, view_h: int
     ) -> Image.Image:
@@ -471,7 +481,7 @@ class WindowedPanel:
             if not self._offsets.known(i):
                 continue
             row_top = table.starts[i]
-            for b, y0, y1 in _row_bands(self._offsets.height(i)):
+            for b, y0, y1 in self._row_band_spans(i):
                 cb = self._blocks.get((i, b))
                 starts.append(row_top + y0)
                 ends.append(row_top + y1)
@@ -571,6 +581,22 @@ class WindowedPanel:
             self._first_view = (view_h, overscan, out)
             if otel_metrics.precompose_builds is not None:
                 otel_metrics.precompose_builds.add(1)
+
+    @property
+    def first_view(self) -> tuple[int, int, np.ndarray] | None:
+        """The idle-precomposed first viewport ``(view_h, overscan, premul-BGRA)``, or ``None`` — read by
+        the persistent render cache to write a cost-gated head to disk (#149)."""
+        with self._lock:
+            return self._first_view
+
+    def install_first_view(self, view_h: int, overscan: int, array: np.ndarray) -> None:
+        """Seed the first-viewport cache from an EXTERNAL premul-BGRA (the persistent render cache's disk
+        blob), so a cold hover is the copy+upload fast path with no synchronous head raster. Equivalent to
+        a :meth:`precompose` that composited ``array`` — a scroll=0 ``viewport_bgra`` of matching
+        ``view_h``/``overscan`` then returns a copy of it (0 rasters). The caller guarantees ``array`` was
+        composited for THIS panel's content+geometry (matching ``config_sig``/``content_key``)."""
+        with self._lock:
+            self._first_view = (view_h, overscan, array)
 
     def viewport(self, scroll: int, view_h: int, overscan: int = 0) -> Image.Image:
         """Composite the ``[scroll, scroll+view_h)`` viewport, rendering + evicting BANDS as needed — a

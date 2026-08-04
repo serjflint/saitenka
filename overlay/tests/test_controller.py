@@ -212,7 +212,7 @@ def _reader_with_index(monkeypatch):
 
     ipc = FakeIPC()
     r = Reader(ipc)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     monkeypatch.setattr(r, "renderer", NullRenderer())  # skip the raster; assert state only
     r._sub_index = SubIndex(parse_srt(_NAV_SRT))
     r._register_keybinds()
@@ -625,17 +625,18 @@ def test_tooltip_capped_and_inside_safe_area():
     from overlay.app.tokenize import tokenize
 
     r = Reader(FakeIPC(), tip_max_frac=0.5)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = tokenize("本")
-    r.boxes = [WordBox(0, 600, 660, 40, 40)]  # word near the bottom (like a subtitle)
+    r.boxes = [WordBox(0, 900, 1000, 40, 40)]  # word near the bottom (like a subtitle)
     r._show_tooltip(0)
 
-    margin = max(16, round(720 * 0.05))
-    assert r._tip_view_h <= round(720 * 0.5)  # height capped
+    # osd == REFERENCE (1080p) so _tip_display_scale == 1.0 → viewport px are display px.
+    margin = max(16, round(1080 * 0.05))
+    assert r._tip_view_h <= round(1080 * 0.5)  # height capped
     _tx, ty = r._tip_xy
     assert ty >= margin  # top clears the header margin
-    assert ty + r._tip_view_h <= 720 - margin  # bottom stays inside the window
+    assert ty + r._tip_view_h <= 1080 - margin  # bottom stays inside the window
 
 
 def test_panel_cache_avoids_rerender_on_revisit():
@@ -651,7 +652,7 @@ def test_panel_cache_avoids_rerender_on_revisit():
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = Reader(FakeIPC(), dict_set=FakeDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [
         Token("本命", "本命", "ほんめい", "名詞", 0, 2),
@@ -678,7 +679,7 @@ def test_panel_cache_records_otel_render_and_cache_metrics():
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = Reader(FakeIPC(), dict_set=FakeDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
@@ -710,7 +711,7 @@ def _reader_with_word(ipc):
     from overlay.app.tokenize import Token
 
     r = Reader(ipc, dict_set=_FakeDS(), pause_on_tooltip=True)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
@@ -868,7 +869,7 @@ def _tall_reader(ipc):
     from overlay.app.tokenize import Token
 
     r = Reader(ipc, dict_set=_TallDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -987,7 +988,7 @@ def _scan_reader(ipc):
     from overlay.app.tokenize import Token
 
     r = Reader(ipc, dict_set=_ScanDS(), scan_delay=0.0)  # open immediately; dwell has its own tests
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -1017,6 +1018,279 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     sx, sy = r._tip_xy
     hit = r._scan_hit(sx + sb.x + sb.w / 2, sy + sb.y + sb.h / 2)
     assert hit is not None and hit.text.startswith("追")
+
+
+def test_tooltip_geometry_is_resolution_independent():
+    # The tooltip renders at the 1920×1080 REFERENCE, so its geometry — and thus the render cache key —
+    # is IDENTICAL at 1080p and 4K. Only _tip_display_scale changes, so a 1080p prewarm hits at any
+    # playback resolution.
+    r = _scan_reader(FakeIPC())
+    r.osd = (1920, 1080)
+    w_ref, cap_ref, scale_ref = r.tip_width, r._tip_cap(), r._tip_display_scale
+    r.osd = (3840, 2160)
+    assert (r.tip_width, r._tip_cap()) == (w_ref, cap_ref)  # geometry unchanged by resolution
+    assert scale_ref == 1.0 and r._tip_display_scale == 2.0  # only the DISPLAY scale changes
+
+
+def test_tooltip_geometry_ignores_ui_scale():
+    # The tooltip is a VIDEO-OVERLAY element: it tracks the vertical viewport (osd_h) via the display
+    # scale, NOT the app-chrome ui_scale (its fonts are theme scale 1.0, so width must stay 1.0 too).
+    # Regression: ui_scale × resolution once compounded to a too-wide tooltip on a hi-dpi screen.
+    from overlay.app.config import PanelOptions, ReaderOptions, TooltipOptions
+
+    r = Reader(
+        FakeIPC(),
+        dict_set=_ScanDS(),
+        options=ReaderOptions(
+            panels=PanelOptions(scale=1.5), tooltip=TooltipOptions(tip_max_frac=0.5)
+        ),
+    )
+    assert r.ui_scale == 1.5  # a large interface scale (for the sidebar / help / analysis panels)
+    r.osd = (1920, 1080)
+    assert r.tip_width == 640  # reference width, NOT 640 × 1.5
+    r.osd = (3840, 2160)  # 4K → displayed width tracks the vertical viewport, not ui_scale
+    assert (
+        r.tip_width == 640 and r._tip_display_scale == 2.0
+    )  # displayed ≈ 1280px, not 1920 (the bug)
+
+
+class _NoThread:  # stand-in for threading.Thread so a test doesn't leak a daemon crisp worker
+    def __init__(self, *a, **k) -> None:
+        pass
+
+    def start(self) -> None:
+        pass
+
+
+def test_crisp_native_panel_renders_at_native_resolution_and_caches():
+    # The idle crisp pass builds a native-scale panel (tip_width×scale canvas, Theme(scale)) into the
+    # shared cache — reused across scrolls of the same word (and across popups) so only new bands raster.
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0
+    tok = r.tokens[0]
+    key = r._panel_key(tok, tok.surface, mined=False)
+    req = {
+        "tok": tok,
+        "inflected": tok.surface,
+        "key": key,
+        "cap": r._tip_cap(),
+        "scale": 2.0,
+        "mined": False,
+        "anki": False,
+    }
+    panel, fresh = tooltip._crisp_native_panel(r, req)
+    assert panel.width == round(r.tip_width * 2.0)  # native canvas, not the 640 reference
+    # cached under (key, scale) for reuse across scrolls / popups / the next hover
+    assert fresh is True and r._crisp_cache[tooltip._crisp_cache_key(key, 2.0)] is panel
+    again, fresh2 = tooltip._crisp_native_panel(r, req)
+    assert again is panel and fresh2 is False  # a re-request reuses the cache (not fresh)
+
+
+def test_request_crisp_is_gated_by_scale(monkeypatch):
+    from overlay.app import tooltip
+
+    monkeypatch.setattr(tooltip.threading, "Thread", _NoThread)  # don't start a real worker
+    r = _scan_reader(FakeIPC())
+    tok = r.tokens[0]
+    key = r._panel_key(tok, tok.surface, mined=False)
+
+    r.osd = (1920, 1080)  # scale 1.0 → no crisp needed
+    tooltip.request_crisp(r, tok, tok.surface, key, r._tip_cap(), 0, 200, mined=False)
+    assert r._crisp_req is None
+
+    r.osd = (3840, 2160)  # 4K → a request is queued (newest scroll wins)
+    tooltip.request_crisp(r, tok, tok.surface, key, r._tip_cap(), 40, 200, mined=False)
+    assert r._crisp_req is not None and r._crisp_req["scroll"] == 40
+
+
+def test_render_tip_view_composites_crisp_from_native_panel_when_built_else_soft(monkeypatch):
+    # SSOT: the sole blit path composites the current viewport CRISP straight from the native panel when
+    # it's built (scale > 1), else the soft upscale — so scrolling stays crisp and can't flip to blurry.
+    import numpy as np
+
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0
+    r._crisp_on = False  # keep the show from spawning a real crisp worker
+    r.hover = 0
+    r._show_tooltip(0)
+    r._crisp_on = True  # now exercise the crisp branch (render_tip_view never spawns a worker)
+    key = r._tip_key
+    path: list[str] = []
+    fake_view = (0, 200, np.zeros((60, 120, 4), dtype=np.uint8))
+
+    def _crisp_spy(*_a):
+        path.append("crisp")
+        return fake_view
+
+    def _soft_spy(*_a, **_k):
+        path.append("soft")
+        return (0, 0, 1, 1)
+
+    monkeypatch.setattr(tooltip, "_crisp_compose", _crisp_spy)
+    monkeypatch.setattr(tooltip, "blit_panel", _soft_spy)
+
+    ck = tooltip._crisp_cache_key(key, r._tip_display_scale)
+    r._crisp_cache[ck] = object()  # a native panel is built for the current word → crisp path
+    tooltip.render_tip_view(r)
+    assert path == ["crisp"]  # composited crisp; no soft fall-through
+
+    path.clear()
+    r._crisp_cache.clear()  # not built yet → soft upscale
+    tooltip.render_tip_view(r)
+    assert path == ["soft"]
+
+
+def test_apply_pending_crisp_reblits_once_when_native_panel_becomes_ready(monkeypatch):
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)
+    r._crisp_on = False
+    r.hover = 0
+    r._show_tooltip(0)
+    reblits: list[int] = []
+
+    def _reblit(_reader):
+        reblits.append(1)
+
+    monkeypatch.setattr(tooltip, "render_tip_view", _reblit)
+
+    r._crisp_dirty = True  # the worker just built the native panel
+    tooltip.apply_pending_crisp(r)
+    assert r._crisp_dirty is False and reblits == [1]  # one re-blit to upgrade soft→crisp
+
+    tooltip.apply_pending_crisp(r)  # nothing new
+    assert reblits == [1]  # no spurious re-blit
+
+
+def test_warm_crisp_lookahead_caches_native_panel_for_crisp_first_paint():
+    # The lookahead builds an upcoming word's native panel into the shared cache in idle time, so its
+    # FIRST hover composites crisp immediately (the old single slot could only upgrade soft→crisp later).
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0 → crisp active
+    tok = r.tokens[0]
+    key = r._panel_key(tok, tok.surface, mined=False)
+    assert tooltip.crisp_lookup(r, key) is None  # nothing warmed yet
+    tooltip.warm_crisp_lookahead(r, tok, tok.surface, mined=False)
+    assert tooltip.crisp_lookup(r, key) is not None  # now the next hover paints crisp on frame 1
+
+    r.osd = (1920, 1080)  # scale 1.0 → the soft upscale IS native, no crisp panel built
+    r._crisp_cache.clear()
+    tooltip.warm_crisp_lookahead(r, tok, tok.surface, mined=False)
+    assert not r._crisp_cache
+
+
+def test_navigated_view_is_crisp_keyed_at_hidpi():
+    # The reported bug: a link-clicked (navigated) tooltip stayed SOFT forever — it set _tip_key=None,
+    # so crisp_lookup/hit_target had no key to find a native panel. navigate now keys the view to its
+    # query and caches a native-scale panel → it composites crisp like a hovered word.
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0, crisp active
+    r._crisp_on = True
+    r.hover = 0
+    r._show_tooltip(0)
+    tooltip.navigate_tip(r, r.tokens[0].surface)  # click a cross-reference to a real term
+
+    assert r._tip_key is not None  # keyed (was None → permanently soft)
+    assert r._tip_tok is None  # not a hovered token → scroll won't rebuild from a stale token
+    panel = tooltip.crisp_lookup(r, r._tip_key)
+    assert panel is not None and panel.width == round(r.tip_width * r._tip_display_scale)  # native
+    # hit-test follows the drawn crisp panel, not the reference
+    hit_panel, scale, _ = tooltip.hit_target(r, nested=False)
+    assert hit_panel is panel and scale == 1.0
+
+    r.osd = (1920, 1080)  # scale 1.0 → no crisp, navigated view stays keyless (soft)
+    r._show_tooltip(0)
+    tooltip.navigate_tip(r, r.tokens[0].surface)
+    assert r._tip_key is None
+
+
+def test_hit_target_uses_the_drawn_crisp_panel_at_hidpi():
+    # The reported bug: at hi-dpi the crisp NATIVE panel is drawn but hover/click hit-tested the REFERENCE
+    # panel, whose wrap differs → links unclickable, unrelated scan popups. hit_target must return the
+    # panel actually on screen: native at 1:1 (scroll in native px) when built, else reference at scale.
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0, crisp active
+    r._crisp_on = True
+    tok = r.tokens[0]
+    key = r._panel_key(tok, tok.surface, mined=False)
+    r._tip_key, r._tip_state, r._tip_scroll = key, object(), 40
+    native = object()
+    r._crisp_cache[tooltip._crisp_cache_key(key, r._tip_display_scale)] = native
+
+    panel, scale, scroll = tooltip.hit_target(r, nested=False)
+    assert panel is native and scale == 1.0 and scroll == round(40 * r._tip_display_scale)
+
+    r._crisp_cache.clear()  # no native panel → reference panel at display scale, reference scroll
+    panel, scale, scroll = tooltip.hit_target(r, nested=False)
+    assert panel is r._tip_state and scale == r._tip_display_scale and scroll == 40
+
+
+def test_render_nested_view_composites_crisp_when_native_panel_built(monkeypatch):
+    # The nested popup was always blurry (soft-only). It now shares the crisp path: composite crisp from
+    # the cached native panel for its inner word when built, else soft — same SSOT as the base tooltip.
+    import numpy as np
+
+    from overlay.app import tooltip
+
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0
+    r._crisp_on = True
+    r._crisp_thread = object()  # request_crisp inside render must not spawn a real worker
+    tok = r.tokens[0]
+    key = r._panel_key(tok, tok.surface, mined=False)
+    st = r._panel_for(tok, tok.surface, min_h=r._tip_cap(), mined=False)
+    r._nest.state, r._nest.key, r._nest.token, r._nest.word = st, key, tok, tok.surface
+    r._nest.view_h, r._nest.scroll, r._nest.xy = min(st.full_height, r._tip_cap()), 0, (10, 10)
+    path: list[str] = []
+
+    def _crisp_spy(*_a):
+        path.append("crisp")
+        return (0, 200, np.zeros((60, 120, 4), dtype=np.uint8))
+
+    def _soft_spy(*_a, **_k):
+        path.append("soft")
+        return (0, 0, 1, 1)
+
+    monkeypatch.setattr(tooltip, "_crisp_compose", _crisp_spy)
+    monkeypatch.setattr(tooltip, "blit_panel", _soft_spy)
+
+    r._crisp_cache[tooltip._crisp_cache_key(key, r._tip_display_scale)] = object()
+    r._render_nested_view()
+    assert path == ["crisp"]  # nested composited crisp, no soft fall-through
+
+    path.clear()
+    r._crisp_cache.clear()  # native panel not built → soft upscale
+    r._render_nested_view()
+    assert path == ["soft"]
+
+
+def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
+    # At 4K the composited tooltip is upscaled 2×; a click at a scan cell's DISPLAYED centre must invert
+    # that scale and still land on the cell (the hit-test must undo the upload's upscale).
+    r = _scan_reader(FakeIPC())
+    r.osd = (3840, 2160)  # scale 2.0
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    r.hover = 0
+    r._show_tooltip(0)
+    boxes = r._tip_state.windowed.scan_boxes()
+    assert boxes
+    sb = boxes[0]
+    s = r._tip_display_scale
+    assert s == 2.0
+    sx, sy = r._tip_xy
+    hit = r._scan_hit(sx + (sb.x + sb.w / 2) * s, sy + (sb.y + sb.h / 2 - r._tip_scroll) * s)
+    assert hit is not None and hit.text == sb.text
 
 
 def test_hover_inner_word_opens_nested_popup(monkeypatch):
@@ -1160,7 +1434,7 @@ def _link_reader(ipc):
     from overlay.app.tokenize import Token
 
     r = Reader(ipc, dict_set=_LinkDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -1223,7 +1497,7 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
 
     ipc = FakeIPC()
     r = Reader(ipc, dict_set=_WildcardDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -1264,7 +1538,7 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
             return Entry(headword=tok.surface, reading="みる", defs=[Definition("Bilingual", body)])
 
     r = Reader(ipc, dict_set=_ExternalDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("観る", "観る", "みる", "動詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -1306,7 +1580,7 @@ def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
 
     ipc = FakeIPC()
     r = Reader(ipc, dict_set=_RubyLinkDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("考え", "考え", "かんがえ", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
@@ -1318,8 +1592,8 @@ def test_ruby_furigana_cross_reference_is_clickable(monkeypatch):
 
 def test_nested_popup_shrinks_to_stay_above_inner_word():
     r = Reader(FakeIPC())
-    r.osd = (1280, 720)
-    margin = max(16, round(720 * 0.05))
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
+    margin = max(16, round(1080 * 0.05))  # reference-height margin (cap_for uses REF_H × ui_scale)
     # a TALL entry anchored to an inner word in the upper-middle: default would drop below (more room
     # below), but the nested popup shrinks its viewport to the room above and stays ABOVE the word.
     wy = 220
@@ -1332,7 +1606,7 @@ def test_nested_popup_shrinks_to_stay_above_inner_word():
 
 def test_nested_popup_drops_below_when_no_room_above():
     r = Reader(FakeIPC())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     wy = 90  # inner word near the very top → can't fit above
     view_h = nested_popup.nested_view_h(r, full_h=800, wy=wy)
     _, ty = r._place_panel(300, 100, wy, 40, view_h)
@@ -1468,7 +1742,7 @@ def _preview_reader(ipc, *, with_audio=True, with_image=True):
     from overlay.app.card_preview import PreviewData
 
     r = Reader(ipc)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     frame = PILImage.new("RGBA", (320, 180), (40, 70, 90, 255)) if with_image else None
     pv = PreviewData(
         "mined",
@@ -1615,7 +1889,7 @@ def _auto_trans_reader(ipc):
 
     ipc.props["secondary-sub-text"] = "I want you to read this."
     r = Reader(ipc, dict_set=_FakeDS(), auto_translate=True)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
@@ -1644,7 +1918,7 @@ def test_no_auto_translate_without_the_flag(monkeypatch):
     from overlay.app.tokenize import Token
 
     r = Reader(ipc, dict_set=_FakeDS())  # flag off (default)
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
@@ -1805,10 +2079,12 @@ def test_mine_tags_carry_source_and_episode():
 def test_bottom_margin_no_dead_code():
     """bottom_margin must not have unreachable code — verify it returns correctly."""
     r = Reader(FakeIPC())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     result = r.bottom_margin
     assert isinstance(result, int)
-    assert result == round(720 * r.bottom_margin_frac)
+    assert result == round(
+        1080 * r.bottom_margin_frac
+    )  # subtitle margin is OSD-native (osd=1080 here)
 
 
 def test_panel_cache_lru_eviction_not_wholesale_clear():
@@ -1826,7 +2102,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
             return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
 
     r = Reader(FakeIPC(), dict_set=_CountDS())
-    r.osd = (1280, 720)
+    r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.sub_origin = (0, 0)
 
     from overlay.app.subtitles import WordBox

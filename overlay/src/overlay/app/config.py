@@ -122,6 +122,42 @@ class TooltipOptions:
     # = the always-available pure-Python DefaultLayoutBackend. "taffy" = the optional taffylite Rust
     # flexbox engine (needs saitenka[layout-engine]); byte-identical geometry, chosen for a mature CSS
     # engine's robustness, not speed. An unset/missing wheel falls back to "default", logged, never fatal.
+    render_cache: bool = True  # cross-session persistent render cache (#149), OPT-OUT: USED WHEN
+    # AVAILABLE — if a `render-cache.sqlite` exists (built by `saitenka prewarm`), a cold first-ever hover
+    # on a cost-gated (tall/pathological) entry paints its precomposed first viewport straight from disk
+    # (copy+upload, skipping the build+raster) and live hovers extend it. No prebuilt cache → nothing is
+    # created and it costs nothing. Set false to ignore an existing cache. Miss/resolution change → live.
+    crisp_upscale: bool = (
+        True  # OPT-OUT: on a hi-dpi display the tooltip paints instantly by upscaling
+    )
+    # its 1920×1080-reference render (soft glyph edges), then — WHEN WORKERS ARE IDLE — re-renders the
+    # first viewport at NATIVE resolution on a background thread and swaps the crisp pixels in place. No
+    # effect at 1080p (display scale 1.0). Set false to keep only the instant soft upscale.
+    crisp_cache_max: int = (
+        8  # LRU cap on retained NATIVE-scale panels (the crisp compose source, shared by the base
+    )
+    # tooltip, nested popup, and the head-prefetch lookahead). >1 (vs the old single slot) so an upcoming
+    # word warmed in idle is crisp on its FIRST paint, not soft-then-swapped. Each holds one native-scale
+    # first viewport (~a few MB on hi-dpi); raise for more crisp-from-start coverage, lower to spend less RAM.
+    mask_atlas: bool = (
+        True  # persistent glyph mask atlas (#149 Tier-1), OPT-OUT: USED WHEN AVAILABLE —
+    )
+    # if a `mask-atlas.sqlite` exists (built by `saitenka prewarm`), getmask2 alpha bitmaps load from disk
+    # (~half the raster CPU) so cache-miss / scroll / post-paint builds skip re-rasterising. ~150 MB RAM
+    # bulk-loaded once in the background at startup. No prebuilt atlas → nothing loads. Set false to ignore.
+    render_cache_max_mb: int = (
+        2048  # THE size bound: LRU byte ceiling on the on-disk render cache. Each
+    )
+    # stored head is the first viewport (height-capped at the tooltip cap) ≈ 32 KiB compressed, so the
+    # whole ~32k popular-word set is ~900 MB — this 2 GB default holds it all with headroom for the
+    # runtime write-back to add rarer hovered words on top; lower it to spend less disk.
+    render_cache_min_height: int = (
+        512  # eligibility gate (px), keeps the big render cache to NON-TRIVIAL panels: skip a head
+    )
+    # shorter than this. EMPIRICALLY CALIBRATED — a < 512px entry cold-renders (get + layout + first-
+    # viewport raster) in ~8ms, already within budget, so it's not worth a render-cache row; 512–1024px is
+    # ~18ms, 4096px ~31ms. (Glyph coverage for those trivial words still lands in the mask atlas, which is
+    # per-glyph and covers the full population.) Cache SIZE is bounded by render_cache_max_mb + LRU too.
 
 
 @dataclass(frozen=True)

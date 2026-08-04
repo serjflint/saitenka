@@ -37,6 +37,19 @@
 #                            # optional taffylite Rust flexbox engine — `pip install
 #                            # 'saitenka[layout-engine]'`). Byte-identical geometry; "taffy" trades a Rust
 #                            # wheel for a mature CSS engine. Missing wheel falls back to "default".
+# render_cache = true        # cross-session render cache (#149), OPT-OUT, USED WHEN AVAILABLE: with a
+#                            # prebuilt cache a COLD first-ever hover on a pathological word paints DIRECTLY
+#                            # from disk (place+decorate+upload, <1ms) then builds the panel after. No
+#                            # prebuilt cache → nothing created. Build it: `saitenka prewarm`. false = ignore.
+# mask_atlas = true          # persistent glyph mask atlas (#149), OPT-OUT, USED WHEN AVAILABLE: with a
+#                            # prebuilt atlas, getmask2 alpha bitmaps load from disk (~half the raster CPU;
+#                            # ~150 MB RAM bulk-loaded once in the background) so cache-miss / scroll /
+#                            # post-paint builds skip re-rasterising. Built by `saitenka prewarm`. false = off.
+# render_cache_max_mb = 2048  # THE size bound: LRU byte ceiling. Each head ≈ 32 KiB; the full ~32k
+#                            # popular-word set is ~900 MB, which this 2 GB default holds with headroom
+# render_cache_min_height = 512  # eligibility gate (px): keeps the render cache to NON-TRIVIAL panels.
+#                            # <512px ≈ 8ms cold (already within budget, not worth a row); 512-1024px ≈
+#                            # 18ms, 4096px ≈ 31ms. (Trivial words' glyphs still land in the mask atlas.)
 # pause_on_tooltip = true    # freeze the frame while a tooltip is shown (the mining default)
 # hover_pause_key = "Alt+p"  # toggle hover auto-pause for the current session
 # overlay_toggle_key = "Alt+o"  # hide/show Saitenka; hidden mode restores mpv subtitles and OSD

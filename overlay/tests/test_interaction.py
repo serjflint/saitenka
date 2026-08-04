@@ -129,6 +129,47 @@ def test_move_over_word_shows_tooltip_and_switching_words():
     assert ui.hover == j, "resting on a different word must switch the tooltip to it"
 
 
+def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, monkeypatch):
+    # Opt-out of BOTH caches must beat use-when-available: a prebuilt file on disk is ignored, and the
+    # live pipeline still renders the tooltip (the caches are pure accelerators, never load-bearing).
+    from overlay import mask_atlas
+    from overlay.app.config import ReaderOptions, TooltipOptions
+    from overlay.app.render_cache import RenderCache
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
+    RenderCache.open(tmp_path / "render-cache.sqlite", max_bytes=1 << 20).close()  # files DO exist
+    atlas = mask_atlas.MaskAtlas.open(tmp_path / "mask-atlas.sqlite")
+    assert atlas is not None
+    atlas.close()
+
+    r = Reader(
+        FakeIPC(),
+        dict_set=_FakeDS(),
+        options=ReaderOptions(
+            tooltip=TooltipOptions(tip_max_frac=0.5, render_cache=False, mask_atlas=False)
+        ),
+    )
+    r.osd = (1920, 1080)
+    r.set_subtitle("本命を読む")
+    r._enable_mask_atlas()  # no-op when opted out, even though mask-atlas.sqlite exists
+    assert r._render_cache() is None  # opt-out beats a present render-cache.sqlite
+    assert r._mask_atlas is None  # opt-out beats a present mask-atlas.sqlite
+
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))
+    assert ui.tip_shown  # the live pipeline renders the tooltip with no cache help
+
+
+def test_main_flow_renders_at_4k_without_caches():
+    # Cache-free AND scale ≠ 1: the reference-render → display-upscale path must stand on its own.
+    r = Reader(FakeIPC(), dict_set=_FakeDS(), tip_max_frac=0.5)
+    r.osd = (3840, 2160)  # 4K → _tip_display_scale 2.0, no prebuilt caches (hermetic)
+    r.set_subtitle("本命を読む")
+    ui = Driver(r)
+    ui.move_to_word(_content_word(r))
+    assert ui.tip_shown and r._tip_rect is not None
+
+
 def test_tooltip_keeps_lease_over_occluded_word(monkeypatch):
     """A tooltip drawn over another subtitle word keeps the lease: resting the cursor on the covered
     word (inside the tip rect) must NOT hijack the tooltip onto it. Regression for the two-line cue
@@ -228,6 +269,26 @@ def test_wheel_scrolls_the_tooltip():
     before = r._tip_scroll
     ui.wheel(1)  # one notch down
     assert r._tip_scroll > before, "wheeling over a scrollable tooltip must scroll it down"
+
+
+def test_scroll_re_requests_a_crisp_render_at_hidpi():
+    # The reported bug: only the first band was crisp; scrolling stayed blurry. On a hi-dpi display every
+    # scroll must re-request a native re-render for the NEW viewport (not just the first).
+    from overlay.app import tooltip
+
+    r = _reader()
+    r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
+    r._crisp_thread = (
+        object()
+    )  # pretend the worker runs so request_crisp doesn't spawn a real thread
+    Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip → sets _tip_tok
+    assert r._tip_state.full_height > r._tip_view_h  # scrollable
+    r._crisp_req = None  # clear the show-time request; isolate the scroll's
+    tooltip.scroll_tip(r, 200)  # what the wheel drives
+    assert r._tip_scroll > 0  # scrolled
+    assert (
+        r._crisp_req is not None and r._crisp_req["scroll"] == r._tip_scroll
+    )  # crisp follows scroll
 
 
 # --- L2: golden-pin the rendered bitmap that a hover produces ----------------------------------------
