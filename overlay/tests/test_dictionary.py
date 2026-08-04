@@ -838,3 +838,38 @@ def test_dictionary_set_populates_freq_and_pitch_pills(tmp_path):
     kinds = [(f.name, f.value, f.color) for f in entry.freqs]
     assert ("Freq", "5386", FREQ_COLOR) in kinds
     assert ("Pitch", "ほんめい [0]", PITCH_COLOR) in kinds
+
+
+@pytest.mark.timeout(30)
+def test_entry_cache_survives_concurrent_access_from_workers(tmp_path):
+    """_entry_from_row runs on the main thread AND every prefetch worker at once (free-threaded build),
+    all sharing one _entry_cache. A concurrent popitem() must not evict an eid between another thread's
+    get() and move_to_end() — the KeyError a report's prefetch worker hit. Guard: no thread raises and
+    the cache stays bounded. (Reproduces only on a free-threaded build; a no-op safety net under the GIL.)"""
+    import threading
+
+    dic = dicthelp.load_dict(_make_dict(tmp_path / "race.zip", "C", [["猫", "ねこ", ["cat"]]]))
+    dic._entry_cache_max = 8
+    # A working set ~2x the cap so every thread constantly hits (move_to_end) AND overflows (popitem) —
+    # the exact interleaving that raced. Rows are synthetic so the hot loop never touches SQLite.
+    rows = [(i, f"語{i}", f"ご{i}", f'["gloss {i}"]', "") for i in range(16)]
+    errors: list[BaseException] = []
+    start = threading.Barrier(8)
+
+    def worker():
+        start.wait()  # release all threads together to overlap the get/move_to_end/popitem windows
+        try:
+            for _ in range(400):
+                for row in rows:
+                    dic._entry_from_row(row)
+        except BaseException as exc:  # noqa: BLE001 — capture the race, don't die silently in a thread
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, name=f"saitenka-prefetch-{k}") for k in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"entry cache raced: {errors[:3]!r}"
+    assert len(dic._entry_cache) == dic._entry_cache_max  # bounded, never exceeded or corrupted
