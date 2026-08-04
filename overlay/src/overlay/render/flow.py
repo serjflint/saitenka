@@ -55,22 +55,40 @@ class ImgBox:
     def descent(self) -> int:
         return self.baseline_drop
 
-    def draw(self, img: Image.Image, draw: ImageDraw.ImageDraw, x: float, baseline: float) -> None:
+    def draw(
+        self,
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        x: float,
+        baseline: float,
+        *,
+        scale: float = 1.0,
+    ) -> None:
         top = baseline + self.baseline_drop - self.height
         if self.sprite is not None:
-            img.alpha_composite(self.sprite, (round(x), round(top)))
+            spr = self.sprite
+            if (
+                scale != 1.0
+            ):  # opaque inline sprite → upscale (not a glyph mask; see the plan's tradeoffs)
+                from PIL import Image as _Image
+
+                spr = spr.resize(
+                    (max(1, round(self.width * scale)), max(1, round(self.height * scale))),
+                    _Image.Resampling.LANCZOS,
+                )
+            img.alpha_composite(spr, (round(x * scale), round(top * scale)))
             return
         draw.rounded_rectangle(
-            [x, top, x + self.width - 1, top + self.height - 1],
-            radius=3,
+            [x * scale, top * scale, (x + self.width) * scale - 1, (top + self.height) * scale - 1],
+            radius=round(3 * scale),
             fill=self.fill,
             outline=self.border,
-            width=1,
+            width=max(1, round(scale)),
         )
         if self.label:
-            f = _font(fonts.FONT_FILES[1], Style(size=max(9, self.height // 3)))
+            f = _font(fonts.FONT_FILES[1], Style(size=max(9, round(self.height // 3 * scale))))
             draw.text(
-                (x + self.width / 2, top + self.height / 2),
+                ((x + self.width / 2) * scale, (top + self.height / 2) * scale),
                 self.label,
                 font=f,
                 fill=self.border,
@@ -106,8 +124,28 @@ class ChipBox:
     def descent(self) -> int:
         return self.sprite.height - self.sprite.baseline
 
-    def draw(self, img: Image.Image, _draw: ImageDraw.ImageDraw, x: float, baseline: float) -> None:
-        img.alpha_composite(self.sprite.image, (round(x), round(baseline - self.sprite.baseline)))
+    def draw(
+        self,
+        img: Image.Image,
+        _draw: ImageDraw.ImageDraw,
+        x: float,
+        baseline: float,
+        *,
+        scale: float = 1.0,
+    ) -> None:
+        spr, top = self.sprite, baseline - self.sprite.baseline
+        if scale == 1.0:
+            img.alpha_composite(spr.image, (round(x), round(top)))
+            return
+        from PIL import (
+            Image as _Image,  # chip sprite → upscale (pre-rendered pill, not a glyph mask)
+        )
+
+        scaled = spr.image.resize(
+            (max(1, round(spr.image.width * scale)), max(1, round(spr.image.height * scale))),
+            _Image.Resampling.LANCZOS,
+        )
+        img.alpha_composite(scaled, (round(x * scale), round(top * scale)))
 
 
 # A flow segment is styled text, a ruby box, an opaque image box, or a chip.
@@ -228,10 +266,15 @@ def render_flow_window(
     y1: int,
     scan_out: list[ScanBox] | None = None,
     link_out: list[LinkBox] | None = None,
+    *,
+    scale: float = 1.0,
 ) -> Image.Image:
     """Rasterise only the band ``[y0, y1)`` of an already-laid-out flow (see :func:`render_flow`'s
-    ``y_window``) — the reusable draw over a cached :class:`FlowLayout`."""
-    return _render_window(lay.block, lay.lines, lay.boxes, (y0, y1), scan_out, link_out)
+    ``y_window``) — the reusable draw over a cached :class:`FlowLayout`. ``scale`` > 1 rasters the band
+    at native device resolution (``round(w×scale) × round((y1-y0)×scale)``); geometry stays 1×."""
+    return _render_window(
+        lay.block, lay.lines, lay.boxes, (y0, y1), scan_out, link_out, scale=scale
+    )
 
 
 def flow_geometry(lay: FlowLayout) -> tuple[list[ScanBox], list[LinkBox]]:
@@ -314,16 +357,22 @@ def _clip_lines_to_height(
 
 
 def _draw_item(
-    img: Image.Image, draw: ImageDraw.ImageDraw, it: Item, x: float, baseline: float
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    it: Item,
+    x: float,
+    baseline: float,
+    *,
+    scale: float = 1.0,
 ) -> None:
     if it.kind == "ruby" and it.box is not None:  # kind implies the field (build_items)
-        it.box.draw(img, draw, x, baseline)
+        it.box.draw(img, draw, x, baseline, scale=scale)
     elif it.kind == "img" and it.img is not None:
-        it.img.draw(img, draw, x, baseline)
+        it.img.draw(img, draw, x, baseline, scale=scale)
     elif it.kind == "chip" and it.chip is not None:
-        it.chip.draw(img, draw, x, baseline)
+        it.chip.draw(img, draw, x, baseline, scale=scale)
     elif it.kind == "text" and it.tok is not None:
-        draw_token(img, draw, x, baseline, it.tok)
+        draw_token(img, draw, x, baseline, it.tok, scale=scale)
 
 
 def _update_scan_run(
@@ -395,13 +444,16 @@ def _draw_flow_line(
     scan_out: list[ScanBox] | None,
     link_out: list[LinkBox] | None,
     padding: int,
+    scale: float = 1.0,
 ) -> None:
+    # ``x``/``y`` stay REFERENCE px: the draw projects by ``scale``, but the scan/link boxes are emitted
+    # at 1× coords (scale-invariant geometry — the whole point of the scale-boundary arch).
     baseline = y + base_from_top
     x = float(padding)
     run: list[tuple[str, float, float]] = []  # contiguous CJK chars: (char, x, width)
     link: tuple[str, float, float] | None = None  # (query, x_start, x_end) of the current link run
     for it in line:
-        _draw_item(img, draw, it, x, baseline)
+        _draw_item(img, draw, it, x, baseline, scale=scale)
         if scan_out is not None:
             run = _update_scan_run(it, x, y, line_box_h, run, scan_out)
         if link_out is not None:
@@ -470,14 +522,20 @@ def _render_window(
     y_window: tuple[int, int],
     scan_out: list[ScanBox] | None,
     link_out: list[LinkBox] | None,
+    *,
+    scale: float = 1.0,
 ) -> Image.Image:
     """Draw only the lines overlapping ``[y0, y1)`` into a ``(y1 - y0)``-tall image, each at ``y - y0``
-    (PIL clips the partial top/bottom lines) — the crop-equivalent slice, without drawing the rest."""
+    (PIL clips the partial top/bottom lines) — the crop-equivalent slice, without drawing the rest.
+    ``scale`` > 1 makes the image native (``round(w×scale) × round((y1-y0)×scale)``); at 1.0 it's the
+    byte-identical reference band."""
     from PIL import Image, ImageDraw
 
     y0, y1 = y_window
     w = block.width + 2 * block.padding
-    img = Image.new("RGBA", (w, max(1, y1 - y0)), block.background)
+    dev_w = round(w * scale)
+    dev_h = max(1, round((y1 - y0) * scale))
+    img = Image.new("RGBA", (dev_w, dev_h), block.background)
     draw = ImageDraw.Draw(img)
     y = block.padding
     for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
@@ -492,6 +550,7 @@ def _render_window(
                 scan_out=scan_out,
                 link_out=link_out,
                 padding=block.padding,
+                scale=scale,
             )
         y += box
     return img
