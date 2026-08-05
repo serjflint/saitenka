@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from overlay.app.tokenize import Token
+from overlay.mask_atlas import REFERENCE_SCALE
 
 if TYPE_CHECKING:
     from overlay.app.render_cache import RenderCache
@@ -220,24 +221,7 @@ class _PrewarmJob:
         tok = Token(term, term, reading, "名詞", 0, len(term))
         # atlas-only: no render cache at all — build + raster every word to feed the mask atlas.
         if self.atlas_only:
-            # Resume ledger: skip a word already rastered at this scale so a stopped `--limit 0` sweep
-            # re-run picks up where it left off (a cheap index probe) instead of re-rastering from word 1.
-            if self.atlas is not None and self.atlas.is_done(self.native_scale, term):
-                with self._lock:
-                    self.skipped += 1
-                return
-            try:
-                r._panel_for(tok, term, min_h=r._tip_cap(), mined=False).precompose_head(
-                    r._tip_cap()
-                )
-            except Exception:  # a single pathological entry must never abort the whole prebuild
-                log.debug("prewarm(atlas) failed for %r", term, exc_info=True)
-            self._raster_native(r, tok, term)
-            if self.atlas is not None:
-                self.atlas.mark_done(
-                    self.native_scale, term
-                )  # both 1× + native masks now persisted
-            self._tick()
+            self._render_atlas(r, tok, term)
             return
         assert self.cache is not None  # non-atlas_only always has a render cache
         already = self.cache.has(self.sig, content_key(r._panel_key(tok, term, mined=False)))
@@ -262,6 +246,37 @@ class _PrewarmJob:
         except Exception:  # a single pathological entry must never abort the whole prebuild
             log.debug("prewarm failed for %r", term, exc_info=True)
         self._raster_native(r, tok, term)
+        self._tick()
+
+    def _render_atlas(self, r, tok, term: str) -> None:
+        """One atlas-only word, with a CHEAP LEDGER READ before any raster. Every scale builds the 1×
+        REFERENCE masks (``precompose_head``) plus its N× native masks (``_raster_native``); the
+        reference is scale-independent, tracked under :data:`REFERENCE_SCALE`, so a run at ANY scale
+        skips a reference another scale already built. A word whose reference AND native are both done is
+        fully skipped — no raster, no getmask2 (this is what makes a re-scale run near-instant)."""
+        atlas = self.atlas
+        ref_done = atlas is not None and atlas.is_done(REFERENCE_SCALE, term)
+        native_needed = self.native_scale > REFERENCE_SCALE
+        native_done = not native_needed or (
+            atlas is not None and atlas.is_done(self.native_scale, term)
+        )
+        if ref_done and native_done:  # nothing left to raster for this word at this scale
+            with self._lock:
+                self.skipped += 1
+            return
+        if not ref_done:
+            try:
+                r._panel_for(tok, term, min_h=r._tip_cap(), mined=False).precompose_head(
+                    r._tip_cap()
+                )
+            except Exception:  # a single pathological entry must never abort the whole prebuild
+                log.debug("prewarm(atlas ref) failed for %r", term, exc_info=True)
+            if atlas is not None:
+                atlas.mark_done(REFERENCE_SCALE, term)  # 1× reference masks persisted
+        if native_needed and not native_done:
+            self._raster_native(r, tok, term)
+            if atlas is not None:
+                atlas.mark_done(self.native_scale, term)  # N× native masks persisted
         self._tick()
 
     def _raster_native(self, r, tok, term: str) -> None:
@@ -403,7 +418,11 @@ def _startup_plan(terms, cache, atlas, *, atlas_only: bool, atlas_scale: float):
     starting footprint. Returns ``(plan, already_done, start_rows)`` — the last two seed the job."""
     total = len(terms)
     if atlas_only and atlas is not None:
-        done = atlas.done_words(atlas_scale)
+        # A word is fully done only if BOTH passes are done: the 1× reference AND (for scale > 1) the
+        # native pass. So a scale-1.0 run counts reference-done words; a scale-N run their intersection.
+        done = atlas.done_words(REFERENCE_SCALE)
+        if atlas_scale > REFERENCE_SCALE:
+            done = done & atlas.done_words(atlas_scale)
         already_done = sum(1 for term, _ in terms if term in done)
         start_rows, start_nbytes, capped = atlas.count(), atlas.disk_bytes(), False
     elif cache is not None:
@@ -470,6 +489,8 @@ def prewarm(
     cache, atlas = _open_build_caches(template, atlas_only=atlas_only)
 
     terms = _popular_terms(template.dict_set, limit)
+    if atlas is not None:
+        atlas.backfill_reference_done()  # native-done ⇒ reference-done, so cross-scale runs can skip it
     plan, already_done, before = _startup_plan(
         terms, cache, atlas, atlas_only=atlas_only, atlas_scale=atlas_scale
     )

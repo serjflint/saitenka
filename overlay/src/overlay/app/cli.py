@@ -456,12 +456,27 @@ def telemetry(
     return 0
 
 
+def _resolve_atlas_scale(cfg: dict, atlas_scale: float) -> float:
+    """Resolve ``--atlas-scale``: ``> 0`` is used as-is; ``<= 0`` inherits the runtime ``tip_scale`` so
+    the atlas matches what the tooltip displays. Reads ``tip_scale`` EXACTLY as the runtime does — the
+    top-level ``cfg["tip_scale"]``, NOT a nested ``[tooltip]`` key the runtime ignores — so prewarm and
+    runtime can never disagree. Falls back to 1.0 (reference only) when it's unset."""
+    if atlas_scale > 0:
+        return atlas_scale
+    return float(cfg.get("tip_scale") or 0.0) or 1.0
+
+
 def _prewarm_emit_start(
     plan: PrewarmPlan, *, atlas_only: bool, atlas_scale: float, width: int, height: int
 ) -> None:  # pragma: no cover — presentation for the thin CLI wrapper
     if atlas_only:
+        builds = (
+            "1× reference masks"
+            if atlas_scale <= 1.0
+            else f"1× reference + {atlas_scale:g}× native masks"
+        )
         print(
-            f"prewarm(atlas): {plan.total:,} words @scale {atlas_scale:g} · "
+            f"prewarm(atlas): {plan.total:,} words @scale {atlas_scale:g} — building {builds} · "
             f"{plan.already_done:,} already done → {plan.remaining:,} to raster · "
             f"atlas {plan.nbytes / 1e6:.0f} MB on disk (uncapped)",
             flush=True,
@@ -529,10 +544,10 @@ def prewarm(
     atlas_scale: Annotated[
         float,
         cyclopts.Parameter(
-            help="also build native CJK/Latin glyph masks at this display scale into the MASK ATLAS, so "
-            "the hi-dpi crisp tooltip loads from disk instead of rastering on first paint (0 = read "
-            "[tooltip] tip_scale; match your runtime tip_scale). 1.0 = reference masks only. The render "
-            "cache is unaffected — it stays 1×-reference-only (storage/wall-time; #149)"
+            help="display scale for the crisp tooltip. EVERY run builds the 1× reference masks; a scale "
+            ">1 ALSO builds native masks at that scale (so one --atlas-scale 1.5 run covers 1.0 AND 1.5 — "
+            "you do NOT need a separate 1.0 run). Match your runtime tip_scale; 0 = read it from config "
+            "(top-level tip_scale). 1.0 = reference only. The render cache stays 1×-reference-only (#149)"
         ),
     ] = 0.0,
     *,
@@ -568,10 +583,7 @@ def prewarm(
     from overlay.app.prewarm import prewarm as _prewarm
 
     cfg = load_config()
-    if atlas_scale <= 0:  # 0 = inherit the runtime display-scale preference so the atlas matches it
-        atlas_scale = float(
-            cfg.get("tip_scale") or (cfg.get("tooltip", {}) or {}).get("tip_scale") or 0.0
-        )
+    atlas_scale = _resolve_atlas_scale(cfg, atlas_scale)
     if (
         not atlas_only
         and not load_config().get("tooltip", {}).get("render_cache")
@@ -589,11 +601,11 @@ def prewarm(
             on_progress=partial(_prewarm_emit_progress, atlas_only=atlas_only),
             workers=workers,
             atlas_only=atlas_only,
-            atlas_scale=atlas_scale or 1.0,
+            atlas_scale=atlas_scale,  # already resolved to an effective scale (≥ 1.0)
             on_start=partial(
                 _prewarm_emit_start,
                 atlas_only=atlas_only,
-                atlas_scale=atlas_scale or 1.0,
+                atlas_scale=atlas_scale,
                 width=width,
                 height=height,
             ),

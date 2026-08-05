@@ -130,6 +130,19 @@ def test_done_ledger_survives_reopen(tmp_path):
     assert a2.is_done(1.5, "読")
 
 
+def test_backfill_reference_done_marks_native_words_at_the_reference_scale(tmp_path):
+    # A native-scale done marker implies its 1× reference pass ran, so backfill marks those words done
+    # at the reference scale too — letting a scale-1.0 run skip what a 1.5 (or 2.0) run already built.
+    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
+    assert atlas is not None
+    atlas.mark_done(1.5, "経")
+    atlas.mark_done(2.0, "済")
+    assert not atlas.is_done(1.0, "経")  # no reference marker before backfill
+    assert atlas.backfill_reference_done() == 2  # both native words gain a reference marker
+    assert atlas.is_done(1.0, "経") and atlas.is_done(1.0, "済")
+    assert atlas.backfill_reference_done() == 0  # idempotent — nothing new the second time
+
+
 def test_done_words_returns_the_scale_scoped_set(tmp_path):
     # The prewarm startup summary intersects this with the term list for its already-done / remaining split.
     atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")

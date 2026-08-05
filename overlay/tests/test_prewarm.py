@@ -46,8 +46,11 @@ class _FakeAtlas:
 
     def mark_done(self, scale: float, word: str) -> None:
         self.done.add((scale, word))
-        self.masks += self._growth
-        self.ignored += self._dup_per_word
+        if (
+            scale == 1.0
+        ):  # reference pass fires once per fresh word → model mask growth here, not twice
+            self.masks += self._growth
+            self.ignored += self._dup_per_word
 
     def count(self) -> int:
         return self.masks
@@ -134,36 +137,50 @@ def test_native_scale_is_a_noop_at_reference_scale():
     assert reader.panel.native_scales == []  # no native compose at scale 1.0
 
 
-def test_atlas_only_skips_a_word_already_marked_done():
-    # Resume ledger: a word already rastered at this scale is skipped (a stopped `--limit 0` re-run
-    # picks up where it left off instead of re-rastering from the start).
+def test_atlas_only_skips_a_word_when_reference_and_native_both_done():
+    # Fully skipped only when BOTH passes are done: the 1× reference AND the native scale (a stopped
+    # `--limit 0` re-run picks up where it left off instead of re-rastering from the start).
     reader = _FakeReader()
     atlas = _FakeAtlas()
-    atlas.mark_done(1.5, "cat")
+    atlas.mark_done(1.0, "cat")  # reference pass done
+    atlas.mark_done(1.5, "cat")  # native pass done
     job = _job(lambda: reader, atlas=atlas, native_scale=1.5)
     job.render(("cat", "kyatto"))
     assert reader.panel.rastered == []  # not rastered — skipped
     assert job.skipped == 1 and job.measured == 0
 
 
-def test_atlas_only_marks_a_word_done_after_rastering():
+def test_atlas_only_marks_both_reference_and_native_after_rastering():
     reader = _FakeReader()
     atlas = _FakeAtlas()
     job = _job(lambda: reader, atlas=atlas, native_scale=1.5)
     job.render(("cat", "kyatto"))
-    assert atlas.is_done(1.5, "cat")  # marked → a re-run skips it
+    assert atlas.is_done(1.0, "cat") and atlas.is_done(1.5, "cat")  # both passes marked
     assert job.measured == 1
 
 
-def test_done_ledger_is_scale_scoped_in_the_job():
-    # A word done at 1.5 is NOT skipped when prewarming at 2.0 (different masks).
+def test_atlas_only_skips_the_reference_a_different_scale_already_built():
+    # The cheap read check: scale 1.0 needs only the reference; if another scale's run built it
+    # (done(1.0)), the word is skipped WITHOUT re-rastering — no getmask2, no wasted CPU.
     reader = _FakeReader()
     atlas = _FakeAtlas()
-    atlas.mark_done(1.5, "cat")
+    atlas.mark_done(1.0, "cat")  # reference built by, e.g., a prior 1.5 run
+    job = _job(lambda: reader, atlas=atlas, native_scale=1.0)
+    job.render(("cat", "kyatto"))
+    assert reader.panel.rastered == [] and job.skipped == 1  # skipped, not re-rastered
+
+
+def test_atlas_only_higher_scale_skips_reference_but_builds_native():
+    # Reference already built (done(1.0)) but native at 2.0 not → skip the reference raster, do ONLY
+    # the native pass. Saves re-rastering the 1× the earlier scale already produced.
+    reader = _FakeReader()
+    atlas = _FakeAtlas()
+    atlas.mark_done(1.0, "cat")
     job = _job(lambda: reader, atlas=atlas, native_scale=2.0)
     job.render(("cat", "kyatto"))
-    assert reader.panel.rastered == [260]  # still rastered at the new scale
-    assert job.measured == 1
+    assert reader.panel.rastered == []  # reference NOT re-rastered
+    assert reader.panel.native_scales == [2.0]  # native pass ran
+    assert atlas.is_done(2.0, "cat") and job.measured == 1
 
 
 def test_native_scale_survives_a_pathological_native_raster():
@@ -192,7 +209,7 @@ def _drive(job: _PrewarmJob, n: int) -> None:
 def test_heartbeat_reports_new_masks_skipped_and_real_bytes():
     # Every checkpoint carries the delta, the resume skips, and REAL bytes (atlas mode used to send 0).
     atlas = _FakeAtlas(growth=3)  # +3 masks per rastered word → +6 per 2-word checkpoint
-    atlas.done.add((1.5, "w1"))  # one word pre-done (no mask bump) → skipped, not rastered
+    atlas.done.update({(1.0, "w1"), (1.5, "w1")})  # one word fully done (both passes) → skipped
     beats: list = []
     job = _job(
         lambda: _FakeReader(),
@@ -271,7 +288,8 @@ def test_plateau_stop_off_by_default_rasters_every_word():
 
 def test_startup_plan_splits_done_from_remaining_in_atlas_mode():
     atlas = _FakeAtlas()
-    atlas.mark_done(1.5, "cat")  # already rastered at this scale
+    atlas.mark_done(1.0, "cat")  # fully done = both passes: reference…
+    atlas.mark_done(1.5, "cat")  # …and native
     terms = [("cat", ""), ("dog", ""), ("fish", "")]
     plan, already_done, start_rows = _startup_plan(
         terms, None, atlas, atlas_only=True, atlas_scale=1.5
