@@ -63,6 +63,7 @@ class SubtitleSource:
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
+        self.translation_secondary_sid: int | None = None  # the mpv sid feeding the EN reveal
 
 
 class EpisodeContext:
@@ -79,3 +80,12 @@ class EpisodeContext:
         self.nav_prev_text = ""  # cue text showing right before a nav render (reconcile)
         # durable per-session recorder (app/session_stats.py); None until stats start on file load
         self.session_recorder: SessionRecorder | None = None
+
+
+class InteractionContext:
+    """State scoped to the current on-screen interaction (hover/tooltip/reveal). Grows with the tooltip
+    cluster; for now it owns the EN-translation reveal toggle."""
+
+    def __init__(self) -> None:
+        self.translate_on = False
+        self.trans_text: str | None = None

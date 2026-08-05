@@ -83,7 +83,7 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
-from overlay.app.reader_context import Delegated, EpisodeContext
+from overlay.app.reader_context import Delegated, EpisodeContext, InteractionContext
 from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
@@ -169,6 +169,12 @@ class Reader:
     # Help overlay state (app/help_overlay.py HelpState) under its historical flat names.
     _help_open = Delegated[bool]("help", "open")
     _help_page = Delegated[int]("help", "page")
+    # Interaction-tier state (app/reader_context.py InteractionContext) under historical flat names.
+    _translate_on = Delegated[bool]("interaction", "translate_on")
+    _trans_text = Delegated[str | None]("interaction", "trans_text")
+    _translation_secondary_sid = Delegated[int | None](
+        "episode.subtitle", "translation_secondary_sid"
+    )
 
     def __init__(
         self,
@@ -192,6 +198,7 @@ class Reader:
         # Episode-lifetime state; the Delegated shims above expose its fields as ``reader.<field>``.
         # A file change rebinds this (#100 re-slot) — see app/reader_context.py.
         self.episode = EpisodeContext()
+        self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
@@ -350,9 +357,6 @@ class Reader:
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
-        self._translate_on = False
-        self._trans_text: str | None = None
-        self._translation_secondary_sid: int | None = None
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
         self._backlog_store: backlog.BacklogStore | None = None
