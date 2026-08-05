@@ -12,11 +12,11 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
   notes, to-be-filed issue bodies) → `vibe/` (git-ignored) — **never `.agents/`, which is durable-only**.
 - **Commits:** frequent, small, focused [Conventional Commits](https://www.conventionalcommits.org)
   (`feat:`/`fix:`/`docs:`/…), one logical change each. No tool-attribution trailers.
-- **`.agents/skills/`** — repo-local agent skills; each is a
-  `SKILL.md` (procedure the always-on rules here defer to) plus a `scripts/smoke.sh` rot-guard. Codex
-  discovers this directory directly. For Claude Code auto-discovery, create a **local** symlink
-  (`.claude/` is git-ignored, never committed):
-  `ln -s ../.agents/skills .claude/skills`. Full per-agent activation of the optional intelligence stack
+- **`.agents/skills/`** — repo-local agent skills (a `SKILL.md` procedure + `references/` depth + a
+  `scripts/smoke.sh` rot-guard), loaded on demand. Authoring one → the **`skill-creator`** skill; whether a
+  convention even belongs in a skill (vs a rule/hook/gate) → **`agents-md`**. Codex discovers this directory
+  directly; Claude Code via a git-ignored `.claude/skills -> ../.agents/skills` symlink (per worktree:
+  `ln -s ../.agents/skills .claude/skills`). Full per-agent activation of the optional intelligence stack
   (repowise + Basic Memory MCP, pyrefly LSP, hooks) → the **`agent-setup`** skill; which tool answers
   what → **`agent-tooling`**.
 - **`.agents/mcp/servers.json`** — canonical, agent-agnostic MCP server definitions (no shared cross-agent

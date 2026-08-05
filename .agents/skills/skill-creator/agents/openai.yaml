@@ -1,0 +1,4 @@
+interface:
+  display_name: "Author a saitenka skill"
+  short_description: "Write a new .agents/skills skill well — structure, trigger description, smoke"
+  default_prompt: "Use $skill-creator to author a new saitenka skill: structure, a discovery-optimized description, progressive disclosure, and a grep-free smoke rot-guard."
