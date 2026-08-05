@@ -1,0 +1,15 @@
+{
+  "runtime": {
+    "python": "3.14.6",
+    "freethreaded_build": true,
+    "gil_enabled": false,
+    "cpu_count": 12,
+    "prefetch_workers": 8
+  },
+  "words": 608,
+  "full_median_ms": 10.804437508340925,
+  "full_p99_ms": 90.03162500448525,
+  "full_max_ms": 121.83658394496888,
+  "cold_median_ms": 6.250604521483183,
+  "cold_max_ms": 89.14233406540006
+}

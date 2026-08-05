@@ -169,6 +169,12 @@ class _PrewarmJob:
         tok = Token(term, term, reading, "名詞", 0, len(term))
         # atlas-only: no render cache at all — build + raster every word to feed the mask atlas.
         if self.atlas_only:
+            # Resume ledger: skip a word already rastered at this scale so a stopped `--limit 0` sweep
+            # re-run picks up where it left off (a cheap index probe) instead of re-rastering from word 1.
+            if self.atlas is not None and self.atlas.is_done(self.native_scale, term):
+                with self._lock:
+                    self.skipped += 1
+                return
             try:
                 r._panel_for(tok, term, min_h=r._tip_cap(), mined=False).precompose_head(
                     r._tip_cap()
@@ -176,6 +182,10 @@ class _PrewarmJob:
             except Exception:  # a single pathological entry must never abort the whole prebuild
                 log.debug("prewarm(atlas) failed for %r", term, exc_info=True)
             self._raster_native(r, tok, term)
+            if self.atlas is not None:
+                self.atlas.mark_done(
+                    self.native_scale, term
+                )  # both 1× + native masks now persisted
             self._tick()
             return
         assert self.cache is not None  # non-atlas_only always has a render cache
