@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785948998618,
+  "lastUpdate": 1785949027305,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -251,6 +251,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.489,
             "range": "±5.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8784f2c57142bd24ea6a7994a76924bb2b06420c",
+          "message": "feat(tokenize): dictionary-attested compound merging (Yomitan longest-match) (#186)\n\nAdjacent content tokens merge into one token when their joined span — the tail\ndeinflected to its dict form — is an exact dictionary headword (応急+処置 →\n応急処置, 走り+出した → 走り出す), so a compound UniDic over-splits is one\nhover/hit-test/colour/mine unit instead of fragments. Backed by a batch\nexistence probe (DictionarySet.terms_exist); applied at the controller's\nper-line token build after merge_inflected, and a no-op until dicts load.",
+          "timestamp": "2026-08-05T19:56:41+03:00",
+          "tree_id": "0e399e8d4578bf2ff0c219117bdfbc1fe7673689",
+          "url": "https://github.com/serjflint/saitenka/commit/8784f2c57142bd24ea6a7994a76924bb2b06420c"
+        },
+        "date": 1785949025652,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.749,
+            "range": "±3.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.499,
+            "range": "±7.1%",
             "unit": "ms"
           }
         ]
