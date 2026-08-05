@@ -355,6 +355,7 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
     mine_model = (
         _prompt(f"  Mining note type [{model_default or '(none)'}]?", models) or model_default
     )
+    mine_kind = _prompt_card_kind(cur)
     default_known = default_known_deck(decks, sizes, prefer=mine_deck)
     raw_known = _prompt(
         f"  Deck of words you already KNOW → coloring [{default_known or 'none'}]; 'n' to skip?",
@@ -372,9 +373,19 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
             or default_field
         )
 
-    frag = anki_config_fragment(known_deck, known_field, mine_deck, mine_model, existing_mine=cur)
+    frag = anki_config_fragment(
+        known_deck, known_field, mine_deck, mine_model, existing_mine=cur, card_kind=mine_kind
+    )
     write_config({**cfg, **frag}, confirm=lambda _p: True)
     print("  Anki config written.")
+
+
+def _prompt_card_kind(current: dict) -> str:
+    """Which card template the mine marks. word-and-sentence is the Lapis/Kiku default; 'sentence' is
+    Saitenka's historical marker; 'audio'/'click'/'none' cover the other Lapis-family templates."""
+    default = current.get("card_kind", "word-and-sentence")
+    kinds = ["word-and-sentence", "sentence", "audio", "click", "none"]
+    return _prompt(f"  Card kind {kinds} [{default}]?", kinds) or default
 
 
 def anki_config_fragment(
@@ -383,11 +394,13 @@ def anki_config_fragment(
     mine_deck: str,
     mine_model: str,
     existing_mine: dict | None = None,
+    card_kind: str = "word-and-sentence",
 ) -> dict:
     """Build the config fragment from the wizard's Anki choices: ``[known]`` deck→[field] (drives
-    coloring; empty deck → omitted) + ``[mine]`` deck/model (merged over any existing [mine] keys, so
-    a custom key/all_key survives). Pure — unit-tested."""
-    frag: dict = {"mine": {**(existing_mine or {}), "deck": mine_deck, "model": mine_model}}
+    coloring; empty deck → omitted) + ``[mine]`` deck/model/card_kind (merged over any existing [mine]
+    keys, so a custom key/all_key/field-map survives). Pure — unit-tested."""
+    mine = {**(existing_mine or {}), "deck": mine_deck, "model": mine_model, "card_kind": card_kind}
+    frag: dict = {"mine": mine}
     if known_deck:
         frag["known"] = {known_deck: [known_field or "Expression"]}
     return frag

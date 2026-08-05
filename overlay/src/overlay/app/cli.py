@@ -105,6 +105,16 @@ def _argv_config_override(argv: list[str]) -> str | None:
 _cfg = load_config()
 _mine_cfg = _cfg.get("mine", {}) if isinstance(_cfg.get("mine"), dict) else {}
 
+
+def _resolve_mine_model(mine_cfg: dict) -> str:
+    """The mining note type: an explicit ``[mine].model``, else the ``[mine].preset`` name (Lapis/Kiku
+    imply their own model), else Lapis. Mirrors what ``_build_mining`` derives on the attach seam, so
+    ``run``/``doctor`` target the SAME note type a preset-only config mines to (the both-seams trap)."""
+    return mine_cfg.get("model") or mine_cfg.get("preset") or "Lapis"
+
+
+_MINE_MODEL_DEFAULT = _resolve_mine_model(_mine_cfg)
+
 app = cyclopts.App(
     name="saitenka",
     help="Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict tooltip, mining.",
@@ -209,7 +219,7 @@ def run(
         ),
     ] = bool(_mine_cfg.get("enabled", bool(_mine_cfg))),
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
-    mine_model: str = _mine_cfg.get("model", "Lapis"),
+    mine_model: str = _MINE_MODEL_DEFAULT,
     mine_normalize_audio: Annotated[
         bool,
         cyclopts.Parameter(
@@ -378,7 +388,7 @@ def doctor(
         ),
     ] = False,
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
-    mine_model: str = _mine_cfg.get("model", "Lapis"),
+    mine_model: str = _MINE_MODEL_DEFAULT,
 ) -> int:  # pragma: no cover — thin CLI wrapper; run_checks/print_report are unit-tested
     """Check the environment: mpv/ffmpeg, config, dict cache, fonts, AnkiConnect."""
     from overlay.app.doctor import print_report, run_checks

@@ -151,6 +151,35 @@ def test_anki_check_missing_deck_only_warns(monkeypatch):
     assert c.status == "warn"
 
 
+def test_anki_check_flags_missing_mining_field(monkeypatch):
+    # the note type exists but lacks a mapped field → warn (not fail): mining would write nothing there
+    replies = {
+        "version": 6,
+        "deckNames": ["Saitenka::Mining"],
+        "modelNames": ["Lapis"],
+        "modelFieldNames": ["Expression", "ExpressionReading"],  # missing Sentence/Glossary/…
+    }
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    monkeypatch.setattr(doc, "load_config", dict)  # default (full Lapis) field map
+    c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
+    assert c.status == "warn"
+    assert "Sentence" in c.detail  # a missing field is named
+
+
+def test_anki_check_ok_when_all_mining_fields_present(monkeypatch):
+    from overlay.app.anki import LAPIS_FIELDS
+
+    replies = {
+        "version": 6,
+        "deckNames": ["Saitenka::Mining"],
+        "modelNames": ["Lapis"],
+        "modelFieldNames": list(LAPIS_FIELDS.values()),  # every mapped field exists
+    }
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    monkeypatch.setattr(doc, "load_config", dict)
+    assert doc.check_anki(deck="Saitenka::Mining", model="Lapis").status == "ok"
+
+
 def _patch_known(monkeypatch, cfg, anki):
     monkeypatch.setattr(doc, "load_config", lambda: cfg)
     monkeypatch.setattr(doc, "_anki_call", anki)

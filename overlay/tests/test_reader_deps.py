@@ -81,6 +81,52 @@ def test_mining_animated_screenshot_off_by_default(monkeypatch):
     assert mine_conf.animated.height == 480 and mine_conf.animated.fmt == "webp"
 
 
+def test_mining_reads_field_map_and_card_kind_from_config(monkeypatch):
+    import overlay.app.anki as anki_mod
+
+    monkeypatch.setattr(
+        anki_mod, "Anki", lambda: "ANKI"
+    )  # str → model_field_names AttributeError → validation no-ops
+    _, _, mine_conf, _ = reader_deps.build_reader_deps(
+        {
+            "mine": {
+                "model": "Animecards",
+                "fields": {"expression": "Word", "reading": "Reading"},
+                "card_kind": "sentence",
+            }
+        },
+        color=False,
+    )
+    assert mine_conf.fields == {"expression": "Word", "reading": "Reading"}  # custom map, not Lapis
+    assert mine_conf.flags == {"IsSentenceCard": "1"}  # card_kind = sentence
+
+
+def test_mining_preset_supplies_map_and_marker(monkeypatch):
+    import overlay.app.anki as anki_mod
+
+    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
+    _, _, mine_conf, _ = reader_deps.build_reader_deps({"mine": {"preset": "Kiku"}}, color=False)
+    assert mine_conf.model == "Kiku"
+    assert mine_conf.fields["audio"] == "SentenceAudio"  # Kiku inherits Lapis field names
+    assert mine_conf.flags == {"IsWordAndSentenceCard": "1"}
+
+
+def test_mining_validation_drops_field_absent_from_note_type(monkeypatch):
+    """A configured field that the note type doesn't have is dropped (+warned), so mining still
+    writes a valid note rather than failing on the unknown field."""
+    import overlay.app.anki as anki_mod
+
+    class _Anki:
+        def model_field_names(self, _model):
+            return ["Expression", "ExpressionReading"]  # note type has only these two
+
+    monkeypatch.setattr(anki_mod, "Anki", _Anki)
+    _, _, mine_conf, _ = reader_deps.build_reader_deps(
+        {"mine": {"fields": {"expression": "Expression", "glossary": "Nonexistent"}}}, color=False
+    )
+    assert mine_conf.fields == {"expression": "Expression"}  # the absent Nonexistent field is gone
+
+
 def test_color_builds_scorer_even_without_known(monkeypatch):
     import overlay.app.scoring as scoring_mod
     import overlay.app.wordlists as wl

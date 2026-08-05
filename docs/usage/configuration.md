@@ -64,7 +64,9 @@ your note's fields:
 [mine]
 enabled = true
 deck  = "Saitenka::Mining"   # destination deck
-model = "Lapis"              # Anki note type / model
+model = "Lapis"              # Anki note type / model (must already exist)
+preset = "Lapis"             # "Lapis" or "Kiku" — fills the field map + card_kind for a known type
+card_kind = "word-and-sentence"  # card template marked: word-and-sentence · sentence · audio · click · none
 key       = "Ctrl+m"         # mine the hovered word
 video_key = "Ctrl+Shift+m"   # mine the hovered word with an animated (motion) clip
 all_key   = "Shift+m"        # bulk-mine the current line
@@ -84,6 +86,24 @@ single run). `preview = false` (or `--no-mine-preview`) mines silently — a toa
 verify panel popping up; mining and the ⊕→✓ flip are unaffected. `normalize_audio` runs an EBU R128
 `loudnorm` pass (−23 LUFS) so cards mined from quiet
 and loud lines play back at an even volume; it adds one ffmpeg pass per mine, so it's off by default.
+
+**Note type, card kind, and field map.** `model` is your Anki note type — it must already exist (a
+deck is auto-created on the first mine, a note type can't be). `preset` (`"Lapis"` or `"Kiku"`) fills
+the field map and card kind for those known types, so you don't spell them out; the two share field
+names, differing only in card template. `card_kind` picks which template the card is marked as —
+`word-and-sentence` (the Lapis/Kiku default), `sentence` (Saitenka's historical marker), `audio`,
+`click`, or `none` — setting exactly one `Is…Card` flag. For any other note type, override the
+logical→real field map in a `[mine.fields]` sub-table (only mapped fields are written):
+
+```toml
+[mine.fields]              # e.g. an Animecards note type
+expression = "Word"
+reading    = "Reading"
+```
+
+`saitenka doctor` validates the effective field map against the note type and warns about names it
+lacks (those values would silently go nowhere); unknown fields are also dropped at mine time so the
+note still adds.
 
 **Animated (motion) screenshots.** `animated_screenshot = true` captures a short animated clip of the
 scene as the card image instead of a still frame — the scene reads better in motion and pairs with the cue

@@ -1,6 +1,8 @@
 """Mining: card builder, dedup query, sentence bolding, media args, toast (no real Anki add)."""
 
-from overlay.app.anki import MineConfig, bold_word, build_note
+import pytest
+
+from overlay.app.anki import KNOWN_MARKERS, MineConfig, bold_word, build_note
 from overlay.app.lookup import card_for
 from overlay.app.media import AnimatedClip, Timespan, clip_audio
 from overlay.app.toast import render_toast
@@ -41,7 +43,9 @@ def test_build_note_maps_lapis_fields():
     assert f["Picture"] == '<img src="p.jpg">'
     assert f["SentenceAudio"] == "[sound:a.mp3]"
     assert f["MiscInfo"] == "ep10 · 10:03"
-    assert f["IsSentenceCard"] == "1"
+    assert (
+        f["IsWordAndSentenceCard"] == "1"
+    )  # default card kind (word-and-sentence, SubMiner default)
     assert note["options"]["allowDuplicate"] is False
     assert "saitenka" in note["tags"]
 
@@ -73,8 +77,53 @@ def test_custom_field_map_only_writes_mapped():
     cfg = MineConfig(model="Animecards", fields={"expression": "Word", "reading": "Reading"})
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     note = build_note(cfg, card_for(tok), "s")
-    assert set(note["fields"]) == {"Word", "Reading", "IsSentenceCard"}
+    assert set(note["fields"]) == {"Word", "Reading", "IsWordAndSentenceCard"}
     assert note["fields"]["Word"] == "読む"
+
+
+@pytest.mark.parametrize(
+    ("card_kind", "marker"),
+    [
+        ("sentence", "IsSentenceCard"),
+        ("word-and-sentence", "IsWordAndSentenceCard"),
+        ("click", "IsClickCard"),
+        ("audio", "IsAudioCard"),
+    ],
+)
+def test_build_note_card_kind_sets_exactly_one_marker(card_kind, marker):
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    note = build_note(MineConfig(card_kind=card_kind), card_for(tok), "s")
+    present = [m for m in KNOWN_MARKERS if m in note["fields"]]
+    assert (
+        present == [marker] and note["fields"][marker] == "1"
+    )  # mutually exclusive by construction
+
+
+def test_build_note_card_kind_none_sets_no_marker():
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    note = build_note(MineConfig(card_kind="none"), card_for(tok), "s")
+    assert not any(m in note["fields"] for m in KNOWN_MARKERS)  # no card-template marker at all
+
+
+def test_build_note_unknown_card_kind_falls_back_to_default(caplog):
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    with caplog.at_level("WARNING"):
+        note = build_note(MineConfig(card_kind="bogus"), card_for(tok), "s")
+    assert note["fields"]["IsWordAndSentenceCard"] == "1"  # typo didn't disable the marker
+    assert "card_kind" in caplog.text
+
+
+def test_mine_config_from_preset_kiku_uses_lapis_fields_and_word_and_sentence():
+    cfg = MineConfig.from_preset("Kiku")
+    assert cfg.model == "Kiku"
+    assert cfg.fields["expression"] == "Expression" and cfg.fields["audio"] == "SentenceAudio"
+    assert cfg.flags == {"IsWordAndSentenceCard": "1"}  # Kiku's word-and-sentence marker
+
+
+def test_mine_config_from_unknown_preset_warns_and_uses_lapis(caplog):
+    with caplog.at_level("WARNING"):
+        cfg = MineConfig.from_preset("Nonesuch")
+    assert cfg.fields == MineConfig().fields and "unknown mining preset" in caplog.text
 
 
 def test_timespan_padding():

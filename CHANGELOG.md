@@ -16,6 +16,13 @@ logs.
 
 ### Added
 
+- **Configurable mining note type — field map, card kind, and presets.** `[mine]` is no longer
+  Lapis-only under a configurable-looking model name. Pick a known note type with `preset = "Lapis"`
+  or `"Kiku"` (they share field names), choose the card template with `card_kind`
+  (`word-and-sentence` · `sentence` · `audio` · `click` · `none` — exactly one `Is…Card` marker), or
+  spell out any note type's logical→real map in a `[mine.fields]` sub-table. `saitenka doctor` now
+  validates the effective field map against the note type and warns about names it lacks, and unknown
+  fields are dropped at mine time so the note still adds instead of failing.
 - **Animated (motion) screenshots on mined cards.** `[mine].animated_screenshot = true` captures a short
   animated clip of the scene as the card image instead of a still — the scene reads better in motion and
   pairs with the cue audio. Opt-in (larger media, an extra ffmpeg pass). It prefers WebP and falls back to
@@ -31,6 +38,12 @@ logs.
   is looked up and mined the way Yomitan shows it instead of as fragments. Runs after the existing
   conjugation-tail merge, never crosses a particle/auxiliary boundary, and is a no-op until dictionaries
   are loaded.
+
+### Changed
+
+- **Mined cards are now marked `IsWordAndSentenceCard` by default, not `IsSentenceCard`.** This matches
+  the Lapis/Kiku default (and SubMiner's), showing the word prominently on the card front. Set
+  `[mine].card_kind = "sentence"` to restore the previous unconditional `IsSentenceCard` marker.
 
 ## [1.3.0] - 2026-08-04
 

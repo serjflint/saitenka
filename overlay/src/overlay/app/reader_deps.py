@@ -200,28 +200,70 @@ def _load_jlpt_dict(db):
         return JlptDict.load(db)
 
 
+def _mine_config_from(mc: dict):
+    """Build a :class:`~overlay.app.anki.MineConfig` from the ``[mine]`` table. An optional ``preset``
+    (Lapis/Kiku) supplies the field map + default card kind; explicit
+    ``deck``/``model``/``fields``/``card_kind``/``normalize_audio``/``animated_*`` keys override it.
+    Pure — the same reader for both the ``attach`` and ``run`` seams (run reaches here via the raw
+    ``[mine]`` table threaded through ``effective_cfg``)."""
+    from overlay.app.anki import MineConfig
+    from overlay.app.media import AnimatedClip
+
+    preset = mc.get("preset")
+    base = MineConfig.from_preset(str(preset)) if preset else MineConfig()
+    raw_fields = mc.get("fields")
+    fields = dict(raw_fields) if isinstance(raw_fields, dict) and raw_fields else base.fields
+    return MineConfig(
+        deck=mc.get("deck", base.deck),
+        model=mc.get("model", base.model),
+        normalize_audio=bool(mc.get("normalize_audio", False)),
+        animated=AnimatedClip(
+            enabled=bool(mc.get("animated_screenshot", False)),
+            height=int(mc.get("animated_height", 480)),
+            fps=int(mc.get("animated_fps", 12)),
+            quality=int(mc.get("animated_quality", 75)),
+            max_secs=float(mc.get("animated_max_secs", 4.0)),
+            fmt=str(mc.get("animated_format", "webp")).lower(),
+        ),
+        card_kind=str(mc.get("card_kind", base.card_kind)),
+        fields=fields,
+    )
+
+
+def _validate_mine_fields(anki, mine_conf) -> None:
+    """Drop + warn about configured field-map targets that don't exist on the note type, so mining
+    writes a valid note instead of silently emptying (or failing on) an unknown field. Best-effort:
+    an AnkiConnect hiccup or an unreadable model leaves the map untouched."""
+    try:
+        real = set(anki.model_field_names(mine_conf.model))
+    except Exception:  # a hiccup reading fields must skip validation, never disable mining
+        log.debug(
+            "couldn't read %r fields for validation; keeping map", mine_conf.model, exc_info=True
+        )
+        return
+    if not real:  # couldn't read the model's fields — can't validate, don't guess
+        return
+    bad = [logical for logical, name in mine_conf.fields.items() if name not in real]
+    if bad:
+        log.warning(
+            "mining note type %r is missing field(s) %s — those values won't be written",
+            mine_conf.model,
+            sorted(mine_conf.fields[k] for k in bad),
+        )
+        for logical in bad:
+            mine_conf.fields.pop(logical, None)
+
+
 def _build_mining(mc: dict, *, mine: bool):
     if not (mine and mc):
         return None, None
     with otel_metrics.traced("build_mining"):
         try:
-            from overlay.app.anki import Anki, MineConfig
-            from overlay.app.media import AnimatedClip
+            from overlay.app.anki import Anki
 
             anki = Anki()
-            mine_conf = MineConfig(
-                deck=mc.get("deck", "Saitenka::Mining"),
-                model=mc.get("model", "Lapis"),
-                normalize_audio=bool(mc.get("normalize_audio", False)),
-                animated=AnimatedClip(
-                    enabled=bool(mc.get("animated_screenshot", False)),
-                    height=int(mc.get("animated_height", 480)),
-                    fps=int(mc.get("animated_fps", 12)),
-                    quality=int(mc.get("animated_quality", 75)),
-                    max_secs=float(mc.get("animated_max_secs", 4.0)),
-                    fmt=str(mc.get("animated_format", "webp")).lower(),
-                ),
-            )
+            mine_conf = _mine_config_from(mc)
+            _validate_mine_fields(anki, mine_conf)
             return anki, mine_conf
         except Exception:  # never let mining setup block attach
             log.warning(

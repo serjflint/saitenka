@@ -165,9 +165,18 @@ def test_anki_config_fragment():
     frag = f("Known", "Entry", "My::Mine", "Lapis", existing_mine={"key": "Ctrl+m"})
     assert frag == {
         "known": {"Known": ["Entry"]},
-        "mine": {"key": "Ctrl+m", "deck": "My::Mine", "model": "Lapis"},  # existing key preserved
+        # existing key preserved; card_kind defaults to word-and-sentence
+        "mine": {
+            "key": "Ctrl+m",
+            "deck": "My::Mine",
+            "model": "Lapis",
+            "card_kind": "word-and-sentence",
+        },
     }
-    assert f("", "", "D", "M") == {"mine": {"deck": "D", "model": "M"}}  # no deck → no [known]
+    # no deck → no [known]; an explicit card_kind is written through
+    assert f("", "", "D", "M", card_kind="sentence") == {
+        "mine": {"deck": "D", "model": "M", "card_kind": "sentence"}
+    }
     assert f("K", "", "D", "M")["known"] == {"K": ["Expression"]}  # blank field → default
 
 

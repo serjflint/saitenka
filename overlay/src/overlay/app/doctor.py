@@ -348,6 +348,10 @@ def check_anki(deck: str, model: str) -> Check:
         return Check("anki", "warn", f"{detail}, but couldn't list decks/models")
     if model not in models:  # a note type can't be auto-created — mining truly can't run without it
         return Check("anki", "fail", f"{detail}, but mining note type {model!r} doesn't exist")
+    if problem := _mining_field_problem(
+        model
+    ):  # configured field map vs the note type's real fields
+        return Check("anki", "warn", f"{detail}, but mining note type {model!r} {problem}")
     if deck not in decks:  # a deck IS auto-created on the first addNote, so this is only a heads-up
         return Check(
             "anki",
@@ -355,6 +359,24 @@ def check_anki(deck: str, model: str) -> Check:
             f"{detail}, but mining deck {deck!r} doesn't exist yet (created on first mine)",
         )
     return Check("anki", "ok", f"{detail}; mining deck+note type present")
+
+
+def _mining_field_problem(model: str) -> str | None:
+    """The mismatch (if any) between the effective mining field map and ``model``'s real fields: the
+    configured field names absent from the note type. ``None`` when they all exist, or when the fields
+    can't be read (so validation is skipped rather than guessed). Warn-level — an unknown field just
+    writes nothing (and is dropped at build time), it doesn't crash mining."""
+    from overlay.app.reader_deps import _mine_config_from
+
+    fields_map = _mine_config_from(load_config().get("mine") or {}).fields
+    try:
+        real = set(_anki_call("modelFieldNames", modelName=model) or [])
+    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
+        return None  # a transient read failure must skip validation, not crash the doctor run
+    if not real:
+        return None
+    missing = sorted({name for name in fields_map.values() if name not in real})
+    return f"is missing mining field(s) {missing}" if missing else None
 
 
 def _known_deck_fields(deck: str) -> set[str] | None:
