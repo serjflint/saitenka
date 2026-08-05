@@ -33,6 +33,13 @@ Reach for the tool that answers the question, not the reflex. **Never shell-sear
 `.agents/rules/searching.md`). Which tool answers what → the **`agent-tooling`** skill; turning the
 stack on → **`agent-setup`**.
 
+If one *does* escape (the shim self-replicates, renaming its argv to `(statham)`; every proc reparents to
+`launchd`, so there's no seeder to kill and leaf `pkill`/`killall -9` loses the race — the count *grows*):
+freeze before kill. Spam `SIGSTOP` across all three match forms until every proc is frozen — a stopped
+proc can't fork, so the chain dies on its own: `for r in $(seq 1 40); do pkill -STOP -x statham;
+pkill -STOP -x grep; pkill -STOP -f find-utils-mocks; done`. Never interleave a KILL pass (it un-gates
+the freeze and survivors respawn).
+
 | When you want to… | Use | Not |
 | --- | --- | --- |
 | find text / a filename | **Grep / Glob** tools, or `git grep` / `git ls-files` | `grep`/`find` in Bash |

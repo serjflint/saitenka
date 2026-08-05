@@ -79,4 +79,21 @@ each mode measures, and every historical baseline, is in the engineering log:
 - **Harness:** [`overlay/examples/bench_responsiveness.py`](https://github.com/serjflint/saitenka/blob/main/overlay/examples/bench_responsiveness.py)
 - **Full log:** [`overlay/BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/overlay/BENCHMARKS.md)
 
+## Guarding against regressions
+
+Three layers stop a perf regression from rotting in unnoticed, each tuned to a different noise profile.
+The exact commands live in `pyproject.toml`'s `[tool.poe.tasks]` and the workflows — this is the map.
+
+| Layer | What it is | When it runs | Signal |
+|---|---|---|---|
+| **Local rot-guard** | `poe perf-check` ratchets the dict-free `--synth` render bench against `perf-baseline.json` (per-metric tolerance: median +50%, tail-noisy p99 +100%). `poe perf-bless` after a deliberate change. | Locally, on demand (hard fail). | Catches a 2-4× rot before you push. |
+| **Continuous history** | [`github-action-benchmark`](https://github.com/benchmark-action/github-action-benchmark) charts the same `--synth` numbers on a gh-pages dashboard; PRs get a comparison comment. | Every push to `main` (stores) + every PR (compares). | Trend over time — a chart, not a gate. |
+| **Live-mpv jank harness** | `poe jank-live` drives the overlay against a real *playing* mpv and polls mpv's own `frame-drop-count` / `vo-delayed-frame-count` — the only signal that sees mpv's compositor. | The e2e GUI tier (Linux/Xvfb, weekly/tag). | Real-time dropped frames. |
+
+The `--synth` corpus is dict-free and deterministic on purpose: it needs no `overlay.toml`, so the same
+numbers come out on any machine and any commit, which is what makes CI history meaningful. Run
+`poe synth-bench` (add `--loops N` to see run-to-run variance) or `poe jank-live` locally to reproduce
+either. The gh-pages dashboard is at `https://serjflint.github.io/saitenka/dev/bench` once the history
+branch is enabled.
+
 See also: [how Saitenka compares to other tools](comparisons.md).

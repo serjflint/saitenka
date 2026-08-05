@@ -1,0 +1,116 @@
+# Continuous perf history (#33/#32) — the STATISTICAL trend gate, complementing the LOCAL hard
+# rot-guard (`poe perf-check`). Runs the dict-free `--synth` bench and feeds github-action-benchmark:
+#   - store (push to main): append to dev/bench/data.js on the gh-pages branch → time-series chart at
+#     https://serjflint.github.io/saitenka/dev/bench, alert (commit comment) on a gross regression.
+#   - compare (PR): compare vs the stored history, comment on the PR, and NEVER push — the write-perm
+#     job must not run on pull_request (github-action-benchmark's own safety rule).
+# This is a TREND signal, NOT a hard gate (`fail-on-alert: false`): GitHub-hosted runners are
+# wall-clock-noisy (>30% variance is common). The hard guard is local `poe perf-check`.
+# UV_PYTHON=3.13 → prebuilt fugashi wheels (no MeCab source build) + steady single-threaded wall-clock.
+#
+# ONE-TIME SETUP (not scripted here): create the history branch and enable Pages on it —
+#   git checkout --orphan gh-pages && git rm -rf . && git commit --allow-empty -m "init gh-pages" \
+#     && git push origin gh-pages
+# then Settings → Pages → Deploy from branch → gh-pages / (root).
+name: Perf
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_PYTHON: "3.13"
+
+jobs:
+  store:
+    if: github.event_name != 'pull_request'
+    name: store history (push to main)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # auto-push the benchmark data to gh-pages
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync (test group only, 3.13 → prebuilt fugashi)
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full --no-default-groups --group test
+
+      - name: Run synth bench
+        working-directory: overlay
+        run: >-
+          uv run --no-sync python examples/bench_responsiveness.py
+          --synth --reps 5 --loops 5 --bench-json bench.json
+
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        with:
+          name: Saitenka render (synth)
+          tool: customSmallerIsBetter
+          output-file-path: overlay/bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "200%" # 2x = the gross-rot line (matches the local p99 +100% tolerance)
+          comment-on-alert: true
+          fail-on-alert: false # trend signal, not a gate — the local rot-guard is the hard one
+
+  compare:
+    if: github.event_name == 'pull_request'
+    name: compare vs main (PR, no push)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # post the comparison comment on the PR
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync (test group only, 3.13 → prebuilt fugashi)
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full --no-default-groups --group test
+
+      - name: Run synth bench
+        working-directory: overlay
+        run: >-
+          uv run --no-sync python examples/bench_responsiveness.py
+          --synth --reps 5 --loops 5 --bench-json bench.json
+
+      - name: Compare against stored history
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        with:
+          name: Saitenka render (synth)
+          tool: customSmallerIsBetter
+          output-file-path: overlay/bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          auto-push: false # PR: compare only, never mutate gh-pages
+          save-data-file: false
+          alert-threshold: "200%"
+          comment-on-alert: true
+          fail-on-alert: false
