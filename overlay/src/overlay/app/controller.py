@@ -84,7 +84,13 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
-from overlay.app.reader_context import Delegated, EpisodeContext, InteractionContext
+from overlay.app.reader_context import (
+    Delegated,
+    EpisodeContext,
+    InteractionContext,
+    RenderCacheState,
+    SessionContext,
+)
 from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
@@ -94,7 +100,6 @@ from overlay.mpvio.osd import Overlay
 if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
     from overlay.app.render_cache import RenderCache
-    from overlay.mask_atlas import MaskAtlas
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
 
@@ -187,6 +192,11 @@ class Reader:
     )
     _render_ahead_lock = Delegated[threading.Lock]("prefetch_state", "render_ahead_lock")
     _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
+    # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
+    # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
+    _mined = Delegated[set[str]]("session", "mined")
+    _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
+    _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
 
     def __init__(
         self,
@@ -271,21 +281,17 @@ class Reader:
         self.raw_band_ceiling = (
             o.tooltip.raw_band_ceiling_mb * 1024 * 1024
         )  # bytes; 0 = always compress
-        # Cross-session persistent render cache (#149): opt-in; seeds a cold hover's first viewport from
-        # disk for cost-gated (tall) entries. Built lazily on first use so a non-dict session (or the
-        # opt-out) never touches disk. render_cache_min_height gates writes to the pathological tail.
-        self._render_cache_on = o.tooltip.render_cache
-        self._render_cache_max_bytes = o.tooltip.render_cache_max_mb * 1024 * 1024
-        self._render_cache_min_height_px = o.tooltip.render_cache_min_height
-        self._render_cache_obj: RenderCache | None = None
-        self._render_cache_built = False
-        self._render_config_sig: str | None = None
-        self._render_sig_key: tuple[int, int] | None = None
-        self._mask_atlas_on = (
-            o.tooltip.mask_atlas
-        )  # persistent glyph mask atlas (#149 Tier-1), opt-out
-        self._mask_atlas: MaskAtlas | None = (
-            None  # write-back handle (kept alive), or None off/no atlas
+        # Session-lifetime state (app/reader_context.py SessionContext) — durable across every #100
+        # episode re-slot: the #149 persistent render caches (opt-in, built lazily / use-when-available so
+        # a non-dict or opted-out session never touches disk), the in-deck mined set, the Anki
+        # reachability cache, and the review backlog store.
+        self.session = SessionContext(
+            RenderCacheState(
+                cache_on=o.tooltip.render_cache,
+                cache_max_bytes=o.tooltip.render_cache_max_mb * 1024 * 1024,
+                cache_min_height_px=o.tooltip.render_cache_min_height,
+                mask_atlas_on=o.tooltip.mask_atlas,  # persistent glyph mask atlas (#149 Tier-1), opt-out
+            )
         )
         # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
@@ -361,18 +367,12 @@ class Reader:
         self.auto_translate = o.translation.auto_translate
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
-        self._backlog_store: backlog.BacklogStore | None = None
         self.sidebar = sidebar.SidebarState()
         self.analysis = analysis_overlay.AnalysisState()
         self.help = help_overlay.HelpState()
         # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
         # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
         self.preview = card_preview.PreviewState()
-        self._mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
-        self._anki_cache: tuple[float, bool] = (
-            0.0,
-            False,
-        )  # (checked_at, reachable) — see _anki_ok
         # Forced mouse-section state (see _sync_mouse_capture).
         self._mouse_section_defined = False
         self._mouse_captured = False
@@ -798,19 +798,18 @@ class Reader:
         """The cross-session render cache, USED WHEN AVAILABLE: opened lazily only if a prebuilt
         ``render-cache.sqlite`` already exists (``saitenka prewarm`` builds it). ``None`` when opted out,
         no dict set, or no prebuilt cache — so a fresh install creates nothing and costs nothing."""
-        if not self._render_cache_on or self.dict_set is None:
+        rc = self.session.render_cache
+        if not rc.cache_on or self.dict_set is None:
             return None
-        if not self._render_cache_built:
-            self._render_cache_built = True
+        if not rc.built:
+            rc.built = True
             from overlay.app.paths import cache_dir
             from overlay.app.render_cache import RenderCache
 
             path = cache_dir() / "render-cache.sqlite"
             if path.exists():  # use-when-available — prewarm is the builder, not a live session
-                self._render_cache_obj = RenderCache.open(
-                    path, max_bytes=self._render_cache_max_bytes
-                )
-        return self._render_cache_obj
+                rc.obj = RenderCache.open(path, max_bytes=rc.cache_max_bytes)
+        return rc.obj
 
     def _enable_mask_atlas(self) -> None:
         """Install the persistent glyph mask atlas WHEN AVAILABLE (a prebuilt ``mask-atlas.sqlite``
@@ -823,7 +822,8 @@ class Reader:
         from overlay.app.paths import cache_dir
         from overlay.mask_atlas import MaskAtlas
 
-        if not self._mask_atlas_on or self._mask_atlas is not None:
+        rc = self.session.render_cache
+        if not rc.mask_atlas_on or rc.mask_atlas is not None:
             return
         path = cache_dir() / "mask-atlas.sqlite"
         if not path.exists():  # use-when-available — prewarm builds it
@@ -831,7 +831,7 @@ class Reader:
         atlas = MaskAtlas.open(path)
         if atlas is None:
             return
-        self._mask_atlas = atlas
+        rc.mask_atlas = atlas
         fonts.set_mask_atlas(None, atlas)  # write-back active immediately; reads join once loaded
 
         def _load() -> None:
@@ -847,24 +847,25 @@ class Reader:
     def _render_cache_sig(self) -> str:
         """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
         resolution change recomputes it. Only called when the cache is on (dict_set present)."""
+        rc = self.session.render_cache
         cap = self._tip_cap()
         ck = (self.tip_width, cap)
-        if self._render_config_sig is None or self._render_sig_key != ck:
+        if rc.config_sig is None or rc.sig_key != ck:
             from overlay.app.render_cache import config_signature, dict_set_signature
 
             assert (
                 self.dict_set is not None
             )  # _render_cache() gated on it before any caller reaches here
-            self._render_config_sig = config_signature(
+            rc.config_sig = config_signature(
                 width=self.tip_width, cap=cap, dict_sig=dict_set_signature(self.dict_set)
             )
-            self._render_sig_key = ck
-        return self._render_config_sig
+            rc.sig_key = ck
+        return rc.config_sig
 
     def _render_cache_min_height(self) -> int:
         """Cost gate (px): only heads at least this tall — a non-trivial entry that needs scrolling, the
         pathological tail whose cold build+raster blows the budget — are persisted."""
-        return self._render_cache_min_height_px
+        return self.session.render_cache.cache_min_height_px
 
     def _peek_render_cache(self, key):
         """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None``. Lets a

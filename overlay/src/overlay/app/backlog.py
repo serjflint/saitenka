@@ -484,9 +484,10 @@ def capture_current(reader) -> BacklogEntry | None:
         hovered_lemma=hovered.lemma if hovered else None,
     )
     try:
-        if reader._backlog_store is None:
-            reader._backlog_store = BacklogStore()
-        entry, created = reader._backlog_store.toggle_capture_result(capture)
+        store = reader._backlog_store
+        if store is None:
+            store = reader._backlog_store = BacklogStore()
+        entry, created = store.toggle_capture_result(capture)
     except (OSError, sqlite3.Error, ValueError) as exc:
         reader._toast(f"bookmark failed: {exc}", "err")
         return None

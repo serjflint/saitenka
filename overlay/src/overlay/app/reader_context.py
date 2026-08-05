@@ -15,9 +15,12 @@ import threading
 from typing import TYPE_CHECKING, overload
 
 if TYPE_CHECKING:
+    from overlay.app.backlog import BacklogStore
+    from overlay.app.render_cache import RenderCache
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
     from overlay.app.subtitle_modes import Language, ProviderFetchFactory
+    from overlay.mask_atlas import MaskAtlas
 
 
 class Delegated[T]:
@@ -89,3 +92,45 @@ class InteractionContext:
     def __init__(self) -> None:
         self.translate_on = False
         self.trans_text: str | None = None
+
+
+class RenderCacheState:
+    """The #149 persistent, cross-session rendering caches: the on-disk render cache (seeds a cold
+    hover's first viewport) and the glyph mask atlas, plus the memoised config signature. Opened lazily
+    / use-when-available (``saitenka prewarm`` is the builder), so a fresh install touches no disk; every
+    handle is session-lifetime."""
+
+    def __init__(
+        self,
+        *,
+        cache_on: bool,
+        cache_max_bytes: int,
+        cache_min_height_px: int,
+        mask_atlas_on: bool,
+    ) -> None:
+        self.cache_on = cache_on
+        self.cache_max_bytes = cache_max_bytes
+        self.cache_min_height_px = cache_min_height_px  # cost gate (px): only tall heads persist
+        self.obj: RenderCache | None = None
+        self.built = False  # the lazy open ran once (obj stays None if no prebuilt cache exists)
+        self.config_sig: str | None = None  # format+width+cap+dict-set signature, memoised…
+        self.sig_key: tuple[int, int] | None = (
+            None  # …per (width, cap) — a res change recomputes it
+        )
+        self.mask_atlas_on = mask_atlas_on
+        self.mask_atlas: MaskAtlas | None = (
+            None  # write-back handle (kept alive), or None off/absent
+        )
+
+
+class SessionContext:
+    """State scoped to the whole mpv session — durable across every episode re-slot (#100): the
+    persistent render caches, the in-deck mined set, the Anki reachability cache, and the review backlog
+    store. Nothing here is rebuilt on a file change (that is EpisodeContext); this is the tier an episode
+    swap must leave untouched."""
+
+    def __init__(self, render_cache: RenderCacheState) -> None:
+        self.render_cache = render_cache
+        self.mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
+        self.anki_cache: tuple[float, bool] = (0.0, False)  # (checked_at, reachable) — see _anki_ok
+        self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle

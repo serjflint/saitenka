@@ -76,3 +76,19 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     assert r._nav_idx == -1
     assert r._sub_settle_until == 0.0
     assert r.episode.subtitle.retry_active is False
+
+
+def test_session_state_survives_an_episode_reslot():
+    """The other half of the lifetime contract: session-scoped state (the deck-mined set, the Anki
+    reachability cache, the backlog handle) is durable — an episode swap must NOT reset it, or #100's
+    re-slot would forget what's already in the deck on every file change."""
+    r = Reader(FakeIPC())
+    r._mined.add("読む")
+    r._anki_cache = (123.0, True)
+    session_before = r.session
+
+    r.episode = EpisodeContext()  # advance to the next file
+
+    assert r.session is session_before  # same session object — not rebound
+    assert "読む" in r._mined  # deck knowledge carried across the episode boundary
+    assert r._anki_cache == (123.0, True)
