@@ -20,6 +20,7 @@ from overlay import otel_metrics
 from overlay.app import (
     analysis_overlay,
     backlog,
+    card_preview,
     help_overlay,
     hover_snapshot,
     miner_ui,
@@ -363,26 +364,18 @@ class Reader:
         self.sidebar = sidebar.SidebarState()
         self.analysis = analysis_overlay.AnalysisState()
         self.help = help_overlay.HelpState()
-        self._last_jpg: Path | None = None
-        self._last_audio: Path | str | None = None
-        self._last_preview: PreviewData | None = None
+        # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
+        # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
+        self.preview = card_preview.PreviewState()
         self._mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
         self._anki_cache: tuple[float, bool] = (
             0.0,
             False,
         )  # (checked_at, reachable) — see _anki_ok
-        # card-preview interaction (clickable regions in screen coords; None when hidden)
-        self._preview_rect: tuple | None = None
         # Forced mouse-section state (see _sync_mouse_capture).
         self._mouse_section_defined = False
         self._mouse_captured = False
         self._mouse_reassert_at = 0.0
-        self._preview_close_rect: tuple | None = None
-        self._preview_audio_rect: tuple | None = None
-        self._preview_image_rect: tuple | None = None
-        self._preview_dup_rect: tuple | None = None
-        self._dup_tok: Token | None = None  # token behind an "exists" preview, for "add anyway"
-        self._preview_zoom = False  # the screenshot is enlarged (toggled by clicking it)
         self._tip_rect: tuple | None = (
             None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
         )
@@ -1004,7 +997,7 @@ class Reader:
             self._tip_rect is not None
             or self.sidebar.open
             or self._help_open
-            or self._preview_rect is not None
+            or self.preview.rect is not None
         )
 
     def _sync_mouse_capture(self) -> None:
@@ -1187,8 +1180,8 @@ class Reader:
     def _add_duplicate(self) -> None:
         """The preview's ＋ button: mine a second card for the current scene even though the
         expression is already in the deck (a different line/episode/anime)."""
-        if self._dup_tok is not None:
-            self._miner.mine_token(self._dup_tok, force=True)
+        if self.preview.dup_tok is not None:
+            self._miner.mine_token(self.preview.dup_tok, force=True)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:

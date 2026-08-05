@@ -8,8 +8,14 @@ compose it from our own primitives, so it's fast and airspace-safe (another OSD 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from overlay.app.tokenize import Token
 
 from overlay.app.lookup import furigana
 from overlay.draw.chip import ChipStyle, render_chip
@@ -57,6 +63,33 @@ class PreviewRender:
     audio_rect: Rect | None = None  # ▶ play the mined clip
     image_rect: Rect | None = None  # the screenshot thumbnail (click to enlarge / shrink)
     dup_rect: Rect | None = None  # ＋ add a second card for a different scene ('exists' only)
+
+
+@dataclass
+class PreviewState:
+    """The last-mined card's media plus the on-screen preview panel and its clickable regions.
+
+    Grouped so the Reader owns preview as one pluggable unit (app/miner_ui.py drives it); ``clear()``
+    is the single reset the dismiss path (``hide_preview``) and any re-show share, so nulling a rect
+    can't drift out of sync with the others."""
+
+    last_jpg: Path | None = None  # the mpv still (mining fallback image); drives the preview
+    last_audio: Path | str | None = None  # the mined cue clip, replayed by the ▶ button
+    last_preview: PreviewData | None = None  # the currently-composed preview (None ⇒ hidden)
+    zoom: bool = False  # the screenshot is enlarged (toggled by clicking it)
+    dup_tok: Token | None = None  # token behind an "exists" preview, for "add anyway"
+    # Screen-space clickable regions of the shown panel (None when hidden / absent).
+    rect: Rect | None = None
+    close_rect: Rect | None = None
+    audio_rect: Rect | None = None
+    image_rect: Rect | None = None
+    dup_rect: Rect | None = None
+
+    def clear(self) -> None:
+        """Dismiss: forget the composed preview and every clickable region in one move."""
+        self.last_preview = None
+        self.rect = self.close_rect = None
+        self.audio_rect = self.image_rect = self.dup_rect = None
 
 
 def _bold_sentence(lines: list[str], surface: str, size: int, color: RGBA) -> list:

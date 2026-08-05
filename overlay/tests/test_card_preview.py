@@ -2,8 +2,21 @@
 
 from PIL import Image
 
-from overlay.app.card_preview import PreviewData, render_card_preview
+from overlay.app.card_preview import PreviewData, PreviewState, render_card_preview
 from overlay.app.miner_ui import _html_items, _html_lines, _media_name
+
+
+def test_preview_state_clear_resets_panel_and_all_rects():
+    """The dismiss path resets the shown preview + every clickable region in one move, so no stale
+    rect can outlive the panel (the invariant hide_preview relies on)."""
+    st = PreviewState()
+    st.last_preview = PreviewData("mined", "本", "ほん", ["本"], "本", ["book"], None, None, "")
+    st.rect = st.close_rect = st.audio_rect = st.image_rect = st.dup_rect = (1, 2, 3, 4)
+    st.last_audio = "/tmp/a.mp3"  # media survives clear() — only the shown panel is dismissed
+    st.clear()
+    assert st.last_preview is None
+    assert st.rect is st.close_rect is st.audio_rect is st.image_rect is st.dup_rect is None
+    assert st.last_audio == "/tmp/a.mp3"  # last-mined media untouched (replay after dismiss)
 
 
 def test_preview_renders_all_sections():
