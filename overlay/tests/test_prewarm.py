@@ -28,10 +28,12 @@ class _FakeAtlas:
     prewarm path AND its heartbeat (``count``/``disk_bytes``/``checkpoint``/``done_words``). ``growth`` =
     masks added per rastered word, so a test can model a productive run (>0) or a plateau (0)."""
 
-    def __init__(self, *, growth: int = 0) -> None:
+    def __init__(self, *, growth: int = 0, disk_seq: list[int] | None = None) -> None:
         self.done: set[tuple[float, str]] = set()
         self.masks = 0
         self._growth = growth
+        self._disk_seq = disk_seq  # scripted per-checkpoint disk_bytes (models lumpy page growth)
+        self._disk_calls = 0
 
     def is_done(self, scale: float, word: str) -> bool:
         return (scale, word) in self.done
@@ -44,7 +46,11 @@ class _FakeAtlas:
         return self.masks
 
     def disk_bytes(self) -> int:
-        return self.masks * 700  # ~compressed bytes per mask
+        if self._disk_seq is None:
+            return self.masks * 700  # ~compressed bytes per mask (smooth)
+        i = min(self._disk_calls, len(self._disk_seq) - 1)
+        self._disk_calls += 1
+        return self._disk_seq[i]
 
     def checkpoint(self) -> None:
         pass
@@ -254,3 +260,45 @@ def test_startup_plan_scale_scoped_done_count():
         [("cat", "")], None, atlas, atlas_only=True, atlas_scale=1.5
     )
     assert plan.already_done == 0 and already_done == 0 and plan.remaining == 1
+
+
+def test_projection_uses_cumulative_rate_not_a_single_checkpoint_delta():
+    # Disk grows in LUMPS (SQLite page allocation), so the last checkpoint's Δ is a noisy estimator;
+    # the projection must extrapolate the CUMULATIVE bytes/word since the run's start instead.
+    start = 1_000_000
+    atlas = _FakeAtlas(growth=10, disk_seq=[1_020_000, 1_024_000])  # m=2 → 1.02M, m=4 → 1.024M
+    beats: list = []
+    job = _job(
+        lambda: _FakeReader(),
+        atlas=atlas,
+        on_progress=beats.append,
+        native_scale=1.5,
+        checkpoint_every=2,
+        total=1002,  # to_raster = 1002 (nothing pre-done)
+        start_nbytes=start,
+    )
+    _drive(job, 4)
+    # m=4: cumulative rate = (1,024,000 - 1,000,000) / 4 = 6,000 B/word; left = 1002 - 4 = 998
+    #   → 1,024,000 + 6,000 * 998 = 7,012,000. A single-checkpoint Δ would give only 3,020,000.
+    assert beats[1].projected_bytes == 7_012_000
+
+
+def test_projection_is_stable_under_steady_growth():
+    # The convergence guarantee: under a constant bytes/word rate the cumulative projection is
+    # IDENTICAL at every checkpoint (start + rate·to_raster) — it converges, it does not oscillate.
+    start, rate, every = 1_000_000, 500, 2
+    atlas = _FakeAtlas(growth=10, disk_seq=[start + rate * (k * every) for k in range(1, 6)])
+    beats: list = []
+    job = _job(
+        lambda: _FakeReader(),
+        atlas=atlas,
+        on_progress=beats.append,
+        native_scale=1.5,
+        checkpoint_every=every,
+        total=1000,
+        start_nbytes=start,
+    )
+    _drive(job, 10)  # checkpoints at m = 2,4,6,8,10
+    projs = [b.projected_bytes for b in beats]
+    assert len(set(projs)) == 1  # same estimate every heartbeat → no oscillation
+    assert projs[0] == start + rate * 1000  # = start + rate · to_raster
