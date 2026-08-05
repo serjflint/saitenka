@@ -54,6 +54,9 @@ class SubtitleRenderer:
             log.info(
                 "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
             )
+            from overlay.app.loading import clear_startup_hint
+
+            clear_startup_hint(reader.ipc)  # overlay is live now → drop mpv's startup breadcrumb
         reader.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
 

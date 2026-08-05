@@ -841,6 +841,16 @@ def place_panel(
     return int(tx), int(ty)
 
 
+def _compose_kind(reader: Reader, oid: int) -> str:
+    """Classify a ``tip_compose`` for telemetry so a report can separate the paints the user perceives
+    as distinct: a ``nested`` scan popup, a ``clicked`` link-navigation of the base tooltip (nav stack
+    non-empty), or a plain ``base`` hover. The blit already knows its ``oid``; navigation is the only
+    state not in it."""
+    if oid == OverlayId.NESTED:
+        return "nested"
+    return "clicked" if reader._tip_nav else "base"
+
+
 def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: float) -> bool:
     """Paint a cold hover DIRECTLY from the persistent render cache (#149): place by the cached ``full_h``
     and decorate + upload the cached premul-BGRA first viewport, skipping the entire build+measure+raster
@@ -863,7 +873,7 @@ def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: f
     reader._tip_view_h = min(full_h, cap)
     xy = place_panel(reader, loaded.array.shape[1], wx, wy, wh, reader._tip_view_h)
     reader._tip_xy = xy
-    with otel_metrics.traced("tip_compose", cached="1"):
+    with otel_metrics.traced("tip_compose", cached="1", kind=_compose_kind(reader, OverlayId.TIP)):
         view = loaded.array.copy()
     reader._tip_rect = decorate_and_upload(reader, view, 0, full_h, xy, OverlayId.TIP)
     return True
@@ -886,6 +896,7 @@ def blit_panel(reader: Reader, panel: Panel, scroll: int, view_h: int, xy, oid: 
         "tip_compose",
         soft_reason=reader._crisp_miss or "n/a",
         scale=f"{reader._tip_display_scale:.4f}",
+        kind=_compose_kind(reader, oid),
     ):
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
     return decorate_and_upload(reader, view, y0, full_h, xy, oid)
@@ -1002,7 +1013,9 @@ def _blit_native(reader: Reader, st: Panel, scroll: int, view_h: int, xy, oid: i
         # crisp=native (soft_reason="" — this IS the crisp path, not a soft fallback). warm_only: the
         # main thread NEVER rasters — the bands are warm (gated above); a raced eviction shows bg, not a
         # synchronous raster. All rasterisation is a worker job (structural, not a thread check).
-        with otel_metrics.traced("tip_compose", soft_reason="", scale=f"{scale:.4f}"):
+        with otel_metrics.traced(
+            "tip_compose", soft_reason="", scale=f"{scale:.4f}", kind=_compose_kind(reader, oid)
+        ):
             arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
         log.debug("native compose failed", exc_info=True)
