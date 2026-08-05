@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785962826433,
+  "lastUpdate": 1785963366914,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -431,6 +431,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.914,
             "range": "±20.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "606bfeb016454fdfca1c63b766f860af4ded9471",
+          "message": "feat(mining): configurable note type — field map, card kind, presets (#101) (#191)\n\nMining is no longer Lapis-only under a configurable-looking model name. `[mine]`\nnow takes a `preset` (Lapis/Kiku), a `card_kind` marker, and a `[mine.fields]`\nlogical→real map, threaded through both the attach and run seams. `doctor`\nvalidates the effective field map against the note type; unknown fields are\ndropped at build time so the note still adds.\n\nDefault card kind switches from IsSentenceCard to IsWordAndSentenceCard (the\nLapis/Kiku default); `card_kind = \"sentence\"` restores the old marker.",
+          "timestamp": "2026-08-05T23:55:35+03:00",
+          "tree_id": "3c49f1602df3c9342c44e63d4f1c8617a7049cb0",
+          "url": "https://github.com/serjflint/saitenka/commit/606bfeb016454fdfca1c63b766f860af4ded9471"
+        },
+        "date": 1785963366019,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.939,
+            "range": "±3.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.178,
+            "range": "±22.2%",
             "unit": "ms"
           }
         ]
