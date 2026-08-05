@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785919601304,
+  "lastUpdate": 1785921029449,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -107,6 +107,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.43,
             "range": "±8.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bd600b741400241294caee1b76da02ec2252688a",
+          "message": "fix(prewarm): project atlas size from the cumulative rate, not one checkpoint (#183)\n\nThe size projection extrapolated a single checkpoint's Δbytes over the ~1M-word\nhorizon, so SQLite's page-quantised (lumpy) growth swung it ±80 MB between\nheartbeats (927 → 934 → 1004 MB). Use the cumulative bytes/word since the run's\nfirst raster instead — it averages the page noise out and converges as the run\nprogresses.",
+          "timestamp": "2026-08-05T12:09:54+03:00",
+          "tree_id": "f27b4dd2f61a3c2a846c494cab72f7ce3abbcb0e",
+          "url": "https://github.com/serjflint/saitenka/commit/bd600b741400241294caee1b76da02ec2252688a"
+        },
+        "date": 1785921028483,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.678,
+            "range": "±2.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.34,
+            "range": "±12.9%",
             "unit": "ms"
           }
         ]
