@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785957893353,
+  "lastUpdate": 1785962826433,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -395,6 +395,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.483,
             "range": "±20.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7978b531fdf4a7338a87565ee80ea0dc098663cd",
+          "message": "docs(agents): add the dream + skill-creator skills (#195)\n\n* docs(agents): add the dream skill — local-memory hygiene + Basic Memory uplift\n\n* docs(agents): add the skill-creator skill; route AGENTS.md skill-authoring to it",
+          "timestamp": "2026-08-05T23:46:32+03:00",
+          "tree_id": "165ca2b3daa7cff54376bfca36ecd0afdddcd494",
+          "url": "https://github.com/serjflint/saitenka/commit/7978b531fdf4a7338a87565ee80ea0dc098663cd"
+        },
+        "date": 1785962825298,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.949,
+            "range": "±3.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.914,
+            "range": "±20.2%",
             "unit": "ms"
           }
         ]
