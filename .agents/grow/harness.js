@@ -364,6 +364,10 @@ async function finish(result) {
     `Then APPEND each finding to the reflection ledger and report escalations. From ${CWD}/:\n` +
     `- the ledger \`.reflection.grow.jsonl\` is at the repo root (parent of ${CWD}/); if absent, create it ` +
     `with a manifest line \`{"type":"manifest","loop_version":1}\` first.\n` +
+    `- FIRST read the existing findings. Recurrence keys on finding_id=hash(category,subject), so if this ` +
+    `run's weakness is the SAME root cause as one already recorded, REUSE that record's exact category + ` +
+    `subject verbatim (do NOT reword) — else its finding_id won't match and recurrence can't accumulate. ` +
+    `Mint a new subject only for a genuinely new weakness.\n` +
     `- for each finding compute finding_id + read recurrence with \`tools/grow_reflect.py\` (import it), and ` +
     `append a record {finding_id, run_id:${JSON.stringify(trace.gap?.target_symbol ?? 'no-candidate')}, ` +
     `category, subject, severity, evidence, proposal, self_referential, loop_version:(manifest)}.\n` +

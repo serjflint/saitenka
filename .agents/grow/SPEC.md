@@ -226,8 +226,11 @@ no-candidate included, those are the richest lessons — is a **`Reflect`** step
   spec / harness / product file. Self-modification is strictly more dangerous than the loop's test edits
   (which already never auto-merge) — a human triages every proposal. A proposal touching the reflection
   machinery itself is flagged `self_referential` for extra scrutiny.
-- **Recurrence + escalation, versioned.** A finding's identity is `hash(category, subject)`; recurrence is
-  counted at the current `loop_version` (manifest, mirrors Sharpen's `toolset_version`). A finding seen
+- **Recurrence + escalation, versioned.** A finding's identity is `hash(category, subject)` — so the
+  reflector must REUSE an existing finding's exact category+subject when the same weakness recurs (it reads
+  the ledger first), or the id won't match and recurrence can't accumulate (a real trap the reflection's own
+  test surfaced). Recurrence is counted at the current `loop_version` (manifest, mirrors Sharpen's
+  `toolset_version`). A finding seen
   ≥ threshold (2) is **escalated** to the human. When a human lands a loop-improvement they bump
   `loop_version`, which resets the accumulation — a finding that outlives the fix re-escalates; one truly
   fixed goes quiet. This is the *inner* loop; the *outer* "grill the loop" reflection (re-derive the arm/

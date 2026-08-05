@@ -105,6 +105,9 @@ verbatim — never work around it by touching another file.
 > needed, a fidelity gap)? Be adversarial toward the loop; cite trace signals as evidence. If the run was
 > clean, file NOTHING — never manufacture findings. (3) IMPROVE — the smallest concrete change to a loop
 > TOOL/SPEC/harness (never product code); `self_referential=true` if it touches the reflection machinery.
-> Then APPEND each finding to `.reflection.grow.jsonl` (via `tools/grow_reflect.py`: `finding_id`,
-> recurrence at the manifest `loop_version`) and report subjects at recurrence ≥ 2 as escalations. ADVISORY
-> ONLY — the ledger is the sole write; edit no tool/spec/harness/product file; open no issue/PR.
+> Then APPEND each finding to `.reflection.grow.jsonl` (via `tools/grow_reflect.py`). **First read the
+> existing findings**: recurrence keys on `finding_id = hash(category, subject)`, so if this run's weakness
+> is the same root cause as one already recorded, REUSE that record's exact `category` + `subject` verbatim
+> (else the id won't match and recurrence can't accumulate); mint a new subject only for a genuinely new
+> weakness. Report subjects at recurrence ≥ 2 as escalations. ADVISORY ONLY — the ledger is the sole write;
+> edit no tool/spec/harness/product file; open no issue/PR.
