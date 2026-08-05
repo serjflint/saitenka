@@ -109,6 +109,16 @@ def test_stale_request_from_a_word_switch_is_dropped():
     assert panel.calls == []  # ...never rendered the stale panel
 
 
+def test_prefetch_state_cancel_bumps_the_generation():
+    """cancel() is the one place a line change / seek invalidates in-flight work: it bumps the
+    generation (so the worker drops stale items) and hands back the fresh value for new enqueues."""
+    st = prefetch.PrefetchState(head_queue_max=8)
+    assert st.gen == 0
+    first = st.cancel()
+    assert first == 1 and st.gen == 1
+    assert st.cancel() == 2  # each call advances → any item stamped with an older gen is stale
+
+
 def test_worker_actually_warms_a_real_panel():
     r = _reader()
     r._tip_scroll = 0

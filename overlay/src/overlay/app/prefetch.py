@@ -88,6 +88,35 @@ class RenderAheadReq:
     direction: int
 
 
+class PrefetchState:
+    """Runtime state of the background prefetch subsystem: the decode-warm and speculative-head work
+    queues, the persistent worker threads, the generation counter whose bump drops every in-flight job
+    on a line change / resume / seek, and the single-slot scroll-ahead request. Grouped so the Reader
+    owns prefetch as one unit and a #100 re-slot can invalidate it in one call (``cancel()``)."""
+
+    def __init__(self, head_queue_max: int) -> None:
+        self.q: queue.Queue = queue.Queue()  # decode-warm + engaged-head jobs (FIFO)
+        # speculative head-renders for upcoming words; maxsize is the transient-RSS cap
+        self.head_q: queue.PriorityQueue = queue.PriorityQueue(maxsize=head_queue_max)
+        self.head_seq = 0  # tie-breaker so priority-queue items never compare HeadPrefetchItems
+        self.head_built = 0  # a speculative head-render job actually ran to completion
+        self.gen = 0  # bumped on line change / resume / seek → cancels in-flight (see cancel())
+        self.key: tuple[str, bool] | None = (
+            None  # last (sub_text, engaged) queued — dedupes re-runs
+        )
+        # Scroll-ahead: a single slot (newest scroll wins) the worker drains; guarded by its own lock.
+        self.render_ahead_req: RenderAheadReq | None = None
+        self.render_ahead_lock = threading.Lock()
+        self.threads: list[threading.Thread] = []  # persistent workers (session-lifetime)
+
+    def cancel(self) -> int:
+        """Invalidate everything queued/in-flight for the old state by bumping the generation; the
+        worker drops any item whose ``gen`` no longer matches. Returns the new generation for the
+        items about to be enqueued."""
+        self.gen += 1
+        return self.gen
+
+
 def prefetch_worker_count(reader: Reader) -> int:
     """An explicit ``[perf].prefetch_workers`` (>0) pins the count on both builds; ``0`` (auto) picks a
     flat per-build default (``_AUTO_WORKERS_FREE_THREADED`` / ``_AUTO_WORKERS_GIL``). Each worker is
@@ -278,8 +307,7 @@ def update_prefetch(reader: Reader) -> None:
     if key == reader._prefetch_key:
         return
     reader._prefetch_key = key
-    reader._prefetch_gen += 1  # invalidate anything queued/in-flight for the old state
-    gen = reader._prefetch_gen
+    gen = reader.prefetch_state.cancel()  # invalidate anything queued/in-flight for the old state
     cands = _candidates(reader)
     for _, i, t in cands:
         _enqueue(

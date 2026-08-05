@@ -93,7 +93,6 @@ from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
-    from overlay.app.prefetch import RenderAheadReq
     from overlay.app.render_cache import RenderCache
     from overlay.mask_atlas import MaskAtlas
     from overlay.mpvio.ipc import MpvIPC
@@ -176,6 +175,18 @@ class Reader:
     _translation_secondary_sid = Delegated[int | None](
         "episode.subtitle", "translation_secondary_sid"
     )
+    # Prefetch runtime state (app/prefetch.py PrefetchState) under its historical flat names.
+    _prefetch_q = Delegated[queue.Queue]("prefetch_state", "q")
+    _head_prefetch_q = Delegated[queue.PriorityQueue]("prefetch_state", "head_q")
+    _head_seq = Delegated[int]("prefetch_state", "head_seq")
+    _head_built = Delegated[int]("prefetch_state", "head_built")
+    _prefetch_gen = Delegated[int]("prefetch_state", "gen")
+    _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
+    _render_ahead_req = Delegated[prefetch.RenderAheadReq | None](
+        "prefetch_state", "render_ahead_req"
+    )
+    _render_ahead_lock = Delegated[threading.Lock]("prefetch_state", "render_ahead_lock")
+    _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
 
     def __init__(
         self,
@@ -328,22 +339,13 @@ class Reader:
         # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
         # is a plain panel_cache hit with no new key-matching logic to get wrong.
         self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
-        self._head_prefetch_q: queue.PriorityQueue = queue.PriorityQueue(
-            maxsize=o.perf.head_prefetch_queue_max
-        )
-        self._head_seq = 0  # tie-breaker so priority-queue items never compare HeadPrefetchItems
-        self._head_built = 0  # a speculative head-render job actually ran to completion
+        # Prefetch runtime state (app/prefetch.py PrefetchState): work queues, worker threads, the
+        # generation counter, and the scroll-ahead slot. The Delegated shims below keep the historical
+        # ``reader._prefetch_*``/``_head_*``/``_render_ahead_*`` names working across the hot paths.
+        self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
-        self._prefetch_q: queue.Queue = queue.Queue()
-        self._prefetch_gen = 0  # bumped on line change / resume / seek → cancels in-flight
-        # Scroll-ahead: a single slot (newest scroll wins) the prefetch worker drains to render the
-        # blocks just beyond the visible tooltip OFF the main thread, so the next notch composites a
-        # warm block instead of rasterising it on the scroll frame. Guarded by its own tiny lock.
-        self._render_ahead_req: RenderAheadReq | None = None
-        self._render_ahead_lock = threading.Lock()
-        self._prefetch_key: tuple[str, bool] | None = None
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
@@ -353,7 +355,6 @@ class Reader:
             False  # the runtime banner prints once, after prefetch actually starts
         )
         self._stop = threading.Event()
-        self._prefetch_threads: list[threading.Thread] = []
         # translation reveal: manual toggle (`t`), or auto-reveal on hover when opted in.
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
