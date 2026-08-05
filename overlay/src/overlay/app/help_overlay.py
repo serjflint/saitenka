@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from overlay.app.bindings import active_bindings
@@ -11,6 +12,14 @@ from overlay.render.help import HelpEntry, build_document, render_page
 if TYPE_CHECKING:
     from overlay.app.bindings import ActiveBinding
     from overlay.app.controller import Reader
+
+
+@dataclass
+class HelpState:
+    """In-player shortcut-reference overlay: whether it is showing, and which page."""
+
+    open: bool = False
+    page: int = 0
 
 
 def _entry(binding: ActiveBinding) -> HelpEntry:

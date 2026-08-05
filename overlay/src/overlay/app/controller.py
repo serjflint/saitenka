@@ -166,6 +166,9 @@ class Reader:
     _session_recorder = Delegated[session_stats.SessionRecorder | None](
         "episode", "session_recorder"
     )
+    # Help overlay state (app/help_overlay.py HelpState) under its historical flat names.
+    _help_open = Delegated[bool]("help", "open")
+    _help_page = Delegated[int]("help", "page")
 
     def __init__(
         self,
@@ -355,8 +358,7 @@ class Reader:
         self._backlog_store: backlog.BacklogStore | None = None
         self.sidebar = sidebar.SidebarState()
         self.analysis = analysis_overlay.AnalysisState()
-        self._help_open = False
-        self._help_page = 0
+        self.help = help_overlay.HelpState()
         self._last_jpg: Path | None = None
         self._last_audio: Path | str | None = None
         self._last_preview: PreviewData | None = None
