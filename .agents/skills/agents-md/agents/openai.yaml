@@ -1,0 +1,4 @@
+interface:
+  display_name: "Curate saitenka AGENTS.md"
+  short_description: "Route a convention to its right home; keep AGENTS.md minimal"
+  default_prompt: "Use $agents-md to decide where a convention belongs (AGENTS.md / rule / skill / hook / gate / MCP) and keep AGENTS.md minimal."
