@@ -14,9 +14,9 @@ metadata:
 
 # dev-gate
 
-The repo has **no CI**. Two gates, both defined in `overlay/pyproject.toml` `[tool.poe.tasks]` — that
-is the source of truth for what each runs; `uv run poe --dry-run <gate>` prints the exact chain. Run
-either from the repo root or `overlay/` (a root shim delegates).
+Two gates, both defined in `overlay/pyproject.toml` `[tool.poe.tasks]` — that is the source of truth for
+what each runs; `uv run poe --dry-run <gate>` prints the exact chain. Run either from the repo root or
+`overlay/` (a root shim delegates). CI (`.github/workflows/ci.yml`) mirrors `poe all` on PRs + pushes to main.
 
 - **`poe all`** — the fast pre-push PR gate. Run before every push.
 - **`poe pre-release`** — the slower superset run once before tagging; `release.py` gates on this, not
@@ -40,9 +40,10 @@ either from the repo root or `overlay/` (a root shim delegates).
 
 ## Env traps (these bite)
 
-- **Never `uv run --python 3.13` against the default env** — it recreates `.venv` as 3.13
-  and clobbers the free-threaded 3.14t build. The 3.13-pinned tasks (`invariants-taint`,
-  `fuzz`, `crosshair`) set `UV_PROJECT_ENVIRONMENT=.venv-{fuzz,cx}` for exactly this reason.
+- **Never `uv run --python 3.13` against the default env** — it recreates `.venv` as 3.13 and clobbers
+  the free-threaded 3.14t build. Run the 3.13-pinned tools through their poe task
+  (`poe invariants-taint` / `poe fuzz` / `poe crosshair`) — each pins its own 3.13 env, and
+  `[tool.poe.tasks]` is the SSOT for *how*, so never hand-roll the interpreter.
 - **`cosmic-ray` re-enables the GIL** via SQLAlchemy in its own harness — expected, not a
   regression (the test subprocess still runs free-threaded).
 - **Don't run `complexipy <narrow-path>`** for a spot check — it silently overwrites the

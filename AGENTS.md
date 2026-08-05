@@ -23,8 +23,7 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
   format exists); `agent-setup`'s `render.py` emits each agent's dialect. The generated `.mcp.json` is
   git-ignored.
 - **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
-  `searching.md` (**never** shell-search — `grep`/`find`/`rg`/`pgrep` fork-bomb the env mock; a
-  `PreToolUse` hook `.agents/hooks/block-shell-search.py` enforces it). Full routing → **Tooling** below.
+  `searching.md` — the shell-search ban (fork-bomb why + the enforcing `PreToolUse` hook: **Tooling** below).
 
 ## Tooling — route by intent
 
@@ -33,12 +32,10 @@ Reach for the tool that answers the question, not the reflex. **Never shell-sear
 `.agents/rules/searching.md`). Which tool answers what → the **`agent-tooling`** skill; turning the
 stack on → **`agent-setup`**.
 
-If one *does* escape (the shim self-replicates, renaming its argv to `(statham)`; every proc reparents to
-`launchd`, so there's no seeder to kill and leaf `pkill`/`killall -9` loses the race — the count *grows*):
-freeze before kill. Spam `SIGSTOP` across all three match forms until every proc is frozen — a stopped
-proc can't fork, so the chain dies on its own: `for r in $(seq 1 40); do pkill -STOP -x statham;
-pkill -STOP -x grep; pkill -STOP -f find-utils-mocks; done`. Never interleave a KILL pass (it un-gates
-the freeze and survivors respawn).
+If one *escapes* the hook it self-replicates (argv `(statham)`, reparented to `launchd` — leaf `pkill -9`
+loses the race, the count *grows*): **freeze before kill.** `SIGSTOP` every match until frozen (a stopped
+proc can't fork): `for r in $(seq 1 40); do pkill -STOP -x statham; pkill -STOP -x grep; pkill -STOP -f find-utils-mocks; done`.
+Never interleave a KILL pass — it un-gates the freeze and survivors respawn.
 
 | When you want to… | Use | Not |
 | --- | --- | --- |
@@ -58,7 +55,7 @@ Read). It only helps while the index is fresh (`repowise update`) and the MCP se
 ## Python: always `uv`
 
 `uv run` / `uvx` / `uv add` — never bare `python`/`pip`/`venv`/`pipx`. Commit `uv.lock`; standalone
-scripts declare deps via PEP 723 inline metadata. (Full details: the `uv-python` skill.)
+scripts declare deps via PEP 723 inline metadata.
 
 ## Project conventions
 
@@ -135,7 +132,6 @@ prose bloat does, because two copies of a fact drift independently and one goes 
   another doc or skill already owns.
 - **Information delta only, distilled.** Same test as comments: does this sentence tell the reader
   something the heading/command name doesn't already? Cut the paragraph restating the heading.
-- **No process scars.** No `(Stage N)` section tags — same rule as comments, same reason.
 - **High-level over step-by-step, when a canonical walkthrough exists.** README explains *what* and
   *why*; the docs site (or a skill) owns the *how* in full detail. A second copy of the steps is the bug,
   not the fix.
@@ -167,14 +163,11 @@ Consult it when adding or rewriting a test.
   mocks); keep it that way.
 - **Adequacy is not coverage — assert the invariant, not the pixels.** Green + 100% line is a lower
   bound; the shipped bug lives in *covered-but-under-specified* code (a config / feature-combination the
-  line ran in but no oracle checked — both motivating regressions were here). Prefer a **metamorphic /
-  invariant oracle** (render↔hit-test agreement, warm==cold cache-equivalence, scale-invariance,
-  feature-toggle consistency, the concurrency oracles) to a pixel golden: oracles are platform-independent,
-  FreeType pixels are not. Every oracle test ships a `*_has_teeth` negative control, and a new shared cache
-  ships its `blanket`-scripted race gate from day one (`tests/test_cache_race.py`, the `942ca3c` TOCTOU
-  class). The family menu, canonical examples, and the extend-before-add config-matrix (`tests/util.py`)
-  live in the **write-test skill's [`references/oracle-catalog.md`](.agents/skills/write-test/references/oracle-catalog.md)**;
-  prove one is load-bearing with `poe test-live` (arm-2 of the Grow gate, exposed for the coding loop).
+  line ran, but no oracle checked — both motivating regressions were here). Prefer a metamorphic /
+  invariant oracle (platform-independent) to a FreeType pixel golden (not), paired with a negative control
+  that proves it can fail. Family menu, canonical examples, the config matrix, and the `poe test-live`
+  liveness check — the **write-test skill's
+  [`references/oracle-catalog.md`](.agents/skills/write-test/references/oracle-catalog.md)** owns them.
 - **`monkeypatch` is the sanctioned seam, `mock` is not.** Injecting a fake or repointing an extracted
   symbol via `monkeypatch.setattr` is correct and normal here (see **Refactoring**). Do **not** reach
   for `unittest.mock`/`MagicMock` to fake *internal* behaviour — construct the real collaborator or use
