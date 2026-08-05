@@ -1,0 +1,4 @@
+interface:
+  display_name: "Refactor local agent memory"
+  short_description: "Prune/dedupe local Claude memory; uplift depth to Basic Memory"
+  default_prompt: "Use $dream to refactor this project's local Claude memory: inventory, back up, trim to a lean index, and uplift depth to Basic Memory."
