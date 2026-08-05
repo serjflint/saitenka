@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785917123258,
+  "lastUpdate": 1785919601304,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -71,6 +71,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.013,
             "range": "±11.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f07b8b9a173c00af28507ed1746e332e9248e790",
+          "message": "feat(prewarm): atlas heartbeat metrics + startup plan + --atlas-plateau stop (#182)\n\nA `--limit 0` atlas sweep is >1M words into an uncapped atlas, but the heartbeat\nshowed only a mask count (bytes hard-coded 0), so a saturated glyph population\nread as a hang and disk growth was invisible. Add a startup plan (total /\nalready-done / footprint), real per-checkpoint bytes + new-mask delta + skipped\n+ marginal-rate size projection, and an opt-in `--atlas-plateau` early-stop.",
+          "timestamp": "2026-08-05T11:46:12+03:00",
+          "tree_id": "016ebe7fbfd80dc646b42a657fa8bb4cc525cb3a",
+          "url": "https://github.com/serjflint/saitenka/commit/f07b8b9a173c00af28507ed1746e332e9248e790"
+        },
+        "date": 1785919600427,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.731,
+            "range": "±3.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.43,
+            "range": "±8.0%",
             "unit": "ms"
           }
         ]
