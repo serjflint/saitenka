@@ -10,7 +10,7 @@ root="$(cd "$here/../.." && pwd)"
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 
 # 1. All six artifacts + this script exist.
-for f in SPEC.md GUIDE.md ADAPTERS.md contracts.json PROMPTS.md harness.js scripts/smoke.sh; do
+for f in SPEC.md GUIDE.md ADAPTERS.md contracts.json PROMPTS.md harness.js BACKTEST.md scripts/smoke.sh; do
   [ -f "$here/$f" ] || fail "missing $f"
 done
 
