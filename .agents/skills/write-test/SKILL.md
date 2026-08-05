@@ -8,7 +8,7 @@ description: >-
   / the IPC path / mining / the tokenizer". Encodes the AGENTS.md "Testing" invariants
   as a step procedure and points at the canonical example tests. NOT for running the
   suite or the pre-push gate (use `poe test` / the dev-gate skill); NOT for
-  mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks"); NOT for
+  mutation/fuzz/crosshair adequacy (the `test-adequacy` skill); NOT for
   other repos.
 metadata:
   project: saitenka

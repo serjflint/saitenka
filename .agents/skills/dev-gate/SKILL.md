@@ -7,7 +7,7 @@ description: >-
   when a gate task fails and you need to read the failure. Explains both bundles, the advisory
   tier, and the free-threaded / 3.13-pinned-env traps that bite agents. NOT for authoring a test
   (use the write-test skill); the release flow itself is RELEASING.md; NOT for
-  mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks").
+  mutation/fuzz/crosshair adequacy (the `test-adequacy` skill).
 metadata:
   project: saitenka
 ---
