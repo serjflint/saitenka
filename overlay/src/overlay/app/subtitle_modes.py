@@ -258,16 +258,16 @@ def start_fetch(
 
 
 def configure_retry(reader: Reader, factory: ProviderFetchFactory | None) -> None:
-    reader._subtitle_retry_factory = factory
+    reader.episode.subtitle.retry_factory = factory
 
 
 def _finish_retry(reader: Reader) -> None:
-    with reader._subtitle_retry_lock:
-        reader._subtitle_retry_active = False
+    with reader.episode.subtitle.retry_lock:
+        reader.episode.subtitle.retry_active = False
 
 
 def retry(reader: Reader) -> None:
-    factory = reader._subtitle_retry_factory
+    factory = reader.episode.subtitle.retry_factory
     if factory is None:
         reader._toast("No Japanese subtitle providers enabled", "warn")
         return
@@ -275,11 +275,11 @@ def retry(reader: Reader) -> None:
     if not video_path:
         reader._toast("No media loaded for subtitle search", "warn")
         return
-    with reader._subtitle_retry_lock:
-        if reader._subtitle_retry_active:
+    with reader.episode.subtitle.retry_lock:
+        if reader.episode.subtitle.retry_active:
             reader._toast("Japanese subtitle search already running", "warn")
             return
-        reader._subtitle_retry_active = True
+        reader.episode.subtitle.retry_active = True
     try:
         fetch = factory(str(video_path))
     except Exception as exc:

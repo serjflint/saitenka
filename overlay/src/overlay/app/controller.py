@@ -153,16 +153,16 @@ class Reader:
     # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
     # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
     # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
-    jp_sid = Delegated[int | None]("episode", "jp_sid")
-    en_sid = Delegated[int | None]("episode", "en_sid")
-    subtitle_language = Delegated[subtitle_modes.Language]("episode", "subtitle_language")
-    subtitle_slang = Delegated[str]("episode", "subtitle_slang")
+    jp_sid = Delegated[int | None]("episode.subtitle", "jp_sid")
+    en_sid = Delegated[int | None]("episode.subtitle", "en_sid")
+    subtitle_language = Delegated[subtitle_modes.Language]("episode.subtitle", "language")
+    subtitle_slang = Delegated[str]("episode.subtitle", "slang")
+    _subtitle_results = Delegated[queue.SimpleQueue]("episode.subtitle", "results")
+    _subtitle_fetch_threads = Delegated[list[threading.Thread]]("episode.subtitle", "fetch_threads")
     _sub_index = Delegated[SubIndex | None]("episode", "sub_index")
     _nav_idx = Delegated[int]("episode", "nav_idx")
     _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
     _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
-    _subtitle_results = Delegated[queue.SimpleQueue]("episode", "subtitle_results")
-    _subtitle_fetch_threads = Delegated[list[threading.Thread]]("episode", "subtitle_fetch_threads")
     _session_recorder = Delegated[session_stats.SessionRecorder | None](
         "episode", "session_recorder"
     )
@@ -352,9 +352,6 @@ class Reader:
         self._translation_secondary_sid: int | None = None
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
-        self._subtitle_retry_factory: subtitle_modes.ProviderFetchFactory | None = None
-        self._subtitle_retry_active = False
-        self._subtitle_retry_lock = threading.Lock()
         self._backlog_store: backlog.BacklogStore | None = None
         self.sidebar = sidebar.SidebarState()
         self.analysis = analysis_overlay.AnalysisState()

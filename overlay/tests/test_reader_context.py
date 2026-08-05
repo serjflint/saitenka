@@ -34,7 +34,7 @@ class FakeIPC:
 
 def test_episode_context_defaults_are_the_no_episode_state():
     ctx = EpisodeContext()
-    assert (ctx.jp_sid, ctx.en_sid, ctx.subtitle_language) == (None, None, "jp")
+    assert (ctx.subtitle.jp_sid, ctx.subtitle.en_sid, ctx.subtitle.language) == (None, None, "jp")
     assert (ctx.sub_index, ctx.nav_idx, ctx.sub_settle_until, ctx.nav_prev_text) == (
         None,
         -1,
@@ -45,14 +45,18 @@ def test_episode_context_defaults_are_the_no_episode_state():
 
 def test_reader_delegates_episode_fields_to_the_context():
     r = Reader(FakeIPC())
-    # reads pass through to the owned context…
-    assert r.jp_sid is r.episode.jp_sid is None
+    # a nested field (episode.subtitle) and a direct one (episode) both read through…
+    assert r.jp_sid is r.episode.subtitle.jp_sid is None
     assert r._nav_idx == r.episode.nav_idx == -1
-    # …and writes land on it, under both the public and the historical private names
+    # …and writes land on the owning context, under both the public and historical private names
     r.jp_sid = 3
     r.subtitle_language = "en"
     r._nav_idx = 7
-    assert (r.episode.jp_sid, r.episode.subtitle_language, r.episode.nav_idx) == (3, "en", 7)
+    assert (r.episode.subtitle.jp_sid, r.episode.subtitle.language, r.episode.nav_idx) == (
+        3,
+        "en",
+        7,
+    )
 
 
 def test_reslot_rebinds_the_episode_without_leaking_prior_state():
@@ -62,6 +66,7 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r.subtitle_language = "en"
     r._nav_idx = 9
     r._sub_settle_until = 12.5
+    r.episode.subtitle.retry_active = True  # a nested-cluster field, migrated fully off the Reader
 
     r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
 
@@ -70,3 +75,4 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     assert r.subtitle_language == "jp"
     assert r._nav_idx == -1
     assert r._sub_settle_until == 0.0
+    assert r.episode.subtitle.retry_active is False
