@@ -7,6 +7,13 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **De-inflection now keeps every distinct trace Yomitan shows** (`saitenka-deinflect` 0.1.1). The engine
+  ports Yomitan's per-chain cycle guard instead of deduping by reached state, so a surface reachable two
+  ways surfaces both — `来られる` is recognised as *potential or passive*, not only *passive*. Clears the
+  last 12 Yomitan conformance-corpus vectors. The single inflection label shown in the tooltip is unchanged.
+
 ### Added
 
 - **Dictionary-attested compound merging (Yomitan longest-match).** A lexicalized compound that
