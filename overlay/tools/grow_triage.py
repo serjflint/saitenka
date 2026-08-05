@@ -46,6 +46,7 @@ class Candidate:
     priv_seam: int = 0  # missing-public-seam proxy (private-attr metric hits)
     survivors: int | None = None  # None = no campaign supplied for this module
     dead_ctx: int | None = None  # None = no contexts JSON supplied
+    untested: bool = False  # no mapped test file at all → maximally under-specified (C5)
     excluded: str = ""
     value: float = 0.0
     underspec: float = 0.0
@@ -80,9 +81,19 @@ def fan_in_by_module(root: Path) -> dict[str, int]:
     return indeg
 
 
+def all_modules(root: Path) -> list[str]:
+    """Every overlay source module key (relative to src/overlay). Genuinely UNTESTED modules must be
+    candidates too — they are the most under-specified code of all, yet the old test-file-keyed universe
+    made them invisible (C5). pathlib rglob, not a shell search."""
+    base = root / sl.SRC
+    return sorted(str(p.relative_to(base)) for p in base.rglob("*.py"))
+
+
 def score_candidates(cands: list[Candidate]) -> None:
     """Fill value / underspec / score IN PLACE for the non-excluded candidates. score = normalised
-    value × normalised under-specification (the product — pure, so it is unit-tested directly)."""
+    value × normalised under-specification (the product — pure, so it is unit-tested directly). An UNTESTED
+    module gets under-spec = 1.0 (maximal): with no tests, the private-attr seam proxy is 0 and would
+    otherwise zero the score, hiding exactly the code most worth growing (C5)."""
     live = [c for c in cands if not c.excluded]
     nfan = st._norm([float(c.fan_in) for c in live])
     nchurn = st._norm([float(c.churn) for c in live])
@@ -91,7 +102,9 @@ def score_candidates(cands: list[Candidate]) -> None:
     nctx = st._norm([float(c.dead_ctx or 0) for c in live])
     for c, fi, ch, seam, surv, ctx in zip(live, nfan, nchurn, nseam, nsurv, nctx, strict=True):
         c.value = 0.6 * fi + 0.4 * ch
-        c.underspec = 0.5 * seam + 0.3 * surv + 0.2 * ctx
+        # Untested = maximally under-specified. For tested modules, seam is a WEAK proxy (it scales with
+        # test volume, not adequacy) — real signal comes from survivors/dead-contexts when supplied.
+        c.underspec = 1.0 if c.untested else (0.5 * seam + 0.3 * surv + 0.2 * ctx)
         c.score = c.value * c.underspec
 
 
@@ -107,9 +120,13 @@ def rank(
     fan = fan_in_by_module(root)
     pr_paths = st.open_pr_paths(root) if check_network else set()
 
+    # Universe = every source module, not just those with a test file — so untested code is rankable (C5).
+    universe: dict[str, list[str]] = {m: [] for m in all_modules(root)}
+    universe.update(test_map)
+
     cands: list[Candidate] = []
-    for module, tests in sorted(test_map.items()):
-        c = Candidate(module=module, tests=tests)
+    for module, tests in sorted(universe.items()):
+        c = Candidate(module=module, tests=tests, untested=not tests)
         total, actionable = conf.get(module, (0, 0))
         c.priv_seam = total - actionable  # metric-rule hits = private-attr / private-monkeypatch
         c.fan_in = fan.get(module, 0)
@@ -129,7 +146,7 @@ def rank(
 def _fmt(c: Candidate) -> str:
     surv = "—" if c.survivors is None else str(c.survivors)
     ctx = "—" if c.dead_ctx is None else str(c.dead_ctx)
-    tag = f"  EXCLUDED[{c.excluded}]" if c.excluded else ""
+    tag = f"  EXCLUDED[{c.excluded}]" if c.excluded else ("  TESTLESS" if c.untested else "")
     return (
         f"{c.score:5.2f}  val={c.value:.2f} uspec={c.underspec:.2f} | "
         f"fan={c.fan_in:<3} churn={c.churn:<2} seam={c.priv_seam:<2} surv={surv:<3} ctx={ctx:<3} "
@@ -159,6 +176,14 @@ def main() -> None:
     if args.no_network:
         print(
             "WARNING: --no-network — open-PR exclusion DISABLED; may pick a module under active work.",
+            file=sys.stderr,
+        )
+    if not args.survivors_json and not args.contexts_json:
+        print(
+            "WARNING: no --survivors-json/--contexts-json — for TESTED modules the under-spec axis is only "
+            "the private-attr seam proxy (scales with test VOLUME, not adequacy), so their ranking is "
+            "low-confidence. TESTLESS modules are ranked reliably. Supply a real signal before trusting the "
+            "tested-module order.",
             file=sys.stderr,
         )
     cands = rank(

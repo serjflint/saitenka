@@ -42,31 +42,33 @@ def gap_id(source: str, target_symbol: str, dimension: str) -> str:
     return hashlib.sha256(f"{source}\x00{target_symbol}\x00{dimension}".encode()).hexdigest()[:16]
 
 
-def _symbol_node(module_src: str, symbol: str) -> ast.AST:
-    """The def/class node for a possibly-dotted ``symbol`` (``Foo`` or ``Foo.method``), walking into
-    class bodies. Raises ``KeyError`` if any path segment is absent."""
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _symbol_nodes(module_src: str, symbol: str) -> list[ast.AST]:
+    """Every def/class node matching a possibly-dotted ``symbol`` (``Foo`` or ``Foo.method``), walking
+    into class bodies for the prefix. The final segment may resolve to MORE THAN ONE node — ``@overload``
+    stubs plus the implementation, or a redefinition — and ALL are returned so a change to any reopens the
+    gap (C7). Raises ``KeyError`` if any path segment is absent."""
     body: list[ast.stmt] = ast.parse(module_src).body
-    node: ast.AST | None = None
-    for part in symbol.split("."):
-        node = next(
-            (
-                n
-                for n in body
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and n.name == part
-            ),
-            None,
-        )
+    *prefix, last = symbol.split(".")
+    for part in prefix:
+        node = next((n for n in body if isinstance(n, _DEFS) and n.name == part), None)
         if node is None:
             raise KeyError(symbol)
         body = node.body
-    assert node is not None  # split() is never empty
-    return node
+    nodes = [n for n in body if isinstance(n, _DEFS) and n.name == last]
+    if not nodes:
+        raise KeyError(symbol)
+    return nodes
 
 
 def symbol_source(module_src: str, symbol: str) -> str:
-    """The exact source text of ``symbol`` — the unit whose change reopens the gap."""
-    return ast.get_source_segment(module_src, _symbol_node(module_src, symbol)) or ""
+    """The normalised source (via ``ast.unparse``, which INCLUDES decorators) of every node matching
+    ``symbol``, concatenated. Hashing this reopens the gap on a decorator swap (``@property`` →
+    ``@cached_property``) or an overload/redefinition change (C7); formatting and comments normalise away
+    (not behaviour), which also strengthens the P1 line-drift idempotency."""
+    return "\n".join(ast.unparse(n) for n in _symbol_nodes(module_src, symbol))
 
 
 def target_sha(module_src: str, symbol: str) -> str:

@@ -1,19 +1,22 @@
 """Model-vs-impl state machine for the tooltip session (test-coverage-plan Phase 3 / gap G4).
 
-`test_scale_boundary` proves the render↔hit-test agreement oracle for a SINGLE action (show, navigate).
-The regressions that motivated the whole seam rewrite, though, emerged from INTERACTION across a session —
-a native-vs-reference panel drift that only bit while scrolling, a navigated view that combined badly with
-a key-gated feature. This drives the REAL controller through arbitrary hover/scroll/navigate/back/nested/
-resize sequences and asserts, after every step, that:
+This drives the REAL controller through arbitrary hover/scroll/navigate/back/open_nested/resize sequences
+and asserts, after every step, three things:
 
   * the model matches the impl — base shown ⇔ `_tip_state`, nav-depth ⇔ `len(_tip_nav)`, nested ⇔ `_nest`;
-  * the agreement oracle holds for the current view(s) — every drawn scan cell / link box round-trips
-    through the real `_scan_hit` / `_tip_link_hit` / `_nest_link_hit` at the displayed centre.
+  * the ONE-PANEL invariant — `hit_target`'s panel IS the panel the blit composites from
+    (`_tip_state` / `_nest.state`); a reintroduced second draw-panel (the Session5b two-geometry split)
+    would make these diverge and fail this assertion;
+  * inverse-transform correctness — every visible drawn element's displayed centre round-trips back to
+    that element through the real `_scan_hit` / `_tip_link_hit` / `_nest_link_hit`.
 
-The oracle is the acceptance test of the one-panel rewrite made STATEFUL: it catches a transition that
-leaves `hit_target`'s (panel, scale, scroll) inconsistent with `_tip_xy` — e.g. a back-stack tuple that
-restored scroll but not its panel, or a resize that didn't reach the hit path. Hypothesis shrinks any
-failing action sequence to the minimal one. `integration`-marked → runs in `poe all`, not the fast loop.
+**What this does and does NOT catch (honest scope — see the review, finding C1).** The round-trip is
+*self-consistent by construction*: it derives each element's centre from `hit_target`'s panel and inverts
+through the same `hit_target`, so it verifies the inverse transform and that state stays coherent across
+transitions (a back-stack tuple that restored scroll but not its panel, a resize that didn't reach the hit
+path) — NOT that the drawn pixels match a *different* panel. Two-panel wrap drift is caught by the explicit
+one-panel invariant above (and is prevented structurally by the scale-boundary rewrite: there is only one
+panel), not by the round-trip. Hypothesis shrinks any failing sequence. `integration`-marked → `poe all`.
 
     uv run python -m pytest tests/test_tooltip_statemachine.py
 """
@@ -58,6 +61,12 @@ def _assert_agrees(reader, *, nested: bool) -> None:
     panel, s, scroll = tooltip.hit_target(reader, nested=nested)
     if panel is None:
         return
+    # One-panel invariant (C1): the hit-tested panel IS the one the blit composites from. This — not the
+    # self-consistent round-trip below — is what would catch a reintroduced second draw-panel.
+    drawn = reader._nest.state if nested else reader._tip_state
+    assert panel is drawn, (
+        f"hit_target panel is not the drawn panel (two-panel regression, nested={nested})"
+    )
     view_h = reader._nest.view_h if nested else reader._tip_view_h
     panel.windowed.viewport(scroll, view_h)  # measure just the visible band range
     xy = reader._nest.xy if nested else reader._tip_xy

@@ -62,6 +62,24 @@ def test_symbol_source_raises_for_a_missing_symbol():
         gl.symbol_source(MODULE_V1, "nonexistent")
 
 
+def test_target_sha_reopens_on_a_decorator_swap():  # C7 — get_source_segment used to drop decorators
+    before = "class D:\n    @property\n    def v(self):\n        return 1\n"
+    after = "class D:\n    @cached_property\n    def v(self):\n        return 1\n"
+    assert gl.target_sha(before, "D.v") != gl.target_sha(after, "D.v")
+
+
+def test_target_sha_reopens_on_a_redefinition_body_change():  # C7 — first-node-only used to miss this
+    before = "def f():\n    return 1\n\n\ndef f():\n    return 2\n"
+    after = "def f():\n    return 1\n\n\ndef f():\n    return 3\n"  # only the SECOND f changes
+    assert gl.target_sha(before, "f") != gl.target_sha(after, "f")
+
+
+def test_target_sha_ignores_a_comment_only_change():  # normalised via ast.unparse (strengthens P1)
+    before = "def crisp(text, scale):\n    return (text.upper(), scale)\n"
+    after = "def crisp(text, scale):\n    # a new comment\n    return (text.upper(), scale)\n"
+    assert gl.target_sha(before, "crisp") == gl.target_sha(after, "crisp")
+
+
 # --- ledger status ------------------------------------------------------------------------------
 
 

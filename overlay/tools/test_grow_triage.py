@@ -16,7 +16,14 @@ import grow_triage as gt
 
 
 def _cand(
-    module: str, *, fan_in: int, churn: int = 0, priv_seam: int = 0, survivors=None, dead_ctx=None
+    module: str,
+    *,
+    fan_in: int,
+    churn: int = 0,
+    priv_seam: int = 0,
+    survivors=None,
+    dead_ctx=None,
+    untested: bool = False,
 ):
     return gt.Candidate(
         module=module,
@@ -26,7 +33,17 @@ def _cand(
         priv_seam=priv_seam,
         survivors=survivors,
         dead_ctx=dead_ctx,
+        untested=untested,
     )
+
+
+def test_an_untested_valuable_module_outranks_a_tested_god_object():  # C5
+    # The run-1 inversion: a tested god-object (huge private-attr seam) topped the list while genuinely
+    # untested valuable code was invisible. Untested = under-spec 1.0, so equal value now ranks it higher.
+    god = _cand("controller.py", fan_in=20, churn=86, priv_seam=147)  # tested, the old #1
+    untested = _cand("newfeature.py", fan_in=20, churn=86, untested=True)  # same value, no tests
+    gt.score_candidates([god, untested])
+    assert untested.score > god.score
 
 
 def test_high_value_but_fully_specified_scores_zero():
