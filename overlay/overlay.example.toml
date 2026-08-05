@@ -161,6 +161,12 @@ model = "Lapis"                # your Anki note type (must already exist — a d
 # [mine.fields]              # override the logical→real field map for a non-Lapis note type, e.g.
 # expression = "Word"        #   Animecards: expression→Word, reading→Reading. Only mapped fields are
 # reading = "Reading"        #   written; `saitenka doctor` warns about names the note type lacks.
+# [mine.card_format]         # Yomitan-style: each note FIELD is a template of {markers}. WINS over
+# Word     = "{expression}"  #   [mine.fields] when set. One field can combine markers / one marker can
+# Reading  = "{furigana}"    #   fill several fields. Markers: expression reading furigana glossary(+-plain)
+# Sentence = "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}"   # sentence cloze-prefix/body/suffix
+# Pitch    = "{pitch-accents}"  # frequencies frequency-rank pitch-accents pitch-accent-positions
+# Image    = "{screenshot}"     # screenshot sentence-audio part-of-speech document-title misc ent-seq tags
 key = "Ctrl+m"
 all_key = "Shift+m"
 preview_key = "p"

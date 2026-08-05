@@ -180,6 +180,31 @@ def test_anki_check_ok_when_all_mining_fields_present(monkeypatch):
     assert doc.check_anki(deck="Saitenka::Mining", model="Lapis").status == "ok"
 
 
+def test_anki_check_flags_unknown_card_format_marker(monkeypatch):
+    # #192: a {marker} Saitenka can't fill would render an empty field → warn (no Anki call needed)
+    replies = {"version": 6, "deckNames": ["Saitenka::Mining"], "modelNames": ["Lapis"]}
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    monkeypatch.setattr(doc, "load_config", lambda: {"mine": {"card_format": {"Word": "{bogus}"}}})
+    c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
+    assert c.status == "warn" and "bogus" in c.detail
+
+
+def test_anki_check_flags_card_format_field_absent_from_note_type(monkeypatch):
+    # card_format's KEYS are the note fields (it wins wholesale) — a key the note type lacks → warn
+    replies = {
+        "version": 6,
+        "deckNames": ["Saitenka::Mining"],
+        "modelNames": ["Lapis"],
+        "modelFieldNames": ["Expression"],  # note type has no "Ghost" field
+    }
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    monkeypatch.setattr(
+        doc, "load_config", lambda: {"mine": {"card_format": {"Ghost": "{expression}"}}}
+    )
+    c = doc.check_anki(deck="Saitenka::Mining", model="Lapis")
+    assert c.status == "warn" and "Ghost" in c.detail
+
+
 def _patch_known(monkeypatch, cfg, anki):
     monkeypatch.setattr(doc, "load_config", lambda: cfg)
     monkeypatch.setattr(doc, "_anki_call", anki)
