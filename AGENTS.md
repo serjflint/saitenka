@@ -165,6 +165,16 @@ Consult it when adding or rewriting a test.
 - **Assert observable behaviour.** Return value, emitted IPC message, written note dict — never a
   private attribute or a mock call-count. This repo is already classicist (≈1500 plain asserts, ~9
   mocks); keep it that way.
+- **Adequacy is not coverage — assert the invariant, not the pixels.** Green + 100% line is a lower
+  bound; the shipped bug lives in *covered-but-under-specified* code (a config / feature-combination the
+  line ran in but no oracle checked — both motivating regressions were here). Prefer a **metamorphic /
+  invariant oracle** (render↔hit-test agreement, warm==cold cache-equivalence, scale-invariance,
+  feature-toggle consistency, the concurrency oracles) to a pixel golden: oracles are platform-independent,
+  FreeType pixels are not. Every oracle test ships a `*_has_teeth` negative control, and a new shared cache
+  ships its `blanket`-scripted race gate from day one (`tests/test_cache_race.py`, the `942ca3c` TOCTOU
+  class). The family menu, canonical examples, and the extend-before-add config-matrix (`tests/util.py`)
+  live in the **write-test skill's [`references/oracle-catalog.md`](.agents/skills/write-test/references/oracle-catalog.md)**;
+  prove one is load-bearing with `poe test-live` (arm-2 of the Grow gate, exposed for the coding loop).
 - **`monkeypatch` is the sanctioned seam, `mock` is not.** Injecting a fake or repointing an extracted
   symbol via `monkeypatch.setattr` is correct and normal here (see **Refactoring**). Do **not** reach
   for `unittest.mock`/`MagicMock` to fake *internal* behaviour — construct the real collaborator or use
