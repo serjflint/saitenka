@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from overlay.app.controller import Reader
 
 MINE_MSG = "saitenka-mine"
+MINE_VIDEO_MSG = "saitenka-mine-video"
 MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
 OVERLAY_TOGGLE_MSG = "saitenka-toggle-overlay"
@@ -126,6 +127,14 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Mine hovered word",
         MINE_MSG,
         key_attr="mine_key",
+        context="tooltip",
+        requires="anki",
+    ),
+    BindingSpec(
+        "Capture & mining",
+        "Mine hovered word with video clip",
+        MINE_VIDEO_MSG,
+        key_attr="mine_video_key",
         context="tooltip",
         requires="anki",
     ),

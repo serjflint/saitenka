@@ -67,6 +67,7 @@ class KeyOptions:
     """mpv keybinds owned by the overlay."""
 
     mine_key: str = "Ctrl+m"
+    mine_video_key: str = "Ctrl+Shift+m"  # mine the hovered word with an animated (motion) clip
     mine_all_key: str = "Shift+m"
     translate_key: str = "t"
     overlay_toggle_key: str = "Alt+o"

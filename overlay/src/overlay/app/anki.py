@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 import stamina
 
+from overlay.app.media import AnimatedClip
+
 if TYPE_CHECKING:
     from overlay.app.lookup import CardData
 
@@ -191,6 +193,9 @@ class MineConfig:
     model: str = "Lapis"
     tags: tuple[str, ...] = ("saitenka",)
     normalize_audio: bool = False  # opt-in −23 LUFS loudnorm on the mined clip
+    # Opt-in animated (motion) screenshot instead of a still (config: [mine].animated_screenshot +
+    # animated_height/fps/quality/max_secs/format). See media.AnimatedClip / animated_screenshot.
+    animated: AnimatedClip = field(default_factory=AnimatedClip)
     # logical name -> real field on the note type (Lapis defaults)
     fields: dict = field(
         default_factory=lambda: {

@@ -16,6 +16,14 @@ logs.
 
 ### Added
 
+- **Animated (motion) screenshots on mined cards.** `[mine].animated_screenshot = true` captures a short
+  animated clip of the scene as the card image instead of a still — the scene reads better in motion and
+  pairs with the cue audio. Opt-in (larger media, an extra ffmpeg pass). It prefers WebP and falls back to
+  an animated **GIF** where ffmpeg lacks `libwebp` (Homebrew / Windows "essentials" builds), so a clip is
+  produced out of the box on every platform (`saitenka doctor` reports which; `animated_format = "gif"`
+  forces GIF). `animated_height`/`fps`/`quality`/`max_secs` trade quality against file size, and
+  ++ctrl+shift+m++ (`[mine].video_key`) mines the hovered word with a clip for one card without turning it
+  on globally.
 - **Dictionary-attested compound merging (Yomitan longest-match).** A lexicalized compound that
   UniDic over-splits (`応急処置` → `応急`+`処置`, `満員電車`, `走り出した` mined as `走り`) now merges into one
   token whenever the joined span — the tail deinflected to its dictionary form — is an exact headword in

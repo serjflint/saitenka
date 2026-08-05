@@ -217,6 +217,13 @@ def run(
             help="normalize mined clip loudness to −23 LUFS (EBU R128) so cards play at an even volume",
         ),
     ] = bool(_mine_cfg.get("normalize_audio", False)),
+    mine_animated_screenshot: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative="--no-mine-animated-screenshot",
+            help="mine a short animated (motion) WebP clip of the scene instead of a still frame",
+        ),
+    ] = bool(_mine_cfg.get("animated_screenshot", False)),
     mine_key: Annotated[
         str, cyclopts.Parameter(help="mpv key that mines the hovered word")
     ] = _mine_cfg.get("key", "Ctrl+m"),
@@ -336,6 +343,7 @@ def run(
         mine_deck=mine_deck,
         mine_model=mine_model,
         mine_normalize_audio=mine_normalize_audio,
+        mine_animated_screenshot=mine_animated_screenshot,
         mine_key=mine_key,
         mine_all_key=mine_all_key,
         preview_key=preview_key,
@@ -1135,6 +1143,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
     return ReaderOptions(
         keys=KeyOptions(
             mine_key=mine.get("key", ko.mine_key),
+            mine_video_key=mine.get("video_key", ko.mine_video_key),
             mine_all_key=mine.get("all_key", ko.mine_all_key),
             preview_key=mine.get("preview_key", ko.preview_key),
             translate_key=cfg.get("translate_key", ko.translate_key),

@@ -73,6 +73,40 @@ def test_run_options_read_mine_preview_toggle():
     assert _build_run_options({}, **kwargs).mining.show_preview is False
 
 
+def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
+    # The RUN path rebuilds a synthetic effective_cfg dict from the CLI kwargs; the animated flag must
+    # survive it or it silently no-ops on `run` while working on `attach` (the both-seams trap).
+    from overlay.app import cli_run, reader_deps
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        reader_deps,
+        "build_reader_deps",
+        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
+    )
+    cli_run._build_run_deps(
+        mine=True,
+        mine_deck="D",
+        mine_model="Lapis",
+        mine_key="Ctrl+m",
+        mine_all_key="Shift+m",
+        mine_normalize_audio=False,
+        mine_animated_screenshot=True,
+        raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
+        known_cfg=None,
+        known="",
+        color=False,
+        dict_titles=[],
+        freq_titles=[],
+        pitch_titles=[],
+    )
+    assert captured["mine"]["animated_screenshot"] is True
+    # config-only quality knobs (no CLI flag) must survive the synthetic effective_cfg too
+    assert captured["mine"]["animated_height"] == 720
+    assert captured["mine"]["animated_format"] == "gif"
+    assert captured["mine"]["deck"] == "D"  # CLI-threaded value overrides the raw config
+
+
 def test_run_options_read_hover_pause_key():
     opts = _build_run_options(
         {

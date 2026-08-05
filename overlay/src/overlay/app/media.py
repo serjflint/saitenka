@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 
@@ -86,6 +86,122 @@ def clip_audio(
     ]
     subprocess.run(cmd, check=True, capture_output=True)
     return Path(path)
+
+
+# WebP animated encoders, best-quality first. Both produce a small animated .webp that drops into the
+# card's existing `<img src>` Picture field. Many ffmpeg builds ship WITHOUT libwebp (e.g. Homebrew's
+# ffmpeg 8, the Windows "essentials" build), so GIF is the universal fallback below.
+_WEBP_ENCODERS = ("libwebp_anim", "libwebp")
+
+
+@dataclass
+class AnimatedClip:
+    """Spec for a motion (animated) screenshot: the on/off toggle plus the quality↔storage levers
+    (``height`` is the primary one). Grouped into one object so the mining config and the capture pass a
+    single value instead of six parallel args. ``enabled`` gates the capture at the call site;
+    :func:`animated_screenshot` uses only the encode fields. ``fmt``: ``"webp"`` prefers WebP and falls
+    back to GIF; ``"gif"`` forces GIF (universal); anything else (av1/mp4 — needs a ``<video>`` template)
+    is unsupported and yields no encode."""
+
+    enabled: bool = False
+    height: int = 480
+    fps: int = 12
+    quality: int = 75
+    max_secs: float = 4.0
+    fmt: str = "webp"
+
+
+@cache
+def _ffmpeg_encoder_available(encoder: str) -> bool:
+    """True if the local ffmpeg build ships ``encoder`` (``libwebp_anim``/``libwebp`` for WebP, ``gif`` for
+    GIF). Cached — the ffmpeg binary doesn't change mid-session (tests call ``.cache_clear()``). Mirrors
+    :func:`overlay.app.doctor.check_ffmpeg`'s ``-encoders`` probe."""
+    from overlay.mpvio.discover import find_tool
+
+    try:
+        r = subprocess.run(
+            [find_tool("ffmpeg") or "ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and encoder in r.stdout
+
+
+def resolve_animated_encoder(fmt: str) -> tuple[str, str] | None:
+    """``(ffmpeg encoder, file extension)`` for ``fmt`` given what the local ffmpeg has — or ``None`` when
+    even the universal GIF encoder is missing (no ffmpeg at all). ``"webp"`` prefers WebP then falls back
+    to GIF; ``"gif"`` forces GIF. GIF's encoder is native to every ffmpeg build, so animation works out of
+    the box even where libwebp is absent — an explicit unsupported ``fmt`` (av1/mp4) returns ``None``."""
+    if fmt == "webp":
+        for enc in _WEBP_ENCODERS:
+            if _ffmpeg_encoder_available(enc):
+                return enc, "webp"
+    if fmt in ("webp", "gif") and _ffmpeg_encoder_available("gif"):
+        return "gif", "gif"
+    return None
+
+
+def _animated_cmd(
+    ffmpeg: str, start: float, end: float, video, encoder: str, opts, out: Path
+) -> list:
+    common = [
+        ffmpeg,
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-to",
+        f"{end:.3f}",
+        "-i",
+        str(video),
+        "-an",
+        "-sn",
+    ]
+    scale = f"fps={opts.fps},scale=-2:{opts.height}"
+    if encoder == "gif":
+        # palettegen/paletteuse → a decent palette instead of gif's ugly default dithering
+        vf = f"{scale}:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse"
+        return [*common, "-vf", vf, "-loop", "0", str(out)]
+    return [
+        *common,
+        "-vf",
+        scale,
+        "-c:v",
+        encoder,
+        "-loop",
+        "0",
+        "-quality",
+        str(opts.quality),
+        str(out),
+    ]
+
+
+def animated_screenshot(
+    video: str | Path, span: Timespan, path: str | Path, opts: AnimatedClip, *, pad: float = 0.5
+) -> Path | None:
+    """Encode the cue span as a short animated clip from the RAW ``video`` — a motion screenshot for the
+    card. Prefers WebP, falls back to a universal GIF (:func:`resolve_animated_encoder`); returns the
+    actual output path (its extension matches the chosen format), or ``None`` when no encoder is available
+    (the caller keeps the mpv still). The passed ``path``'s suffix is replaced with the real one.
+
+    Same source + span as :func:`clip_audio` (the raw ``video`` layer, so no subtitle/OSD burn-in). The
+    ``opts`` height/fps/quality are the quality↔storage levers; ``opts.max_secs`` bounds the clip so a long
+    cue can't produce a huge file. Runs with a timeout so a stuck encode can't hang a mine."""
+    resolved = resolve_animated_encoder(opts.fmt)
+    if resolved is None:
+        return None
+    encoder, ext = resolved
+    from overlay.mpvio.discover import find_tool
+
+    out = Path(path).with_suffix(f".{ext}")
+    p = span.padded(pad)
+    end = min(p.start + opts.max_secs, p.end)
+    cmd = _animated_cmd(find_tool("ffmpeg") or "ffmpeg", p.start, end, video, encoder, opts, out)
+    subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+    return out
 
 
 def _play_cmd(path: str | Path) -> list[str]:
