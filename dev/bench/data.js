@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785921029449,
+  "lastUpdate": 1785924146421,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -143,6 +143,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.34,
             "range": "±12.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2bdcdeb5d092a5fcf324a9d2fc930cde72e15b21",
+          "message": "feat(prewarm): surface already-cached masks + progress denominator in heartbeat (#184)\n\nThe heartbeat showed skipped (resume ledger) and +new masks, but not the OTHER\ndedup layer: masks re-rastered whose rows already existed (INSERT OR IGNORE). So\na re-scale run (--atlas-scale 1.0 after 1.5, whose 1× reference masks the 1.5\npass already built) read as \"+0 masks · 0 skipped\" — opaque. Count inserted vs\nignored in MaskAtlas.put and show \"+N new (M already cached)\", plus an\nm/to_raster progress denominator.",
+          "timestamp": "2026-08-05T13:02:01+03:00",
+          "tree_id": "aa722292d1a71a62a2605197e690b2ed5874dd72",
+          "url": "https://github.com/serjflint/saitenka/commit/2bdcdeb5d092a5fcf324a9d2fc930cde72e15b21"
+        },
+        "date": 1785924145618,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 3.139,
+            "range": "±4.8%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 5.017,
+            "range": "±12.7%",
             "unit": "ms"
           }
         ]
