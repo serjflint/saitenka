@@ -485,7 +485,8 @@ def _prewarm_emit_progress(
         return
     proj = f" · ~{p.projected_bytes / 1e6:.0f} MB projected" if p.projected_bytes else ""
     print(
-        f"  … {p.measured:,} rastered (+{p.new_rows:,} masks) · {p.skipped:,} skipped "
+        f"  … {p.measured:,}/{p.to_raster:,} rastered · {p.skipped:,} skipped · "
+        f"+{p.new_rows:,} new ({p.dup_masks:,} already cached) "
         f"→ {p.rows:,} masks, {p.nbytes / 1e6:.0f} MB{proj}",
         flush=True,
     )
