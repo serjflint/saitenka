@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785965510652,
+  "lastUpdate": 1785968427714,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -539,6 +539,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.446,
             "range": "±9.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e0db7b2184040d36ce9252fe137783699867c02a",
+          "message": "feat(setup): arrow-key + type-to-filter wizard prompts behind one shared seam (#194) (#199)\n\n`saitenka setup` drove every choice through hand-rolled `input()`: the deck picker\nprinted the top-12 by size and made you type the rest from memory; note-type and\ncard-kind were type-a-name-or-number lists. On a 50-deck collection that is the\nfriction the installer exists to remove.\n\nA new `prompt` module is the single seam for asking: `confirm` / `select` /\n`autocomplete` / `text` (+ a `spinner` for the silent AnkiConnect round-trips).\nOn a real terminal they use questionary — arrow-key selection and type-to-filter,\nwith the deck pickers accepting a brand-new name (the mining deck is created on\nfirst mine). It degrades cleanly, gated on `sys.stdin.isatty()`: a non-tty (the\nmpv plugin spawns the wizard console-less), `--yes`, a legacy Windows console (any\nTUI failure is caught), or `SAITENKA_NO_TUI=1` fall back to today's numbered-list /\n`[y/N]` prompts unchanged. questionary is lazy-imported inside the interactive\nbranch only, so it never touches a console-less run or the render pipeline.\n\nThe ~4 duplicate `_ask` / `_prompt` / raw-`input()` definitions across\nsetup_wizard, init_wizard, and cli.py collapse onto this one seam. The pure,\nseparately-tested core (`rank_decks`, `default_known_deck`, `intersect_default`,\n`anki_config_fragment`) is untouched — only the interactive glue moved. Adds a\n`questionary` dependency (MIT → prompt_toolkit BSD → wcwidth MIT).",
+          "timestamp": "2026-08-06T01:19:35+03:00",
+          "tree_id": "564dce5bc2df53c178dd226fa1799f5fe766349b",
+          "url": "https://github.com/serjflint/saitenka/commit/e0db7b2184040d36ce9252fe137783699867c02a"
+        },
+        "date": 1785968426743,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.654,
+            "range": "±1.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.92,
+            "range": "±3.8%",
             "unit": "ms"
           }
         ]
