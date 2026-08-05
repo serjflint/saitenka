@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785949027305,
+  "lastUpdate": 1785952507721,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -287,6 +287,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.499,
             "range": "±7.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4c754052c93bbe8dc05ddad91bada9a362d346bc",
+          "message": "fix(deinflect): keep every distinct trace like Yomitan (kuru potential-or-passive) (#188)\n\nRework engine.deinflect()'s BFS to Yomitan's per-chain cycle guard (a rule can't\nre-apply to a text already in its own ancestry) as the termination bound, plus a\n(text, cond_out, chain) dedup that drops only genuine duplicate traces. A state\nreachable two ways now surfaces both — 来られる is recognised as potential-or-passive,\nnot only passive — clearing the last 12 Yomitan conformance-corpus vectors. The\nsingle inflection_chain label is unchanged. Bumps saitenka-deinflect 0.1.0 → 0.1.1.",
+          "timestamp": "2026-08-05T20:54:34+03:00",
+          "tree_id": "1b0517f48dd99b5091cf14e1ec5d509d2b8dcde8",
+          "url": "https://github.com/serjflint/saitenka/commit/4c754052c93bbe8dc05ddad91bada9a362d346bc"
+        },
+        "date": 1785952506800,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.703,
+            "range": "±3.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.577,
+            "range": "±10.7%",
             "unit": "ms"
           }
         ]
