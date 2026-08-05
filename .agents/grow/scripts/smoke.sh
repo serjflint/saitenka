@@ -41,7 +41,7 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 # 4. The deterministic tools the harness orchestrates exist and their unit tests are present.
-for t in grow_gate.py grow_ledger.py grow_triage.py test_grow_gate.py test_grow_ledger.py test_grow_triage.py; do
+for t in grow_gate.py grow_ledger.py grow_triage.py grow_contexts.py test_grow_gate.py test_grow_ledger.py test_grow_triage.py test_grow_contexts.py; do
   [ -f "$root/overlay/tools/$t" ] || fail "missing overlay/tools/$t"
 done
 

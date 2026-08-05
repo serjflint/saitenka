@@ -100,11 +100,20 @@ def score_candidates(cands: list[Candidate]) -> None:
     nseam = st._norm([float(c.priv_seam) for c in live])
     nsurv = st._norm([float(c.survivors or 0) for c in live])
     nctx = st._norm([float(c.dead_ctx or 0) for c in live])
+    # A REAL adequacy signal (survivors / dead-contexts) present anywhere ⇒ let it DOMINATE the under-spec
+    # axis; the seam proxy drops to a minor tiebreak. Absent both, seam is dampened (×0.5) — never full —
+    # so an UNTESTED module (under-spec 1.0) always outranks a tested seam-heavy one (C5).
+    has_real = any(c.dead_ctx is not None for c in live) or any(
+        c.survivors is not None for c in live
+    )
     for c, fi, ch, seam, surv, ctx in zip(live, nfan, nchurn, nseam, nsurv, nctx, strict=True):
         c.value = 0.6 * fi + 0.4 * ch
-        # Untested = maximally under-specified. For tested modules, seam is a WEAK proxy (it scales with
-        # test volume, not adequacy) — real signal comes from survivors/dead-contexts when supplied.
-        c.underspec = 1.0 if c.untested else (0.5 * seam + 0.3 * surv + 0.2 * ctx)
+        if c.untested:
+            c.underspec = 1.0
+        elif has_real:
+            c.underspec = 0.55 * ctx + 0.30 * surv + 0.15 * seam
+        else:
+            c.underspec = 0.5 * seam  # weak proxy only (warned) — dampened so untested still wins
         c.score = c.value * c.underspec
 
 

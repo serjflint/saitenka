@@ -508,8 +508,11 @@ def _run_growth_adhoc(args: argparse.Namespace) -> int:
     def run(cmd: list[str]) -> int:
         return _pytest(args.repo, *cmd).returncode
 
+    # --deselect keeps the grown test OUT of --old (the existing suite must SURVIVE the mutant); when
+    # extending an existing file the grown test would otherwise sit in --old and spuriously "kill" it.
+    old = [*args.old, *(x for node in args.deselect for x in ("--deselect", node))]
     rep = growth_adhoc_gate(
-        Path(args.cut), args.find, args.replace, args.old, args.new, run, cwd=args.repo
+        Path(args.cut), args.find, args.replace, old, args.new, run, cwd=args.repo
     )
     print(
         f"growth-adhoc: {'PASS' if rep.ok else 'BOUNCE'} "
@@ -602,6 +605,12 @@ def _main() -> int:
     adh.add_argument("--replace", required=True, help="the scenario-violating replacement")
     adh.add_argument("--old", nargs="+", required=True, help="existing-suite pytest args")
     adh.add_argument("--new", nargs="+", required=True, help="grown-suite pytest args")
+    adh.add_argument(
+        "--deselect",
+        nargs="*",
+        default=[],
+        help="node id(s) to deselect from --old (the grown test)",
+    )
     adh.add_argument("--repo", type=Path, default=Path.cwd())
 
     add = sub.add_parser(

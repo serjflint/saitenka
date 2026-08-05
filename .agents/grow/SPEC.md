@@ -48,16 +48,20 @@ in `tools/test_grow_gate.py`.
 
 | # | Arm | Proves | Mechanism |
 |---|-----|--------|-----------|
-| 1 | **property-mutant** | load-bearing + genuine growth | a scenario-encoding mutant must be KILLED by the grown test AND have SURVIVED the existing suite (survives-old ⇒ not redundant). `growth_gate` uses `sharpen_gate` cosmic-ray replay (the 4 `poe mutate` targets); `growth_adhoc_gate` generalises it to ANY module via an author-supplied one-line text mutation — so arm-1 runs off the allowlist. **Non-optional for a `scenario` gap** (see the honest-scope note). |
+| 1 | **property-mutant** | load-bearing + genuine growth | a scenario-encoding mutant must be KILLED by the grown test AND have SURVIVED the existing suite (survives-old ⇒ not redundant). `growth_gate` uses `sharpen_gate` cosmic-ray replay (the 4 `poe mutate` targets); `growth_adhoc_gate` generalises it to ANY module via an author-supplied one-line text mutation — so arm-1 runs off the allowlist. **The STRONG growth proof for a `scenario` gap** (arm-1 OR arm-3 — see the honest-scope note). |
 | 2 | **oracle-liveness** | falsifiable, not vacuous | negate the grown test's OWN asserts one at a time → each must flip it red; a static trivial-check rejects `assert True` / `x == x`. A `pytest.raises`/`warns` block counts as a live oracle (not `no_asserts`). Catches swallowed / unreachable / tautological asserts a static count can't. |
 | 3 | **context-delta** | newly-exercised | the grown test lights a `coverage.py` line the existing suite never ran (the dead-config detector). The OLD baseline MUST `--deselect` the grown test, or an extend-before-add edit collapses the delta to ∅ (false bounce). Necessary, insufficient alone (reached ≠ checked). |
 | 4 | **concurrency** | race reproduces unguarded, prevented guarded | a PAIR of PASSING tests: a regression (the guard prevents the bug under the forced schedule) + a self-certifying negative control that unguards a throwaway instance and asserts the bug REPRODUCES (`blanket` scripts the interleaving; GIL-agnostic). Both pass; the teeth are the control's own falsifiable assertion, confirmed by running arm-2 liveness on the control. |
 
-**Honest scope (what the deterministic gate proves).** The reframe is *covered-but-under-specified*. Arm-3
-alone only proves *newly-exercised* (a dead-config / uncovered-line gap) — a covered-but-under-tested gap
-has no new line, so **arm-1 is what certifies genuine growth over covered code**, and is therefore
-non-optional for a `scenario` gap. Without arm-1 the gate degrades to "dead-config + non-vacuous + additive"
-— useful, but not the flagship claim; never ship a `scenario` grow whose only teeth are arm-3.
+**Genuine-growth proof = arm-1 OR arm-3 (they are ALTERNATIVES, not both-required).** The reframe is
+*covered-but-under-specified*. Arm-1 (a killed scenario-mutant that survived the old suite) is the STRONG
+proof and works for the flagship covered-but-under-specified class. Arm-3 (a newly-lit line) is the
+ALTERNATIVE for a dead-config / uncovered-line gap that has no clean one-line mutant. A `scenario` gap
+passes on EITHER; requiring both is wrong — **arm-3 is LINE-level, so a covered-but-under-specified BRANCH
+of an already-covered line (e.g. an untested arm of a ternary) lights no new line and bounces arm-3, though
+arm-1 proves it** (found live: `panel.py::header_add_rect(speak_button=False)` — arm-1 PASS, arm-3 BOUNCE).
+So the gate is: additive AND liveness AND (arm-1 OR arm-3). A gap with NEITHER has no growth proof → bounce.
+(Future refinement: make arm-3 branch/arc-aware so it corroborates branch gaps too.)
 
 A separate **Grow↔Sharpen boundary check** (`additive_gate`) enforces adds-only assert nodes — see
 *Extend-vs-add*. It is NOT `sharpen_gate.anticheat_diff` (which only flags a specificity drop).
@@ -74,9 +78,12 @@ and an under-tested dead leaf are both skipped). Every component is a printed co
 
 - **value/risk:** ruff-analyze fan-in · churn (recency proxy — NOT centrality; repowise `get_risk` is the
   documented, still-unwired centrality input).
-- **under-specification:** the missing-public-seam proxy (test-lint's private-attr metric count) · un-killed
-  survivors (opt-in, from a mutate campaign JSON) · 0%-coverage-contexts (opt-in). The opt-in signals print
-  `—` when their source is absent — never a silent zero.
+- **under-specification:** the **coverage-context signal** (uncovered + weakly-covered lines — those run by
+  ≤1 test — produced by `grow_contexts.py` → `--contexts-json`). When supplied it DOMINATES the axis; the
+  private-attr seam proxy drops to a tiebreak (it scales with test VOLUME, not adequacy — review C5). Also
+  un-killed survivors (`--survivors-json`). An **untested** module (no test file) is a candidate at
+  under-spec 1.0. With no real signal supplied, the seam proxy is used dampened and a low-confidence warning
+  prints — never a silent zero.
 
 Ranked gap list → an AutoCover-style **scenario map per top target** (LLM: intents / edges / invariants ∩
 the coverage baseline → orphan scenarios) → each orphan through the four-arm gate. Module-level exclusions
