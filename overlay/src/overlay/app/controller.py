@@ -83,6 +83,8 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
+from overlay.app.reader_context import Delegated, EpisodeContext
+from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compounds, tokenize
@@ -93,7 +95,6 @@ if TYPE_CHECKING:
     from overlay.app.prefetch import RenderAheadReq
     from overlay.app.render_cache import RenderCache
     from overlay.app.session_stats import SessionRecorder
-    from overlay.app.sub_index import SubIndex
     from overlay.mask_atlas import MaskAtlas
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
@@ -150,6 +151,18 @@ _Nested = PopupView
 class Reader:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
+    # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
+    # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
+    # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
+    jp_sid = Delegated[int | None]("episode", "jp_sid")
+    en_sid = Delegated[int | None]("episode", "en_sid")
+    subtitle_language = Delegated[subtitle_modes.Language]("episode", "subtitle_language")
+    subtitle_slang = Delegated[str]("episode", "subtitle_slang")
+    _sub_index = Delegated[SubIndex | None]("episode", "sub_index")
+    _nav_idx = Delegated[int]("episode", "nav_idx")
+    _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
+    _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
+
     def __init__(
         self,
         ipc: MpvIPC,
@@ -169,6 +182,9 @@ class Reader:
         if legacy_kw:
             o = o.with_overrides(**legacy_kw)
         self.options = o
+        # Episode-lifetime state; the Delegated shims above expose its fields as ``reader.<field>``.
+        # A file change rebinds this (#100 re-slot) — see app/reader_context.py.
+        self.episode = EpisodeContext()
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
@@ -332,10 +348,6 @@ class Reader:
         self._translation_secondary_sid: int | None = None
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
-        self.jp_sid: int | None = None
-        self.en_sid: int | None = None
-        self.subtitle_language: subtitle_modes.Language = "jp"
-        self.subtitle_slang = "ja,jpn,jp"
         self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
         self._subtitle_fetch_threads: list[threading.Thread] = []
         self._subtitle_retry_factory: subtitle_modes.ProviderFetchFactory | None = None
@@ -430,13 +442,6 @@ class Reader:
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
         self.hover = -1
-        # subtitle navigation: an index of the external sub file's cues (when known) lets Alt+←/→/↓
-        # render the target line in the overlay INSTANTLY, decoupled from mpv's slow video seek. The
-        # real sub-seek still fires behind it and reconciles once it settles (see _sub_nav).
-        self._sub_index: SubIndex | None = None
-        self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
-        self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
-        self._nav_prev_text = ""  # the cue text showing right before a nav render (see reconcile)
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
