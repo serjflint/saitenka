@@ -119,13 +119,12 @@ Pitch    = "{pitch-accents}"
 Image    = "{screenshot}"
 ```
 
-Available markers (all filled from real data — nothing fabricated): `expression`, `reading`,
-`furigana` (Anki `漢字[かんじ]` form), `glossary`, `glossary-plain`, `sentence`, `cloze-prefix`,
-`cloze-body`, `cloze-suffix`, `screenshot`, `sentence-audio`, `frequencies`, `frequency-rank`,
-`pitch-accents`, `pitch-accent-positions`, `part-of-speech`, `document-title`, `misc`, `ent-seq`,
-`tags`. `saitenka doctor` warns about a `{marker}` Saitenka can't fill (it would render empty) and about
-a field name the note type lacks. Not yet supported (named so you're not surprised by a blank field):
-word `audio` (sentence audio only for now), `pitch-accent-graphs`, and `sentence-furigana`.
+All markers are filled from real data — nothing fabricated. `saitenka doctor` warns about a `{marker}`
+Saitenka can't fill (it would render empty) and about a field name the note type lacks.
+
+{%
+  include-markdown "./_card_format_markers.md"
+%}
 
 **Animated (motion) screenshots.** `animated_screenshot = true` captures a short animated clip of the
 scene as the card image instead of a still frame — the scene reads better in motion and pairs with the cue

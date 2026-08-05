@@ -535,10 +535,12 @@ links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress
 # but the build runs here because this env has the `saitenka` package + `docs` group. `--strict` fails on
 # broken links/nav, so a docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an
 # opt-in group); builds to ../site/, `docs-serve` live-reloads at http://127.0.0.1:8000.
-# `docs-cli` regenerates the committed CLI reference from the cyclopts app (run after changing commands).
+# `docs-cli`/`docs-markers` regenerate committed reference fragments from the code (run after changing
+# commands / the card_markers.CATALOG); a golden test guards `docs-markers` against drift.
 docs = { shell = "uv run --group docs mkdocs build -f ../mkdocs.yml --strict" }
 docs-serve = { shell = "uv run --group docs mkdocs serve -f ../mkdocs.yml" }
 docs-cli = { shell = "uv run python -m overlay.app.gen_cli_docs > ../docs/usage/cli.md" }
+docs-markers = { shell = "uv run python -m overlay.app.gen_card_format_markers > ../docs/usage/_card_format_markers.md" }
 # Publish the install scripts to the gh-pages branch (https://serjflint.github.io/saitenka/). Keeps the
 # served install.sh/install.ps1 in sync with install/overlay-install.{sh,ps1}; re-run after editing them
 # and at each release. Not in `all` (touches the remote).
@@ -610,7 +612,8 @@ all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "d
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
 # rarely relevant to a code PR, release-critical to verify once) plus the checks too slow/heavy for it:
-# network link integrity, the real-mpv smoke, and a bench-runs smoke. Needs mpv + network; NOT for PR
-# iteration. The human-triage advisory tools (hygiene/ps1/perf-risk) stay OUT — deterministic pass/fail
-# only; run those by hand and triage.
-pre-release = ["all", "audit", "licenses", "shell", "links-net", "smoke-live", "bench"]
+# network link integrity, a `mkdocs build --strict` (the golden test guards fragment↔generator drift, but
+# only this proves the generated partials still *render* — includes resolve, table intact), the real-mpv
+# smoke, and a bench-runs smoke. Needs mpv + network; NOT for PR iteration. The human-triage advisory tools
+# (hygiene/ps1/perf-risk) stay OUT — deterministic pass/fail only; run those by hand and triage.
+pre-release = ["all", "audit", "licenses", "shell", "links-net", "docs", "smoke-live", "bench"]
