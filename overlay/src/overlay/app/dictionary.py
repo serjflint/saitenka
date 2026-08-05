@@ -446,6 +446,28 @@ class DictionarySet:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""
         return any(d.lookup(*forms) for d in self.dicts)
 
+    def terms_exist(self, forms: Sequence[str]) -> set[str]:
+        """The subset of ``forms`` that are an exact **term** (headword) in some dictionary — the batch
+        existence probe backing dict-attested compound merging (:func:`~overlay.app.tokenize.
+        merge_dict_compounds`), mirroring anki_miner's ``offline_terms_exist``. One IN-list scan for the
+        whole line via :meth:`_batch_exact`. Term-only, NOT reading: a kanji-compound candidate that
+        merely coincides with some entry's *reading* must not license a false merge (unlike
+        :meth:`has_term`, whose reading hits are wanted for the kanji-fallback gate)."""
+        keys = tuple(dict.fromkeys(f for f in forms if f))
+        if not keys:
+            return set()
+        batched = self._batch_exact(
+            keys
+        )  # {dict_id: {key: [(id, term, reading, glossary, tags), …]}}
+        return {
+            key
+            for by_key in batched.values()
+            for key, rows in by_key.items()
+            if any(
+                row[1] == key for row in rows
+            )  # row[1] == e.term → exact headword, not a reading
+        }
+
     def decoded_entry_count(self) -> int:
         """Decoded :class:`DictEntry` objects currently cached across every dictionary — the
         ``dict_cache.size`` gauge (each dict's ``_entry_cache`` is bounded by ``entry_cache_max``)."""
