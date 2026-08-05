@@ -101,12 +101,43 @@ wheels = [
 ]
 
 [[package]]
+name = "big"
+version = "0.14"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/2f/99f09cc782d4990ef53c2bd5d031af3ce6b8b18c6521407ea3cf3e92e004/big-0.14.tar.gz", hash = "sha256:dc775fc01e9b3cbc769d56c7da6fe95b4e0de2e6299c7c8f1a32486e50c9329d", size = 5362214, upload-time = "2026-07-16T08:41:40.434Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/f4/716e8e0f40d013988370f3775a5833459da93d64faa440d892faa1812060/big-0.14-py3-none-any.whl", hash = "sha256:9c82c3d0d1cb17b8857c21597eec0bc5f8d4090e3710a05b1e7f9df1861e2324", size = 418136, upload-time = "2026-07-16T08:41:26.495Z" },
+]
+
+[[package]]
+name = "blanket"
+version = "1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "big" },
+    { name = "bytecode" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/3d/a1b6f142cfd2f867d927e15a779f40c07a1f2dccb63fc8650e98174fff24/blanket-1.0.tar.gz", hash = "sha256:b4ab32813f848af1b53a8d898bbb5afe48333fddbd20376b5216664f294f2c5c", size = 210244, upload-time = "2026-05-16T06:15:54.486Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/02/3c23188b9ad6425cce23cd63af664b9461a5b2ffcdcf1daa658def0da82f/blanket-1.0-py3-none-any.whl", hash = "sha256:4c43251e1cc469a8caa42ebc06de418eece7a2e91eb42ac9878ca943803d7d79", size = 116605, upload-time = "2026-05-16T06:15:52.101Z" },
+]
+
+[[package]]
 name = "bracex"
 version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ac/01/5f394b8bcd6e5b92f73130990960423bbb19711f906bd9fe9ea5557c667c/bracex-3.0.1.tar.gz", hash = "sha256:4e38e32392e4a4780fe15d644bfc7c8514057cfc3861e060b11814ce829c25e4", size = 44019, upload-time = "2026-07-20T13:43:00.335Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/8f/6f7273a7adb8d73fc8d21ede4376a3e475e52f98435c6007f69100dec8ca/bracex-3.0.1-py3-none-any.whl", hash = "sha256:6523ad83aeb5098a4ee597cff0f964442ff74e460bd3fafaffab6a013ff2288c", size = 11940, upload-time = "2026-07-20T13:42:59.268Z" },
+]
+
+[[package]]
+name = "bytecode"
+version = "0.18.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/27/8f/7d12c539869a5cbd801d550b86cc0f030ecaeb12f57f8b3ff19f2d2a184c/bytecode-0.18.1.tar.gz", hash = "sha256:d9564f1565fe1ae6a1173e544ef43a85f093e83997ef45af65d0d250eb48d7a1", size = 104631, upload-time = "2026-06-03T14:17:59.115Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/ef/6a629424ec08adc3819ddfd7ec0a710361eaa29d1e5fffb4e02f074be5c9/bytecode-0.18.1-py3-none-any.whl", hash = "sha256:9535bfdd665260b2888ec4121569e3ca5106965a7fedbb6de6ba1bafebc5c7d7", size = 42868, upload-time = "2026-06-03T14:17:57.654Z" },
 ]
 
 [[package]]
@@ -1916,6 +1947,9 @@ docs = [
     { name = "mkdocs-include-markdown-plugin" },
     { name = "mkdocs-material" },
 ]
+grow = [
+    { name = "blanket" },
+]
 test = [
     { name = "dirty-equals" },
     { name = "hypothesis" },
@@ -1988,6 +2022,7 @@ docs = [
     { name = "mkdocs-include-markdown-plugin", specifier = ">=6.2" },
     { name = "mkdocs-material", specifier = ">=9.5" },
 ]
+grow = [{ name = "blanket", specifier = ">=1.0" }]
 test = [
     { name = "dirty-equals", specifier = ">=0.11" },
     { name = "hypothesis", specifier = ">=6.157.2" },
