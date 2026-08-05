@@ -86,6 +86,19 @@ def test_put_is_idempotent_no_duplicate_rows(tmp_path):
     assert atlas.count() == 1
 
 
+def test_put_counts_new_vs_already_cached(tmp_path):
+    # The prewarm "already cached" signal: a fresh key is inserted; the same key again is an IGNORE'd
+    # no-op — counted separately so a re-scale run can show masks were re-rastered but already present.
+    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
+    assert atlas is not None
+    mask = _font().getmask2("見", "L", None, None, None, 0, "ls", 0, (0.0, 0.0), stroke_filled=True)
+    atlas.put("f:40:400", "見", "L", (0.0, 0.0), mask)
+    assert (atlas.inserted, atlas.ignored) == (1, 0)  # stored a new mask
+    atlas.put("f:40:400", "見", "L", (0.0, 0.0), mask)  # identical key → already cached
+    assert (atlas.inserted, atlas.ignored) == (1, 1)  # one stored, one re-cached
+    assert atlas.count() == 1
+
+
 def test_done_ledger_marks_and_probes(tmp_path):
     atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
     assert atlas is not None

@@ -87,6 +87,12 @@ class MaskAtlas:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self._local = threading.local()
+        # Write-back accounting for the prewarm heartbeat: masks actually stored vs found already present
+        # (``INSERT OR IGNORE`` no-ops). Lock-guarded — worker threads share one atlas; the critical
+        # section is two int adds, dwarfed by the getmask2 that precedes every put.
+        self._stats_lock = threading.Lock()
+        self.inserted = 0
+        self.ignored = 0
         self._ensure_schema()
 
     @classmethod
@@ -126,12 +132,20 @@ class MaskAtlas:
             w, h, data = serialize_core(core)
             sx, sy = _phase(start)
             conn = self._conn()
-            conn.execute(
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO masks (font_id, text, mode, sx, sy, offx, offy, w, h, alpha) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (font_id, text, mode, sx, sy, offx, offy, w, h, zlib.compress(data, 1)),
             )
             conn.commit()
+            # rowcount 1 → a NEW mask; 0 → the row already existed (IGNORE'd). The ignore count is the
+            # "re-rastered but already cached" signal the prewarm surfaces (e.g. a scale whose 1× masks
+            # another scale's reference pass already built).
+            with self._stats_lock:
+                if cur.rowcount == 1:
+                    self.inserted += 1
+                else:
+                    self.ignored += 1
         except sqlite3.Error:
             log.debug("mask atlas put failed", exc_info=True)
 

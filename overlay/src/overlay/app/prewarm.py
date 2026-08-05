@@ -64,13 +64,16 @@ class PrewarmPlan:
 @dataclass(frozen=True, slots=True)
 class PrewarmProgress:
     """One heartbeat. The counters a long prebuild needs to be legible: ``new_rows`` exposes a plateau
-    (0 → the glyph population saturated), ``skipped`` exposes resume, ``projected_bytes`` extrapolates
-    the tail at the cumulative rate since the run's first raster."""
+    (0 → the glyph population saturated), ``dup_masks`` exposes the OTHER dedup layer (masks re-rastered
+    but found already cached — why a re-scale run adds nothing), ``skipped`` exposes resume,
+    ``projected_bytes`` extrapolates the tail at the cumulative rate since the run's first raster."""
 
     measured: int  # words rastered so far (skipped words excluded)
-    skipped: int  # words skipped via the resume ledger
+    to_raster: int  # words this run set out to raster (population − skips) → progress denominator
+    skipped: int  # words skipped via the resume LEDGER (per-word done marker)
     rows: int  # total rows / masks now in the cache
     new_rows: int  # rows added since the previous checkpoint (0 → plateau)
+    dup_masks: int  # masks re-produced this checkpoint but already cached (INSERT OR IGNORE)
     nbytes: int  # REAL on-disk bytes (atlas mode now reports this; it used to send 0)
     projected_bytes: int  # final-size extrapolation at the cumulative rate (0 = unknown)
 
@@ -195,6 +198,7 @@ class _PrewarmJob:
         self.skipped = 0
         self.stop = False
         self._last_rows = start_rows  # rows at the previous checkpoint → new-mask delta
+        self._last_ignored = 0  # atlas.ignored at the previous checkpoint → already-cached delta
         self._start_nbytes = start_nbytes  # run-start footprint → cumulative-rate projection
         self._dry_streak = 0  # consecutive dry checkpoints, for --atlas-plateau
 
@@ -289,17 +293,28 @@ class _PrewarmJob:
         ratchet."""
         rows, nbytes = self._checkpoint_stats()
         new_rows = rows - self._last_rows
+        ignored = self.atlas.ignored if self.atlas is not None else 0
+        dup_masks = ignored - self._last_ignored
         projected = self._project(nbytes, m)
         self._update_stop(new_rows, nbytes)
-        self._last_rows = rows
-        log.info("prewarm: measured %d, %d rows (+%d), %.0f MB", m, rows, new_rows, nbytes / 1e6)
+        self._last_rows, self._last_ignored = rows, ignored
+        log.info(
+            "prewarm: measured %d, %d rows (+%d, %d cached), %.0f MB",
+            m,
+            rows,
+            new_rows,
+            dup_masks,
+            nbytes / 1e6,
+        )
         if self.on_progress is not None:
             self.on_progress(
                 PrewarmProgress(
                     measured=m,
+                    to_raster=self.to_raster,
                     skipped=skipped,
                     rows=rows,
                     new_rows=new_rows,
+                    dup_masks=dup_masks,
                     nbytes=nbytes,
                     projected_bytes=projected,
                 )

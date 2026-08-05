@@ -28,10 +28,16 @@ class _FakeAtlas:
     prewarm path AND its heartbeat (``count``/``disk_bytes``/``checkpoint``/``done_words``). ``growth`` =
     masks added per rastered word, so a test can model a productive run (>0) or a plateau (0)."""
 
-    def __init__(self, *, growth: int = 0, disk_seq: list[int] | None = None) -> None:
+    def __init__(
+        self, *, growth: int = 0, disk_seq: list[int] | None = None, dup_per_word: int = 0
+    ) -> None:
         self.done: set[tuple[float, str]] = set()
         self.masks = 0
+        self.ignored = (
+            0  # masks produced but already cached (INSERT OR IGNORE), read by the heartbeat
+        )
         self._growth = growth
+        self._dup_per_word = dup_per_word  # already-cached masks re-produced per rastered word
         self._disk_seq = disk_seq  # scripted per-checkpoint disk_bytes (models lumpy page growth)
         self._disk_calls = 0
 
@@ -41,6 +47,7 @@ class _FakeAtlas:
     def mark_done(self, scale: float, word: str) -> None:
         self.done.add((scale, word))
         self.masks += self._growth
+        self.ignored += self._dup_per_word
 
     def count(self) -> int:
         return self.masks
@@ -199,6 +206,29 @@ def test_heartbeat_reports_new_masks_skipped_and_real_bytes():
     assert beats[0].skipped == 1  # the pre-done word
     assert beats[0].new_rows == 6 and beats[1].new_rows == 6  # two rastered words × 3 masks each
     assert beats[0].nbytes == 6 * 700 and beats[0].nbytes > 0  # REAL bytes, not old 0
+
+
+def test_heartbeat_reports_masks_already_cached_and_progress_denominator():
+    # The transparency fix: a re-scale run rasters words whose masks already exist → +0 NEW but N
+    # "already cached" (the INSERT OR IGNORE layer that `skipped` never reflected). Also the m/to_raster
+    # denominator. growth=0 → nothing stored; dup_per_word models the IGNORE'd (already-present) masks.
+    atlas = _FakeAtlas(growth=0, dup_per_word=5)
+    beats: list = []
+    job = _job(
+        lambda: _FakeReader(),
+        atlas=atlas,
+        on_progress=beats.append,
+        native_scale=1.5,
+        checkpoint_every=2,
+        total=100,
+    )
+    _drive(job, 4)  # checkpoints at m=2, m=4
+    assert [b.new_rows for b in beats] == [0, 0]  # nothing stored
+    assert [b.dup_masks for b in beats] == [
+        10,
+        10,
+    ]  # 5 already-cached per word × 2 words/checkpoint
+    assert beats[0].to_raster == 100 and beats[0].skipped == 0  # denominator; ledger skip untouched
 
 
 def test_atlas_plateau_stops_after_consecutive_dry_checkpoints():
