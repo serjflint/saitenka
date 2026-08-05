@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
 # fugashi/MeCab wraps a C extension that has NOT declared free-threaded safety, so on a free-threaded
 # build we run with PYTHON_GIL=0 (see examples/mpv_reader._ensure_free_threaded). Tokenising is
@@ -258,6 +258,106 @@ def phrase_terms(
             seen.add(surface)
             terms.append(surface)
     return terms, hits[0][1], hits[0][2]
+
+
+_COMPOUND_INFLECTABLE = {
+    "動詞",
+    "形容詞",
+}  # a tail whose dict form (lemma) differs from its surface
+_COMPOUND_MAX_TOKENS = 4  # span cap (tokens) — unidic over-splits lexicalized compounds by 2-3
+_COMPOUND_MAX_CHARS = 16  # safety char bound; admits katakana tech compounds (アプリケーション…)
+
+
+def _compound_form(span: list[Token]) -> str:
+    """The dictionary headword a span resolves to: the joined surfaces with the tail deinflected to its
+    dict form (走り+出した → 走り出す) when the tail conjugates (動詞/形容詞), else the plain surface join
+    (応急+処置 → 応急処置). Mirrors anki_miner's orthBase-deinflected candidate."""
+    prefix = "".join(t.surface for t in span[:-1])
+    tail = span[-1]
+    return prefix + (tail.lemma if tail.pos in _COMPOUND_INFLECTABLE else tail.surface)
+
+
+def _compound_spans(tokens: list[Token]) -> dict[tuple[int, int], str]:
+    """Every mergeable ``(start, end)`` span → its candidate headword (:func:`_compound_form`). A span
+    starts at a content token and extends only over content tokens that are exactly adjacent on the same
+    line — a non-content token (助詞/助動詞/punct) or an offset gap (a new source line restarts offsets)
+    ends it — up to the token- and char-caps. That content-only rule is the 格/係助詞 boundary guard the
+    tooltip's :func:`phrase_terms` and :func:`merge_inflected` already respect."""
+    n = len(tokens)
+    spans: dict[tuple[int, int], str] = {}
+    for i in range(n):
+        if not tokens[i].is_content:
+            continue
+        prev_end, chars = tokens[i].end, len(tokens[i].surface)
+        for j in range(i + 1, min(n, i + _COMPOUND_MAX_TOKENS)):
+            nxt = tokens[j]
+            if not nxt.is_content or nxt.start != prev_end:
+                break
+            chars += len(nxt.surface)
+            if chars > _COMPOUND_MAX_CHARS:
+                break
+            prev_end = nxt.end
+            spans[(i, j)] = _compound_form(tokens[i : j + 1])
+    return spans
+
+
+def _compound_token(span: list[Token], headword: str) -> Token:
+    """One merged token: SURFACE/READING are the concatenations (display + reading-affinity ranking),
+    LEMMA is the attested ``headword`` (drives lookup). An inflectable tail lends its verb/adjective POS
+    (so downstream inflection/mining treats the whole as one conjugating word); a nominal span keeps the
+    head's POS.
+
+    Concatenating the component readings is safe because a compound with a non-compositional reading
+    (jukujikun 今日/大人, whole-compound rendaku) is lexicalized as ONE unidic token and never reaches
+    this pass; a compound unidic DOES over-split carries each fragment's contextual reading (rendaku
+    already applied: 消費+税 → しょうひ+ぜい), so the join reconstructs it. The reading is secondary
+    regardless — lookup keys on the lemma, and the tooltip/TTS prefer the matched dict entry's reading."""
+    head, tail = span[0], span[-1]
+    inflectable = tail.pos in _COMPOUND_INFLECTABLE
+    return Token(
+        surface="".join(t.surface for t in span),
+        lemma=headword,
+        reading="".join(t.reading for t in span),
+        pos=tail.pos if inflectable else head.pos,
+        start=head.start,
+        end=tail.end,
+        pos2="" if inflectable else head.pos2,
+    )
+
+
+def merge_dict_compounds(
+    tokens: list[Token], exists: Callable[[Sequence[str]], set[str]]
+) -> list[Token]:
+    """Merge adjacent tokens into ONE token wherever their joined span is an exact dictionary headword —
+    Yomitan's longest-match at the token level, so a lexicalized compound unidic over-splits (応急+処置 →
+    応急処置, 満員+電車 → 満員電車, 走り+出した → 走り出した) becomes a single hover / hit-test / color / mine
+    unit instead of fragments. Runs AFTER :func:`merge_inflected` (the conjugation tail is already glued
+    on, so 走り出した is available as [走り, 出した]). Greedy left-to-right, longest span first; guardrails
+    and per-token shape live in :func:`_compound_spans` / :func:`_compound_token`.
+
+    ``exists`` is the batch dict-set existence seam (:meth:`DictionarySet.terms_exist`), a callable so
+    this stays dict-free and swappable, exactly like :func:`phrase_terms`' ``has_term``."""
+    n = len(tokens)
+    if n < 2:
+        return tokens
+    spans = _compound_spans(
+        tokens
+    )  # one batched probe covers the whole line, not a lookup per span
+    if not spans:
+        return tokens
+    hits = exists(sorted(set(spans.values())))
+    out: list[Token] = []
+    i = 0
+    while i < n:
+        widest = range(min(n - 1, i + _COMPOUND_MAX_TOKENS - 1), i, -1)  # longest span first
+        end = next((j for j in widest if spans.get((i, j)) in hits), i)
+        if end > i:
+            out.append(_compound_token(tokens[i : end + 1], spans[(i, end)]))
+            i = end + 1
+        else:
+            out.append(tokens[i])
+            i += 1
+    return out
 
 
 def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> list[Token]:

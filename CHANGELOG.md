@@ -7,6 +7,16 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **Dictionary-attested compound merging (Yomitan longest-match).** A lexicalized compound that
+  UniDic over-splits (`応急処置` → `応急`+`処置`, `満員電車`, `走り出した` mined as `走り`) now merges into one
+  token whenever the joined span — the tail deinflected to its dictionary form — is an exact headword in
+  your loaded dictionaries. The whole word becomes a single hover / hit-test / colour / mine unit, so it
+  is looked up and mined the way Yomitan shows it instead of as fragments. Runs after the existing
+  conjugation-tail merge, never crosses a particle/auxiliary boundary, and is a no-op until dictionaries
+  are loaded.
+
 ## [1.3.0] - 2026-08-04
 
 ### Added

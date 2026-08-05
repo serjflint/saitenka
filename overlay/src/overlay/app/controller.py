@@ -84,7 +84,7 @@ from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
-from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
+from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compounds, tokenize
 from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
@@ -646,8 +646,12 @@ class Reader:
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = text.replace("\\N", "\n").replace("\r", "")
+        # Dictionary-attested compound merge (応急+処置 → 応急処置) — one hover/color/mine unit like
+        # Yomitan. Optional dict capability, absent until the dicts finish loading (like has_term).
+        exists = getattr(self.dict_set, "terms_exist", None)
         with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
-            self.lines = [tokenize(ln) for ln in norm.split("\n") if ln.strip()]
+            lines = (tokenize(ln) for ln in norm.split("\n") if ln.strip())
+            self.lines = [merge_dict_compounds(t, exists) if exists else t for t in lines]
         self.tokens = [t for line in self.lines for t in line]
         # score the whole cue (N+1 splits by sentence punctuation across lines); warms lookup cache
         with otel_metrics.traced("score_line"):
