@@ -689,7 +689,8 @@ def import_dicts(
     zips are read **in place** — no copy is kept — so you can delete or move them afterwards."""
     from datetime import datetime
 
-    from overlay.app.init_wizard import _ask, dumps_toml, write_config
+    from overlay.app import prompt
+    from overlay.app.init_wizard import dumps_toml, write_config
     from overlay.app.progress import BuildBar
     from overlay.app.yomitan_import import gather_yomitan_zips, import_zips
 
@@ -712,7 +713,7 @@ def import_dicts(
     merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
     print("\nProposed config:")
     print(dumps_toml(merged))
-    backup = write_config(merged, confirm=(lambda _p: True) if yes else _ask)
+    backup = write_config(merged, confirm=(lambda _p: True) if yes else prompt.confirm)
     if backup:
         print(f"backed up existing config → {backup}")
     _print_legacy_note()
@@ -810,10 +811,10 @@ def import_settings(
     multi-GB export), use ``import-dictionaries`` instead — it unpacks that into ``.zip`` dicts.
     (Alias: ``import-settings``.)
     """
-    from overlay.app.init_wizard import _ask
+    from overlay.app import prompt
     from overlay.app.yomitan_import import YomitanImportError, run_import
 
-    confirm = (lambda _p: True) if yes else _ask
+    confirm = (lambda _p: True) if yes else prompt.confirm
     try:
         return run_import(settings, scan_dir, confirm)
     except YomitanImportError as e:
@@ -840,7 +841,8 @@ def import_dictionaries(
 
     from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
-    from overlay.app.init_wizard import _ask, dumps_toml, write_config
+    from overlay.app import prompt
+    from overlay.app.init_wizard import dumps_toml, write_config
     from overlay.app.progress import BuildBar
     from overlay.app.yomitan_db_import import YomitanDbImportError, import_database, read_header
     from overlay.app.yomitan_import import import_zips
@@ -897,7 +899,7 @@ def import_dictionaries(
     merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
     print("\nProposed config:")
     print(dumps_toml(merged))
-    backup = write_config(merged, confirm=(lambda _p: True) if yes else _ask)
+    backup = write_config(merged, confirm=(lambda _p: True) if yes else prompt.confirm)
     if backup:
         print(f"backed up existing config → {backup}")
     return 0
@@ -1043,9 +1045,9 @@ def reinstall(
         print(f"latest release: {github_ref}" if github_ref else "no release info — using main")
     attempts = reinstall_attempts(extras, source=source, github_ref=github_ref)
     print(f"detected extras: {', '.join(extras) or '(none)'}")
-    if not yes and input(
-        f"Reinstall keeping [{','.join(extras) or 'none'}]? [y/N] "
-    ).strip().lower() not in ("y", "yes"):
+    from overlay.app import prompt
+
+    if not yes and not prompt.confirm(f"Reinstall keeping [{','.join(extras) or 'none'}]?"):
         print("cancelled")
         return 1
     return _dispatch_install(attempts, now=now, label="reinstall")
@@ -1066,13 +1068,10 @@ def uninstall(
 ) -> int:  # pragma: no cover — thin CLI wrapper; the removal logic is unit-tested in test_lifecycle
     """Delete saitenka's config, dictionaries, cache/logs, crash reports and mpv plugin. Leaves mpv and
     ffmpeg installed. Does NOT remove the saitenka binary itself — the last line tells you how."""
+    from overlay.app import prompt
     from overlay.app.lifecycle import uninstall as do_uninstall
 
-    confirm = (
-        (lambda _p: True)
-        if yes
-        else (lambda p: input(f"{p} [y/N] ").strip().lower() in ("y", "yes"))
-    )
+    confirm = (lambda _p: True) if yes else prompt.confirm
     removed = do_uninstall(confirm, keep_dicts=keep_dicts)
     if not removed:
         print("nothing removed (no saitenka data found, or cancelled)")

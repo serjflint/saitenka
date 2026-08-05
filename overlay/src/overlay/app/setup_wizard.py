@@ -22,6 +22,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from overlay.app import prompt
+
 log = logging.getLogger(__name__)
 
 Confirm = Callable[[str], bool]
@@ -200,7 +202,7 @@ def ensure_mpv_path(
         return None
     print("  mpv not found automatically.")
     for _ in range(3):
-        raw = input("  Full path to the mpv / mpvnet executable (blank to skip): ").strip()
+        raw = prompt.text("  Full path to the mpv / mpvnet executable (blank to skip):")
         if not raw:
             return None
         if resolved := _resolve_mpv_input(raw):
@@ -241,16 +243,6 @@ def _run_init(confirm: Confirm) -> None:  # pragma: no cover — thin glue over 
     print(dumps_toml(proposal))
     write_config(proposal, confirm=confirm)
     _maybe_store_jimaku_key()
-
-
-def _prompt(msg: str, options: list[str]) -> str:  # pragma: no cover — interactive I/O
-    """Ask for a value; accept a NAME or its 1-based number from ``options``. Blank / non-tty → ''."""
-    if not sys.stdin.isatty():
-        return ""
-    ans = input(f"{msg} ").strip()
-    if ans.isdigit() and 1 <= int(ans) <= len(options):
-        return options[int(ans) - 1]
-    return ans
 
 
 def _deck_fields(anki, deck: str) -> list[str]:  # pragma: no cover — needs a live AnkiConnect
@@ -326,52 +318,42 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
         return
     anki = Anki()
     try:
-        decks = sorted(anki._call("deckNames") or [])
-        models = sorted(anki._call("modelNames") or [])
+        with prompt.spinner("  querying Anki (decks / note types)…"):
+            decks = sorted(anki._call("deckNames") or [])
+            models = sorted(anki._call("modelNames") or [])
     except (AnkiError, json.JSONDecodeError):
         print("  couldn't query AnkiConnect (decks/models) — skipping")
         return
 
-    sizes = _deck_sizes(anki)
-    ranked = rank_decks(decks, sizes)
-    top = ranked[:12]  # don't dump 50+ decks; show the biggest, accept any typed name below
-    print("\n  Decks (largest first):")
-    for i, d in enumerate(top, 1):
-        n = sizes.get(d, 0)
-        print(f"    {i:2}. {d}" + (f"  ({n} cards)" if n else ""))
-    if len(ranked) > len(top):
-        print(f"    … +{len(ranked) - len(top)} more — type a deck name to match one not listed")
+    with prompt.spinner("  reading deck sizes…"):
+        sizes = _deck_sizes(anki)
+    ranked = rank_decks(decks, sizes)  # biggest first → the deck picker's completion order
 
     cfg = load_config()
     cur = dict(cfg.get("mine") or {})
     # Ask the mining deck/model FIRST: most users have one mining deck, so it's the natural default for
     # the known-words deck below (a single-deck user reuses it for coloring instead of picking twice).
-    mine_deck = _prompt(
-        f"  Mining deck [{cur.get('deck', 'Saitenka::Mining')}]?", decks
-    ) or cur.get("deck", "Saitenka::Mining")
-    # The note type MUST already exist in Anki (unlike the deck, which is created on first mine), so
-    # only default to Lapis / the configured model when it's really installed — else the first model.
-    model_default = intersect_default(cur.get("model", "Lapis"), models)
-    mine_model = (
-        _prompt(f"  Mining note type [{model_default or '(none)'}]?", models) or model_default
+    # Deck pickers are type-to-filter but accept a NEW name — the mining deck is created on first mine,
+    # so it needn't already exist; the note type must (Anki won't create it).
+    mine_deck = prompt.autocomplete(
+        "  Mining deck (type to filter; a new name is fine)?",
+        ranked,
+        default=cur.get("deck", "Saitenka::Mining"),
     )
+    model_default = intersect_default(cur.get("model", "Lapis"), models)
+    mine_model = prompt.select("  Mining note type?", models, default=model_default)
     mine_kind = _prompt_card_kind(cur)
     default_known = default_known_deck(decks, sizes, prefer=mine_deck)
-    raw_known = _prompt(
-        f"  Deck of words you already KNOW → coloring [{default_known or 'none'}]; 'n' to skip?",
-        top,
-    )
-    # 'n'/skip → no known deck; blank → the default (Saitenka::Known or the mining deck); else typed.
-    skip = raw_known.lower() in ("n", "no", "skip", "-")
-    known_deck = "" if skip else (raw_known or default_known)
+    # A yes/no gate (via the wizard's confirm seam, so --yes / non-tty resolve it) makes "no known deck"
+    # unambiguously reachable — an autocomplete pre-filled with the default can't cleanly express skip.
+    known_deck = ""
+    if confirm("  Add a deck of words you already KNOW (drives subtitle coloring)?"):
+        known_deck = prompt.autocomplete("  Known-words deck?", ranked, default=default_known)
     known_field = ""
     if known_deck:
         fields = _deck_fields(anki, known_deck)
         default_field = fields[0] if fields else "Expression"
-        known_field = (
-            _prompt(f"    Field with the word {fields or '(none read)'} [{default_field}]?", fields)
-            or default_field
-        )
+        known_field = prompt.select("    Field with the word?", fields, default=default_field)
 
     frag = anki_config_fragment(
         known_deck, known_field, mine_deck, mine_model, existing_mine=cur, card_kind=mine_kind
@@ -385,7 +367,7 @@ def _prompt_card_kind(current: dict) -> str:
     Saitenka's historical marker; 'audio'/'click'/'none' cover the other Lapis-family templates."""
     default = current.get("card_kind", "word-and-sentence")
     kinds = ["word-and-sentence", "sentence", "audio", "click", "none"]
-    return _prompt(f"  Card kind {kinds} [{default}]?", kinds) or default
+    return prompt.select("  Card kind?", kinds, default=default)
 
 
 def anki_config_fragment(
@@ -426,13 +408,9 @@ def _offer_plugin(confirm: Confirm) -> None:  # pragma: no cover — thin glue o
     print(f"  installed {dest}")
 
 
-def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
-    return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
-
-
 def run_setup(*, yes: bool, dry_run: bool) -> int:
     """Full wizard: inventory → install → doctor → init → import → plugin."""
-    confirm: Confirm = (lambda _p: True) if yes else _ask
+    confirm: Confirm = (lambda _p: True) if yes else prompt.confirm
     print("saitenka setup")
 
     # Only surface the tooling inventory when something actually needs installing. When everything's

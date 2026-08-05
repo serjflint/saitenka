@@ -30,16 +30,6 @@
     ]
   },
   {
-    "path": "src/overlay/app/setup_wizard.py",
-    "file_name": "setup_wizard.py",
-    "functions": [
-      {
-        "name": "_offer_anki",
-        "complexity": 16
-      }
-    ]
-  },
-  {
     "path": "src/overlay/app/sub_index.py",
     "file_name": "sub_index.py",
     "functions": [
