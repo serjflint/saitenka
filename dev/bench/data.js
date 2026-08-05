@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785963366914,
+  "lastUpdate": 1785963471008,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -467,6 +467,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.178,
             "range": "±22.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f9a138d931541aec6e908f264999558b8caa8057",
+          "message": "feat(mining): Yomitan-style per-field marker templates ([mine.card_format]) (#192) (#197)\n\nEach note field becomes a template of {marker} tokens (Reading = \"{furigana}\",\nSentence = \"{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}\"), so one field can\ncombine markers and one marker can fill several fields. Opt-in; wins wholesale\nover [mine.fields]. Twenty markers, each filled from real data (readings/pitch\nfrom dictionaries); doctor warns on an unfillable marker or a missing field.\n\nNew card_markers.py (build_markers/render_card_format/anki_furigana/cloze);\nDictionarySet.pitch_field; dedup keys off the field that actually holds\n{expression} under card_format.",
+          "timestamp": "2026-08-05T23:57:26+03:00",
+          "tree_id": "272ff0461fca1026ba816d1d239d89c7772545e6",
+          "url": "https://github.com/serjflint/saitenka/commit/f9a138d931541aec6e908f264999558b8caa8057"
+        },
+        "date": 1785963470466,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.713,
+            "range": "±2.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.376,
+            "range": "±9.0%",
             "unit": "ms"
           }
         ]
