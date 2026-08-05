@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from overlay.app.config import ReaderOptions
+    from overlay.app.prewarm import PrewarmPlan, PrewarmProgress, PrewarmResult
 
 
 def _ensure_free_threaded() -> None:
@@ -455,6 +456,59 @@ def telemetry(
     return 0
 
 
+def _prewarm_emit_start(
+    plan: PrewarmPlan, *, atlas_only: bool, atlas_scale: float, width: int, height: int
+) -> None:  # pragma: no cover — presentation for the thin CLI wrapper
+    if atlas_only:
+        print(
+            f"prewarm(atlas): {plan.total:,} words @scale {atlas_scale:g} · "
+            f"{plan.already_done:,} already done → {plan.remaining:,} to raster · "
+            f"atlas {plan.nbytes / 1e6:.0f} MB on disk (uncapped)",
+            flush=True,
+        )
+    else:
+        print(
+            f"prewarm: {plan.total:,} words @{width}×{height} · "
+            f"render cache {plan.nbytes / 1e6:.0f} MB on disk (byte-ceiling bounded)",
+            flush=True,
+        )
+
+
+def _prewarm_emit_progress(
+    p: PrewarmProgress, *, atlas_only: bool
+) -> None:  # pragma: no cover — presentation for the thin CLI wrapper
+    if not atlas_only:
+        print(
+            f"  … measured {p.measured:,} words → {p.rows:,} heads, {p.nbytes / 1e6:.0f} MB",
+            flush=True,
+        )
+        return
+    proj = f" · ~{p.projected_bytes / 1e6:.0f} MB projected" if p.projected_bytes else ""
+    print(
+        f"  … {p.measured:,} rastered (+{p.new_rows:,} masks) · {p.skipped:,} skipped "
+        f"→ {p.rows:,} masks, {p.nbytes / 1e6:.0f} MB{proj}",
+        flush=True,
+    )
+
+
+def _prewarm_emit_summary(
+    result: PrewarmResult, *, atlas_only: bool
+) -> None:  # pragma: no cover — presentation for the thin CLI wrapper
+    if atlas_only:
+        tail = " · stopped early (plateau)" if result.stopped_at_ceiling else ""
+        print(
+            f"prewarm(atlas): rendered {result.candidates:,} words "
+            f"({result.skipped:,} skipped via resume) → {result.rows:,} masks, "
+            f"{result.bytes / 1e6:.0f} MB on disk{tail}"
+        )
+    else:
+        tail = ", stopped at the byte ceiling)" if result.stopped_at_ceiling else ")"
+        print(
+            f"prewarm: rendered {result.candidates:,} popular words → stored {result.stored:,} "
+            f"non-trivial heads ({result.rows:,} rows, {result.bytes / 1e6:.0f} MB on disk{tail}"
+        )
+
+
 @app.command
 def prewarm(
     width: Annotated[
@@ -489,6 +543,14 @@ def prewarm(
             "`--limit 0` to saturate the atlas over the whole corpus without growing the render cache",
         ),
     ] = False,
+    atlas_plateau: Annotated[
+        int,
+        cyclopts.Parameter(
+            help="atlas-only: stop early after this many consecutive heartbeats add essentially no new "
+            "masks. The CJK glyph set saturates in the first few thousand words, so the rest of a "
+            "`--limit 0` (>1M-word) sweep is near-pure churn. 0 = off (raster every word)",
+        ),
+    ] = 0,
 ) -> int:  # pragma: no cover — thin CLI wrapper; prewarm() logic is unit-tested
     """Prebuild the persistent tooltip render cache (#149) so even a FIRST-session cold hover on a
     pathological word is instant (copy+upload), not a 40–170 ms build+raster.
@@ -499,6 +561,8 @@ def prewarm(
     ``[tooltip] render_cache`` on and dictionaries imported. Re-run after a resolution or dictionary
     change (both invalidate the cache signature).
     """
+    from functools import partial
+
     from overlay.app.config import load_config
     from overlay.app.prewarm import prewarm as _prewarm
 
@@ -516,34 +580,28 @@ def prewarm(
             "note: [tooltip] render_cache is off — prewarm still builds the cache, but enable it to use it"
         )
 
-    def _progress(measured: int, rows: int, nbytes: int) -> None:
-        unit = "masks" if atlas_only else f"heads, {nbytes / 1e6:.0f} MB"
-        print(f"  … measured {measured:,} words → {rows:,} {unit}", flush=True)
-
     try:
         result = _prewarm(
             width,
             height,
             limit,
-            on_progress=_progress,
+            on_progress=partial(_prewarm_emit_progress, atlas_only=atlas_only),
             workers=workers,
             atlas_only=atlas_only,
             atlas_scale=atlas_scale or 1.0,
+            on_start=partial(
+                _prewarm_emit_start,
+                atlas_only=atlas_only,
+                atlas_scale=atlas_scale or 1.0,
+                width=width,
+                height=height,
+            ),
+            plateau_stop=atlas_plateau,
         )
     except RuntimeError as e:
         print(f"prewarm: {e}")
         return 1
-    if atlas_only:
-        print(
-            f"prewarm(atlas): rendered {result.candidates:,} words → {result.rows:,} masks "
-            f"in the glyph atlas (render cache untouched)"
-        )
-    else:
-        print(
-            f"prewarm: rendered {result.candidates:,} popular words → stored {result.stored:,} non-trivial "
-            f"heads ({result.rows:,} rows, {result.bytes / 1e6:.0f} MB on disk"
-            + (", stopped at the byte ceiling)" if result.stopped_at_ceiling else ")")
-        )
+    _prewarm_emit_summary(result, atlas_only=atlas_only)
     return 0
 
 
