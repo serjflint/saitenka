@@ -213,6 +213,8 @@ def _mine_config_from(mc: dict):
     base = MineConfig.from_preset(str(preset)) if preset else MineConfig()
     raw_fields = mc.get("fields")
     fields = dict(raw_fields) if isinstance(raw_fields, dict) and raw_fields else base.fields
+    raw_format = mc.get("card_format")
+    card_format = dict(raw_format) if isinstance(raw_format, dict) else {}
     return MineConfig(
         deck=mc.get("deck", base.deck),
         model=mc.get("model", base.model),
@@ -227,6 +229,7 @@ def _mine_config_from(mc: dict):
         ),
         card_kind=str(mc.get("card_kind", base.card_kind)),
         fields=fields,
+        card_format=card_format,
     )
 
 
@@ -263,7 +266,10 @@ def _build_mining(mc: dict, *, mine: bool):
 
             anki = Anki()
             mine_conf = _mine_config_from(mc)
-            _validate_mine_fields(anki, mine_conf)
+            if (
+                not mine_conf.card_format
+            ):  # card_format wins wholesale — the `fields` map is unused, so
+                _validate_mine_fields(anki, mine_conf)  # validating/dropping it here would mislead
             return anki, mine_conf
         except Exception:  # never let mining setup block attach
             log.warning(

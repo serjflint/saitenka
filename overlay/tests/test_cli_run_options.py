@@ -151,6 +151,35 @@ def test_run_threads_field_map_and_card_kind(monkeypatch):
     assert captured["mine"]["fields"] == {"expression": "Word"}
 
 
+def test_run_threads_card_format(monkeypatch):
+    # [mine.card_format] has no CLI flag — like fields/card_kind it must ride the RUN seam via raw [mine].
+    from overlay.app import cli_run, reader_deps
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        reader_deps,
+        "build_reader_deps",
+        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
+    )
+    cli_run._build_run_deps(
+        mine=True,
+        mine_deck="D",
+        mine_model="Lapis",
+        mine_key="Ctrl+m",
+        mine_all_key="Shift+m",
+        mine_normalize_audio=False,
+        mine_animated_screenshot=False,
+        raw_mine={"card_format": {"Word": "{expression}"}},
+        known_cfg=None,
+        known="",
+        color=False,
+        dict_titles=[],
+        freq_titles=[],
+        pitch_titles=[],
+    )
+    assert captured["mine"]["card_format"] == {"Word": "{expression}"}
+
+
 def test_run_options_read_hover_pause_key():
     opts = _build_run_options(
         {

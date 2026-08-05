@@ -111,6 +111,37 @@ class Miner:
         r = self.r
         return r.dict_set.frequency_field(tok) if r.dict_set else ("", "")
 
+    def pitch(self, tok) -> tuple[str, str]:
+        """(pitch-accent field HTML, positions) for a mined card — the tooltip's purple-pill values.
+        Only consulted for the ``[mine.card_format]`` path (``{pitch-accents}``)."""
+        r = self.r
+        return r.dict_set.pitch_field(tok) if r.dict_set else ("", "")
+
+    def _markers_for(self, tok, card, *, sentence_html, pic, audio, video, misc, tags, freq):
+        """The ``{marker} -> value`` map for the ``[mine.card_format]`` path, or ``None`` when it isn't
+        configured (so ``build_note`` takes the plain ``[mine.fields]`` route and skips this work)."""
+        if not self.r.mine_cfg.card_format:
+            return None
+        from overlay.app.card_markers import build_markers
+        from overlay.app.lookup import POS_EN
+
+        title, _ep = source_meta(video)
+        pitch_html, pitch_positions = self.pitch(tok)
+        return build_markers(
+            card,
+            sentence_html=sentence_html,
+            picture=pic,
+            audio=audio,
+            misc=misc,
+            doc_title=title,
+            freq_html=freq[0],
+            freq_rank=freq[1],
+            pos_en=POS_EN.get(tok.pos, tok.pos or "word"),
+            tags=tags,
+            pitch_html=pitch_html,
+            pitch_positions=pitch_positions,
+        )
+
     def _card_for(self, tok):
         """Card fields for ``tok`` — the user's dictionaries first (dict-first mining), falling back
         to the JMdict/jamdict source when no dictionary is configured or the word isn't in one. That
@@ -259,18 +290,32 @@ class Miner:
             pic, audio = self.capture_media(
                 f"saitenka_{int(time.time() * 1000)}", video, animated=animated
             )
-            freq_html, freq_sort = self.frequency(tok)
+            freq = self.frequency(tok)
+            sentence_html = bold_word(r._sentence_html(), tok.surface)
+            misc, tags = self.provenance(video), self.mine_tags(video)
+            markers = self._markers_for(
+                tok,
+                card,
+                sentence_html=sentence_html,
+                pic=pic,
+                audio=audio,
+                video=video,
+                misc=misc,
+                tags=tags,
+                freq=freq,
+            )
             note = build_note(
                 r.mine_cfg,
                 card,
-                bold_word(r._sentence_html(), tok.surface),
+                sentence_html,
                 pic,
                 audio,
-                self.provenance(video),
-                freq_html,
-                freq_sort,
-                self.mine_tags(video),
+                misc,
+                freq[0],
+                freq[1],
+                tags,
                 allow_duplicate=force,
+                markers=markers,
             )
             if not force and not r.anki.can_add(note):
                 r._toast(f"can't add {card.expression}", "err")
@@ -312,17 +357,30 @@ class Miner:
                 if dedupe(r.anki, r.mine_cfg, card.expression):
                     dup += 1
                     continue
-                freq_html, freq_sort = self.frequency(tok)
+                freq = self.frequency(tok)
+                sentence_html = bold_word(sentence, tok.surface)
+                markers = self._markers_for(
+                    tok,
+                    card,
+                    sentence_html=sentence_html,
+                    pic=pic,
+                    audio=audio,
+                    video=video,
+                    misc=misc,
+                    tags=tags,
+                    freq=freq,
+                )
                 note = build_note(
                     r.mine_cfg,
                     card,
-                    bold_word(sentence, tok.surface),
+                    sentence_html,
                     pic,
                     audio,
                     misc,
-                    freq_html,
-                    freq_sort,
+                    freq[0],
+                    freq[1],
                     tags,
+                    markers=markers,
                 )
                 if r.anki.can_add(note):
                     r.anki.add_note(note)
@@ -344,7 +402,7 @@ class Miner:
             return
         from overlay.app.miner_ui import _strip_tags
 
-        fieldname = r.mine_cfg.fields.get("expression", "Expression")
+        fieldname = r.mine_cfg.expression_field() or "Expression"
         try:
             ids = r.anki.find_notes(f'deck:"{r.mine_cfg.deck}"')
             for chunk in (ids[i : i + 500] for i in range(0, len(ids), 500)):

@@ -247,12 +247,34 @@ class MineConfig:
     # [mine].card_kind = "sentence" to restore the old marker.
     card_kind: str = _DEFAULT_CARD_KIND
     fields: dict = field(default_factory=lambda: dict(LAPIS_FIELDS))
+    # Yomitan-style field -> "{marker}" template map. When set it WINS wholesale over `fields` (only
+    # these fields are written), letting one field combine markers / one entity fan out. See
+    # card_markers.render_card_format / MARKERS.
+    card_format: dict = field(default_factory=dict)
     # non-empty flag fields that pick a card template; derived from card_kind unless set explicitly
     flags: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.flags:
             self.flags = _flags_for(self.card_kind)
+
+    def expression_field(self) -> str:
+        """The real note field holding the mined expression — the dedup key. Under ``card_format`` it's
+        the field whose template references ``{expression}`` (that's what actually gets written); else
+        the entity map's ``expression`` target. ``""`` when ``card_format`` never surfaces the expression
+        — no reliable dedup key, so the caller allows the add rather than querying an empty field."""
+        if self.card_format:
+            from overlay.app.card_markers import markers_in
+
+            return next(
+                (
+                    real
+                    for real, tmpl in self.card_format.items()
+                    if "expression" in markers_in(str(tmpl))
+                ),
+                "",
+            )
+        return self.fields.get("expression", "Expression")
 
     @classmethod
     def from_preset(cls, name: str, **overrides) -> MineConfig:
@@ -336,7 +358,9 @@ def _esc_query(s: str) -> str:
 
 def dedupe(anki: Anki, cfg: MineConfig, expression: str) -> list[int]:
     """Existing note ids for this expression in the mining deck (empty = safe to add)."""
-    field = cfg.fields["expression"]
+    field = cfg.expression_field()
+    if not field:  # a card_format with no {expression} field → no reliable dedup key, allow the add
+        return []
     # Escape both the deck name (double-quote) and the expression (Anki wildcard chars) to avoid
     # query injection (e.g. an expression containing * would match all cards in the field).
     return anki.find_notes(f'deck:"{_q(cfg.deck)}" "{field}:{_esc_query(expression)}"')
@@ -355,6 +379,45 @@ def bold_word(sentence: str, surface: str) -> str:
     return f"{esc[:i]}<b>{esc_surface}</b>{esc[i + len(esc_surface) :]}"
 
 
+def _entity_values(card, sentence_html, picture, audio, misc, freq_html, freq_sort) -> dict:
+    """logical entity -> content, for the default ``[mine.fields]`` map (media wrapped Anki-ready)."""
+    return {
+        "expression": card.expression,
+        "reading": card.reading,
+        "sentence": sentence_html,
+        "glossary": card.glossary_html,
+        "picture": f'<img src="{picture}">' if picture else "",
+        "audio": f"[sound:{audio}]" if audio else "",
+        "misc": misc,
+        "id": card.idseq,
+        "freq": freq_html,
+        "freq_sort": freq_sort,
+    }
+
+
+def _card_format_fields(
+    cfg, card, sentence_html, picture, audio, misc, freq_html, freq_sort, tags, markers
+) -> dict:
+    """Render ``cfg.card_format`` (field -> ``{marker}`` template). ``markers`` from the miner when it
+    has one; otherwise a partial map from these args (pitch/pos/title empty)."""
+    from overlay.app.card_markers import build_markers, render_card_format
+
+    if markers is None:
+        markers = build_markers(
+            card,
+            sentence_html=sentence_html,
+            picture=picture,
+            audio=audio,
+            misc=misc,
+            doc_title="",
+            freq_html=freq_html,
+            freq_rank=freq_sort,
+            pos_en="",
+            tags=tags,
+        )
+    return render_card_format(cfg.card_format, markers)
+
+
 def build_note(
     cfg: MineConfig,
     card: CardData,
@@ -367,23 +430,22 @@ def build_note(
     tags=(),
     *,
     allow_duplicate: bool = False,
+    markers: dict | None = None,
 ) -> dict:
     """Assemble the AnkiConnect note dict from card data + media filenames. ``tags`` are extra per-card
     tags (source/episode) added to the config's static tags. ``allow_duplicate`` lets an explicit
-    "add anyway" mine a second card for an expression already in the deck (a different scene)."""
-    values = {
-        "expression": card.expression,
-        "reading": card.reading,
-        "sentence": sentence_html,
-        "glossary": card.glossary_html,
-        "picture": f'<img src="{picture}">' if picture else "",
-        "audio": f"[sound:{audio}]" if audio else "",
-        "misc": misc,
-        "id": card.idseq,
-        "freq": freq_html,
-        "freq_sort": freq_sort,
-    }
-    note_fields = {real: values.get(logical, "") for logical, real in cfg.fields.items()}
+    "add anyway" mine a second card for an expression already in the deck (a different scene).
+
+    ``markers`` is the full ``{marker} -> value`` map for the ``[mine.card_format]`` path — the miner
+    builds it (it has the token/dict/video the pitch/pos/title markers need). Omitted, that path falls
+    back to a partial map from these args (pitch/pos/title empty), so ``build_note`` stays usable alone."""
+    if cfg.card_format:
+        note_fields = _card_format_fields(
+            cfg, card, sentence_html, picture, audio, misc, freq_html, freq_sort, tags, markers
+        )
+    else:
+        values = _entity_values(card, sentence_html, picture, audio, misc, freq_html, freq_sort)
+        note_fields = {real: values.get(logical, "") for logical, real in cfg.fields.items()}
     note_fields.update(cfg.flags)
     all_tags = list(dict.fromkeys(list(cfg.tags) + list(tags)))  # dedupe, keep order
     return {

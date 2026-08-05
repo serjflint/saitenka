@@ -361,21 +361,37 @@ def check_anki(deck: str, model: str) -> Check:
     return Check("anki", "ok", f"{detail}; mining deck+note type present")
 
 
+def _card_format_marker_problem(card_format: dict) -> str | None:
+    """Unknown ``{marker}`` in a ``[mine.card_format]`` template — a marker Saitenka can't fill, so the
+    field would render empty. Doesn't need Anki (a pure marker-name check)."""
+    from overlay.app.card_markers import MARKERS, markers_in
+
+    used = {m for tmpl in card_format.values() for m in markers_in(str(tmpl))}
+    unknown = sorted(used - MARKERS)
+    return f"uses unknown [mine.card_format] marker(s) {unknown}" if unknown else None
+
+
 def _mining_field_problem(model: str) -> str | None:
-    """The mismatch (if any) between the effective mining field map and ``model``'s real fields: the
-    configured field names absent from the note type. ``None`` when they all exist, or when the fields
-    can't be read (so validation is skipped rather than guessed). Warn-level — an unknown field just
-    writes nothing (and is dropped at build time), it doesn't crash mining."""
+    """The mismatch (if any) between the effective mining fields and ``model``'s real fields: configured
+    field names absent from the note type, or an unknown ``card_format`` marker. ``None`` when all is
+    well, or the fields can't be read (skip rather than guess). Warn-level — an unknown field/marker just
+    writes nothing (fields are dropped at build time), it doesn't crash mining. The effective field names
+    are ``card_format``'s keys when it's set (it wins wholesale, #192), else the ``fields`` map values."""
     from overlay.app.reader_deps import _mine_config_from
 
-    fields_map = _mine_config_from(load_config().get("mine") or {}).fields
+    mine_conf = _mine_config_from(load_config().get("mine") or {})
+    if mine_conf.card_format and (problem := _card_format_marker_problem(mine_conf.card_format)):
+        return problem  # marker names need no Anki call — report first
+    field_names = (
+        set(mine_conf.card_format) if mine_conf.card_format else set(mine_conf.fields.values())
+    )
     try:
         real = set(_anki_call("modelFieldNames", modelName=model) or [])
     except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
         return None  # a transient read failure must skip validation, not crash the doctor run
     if not real:
         return None
-    missing = sorted({name for name in fields_map.values() if name not in real})
+    missing = sorted(name for name in field_names if name not in real)
     return f"is missing mining field(s) {missing}" if missing else None
 
 

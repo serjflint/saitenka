@@ -111,6 +111,16 @@ def test_mining_preset_supplies_map_and_marker(monkeypatch):
     assert mine_conf.flags == {"IsWordAndSentenceCard": "1"}
 
 
+def test_mining_reads_card_format_from_config(monkeypatch):
+    import overlay.app.anki as anki_mod
+
+    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
+    _, _, mine_conf, _ = reader_deps.build_reader_deps(
+        {"mine": {"card_format": {"Word": "{expression}", "Reading": "{furigana}"}}}, color=False
+    )
+    assert mine_conf.card_format == {"Word": "{expression}", "Reading": "{furigana}"}
+
+
 def test_mining_validation_drops_field_absent_from_note_type(monkeypatch):
     """A configured field that the note type doesn't have is dropped (+warned), so mining still
     writes a valid note rather than failing on the unknown field."""

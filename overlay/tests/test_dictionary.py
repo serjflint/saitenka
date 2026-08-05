@@ -840,6 +840,27 @@ def test_dictionary_set_populates_freq_and_pitch_pills(tmp_path):
     assert ("Pitch", "ほんめい [0]", PITCH_COLOR) in kinds
 
 
+def test_pitch_field_returns_html_and_positions(tmp_path):
+    # #192: the mined-card {pitch-accents}/{pitch-accent-positions} markers, mirroring frequency_field
+    pz = _make_meta(
+        tmp_path / "p.zip",
+        "Pitch",
+        "pitch",
+        [["本命", {"reading": "ほんめい", "pitches": [{"position": 0}, {"position": 2}]}]],
+    )
+    ds = dicthelp.load_set([], pitch_zips=[pz])
+    tok = Token(surface="本命", lemma="本命", reading="ほんめい", pos="名詞", start=0, end=2)
+    html, positions = ds.pitch_field(tok)
+    assert "ほんめい" in html and "[0]" in html and "[2]" in html
+    assert positions == "0, 2"
+
+
+def test_pitch_field_empty_when_no_pitch_source(tmp_path):
+    ds = dicthelp.load_set([_make_dict(tmp_path / "d.zip", "D", [["猫", "ねこ", ["cat"]]])])
+    tok = Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
+    assert ds.pitch_field(tok) == ("", "")
+
+
 @pytest.mark.timeout(30)
 def test_entry_cache_survives_concurrent_access_from_workers(tmp_path):
     """_entry_from_row runs on the main thread AND every prefetch worker at once (free-threaded build),

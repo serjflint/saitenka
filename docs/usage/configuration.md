@@ -105,6 +105,28 @@ reading    = "Reading"
 lacks (those values would silently go nowhere); unknown fields are also dropped at mine time so the
 note still adds.
 
+**Field templates (`[mine.card_format]`).** For full control — Yomitan's model — give each note field a
+template of `{marker}` tokens instead of a single entity. When present it **wins wholesale** over
+`[mine.fields]` (only the fields you list here are written; the entity map is ignored), so one field can
+combine markers and one marker can fill several fields:
+
+```toml
+[mine.card_format]
+Word     = "{expression}"
+Reading  = "{furigana}"
+Sentence = "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}"
+Pitch    = "{pitch-accents}"
+Image    = "{screenshot}"
+```
+
+Available markers (all filled from real data — nothing fabricated): `expression`, `reading`,
+`furigana` (Anki `漢字[かんじ]` form), `glossary`, `glossary-plain`, `sentence`, `cloze-prefix`,
+`cloze-body`, `cloze-suffix`, `screenshot`, `sentence-audio`, `frequencies`, `frequency-rank`,
+`pitch-accents`, `pitch-accent-positions`, `part-of-speech`, `document-title`, `misc`, `ent-seq`,
+`tags`. `saitenka doctor` warns about a `{marker}` Saitenka can't fill (it would render empty) and about
+a field name the note type lacks. Not yet supported (named so you're not surprised by a blank field):
+word `audio` (sentence audio only for now), `pitch-accent-graphs`, and `sentence-furigana`.
+
 **Animated (motion) screenshots.** `animated_screenshot = true` captures a short animated clip of the
 scene as the card image instead of a still frame — the scene reads better in motion and pairs with the cue
 audio you already clip. It's opt-in (larger media + an extra ffmpeg pass). It prefers WebP (small and
