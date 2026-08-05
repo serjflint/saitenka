@@ -24,6 +24,8 @@ jobs:
   e2e:
     if: github.event_name != 'pull_request'
     name: e2e (${{ matrix.os }})
+    permissions:
+      contents: write # the Linux GUI tier auto-pushes the jank result to gh-pages
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +69,30 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: overlay
         run: xvfb-run -a uv run poe smoke-live
+
+      # Live-mpv jank harness (#32/#33): poll mpv's own frame-drop counters while driving the overlay —
+      # the true real-time signal. `poe jank-live` fails past --max-drops (catastrophic-jank gate).
+      - name: Live jank harness (Linux/Xvfb, real mpv)
+        if: runner.os == 'Linux'
+        working-directory: overlay
+        run: xvfb-run -a uv run poe jank-live
+
+      # Track the jank totals on the SAME gh-pages dashboard as the render bench (second series). Only
+      # on the non-PR GUI tier (weekly/tag/dispatch) → auto-push (store) mode; matches perf.yml's rule.
+      - name: Store jank result
+        if: runner.os == 'Linux'
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        with:
+          name: Saitenka live jank
+          tool: customSmallerIsBetter
+          output-file-path: overlay/jank-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "200%"
+          comment-on-alert: true
+          fail-on-alert: false
 
   windows-regressions:
     if: github.event_name == 'pull_request'

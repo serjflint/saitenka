@@ -303,8 +303,9 @@ def prewarm(
 
     ``atlas_only`` fills ONLY the mask atlas (every word rasters → its glyphs/words land in the atlas) and
     NEVER touches the render cache — so ``--limit 0`` can saturate the atlas over the whole corpus without
-    growing the byte-ceiling-bounded render cache. Not incremental (the atlas has no per-word probe), but
-    idempotent.
+    growing the byte-ceiling-bounded render cache. Resumable + idempotent: a per-word
+    ``done(scale, word)`` ledger skips words rastered at this scale, so a stopped ``--limit 0``
+    re-run resumes where it left off (scoped by scale — 1.5 masks ≠ 2.0 masks).
 
     ``atlas_scale`` > 1.0 ALSO rasters each word's native-scale panel so its ``size×scale`` glyph masks
     land in the MASK ATLAS (CJK/Latin glyphs) — match it to ``[tooltip] tip_scale`` so the hi-dpi crisp
