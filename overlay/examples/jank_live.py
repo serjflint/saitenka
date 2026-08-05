@@ -96,9 +96,13 @@ def run(*, settle_s: float = 0.4) -> dict:
         ox, oy = reader.sub_origin
         cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
 
-        sample("baseline")  # playback only, no overlay
+        # Sustained playback with the subtitle overlay drawn — the primary signal: does compositing our
+        # overlay drop frames while video advances? (≈0 on fast HW; Xvfb software rendering in CI is more
+        # sensitive.) The interaction steps below mostly read ≈0 BY DESIGN — saitenka's pause-lease pauses
+        # playback on hover, so the VO isn't advancing frames to drop.
+        sample("baseline")
 
-        ipc.command("mouse", cx, cy)  # hover → tooltip composites
+        ipc.command("mouse", cx, cy)  # hover → tooltip composites (pause-lease engages)
         sample("hover")
 
         for _ in range(4):  # scroll the tooltip — repeated OSD re-uploads, the scroll-jank path

@@ -21,6 +21,12 @@ DEMO_LINE = "門前の小僧習わぬ経を読む"
 class MiniDS:
     """A trivial dict so a tooltip renders — the live tier is about the input/render path, not content."""
 
+    # Empty collections so the render-cache signature path (dict_set_signature) works when a cache file
+    # is present on disk (the cold-paint path); a fresh CI runner has none, but a dev machine does.
+    dicts = ()
+    freqs = ()
+    pitches = ()
+
     def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # match DictionarySet
         from overlay.panel import Definition, Entry
 
