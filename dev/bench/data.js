@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785916783096,
+  "lastUpdate": 1785917123258,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -35,6 +35,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.215,
             "range": "±8.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "55cd10730c4859ccc83db4d2048c9abfb8093804",
+          "message": "test(coverage): assert the benchmark scenario signals that had no conventional test (#181)\n\nA coverage audit of the benchmark scenarios against the suite found the render/cache/\ninteraction seams thoroughly covered (pixel-identity + picking-oracle + concurrency\ninvariants), with four genuine holes — signals a benchmark headlines but nothing asserted:\n\n- scroll_frame.jank counter (the --scroll-jank headline): bumps only past the threshold.\n- subtitle_render span: emitted (was produced, never asserted).\n- tip_compose `kind` attribute: base/nested/clicked classification pinned.\n- the --stress chain (show→scroll→nested→scroll→dismiss) as ONE accumulating session\n  through the REAL hit-test path (_hit/_scan_hit) — test_stress.py runs the same chain\n  but via direct entry points, bypassing hit-testing.",
+          "timestamp": "2026-08-05T11:04:42+03:00",
+          "tree_id": "8c60427561aee2b3497802d6df7850934391cbee",
+          "url": "https://github.com/serjflint/saitenka/commit/55cd10730c4859ccc83db4d2048c9abfb8093804"
+        },
+        "date": 1785917122305,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.928,
+            "range": "±3.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.013,
+            "range": "±11.8%",
             "unit": "ms"
           }
         ]
