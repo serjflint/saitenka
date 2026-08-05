@@ -112,6 +112,8 @@ module's scenario map is enumerated, not at module triage. repowise steers SELEC
    pinned, a bug caught, a robustness/observability gap surfaced). One gap, evidence-carrying body (see
    *PR body*). Human merges.
 7. **Record** the outcome in the ledger, including *what was deliberately left unclosable and why*.
+8. **Reflect** on the LOOP (every run — see *Self-reflection*): an isolated agent introspects the run
+   trace, files loop-improvement proposals, and escalates recurring ones. Advisory; never self-modifies.
 
 ### Product bugs (green-trunk policy)
 
@@ -205,6 +207,31 @@ Status (`grow_ledger.status`): **unseen** / **open** / **closed-current** (a tes
 re-examines) / **unclosable** (recorded infeasible → SKIP). A closed gap stays closed under unrelated churn
 and reopens ONLY when its own target symbol changes. Any shippable state additionally requires a valid
 `review` block (see *Fidelity* in `ADAPTERS.md`); without one the run is a `dry-run`.
+
+## Self-reflection — every run introspects the LOOP (`overlay/tools/grow_reflect.py`)
+
+The loop's own thesis applied to itself: a green run proves nothing about whether the LOOP is any good. Both
+dogfood runs found real loop-design bugs the design docs missed (run 1 → 8 flaws under adversarial review;
+run 2 → the arm-1/arm-3 composition bug). So the final phase of *every* run — bounced, dropped, or
+no-candidate included, those are the richest lessons — is a **`Reflect`** step:
+
+- **Isolated + evidence-based.** A fresh agent (it did not run the loop) receives only the factual **run
+  trace** — which arms ran / bounced / were n-a, retries, review verdicts, outcome, notes — and reasons
+  from it. It **introspects** (what happened), **reflects** (what about the LOOP was wrong / inefficient /
+  suboptimal — a false-bounce, a false-pass, an n-a arm that should apply, an inverted triage signal, a slow
+  stage, a CLI that couldn't express what was needed, a fidelity gap), and **improves** (the smallest
+  concrete change to a loop TOOL/SPEC/harness). If the run was clean it files NOTHING (anti-Goodhart — no
+  manufactured findings).
+- **Advisory, never self-modifying.** It writes only `.reflection.grow.jsonl`; it MUST NOT edit any tool /
+  spec / harness / product file. Self-modification is strictly more dangerous than the loop's test edits
+  (which already never auto-merge) — a human triages every proposal. A proposal touching the reflection
+  machinery itself is flagged `self_referential` for extra scrutiny.
+- **Recurrence + escalation, versioned.** A finding's identity is `hash(category, subject)`; recurrence is
+  counted at the current `loop_version` (manifest, mirrors Sharpen's `toolset_version`). A finding seen
+  ≥ threshold (2) is **escalated** to the human. When a human lands a loop-improvement they bump
+  `loop_version`, which resets the accumulation — a finding that outlives the fix re-escalates; one truly
+  fixed goes quiet. This is the *inner* loop; the *outer* "grill the loop" reflection (re-derive the arm/
+  signal set from scratch, A/B before adopting) mirrors Sharpen's and also bumps `loop_version`.
 
 ## Cadence & cost
 

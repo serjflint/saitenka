@@ -9,6 +9,7 @@ export const meta = {
     { title: 'Skeptic' },
     { title: 'Judge' },
     { title: 'Record' },
+    { title: 'Reflect' },
   ],
 }
 
@@ -23,10 +24,15 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 2 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 3 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
+
+// The run TRACE — a factual record of what the loop actually did this run, fed to the Reflect phase so it
+// introspects on evidence, not vibes. Populated as the run proceeds; every terminal exit flows through
+// finish() so a bounced / dropped / no-candidate run reflects too (those are the richest lessons).
+const trace = { gap: null, retries: 0, gate: null, review: null, outcome: null, notes: [] }
 
 // Worktree-safe: launch from a dedicated git worktree so executor edits can't touch the live tree. Every
 // executor operates on paths RELATIVE to its inherited cwd — an absolute path would escape the worktree.
@@ -142,6 +148,36 @@ const RECORD = {
   },
 }
 
+const REFLECT_CATEGORIES = [
+  'gate-composition', 'arm-limitation', 'triage-signal', 'discovery', 'cli-ergonomics',
+  'cost-latency', 'review-fidelity', 'false-bounce', 'false-pass', 'other',
+]
+
+const REFLECTION = {
+  type: 'object', additionalProperties: false,
+  required: ['introspection', 'findings', 'appended', 'escalations'],
+  properties: {
+    introspection: { type: 'string', description: 'plainly what the loop did this run, from the trace' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['category', 'subject', 'severity', 'evidence', 'proposal', 'self_referential'],
+        properties: {
+          category: { type: 'string', enum: REFLECT_CATEGORIES },
+          subject: { type: 'string', description: 'the loop weakness, stable across runs (the recurrence key)' },
+          severity: { type: 'string', enum: ['low', 'medium', 'high'] },
+          evidence: { type: 'string', description: 'the trace signal(s) that show it — never a guess' },
+          proposal: { type: 'string', description: 'smallest concrete change to a loop tool/spec/harness' },
+          self_referential: { type: 'boolean', description: 'true if it touches the reflection machinery itself → extra human scrutiny' },
+        },
+      },
+    },
+    appended: { type: 'boolean', description: 'the findings were written to .reflection.grow.jsonl' },
+    escalations: { type: 'array', items: { type: 'string' }, description: 'subjects at recurrence ≥ 2 (human triages)' },
+  },
+}
+
 // --- run -------------------------------------------------------------------------------------------
 
 phase('Select')
@@ -155,9 +191,11 @@ const gap = await agent(
 
 if (!gap || !gap.found) {
   log(`No live gap to grow — ${gap ? gap.reason : 'triage failed'}`)
-  return { done: false, reason: gap ? gap.reason : 'triage failed', openPr: OPEN_PR }
+  trace.notes.push(`no live candidate: ${gap ? gap.reason : 'triage failed'}`)
+  return await finish({ done: false, reason: gap ? gap.reason : 'triage failed', openPr: OPEN_PR })
 }
 log(`gap: ${gap.target_symbol} [${gap.kind}] "${gap.dimension}" (${gap.status}) — ${gap.reason}`)
+trace.gap = { target_symbol: gap.target_symbol, kind: gap.kind, dimension: gap.dimension, module: gap.module, status: gap.status }
 
 // Fail-closed: only open a PR if the open-PR exclusion actually ran (SPEC → never grow a module with an
 // open feature branch). If triage couldn't check it, force a dry-run.
@@ -194,9 +232,11 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   if (proposal.red_on_pristine) {
     log(`grown test is RED on pristine code → latent bug (outcome class 2): ${proposal.reason ?? 'see proposal'}`)
     await revert(proposal)
+    trace.notes.push('red-on-pristine → filed a product bug (outcome class 2)')
     const rec = await recordOutcome('filed', null, null, 'bug',
       `Grown test for "${gap.dimension}" went red on pristine code — a real defect. Author note: ${proposal.reason ?? '(see diff)'}. File a product issue; do not land the assertion green (green-trunk).`)
-    return { done: true, target: gap.target_symbol, state: rec?.state ?? 'filed', outcome: 'bug', openPr: OPEN_PR }
+    trace.outcome = rec?.state ?? 'filed'
+    return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? 'filed', outcome: 'bug', openPr: OPEN_PR })
   }
 
   phase('Objective gate')
@@ -218,7 +258,9 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `pass (scenario) = additive_only AND liveness_pass AND (growth_pass OR context_pass) — arm-1 and arm-3 are ALTERNATIVE proofs of genuine growth (a killed scenario-mutant OR a newly-lit line); requiring BOTH would reject a covered-but-under-specified branch gap arm-1 proves but line-level arm-3 misses. A scenario gap with NEITHER arm-1 nor arm-3 → BOUNCE (no growth proof). pass (concurrency) = additive_only AND concurrency_pass. arms_run lists the arms actually executed. Quote every BOUNCE line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
-  if (gate && gate.pass) break
+  trace.retries = attempt
+  if (gate && gate.pass) { trace.gate = gate; break }
+  trace.gate = gate
   carry = gate ? gate.report : 'gate execution failed'
   log(`attempt ${attempt} bounced: ${carry.split('\n')[0]}`)
   await revert(proposal)
@@ -226,9 +268,11 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 }
 
 if (!proposal || !gate || !gate.pass) {
+  trace.notes.push(`objective gate never cleared in ${MAX_RETRIES} attempts; last bounce: ${carry}`)
   const rec = await recordOutcome('unclosable', null, null, null,
     `No grown test cleared the objective gate in ${MAX_RETRIES} attempts. Last bounce: ${carry}`)
-  return { done: true, target: gap.target_symbol, state: rec?.state ?? 'unclosable', openPr: OPEN_PR }
+  trace.outcome = rec?.state ?? 'unclosable'
+  return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? 'unclosable', openPr: OPEN_PR })
 }
 
 phase('Skeptic')
@@ -269,15 +313,18 @@ const review = {
   judge_verdict: judge?.verdict ?? null,
   verdict,
 }
+trace.review = review
 
 phase('Record')
 if (verdict !== 'UPHELD') {
   const refuter = skeptic?.verdict === 'REFUTED' ? skeptic : judge
   await revert(proposal)
+  trace.notes.push(`review dropped the change (${judgeNote})`)
   const rec = await recordOutcome('dry-run', null, review, null,
     `Review dropped the change (${judgeNote}). Grounds: ${JSON.stringify(refuter?.grounds ?? [])}. ` +
     `Redundant with: ${refuter?.redundant_with ?? 'n/a'}. Better fix (separate authorization; never applied here): ${JSON.stringify(refuter?.better_fix ?? null)}`)
-  return { done: true, target: gap.target_symbol, state: 'dry-run', verdict, openPr: OPEN_PR }
+  trace.outcome = 'dry-run'
+  return await finish({ done: true, target: gap.target_symbol, state: 'dry-run', verdict, openPr: OPEN_PR })
 }
 
 if (!canOpenPr) {
@@ -287,9 +334,46 @@ if (!canOpenPr) {
   await revert(proposal)
 }
 const rec = await recordOutcome(canOpenPr ? 'closed' : 'dry-run', proposal, review, 'coverage-only', null)
-return { done: true, target: gap.target_symbol, state: rec?.state ?? (canOpenPr ? 'closed' : 'dry-run'), pr: rec?.pr_url ?? null, openPr: OPEN_PR }
+trace.outcome = rec?.state ?? (canOpenPr ? 'closed' : 'dry-run')
+return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? (canOpenPr ? 'closed' : 'dry-run'), pr: rec?.pr_url ?? null, openPr: OPEN_PR })
 
 // --- helpers ---------------------------------------------------------------------------------------
+
+// The Reflect phase: an ISOLATED agent introspects the run TRACE, reflects on what was wrong / inefficient
+// about the LOOP ITSELF, and files improvement proposals to `.reflection.grow.jsonl` — ADVISORY only, it
+// NEVER edits the loop's tools (self-modification is more dangerous than the loop's test edits, which
+// already never auto-merge). It runs at EVERY terminal exit (a bounced / dropped / no-candidate run is the
+// richest lesson). See SPEC → Self-reflection.
+async function finish(result) {
+  phase('Reflect')
+  await agent(
+    `You are the Grow loop's SELF-REFLECTION agent — an INDEPENDENT introspector of the LOOP, not of the ` +
+    `grown test. You did not run the loop; reason ONLY from the factual run trace below. ${REL}\n\n` +
+    `RUN TRACE:\n${JSON.stringify(trace, null, 2)}\n\n` +
+    `Do THREE things:\n` +
+    `1. INTROSPECT — state plainly what the loop did this run (which arms ran/bounced/were n-a, retries, ` +
+    `review verdicts, outcome, any notes).\n` +
+    `2. REFLECT — was anything about the LOOP wrong, inefficient, or suboptimal? A false-bounce (a gate arm ` +
+    `rejected a legitimate grow), a false-pass, an arm that was n-a when it should apply, a weak/inverted ` +
+    `triage signal, a slow stage, a CLI that couldn't express what was needed, a review-fidelity gap. Be ` +
+    `adversarial toward the loop; cite trace signals as evidence. If the run was clean and revealed nothing, ` +
+    `file NOTHING — do not manufacture findings (anti-Goodhart).\n` +
+    `3. IMPROVE — for each real finding, the SMALLEST concrete change to a loop TOOL/SPEC/harness (never the ` +
+    `product code). Mark self_referential=true if the proposal touches the reflection machinery itself ` +
+    `(needs extra human scrutiny). category ∈ ${JSON.stringify(REFLECT_CATEGORIES)}; severity low|medium|high.\n\n` +
+    `Then APPEND each finding to the reflection ledger and report escalations. From ${CWD}/:\n` +
+    `- the ledger \`.reflection.grow.jsonl\` is at the repo root (parent of ${CWD}/); if absent, create it ` +
+    `with a manifest line \`{"type":"manifest","loop_version":1}\` first.\n` +
+    `- for each finding compute finding_id + read recurrence with \`tools/grow_reflect.py\` (import it), and ` +
+    `append a record {finding_id, run_id:${JSON.stringify(trace.gap?.target_symbol ?? 'no-candidate')}, ` +
+    `category, subject, severity, evidence, proposal, self_referential, loop_version:(manifest)}.\n` +
+    `- ADVISORY ONLY: do NOT edit any tool/spec/harness/product file; the ledger is the only write.\n` +
+    `- report any finding whose recurrence ≥ 2 at the current loop_version as an ESCALATION (the human ` +
+    `triages / a bump to loop_version marks it addressed). Do NOT open issues or PRs.`,
+    { phase: 'Reflect', schema: REFLECTION, label: 'reflect', effort: 'low' },
+  )
+  return result
+}
 
 async function revert(prop) {
   await agent(

@@ -25,6 +25,10 @@ context; otherwise fidelity is unproven and the run is `dry-run`.
 - **Author:** generation-capable; may edit the single target test file (ADDITIVE only — see below).
 - **Skeptic:** independent adversarial verifier; read-only except inspection commands.
 - **Judge:** second independent adversarial verifier; verification-capable, may use a cheaper model.
+- **Reflector:** independent introspector of the LOOP (not the test), runs at every terminal exit. Gets only
+  the factual run trace; writes ONLY `.reflection.grow.jsonl`. **Advisory — MUST NOT edit any tool / spec /
+  harness / product file** (self-modification guard). A proposal touching the reflection machinery itself
+  carries `self_referential=true` for extra human scrutiny.
 
 Semantic capability tiers, not provider model names. Run sequentially in one dedicated worktree; author,
 skeptic, and judge must be distinct invocations; a reviewer must not inherit the orchestrator conversation

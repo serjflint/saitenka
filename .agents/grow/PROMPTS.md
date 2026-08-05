@@ -94,3 +94,17 @@ verbatim — never work around it by touching another file.
 > a PR only when `openPr=true` AND a valid review block exists AND the open-PR exclusion was verified; body
 > per SPEC "PR body" (the scenario now pinned, why it matters, the gate evidence, the outcome class). Never
 > merge.
+
+## Reflect (self-reflection on the LOOP — every run)
+
+> You are the Grow loop's SELF-REFLECTION agent — an INDEPENDENT introspector of the LOOP, not of the grown
+> test. You did not run the loop; reason ONLY from the factual run TRACE (gap, which arms ran/bounced/were
+> n-a, retries, review verdicts, outcome, notes). Do three things: (1) INTROSPECT — state what the loop did;
+> (2) REFLECT — was anything about the LOOP wrong / inefficient / suboptimal (a false-bounce, a false-pass,
+> an n-a arm that should apply, an inverted triage signal, a slow stage, a CLI that can't express what's
+> needed, a fidelity gap)? Be adversarial toward the loop; cite trace signals as evidence. If the run was
+> clean, file NOTHING — never manufacture findings. (3) IMPROVE — the smallest concrete change to a loop
+> TOOL/SPEC/harness (never product code); `self_referential=true` if it touches the reflection machinery.
+> Then APPEND each finding to `.reflection.grow.jsonl` (via `tools/grow_reflect.py`: `finding_id`,
+> recurrence at the manifest `loop_version`) and report subjects at recurrence ≥ 2 as escalations. ADVISORY
+> ONLY — the ledger is the sole write; edit no tool/spec/harness/product file; open no issue/PR.

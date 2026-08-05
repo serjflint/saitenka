@@ -134,6 +134,17 @@ an isolated judge, each seeing only the factual *what* + the *diff*, never the a
 SycEval trap: a persuasive rationale *increases* sycophantic agreement). Every run records a review
 provenance block; no valid block ⇒ `dry-run`, never a PR. The maintainer approves every merge.
 
+## The loop reflects on itself — every run
+
+A green run says nothing about whether the *loop* is any good — the same reframe the loop applies to tests,
+turned on itself. So every run ends with a **Reflect** phase: an isolated agent reads the run's factual
+trace (which arms ran/bounced/were n-a, retries, review verdicts, outcome) and asks "what about the LOOP was
+wrong or inefficient here?" — filing concrete improvement proposals to `.reflection.grow.jsonl`. It is
+**advisory only**: it never edits the loop's own code (self-modification is more dangerous than the loop's
+test edits, which already never auto-merge — a human triages). Findings that recur across runs escalate; a
+landed loop-improvement bumps `loop_version` and resets the count. This is how the dogfooding that found the
+8 review flaws and the arm-1/arm-3 bug becomes a standing mechanism rather than a lucky accident.
+
 ## References
 
 - Design SSOT and full research provenance: `vibe/grow-loop-plan.md`, `vibe/research/grow-loop-research-*`.

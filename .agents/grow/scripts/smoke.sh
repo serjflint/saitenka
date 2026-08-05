@@ -31,9 +31,9 @@ ver = json.load(open(sys.argv[2], encoding="utf-8"))["version"]
 m = re.search(r"CONTRACT_VERSION\s*=\s*(\d+)", src)
 assert m, "harness.js has no CONTRACT_VERSION"
 assert int(m.group(1)) == ver, f"harness CONTRACT_VERSION {m.group(1)} != contracts.json version {ver}"
-for tok in ("grow_triage", "grow_gate", "grow_ledger"):
+for tok in ("grow_triage", "grow_gate", "grow_ledger", "grow_reflect"):
     assert tok in src, f"harness.js never invokes {tok}"
-for phase in ("Select", "Author", "Objective gate", "Skeptic", "Judge", "Record"):
+for phase in ("Select", "Author", "Objective gate", "Skeptic", "Judge", "Record", "Reflect"):
     assert phase in src, f"harness.js missing phase {phase!r}"
 PY
 if command -v node >/dev/null 2>&1; then
@@ -41,7 +41,7 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 # 4. The deterministic tools the harness orchestrates exist and their unit tests are present.
-for t in grow_gate.py grow_ledger.py grow_triage.py grow_contexts.py test_grow_gate.py test_grow_ledger.py test_grow_triage.py test_grow_contexts.py; do
+for t in grow_gate.py grow_ledger.py grow_triage.py grow_contexts.py grow_reflect.py test_grow_gate.py test_grow_ledger.py test_grow_triage.py test_grow_contexts.py test_grow_reflect.py; do
   [ -f "$root/overlay/tools/$t" ] || fail "missing overlay/tools/$t"
 done
 

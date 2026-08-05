@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "gap": {
     "type": "object",
     "additionalProperties": false,
@@ -113,6 +113,32 @@
       "pr_url": {"type": ["string", "null"]},
       "filed_issues": {"type": "array", "items": {"type": "string"}},
       "note": {"type": "string"}
+    }
+  },
+  "reflection": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["introspection", "findings", "appended", "escalations"],
+    "properties": {
+      "introspection": {"type": "string", "description": "plainly what the loop did this run, from the trace"},
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category", "subject", "severity", "evidence", "proposal", "self_referential"],
+          "properties": {
+            "category": {"type": "string", "enum": ["gate-composition", "arm-limitation", "triage-signal", "discovery", "cli-ergonomics", "cost-latency", "review-fidelity", "false-bounce", "false-pass", "other"]},
+            "subject": {"type": "string", "description": "the loop weakness, stable across runs (the recurrence key)"},
+            "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+            "evidence": {"type": "string", "description": "the trace signal(s) that show it — never a guess"},
+            "proposal": {"type": "string", "description": "smallest concrete change to a loop tool/spec/harness (never product code)"},
+            "self_referential": {"type": "boolean", "description": "true if it touches the reflection machinery itself → extra human scrutiny"}
+          }
+        }
+      },
+      "appended": {"type": "boolean", "description": "findings written to .reflection.grow.jsonl"},
+      "escalations": {"type": "array", "items": {"type": "string"}, "description": "subjects at recurrence >= 2 (human triages)"}
     }
   }
 }
