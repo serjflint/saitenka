@@ -33,22 +33,32 @@ verbatim — never work around it by touching another file.
 > pristine code — if it goes red, you have found a real defect: set `red_on_pristine=true`, describe it,
 > and STOP (do not massage it green; the harness routes it to a product issue).
 >
+> For a SCENARIO gap you MUST also supply a one-line scenario-encoding mutation of the CUT
+> (`mutant_find` → `mutant_replace`, `mutant_find` occurring exactly once) that your test KILLS and the
+> existing suite SURVIVES — this is arm-1, non-optional (without it the gate proves only dead-config, not
+> growth over covered code). For a CONCURRENCY gap, ship the PASSING pair and set `regression_node`,
+> `control_node`, `control_test`.
+>
 > Return the additive diff, `test_name`, `target_func` (the production symbol it exercises), `cut_module`
-> (its dotted path), and a named proposal list. If there is genuinely nothing worth growing, return
-> `applied=false` with the reason — never fabricate a vacuous test.
+> (dotted path), `cut_file` (repo-relative CUT path), and a named proposal list. If there is genuinely
+> nothing worth growing, return `applied=false` with the reason — never fabricate a vacuous test.
 
 ## Objective gate (deterministic — no judgment)
 
 > Run the deterministic Grow gate on the author's edit; report the tool output VERBATIM. From `overlay/`:
-> First, additive check — `uv run python tools/sharpen_gate.py anticheat {test_file} --cut {cut_module}
-> --repo .` must report ONLY added asserts (any `removed`/`weakened` ⇒ mutative ⇒ Sharpen scope ⇒ bounce).
+> First, the additive boundary — `uv run python tools/grow_gate.py additive {test_file} --repo .` must
+> report ONLY added asserts (any altered/removed ⇒ mutative ⇒ Sharpen scope ⇒ bounce). Do NOT use
+> `sharpen_gate anticheat` — it misses same-tier value changes (review C4).
 > Then the applicable arms of `tools/grow_gate.py`:
-> - `scenario` gap: `liveness {test_file} --test {test_name} --repo .` (≥1 live assert, no trivial/dead)
->   AND `context --cut src/overlay/{module} --old {existing tests} --new {existing tests + the grown test}
->   --repo .` (a newly-lit line) AND, when a property mutant encodes the scenario, `growth ...`
->   (survives-old + killed-new).
-> - `concurrency` gap: `concurrency --regression {reg test} --control {control test} --repo .` (regression
->   passes, negative control fails).
+> - `scenario` gap (all three): `liveness {test_file} --test {test_name} --repo .` (≥1 live assert or a
+>   `pytest.raises` block, no trivial/dead) AND `context --cut {cut_file} --old {existing tests} --new
+>   {existing tests} {test_file} --deselect {test_file}::{test_name} --repo .` (a newly-lit line; --deselect
+>   keeps the grown test OUT of the old baseline) AND `growth-adhoc --cut {cut_file} --find {mutant_find}
+>   --replace {mutant_replace} --old {existing tests} --new {existing tests} {test_file} --repo .`
+>   (old SURVIVES, grown test KILLS) — **arm-1 is non-optional; a scenario grow with no mutant BOUNCES.**
+> - `concurrency` gap: `liveness` on the CONTROL test first (its oracle must be live), then `concurrency
+>   --regression {reg node} --control {control node} --control-file {control file} --control-test {name}
+>   --repo .` (both PASS, control oracle live).
 > `pass` = additive-only AND every applicable arm clean; quote every BOUNCE line.
 
 ## Skeptic (isolated adversarial verifier)

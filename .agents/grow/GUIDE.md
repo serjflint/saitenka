@@ -52,10 +52,14 @@ The canonical Grow artifact in this repo is `overlay/tests/test_tooltip_statemac
 test (`test_scale_boundary.py`) already proves the render↔hit-test **agreement oracle** for one action:
 every drawn element's displayed centre round-trips back to that element through the real hit path. Grow
 made it **stateful** — a `RuleBasedStateMachine` drives the real controller through arbitrary
-`hover / scroll / navigate / back / open_nested / resize` sequences and asserts, after *every* step, that
-the oracle still holds and the model matches the impl. That catches the interaction regressions a
-single-action test can't. It ships with a permanent negative control (`test_the_agreement_oracle_has_teeth`)
-that proves a deliberately-drifted transform *does* mis-hit — so the invariant is falsifiable, not vacuous.
+`hover / scroll / navigate / back / open_nested / resize` sequences and asserts, after *every* step, the
+model matches the impl, the **one-panel invariant** holds (`hit_target`'s panel *is* the drawn panel — the
+guard against a reintroduced two-panel split), and the transform round-trips. Honest scope: the round-trip
+is self-consistent by construction (it reads the panel from `hit_target` for both sides), so it proves the
+inverse transform and cross-transition state coherence — a back-stack that restored scroll but not its
+panel, a resize that missed the hit path — *not* pixel-vs-panel drift; the one-panel invariant, not the
+round-trip, is what catches a second draw-panel. It ships a permanent negative control
+(`test_the_agreement_oracle_has_teeth`) proving a deliberately-drifted transform *does* mis-hit.
 
 The other worked artifact is `overlay/tests/test_cache_race.py`: a `blanket`-scripted deterministic
 regression for a cache eviction race, with a negative control that fails against the unguarded variant.
@@ -78,12 +82,14 @@ subprocess (`tools/test_grow_gate.py`).
 - **Arm 3 — context-delta (newly-exercised).** The grown test must light a `coverage.py` line the existing
   suite never ran — the dead-configuration detector. Necessary but not sufficient alone: reaching a line
   isn't checking it (that's arms 1–2).
-- **Arm 4 — concurrency (race fails-on-bug, passes-on-fix).** A race has no coverage-delta and no ordinary
-  mutant. Instead the grown test ships as a *pair*: a regression that passes against the guarded code, and
-  a negative control that fails against the unguarded variant. `blanket` (MIT, out-of-process tooling)
-  scripts the exact thread interleaving via a bytecode injector, so the race is *deterministic* — no
-  stochastic stress that flakes 1-in-200. Because `blanket` controls the schedule, the logical race
-  reproduces even under the GIL, so the gate needs no special build.
+- **Arm 4 — concurrency (race reproduces unguarded, prevented guarded).** A race has no coverage-delta and
+  no ordinary mutant. Instead the grown test ships as a *pair of passing tests*: a regression (the guard
+  prevents the bug under a forced schedule) and a self-certifying negative control that unguards a throwaway
+  instance and asserts the bug *does* reproduce. The teeth are the control's own falsifiable assertion — a
+  passing control with a live oracle proves the schedule reproduces the bug when unguarded — so arm-2
+  liveness is run on the control to confirm it. `blanket` (MIT, out-of-process tooling) scripts the exact
+  thread interleaving via a bytecode injector, so the race is *deterministic* — no stochastic stress that
+  flakes 1-in-200 — and because it controls the schedule, the logical race reproduces even under the GIL.
 
 ## Discovery — where the loop points first
 

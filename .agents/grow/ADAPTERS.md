@@ -34,9 +34,11 @@ or another role's context.
 
 The author may only ADD assertions/tests — append a `PROFILES`/`ENTRY_FACTORIES` row, a `parametrize`
 case, an `@example`, or a new test function/file. It must NOT alter or remove an existing assertion; that
-is Sharpen's job. The gate enforces this deterministically: `sharpen_gate.anticheat_diff` over the edit
-must report *only* added assert-nodes (no `removed`/`weakened`). A proposal that mutates an existing assert
-is out of scope → route to Sharpen, record `left-unclosable: ["mutative — Sharpen scope"]`.
+is Sharpen's job. The gate enforces this deterministically with `grow_gate.py additive` — a real adds-only
+assert-node diff: every before-assert must still be present after, so any altered/removed node ⇒ MUTATIVE ⇒
+bounce. **Do NOT use `sharpen_gate.anticheat_diff` for this** — it only flags a specificity *drop*, so a
+same-tier value change (`== 1` → `== 2`) slips past as 'additive' (review C4). A mutative proposal routes to
+Sharpen, recorded `left-unclosable: ["mutative — Sharpen scope"]`.
 
 ## Review payload and decision
 
@@ -60,9 +62,15 @@ copy `skeptic_verdict` into `verdict` without applying the judge result.
 
 Unlike Sharpen's fixed two arms, Grow runs the arms **applicable to the gap's kind** (`grow_gate`
 subcommands):
-- ordinary scenario/config gap → `liveness` (always) + `context` (CUT + old/new suite cmds) + `growth`
-  (a property mutant, when one encodes the scenario);
-- concurrency gap → `concurrency` (a paired regression + negative control) INSTEAD of 1–3.
+- **scenario/config gap** → `liveness` (always) + `context` with `--deselect <grown-test-node>` (so an
+  extend-before-add edit's grown test is excluded from the OLD baseline, else the delta collapses to ∅) +
+  `growth-adhoc` (an author-supplied one-line CUT mutant the test must kill / old suite must survive) —
+  **arm-1 is non-optional for a scenario gap**: without it the gate proves only dead-config, not growth
+  over covered code (review C2). `growth` (cosmic-ray) is used instead when the module is a `poe mutate`
+  target.
+- **concurrency gap** → `concurrency` INSTEAD of 1–3: a pair of PASSING tests (regression + a
+  self-certifying negative control), plus arm-2 `liveness` run on the CONTROL to confirm its oracle is
+  live (that is what gives the passing control teeth — review C6).
 
 The harness selects arms from the gap kind and records which arms ran and which were `n/a` in
 `axes_not_applied` (the guard against a silent no-run).

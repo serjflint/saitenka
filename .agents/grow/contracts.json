@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "gap": {
     "type": "object",
     "additionalProperties": false,
@@ -21,14 +21,20 @@
   "proposal": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["applied", "test_file", "cut_module", "target_func", "diff", "proposals"],
+    "required": ["applied", "test_file", "cut_module", "cut_file", "target_func", "test_name", "diff", "proposals"],
     "properties": {
       "applied": {"type": "boolean", "description": "the ADDITIVE edit was written to the test file"},
       "test_file": {"type": "string", "description": "edited test path, repo-relative"},
-      "cut_module": {"type": "string", "description": "dotted code-under-test module (for anti-cheat cut-derived)"},
+      "cut_module": {"type": "string", "description": "dotted code-under-test module"},
+      "cut_file": {"type": "string", "description": "CUT path relative to repo (src/overlay/...) — for context/growth-adhoc"},
       "target_func": {"type": "string", "description": "the production symbol the grown test exercises (scopes arm-1 replay)"},
-      "test_name": {"type": "string", "description": "the grown test function name (for arm-2 liveness)"},
+      "test_name": {"type": "string", "description": "the grown test function name (arm-2 liveness / --deselect node)"},
       "red_on_pristine": {"type": "boolean", "description": "the grown test FAILS on unmutated code → outcome-class-2 latent bug, not a coverage grow"},
+      "mutant_find": {"type": ["string", "null"], "description": "arm-1 (scenario): exact CUT snippet to mutate (occurs once); the grown test must KILL it, the old suite SURVIVE it"},
+      "mutant_replace": {"type": ["string", "null"], "description": "arm-1 (scenario): the scenario-violating replacement"},
+      "regression_node": {"type": ["string", "null"], "description": "arm-4 (concurrency): regression test node id"},
+      "control_node": {"type": ["string", "null"], "description": "arm-4 (concurrency): negative-control test node id"},
+      "control_test": {"type": ["string", "null"], "description": "arm-4 (concurrency): control test function name (for its liveness check)"},
       "diff": {"type": "string", "description": "unified diff of the ADDITIVE test edit"},
       "reason": {"type": ["string", "null"], "description": "why no edit was applied"},
       "proposals": {

@@ -48,10 +48,19 @@ in `tools/test_grow_gate.py`.
 
 | # | Arm | Proves | Mechanism |
 |---|-----|--------|-----------|
-| 1 | **property-mutant** | load-bearing + genuine growth | a scenario-encoding mutant must be KILLED by the grown test AND have SURVIVED the existing suite (survives-old ⇒ not redundant). Reuses `sharpen_gate` cosmic-ray replay. |
-| 2 | **oracle-liveness** | falsifiable, not vacuous | negate the grown test's OWN asserts one at a time → each must flip it red; a static trivial-check rejects `assert True` / `x == x`. Catches swallowed / unreachable / tautological asserts a static count can't. |
-| 3 | **context-delta** | newly-exercised | the grown test lights a `coverage.py` line the existing suite never ran (the dead-config detector). Necessary, insufficient alone (reached ≠ checked). |
-| 4 | **concurrency** | race fails-on-bug, passes-on-fix | a PAIR: a regression that PASSES against the guarded code + a negative control that FAILS against the unguarded variant (`blanket` scripts the exact interleaving; GIL-agnostic). The paired control is arm-2 made permanent for a race with no in-process assert. |
+| 1 | **property-mutant** | load-bearing + genuine growth | a scenario-encoding mutant must be KILLED by the grown test AND have SURVIVED the existing suite (survives-old ⇒ not redundant). `growth_gate` uses `sharpen_gate` cosmic-ray replay (the 4 `poe mutate` targets); `growth_adhoc_gate` generalises it to ANY module via an author-supplied one-line text mutation — so arm-1 runs off the allowlist. **Non-optional for a `scenario` gap** (see the honest-scope note). |
+| 2 | **oracle-liveness** | falsifiable, not vacuous | negate the grown test's OWN asserts one at a time → each must flip it red; a static trivial-check rejects `assert True` / `x == x`. A `pytest.raises`/`warns` block counts as a live oracle (not `no_asserts`). Catches swallowed / unreachable / tautological asserts a static count can't. |
+| 3 | **context-delta** | newly-exercised | the grown test lights a `coverage.py` line the existing suite never ran (the dead-config detector). The OLD baseline MUST `--deselect` the grown test, or an extend-before-add edit collapses the delta to ∅ (false bounce). Necessary, insufficient alone (reached ≠ checked). |
+| 4 | **concurrency** | race reproduces unguarded, prevented guarded | a PAIR of PASSING tests: a regression (the guard prevents the bug under the forced schedule) + a self-certifying negative control that unguards a throwaway instance and asserts the bug REPRODUCES (`blanket` scripts the interleaving; GIL-agnostic). Both pass; the teeth are the control's own falsifiable assertion, confirmed by running arm-2 liveness on the control. |
+
+**Honest scope (what the deterministic gate proves).** The reframe is *covered-but-under-specified*. Arm-3
+alone only proves *newly-exercised* (a dead-config / uncovered-line gap) — a covered-but-under-tested gap
+has no new line, so **arm-1 is what certifies genuine growth over covered code**, and is therefore
+non-optional for a `scenario` gap. Without arm-1 the gate degrades to "dead-config + non-vacuous + additive"
+— useful, but not the flagship claim; never ship a `scenario` grow whose only teeth are arm-3.
+
+A separate **Grow↔Sharpen boundary check** (`additive_gate`) enforces adds-only assert nodes — see
+*Extend-vs-add*. It is NOT `sharpen_gate.anticheat_diff` (which only flags a specificity drop).
 
 Discovery-tier (feeds arm 4, not a gate): TSan `--with-thread-sanitizer` + `pytest-run-parallel`
 (stochastic, needs a no-GIL build). Deferred/optional: checked-coverage (pyChecco, abandoned; the
@@ -116,9 +125,11 @@ up front — exactly one of the four outcome classes — so the merge decision i
 
 **Grow = ADDITIVE**: append a `Profile` / `ENTRY_FACTORIES` row, a `parametrize` case, an `@example`, or a
 new test (appending a `PROFILES` row IS extend-before-add — one row, every property inherits it). **Sharpen
-= MUTATIVE**: change an existing test's assertions. Deterministically separable by the SAME AST assert-diff
-`sharpen_gate.anticheat_diff` computes: adds-only assert-nodes → Grow; alters/removes existing → Sharpen.
-So a Grow proposal that changes an existing assertion is out of scope — route it to Sharpen.
+= MUTATIVE**: change an existing test's assertions. Deterministically separable by `grow_gate.additive_gate`
+— a real adds-only assert-node diff: every before-assert must still be present after (only additions); any
+altered/removed assert node ⇒ MUTATIVE ⇒ route to Sharpen. **Not `sharpen_gate.anticheat_diff`**: that only
+flags a specificity *drop*, so a same-tier value change (`== 1` → `== 2`, a change-detector) slips past it
+as 'additive' (the review's C4) — `additive_gate` catches it.
 
 ## Review architecture
 

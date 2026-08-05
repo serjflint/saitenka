@@ -31,11 +31,24 @@ Session5b hit-test drift, the nested scroll-to-true-bottom guard, and the honori
 | **Nested popup scrolls to its true bottom** (dabfdd9) | **NO** | `app/tooltip.py` — nested-scroll clamp dimension | **3 context-delta** (+ **2**) | coverage-only | **open**: no true-bottom clamp guard on this branch; the clamp path is lit only when scrolling past the converging full-height estimate | **would surface — left OPEN** (not tuned) |
 | **Honorific prefix** (お in お考え shows 御) | bug OPEN, no test | `app/tokenize.py`/fold seam — bare-prefix dimension | (red-on-pristine) | **2 latent bug** | **open**: documented-open defect; a grown test asserting the content word would go red on pristine | **would surface → files a product issue** (class 2) |
 
+> **Correction (adversarial review, findings C1/C6).** An earlier version of this file claimed "3/5
+> surfaced+closed with demonstrated teeth." That overstated the *deterministic* evidence. The render↔hit-test
+> agreement oracle (scale-boundary, Session5b) is **self-consistent by construction** — it reads the panel
+> from `hit_target` for both the drawn-centre and the hit-test, so it proves the inverse transform and
+> cross-transition state coherence, NOT pixel-vs-panel two-panel drift. The two-panel regression is now
+> guarded by the explicit **one-panel invariant** (`hit_target`'s panel *is* the drawn panel) added to the
+> state machine — and is prevented structurally by the scale-boundary rewrite (one panel). And the race
+> (arm-4) teeth come from the control's own falsifiable assertion, verified by running arm-2 liveness on the
+> control, not from a gate that requires the control to *fail*. Honest tally below.
+
 ## Reading the results
 
-- **3 of 5 surfaced-and-closed with demonstrated teeth** — one per gate arm the corpus exercises (arm 4
-  concurrency, arm 3 dead-config, the arms-1/2/3 agreement oracle). Each closure carries a negative control,
-  so it is not vacuously green.
+- **Decisive deterministic teeth: ~1 of 5 (the race).** The race closes with a self-certifying negative
+  control whose oracle is arm-2-live. The scale-boundary and Session5b closures are real *coverage +
+  inverse-transform + one-panel-invariant* guards (genuine value), but their round-trip does not by itself
+  catch two-panel wrap drift (C1) — that named regression is caught by the one-panel invariant + the
+  architecture, not the round-trip. So count them as **surfaced + guarded**, not "teeth caught the exact
+  historical bug."
 - **The two genuinely-open items validate the loop's two non-trivial paths without cheating:**
   - the **nested scroll-to-true-bottom** gap is exactly a *covered-but-under-specified* dimension (nested
     scroll is exercised; scroll-to-the-converging-max is not) — the loop's core reframe — and arm-3

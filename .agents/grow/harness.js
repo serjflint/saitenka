@@ -23,7 +23,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 1 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 2 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -61,14 +61,23 @@ const GAP = {
 
 const PROPOSAL = {
   type: 'object', additionalProperties: false,
-  required: ['applied', 'test_file', 'cut_module', 'target_func', 'diff', 'proposals'],
+  required: ['applied', 'test_file', 'cut_module', 'cut_file', 'target_func', 'test_name', 'diff', 'proposals'],
   properties: {
     applied: { type: 'boolean' },
     test_file: { type: 'string', description: 'edited test path, repo-relative' },
     cut_module: { type: 'string', description: 'dotted code-under-test module' },
+    cut_file: { type: 'string', description: 'CUT path relative to repo (e.g. src/overlay/app/config.py) — for context/growth-adhoc' },
     target_func: { type: 'string', description: 'production symbol the grown test exercises (scopes arm-1)' },
-    test_name: { type: 'string', description: 'the grown test function name (for arm-2 liveness)' },
+    test_name: { type: 'string', description: 'the grown test function name (arm-2 liveness / --deselect node)' },
     red_on_pristine: { type: 'boolean', description: 'grown test FAILS on unmutated code → outcome-class-2 latent bug' },
+    // arm-1 (scenario gaps): a one-line scenario-encoding mutation of the CUT the grown test must KILL and
+    // the existing suite must SURVIVE. Non-optional for kind=scenario — it certifies growth over covered code.
+    mutant_find: { type: ['string', 'null'], description: 'exact CUT snippet to mutate (must occur once)' },
+    mutant_replace: { type: ['string', 'null'], description: 'the scenario-violating replacement' },
+    // arm-4 (concurrency gaps): the two test node ids of the shipped pair.
+    regression_node: { type: ['string', 'null'], description: 'concurrency regression test node id' },
+    control_node: { type: ['string', 'null'], description: 'concurrency negative-control test node id' },
+    control_test: { type: ['string', 'null'], description: 'control test function name (for its liveness check)' },
     diff: { type: 'string' },
     reason: { type: ['string', 'null'] },
     proposals: {
@@ -172,9 +181,9 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `EXTEND the existing test(s) (${testHint}) before adding a new file — append a PROFILES/ENTRY_FACTORIES row, a parametrize case, or an @example; a new file only when there is no home. If the gap is a family, emit a Hypothesis property / deal contract, not a bare example.\n` +
     `Assert OBSERVABLE behaviour (return value / emitted IPC / written note / a metamorphic oracle) — never a private attr, mock call-count, or pixels. The test MUST be GREEN on pristine code; if it goes red you found a real defect: set red_on_pristine=true, describe it, STOP (do not massage it green).\n` +
     (gap.kind === 'concurrency'
-      ? `This is a CONCURRENCY gap: ship a PAIR — a regression that passes against the guarded code + a negative control that fails against the unguarded variant, driven by \`blanket\` (opt-in \`grow\` dep group) as in tests/test_cache_race.py. Name both in the proposal list.\n`
-      : `This is a SCENARIO gap: the test must exercise a configuration/combination the existing suite never does.\n`) +
-    `Return the additive diff, test_name, target_func (the production symbol exercised) and cut_module (its dotted path). If nothing is worth growing, return applied=false with the reason — never fabricate a vacuous test.\n` +
+      ? `This is a CONCURRENCY gap: ship a PAIR of PASSING tests as in tests/test_cache_race.py, driven by \`blanket\` (opt-in \`grow\` group) — a regression (guard present → no error) AND a self-certifying negative control that unguards a throwaway instance and ASSERTS the bug reproduces. Set regression_node, control_node, control_test.\n`
+      : `This is a SCENARIO gap: the test must exercise a configuration/combination the existing suite never does. You MUST also supply a one-line scenario-encoding mutation of the CUT (mutant_find → mutant_replace, mutant_find occurring exactly once) that your test KILLS and the existing suite SURVIVES — this is arm-1, non-optional; without it the gate can only prove dead-config, not growth over covered code.\n`) +
+    `Return the additive diff, test_name, target_func (the production symbol exercised), cut_module (dotted path) and cut_file (repo-relative path, e.g. src/overlay/${gap.module}). If nothing is worth growing, return applied=false with the reason — never fabricate a vacuous test.\n` +
     (carry ? `\nPRIOR ATTEMPT BOUNCED — do not repeat it. Gate report:\n${carry}\n` : ''),
     { phase: 'Author', schema: PROPOSAL, label: `author#${attempt}` },
   )
@@ -191,14 +200,20 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   }
 
   phase('Objective gate')
-  // Deterministic: additive-only anti-cheat + the applicable grow_gate arms for this gap kind.
+  // Deterministic: the real adds-only diff + the applicable grow_gate arms for this gap kind.
   const tf = proposal.test_file.replace('overlay/', '')
+  const oldTests = (gap.tests || []).map((t) => t.replace('overlay/', '')).join(' ')
   const armsSpec = gap.kind === 'concurrency'
-    ? `Arm 4 (concurrency): the paired regression must PASS and the negative control must FAIL — run \`uv run --group grow python -m pytest -q <regression_node>\` (expect pass) and \`... <control_node>\` (expect fail), or \`tools/grow_gate.py concurrency --regression <args> --control <args> --repo .\`. Set concurrency_pass; liveness/context/growth = null.`
-    : `Arm 2 (liveness): \`uv run python tools/grow_gate.py liveness ${tf} --test ${proposal.test_name} --repo .\` (>=1 live assert, no trivial/dead). Arm 3 (context-delta): \`uv run python tools/grow_gate.py context --cut src/overlay/${gap.module} --old ${(gap.tests || []).map(t => t.replace('overlay/', '')).join(' ')} --new ${(gap.tests || []).map(t => t.replace('overlay/', '')).join(' ')} ${tf} --repo .\` (a newly-lit line). Arm 1 (growth): run ONLY if a property mutant encodes the scenario; else growth_pass=null. Set liveness_pass/context_pass; concurrency_pass=null.`
+    ? `Arm 4 (concurrency), both PASS + control-oracle-live: first run arm-2 liveness on the CONTROL — ` +
+      `\`uv run python tools/grow_gate.py liveness ${proposal.control_node ? proposal.control_node.split('::')[0] : tf} --test ${proposal.control_test} --repo .\` — then ` +
+      `\`uv run --group grow python tools/grow_gate.py concurrency --regression ${proposal.regression_node} --control ${proposal.control_node} --control-file ${proposal.control_node ? proposal.control_node.split('::')[0] : tf} --control-test ${proposal.control_test} --repo .\` ` +
+      `(regression PASSES, control PASSES, control oracle LIVE). Set concurrency_pass; liveness/context/growth = null.`
+    : `Arm 2 (liveness): \`uv run python tools/grow_gate.py liveness ${tf} --test ${proposal.test_name} --repo .\` (>=1 live assert or a pytest.raises block, no trivial/dead). ` +
+      `Arm 3 (context-delta): \`uv run python tools/grow_gate.py context --cut ${proposal.cut_file} --old ${oldTests} --new ${oldTests} ${tf} --deselect ${tf}::${proposal.test_name} --repo .\` (a newly-lit line; --deselect keeps the grown test OUT of the old baseline). ` +
+      `Arm 1 (growth-adhoc, NON-OPTIONAL for a scenario gap): \`uv run python tools/grow_gate.py growth-adhoc --cut ${proposal.cut_file} --find ${JSON.stringify(proposal.mutant_find)} --replace ${JSON.stringify(proposal.mutant_replace)} --old ${oldTests} --deselect... --new ${oldTests} ${tf} --repo .\` (old SURVIVES the mutant, grown test KILLS it). If mutant_find is null, growth_pass=false → BOUNCE (a scenario grow MUST ship an arm-1 mutant). Set liveness_pass/context_pass/growth_pass; concurrency_pass=null.`
   gate = await agent(
     `Run the deterministic Grow objective gate on the author's edit. ${REL} Report tool output VERBATIM. (Read-only tools; edit nothing.)\n` +
-    `1. ADDITIVE check: \`uv run python tools/sharpen_gate.py anticheat ${tf} --cut ${proposal.cut_module} --repo .\` — it must report ONLY added asserts. Any removed/weakened ⇒ mutative ⇒ Sharpen scope ⇒ additive_only=false ⇒ BOUNCE.\n` +
+    `1. ADDITIVE check (Grow↔Sharpen boundary): \`uv run python tools/grow_gate.py additive ${tf} --repo .\` — it must report ONLY added asserts. Any altered/removed assert ⇒ mutative ⇒ Sharpen scope ⇒ additive_only=false ⇒ BOUNCE. (Do NOT use sharpen_gate anticheat here — it misses same-tier value changes.)\n` +
     `2. ${armsSpec}\n` +
     `pass = additive_only AND every arm that ran is clean. arms_run lists the arms actually executed. Quote every BOUNCE line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
