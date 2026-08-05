@@ -25,6 +25,7 @@ from overlay.app import (
     hover_snapshot,
     miner_ui,
     nested_popup,
+    popups,
     prefetch,
     reader_deps,
     session_stats,
@@ -197,6 +198,36 @@ class Reader:
     _mined = Delegated[set[str]]("session", "mined")
     _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
     _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
+    # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
+    # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
+    _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
+    _tip_rect = Delegated[tuple | None]("tip", "tip_rect")
+    _hide_at = Delegated[float]("tip", "hide_at")
+    _tip_scroll = Delegated[int]("tip", "tip_scroll")
+    _tip_view_h = Delegated[int]("tip", "tip_view_h")
+    _tip_xy = Delegated[tuple[int, int]]("tip", "tip_xy")
+    _tip_state = Delegated[Panel | None]("tip", "tip_state")
+    _tip_key = Delegated[tooltip.PanelKey | None]("tip", "tip_key")
+    _tip_nav = Delegated[list]("tip", "tip_nav")
+    _nest = Delegated[PopupView]("tip", "nest")
+    _scan_target = Delegated[str | None]("tip", "scan_target")
+    _scan_since = Delegated[float]("tip", "scan_since")
+    _word_target = Delegated[int | None]("tip", "word_target")
+    _word_since = Delegated[float]("tip", "word_since")
+    _last_mouse = Delegated[tuple[float, float]]("tip", "last_mouse")
+    _flash_oid = Delegated[int | None]("tip", "flash_oid")
+    _flash_until = Delegated[float]("tip", "flash_until")
+    _hover_reading = Delegated[str]("tip", "hover_reading")
+    _hover_terms = Delegated[tuple[str, ...]]("tip", "hover_terms")
+    _hover_span = Delegated[tuple[int, int] | None]("tip", "hover_span")
+    _kanji_index = Delegated[int]("tip", "kanji_index")
+    _tip_keys_bound = Delegated[bool]("tip", "tip_keys_bound")
+    _tip_tok = Delegated[Token | None]("tip", "tip_tok")
+    _tip_inflected = Delegated[str | None]("tip", "tip_inflected")
+    _crisp_miss = Delegated[str]("tip", "crisp_miss")
+    _crisp_pending = Delegated[bool]("tip", "crisp_pending")
+    _tip_show_cold = Delegated[bool]("tip", "tip_show_cold")
+    _panel_cache = Delegated[OrderedDict]("tip", "panel_cache")
 
     def __init__(
         self,
@@ -300,18 +331,10 @@ class Reader:
         # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes _tip_display_scale (see config)
-        self._crisp_miss = (
-            ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
-        )
-        self._crisp_pending = (
-            False  # a soft first paint is up; poll upgrades to crisp once bands warm
-        )
-        self._tip_tok: Token | None = (
-            None  # the base tooltip's source token (for the crisp re-render)
-        )
-        self._tip_inflected: str | None = (
-            None  # its inflected surface (re-rendered on show AND scroll)
-        )
+        # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState). The Delegated shims below
+        # keep the historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/
+        # ``_panel_cache`` names so the hover FSM and its tests are untouched (#30 lifetime split).
+        self.tip = popups.TooltipState()
         from overlay.render.layout_backend import backend_label, resolve_backend
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
@@ -328,7 +351,6 @@ class Reader:
             o.mining.anki_ok_ttl
         )  # seconds an AnkiConnect reachability check is cached
         self.anki_ping_timeout = o.mining.anki_ping_timeout  # reachability ping timeout
-        self._paused_by_tip = False
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
         # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
         self.prefetch = o.prefetch
@@ -356,7 +378,6 @@ class Reader:
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
-        self._tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
         self._runtime_announced = (
             False  # the runtime banner prints once, after prefetch actually starts
         )
@@ -377,54 +398,9 @@ class Reader:
         self._mouse_section_defined = False
         self._mouse_captured = False
         self._mouse_reassert_at = 0.0
-        self._tip_rect: tuple | None = (
-            None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
-        )
-        self._hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
-        self._tip_scroll = 0
-        self._tip_view_h = 0
-        self._tip_xy: tuple[int, int] = (0, 0)
-        self._tip_state: Panel | None = None  # Panel currently shown
-        self._tip_key: tooltip.PanelKey | None = None  # its cache key
-        # Yomitan-style in-place link navigation: clicking a cross-reference replaces the base
-        # tooltip's content and pushes the previous view here; Esc/back pops it. Cleared when hovering
-        # a new subtitle word (show_tooltip_impl) or on teardown. Empty ⇒ the base is a hovered word.
-        self._tip_nav: list = []
-        self._nest = _Nested()  # nested scan popup (hover a word inside the tooltip → its entry)
-        # Yomitan-style scan delay: the cursor must dwell on a word inside the tooltip before its
-        # popup opens, so drifting across the definition doesn't fire a flurry of popups.
+        # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
-        self._scan_target: str | None = (
-            None  # the scan-cell tail the cursor is currently settling on
-        )
-        self._scan_since = 0.0  # when it became the target (dwell start)
-        # subtitle-word switch dwell: transiting the cursor over other words (e.g. the other line of a
-        # two-line sub) on the way to the tooltip must not switch it — only resting on a new word does.
         self.hover_switch_delay = o.tooltip.hover_switch_delay
-        self._word_target: int | None = None
-        self._word_since = 0.0
-        self._last_mouse = (
-            -1.0,
-            -1.0,
-        )  # latest cursor pos — routes the wheel to the popup under it
-        self._flash_oid: int | None = (
-            None  # a popup pulsing a "copied" highlight border (TIP_ID / NESTED_ID)
-        )
-        self._flash_until = 0.0
-        self._hover_reading = ""  # dict-form reading of the hovered word, for TTS
-        # Multi-token dictionary terms starting at the hovered word (数ある over 数), longest-first, and
-        # the token span the longest covers: the tooltip stacks them above the bare word and the
-        # underline spans the match. Empty / None when no longer term starts here.
-        self._hover_terms: tuple[str, ...] = ()
-        self._hover_span: tuple[int, int] | None = None
-        self._kanji_index = 0  # `k` cycles the hovered word's kanji
-        self._tip_keys_bound = False
-        # LRU cache: OrderedDict keyed by panel_key, bounded at panel_cache_max entries. Each Panel
-        # retains only its windowed engine's blocks (zlib-compressed, bounded to the last viewport±
-        # overscan), so the whole cache stays small. On overflow we evict the LEAST-recently-used entry
-        # (the OrderedDict move_to_end protocol) rather than clearing everything (which would lose
-        # already-rendered panels the user is likely to re-hover).
-        self._panel_cache: OrderedDict = OrderedDict()  # key -> Panel
         self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         self._toast_until = 0.0
         # Event-driven property state (observe_property); empty + off until run() calls

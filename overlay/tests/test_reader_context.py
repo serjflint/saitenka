@@ -8,6 +8,7 @@ exactly what the future file-change re-slot relies on, so it is asserted here di
 from __future__ import annotations
 
 from overlay.app.controller import Reader
+from overlay.app.popups import PopupView, TooltipState
 from overlay.app.reader_context import EpisodeContext
 
 
@@ -76,6 +77,42 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     assert r._nav_idx == -1
     assert r._sub_settle_until == 0.0
     assert r.episode.subtitle.retry_active is False
+
+
+def test_reader_delegates_tooltip_fields_to_tip_state():
+    r = Reader(FakeIPC())
+    assert isinstance(r.tip, TooltipState)
+    # the historical private names read/write through the grouped state, incl. the nested-popup handle
+    assert r._nest is r.tip.nest and isinstance(r._nest, PopupView)
+    r._tip_scroll = 4
+    r._hover_reading = "よむ"
+    assert r.tip.tip_scroll == 4 and r.tip.hover_reading == "よむ"
+
+
+def test_rebinding_tip_resets_the_whole_hover_stack():
+    """Tearing down / re-slotting the tooltip is one rebind: every hover-FSM field (shown panel, scroll,
+    scan/word dwell, flash pulse, hovered-word metadata) returns to its no-hover default in a single move,
+    leak-free by construction — the same property the episode re-slot relies on, one tier down."""
+    r = Reader(FakeIPC())
+    r._tip_rect = (1, 2, 3, 4)
+    r._tip_scroll = 9
+    r._scan_target = "cell"
+    r._word_target = 2
+    r._flash_oid = 7
+    r._hover_terms = ("数ある",)
+    r._kanji_index = 3
+    r._paused_by_tip = True
+
+    r.tip = TooltipState()  # the teardown/re-slot move
+
+    assert r._tip_rect is None
+    assert r._tip_scroll == 0
+    assert r._scan_target is None
+    assert r._word_target is None
+    assert r._flash_oid is None
+    assert r._hover_terms == ()
+    assert r._kanji_index == 0
+    assert r._paused_by_tip is False
 
 
 def test_session_state_survives_an_episode_reslot():

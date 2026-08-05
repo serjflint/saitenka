@@ -28,14 +28,16 @@ class Delegated[T]:
     path (e.g. ``episode.subtitle``). The stable seam that lets the Reader own its state as lifetime
     contexts without breaking the ``reader.<field>`` call sites."""
 
-    __slots__ = ("_context", "_field")
+    __slots__ = ("_field", "_parts")
 
     def __init__(self, context: str, field: str) -> None:
-        self._context = context
+        self._parts = context.split(
+            "."
+        )  # precomputed once — the hot path walks this, never re-splits
         self._field = field
 
     def _owner(self, obj: object) -> object:
-        for part in self._context.split("."):
+        for part in self._parts:
             obj = getattr(obj, part)
         return obj
 
