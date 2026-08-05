@@ -14,3 +14,17 @@ more. So this is a hard line, not a style preference:
 - **Process work:** `pkill` / `killall` / `kill` by name or PID. Never `ps | grep` / `pgrep`.
 
 See AGENTS.md **"Tooling — route by intent"** for the full intent→tool table (repowise / Basic Memory too).
+
+## If a search escapes the ban (recovery)
+
+If a forbidden search runs anyway (an indirect invocation the hook missed, or a grep-based script), the
+shim self-replicates: it renames its argv to `(statham)` and every proc reparents to `launchd`, so there's
+no seeder to kill and a leaf `pkill`/`killall -9` loses the race — the count *grows*. **Freeze before
+kill.** Spam `SIGSTOP` across all match forms until every proc is frozen (a stopped proc can't fork, so the
+chain dies on its own):
+
+```bash
+for r in $(seq 1 40); do pkill -STOP -x statham; pkill -STOP -x grep; pkill -STOP -f find-utils-mocks; done
+```
+
+Never interleave a KILL pass — it un-gates the freeze and survivors respawn.

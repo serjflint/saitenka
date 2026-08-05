@@ -23,7 +23,10 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
   format exists); `agent-setup`'s `render.py` emits each agent's dialect. The generated `.mcp.json` is
   git-ignored.
 - **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
-  `searching.md` — the shell-search ban (fork-bomb why + the enforcing `PreToolUse` hook: **Tooling** below).
+  `searching.md` — the shell-search ban + escape-recovery (fork-bomb why + the enforcing `PreToolUse`
+  hook: **Tooling** below). Claude Code auto-loads these via a git-ignored `.claude/rules -> ../.agents/rules`
+  symlink (per worktree, like skills; a no-`paths:` rule loads globally — verify with `/memory`); Codex
+  reads them directly.
 
 ## Tooling — route by intent
 
@@ -32,10 +35,8 @@ Reach for the tool that answers the question, not the reflex. **Never shell-sear
 `.agents/rules/searching.md`). Which tool answers what → the **`agent-tooling`** skill; turning the
 stack on → **`agent-setup`**.
 
-If one *escapes* the hook it self-replicates (argv `(statham)`, reparented to `launchd` — leaf `pkill -9`
-loses the race, the count *grows*): **freeze before kill.** `SIGSTOP` every match until frozen (a stopped
-proc can't fork): `for r in $(seq 1 40); do pkill -STOP -x statham; pkill -STOP -x grep; pkill -STOP -f find-utils-mocks; done`.
-Never interleave a KILL pass — it un-gates the freeze and survivors respawn.
+If one *escapes* the hook it self-replicates and `pkill -9` loses the race (the count *grows*) — **freeze
+before kill** (`SIGSTOP`); the full recovery drill is `.agents/rules/searching.md`.
 
 | When you want to… | Use | Not |
 | --- | --- | --- |
