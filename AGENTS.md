@@ -25,8 +25,8 @@ there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (mo
 - **`.agents/rules/`** — repo-local always-on rules (short, standing constraints). Currently
   `searching.md` — the shell-search ban + escape-recovery (fork-bomb why + the enforcing `PreToolUse`
   hook: **Tooling** below). Claude Code auto-loads these via a git-ignored `.claude/rules -> ../.agents/rules`
-  symlink (per worktree, like skills; a no-`paths:` rule loads globally — verify with `/memory`); Codex
-  reads them directly.
+  symlink (per worktree, like skills; a no-`paths:` rule loads globally — confirm via the
+  `InstructionsLoaded` hook, which logs what loads); Codex reads them directly.
 
 ## Tooling — route by intent
 
