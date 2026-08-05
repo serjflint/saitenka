@@ -16,6 +16,14 @@ logs.
 
 ### Added
 
+- **Field templates for mined cards (`[mine.card_format]`).** Yomitan's model: give each note field a
+  template of `{marker}` tokens (`Reading = "{furigana}"`,
+  `Sentence = "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}"`), so one field can combine markers and
+  one marker can fill several fields. Opt-in; wins wholesale over `[mine.fields]` when set. Twenty
+  markers, each filled from real data — `expression`/`reading`/`furigana`/`glossary`/`sentence`/
+  `cloze-*`/`screenshot`/`sentence-audio`/`frequencies`/`pitch-accents`/… `saitenka doctor` warns about
+  an unfillable marker or a field the note type lacks. (Word audio, pitch-accent graphs, and
+  sentence-furigana are named as not-yet-supported rather than silently blank.)
 - **Configurable mining note type — field map, card kind, and presets.** `[mine]` is no longer
   Lapis-only under a configurable-looking model name. Pick a known note type with `preset = "Lapis"`
   or `"Kiku"` (they share field names), choose the card template with `card_kind`

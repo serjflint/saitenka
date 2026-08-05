@@ -528,6 +528,19 @@ class DictionarySet:
         nums = [int(n) for _, value in rows for n in re.findall(r"\d+", value)]
         return html, (str(min(nums)) if nums else "")
 
+    def pitch_field(self, token) -> tuple[str, str]:
+        """(pitch-accent field HTML, positions text) for a mined card — the same accents the tooltip
+        shows as purple pills. Empty when no pitch source has the word. ``{pitch-accents}`` renders the
+        HTML; ``{pitch-accent-positions}`` the bare numbers (e.g. ``0`` / ``0, 2``)."""
+        forms = (token.lemma, token.surface, token.reading)
+        accents = self._pitch_accents(forms, token.reading)
+        if not accents:
+            return "", ""
+        items = "".join(f"<li>{r}: {', '.join(f'[{p}]' for p in ps)}</li>" for r, ps in accents)
+        html = f'<ul style="text-align:left;margin:0;padding-left:1.1em;">{items}</ul>'
+        positions = ", ".join(str(p) for _r, ps in accents for p in ps)
+        return html, positions
+
     def _freq_rank(self, term: str, reading: str) -> int | None:
         """Lowest (most-common) frequency rank across the freq sources for this ``(term, reading)`` —
         the tie-breaker's commonness signal. ``None`` when no source ranks it.

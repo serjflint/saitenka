@@ -113,6 +113,85 @@ def test_build_note_unknown_card_kind_falls_back_to_default(caplog):
     assert "card_kind" in caplog.text
 
 
+def test_build_note_card_format_wins_over_fields():
+    # card_format present → ONLY its fields written (fields map ignored); card_kind flag still applies.
+    cfg = MineConfig(
+        fields={"expression": "Expression"},
+        card_format={"Word": "{expression}", "Furigana": "{furigana}"},
+    )
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    note = build_note(cfg, card_for(tok), "本を<b>読む</b>")
+    assert note["fields"]["Word"] == "読む" and note["fields"]["Furigana"] == "読[よ]む"
+    assert "Expression" not in note["fields"]  # the entity map is ignored wholesale
+    assert note["fields"]["IsWordAndSentenceCard"] == "1"  # card_kind marker still added
+
+
+def test_build_note_card_format_fans_one_entity_into_two_fields():
+    # the capability the entity→field map couldn't express: one marker in several fields
+    cfg = MineConfig(card_format={"Word": "{expression}", "Key": "{expression}"})
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    note = build_note(cfg, card_for(tok), "s")
+    assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
+
+
+def test_expression_field_resolves_from_card_format():
+    from overlay.app.anki import dedupe
+
+    # dedup must key off the field that actually holds {expression} under card_format, not fields["expression"]
+    cfg = MineConfig(card_format={"Word": "{expression}", "Note": "{glossary}"})
+    assert cfg.expression_field() == "Word"
+
+    queries = []
+
+    class _A:
+        def find_notes(self, q):
+            queries.append(q)
+            return []
+
+    dedupe(_A(), cfg, "読む")
+    assert queries and "Word:読む" in queries[0]  # queried the {expression} field, not Expression
+
+
+def test_dedupe_allows_add_when_card_format_has_no_expression_field():
+    from overlay.app.anki import dedupe
+
+    # no {expression} anywhere → no reliable dedup key → allow the add (never KeyError on fields["expression"])
+    cfg = MineConfig(card_format={"Sentence": "{sentence}"})
+    assert cfg.expression_field() == ""
+    called = []
+
+    class _A:
+        def find_notes(self, q):
+            called.append(q)
+            return [1]
+
+    assert dedupe(_A(), cfg, "読む") == [] and called == []  # short-circuits, no query
+
+
+def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
+    # end-to-end: an already-mined word is detected under card_format (the both-KeyError/false-negative fix)
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+
+    ipc = FakeIPC()
+    anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(card_format={"Word": "{expression}"}))
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert anki.added == [] and "読む" in r._mined  # deduped, not added; ⊕→✓ flipped
+
+
+def test_build_note_card_format_uses_passed_markers():
+    # the miner passes a full marker map (pitch/pos the args can't supply); build_note renders it
+    cfg = MineConfig(card_format={"Pitch": "{pitch-accents}"})
+    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
+    note = build_note(cfg, card_for(tok), "s", markers={"pitch-accents": "よむ [0]"})
+    assert note["fields"]["Pitch"] == "よむ [0]"
+
+
 def test_mine_config_from_preset_kiku_uses_lapis_fields_and_word_and_sentence():
     cfg = MineConfig.from_preset("Kiku")
     assert cfg.model == "Kiku"
@@ -544,6 +623,47 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     f = anki.added[0]["fields"]
     assert (f["Expression"], f["ExpressionReading"]) == ("退く", "しりぞく")
     assert f["Glossary"] == "<ol><li>to retreat</li></ol>"
+
+
+def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
+    """#192: with [mine.card_format] set, the mined note's fields are the rendered {marker} templates —
+    furigana, pitch (from the dict), and a cloze-split sentence — not the entity→field map."""
+    import dicthelp
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+
+    d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
+    pz = dicthelp.meta_zip(
+        tmp_path / "p.zip",
+        "Pitch",
+        "pitch",
+        [["読む", {"reading": "よむ", "pitches": [{"position": 1}]}]],
+    )
+    ds = dicthelp.load_set([d], pitch_zips=[pz])
+    ipc = FakeIPC()
+    ipc.props["path"] = "/x/Show - 01.mkv"
+    anki = _FakeAnki()
+    cfg = MineConfig(
+        card_format={
+            "Word": "{expression}",
+            "Furigana": "{furigana}",
+            "Pitch": "{pitch-accents}",
+            "Sentence": "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}",
+            "Freq": "{frequency-rank}",
+        }
+    )
+    r = Reader(ipc, anki=anki, mine_cfg=cfg, dict_set=ds)
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _b, _v, **_k: ("", ""))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    f = anki.added[0]["fields"]
+    assert f["Word"] == "読む" and f["Furigana"] == "読[よ]む"
+    assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
+    assert f["Sentence"] == "本を<b>読む</b>"  # cloze markers reassembled around the surface
+    assert set(f) == {"Word", "Furigana", "Pitch", "Sentence", "Freq", "IsWordAndSentenceCard"}
 
 
 def test_group_mined_of_marks_entries_by_expression(tmp_path):
