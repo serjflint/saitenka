@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS masks (
     alpha   BLOB NOT NULL,
     PRIMARY KEY (font_id, text, mode, sx, sy)
 );
+CREATE TABLE IF NOT EXISTS done (
+    scale REAL NOT NULL,
+    word  TEXT NOT NULL,
+    PRIMARY KEY (scale, word)
+);
 """
 
 
@@ -112,20 +117,47 @@ class MaskAtlas:
         return c
 
     def put(self, font_id: str, text: str, mode: str, start: tuple[float, float], mask) -> None:
-        """Persist one ``getmask2`` result (``mask`` = ``(core, (offx, offy))``). Idempotent."""
+        """Persist one ``getmask2`` result (``mask`` = ``(core, (offx, offy))``). Idempotent —
+        ``INSERT OR IGNORE`` (not REPLACE): the mask is deterministic for its key, so an existing row is
+        already correct and re-writing identical bytes on a re-run is pure WAL churn. A format/font change
+        needs a rebuild anyway (bump the cache dir), not a silent per-write refresh."""
         try:
             core, (offx, offy) = mask
             w, h, data = serialize_core(core)
             sx, sy = _phase(start)
             conn = self._conn()
             conn.execute(
-                "INSERT OR REPLACE INTO masks (font_id, text, mode, sx, sy, offx, offy, w, h, alpha) "
+                "INSERT OR IGNORE INTO masks (font_id, text, mode, sx, sy, offx, offy, w, h, alpha) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (font_id, text, mode, sx, sy, offx, offy, w, h, zlib.compress(data, 1)),
             )
             conn.commit()
         except sqlite3.Error:
             log.debug("mask atlas put failed", exc_info=True)
+
+    def is_done(self, scale: float, word: str) -> bool:
+        """True if ``word`` was already fully rastered at ``scale`` (the prewarm resume ledger). The atlas
+        keys per GLYPH, so there's no cheap "is this whole word cached" probe — this per-word marker gives
+        ``saitenka prewarm --atlas-only`` a resumable skip: a stopped run re-run skips finished words
+        instead of re-rastering from the start. Scoped by scale (1.5 masks ≠ 2.0 masks)."""
+        try:
+            row = (
+                self._conn()
+                .execute("SELECT 1 FROM done WHERE scale=? AND word=?", (scale, word))
+                .fetchone()
+            )
+            return row is not None
+        except sqlite3.Error:  # pragma: no cover — degrade to "not done" → re-raster (safe)
+            return False
+
+    def mark_done(self, scale: float, word: str) -> None:
+        """Record that ``word``'s masks at ``scale`` are all persisted, so a later run skips it."""
+        try:
+            conn = self._conn()
+            conn.execute("INSERT OR IGNORE INTO done (scale, word) VALUES (?, ?)", (scale, word))
+            conn.commit()
+        except sqlite3.Error:  # pragma: no cover — a lost marker only costs a re-raster next run
+            log.debug("mask atlas mark_done failed", exc_info=True)
 
     def load_into(self, mem: dict, *, font_ids: Iterable[str] | None = None) -> int:
         """Bulk-reconstruct every stored mask into ``mem`` (a shared read-only dict keyed
