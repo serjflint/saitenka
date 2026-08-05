@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785963471008,
+  "lastUpdate": 1785965510652,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -503,6 +503,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.376,
             "range": "±9.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1fc4ec3b627a702c386016bdaa5d5a1ff7c4acfc",
+          "message": "refactor(mining): single source of truth for the card-format marker catalog (#193) (#198)\n\n* docs(dream): backtick the MEMORY.md pointer example so lychee ignores it\n\nThe illustrative `- [Title](file.md) — hook` was written as a bare Markdown\nlink, so `poe links` (lychee) resolved it as a real relative link to a missing\nfile.md and failed the gate. Backticking it keeps the example readable and out\nof the link checker.\n\n* refactor(mining): single source of truth for the card-format marker catalog (#193)\n\nThe [mine.card_format] marker vocabulary was duplicated across three\nhand-maintained places — MARKERS (doctor's validator), the build_markers dict\nliteral (the producer), and the docs table — with nothing keeping them in sync.\nDrift had a user-visible cost: a producer-only marker made doctor false-warn a\nvalid marker; a listed-but-unproduced marker shipped an empty field.\n\nOne CATALOG of Marker entries (name, ship/deferred status, source, producer) is\nnow the sole source: MARKERS and build_markers both derive from it, and the docs\ntable is generated from it (poe docs-markers → a committed fragment\ninclude-markdown'd into the Configuration page, guarded by a golden test). Adding\nor deferring a marker is a one-line edit that can't desync the three.\n\nFolds the not-yet-groundable markers (word audio #93, pitch-accent-graphs,\nsentence-furigana, furigana-plain) into the catalog as deferred: out of MARKERS\n(so doctor still flags them) and named in the docs as unsupported. card_format\nrender output is unchanged.",
+          "timestamp": "2026-08-06T00:31:00+03:00",
+          "tree_id": "587d39781e36a758cc3557b755ae32953f32d599",
+          "url": "https://github.com/serjflint/saitenka/commit/1fc4ec3b627a702c386016bdaa5d5a1ff7c4acfc"
+        },
+        "date": 1785965510029,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.712,
+            "range": "±3.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.446,
+            "range": "±9.7%",
             "unit": "ms"
           }
         ]
