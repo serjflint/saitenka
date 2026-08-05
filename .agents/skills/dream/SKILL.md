@@ -70,7 +70,7 @@ manifest, and **verify before editing**. Full spec in `references/backup-and-cla
 
 ### Phase 3 — Refactor
 
-- **`MEMORY.md` = compact index.** High-value facts + one-line pointers ("- [Title](file.md) — hook") +
+- **`MEMORY.md` = compact index.** High-value facts + one-line pointers (`- [Title](file.md) — hook`) +
   clearly-labelled open issues. Not session logs, debugging narratives, or copies of permanent
   instructions.
 - **Each fact file = one fact / a headline + a Basic Memory pointer.** Refresh a stale fact in place;

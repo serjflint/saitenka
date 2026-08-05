@@ -1,10 +1,13 @@
 """Yomitan-style ``{marker}`` templates for mined cards ([mine.card_format]).
 
-``build_markers`` turns the data a mine already produces (card fields, sentence, media, freq, pitch)
-into a ``marker -> value`` map using Yomitan's marker names; ``render_card_format`` substitutes those
-into a per-field template. Every marker is filled from real data (readings/pitch from dictionaries) —
-markers Saitenka can't yet ground (word ``audio`` (#93), ``pitch-accent-graphs``, ``sentence-furigana``)
-are deliberately NOT in :data:`MARKERS`, so the doctor flags them instead of shipping an empty field.
+One :data:`CATALOG` is the single source of truth for the marker vocabulary (#193): each entry names a
+marker, whether it ``ship``s or is ``deferred``, its one-line source (for the docs), and — for shippable
+ones — the producer that fills it. :data:`MARKERS` (what ``doctor`` validates a template against) and
+:func:`build_markers` (what actually gets produced) both derive from it, so the validator, the producer,
+and the docs table can't desync. Every shippable marker is filled from real data (readings/pitch from
+dictionaries) — markers Saitenka can't yet ground (word ``audio`` (#93), ``pitch-accent-graphs``,
+``sentence-furigana``, ``furigana-plain``) are ``deferred``: out of :data:`MARKERS`, so ``doctor`` flags
+them instead of shipping an empty field.
 
 No import of :mod:`overlay.app.anki` — that module imports this one for ``build_note``'s template path,
 so the cloze markers read the already-bolded ``sentence_html`` (its lone real ``<b>`` is the surface)
@@ -15,41 +18,18 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from overlay.app.lookup import _is_kana
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import Literal
+
     from overlay.app.lookup import CardData
 
 log = logging.getLogger(__name__)
-
-# The markers Saitenka can fill from real data. The doctor validates a [mine.card_format] template's
-# {markers} against this set; anything else won't render, so warn rather than ship an empty field.
-MARKERS = frozenset(
-    {
-        "expression",
-        "reading",
-        "furigana",
-        "glossary",
-        "glossary-plain",
-        "sentence",
-        "cloze-prefix",
-        "cloze-body",
-        "cloze-suffix",
-        "screenshot",
-        "sentence-audio",
-        "frequencies",
-        "frequency-rank",
-        "pitch-accents",
-        "pitch-accent-positions",
-        "part-of-speech",
-        "document-title",
-        "misc",
-        "ent-seq",
-        "tags",
-    }
-)
 
 # \w (not just [a-z]) so a miscased/typo marker like {Reading} is captured too — it then renders empty
 # with a warning and the doctor flags it, instead of landing on the card as literal "{Reading}" text.
@@ -147,6 +127,100 @@ def _sound(name: str) -> str:
     return f"[sound:{name}]" if name else ""
 
 
+# --- the marker catalog: single source of truth (#193) ---------------------------------------
+#
+# One entry per marker. MARKERS and build_markers both derive from CATALOG, so adding/renaming/deferring
+# a marker is a one-line edit that can't leave the validator, the producer, and the docs out of sync.
+
+
+@dataclass(frozen=True)
+class MarkerContext:
+    """The per-mine data a producer draws from. Carries the raw pieces build_markers is handed; each
+    producer computes its own value (``anki_furigana(...)``, ``_img(...)``, the cloze split), so the
+    producer expression *is* the marker's definition — no second literal list of values."""
+
+    card: CardData
+    sentence_html: str
+    picture: str
+    audio: str
+    misc: str
+    doc_title: str
+    freq_html: str
+    freq_rank: str
+    pos_en: str
+    tags: tuple[str, ...] | list[str]
+    pitch_html: str = ""
+    pitch_positions: str = ""
+
+    @property
+    def cloze(self) -> tuple[str, str, str]:
+        return _cloze(self.sentence_html)
+
+
+@dataclass(frozen=True)
+class Marker:
+    """A catalog entry. ``produce`` is ``None`` exactly when ``status == "deferred"`` — a marker we name
+    (in the docs, so a blank field isn't a surprise) but can't yet ground, so it stays out of MARKERS."""
+
+    name: str
+    status: Literal["ship", "deferred"]
+    source: str  # one-line description; feeds the generated docs table
+    produce: Callable[[MarkerContext], str] | None
+
+
+CATALOG: tuple[Marker, ...] = (
+    Marker(
+        "expression", "ship", "the mined headword (dictionary form)", lambda c: c.card.expression
+    ),
+    Marker("reading", "ship", "kana reading", lambda c: c.card.reading),
+    Marker(
+        "furigana",
+        "ship",
+        "Anki ruby form, `漢字[かんじ]`",
+        lambda c: anki_furigana(c.card.expression, c.card.reading),
+    ),
+    Marker("glossary", "ship", "definitions, HTML", lambda c: c.card.glossary_html),
+    Marker(
+        "glossary-plain",
+        "ship",
+        "definitions, plain text (`; `-joined)",
+        lambda c: "; ".join(c.card.glosses),
+    ),
+    Marker(
+        "sentence", "ship", "the example sentence, mined surface bolded", lambda c: c.sentence_html
+    ),
+    Marker("cloze-prefix", "ship", "sentence text before the surface", lambda c: c.cloze[0]),
+    Marker("cloze-body", "ship", "the mined surface", lambda c: c.cloze[1]),
+    Marker("cloze-suffix", "ship", "sentence text after the surface", lambda c: c.cloze[2]),
+    Marker("screenshot", "ship", "scene image, `<img>`-wrapped", lambda c: _img(c.picture)),
+    Marker(
+        "sentence-audio",
+        "ship",
+        "clipped line audio, `[sound:]`-wrapped",
+        lambda c: _sound(c.audio),
+    ),
+    Marker("frequencies", "ship", "frequency pills, HTML", lambda c: c.freq_html),
+    Marker("frequency-rank", "ship", "numeric frequency rank", lambda c: c.freq_rank),
+    Marker("pitch-accents", "ship", "pitch-accent notation, HTML", lambda c: c.pitch_html),
+    Marker(
+        "pitch-accent-positions", "ship", "downstep position number(s)", lambda c: c.pitch_positions
+    ),
+    Marker("part-of-speech", "ship", "part of speech (English)", lambda c: c.pos_en),
+    Marker("document-title", "ship", "video / source title", lambda c: c.doc_title),
+    Marker("misc", "ship", "source · episode · timestamp line", lambda c: c.misc),
+    Marker("ent-seq", "ship", "JMdict entry id", lambda c: c.card.idseq),
+    Marker("tags", "ship", "note tags, space-joined", lambda c: " ".join(c.tags)),
+    # deferred — not yet groundable, so out of MARKERS (doctor flags them → never a silent empty field).
+    Marker("audio", "deferred", "word audio — needs #93 (sentence audio only for now)", None),
+    Marker("pitch-accent-graphs", "deferred", "SVG pitch-accent graph", None),
+    Marker("sentence-furigana", "deferred", "whole-sentence furigana (every token)", None),
+    Marker("furigana-plain", "deferred", "reading as plain furigana (no ruby brackets)", None),
+)
+
+# What the doctor validates a [mine.card_format] template's {markers} against — the shippable names only.
+MARKERS = frozenset(m.name for m in CATALOG if m.status == "ship")
+
+
 def build_markers(
     card: CardData,
     *,
@@ -162,32 +236,30 @@ def build_markers(
     pitch_html: str = "",
     pitch_positions: str = "",
 ) -> dict[str, str]:
-    """The ``marker -> value`` map for a mine. ``pitch_*`` are passed in (the caller has ``dict_set``);
-    they default to empty so a caller without pitch still produces a valid map. Media markers carry the
-    Anki-ready wrappers (``<img src>`` / ``[sound:]``) so a bare ``{screenshot}`` renders the image."""
-    prefix, body, suffix = _cloze(sentence_html)
-    return {
-        "expression": card.expression,
-        "reading": card.reading,
-        "furigana": anki_furigana(card.expression, card.reading),
-        "glossary": card.glossary_html,
-        "glossary-plain": "; ".join(card.glosses),
-        "sentence": sentence_html,
-        "cloze-prefix": prefix,
-        "cloze-body": body,
-        "cloze-suffix": suffix,
-        "screenshot": _img(picture),
-        "sentence-audio": _sound(audio),
-        "frequencies": freq_html,
-        "frequency-rank": freq_rank,
-        "pitch-accents": pitch_html,
-        "pitch-accent-positions": pitch_positions,
-        "part-of-speech": pos_en,
-        "document-title": doc_title,
-        "misc": misc,
-        "ent-seq": card.idseq,
-        "tags": " ".join(tags),
-    }
+    """The ``marker -> value`` map for a mine, produced by running every shippable :data:`CATALOG` entry
+    against a :class:`MarkerContext`. ``pitch_*`` are passed in (the caller has ``dict_set``); they default
+    to empty so a caller without pitch still produces a valid map. Media markers carry the Anki-ready
+    wrappers (``<img src>`` / ``[sound:]``) so a bare ``{screenshot}`` renders the image."""
+    ctx = MarkerContext(
+        card=card,
+        sentence_html=sentence_html,
+        picture=picture,
+        audio=audio,
+        misc=misc,
+        doc_title=doc_title,
+        freq_html=freq_html,
+        freq_rank=freq_rank,
+        pos_en=pos_en,
+        tags=tags,
+        pitch_html=pitch_html,
+        pitch_positions=pitch_positions,
+    )
+    out: dict[str, str] = {}
+    for marker in CATALOG:
+        produce = marker.produce
+        if produce is not None:
+            out[marker.name] = produce(ctx)
+    return out
 
 
 def render_card_format(card_format: dict[str, str], markers: dict[str, str]) -> dict[str, str]:
