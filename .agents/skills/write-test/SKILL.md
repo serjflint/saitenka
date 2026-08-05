@@ -8,7 +8,7 @@ description: >-
   / the IPC path / mining / the tokenizer". Encodes the AGENTS.md "Testing" invariants
   as a step procedure and points at the canonical example tests. NOT for running the
   suite or the pre-push gate (use `poe test` / the dev-gate skill); NOT for
-  mutation/fuzz/crosshair adequacy (AGENTS.md "Fuzzing & symbolic checks"); NOT for
+  mutation/fuzz/crosshair adequacy (the `test-adequacy` skill); NOT for
   other repos.
 metadata:
   project: saitenka
@@ -41,8 +41,16 @@ file's style — read a sibling test first.
    `scope="module"|"session"` — shared mutable state races under free-threading.
 5. **Assertion tier?** plain `assert` → `dirty_equals` (`IsPartialDict`, `IsStr(regex=…)`,
    `Contains`) for payloads with keys you don't care about or volatile ids/timestamps → an
-   existing **golden** for large structured output.
+   existing **golden** for large structured output. For a **rendering / cache / config /
+   interaction** behaviour, assert a metamorphic **oracle** (agreement round-trip, warm==cold,
+   scale-invariance, feature-toggle consistency), never raw pixels — they're platform-dependent;
+   when the gap is a *family* not a point, a Hypothesis `@given` property beats N examples. Menu +
+   canonical examples: [`references/oracle-catalog.md`](references/oracle-catalog.md).
 6. **One act, scenario name.** One trigger + one assertion chain; split multi-act tests.
+7. **Extend or add?** Prefer appending a `PROFILES` row (`tests/util.py`), a `parametrize` case, or
+   an `@example` to an existing test over a near-duplicate new file — one row, every property inherits
+   the corner. A *new* test is for a genuinely new scenario. (Adding an assertion is fine; *changing*
+   an existing one is the Sharpen loop's job, not yours.)
 
 ## Recipes (canonical tests in-tree — read them, don't reinvent)
 
@@ -82,3 +90,8 @@ file's style — read a sibling test first.
 
 `uv run poe test` (fast tier) green, and if the change touches free-threading,
 `uv run poe test-ft`. Coverage floor is 85% (`poe cov`).
+
+Prove a new oracle/assert is load-bearing, not vacuous:
+`uv run poe test-live tests/test_x.py --test <name>` — it negates each assert in turn, and every one
+must flip the test red (a `pytest.raises`/`warns` block counts as live). This is arm-2 of the Grow gate,
+exposed for the coding loop.

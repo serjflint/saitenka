@@ -26,4 +26,14 @@ for m in live integration slow requires_display e2e; do
   grep -q "\"$m:" "$OV/pyproject.toml" || { echo "MISSING marker: $m"; fail=1; }
 done
 
+# The oracle-catalog reference the skill points at, and the canonical oracle examples it cites (test -f is
+# grep-free — safe under the search-shim mock; see AGENTS.md "Tooling").
+test -f "$skill_dir/references/oracle-catalog.md" || { echo "MISSING: references/oracle-catalog.md"; fail=1; }
+for t in test_scale_boundary test_tooltip_statemachine test_cache_race test_cache_equivalence test_crisp_scale_properties; do
+  test -f "$OV/tests/$t.py" || { echo "MISSING oracle example: tests/$t.py"; fail=1; }
+done
+test -f "$OV/tests/util.py" || { echo "MISSING: tests/util.py (PROFILES matrix)"; fail=1; }
+# The test-live task the Verify step invokes
+grep -q "test-live" "$OV/pyproject.toml" || { echo "MISSING task: test-live"; fail=1; }
+
 if [ "$fail" -eq 0 ]; then echo "write-test smoke OK"; else echo "write-test smoke FAILED"; exit 1; fi

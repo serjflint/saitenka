@@ -487,6 +487,14 @@ fuzz = { shell = "uv run --no-project --python 3.13 --with-editable '.[full]' --
 # its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS) — unfit to commit into a
 # licence-careful Apache-2.0 repo — and atheris+crosshair already cover the pure-core adequacy angle.
 crosshair = { shell = "uv run --no-project --python 3.13 --with-editable '.[full]' --with hypothesis-crosshair pytest -q -p no:randomly --hypothesis-profile=crosshair tests/test_sub_index_properties.py tests/test_properties.py tests/test_property.py" }
+# ADVISORY (NOT in `all`) — oracle-liveness on ONE new/changed test, for the coding loop. Negates each
+# assert in the named test and re-runs it: every live oracle must flip it red, or the test is vacuous
+# (swallowed/unreachable/tautology). It's arm-2 of the Grow gate (tools/grow_gate.py) exposed here so a
+# feature-writer can prove a new test is load-bearing WITHOUT the whole idle loop. Runs the test under a
+# real pytest subprocess (needs `--extra full`), so it's per-test and opt-in, never a required gate — the
+# idle Grow loop sweeps the whole tree. `uv run poe test-live tests/test_x.py --test test_name`. See the
+# write-test skill (Verify) + .agents/skills/write-test/references/oracle-catalog.md.
+test-live = { cmd = "uv run --extra full python tools/grow_gate.py liveness" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Saitenka test adequacy"
+  short_description: "Mutation / fuzz / symbolic adequacy of the pure core"
+  default_prompt: "Use $test-adequacy to run poe mutate/fuzz/crosshair and harden survivors with a Hypothesis property + @example."
