@@ -230,6 +230,9 @@ class Dictionary:
         # unlimited, so it doesn't grow forever over a long session (`[dictdb].entry_cache_max`).
         self._entry_cache: OrderedDict[int, DictEntry] = OrderedDict()
         self._entry_cache_max = db._opts.entry_cache_max
+        # Guards _entry_cache: it's shared by the main thread AND every prefetch worker (free-threaded
+        # build), and OrderedDict get/move_to_end/setitem/popitem aren't atomic without the GIL.
+        self._entry_lock = threading.Lock()
 
     @property
     def tags(self) -> dict:
@@ -276,21 +279,38 @@ class Dictionary:
         return [n for _, n in out]
 
     def _entry_from_row(self, row) -> DictEntry:
+        # Runs on the main thread AND every prefetch worker at once (free-threaded build), all sharing
+        # this dict's _entry_cache — so the OrderedDict touches are locked. The expensive JSON decode
+        # stays OUTSIDE the lock, so workers still decode distinct entries in parallel (this cache is the
+        # whole point: glossary decode was 51% of a --stress profile). Without the lock a concurrent
+        # popitem() could evict eid between the get() and the move_to_end() (an observed KeyError), or
+        # corrupt the OrderedDict's link list outright.
         eid = row[0]
-        cached = self._entry_cache.get(eid)
+        with self._entry_lock:
+            cached = self._entry_cache.get(eid)
+            if cached is not None:
+                self._entry_cache.move_to_end(eid)
         if cached is not None:
-            self._entry_cache.move_to_end(eid)
             if otel_metrics.dict_cache_hits is not None:
                 otel_metrics.dict_cache_hits.add(1)
             return cached
         if otel_metrics.dict_cache_misses is not None:
             otel_metrics.dict_cache_misses.add(1)
         entry = DictEntry(row[1], row[2], msgspec_json.decode(row[3]), row[4], raw_glossary=row[3])
-        self._entry_cache[eid] = entry
-        if len(self._entry_cache) > self._entry_cache_max:
-            self._entry_cache.popitem(last=False)
-            if otel_metrics.dict_cache_evictions is not None:
-                otel_metrics.dict_cache_evictions.add(1)
+        evicted = False
+        with self._entry_lock:
+            # First-writer-wins: another thread may have decoded + inserted this eid while we decoded it
+            # unlocked — reuse theirs so the cached object's identity stays stable, and drop our dup.
+            existing = self._entry_cache.get(eid)
+            if existing is not None:
+                self._entry_cache.move_to_end(eid)
+                return existing
+            self._entry_cache[eid] = entry
+            if len(self._entry_cache) > self._entry_cache_max:
+                self._entry_cache.popitem(last=False)
+                evicted = True
+        if evicted and otel_metrics.dict_cache_evictions is not None:
+            otel_metrics.dict_cache_evictions.add(1)
         return entry
 
     # ORDER BY e.id makes row order deterministic so DictionarySet._batch_exact (one IN-list query
