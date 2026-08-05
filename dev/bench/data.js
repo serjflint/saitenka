@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785957201625,
+  "lastUpdate": 1785957893353,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -359,6 +359,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.072,
             "range": "±13.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "448c5e1d5f226dc97484a67ebb5f0cf5cdfedbbc",
+          "message": "feat(mining): animated (motion) screenshots on mined cards (#92) (#189)\n\nOpt-in [mine].animated_screenshot captures a short animated clip of the scene\nas the card image instead of a still — better sense of the scene, pairs with\nthe cue audio. Prefers WebP (small, sharp) and falls back to an animated GIF\nwhere ffmpeg lacks libwebp (Homebrew ffmpeg 8, Windows \"essentials\" builds), so\na clip is produced out of the box on every platform; only a build with no\nwebp/gif encoder at all keeps the still. The still JPG is always captured\nlocally as the preview + fallback.\n\nanimated_height/fps/quality/max_secs are the quality↔storage knobs; a\nCtrl+Shift+m shortcut ([mine].video_key) mines the hovered word with a clip for\none card without turning it on globally. Config threads through both the run and\nattach seams; doctor reports the animated capability.",
+          "timestamp": "2026-08-05T22:24:27+03:00",
+          "tree_id": "2b17c805b6e4e984d53fab5b7c8233ed65ffb5ed",
+          "url": "https://github.com/serjflint/saitenka/commit/448c5e1d5f226dc97484a67ebb5f0cf5cdfedbbc"
+        },
+        "date": 1785957892248,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.68,
+            "range": "±3.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.483,
+            "range": "±20.9%",
             "unit": "ms"
           }
         ]
