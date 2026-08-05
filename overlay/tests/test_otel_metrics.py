@@ -71,6 +71,25 @@ def test_snapshot_reports_gil_enabled_gauge():
 
 
 @pytest.mark.usefixtures("registered")
+def test_scroll_frame_jank_counter_bumps_only_past_threshold():
+    # The --scroll-jank benchmark's headline signal (a frame over the display budget = visible stutter):
+    # instrumented_jank must bump saitenka.scroll_frame.jank ONLY when the block runs past the
+    # threshold, while the histogram always records. Threshold 0.0 → any real elapsed is "janky";
+    # a huge threshold → the same fast frame is not — deterministic, no sleep.
+    with otel_metrics.instrumented_jank(
+        otel_metrics.scroll_frame_duration_ms, otel_metrics.scroll_frame_jank, 0.0, "scroll_frame"
+    ):
+        pass
+    with otel_metrics.instrumented_jank(
+        otel_metrics.scroll_frame_duration_ms, otel_metrics.scroll_frame_jank, 1e9, "scroll_frame"
+    ):
+        pass
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.scroll_frame.jank"]["value"] == 1  # only the over-threshold frame
+    assert snap["saitenka.scroll_frame.duration_ms"]["count"] == 2  # both frames still timed
+
+
+@pytest.mark.usefixtures("registered")
 def test_unregister_resets_instruments_to_none():
     assert otel_metrics.render_duration_ms is not None
     otel_metrics.unregister()
