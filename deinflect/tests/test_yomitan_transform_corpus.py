@@ -22,19 +22,6 @@ _CASES = json.loads(
 )["cases"]
 
 
-# Kuru 来られる 'potential or passive' (kanji/kana + negative variants): the identical-state 'passive'
-# rule wins the BFS `(text, conditions)` dedup, so the port can't emit the 'potential or passive' trace
-# Yomitan keeps. Engine-behaviour divergence tracked in #152 — strict xfail flips red once fixed.
-_KNOWN_DIVERGENCE = {
-    ("来られる", ("potential or passive",)),
-    ("来られない", ("potential or passive", "negative")),
-    ("來られる", ("potential or passive",)),
-    ("來られない", ("potential or passive", "negative")),
-    ("こられる", ("potential or passive",)),
-    ("こられない", ("potential or passive", "negative")),
-}
-
-
 def _has_term_reasons(
     source: str, term: str, rule: str | None, reasons: list[str]
 ) -> bool:
@@ -56,10 +43,6 @@ def _has_term_reasons(
     _CASES,
     ids=[f"{c['category']}:{c['source']}->{c['term']}" for c in _CASES],
 )
-def test_matches_yomitan_transform_corpus(case, request):
-    if (case["source"], tuple(case["reasons"])) in _KNOWN_DIVERGENCE:
-        request.node.add_marker(
-            pytest.mark.xfail(reason="#152 dedup drops trace", strict=True)
-        )
+def test_matches_yomitan_transform_corpus(case):
     got = _has_term_reasons(case["source"], case["term"], case["rule"], case["reasons"])
     assert got is case["valid"]

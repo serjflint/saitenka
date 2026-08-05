@@ -95,15 +95,25 @@ class Deinflection:
 
 
 def deinflect(text: str) -> list[Deinflection]:
-    """All ways to peel inflections off ``text`` (breadth-first, deduped by reached state)."""
+    """All ways to peel inflections off ``text``, faithful to Yomitan's ``LanguageTransformer.transform``.
+
+    A **per-chain cycle guard** — a rule ``(name, index)`` may not re-apply to a text already in its own
+    ancestry — is the termination bound (as upstream), so two transforms reaching the SAME ``(text,
+    conditions)`` via DIFFERENT traces both survive: 来られる keeps both ``passive`` and ``potential or
+    passive`` (the old ``(text, cond)`` dedup dropped the second — #152). The global ``seen`` dedup is kept
+    but keyed by ``(text, cond_out, chain)``: it removes only genuine duplicates (identical reached state
+    AND identical name-chain, which the corpus oracle and :func:`inflection_chain` can't tell apart), an
+    efficiency win over upstream's no-dedup that cannot suppress a distinct trace."""
     results = [Deinflection(text, 0, ())]
-    seen = {(text, 0)}
+    # Per-node ancestry of applied rules, frame = (name, rule_index, text_applied_to) — the cycle guard.
+    traces: list[tuple[tuple[str, int, str], ...]] = [()]
+    seen = {(text, 0, ())}
     i = 0
     while i < len(results):
-        cur = results[i]
+        cur, tr = results[i], traces[i]
         i += 1
         for name, rules in TRANSFORMS.items():
-            for r in rules:
+            for j, r in enumerate(rules):
                 if r.is_suffix:
                     if len(cur.text) < len(r.inflected) or not cur.text.endswith(r.inflected):
                         continue
@@ -114,11 +124,19 @@ def deinflect(text: str) -> list[Deinflection]:
                     nt = r.deinflected
                 if not _match(cur.conditions, r.cond_in):
                     continue
-                key = (nt, r.cond_out)
-                if not nt or key in seen:
+                if not nt or (name, j, cur.text) in tr:  # empty result, or Yomitan's isCycle
+                    continue
+                ch = (name, *cur.chain)
+                key = (nt, r.cond_out, ch)
+                # True duplicate: same reached state AND same observable name-chain. Lossless on the
+                # current descriptor (verified against a no-dedup port); a future rule edit adding BOTH a
+                # within-transform duplicate rule AND a grammar cycle back to it could make this coarser
+                # than the trace — the corpus gate would catch it.
+                if key in seen:
                     continue
                 seen.add(key)
-                results.append(Deinflection(nt, r.cond_out, (name, *cur.chain)))
+                results.append(Deinflection(nt, r.cond_out, ch))
+                traces.append(((name, j, cur.text), *tr))
     return results
 
 

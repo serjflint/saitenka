@@ -1,6 +1,21 @@
 """Japanese deinflector: surface → dictionary form + the Yomitan-style inflection chain."""
 
-from saitenka_deinflect import deinflect, inflection_chain
+from saitenka_deinflect import (
+    condition_flags,
+    conditions_match,
+    deinflect,
+    inflection_chain,
+)
+
+
+def _traces_to(surface: str, term: str, rule: str) -> set[tuple[str, ...]]:
+    """Every transform chain that reduces ``surface`` to ``term`` with the ``rule`` POS conditions."""
+    flags = condition_flags(rule)
+    return {
+        tuple(d.chain)
+        for d in deinflect(surface)
+        if d.text == term and conditions_match(d.conditions, flags)
+    }
 
 
 def test_chain_matches_yomitan_examples():
@@ -46,3 +61,27 @@ def test_no_path_returns_empty():
 def test_deinflect_reaches_dictionary_form():
     forms = {d.text for d in deinflect("食べさせた")}
     assert "食べる" in forms  # causative + past peels back to the dictionary form
+
+
+def test_kuru_keeps_both_potential_and_passive_traces():
+    # #152: 来られる reaches 来る (vk) via BOTH the passive and the 'potential or passive' kuru rules, which
+    # land on the identical (来る, vk) state. The old (text, conditions) dedup dropped whichever lost the
+    # BFS race; Yomitan keeps both, so the port must too.
+    assert _traces_to("来られる", "来る", "vk") >= {("passive",), ("potential or passive",)}
+    # the kana + negative twin behaves identically
+    assert _traces_to("こられない", "くる", "vk") >= {
+        ("passive", "negative"),
+        ("potential or passive", "negative"),
+    }
+
+
+def test_inflection_chain_prefers_shortest_label_after_trace_fix():
+    # keeping the extra trace must NOT change the single label users see — the shortest chain still wins,
+    # stably (passive is discovered before potential-or-passive), so the tooltip is unchanged.
+    assert inflection_chain("来られる", "来る") == ["passive"]
+
+
+def test_deinflect_terminates_with_bounded_growth():
+    # loosening the state dedup to keep distinct traces must not explode the BFS: the per-chain cycle
+    # guard is the termination bound (a rule can't re-apply to the same text within a chain).
+    assert len(deinflect("くんなきゃ")) <= 40
