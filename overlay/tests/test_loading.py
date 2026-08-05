@@ -63,6 +63,57 @@ def test_draw_loading_shows_spinner_throttles_then_resumes(monkeypatch):
     assert len(r.ov.shown) == n1 + 1 and r._load_frame == 2
 
 
+# --- the mpv-native startup breadcrumb (the only feedback during mpv's pre-overlay file-load) --------
+
+
+def test_show_startup_hint_posts_mpv_osd_text():
+    from util import FakeIPC
+
+    from overlay.app.loading import STARTUP_HINT, show_startup_hint
+
+    ipc = FakeIPC()
+    show_startup_hint(ipc)
+    assert ("show-text", STARTUP_HINT, 30000) in ipc.commands
+
+
+def test_show_startup_hint_skipped_for_screenshot():
+    # A screenshot capture must not carry the breadcrumb, so it never touches mpv's OSD.
+    from util import FakeIPC
+
+    from overlay.app.loading import show_startup_hint
+
+    ipc = FakeIPC()
+    show_startup_hint(ipc, screenshot=True)
+    assert ipc.commands == []
+
+
+def test_clear_startup_hint_empties_the_osd_text():
+    from util import FakeIPC
+
+    from overlay.app.loading import clear_startup_hint
+
+    ipc = FakeIPC()
+    clear_startup_hint(ipc)
+    assert ("show-text", "", 1) in ipc.commands
+
+
+def test_first_subtitle_draw_clears_the_startup_hint():
+    # The overlay is live once the first cue draws → the breadcrumb must be cleared exactly then.
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+
+    r = Reader(FakeIPC())
+    r.ov = _RecOv()
+    r.subtitle_language = "en"  # plain path → no dict/tokenize deps needed to raster a cue
+    assert not r._first_sub_logged
+    r.set_subtitle("hello")  # first cue draws → hint cleared exactly here
+    assert r._first_sub_logged
+    assert ("show-text", "", 1) in r.ipc.commands
+    r.set_subtitle("world")  # a second cue must NOT re-clear (one-shot)
+    assert r.ipc.commands.count(("show-text", "", 1)) == 1
+
+
 def test_apply_deps_stops_the_spinner():
     from util import FakeIPC
 

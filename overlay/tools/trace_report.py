@@ -148,6 +148,31 @@ def attr_breakdowns(events: list[dict]) -> dict[str, Counter]:
     return out
 
 
+def _first(spans: list[dict], name: str, pred=None) -> dict | None:
+    """Earliest complete span called ``name`` (optionally matching ``pred(args)``), by start time."""
+    hits = [s for s in spans if s["name"] == name and (pred is None or pred(s.get("args", {})))]
+    return min(hits, key=lambda s: s["ts"]) if hits else None
+
+
+def first_paints(events: list[dict]) -> list[tuple[str, dict | None, str]]:
+    """The user-perceived 'first X paint' latencies, timestamped from session start (the earliest span).
+    Each row is (label, span_or_None, note). ``tooltip_show`` is the end-to-end base hover→drawn; nested
+    and clicked paints have no ``tooltip_show``, so they're taken from the ``tip_compose`` ``kind``
+    attribute (absent in bundles from before that marker → the note says so, not a false 'never')."""
+    spans = [e for e in events if e.get("ph") == "X"]
+    kinds = {s.get("args", {}).get("kind") for s in spans if s["name"] == "tip_compose"}
+    tagged = any(k is not None for k in kinds)
+    untagged = "" if tagged else "  (tip_compose has no `kind` — bundle predates the marker)"
+    return [
+        ("first subtitle cue paint", _first(spans, "subtitle_render") or _first(spans, "cue_redraw"), ""),
+        ("first tooltip paint (base)", _first(spans, "tooltip_show"), ""),
+        ("first nested tooltip paint",
+         _first(spans, "tip_compose", lambda a: a.get("kind") == "nested"), untagged),
+        ("first clicked tooltip paint",
+         _first(spans, "tip_compose", lambda a: a.get("kind") == "clicked"), untagged),
+    ]
+
+
 def final_counters(events: list[dict]) -> dict[str, float]:
     """Last sampled value of each pull-based counter (ph == C)."""
     out: dict[str, float] = {}
@@ -171,7 +196,7 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
     spans = span_stats(events)
     print(f"# saitenka trace report — {src.name}")
     print(f"  {len([e for e in events if e.get('ph') == 'X'])} spans, "
-          f"{len(set(e['name'] for e in events if e.get('ph') == 'C'))} counters, {len(log)} log lines\n")
+          f"{len({e['name'] for e in events if e.get('ph') == 'C'})} counters, {len(log)} log lines\n")
 
     print("## diagnostics")
     swaps = counters.get("crisp.swaps", 0.0)
@@ -201,6 +226,24 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
     if shows:
         print(f"  tooltip_show cold/warm               {dict(shows)}")
     print()
+
+    x_spans = [e for e in events if e.get("ph") == "X"]
+    if x_spans:
+        t0 = min(s["ts"] for s in x_spans)
+        print("## first paints (t+ from session start, ms)")
+        for label, sp, note in first_paints(events):
+            if sp is None:
+                print(f"  {label:<30} —{note or '  (none this session)'}")
+                continue
+            a = sp.get("args", {})
+            tags = " ".join(f"{k}={a[k]}" for k in ("cold", "kind", "soft_reason", "scale")
+                            if k in a)
+            print(f"  {label:<30} t+{(sp['ts'] - t0) / 1000:8.1f}  "
+                  f"dur={sp.get('dur', 0.0) / 1000:6.1f}ms  {tags}")
+        kinds = breaks.get("tip_compose.kind")
+        if kinds:  # per-kind paint counts once the marker is present
+            print(f"  tip_compose by kind                  {dict(kinds.most_common())}")
+        print()
 
     probe_keys = sorted(k for k in breaks if k.startswith("osd_probe."))
     if probe_keys:
