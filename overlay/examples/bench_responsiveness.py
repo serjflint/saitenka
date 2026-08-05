@@ -201,6 +201,27 @@ class _SyntheticDS:
         )
 
 
+# Deterministic CJK headword pool for the dict-free synth corpus — a fixed string, no randomness, so the
+# same corpus (and the same numbers) come out on every machine and every commit.
+_SYNTH_POOL = "見門経読語手気道時人山川花水火木金土空海雨風雪月日火"
+_SYNTH_PARA = "とても長い定義の本文でありスクロールが必要になるほど縦に伸びる説明文です。"
+
+
+def synth_corpus(n: int = 60) -> list[tuple[str, Entry]]:
+    """A deterministic, dict-free corpus of ``(headword, Entry)`` spanning the render cost space — short
+    single-def entries, medium multi-def, and tall scrolling ones. No ``overlay.toml``, no ``random``:
+    byte-identical every run, so it is the CI/asv-safe gate target that ``--vocab`` (which needs real
+    dicts) can't be. The cost tier cycles short/medium/tall and the body length grows within a tier."""
+    out: list[tuple[str, Entry]] = []
+    for i in range(n):
+        hw = _SYNTH_POOL[i % len(_SYNTH_POOL)] + _SYNTH_POOL[(i * 7 + 3) % len(_SYNTH_POOL)]
+        tier = i % 3
+        n_defs, body_reps = ((1, 1), (3, 2), (6, 3))[tier]
+        defs = [Definition(f"辞書{j}", [_SYNTH_PARA * body_reps]) for j in range(n_defs)]
+        out.append((hw, Entry(headword=hw, reading="かな", defs=defs)))
+    return out
+
+
 def _content_indices(reader) -> list[int]:
     from overlay.app.controller import SKIP_POS
 
@@ -1046,6 +1067,114 @@ def _vocab_render(job: tuple[str, str, str, str, int]) -> int:
     return WindowedPanel(panel_rows(entry, width), width).viewport(0, 432, overscan=80).height
 
 
+def to_bench_json(metrics: dict) -> list[dict]:
+    """Map the synth metrics dict to github-action-benchmark's ``customSmallerIsBetter`` array —
+    ``[{name, unit, value, range}]``, smaller = better → fits ms latency with no benchmark rewrite. The
+    measured CV becomes the ``range`` band so run-to-run variance shows on the gh-pages chart. A metric
+    absent from ``metrics`` is omitted, never emitted as ``null``."""
+    out: list[dict] = []
+    for name, val_key, cv_key in (
+        ("synth median render", "synth_median_ms", "synth_median_cv"),
+        ("synth p99 render", "synth_p99_ms", "synth_p99_cv"),
+    ):
+        value = metrics.get(val_key)
+        if value is None:
+            continue
+        entry: dict = {"name": name, "unit": "ms", "value": round(value, 3)}
+        cv = metrics.get(cv_key)
+        if cv:
+            entry["range"] = f"±{cv * 100:.1f}%"
+        out.append(entry)
+    return out
+
+
+def _percentile(samples: list[float], q: float) -> float:
+    s = sorted(samples)
+    return s[min(len(s) - 1, int(q * len(s)))]
+
+
+def _cv(xs: list[float]) -> float:
+    """Coefficient of variation (stdev/mean) — the run-to-run noise #33 asks to characterize. 0 for a
+    single sample or a zero mean."""
+    return (
+        statistics.pstdev(xs) / statistics.mean(xs) if len(xs) > 1 and statistics.mean(xs) else 0.0
+    )
+
+
+def run_synth(
+    reps: int,
+    rt: dict,
+    require_ft: bool = False,
+    json_path: str | None = None,
+    *,
+    loops: int = 1,
+    bench_json: str | None = None,
+    n: int = 60,
+) -> int:
+    """Dict-free deterministic render benchmark — the CI/asv-safe gate target. For each entry in
+    :func:`synth_corpus` it times the shipping windowed viewport render (``WindowedPanel.viewport`` — the
+    real hover compositor cost, minus the dict lookup), so the same numbers come out on any machine and
+    any commit. ``--loops`` repeats the whole corpus to characterize run-to-run variance (CV), surfaced
+    in the JSON and, via :func:`to_bench_json`, as the chart's variance band."""
+    from overlay.render.banded import WindowedPanel
+
+    corpus = synth_corpus(n)
+    width = 640
+
+    gil_rc = finalize_runtime(rt, require_ft)
+    print("\nSaitenka overlay — SYNTH render benchmark (dict-free, deterministic)")
+    print(format_runtime(rt))
+    print(f"entries: {len(corpus)}   reps: {reps}   loops: {loops}   tip_width: {width}\n")
+
+    for (
+        _hw,
+        entry,
+    ) in corpus:  # warm caches/imports so the first-render outlier doesn't inflate p99 CV
+        WindowedPanel(panel_rows(entry, width), width).viewport(0, 432, overscan=80)
+
+    loop_median: list[float] = []
+    loop_p99: list[float] = []
+    all_ms: list[float] = []
+    for _loop in range(loops):
+        loop_ms: list[float] = []
+        for _ in range(reps):
+            for _hw, entry in corpus:
+                t0 = time.perf_counter()
+                WindowedPanel(panel_rows(entry, width), width).viewport(0, 432, overscan=80)
+                loop_ms.append((time.perf_counter() - t0) * 1000.0)
+        loop_median.append(statistics.median(loop_ms))
+        loop_p99.append(_percentile(loop_ms, 0.99))
+        all_ms.extend(loop_ms)
+
+    metrics = {
+        "runtime": rt,
+        "entries": len(corpus),
+        "reps": reps,
+        "loops": loops,
+        "synth_median_ms": statistics.median(all_ms),
+        "synth_p99_ms": _percentile(all_ms, 0.99),
+        "synth_max_ms": max(all_ms),
+        "synth_median_cv": _cv(loop_median),
+        "synth_p99_cv": _cv(loop_p99),
+    }
+    print(
+        f"  median {metrics['synth_median_ms']:7.2f}   p99 {metrics['synth_p99_ms']:7.2f}   "
+        f"MAX {metrics['synth_max_ms']:7.2f}  ms"
+    )
+    if loops > 1:
+        print(
+            f"  CV over {loops} loops: median {metrics['synth_median_cv'] * 100:.1f}%   "
+            f"p99 {metrics['synth_p99_cv'] * 100:.1f}%"
+        )
+    if json_path:
+        Path(json_path).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        print(f"\nwrote synth baseline → {json_path}")
+    if bench_json:
+        Path(bench_json).write_text(json.dumps(to_bench_json(metrics), indent=2), encoding="utf-8")
+        print(f"wrote github-action-benchmark JSON → {bench_json}")
+    return gil_rc
+
+
 def run_vocab(
     vocab_path: str,
     reps: int,
@@ -1666,6 +1795,24 @@ def main() -> int:
         help="also write the metrics (with runtime info) as JSON, for baseline diffing over time",
     )
     ap.add_argument(
+        "--synth",
+        action="store_true",
+        help="dict-free deterministic render benchmark over synth_corpus() — the CI/asv-safe gate "
+        "target (no overlay.toml, no randomness → identical numbers on any machine/commit)",
+    )
+    ap.add_argument(
+        "--loops",
+        type=int,
+        default=1,
+        help="--synth: repeat the whole corpus N times to characterize run-to-run variance (CV)",
+    )
+    ap.add_argument(
+        "--bench-json",
+        metavar="PATH",
+        help="--synth: also write github-action-benchmark customSmallerIsBetter JSON (for the gh-pages "
+        "continuous-history dashboard)",
+    )
+    ap.add_argument(
         "--require-ft",
         action="store_true",
         help="fail if the GIL is enabled (a C-extension re-enabled it) — for free-threaded runs",
@@ -1851,6 +1998,15 @@ def main() -> int:
         )
     if args.scroll_jank:
         return run_scroll_jank(args.reps, rt, args.require_ft, args.json)
+    if args.synth:
+        return run_synth(
+            args.reps,
+            rt,
+            args.require_ft,
+            args.json,
+            loops=args.loops,
+            bench_json=args.bench_json,
+        )
     if args.vocab:
         return run_vocab(
             args.vocab,

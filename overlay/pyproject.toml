@@ -382,10 +382,14 @@ affected = { cmd = "uv run --extra full python tools/affected.py" }
 # instead of a separate `test` — the suite runs twice total (here + `test-ft` under PYTHON_GIL=0).
 cov = "uv run --extra full pytest -q -n auto --cov=overlay --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
-# Local perf rot-guard (#33): ratchet the --vocab render throughput against perf-baseline.json, failing
-# only on GROSS regression (generous +50% tolerance → catches a 2-4x rot, never micro-drift). LOCAL/
-# OPT-IN, wall-clock + machine-specific → deliberately NOT in `all` (like mutate/bench). Needs dicts in
-# overlay.toml. Re-bless after a deliberate perf change. See tools/perf_gate.py.
+# Dict-free deterministic render bench — the CI/asv-safe gate target (no overlay.toml, no randomness).
+# --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
+synth-bench = "uv run --extra full python examples/bench_responsiveness.py --synth --reps 5 --loops 5"
+# Local perf rot-guard (#33): ratchet the --synth render throughput against perf-baseline.json, failing
+# only on GROSS regression (per-metric tolerance: median +50%, tail-noisy p99 +100% → catches a 2-4x
+# rot, never micro-drift). LOCAL/OPT-IN, wall-clock + machine-specific → deliberately NOT in `all` (like
+# mutate/bench). The statistical trend gate is github-action-benchmark on gh-pages (.github/workflows/
+# perf.yml). Re-bless after a deliberate perf change. See tools/perf_gate.py.
 perf-check = "uv run --extra full python tools/perf_gate.py"
 perf-bless = "uv run --extra full python tools/perf_gate.py --bless"
 # Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between

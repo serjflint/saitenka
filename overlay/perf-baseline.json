@@ -6,10 +6,12 @@
     "cpu_count": 12,
     "prefetch_workers": 8
   },
-  "words": 608,
-  "full_median_ms": 10.804437508340925,
-  "full_p99_ms": 90.03162500448525,
-  "full_max_ms": 121.83658394496888,
-  "cold_median_ms": 6.250604521483183,
-  "cold_max_ms": 89.14233406540006
+  "entries": 60,
+  "reps": 5,
+  "loops": 3,
+  "synth_median_ms": 2.3597499821335077,
+  "synth_p99_ms": 4.410875029861927,
+  "synth_max_ms": 41.606416925787926,
+  "synth_median_cv": 0.026733899153634947,
+  "synth_p99_cv": 0.5686012517546569
 }
