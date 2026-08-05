@@ -1,0 +1,73 @@
+"""Tests for the Grow triage composite. Run explicitly (tools/ is outside `poe all`):
+    uv run python -m pytest tools/test_grow_triage.py
+
+Only the PURE scorer is tested — the real gatherers are subprocess glue (ruff/git/gh), like
+`sharpen_triage`, which carries no unit test. The one invariant worth locking is that the composite is a
+PRODUCT of the two axes, not a sum (the Grow↔Sharpen distinction).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import grow_triage as gt
+
+
+def _cand(
+    module: str, *, fan_in: int, churn: int = 0, priv_seam: int = 0, survivors=None, dead_ctx=None
+):
+    return gt.Candidate(
+        module=module,
+        tests=[],
+        fan_in=fan_in,
+        churn=churn,
+        priv_seam=priv_seam,
+        survivors=survivors,
+        dead_ctx=dead_ctx,
+    )
+
+
+def test_high_value_but_fully_specified_scores_zero():
+    # max fan-in, but zero under-specification → product is zero (a sum would rank it top)
+    c = _cand("hot.py", fan_in=44, priv_seam=0, survivors=0, dead_ctx=0)
+    other = _cand("mild.py", fan_in=1, priv_seam=5, survivors=3, dead_ctx=2)
+    gt.score_candidates([c, other])
+    assert c.score == 0.0
+    assert other.score > 0.0
+
+
+def test_under_specified_but_worthless_scores_zero():
+    # heavily under-specified, but zero value (no fan-in, no churn) → product is zero
+    c = _cand("dead.py", fan_in=0, churn=0, priv_seam=9, survivors=9, dead_ctx=9)
+    other = _cand("live.py", fan_in=10, churn=4, priv_seam=3)
+    gt.score_candidates([c, other])
+    assert c.score == 0.0
+    assert other.score > 0.0
+
+
+def test_the_bullseye_both_axes_high_ranks_first():
+    bull = _cand("panel.py", fan_in=44, churn=8, priv_seam=6, survivors=4, dead_ctx=3)
+    value_only = _cand("config.py", fan_in=37, churn=6, priv_seam=0)
+    uspec_only = _cand("leaf.py", fan_in=0, churn=0, priv_seam=8)
+    cands = [value_only, bull, uspec_only]
+    gt.score_candidates(cands)
+    cands.sort(key=lambda c: -c.score)
+    assert cands[0] is bull
+
+
+def test_excluded_candidates_are_skipped_by_the_scorer():
+    live = _cand("a.py", fan_in=10, priv_seam=5)
+    dead = _cand("b.py", fan_in=99, priv_seam=99)
+    dead.excluded = "open-PR: x"
+    gt.score_candidates([live, dead])
+    assert dead.score == 0.0  # untouched — never scored
+    assert live.score > 0.0
+
+
+def test_optional_signals_absent_do_not_crash_and_read_as_zero():
+    # survivors / dead_ctx are None (no campaign / contexts supplied) → treated as 0, still scores on seam
+    c = _cand("x.py", fan_in=5, priv_seam=4, survivors=None, dead_ctx=None)
+    gt.score_candidates([c])
+    assert c.underspec > 0.0  # driven by the always-available seam signal
