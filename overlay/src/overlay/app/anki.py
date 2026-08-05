@@ -187,6 +187,52 @@ class _AnkiRetryable(AnkiError):
     are plain ``AnkiError`` and never retried."""
 
 
+# logical name -> real field on the note type (Lapis defaults). Kiku shares these names — SubMiner
+# treats the two uniformly and its docs describe Kiku as inheriting Lapis's field settings.
+LAPIS_FIELDS = {
+    "expression": "Expression",
+    "reading": "ExpressionReading",
+    "sentence": "Sentence",
+    "glossary": "Glossary",
+    "picture": "Picture",
+    "audio": "SentenceAudio",
+    "misc": "MiscInfo",
+    "id": "ID",
+    "freq": "Frequency",
+    "freq_sort": "FreqSort",
+}
+
+# The mutually-exclusive card-template markers a note type may key off (Lapis/Kiku family). One of
+# these, set non-empty, selects the front/back template. card_kind -> its marker (None = mark none).
+KNOWN_MARKERS = ("IsSentenceCard", "IsWordAndSentenceCard", "IsClickCard", "IsAudioCard")
+_CARD_KIND_MARKER: dict[str, str | None] = {
+    "sentence": "IsSentenceCard",
+    "word-and-sentence": "IsWordAndSentenceCard",
+    "click": "IsClickCard",
+    "audio": "IsAudioCard",
+    "none": None,
+}
+_DEFAULT_CARD_KIND = "word-and-sentence"
+
+# Known-good note types: (field map, default card kind). A preset spares the user spelling the map
+# out; both Lapis and Kiku use the shared LAPIS_FIELDS names, differing only in card template.
+PRESETS: dict[str, tuple[dict, str]] = {
+    "Lapis": (LAPIS_FIELDS, _DEFAULT_CARD_KIND),
+    "Kiku": (LAPIS_FIELDS, _DEFAULT_CARD_KIND),
+}
+
+
+def _flags_for(card_kind: str) -> dict:
+    """The non-empty card-template marker(s) for a card kind: exactly one of :data:`KNOWN_MARKERS`
+    set to ``"1"`` (mutual exclusion by construction), or ``{}`` for ``"none"``. An unrecognised kind
+    warns and falls back to the default, so a ``[mine].card_kind`` typo can't silently disable mining."""
+    if card_kind not in _CARD_KIND_MARKER:
+        log.warning("unknown [mine].card_kind %r; using %r", card_kind, _DEFAULT_CARD_KIND)
+        card_kind = _DEFAULT_CARD_KIND
+    marker = _CARD_KIND_MARKER[card_kind]
+    return {marker: "1"} if marker else {}
+
+
 @dataclass
 class MineConfig:
     deck: str = "Saitenka::Mining"
@@ -196,23 +242,28 @@ class MineConfig:
     # Opt-in animated (motion) screenshot instead of a still (config: [mine].animated_screenshot +
     # animated_height/fps/quality/max_secs/format). See media.AnimatedClip / animated_screenshot.
     animated: AnimatedClip = field(default_factory=AnimatedClip)
-    # logical name -> real field on the note type (Lapis defaults)
-    fields: dict = field(
-        default_factory=lambda: {
-            "expression": "Expression",
-            "reading": "ExpressionReading",
-            "sentence": "Sentence",
-            "glossary": "Glossary",
-            "picture": "Picture",
-            "audio": "SentenceAudio",
-            "misc": "MiscInfo",
-            "id": "ID",
-            "freq": "Frequency",
-            "freq_sort": "FreqSort",
-        }
-    )
-    # non-empty flag fields Lapis uses to pick a card template
-    flags: dict = field(default_factory=lambda: {"IsSentenceCard": "1"})
+    # card template selector — one of _CARD_KIND_MARKER's keys. Default word-and-sentence (SubMiner's
+    # default) is a deliberate change from the historical unconditional IsSentenceCard; set
+    # [mine].card_kind = "sentence" to restore the old marker.
+    card_kind: str = _DEFAULT_CARD_KIND
+    fields: dict = field(default_factory=lambda: dict(LAPIS_FIELDS))
+    # non-empty flag fields that pick a card template; derived from card_kind unless set explicitly
+    flags: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.flags:
+            self.flags = _flags_for(self.card_kind)
+
+    @classmethod
+    def from_preset(cls, name: str, **overrides) -> MineConfig:
+        """A :class:`MineConfig` for a known note type (Lapis/Kiku): its field map + default card
+        kind. An unknown name warns and falls back to the Lapis map. ``overrides`` win over the preset."""
+        if name not in PRESETS:
+            log.warning("unknown mining preset %r; using the Lapis field map", name)
+        fields_map, card_kind = PRESETS.get(name, (LAPIS_FIELDS, _DEFAULT_CARD_KIND))
+        params: dict = {"model": name, "fields": dict(fields_map), "card_kind": card_kind}
+        params.update(overrides)
+        return cls(**params)
 
 
 class Anki:
@@ -259,6 +310,10 @@ class Anki:
 
     def notes_info(self, ids: list[int]) -> list[dict]:
         return self._call("notesInfo", notes=ids) or []
+
+    def model_field_names(self, model: str) -> list[str]:
+        """The real field names of a note type — used to validate a configured mining field map."""
+        return self._call("modelFieldNames", modelName=model) or []
 
     def can_add(self, note: dict) -> bool:
         return bool((self._call("canAddNotes", notes=[note]) or [False])[0])

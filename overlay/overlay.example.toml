@@ -151,7 +151,16 @@ pitch = [
 [mine]
 enabled = true
 deck = "Saitenka::Mining"
-model = "Lapis"
+model = "Lapis"                # your Anki note type (must already exist — a deck is auto-created, a
+                              # note type is not); `saitenka doctor` warns if its fields don't match
+# preset = "Lapis"            # "Lapis" or "Kiku": fill the field map + card_kind for a known note
+                              # type so you don't spell `fields` out (Kiku shares Lapis's field names)
+# card_kind = "word-and-sentence"  # which card template the mine marks:
+                              # word-and-sentence (Lapis/Kiku default) · sentence (the old Saitenka
+                              # marker) · audio · click · none. Sets exactly one Is…Card flag.
+# [mine.fields]              # override the logical→real field map for a non-Lapis note type, e.g.
+# expression = "Word"        #   Animecards: expression→Word, reading→Reading. Only mapped fields are
+# reading = "Reading"        #   written; `saitenka doctor` warns about names the note type lacks.
 key = "Ctrl+m"
 all_key = "Shift+m"
 preview_key = "p"

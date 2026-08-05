@@ -107,6 +107,50 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
     assert captured["mine"]["deck"] == "D"  # CLI-threaded value overrides the raw config
 
 
+def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
+    # preset-only config must resolve to the preset's note type on run/doctor, matching the attach
+    # seam's _mine_config_from — else `preset = "Kiku"` (no model) mines to Kiku on attach but Lapis on run.
+    from overlay.app.cli import _resolve_mine_model
+
+    assert _resolve_mine_model({}) == "Lapis"
+    assert _resolve_mine_model({"preset": "Kiku"}) == "Kiku"
+    assert (
+        _resolve_mine_model({"model": "Custom", "preset": "Kiku"}) == "Custom"
+    )  # explicit model wins
+
+
+def test_run_threads_field_map_and_card_kind(monkeypatch):
+    # #101 field-map/card-kind have no CLI flag — they must ride through the RUN seam purely via the
+    # raw [mine] table (the both-seams trap), or they'd work on attach but silently no-op on run.
+    from overlay.app import cli_run, reader_deps
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        reader_deps,
+        "build_reader_deps",
+        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
+    )
+    cli_run._build_run_deps(
+        mine=True,
+        mine_deck="D",
+        mine_model="Lapis",
+        mine_key="Ctrl+m",
+        mine_all_key="Shift+m",
+        mine_normalize_audio=False,
+        mine_animated_screenshot=False,
+        raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
+        known_cfg=None,
+        known="",
+        color=False,
+        dict_titles=[],
+        freq_titles=[],
+        pitch_titles=[],
+    )
+    assert captured["mine"]["preset"] == "Kiku"
+    assert captured["mine"]["card_kind"] == "sentence"
+    assert captured["mine"]["fields"] == {"expression": "Word"}
+
+
 def test_run_options_read_hover_pause_key():
     opts = _build_run_options(
         {
