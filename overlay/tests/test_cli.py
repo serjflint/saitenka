@@ -255,3 +255,31 @@ def test_jimaku_should_fetch_decision():
     assert (
         f(explicit_flag=False, cfg_fetch=False, video="v.mkv", probe=lambda _v, _s: False) is False
     )  # neither → never
+
+
+def test_resolve_atlas_scale_explicit_value_wins():
+    from overlay.app.cli import _resolve_atlas_scale
+
+    assert (
+        _resolve_atlas_scale({"tip_scale": 1.5}, 2.0) == 2.0
+    )  # an explicit --atlas-scale > 0 is used
+
+
+def test_resolve_atlas_scale_zero_inherits_top_level_tip_scale():
+    from overlay.app.cli import _resolve_atlas_scale
+
+    assert _resolve_atlas_scale({"tip_scale": 1.5}, 0.0) == 1.5  # 0 → the runtime's tip_scale
+
+
+def test_resolve_atlas_scale_ignores_nested_tooltip_key_like_the_runtime():
+    from overlay.app.cli import _resolve_atlas_scale
+
+    # The runtime reads only top-level tip_scale; a nested [tooltip] tip_scale it ignores must NOT be
+    # honoured here either, or prewarm would build a scale the tooltip never displays.
+    assert _resolve_atlas_scale({"tooltip": {"tip_scale": 1.5}}, 0.0) == 1.0
+
+
+def test_resolve_atlas_scale_defaults_to_reference_when_unset():
+    from overlay.app.cli import _resolve_atlas_scale
+
+    assert _resolve_atlas_scale({}, 0.0) == 1.0  # nothing configured → reference only

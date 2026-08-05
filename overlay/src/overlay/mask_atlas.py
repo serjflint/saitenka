@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# The 1× reference pass every prewarm scale builds first (native masks stack on top). Tracked in the
+# ``done`` ledger under this scale so a run at ANY display scale can skip a reference another scale built.
+REFERENCE_SCALE = 1.0
+
 # The subpixel phase (draw.text passes frac(x), frac(y)) is quantised to this many steps per pixel for
 # the key — CJK's fixed advance keeps the real phase set small, and quantising bounds the atlas without
 # changing the stored bytes (the phase a live glyph_mask uses IS one of these, so it matches exactly).
@@ -182,6 +186,22 @@ class MaskAtlas:
             return {w for (w,) in rows}
         except sqlite3.Error:  # pragma: no cover
             return set()
+
+    def backfill_reference_done(self) -> int:
+        """One-time, idempotent: a native-scale done marker implies its 1× reference pass ran (the
+        reference is always built first), so mark those words done at :data:`REFERENCE_SCALE` too. Lets a
+        run at any scale skip a reference a DIFFERENT scale's run already built (the ledgers predate the
+        split). Returns rows added. Best-effort → 0."""
+        try:
+            conn = self._conn()
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO done (scale, word) SELECT ?, word FROM done WHERE scale != ?",
+                (REFERENCE_SCALE, REFERENCE_SCALE),
+            )
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:  # pragma: no cover
+            return 0
 
     def load_into(self, mem: dict, *, font_ids: Iterable[str] | None = None) -> int:
         """Bulk-reconstruct every stored mask into ``mem`` (a shared read-only dict keyed
