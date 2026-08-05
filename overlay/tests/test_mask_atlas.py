@@ -115,3 +115,29 @@ def test_done_ledger_survives_reopen(tmp_path):
     a2 = MaskAtlas.open(path)
     assert a2 is not None
     assert a2.is_done(1.5, "読")
+
+
+def test_done_words_returns_the_scale_scoped_set(tmp_path):
+    # The prewarm startup summary intersects this with the term list for its already-done / remaining split.
+    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
+    assert atlas is not None
+    atlas.mark_done(1.5, "門")
+    atlas.mark_done(1.5, "経")
+    atlas.mark_done(2.0, "読")  # a different scale — excluded from the 1.5 set
+    assert atlas.done_words(1.5) == {"門", "経"}
+    assert atlas.done_words(2.0) == {"読"}
+    assert atlas.done_words(3.0) == set()  # nothing at this scale
+
+
+def test_disk_bytes_grows_with_stored_masks(tmp_path):
+    # The heartbeat reports this as the real footprint (the atlas is uncapped) — it must be a positive,
+    # non-decreasing size, not the placeholder 0 the atlas-only path used to send.
+    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
+    assert atlas is not None
+    empty = atlas.disk_bytes()
+    assert empty > 0  # even a fresh DB has header/schema pages
+    mask = _font().getmask2("見", "L", None, None, None, 0, "ls", 0, (0.0, 0.0), stroke_filled=True)
+    for i in range(200):  # enough rows to spill onto new pages
+        atlas.put(f"f:{i}:400", "見", "L", (0.0, 0.0), mask)
+    atlas.checkpoint()  # fold the WAL back so page_count reflects the writes
+    assert atlas.disk_bytes() > empty

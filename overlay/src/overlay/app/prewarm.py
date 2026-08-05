@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_CHECKPOINT_EVERY = 2000  # rastered words between heartbeats (WAL truncate + progress emit)
+_PLATEAU_MIN_NEW = 64  # a checkpoint adding fewer new masks than this counts as "dry"
+
 
 class _PrewarmIPC:
     """A no-socket mpv stand-in: a fixed OSD and inert commands, so a headless Reader can build panels
@@ -47,12 +50,39 @@ class _PrewarmIPC:
 
 
 @dataclass(frozen=True, slots=True)
+class PrewarmPlan:
+    """Emitted once, before the fan-out, so the operator sees scope + starting footprint BEFORE a long
+    run commits — a ``--limit 0`` atlas sweep is >1M words and the atlas is uncapped."""
+
+    total: int  # words this run will consider
+    already_done: int  # of those, already in the resume ledger / cache → will be skipped
+    remaining: int  # total - already_done
+    nbytes: int  # cache size on disk right now (the baseline the heartbeat grows from)
+    capped: bool  # True if this mode has a byte ceiling (render cache); False = uncapped (atlas)
+
+
+@dataclass(frozen=True, slots=True)
+class PrewarmProgress:
+    """One heartbeat. The counters a long prebuild needs to be legible: ``new_rows`` exposes a plateau
+    (0 → the glyph population saturated), ``skipped`` exposes resume, ``projected_bytes`` extrapolates
+    the tail at the current marginal rate."""
+
+    measured: int  # words rastered so far (skipped words excluded)
+    skipped: int  # words skipped via the resume ledger
+    rows: int  # total rows / masks now in the cache
+    new_rows: int  # rows added since the previous checkpoint (0 → plateau)
+    nbytes: int  # REAL on-disk bytes (atlas mode now reports this; it used to send 0)
+    projected_bytes: int  # final-size extrapolation at the marginal rate (0 = unknown)
+
+
+@dataclass(frozen=True, slots=True)
 class PrewarmResult:
     candidates: int  # popular words rendered
     stored: int  # heads that cleared the cost gate and were persisted this run
     rows: int  # total rows now in the cache
     bytes: int  # total on-disk blob size
-    stopped_at_ceiling: bool  # True if the byte ceiling was reached before the whole popular set
+    skipped: int  # words skipped via the resume ledger (already rastered at this scale)
+    stopped_at_ceiling: bool  # stopped before the whole set — render byte ceiling or atlas plateau
 
 
 def _popular_terms(ds, limit: int) -> list[tuple[str, str]]:
@@ -128,6 +158,12 @@ class _PrewarmJob:
         *,
         atlas_only: bool = False,
         native_scale: float = 1.0,
+        total: int = 0,
+        already_done: int = 0,
+        start_rows: int = 0,
+        plateau_stop: int = 0,
+        checkpoint_every: int = _CHECKPOINT_EVERY,
+        plateau_min: int = _PLATEAU_MIN_NEW,
     ):
         self._make = reader_factory  # () -> a fresh headless Reader with the shared cache
         self.cache = cache  # None in atlas-only mode (the render cache is left untouched)
@@ -145,11 +181,21 @@ class _PrewarmJob:
         self.sig = sig
         self.ceiling = ceiling
         self.on_progress = on_progress
+        # Progress / early-stop bookkeeping. ``to_raster`` (population minus the resume-ledger skips) is
+        # the denominator the tail projection extrapolates over; ``plateau_stop`` opts into stopping once
+        # the glyph population saturates (N dry checkpoints) instead of churning the whole 1M-word tail.
+        self.to_raster = max(0, total - already_done)
+        self.plateau_stop = plateau_stop
+        self.checkpoint_every = checkpoint_every
+        self.plateau_min = plateau_min
         self._tls = threading.local()
         self._lock = threading.Lock()
         self.measured = 0
         self.skipped = 0
         self.stop = False
+        self._last_rows = start_rows  # rows at the previous checkpoint → new-mask delta
+        self._last_nbytes: int | None = None  # bytes at prev checkpoint → projection
+        self._dry_streak = 0  # consecutive dry checkpoints, for --atlas-plateau
 
     def _reader(self):
         r = getattr(self._tls, "reader", None)
@@ -232,21 +278,66 @@ class _PrewarmJob:
     def _tick(self) -> None:
         with self._lock:
             self.measured += 1
-            m = self.measured
-        if m % 2000 == 0:
-            if self.atlas is not None:
-                self.atlas.checkpoint()
-            if self.cache is None:  # atlas-only: report atlas mask count, no render-cache ceiling
-                rows = self.atlas.count() if self.atlas is not None else 0
-                nbytes = 0
-            else:
-                self.cache.checkpoint()  # cap the WAL so a long parallel prebuild doesn't slow scanning
-                rows, nbytes = self.cache.stats()
-                if nbytes >= self.ceiling:
-                    self.stop = True
-            log.info("prewarm: measured %d, %d rows (%.0f MB)", m, rows, nbytes / 1e6)
-            if self.on_progress is not None:
-                self.on_progress(m, rows, nbytes)
+            m, skipped = self.measured, self.skipped
+        if m % self.checkpoint_every == 0:
+            self._report(m, skipped)
+
+    def _report(self, m: int, skipped: int) -> None:
+        """One heartbeat: checkpoint the WAL, read (rows, real bytes), emit the delta/projection, and
+        re-evaluate the stop conditions. Split out of :meth:`_tick` so each stays under the complexity
+        ratchet."""
+        rows, nbytes = self._checkpoint_stats()
+        new_rows = rows - self._last_rows
+        projected = self._project(nbytes, m)
+        self._update_stop(new_rows, nbytes)
+        self._last_rows, self._last_nbytes = rows, nbytes
+        log.info("prewarm: measured %d, %d rows (+%d), %.0f MB", m, rows, new_rows, nbytes / 1e6)
+        if self.on_progress is not None:
+            self.on_progress(
+                PrewarmProgress(
+                    measured=m,
+                    skipped=skipped,
+                    rows=rows,
+                    new_rows=new_rows,
+                    nbytes=nbytes,
+                    projected_bytes=projected,
+                )
+            )
+
+    def _checkpoint_stats(self) -> tuple[int, int]:
+        """Checkpoint the WAL and read ``(rows, on-disk bytes)``. Atlas-only reports the atlas's own mask
+        count + REAL ``disk_bytes`` (it is uncapped, so size is the number to watch); render mode reads
+        the cache stats. The atlas is checkpointed in both modes — its write-back fills it either way."""
+        if self.atlas is not None:
+            self.atlas.checkpoint()
+        if self.cache is None:  # atlas-only
+            if self.atlas is None:
+                return 0, 0
+            return self.atlas.count(), self.atlas.disk_bytes()
+        self.cache.checkpoint()  # cap the WAL so a long parallel prebuild doesn't slow scanning
+        return self.cache.stats()
+
+    def _update_stop(self, new_rows: int, nbytes: int) -> None:
+        """Two independent stop conditions: the render cache's byte ceiling (unchanged), and the opt-in
+        atlas plateau — ``plateau_stop`` consecutive checkpoints adding < ``plateau_min`` masks means the
+        glyph population saturated and the corpus tail is near-pure churn (the 1.25M-word tail case)."""
+        if self.cache is not None and nbytes >= self.ceiling:
+            self.stop = True
+        if self.plateau_stop > 0:
+            self._dry_streak = self._dry_streak + 1 if new_rows < self.plateau_min else 0
+            if self._dry_streak >= self.plateau_stop:
+                self.stop = True
+
+    def _project(self, nbytes: int, m: int) -> int:
+        """Extrapolate final on-disk bytes from the LAST checkpoint's marginal rate (Δbytes/Δwords ×
+        words-left). Self-correcting: once CJK glyphs saturate, the marginal is the small Latin-word
+        trickle, so this converges on the honest tail instead of a word-count-linear over-estimate. 0
+        until a prior checkpoint exists (nothing to extrapolate from yet)."""
+        if self._last_nbytes is None:
+            return 0
+        left = max(0, self.to_raster - m)
+        rate = max(0.0, (nbytes - self._last_nbytes) / self.checkpoint_every)
+        return int(nbytes + rate * left)
 
 
 def _open_build_caches(template, *, atlas_only: bool):
@@ -271,17 +362,46 @@ def _open_build_caches(template, *, atlas_only: bool):
 
 
 def _finalize_caches(cache, atlas) -> tuple[int, int]:
-    """Checkpoint + close both caches; return the render cache's ``(rows, bytes)`` — or the atlas mask
-    count in atlas-only mode — for the :class:`PrewarmResult`."""
+    """Checkpoint + close both caches; return the render cache's ``(rows, bytes)`` — or the atlas's
+    ``(mask count, real disk bytes)`` in atlas-only mode — for the :class:`PrewarmResult`."""
     if atlas is not None:
         atlas.checkpoint()
-    rows, nbytes = cache.stats() if cache is not None else (atlas.count() if atlas else 0, 0)
+    if cache is not None:
+        rows, nbytes = cache.stats()
+    elif atlas is not None:
+        rows, nbytes = atlas.count(), atlas.disk_bytes()
+    else:  # pragma: no cover — neither cache opened
+        rows, nbytes = 0, 0
     if cache is not None:
         cache.checkpoint()
         cache.close()
     if atlas is not None:
         atlas.close()
     return rows, nbytes
+
+
+def _startup_plan(terms, cache, atlas, *, atlas_only: bool, atlas_scale: float):
+    """The pre-run summary: total words, how many are already done (resume ledger — atlas mode only; the
+    render cache's per-word probe is too costly to run over the whole population up front), and the
+    starting footprint. Returns ``(plan, already_done, start_rows)`` — the last two seed the job."""
+    total = len(terms)
+    if atlas_only and atlas is not None:
+        done = atlas.done_words(atlas_scale)
+        already_done = sum(1 for term, _ in terms if term in done)
+        start_rows, start_nbytes, capped = atlas.count(), atlas.disk_bytes(), False
+    elif cache is not None:
+        already_done = 0
+        (start_rows, start_nbytes), capped = cache.stats(), True
+    else:  # pragma: no cover — atlas open failed AND render cache off; degrade to a bare plan
+        already_done, start_rows, start_nbytes, capped = 0, 0, 0, False
+    plan = PrewarmPlan(
+        total=total,
+        already_done=already_done,
+        remaining=max(0, total - already_done),
+        nbytes=start_nbytes,
+        capped=capped,
+    )
+    return plan, already_done, start_rows
 
 
 def prewarm(
@@ -293,19 +413,25 @@ def prewarm(
     *,
     atlas_only: bool = False,
     atlas_scale: float = 1.0,
+    on_start=None,
+    plateau_stop: int = 0,
 ) -> PrewarmResult:
     """Build the render cache for the top ``limit`` popular words at the given resolution, rendering in
     PARALLEL across ``workers`` threads (0 = auto) — the free-threaded build renders concurrently, so a
     full prebuild is minutes not tens of minutes. **Incremental**: an entry already in the cache is
     skipped (a cheap index probe), so a re-run after a resolution/dict change only fills the gaps, and an
-    interrupted run resumes. Stops when the ``render_cache_max_mb`` ceiling is reached. ``on_progress
-    (measured, rows, nbytes)`` is a periodic heartbeat. Raises if no dictionaries are configured.
+    interrupted run resumes. Stops when the ``render_cache_max_mb`` ceiling is reached. ``on_start
+    (PrewarmPlan)`` fires once with the scope + starting footprint; ``on_progress(PrewarmProgress)`` is a
+    periodic heartbeat (real bytes, new-mask delta, skipped, tail projection). Raises if no dictionaries
+    are configured.
 
     ``atlas_only`` fills ONLY the mask atlas (every word rasters → its glyphs/words land in the atlas) and
     NEVER touches the render cache — so ``--limit 0`` can saturate the atlas over the whole corpus without
     growing the byte-ceiling-bounded render cache. Resumable + idempotent: a per-word
     ``done(scale, word)`` ledger skips words rastered at this scale, so a stopped ``--limit 0``
-    re-run resumes where it left off (scoped by scale — 1.5 masks ≠ 2.0 masks).
+    re-run resumes where it left off (scoped by scale — 1.5 masks ≠ 2.0 masks). ``plateau_stop`` > 0
+    stops the sweep early after that many consecutive dry checkpoints — the CJK glyph set saturates in
+    the first few thousand words, so the 1M-word tail is near-pure churn (uncapped, watch the size).
 
     ``atlas_scale`` > 1.0 ALSO rasters each word's native-scale panel so its ``size×scale`` glyph masks
     land in the MASK ATLAS (CJK/Latin glyphs) — match it to ``[tooltip] tip_scale`` so the hi-dpi crisp
@@ -327,7 +453,11 @@ def prewarm(
     cache, atlas = _open_build_caches(template, atlas_only=atlas_only)
 
     terms = _popular_terms(template.dict_set, limit)
-    before = cache.stats()[0] if cache is not None else 0
+    plan, already_done, before = _startup_plan(
+        terms, cache, atlas, atlas_only=atlas_only, atlas_scale=atlas_scale
+    )
+    if on_start is not None:
+        on_start(plan)
     job = _PrewarmJob(
         reader_factory=lambda: _make_reader(
             width, height, dict_titles, freqs, pitches, cache, render_cache_on=not atlas_only
@@ -340,6 +470,10 @@ def prewarm(
         on_progress=on_progress,
         atlas_only=atlas_only,
         native_scale=atlas_scale,
+        total=plan.total,
+        already_done=already_done,
+        start_rows=before,
+        plateau_stop=plateau_stop,
     )
     n_workers = workers if workers > 0 else min(8, (os.cpu_count() or 4))
     try:
@@ -354,5 +488,6 @@ def prewarm(
         stored=rows - before,
         rows=rows,
         bytes=nbytes,
+        skipped=job.skipped,
         stopped_at_ceiling=job.stop,
     )

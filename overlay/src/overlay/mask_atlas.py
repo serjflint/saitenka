@@ -159,6 +159,16 @@ class MaskAtlas:
         except sqlite3.Error:  # pragma: no cover — a lost marker only costs a re-raster next run
             log.debug("mask atlas mark_done failed", exc_info=True)
 
+    def done_words(self, scale: float) -> set[str]:
+        """Every word already rastered at ``scale`` (the resume ledger) as a set — for the prewarm
+        startup summary's already-done / remaining split (one query beats a per-term probe). Best-effort
+        → empty set (→ the summary just shows the whole population as remaining)."""
+        try:
+            rows = self._conn().execute("SELECT word FROM done WHERE scale=?", (scale,))
+            return {w for (w,) in rows}
+        except sqlite3.Error:  # pragma: no cover
+            return set()
+
     def load_into(self, mem: dict, *, font_ids: Iterable[str] | None = None) -> int:
         """Bulk-reconstruct every stored mask into ``mem`` (a shared read-only dict keyed
         ``(font_id, text, mode, sx, sy)`` → ``(core, offset)``) in one pass — the only read path (a
@@ -191,6 +201,18 @@ class MaskAtlas:
     def count(self) -> int:
         try:
             return int(self._conn().execute("SELECT COUNT(*) FROM masks").fetchone()[0])
+        except sqlite3.Error:  # pragma: no cover
+            return 0
+
+    def disk_bytes(self) -> int:
+        """On-disk size of the atlas DB (``page_count × page_size``). The prewarm heartbeat reports this
+        as the real footprint because the atlas is UNBOUNDED — no ``max_bytes`` ceiling, unlike the render
+        cache — so size is the number to watch on a ``--limit 0`` sweep. Best-effort → 0."""
+        try:
+            conn = self._conn()
+            pages = conn.execute("PRAGMA page_count").fetchone()[0]
+            page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+            return int(pages) * int(page_size)
         except sqlite3.Error:  # pragma: no cover
             return 0
 
