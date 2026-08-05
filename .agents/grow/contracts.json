@@ -1,0 +1,144 @@
+{
+  "version": 3,
+  "gap": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["found", "module", "target_symbol", "dimension", "kind", "status", "reason"],
+    "properties": {
+      "found": {"type": "boolean", "description": "false when triage/scenario-map yields no live orphan gap"},
+      "module": {"type": "string", "description": "module key relative to src/overlay, e.g. app/tooltip.py"},
+      "target_symbol": {"type": "string", "description": "module_key::dotted.symbol, e.g. app/dictionary.py::Dictionary._entry_from_row"},
+      "dimension": {"type": "string", "description": "the under-specified axis: a coverage-context label, an invariant, a survivor operator, or a filed issue id"},
+      "kind": {"type": "string", "enum": ["scenario", "concurrency"], "description": "scenario ⇒ arms 1-3; concurrency ⇒ arm 4"},
+      "source": {"type": "string", "enum": ["survivor", "dead_config", "invariant", "filed"]},
+      "tests": {"type": "array", "items": {"type": "string"}, "description": "existing mapped test files to extend"},
+      "status": {"type": "string", "description": "grow_ledger status of the gap (unseen/open/closed-current/stale-target/unclosable)"},
+      "score": {"type": "number"},
+      "pr_exclusion_checked": {"type": "boolean", "description": "true ONLY if triage ran the open-PR exclusion (gh authed, no --no-network); else the harness refuses to open a PR"},
+      "reason": {"type": "string", "description": "why this gap (the scenario + the value×under-spec components) or why none"}
+    }
+  },
+  "proposal": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["applied", "test_file", "cut_module", "cut_file", "target_func", "test_name", "diff", "proposals"],
+    "properties": {
+      "applied": {"type": "boolean", "description": "the ADDITIVE edit was written to the test file"},
+      "test_file": {"type": "string", "description": "edited test path, repo-relative"},
+      "cut_module": {"type": "string", "description": "dotted code-under-test module"},
+      "cut_file": {"type": "string", "description": "CUT path relative to repo (src/overlay/...) — for context/growth-adhoc"},
+      "target_func": {"type": "string", "description": "the production symbol the grown test exercises (scopes arm-1 replay)"},
+      "test_name": {"type": "string", "description": "the grown test function name (arm-2 liveness / --deselect node)"},
+      "red_on_pristine": {"type": "boolean", "description": "the grown test FAILS on unmutated code → outcome-class-2 latent bug, not a coverage grow"},
+      "mutant_find": {"type": ["string", "null"], "description": "arm-1 (scenario): exact CUT snippet to mutate (occurs once); the grown test must KILL it, the old suite SURVIVE it"},
+      "mutant_replace": {"type": ["string", "null"], "description": "arm-1 (scenario): the scenario-violating replacement"},
+      "regression_node": {"type": ["string", "null"], "description": "arm-4 (concurrency): regression test node id"},
+      "control_node": {"type": ["string", "null"], "description": "arm-4 (concurrency): negative-control test node id"},
+      "control_test": {"type": ["string", "null"], "description": "arm-4 (concurrency): control test function name (for its liveness check)"},
+      "diff": {"type": "string", "description": "unified diff of the ADDITIVE test edit"},
+      "reason": {"type": ["string", "null"], "description": "why no edit was applied"},
+      "proposals": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target_test", "dimension", "change", "rationale"],
+          "properties": {
+            "target_test": {"type": "string"},
+            "dimension": {"type": "string"},
+            "change": {"type": "string"},
+            "rationale": {"type": "string"},
+            "claimed_growth": {"type": "array", "items": {"type": "string"}, "description": "the scenario/mutant/line the test newly pins"}
+          }
+        }
+      }
+    }
+  },
+  "gate": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["pass", "arms_run", "report"],
+    "properties": {
+      "pass": {"type": "boolean", "description": "every applicable arm clean AND additive-only"},
+      "additive_only": {"type": "boolean", "description": "anticheat_diff reports only added assert-nodes (Grow scope)"},
+      "liveness_pass": {"type": ["boolean", "null"]},
+      "context_pass": {"type": ["boolean", "null"]},
+      "growth_pass": {"type": ["boolean", "null"]},
+      "concurrency_pass": {"type": ["boolean", "null"]},
+      "arms_run": {"type": "array", "items": {"type": "string"}, "description": "which arms actually ran (the rest are n/a for this gap kind)"},
+      "report": {"type": "string", "description": "the exact PASS/BOUNCE lines, verbatim from grow_gate"}
+    }
+  },
+  "review": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["verdict", "grounds", "redundant_with", "better_fix"],
+    "properties": {
+      "verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"], "description": "REFUTED = drop the change"},
+      "grounds": {"type": "array", "items": {"type": "string"}, "description": "evidence citing scenarios/mutants/lines/diff, never authority"},
+      "redundant_with": {"type": ["string", "null"], "description": "an existing test that already pins this scenario, or null"},
+      "better_fix": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "required": ["summary", "scope", "evidence"],
+        "properties": {
+          "summary": {"type": "string"},
+          "scope": {"type": "string", "enum": ["target-test", "outside-grow"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    }
+  },
+  "review_provenance": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["author", "skeptic", "judge", "skeptic_verdict", "judge_verdict", "verdict"],
+    "properties": {
+      "author": {"type": "string"},
+      "skeptic": {"type": "string"},
+      "judge": {"type": ["string", "null"]},
+      "skeptic_verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]},
+      "judge_verdict": {"type": ["string", "null"], "enum": ["UPHELD", "REFUTED", null]},
+      "verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]}
+    }
+  },
+  "record": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["state", "ledger_appended"],
+    "properties": {
+      "state": {"type": "string", "enum": ["closed", "open", "unclosable", "filed", "dry-run"]},
+      "outcome": {"type": ["string", "null"], "enum": ["coverage-only", "bug", "robustness", "design", null]},
+      "ledger_appended": {"type": "boolean"},
+      "pr_url": {"type": ["string", "null"]},
+      "filed_issues": {"type": "array", "items": {"type": "string"}},
+      "note": {"type": "string"}
+    }
+  },
+  "reflection": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["introspection", "findings", "appended", "escalations"],
+    "properties": {
+      "introspection": {"type": "string", "description": "plainly what the loop did this run, from the trace"},
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category", "subject", "severity", "evidence", "proposal", "self_referential"],
+          "properties": {
+            "category": {"type": "string", "enum": ["gate-composition", "arm-limitation", "triage-signal", "discovery", "cli-ergonomics", "cost-latency", "review-fidelity", "false-bounce", "false-pass", "other"]},
+            "subject": {"type": "string", "description": "the loop weakness, stable across runs (the recurrence key)"},
+            "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+            "evidence": {"type": "string", "description": "the trace signal(s) that show it — never a guess"},
+            "proposal": {"type": "string", "description": "smallest concrete change to a loop tool/spec/harness (never product code)"},
+            "self_referential": {"type": "boolean", "description": "true if it touches the reflection machinery itself → extra human scrutiny"}
+          }
+        }
+      },
+      "appended": {"type": "boolean", "description": "findings written to .reflection.grow.jsonl"},
+      "escalations": {"type": "array", "items": {"type": "string"}, "description": "subjects at recurrence >= 2 (human triages)"}
+    }
+  }
+}

@@ -99,6 +99,10 @@ preview-features = ["centralized-project-envs"]
 # `uv sync` (incl. the CI test matrix) fail to even create the env on 3.15+. Isolated here so the default
 # dev env stays lean and forward-compatible; author codemods with `uv run --group codemod <script>`.
 codemod = ["libcst>=1.8.6"]
+# blanket drives DETERMINISTIC thread interleavings for the concurrency tests (tests/test_cache_race.py):
+# it turns a no-GIL cache TOCTOU race into a 100%-reproducible regression instead of flaky stress. MIT,
+# pure-Python, runs under 3.14t; opt-in so only the concurrency tests pull it — `uv run --group grow …`.
+grow = ["blanket>=1.0"]
 # Minimal deps to RUN the suite. The CI test matrix installs ONLY this group
 # (`--no-default-groups --group test`), so new-interpreter legs (e.g. 3.15t) aren't blocked building the
 # heavy native dev tools they never use (memray/py-spy/mypy/ruff/…, which lack free-threaded wheels).
