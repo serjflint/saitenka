@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785924146421,
+  "lastUpdate": 1785932186320,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -179,6 +179,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 5.017,
             "range": "±12.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cf7f5b41aa7206d84620e543b58a8c1da17c4981",
+          "message": "feat(prewarm): cross-scale read-check + explicit reference-build note (#185)\n\nThree fixes to the atlas-scale UX and correctness:\n\n1. Explicit: a run at scale N builds the 1× REFERENCE masks AND the N× native\n   masks — the help + startup line now say so (one 1.5 run covers 1.0 and 1.5;\n   no separate 1.0 run needed).\n2. Cheap read-check: split the resume ledger into reference (1×) and native\n   passes, so a run at any scale skips a reference another scale already built\n   (done(1.0)) BEFORE rastering — no getmask2, no wasted CPU. A one-time\n   backfill (native-done ⇒ reference-done) fixes existing ledgers.\n3. --atlas-scale 0 now reads tip_scale exactly as the runtime does (top-level,\n   not a nested [tooltip] key the runtime ignores), so they can't disagree.",
+          "timestamp": "2026-08-05T15:15:56+03:00",
+          "tree_id": "a272aa51817e28fe269a586f97f5dab1b77e4ff0",
+          "url": "https://github.com/serjflint/saitenka/commit/cf7f5b41aa7206d84620e543b58a8c1da17c4981"
+        },
+        "date": 1785932185405,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.767,
+            "range": "±2.9%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.669,
+            "range": "±8.4%",
             "unit": "ms"
           }
         ]
