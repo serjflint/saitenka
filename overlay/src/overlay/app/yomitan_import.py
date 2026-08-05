@@ -26,6 +26,8 @@ from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from overlay.app import prompt
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -239,9 +241,9 @@ def _resolve_settings_path(settings_path: str | None) -> str | None:
     if sys.stdin.isatty():
         # Interactive: don't skip past silently — ask for the path and WAIT.
         entered = (
-            input(
+            prompt.text(
                 "Yomitan settings export not found. Enter its path (Yomitan → Settings → Backup → "
-                "Export Settings), or press Enter to skip: "
+                "Export Settings), or press Enter to skip:"
             )
             .strip()
             .strip("\"'")

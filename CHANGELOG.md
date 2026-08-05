@@ -16,6 +16,12 @@ logs.
 
 ### Added
 
+- **Interactive `saitenka setup` — arrow-key pickers + type-to-filter.** The deck, note-type, and
+  card-kind prompts are now arrow-key selectable and filter as you type (a 50-deck collection no longer
+  means typing a name from memory), and the silent AnkiConnect lookups show a spinner. It degrades
+  cleanly: a non-tty (the mpv plugin spawns the wizard console-less), `--yes`, a legacy Windows console,
+  or `SAITENKA_NO_TUI=1` fall back to the previous numbered-list / `[y/N]` prompts unchanged. Adds a
+  `questionary` dependency; all the ways the wizard asks now route through one shared prompt seam.
 - **Field templates for mined cards (`[mine.card_format]`).** Yomitan's model: give each note field a
   template of `{marker}` tokens (`Reading = "{furigana}"`,
   `Sentence = "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}"`), so one field can combine markers and

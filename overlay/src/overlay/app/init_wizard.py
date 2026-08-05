@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from overlay.app import prompt
 from overlay.app.config import config_path
 
 if TYPE_CHECKING:
@@ -129,10 +130,6 @@ def write_config(
     return backup
 
 
-def _ask(prompt: str) -> bool:  # pragma: no cover — interactive I/O
-    return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
-
-
 def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, Path | None]:
     """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
     via ``keyring`` (macOS Keychain / Windows Credential Locker / opt-in Linux Secret Service), else
@@ -168,7 +165,7 @@ def _maybe_store_jimaku_key() -> None:  # pragma: no cover — interactive/secre
     if key:
         print(f"jimaku API key: found (from {src})")
         return
-    if not _ask("\nStore a jimaku.cc API key now (for sub fetch in plugin mode)?"):
+    if not prompt.confirm("\nStore a jimaku.cc API key now (for sub fetch in plugin mode)?"):
         return
     k = prompt_for_key(
         getpass.getpass
@@ -194,7 +191,7 @@ def run_init() -> int:  # pragma: no cover — interactive wizard, exercised liv
     proposal = dict(DEFAULT_CONFIG)
     print("\nProposed config:")
     print(dumps_toml(proposal))
-    backup = write_config(proposal, confirm=_ask)
+    backup = write_config(proposal, confirm=prompt.confirm)
     if backup:
         print(f"backed up existing config → {backup}")
 
