@@ -91,6 +91,21 @@ scripts declare deps via PEP 723 inline metadata.
   a CI-down fallback only. Tag the *merged* commit by SHA (works from a worktree, where `main` is
   checked out elsewhere).
 
+## Quality gates — when to run what
+
+Tight loop: the **cheapest sufficient** check; escalate by the change's risk, not by reflex. `poe all` is
+the floor for every change; 3–6 are escalations, not replacements.
+
+1. **Editing** → `poe affected` (seconds — only the affected tests). Inner loop.
+2. **Before commit / push** → `poe all` (the deterministic gate). Green = enough for a routine change.
+3. **Adding / rewriting a test** → the **`write-test`** skill; `poe test-live` proves the oracle bites.
+4. **Touching the algorithmic pure core, or killing a survivor** → the **`test-adequacy`** skill
+   (`poe mutate` / `fuzz` / `crosshair`, opt-in, minutes).
+5. **Landing a non-trivial change / a PR** → the **`contribute`** skill — its fresh **adversarial review**
+   (isolated reviewer, artifact only, P0–P3) is the high-quality gate before a human's eyes.
+6. **Idle time, nothing in flight** → the **Sharpen** / **Grow** loops (fix / write tests) — never against
+   a module under active feature work.
+
 ## Refactoring
 
 - **Navigate by symbols, not text sweeps or research subagents.** Use the `LSP` tool (pyrefly) —
