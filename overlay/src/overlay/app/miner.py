@@ -16,7 +16,7 @@ from pathlib import Path
 
 from overlay.app.anki import AnkiError, bold_word, build_note, dedupe
 from overlay.app.lookup import card_for
-from overlay.app.media import clip_audio, current_timespan, screenshot
+from overlay.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
 
 log = logging.getLogger(__name__)
 
@@ -124,40 +124,93 @@ class Miner:
         return card_for(tok)
 
     # --- media capture --------------------------------------------------------------------------
-    def capture_media(self, base: str, video) -> tuple[str, str]:
-        """Screenshot the frame + clip the cue's audio, store both in Anki. Returns (pic, audio).
+    def capture_media(self, base: str, video, *, animated: bool | None = None) -> tuple[str, str]:
+        """Capture the card image (a still frame, or an animated clip of the cue — WebP or GIF) + the cue's
+        audio and store both in Anki. Returns (pic, audio).
 
-        Also stashes the local files (``_last_jpg``/``_last_audio``) on the Reader for the card
-        preview + audio replay. Shows a warn toast if captures fail so the user knows."""
+        ``animated`` overrides ``[mine].animated_screenshot`` for this one mine — the video-mine shortcut
+        passes ``True`` regardless of the config default; ``None`` uses the config. The still JPG is always
+        captured locally (``_last_jpg`` drives the preview and is the fallback); the clip becomes the card
+        image only when the encode succeeds. Also stashes ``_last_audio``. Warn-toasts on failure."""
         r = self.r
-        pic = audio = ""
+        # any animated path needs mine_cfg (for the encode opts), so gate the whole thing on it — a per-mine
+        # override can't force a clip without a config to encode from.
+        want_animated = bool(r.mine_cfg) and (
+            r.mine_cfg.animated.enabled if animated is None else animated
+        )
         r._last_jpg = r._last_audio = None
-        pic_err = audio_err = None
+        try:
+            span = current_timespan(
+                r.ipc
+            )  # guarded: an IPC hiccup here must not escape and kill the loop
+        except (OSError, ValueError):
+            log.debug("cue timespan read failed — image-only mine", exc_info=True)
+            span = None
+        pic, pic_err = self._capture_image(base, video, span, animated=want_animated)
+        audio, audio_err = self._capture_audio(base, video, span)
+        self._warn_capture_failure(pic_err, audio_err)
+        return pic, audio
+
+    def _capture_image(
+        self, base: str, video, span, *, animated: bool
+    ) -> tuple[str, Exception | None]:
+        """The card image: the mpv still (always, → ``_last_jpg``), replaced by an animated clip when
+        ``animated`` and the encode succeeds. Returns (media_name, error-or-None)."""
+        r = self.r
         try:
             jpg = r._tmp / f"{base}.jpg"
             screenshot(r.ipc, jpg)
-            pic = r.anki.store_media(f"{base}.jpg", jpg)
-            r._last_jpg = jpg
+            r._last_jpg = (
+                jpg  # local still — drives the preview and is the fallback (may not be uploaded)
+            )
+            if animated and video and span:
+                clip = self._encode_animated(base, video, span)
+                if clip:
+                    return (
+                        clip,
+                        None,
+                    )  # clip is the card image; the still stays a local-only fallback
+            return r.anki.store_media(
+                f"{base}.jpg", jpg
+            ), None  # still is the card image → upload it
         except (OSError, AnkiError, json.JSONDecodeError) as e:
             log.debug("screenshot capture failed", exc_info=True)
-            pic_err = e
+            return "", e
+
+    def _encode_animated(self, base: str, video, span) -> str | None:
+        """Encode + store the animated clip, returning its media name — or None on any failure (a missing
+        encoder, a bad encode, a store error), so the caller keeps the still."""
+        r = self.r
         try:
-            span = current_timespan(r.ipc)
+            # nominal path; animated_screenshot swaps the suffix to the real format (.webp or .gif)
+            clip = animated_screenshot(video, span, r._tmp / f"{base}.webp", r.mine_cfg.animated)
+            if clip:
+                return r.anki.store_media(clip.name, clip)
+        except (OSError, subprocess.SubprocessError, AnkiError, json.JSONDecodeError):
+            log.debug("animated screenshot failed — keeping the still", exc_info=True)
+        return None
+
+    def _capture_audio(self, base: str, video, span) -> tuple[str, Exception | None]:
+        """The cue audio clip (→ ``_last_audio``). Returns (media_name, error-or-None)."""
+        r = self.r
+        try:
             if video and span:
                 aud = r._tmp / f"{base}.m4a"
                 clip_audio(video, span, aud, normalize=r.mine_cfg.normalize_audio)
-                audio = r.anki.store_media(f"{base}.m4a", aud)
                 r._last_audio = aud
+                return r.anki.store_media(f"{base}.m4a", aud), None
         except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:
             log.debug("audio capture failed", exc_info=True)
-            audio_err = e
+            return "", e
+        return "", None
+
+    def _warn_capture_failure(self, pic_err, audio_err) -> None:
         if pic_err and audio_err:
-            r._toast("media capture failed (no image/audio on card)", "warn")
+            self.r._toast("media capture failed (no image/audio on card)", "warn")
         elif pic_err:
-            r._toast("screenshot failed — audio only", "warn")
+            self.r._toast("screenshot failed — audio only", "warn")
         elif audio_err:
-            r._toast("audio clip failed — image only", "warn")
-        return pic, audio
+            self.r._toast("audio clip failed — image only", "warn")
 
     # --- mining -------------------------------------------------------------------------------
     def mine_current(self) -> None:
@@ -178,12 +231,15 @@ class Miner:
         )
         self.mine_token(tok, card=cards[0] if cards else None)
 
-    def mine_token(self, tok, *, force: bool = False, card=None) -> None:
+    def mine_token(
+        self, tok, *, force: bool = False, card=None, animated: bool | None = None
+    ) -> None:
         """Mine a specific token into Anki — the hovered subtitle word, or an inner word discovered
         by scanning inside the tooltip (the nested popup's ⊕). ``force`` mines a second card for an
         expression already in the deck (the preview's explicit "add anyway" for a different scene).
         ``card`` mines an explicit CardData (a specific entry chosen from the panel's per-entry ⊕),
-        bypassing the default entry pick — otherwise the dict-first ``_card_for`` derives it."""
+        bypassing the default entry pick — otherwise the dict-first ``_card_for`` derives it. ``animated``
+        overrides ``[mine].animated_screenshot`` for this mine (the video-mine shortcut passes ``True``)."""
         r = self.r
         if not r.anki or not r.mine_cfg:
             return
@@ -200,7 +256,9 @@ class Miner:
                     r._preview_existing(existing[0], card, "exists")
                     return
             video = r._get("path")
-            pic, audio = self.capture_media(f"saitenka_{int(time.time() * 1000)}", video)
+            pic, audio = self.capture_media(
+                f"saitenka_{int(time.time() * 1000)}", video, animated=animated
+            )
             freq_html, freq_sort = self.frequency(tok)
             note = build_note(
                 r.mine_cfg,

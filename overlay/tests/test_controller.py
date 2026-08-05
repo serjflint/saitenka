@@ -226,6 +226,30 @@ def _msg_for(ipc, key):
     return binds[key]
 
 
+def test_mine_current_video_forces_the_animated_clip(monkeypatch):
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    captured: dict = {}
+    monkeypatch.setattr(r, "mine_current", lambda **k: captured.update(k))
+    r.mine_current_video()
+    assert captured == {
+        "animated": True
+    }  # the video-mine shortcut forces a motion clip for this mine
+
+
+def test_mine_video_key_registers_and_routes_to_the_video_mine():
+    from overlay.app.bindings import MINE_VIDEO_MSG
+
+    ipc = FakeIPC()
+    Reader(ipc, anki=object())._register_keybinds()  # mine bindings require anki
+    assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG  # default shortcut is bound
+    # and the message routes to the video-mine action (not the still mine)
+    calls: list = []
+    fake = type("R", (), {"mine_current_video": lambda _self: calls.append("video")})()
+    Reader._HANDLERS[MINE_VIDEO_MSG](fake)
+    assert calls == ["video"]
+
+
 def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
     """Next must render the following cue's text in the overlay right away AND still issue the real
     sub-seek so the video catches up behind it."""
@@ -2285,7 +2309,7 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
     assert isinstance(r._miner, Miner)
     # Reader's mining API delegates to the Miner (behaviour preserved)
     mined = []
-    monkeypatch.setattr(r._miner, "mine_token", lambda tok: mined.append(tok.surface))
+    monkeypatch.setattr(r._miner, "mine_token", lambda tok, **_k: mined.append(tok.surface))
     r.anki = object()
     r.mine_cfg = object()
     r.hover = 0

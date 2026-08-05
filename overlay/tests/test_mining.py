@@ -2,7 +2,7 @@
 
 from overlay.app.anki import MineConfig, bold_word, build_note
 from overlay.app.lookup import card_for
-from overlay.app.media import Timespan, clip_audio
+from overlay.app.media import AnimatedClip, Timespan, clip_audio
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import tokenize
 
@@ -196,7 +196,7 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
     # media capture: no real mpv/ffmpeg — stub the capture step
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
     shown = []
     monkeypatch.setattr(
         r, "_preview_mined", lambda card, _tok, _video, _st="mined": shown.append(card.expression)
@@ -211,6 +211,84 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
     assert shown == ["読む"]
 
 
+def _capture_reader(tmp_path, *, animated_enabled: bool):
+    from util import FakeIPC
+
+    from overlay.app.controller import Reader
+
+    r = Reader(
+        FakeIPC(),
+        anki=_FakeAnki(),
+        mine_cfg=MineConfig(animated=AnimatedClip(enabled=animated_enabled)),
+    )
+    r._tmp = tmp_path
+    return r
+
+
+def _stub_capture(monkeypatch, *, animated_result):
+    """Stub the media boundary so capture_media runs without real mpv/ffmpeg. ``animated_result`` is
+    what animated_screenshot returns (a Path = encode ok, None = no encoder)."""
+    import overlay.app.miner as _M
+
+    monkeypatch.setattr(_M, "screenshot", lambda *_a: None)
+    monkeypatch.setattr(_M, "current_timespan", lambda _ipc: Timespan(10, 12))
+    monkeypatch.setattr(_M, "clip_audio", lambda *_a, **_k: None)
+    calls: list = []
+    monkeypatch.setattr(
+        _M, "animated_screenshot", lambda *a, **_k: (calls.append(a), animated_result)[1]
+    )
+    return calls
+
+
+def test_capture_media_uses_webp_when_encoder_available(monkeypatch, tmp_path):
+    r = _capture_reader(tmp_path, animated_enabled=True)
+    _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
+    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv")
+    assert pic.endswith(".webp")  # the animated clip becomes the card image
+    assert r._last_jpg is not None and str(r._last_jpg).endswith(
+        ".jpg"
+    )  # still kept for preview/fallback
+
+
+def test_capture_media_falls_back_to_still_when_encoder_absent(monkeypatch, tmp_path):
+    r = _capture_reader(tmp_path, animated_enabled=True)
+    _stub_capture(monkeypatch, animated_result=None)  # no animated encoder present
+    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv")
+    assert pic.endswith(".jpg")  # falls back to the mpv still
+
+
+def test_capture_media_animated_override_forces_clip_over_config_default(monkeypatch, tmp_path):
+    # config default is OFF, but the per-mine override (the video-mine shortcut) forces the clip
+    r = _capture_reader(tmp_path, animated_enabled=False)
+    calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
+    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv", animated=True)
+    assert calls and pic.endswith(".webp")  # the encode ran despite the config default being off
+
+
+def test_capture_media_still_only_when_animated_disabled(monkeypatch, tmp_path):
+    r = _capture_reader(tmp_path, animated_enabled=False)
+    calls = _stub_capture(monkeypatch, animated_result=tmp_path / "x.webp")
+    pic, _audio = r._miner.capture_media("saitenka_1", "/v.mkv")
+    assert calls == [] and pic.endswith(".jpg")  # animated off + no override → never encodes
+
+
+def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
+    # A transient IPC error reading the cue timespan must NOT escape capture_media — in bulk_mine it would
+    # propagate to poll_once and tear the session down. The still is still captured (image-only mine).
+    import overlay.app.miner as _M
+
+    r = _capture_reader(tmp_path, animated_enabled=False)
+    monkeypatch.setattr(_M, "screenshot", lambda *_a: None)
+    monkeypatch.setattr(_M, "clip_audio", lambda *_a, **_k: None)
+
+    def _boom(_ipc):
+        raise OSError("broken pipe")
+
+    monkeypatch.setattr(_M, "current_timespan", _boom)
+    pic, audio = r._miner.capture_media("saitenka_1", "/v.mkv")  # must not raise
+    assert pic.endswith(".jpg") and audio == ""  # still captured; audio skipped (no span)
+
+
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     """A per-entry ⊕ passes an explicit CardData, so the mined note is that chosen entry (しりぞく),
     not whatever the default dict-first pick would derive for the token."""
@@ -223,7 +301,7 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     chosen = CardData("退く", "しりぞく", "<ol><li>to retreat</li></ol>", glosses=("to retreat",))
     tok = next(t for t in r.tokens if t.surface == "読む")
@@ -303,7 +381,7 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
     monkeypatch.setattr(r, "_preview_existing", lambda *_a: None)
     dup_status = []
     monkeypatch.setattr(
@@ -364,7 +442,7 @@ def test_bulk_mine_counts_and_toasts(monkeypatch):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("", ""))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("", ""))
     toasts = []
     monkeypatch.setattr(r, "_toast", lambda text, _kind="ok", _seconds=2.8: toasts.append(text))
     monkeypatch.setattr(r, "_mark_mined", lambda _expr: None)  # skip the view refresh
@@ -407,7 +485,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("退いた")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _b, _v: ("", ""))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _b, _v, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
     handled = tooltip._mine_link(
@@ -457,7 +535,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     anki = _FakeAnki()
     r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
     r.set_subtitle("本を読む")
-    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video: ("", ""))
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("", ""))
     monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
     tok = next(t for t in r.tokens if t.surface == "読む")
     r._mine_token(tok)

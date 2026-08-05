@@ -56,6 +56,31 @@ def test_mining_threads_normalize_audio_flag(monkeypatch):
     assert mine_conf.normalize_audio is True
 
 
+def test_mining_threads_animated_screenshot_and_quality_knobs(monkeypatch):
+    import overlay.app.anki as anki_mod
+
+    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
+    _, _, mine_conf, _ = reader_deps.build_reader_deps(
+        {"mine": {"animated_screenshot": True, "animated_height": 720, "animated_fps": 15}},
+        color=False,
+    )
+    assert mine_conf.animated.enabled is True
+    assert (
+        mine_conf.animated.height == 720 and mine_conf.animated.fps == 15
+    )  # storage↔quality levers
+
+
+def test_mining_animated_screenshot_off_by_default(monkeypatch):
+    import overlay.app.anki as anki_mod
+
+    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
+    _, _, mine_conf, _ = reader_deps.build_reader_deps(
+        {"mine": {"deck": "D", "model": "Lapis"}}, color=False
+    )
+    assert mine_conf.animated.enabled is False
+    assert mine_conf.animated.height == 480 and mine_conf.animated.fmt == "webp"
+
+
 def test_color_builds_scorer_even_without_known(monkeypatch):
     import overlay.app.scoring as scoring_mod
     import overlay.app.wordlists as wl

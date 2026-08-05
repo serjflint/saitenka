@@ -159,6 +159,17 @@ preview_key = "p"
                               # confirms instead; Ctrl+m/Shift+m still mine, ⊕→✓ still flips)
 # normalize_audio = false     # even out card volume: −23 LUFS EBU R128 loudnorm on the mined clip
                               # (adds one ffmpeg pass per mine)
+# video_key = "Ctrl+Shift+m"  # shortcut: mine the hovered word with an animated (motion) clip, even
+                              # when animated_screenshot below is off (a one-shot "record this scene")
+# animated_screenshot = false # capture a short animated clip of the scene as the card image instead of a
+                              # still (opt-in: larger media + an extra ffmpeg pass). Prefers WebP (small,
+                              # sharp) and falls back to GIF where ffmpeg lacks libwebp — GIF is native to
+                              # every ffmpeg, so it works out of the box; `saitenka doctor` shows which
+# animated_format = "webp"    # "webp" (prefer WebP → GIF) or "gif" (force the universal GIF)
+# animated_height = 480       # clip height in px — the main quality↔storage lever (smaller = smaller file)
+# animated_fps = 12           # clip frame rate
+# animated_quality = 75       # WebP quality, 0–100 (ignored for GIF)
+# animated_max_secs = 4.0     # cap clip length so a long cue can't produce a huge file
 
 # ── [anki] AnkiConnect endpoint — only if you changed its defaults (stock: 127.0.0.1:8765, no key) ──
 # [anki]

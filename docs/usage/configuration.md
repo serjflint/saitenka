@@ -66,18 +66,35 @@ enabled = true
 deck  = "Saitenka::Mining"   # destination deck
 model = "Lapis"              # Anki note type / model
 key       = "Ctrl+m"         # mine the hovered word
+video_key = "Ctrl+Shift+m"   # mine the hovered word with an animated (motion) clip
 all_key   = "Shift+m"        # bulk-mine the current line
 preview_key = "p"            # replay the last card preview
 preview = true               # auto-pop the card-preview panel after a mine (--no-mine-preview off)
 normalize_audio = false      # −23 LUFS loudnorm on the mined clip (off by default)
+animated_screenshot = false  # capture a motion clip as the card image instead of a still (off by default)
+animated_format = "webp"     # "webp" (prefer WebP → GIF fallback) or "gif" (force universal GIF)
+animated_height = 480        # clip height in px — the main quality↔storage lever
+animated_fps = 12            # clip frame rate
+animated_quality = 75        # WebP quality, 0–100 (ignored for GIF)
+animated_max_secs = 4.0      # cap clip length so a long cue can't produce a huge file
 ```
 
 Set `enabled = false` to keep the config but turn mining off (the `--no-mine` flag does the same for a
 single run). `preview = false` (or `--no-mine-preview`) mines silently — a toast confirms instead of the
 verify panel popping up; mining and the ⊕→✓ flip are unaffected. `normalize_audio` runs an EBU R128
 `loudnorm` pass (−23 LUFS) so cards mined from quiet
-and loud lines play back at an even volume; it adds one ffmpeg pass per mine, so it's off by default. If your AnkiConnect endpoint isn't the stock `127.0.0.1:8765`, override it in the separate
-`[anki]` table.
+and loud lines play back at an even volume; it adds one ffmpeg pass per mine, so it's off by default.
+
+**Animated (motion) screenshots.** `animated_screenshot = true` captures a short animated clip of the
+scene as the card image instead of a still frame — the scene reads better in motion and pairs with the cue
+audio you already clip. It's opt-in (larger media + an extra ffmpeg pass). It prefers WebP (small and
+sharp) and automatically falls back to an animated **GIF** where your ffmpeg lacks `libwebp` (Homebrew's
+ffmpeg and the Windows "essentials" build often do) — GIF's encoder is native to every ffmpeg, so a clip is
+produced out of the box on macOS, Linux, and Windows; `saitenka doctor` reports which. Force GIF with
+`animated_format = "gif"`. `animated_height` (plus `animated_fps`/`animated_quality`/`animated_max_secs`)
+trade clip quality against file size. You don't have to turn it on globally: ++ctrl+shift+m++ (`video_key`)
+mines the hovered word with a clip for that one card. If your AnkiConnect endpoint isn't the stock
+`127.0.0.1:8765`, override it in the separate `[anki]` table.
 
 !!! note "Anki starts itself"
     When mining (or Anki-backed coloring) is on, Saitenka launches Anki for you if it's closed.

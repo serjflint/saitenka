@@ -158,7 +158,15 @@ def check_ffmpeg() -> Check:
         return Check(
             "ffmpeg", "warn", "ffmpeg present but no aac encoder — mined SentenceAudio won't encode"
         )
-    return Check("ffmpeg", "ok", "ffmpeg + aac")
+    # Opt-in [mine].animated_screenshot prefers WebP but falls back to GIF (native to every ffmpeg), so
+    # animation works even without libwebp — informational, never a warning.
+    if any(e in out for e in ("libwebp_anim", "libwebp")):
+        anim = " + animated webp"
+    elif re.search(r"^\s*\S*\s+gif\b", out, re.MULTILINE):
+        anim = " + animated gif (no libwebp — WebP clips unavailable, GIF used)"
+    else:
+        anim = " (no webp/gif encoder — animated screenshots stay still)"
+    return Check("ffmpeg", "ok", "ffmpeg + aac" + anim)
 
 
 def check_config() -> Check:

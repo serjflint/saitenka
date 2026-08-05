@@ -51,6 +51,7 @@ from overlay.app.bindings import (
     KANJI_MSG,
     MINE_ALL_MSG,
     MINE_MSG,
+    MINE_VIDEO_MSG,
     MOUSE_SECTION,
     OVERLAY_TOGGLE_MSG,
     PREVIEW_CLOSE_MSG,
@@ -190,6 +191,7 @@ class Reader:
         self._load_next = 0.0
         self._miner = Miner(self)  # mining flow (app/miner.py)
         self.mine_key = o.keys.mine_key
+        self.mine_video_key = o.keys.mine_video_key
         self.mine_all_key = o.keys.mine_all_key
         self.translate_key = o.keys.translate_key
         self.overlay_toggle_key = o.keys.overlay_toggle_key
@@ -1135,7 +1137,7 @@ class Reader:
     def _mine_tags(self, video) -> list[str]:
         return self._miner.mine_tags(video)
 
-    def mine_current(self) -> None:
+    def mine_current(self, *, animated: bool | None = None) -> None:
         if not self.anki or not self.mine_cfg:
             return
         idx = self._mine_target()
@@ -1143,7 +1145,12 @@ class Reader:
             self._toast("no word to mine", "warn")
             return
         with otel_metrics.traced("anki_mine", source="base"):
-            self._miner.mine_token(self.tokens[idx])
+            self._miner.mine_token(self.tokens[idx], animated=animated)
+
+    def mine_current_video(self) -> None:
+        """The video-mine shortcut: mine the hovered word with an animated (motion) screenshot, even when
+        ``[mine].animated_screenshot`` is off."""
+        self.mine_current(animated=True)
 
     def _mine_token(self, tok, *, card=None) -> None:
         with otel_metrics.traced("anki_mine", source="nested"):
@@ -1324,6 +1331,7 @@ class Reader:
     # position first: _sub_nav samples sub-start/time-pos before the seek moves them).
     _HANDLERS: ClassVar[dict] = {
         MINE_MSG: lambda r: r.mine_current(),
+        MINE_VIDEO_MSG: lambda r: r.mine_current_video(),
         MINE_ALL_MSG: lambda r: r.bulk_mine(),
         TRANS_MSG: lambda r: r.toggle_translation(),
         OVERLAY_TOGGLE_MSG: lambda r: r.toggle_overlay(),

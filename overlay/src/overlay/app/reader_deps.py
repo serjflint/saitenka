@@ -206,12 +206,21 @@ def _build_mining(mc: dict, *, mine: bool):
     with otel_metrics.traced("build_mining"):
         try:
             from overlay.app.anki import Anki, MineConfig
+            from overlay.app.media import AnimatedClip
 
             anki = Anki()
             mine_conf = MineConfig(
                 deck=mc.get("deck", "Saitenka::Mining"),
                 model=mc.get("model", "Lapis"),
                 normalize_audio=bool(mc.get("normalize_audio", False)),
+                animated=AnimatedClip(
+                    enabled=bool(mc.get("animated_screenshot", False)),
+                    height=int(mc.get("animated_height", 480)),
+                    fps=int(mc.get("animated_fps", 12)),
+                    quality=int(mc.get("animated_quality", 75)),
+                    max_secs=float(mc.get("animated_max_secs", 4.0)),
+                    fmt=str(mc.get("animated_format", "webp")).lower(),
+                ),
             )
             return anki, mine_conf
         except Exception:  # never let mining setup block attach

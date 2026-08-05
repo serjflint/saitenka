@@ -377,6 +377,7 @@ def _build_run_options(
     return ReaderOptions(
         keys=KeyOptions(
             mine_key=mine_key,
+            mine_video_key=cfg.get("mine", {}).get("video_key", _ko.mine_video_key),
             mine_all_key=mine_all_key,
             translate_key=translate_key,
             overlay_toggle_key=cfg.get("overlay_toggle_key", _ko.overlay_toggle_key),
@@ -504,6 +505,8 @@ def _build_run_deps(
     mine_key: str,
     mine_all_key: str,
     mine_normalize_audio: bool,
+    mine_animated_screenshot: bool,
+    raw_mine: dict,
     known_cfg,
     known: str,
     color: bool,
@@ -542,7 +545,15 @@ def _build_run_deps(
         "freq": freq_titles,
         "pitch": pitch_titles,
         "known": known_cfg,
-        "mine": {"deck": mine_deck, "model": mine_model, "normalize_audio": mine_normalize_audio}
+        # start from the raw [mine] config (so config-only keys like animated_height/fps/quality/format
+        # survive the run path — the both-seams trap), then override with the CLI-threaded values
+        "mine": {
+            **raw_mine,
+            "deck": mine_deck,
+            "model": mine_model,
+            "normalize_audio": mine_normalize_audio,
+            "animated_screenshot": mine_animated_screenshot,
+        }
         if mine
         else {},
     }
@@ -704,6 +715,7 @@ def run_impl(
     mine_key: str,
     mine_all_key: str,
     mine_normalize_audio: bool,
+    mine_animated_screenshot: bool,
     preview_key: str,
     no_audio_play: bool,
     mine_preview: bool,
@@ -767,6 +779,8 @@ def run_impl(
             mine_key=mine_key,
             mine_all_key=mine_all_key,
             mine_normalize_audio=mine_normalize_audio,
+            mine_animated_screenshot=mine_animated_screenshot,
+            raw_mine=cfg.get("mine") or {},
             known_cfg=known_cfg,
             known=known,
             color=color,
