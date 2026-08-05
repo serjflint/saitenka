@@ -65,14 +65,14 @@ class PrewarmPlan:
 class PrewarmProgress:
     """One heartbeat. The counters a long prebuild needs to be legible: ``new_rows`` exposes a plateau
     (0 → the glyph population saturated), ``skipped`` exposes resume, ``projected_bytes`` extrapolates
-    the tail at the current marginal rate."""
+    the tail at the cumulative rate since the run's first raster."""
 
     measured: int  # words rastered so far (skipped words excluded)
     skipped: int  # words skipped via the resume ledger
     rows: int  # total rows / masks now in the cache
     new_rows: int  # rows added since the previous checkpoint (0 → plateau)
     nbytes: int  # REAL on-disk bytes (atlas mode now reports this; it used to send 0)
-    projected_bytes: int  # final-size extrapolation at the marginal rate (0 = unknown)
+    projected_bytes: int  # final-size extrapolation at the cumulative rate (0 = unknown)
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +161,7 @@ class _PrewarmJob:
         total: int = 0,
         already_done: int = 0,
         start_rows: int = 0,
+        start_nbytes: int = 0,
         plateau_stop: int = 0,
         checkpoint_every: int = _CHECKPOINT_EVERY,
         plateau_min: int = _PLATEAU_MIN_NEW,
@@ -194,7 +195,7 @@ class _PrewarmJob:
         self.skipped = 0
         self.stop = False
         self._last_rows = start_rows  # rows at the previous checkpoint → new-mask delta
-        self._last_nbytes: int | None = None  # bytes at prev checkpoint → projection
+        self._start_nbytes = start_nbytes  # run-start footprint → cumulative-rate projection
         self._dry_streak = 0  # consecutive dry checkpoints, for --atlas-plateau
 
     def _reader(self):
@@ -290,7 +291,7 @@ class _PrewarmJob:
         new_rows = rows - self._last_rows
         projected = self._project(nbytes, m)
         self._update_stop(new_rows, nbytes)
-        self._last_rows, self._last_nbytes = rows, nbytes
+        self._last_rows = rows
         log.info("prewarm: measured %d, %d rows (+%d), %.0f MB", m, rows, new_rows, nbytes / 1e6)
         if self.on_progress is not None:
             self.on_progress(
@@ -329,14 +330,15 @@ class _PrewarmJob:
                 self.stop = True
 
     def _project(self, nbytes: int, m: int) -> int:
-        """Extrapolate final on-disk bytes from the LAST checkpoint's marginal rate (Δbytes/Δwords ×
-        words-left). Self-correcting: once CJK glyphs saturate, the marginal is the small Latin-word
-        trickle, so this converges on the honest tail instead of a word-count-linear over-estimate. 0
-        until a prior checkpoint exists (nothing to extrapolate from yet)."""
-        if self._last_nbytes is None:
+        """Extrapolate final on-disk bytes from the CUMULATIVE bytes/word since this run's first raster
+        (total growth ÷ words rastered), × words-left. NOT a single checkpoint's Δ: that, times the
+        ~1M-word horizon, amplifies SQLite's page-quantised (lumpy) growth into ±80 MB swings between
+        heartbeats. The cumulative rate averages that noise out, so the estimate converges as the run
+        progresses. 0 until at least one word has been rastered."""
+        if m <= 0:
             return 0
         left = max(0, self.to_raster - m)
-        rate = max(0.0, (nbytes - self._last_nbytes) / self.checkpoint_every)
+        rate = max(0.0, (nbytes - self._start_nbytes) / m)
         return int(nbytes + rate * left)
 
 
@@ -473,6 +475,7 @@ def prewarm(
         total=plan.total,
         already_done=already_done,
         start_rows=before,
+        start_nbytes=plan.nbytes,
         plateau_stop=plateau_stop,
     )
     n_workers = workers if workers > 0 else min(8, (os.cpu_count() or 4))
