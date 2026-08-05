@@ -9,9 +9,13 @@ fields under their historical ``reader.<field>`` names while call sites migrate 
 
 from __future__ import annotations
 
+import queue
 from typing import TYPE_CHECKING, overload
 
 if TYPE_CHECKING:
+    import threading
+
+    from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
     from overlay.app.subtitle_modes import Language
 
@@ -54,3 +58,8 @@ class EpisodeContext:
         self.nav_idx = -1  # last cue index jumped to (chaining hint; -1 = unknown)
         self.sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
         self.nav_prev_text = ""  # cue text showing right before a nav render (reconcile)
+        # background subtitle provider fetches for THIS file
+        self.subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
+        self.subtitle_fetch_threads: list[threading.Thread] = []
+        # durable per-session recorder (app/session_stats.py); None until stats start on file load
+        self.session_recorder: SessionRecorder | None = None

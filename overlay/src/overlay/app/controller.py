@@ -94,7 +94,6 @@ if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
     from overlay.app.prefetch import RenderAheadReq
     from overlay.app.render_cache import RenderCache
-    from overlay.app.session_stats import SessionRecorder
     from overlay.mask_atlas import MaskAtlas
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
@@ -162,6 +161,11 @@ class Reader:
     _nav_idx = Delegated[int]("episode", "nav_idx")
     _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
     _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
+    _subtitle_results = Delegated[queue.SimpleQueue]("episode", "subtitle_results")
+    _subtitle_fetch_threads = Delegated[list[threading.Thread]]("episode", "subtitle_fetch_threads")
+    _session_recorder = Delegated[session_stats.SessionRecorder | None](
+        "episode", "session_recorder"
+    )
 
     def __init__(
         self,
@@ -348,15 +352,12 @@ class Reader:
         self._translation_secondary_sid: int | None = None
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
-        self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
-        self._subtitle_fetch_threads: list[threading.Thread] = []
         self._subtitle_retry_factory: subtitle_modes.ProviderFetchFactory | None = None
         self._subtitle_retry_active = False
         self._subtitle_retry_lock = threading.Lock()
         self._backlog_store: backlog.BacklogStore | None = None
         self.sidebar = sidebar.SidebarState()
         self.analysis = analysis_overlay.AnalysisState()
-        self._session_recorder: SessionRecorder | None = None
         self._help_open = False
         self._help_page = 0
         self._last_jpg: Path | None = None
