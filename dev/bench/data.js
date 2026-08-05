@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785952507721,
+  "lastUpdate": 1785957201625,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -323,6 +323,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.577,
             "range": "±10.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b0ac9940d13dbfab739f2223327b4069c18ab698",
+          "message": "docs(agents): distil loop research into skills; curate + adversarially review AGENTS.md (#190)\n\n* docs(testing): surface loop test-adequacy knowledge for the coding loop\n\nThe Sharpen and Grow loops apply a body of test-adequacy knowledge reactively, at\nidle time. Applied proactively while building, the same knowledge prevents the\ndefects the loops catch later — but it was trapped in the idle-loop docs and the\ngit-ignored research. Distil the feature-time half into the always-on / on-task\nsurfaces:\n\n- new .agents/skills/write-test/references/oracle-catalog.md — the invariant /\n  metamorphic-oracle families (agreement round-trip, warm==cold cache-equivalence,\n  scale-invariance, feature-toggle consistency, the concurrency oracles),\n  assert-oracles-not-pixels (platform-independence), the negative-control\n  discipline, and the extend-before-add config matrix (tests/util.py), each pointing\n  at its canonical in-tree example.\n- AGENTS.md §Testing: one reframe bullet (adequacy != coverage; covered-but-under-\n  specified is the target) → the catalog.\n- write-test skill: an oracle/property assertion step, an extend-before-add step, and\n  a load-bearing check in Verify.\n- advisory `poe test-live` — arm-2 oracle-liveness (tools/grow_gate.py) exposed for\n  the coding loop to prove one new test isn't vacuous, without the whole idle loop.\n  Opt-in, NOT in `poe all`.\n- write-test smoke rot-guards the catalog + the example tests it cites (grep-free).\n\nNo product/behaviour change; advisory-only.\n\n* docs(skills): add self-contained agents-md skill for config-surface curation\n\nA recurring decision — where does a new agent-facing convention belong, and is\nAGENTS.md still minimal? — had no consultable home. Add a thin, on-demand skill that\nencodes the routing across saitenka's surfaces (AGENTS.md / .agents/rules /\n.agents/skills / .agents/hooks / poe required-vs-advisory gates / .agents/mcp), the\ninclusion test, the persist-as-what call, and keep-it-fresh review.\n\nSelf-contained per the skill-authoring guidance: it packages its own vendored,\nevidence-based guide (references/writing-agents-md.md, reframed for this repo's\nopen-source/git reality from an internal-frameworks original) rather than depending on\nan external file or another skill. Ships a grep-free scripts/smoke.sh that rot-guards\nthe vendored guide + every surface it routes to. Description within the store limits\n(892 chars, no angle brackets, kebab name).\n\nPer the guide's own minimality thesis AGENTS.md is left unchanged (no skills catalog):\nskills auto-surface via their description, and dev-gate/agent-tooling are already\npointed at contextually.\n\n* docs: apply adversarial AGENTS.md review — cut drift, fix stale skill claims\n\nAn isolated adversarial review (contribute skill, two fresh grounded reviewers) found\nno P0/P1 — the file is accurate — but real drift/staleness. A reachability check first\nestablished that for Claude Code only AGENTS.md is auto-loaded (CLAUDE.md -> @AGENTS.md);\nskills load on-demand but .agents/rules/ is NOT injected — so content that must be seen\ncan't simply move to a rule.\n\nAGENTS.md:\n- Testing \"adequacy\" bullet restated the oracle-catalog it points to, and asserted a\n  false \"every oracle ships *_has_teeth\" universal (only one such test exists) ->\n  compressed to the reframe + pointer; the catalog is sole owner.\n- Dangling `uv-python` skill pointer (no such repo skill) -> cut.\n- Fork-bomb + PreToolUse-hook fact stated twice -> the rules bullet now points to the\n  Tooling section that explains it.\n- Escape-recovery block tightened but KEPT in AGENTS.md (moving it to searching.md would\n  hide it from Claude, which never loads that rule).\n- Deduped \"No process scars\" (Documentation restated Comments).\n\ndev-gate skill:\n- \"The repo has no CI\" was false — CI (.github/workflows/ci.yml) mirrors poe all; fixed.\n- Stale \"3.13 tasks set UV_PROJECT_ENVIRONMENT=.venv-{fuzz,cx}\" — they use uvx /\n  uv run --no-project ephemeral envs; corrected + pointed at the canonical AGENTS.md\n  \"Fuzzing & symbolic checks\".\n\nKept (critical judgment): the Comments/Documentation guardrails the review called\n\"inferable virtue\" stay — this session proved them load-bearing (they caught the Testing\nover-write). The adequacy sections stay canonical in AGENTS.md (no skill owns them).\n\n* feat(agents): make .agents/rules/ actually always-loaded for Claude\n\nAGENTS.md called .agents/rules/ \"always-on\", but for Claude Code that was\naspirational — only the PreToolUse hook enforced the shell-search ban; the rule\nTEXT was never in context (CLAUDE.md -> @AGENTS.md is the sole auto-load, and\nnothing injects .agents/rules/). Claude Code 2.0.64 ships a native .claude/rules/\ndirectory (a no-`paths:` rule loads globally); materialize it from the canonical\nsource with a git-ignored `.claude/rules -> ../.agents/rules` symlink, mirroring the\nskills symlink. Documented in the .agents/rules/ bullet + the agent-setup activation\ntable; verify with /memory.\n\nWith searching.md now genuinely always-loaded, the fork-bomb escape-recovery drill\nmoves there (its proper home) — AGENTS.md keeps a one-line breadcrumb (safe even\nbefore /memory confirms the load).\n\n* docs(skills): add test-adequacy skill; compress AGENTS.md adequacy sections\n\nMutation auditing + Fuzzing & symbolic checks were ~42 always-loaded lines of deep,\nopt-in-tool reference. Route the depth to a new on-demand `test-adequacy` skill\n(mutation/fuzz/crosshair — allowlist, survivors->property+@example, crash-repro\nworkflow, 3.13-env pinning, HypoFuzz-licence rationale). AGENTS.md keeps both headings\n(anchors in sharpen docs / conftest / test_mutate_targets stay valid) compressed to the\nalways-relevant principle + poe task names + a pointer; names poe tasks, never\ninvocations (poe is SSOT for how). dev-gate + write-test descriptions repointed to the\nskill as the adequacy owner. Self-contained, grep-free smoke.\n\n* docs: add \"Quality gates — when to run what\" decision tree\n\nUnifies the quality stack into one tight-loop routing map: cheapest sufficient check\nfirst (poe affected -> poe all), escalate by change-risk to write-test / test-adequacy\n/ the contribute adversarial review / the Sharpen+Grow loops — poe all as the floor,\nthe rest as escalations. High-value always-on routing (names saitenka's own stack), so\nit earns always-loaded placement while the detail stays in each skill/loop.\n\n* fix(agents): correct the rules-load verification pointer\n\n/memory is Claude Code's memory-file editor, not a loaded-instructions viewer, so it\ncan't confirm .claude/rules/searching.md is loaded. Point at the InstructionsLoaded\nhook (logs which instruction files load, when, and why) instead — in the AGENTS.md\nrules bullet and the agent-setup table.",
+          "timestamp": "2026-08-05T22:12:30+03:00",
+          "tree_id": "4b8e957b47235aa03ca6fbb7e2992cb1e346483b",
+          "url": "https://github.com/serjflint/saitenka/commit/b0ac9940d13dbfab739f2223327b4069c18ab698"
+        },
+        "date": 1785957200980,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.826,
+            "range": "±3.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.072,
+            "range": "±13.5%",
             "unit": "ms"
           }
         ]
