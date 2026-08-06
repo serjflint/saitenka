@@ -42,8 +42,10 @@ def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -
     fire-and-forget and warn — never block startup on the poll. A background watcher (see
     :func:`_spawn_anki_seed_watcher`) backfills mining once Anki answers, so the up-to-20s launch poll
     stays off the dict/coloring critical path (it used to gate the whole dep build → apply_deps → the
-    'dictionaries loaded' feedback by the full wait). ``on_unreachable`` lets an interactive caller
-    (``run``) print a console note instead of the default log-only warning (``attach`` is detached)."""
+    'dictionaries loaded' feedback by the full wait). ``on_unreachable(*, launched)`` lets an
+    interactive caller (``run``) print a console note — ``launched`` is False when Anki couldn't even
+    be started (not found / launch failed), a distinct warning — in addition to the log-only warning
+    (``attach`` is detached, so it passes no callback)."""
     if not ((mine and mc) or known_cfg):
         return
     from overlay.app.anki import anki_reachable, launch_anki
@@ -51,11 +53,16 @@ def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -
     with otel_metrics.traced("anki_ensure_running"):
         if anki_reachable():
             return
-        launch_anki()  # fire-and-forget; the seed watcher polls for it to come up
+        launched = launch_anki()  # fire-and-forget; the seed watcher polls for it to come up
+        if launched:
+            log.warning("Anki not reachable — launching it; mining/coloring enables once it's up")
+        else:  # couldn't find the Anki binary or the launch itself failed — it won't come up on its own
+            log.warning(
+                "Anki is unavailable and couldn't be started (not found or failed to launch) — "
+                "mining/coloring stays off until you open Anki manually"
+            )
         if on_unreachable is not None:
-            on_unreachable()
-        else:
-            log.warning("Anki not reachable — launching it; mining enables once it's up")
+            on_unreachable(launched=launched)
 
 
 def _anki_seed_watch(reader: Reader) -> None:
