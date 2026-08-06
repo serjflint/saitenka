@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786000671221,
+  "lastUpdate": 1786004747816,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -683,6 +683,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.51,
             "range": "±8.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2b0266586c0835fe523a0ab5966d5947d514c76f",
+          "message": "Merge pull request #203 from serjflint/feat/doctor-stale-overlay-guard\n\nfeat(doctor): warn when a stale overlay process is running vs the installed build",
+          "timestamp": "2026-08-06T11:25:18+03:00",
+          "tree_id": "0523119919f5da5a722cc96fc9297a7a3f292902",
+          "url": "https://github.com/serjflint/saitenka/commit/2b0266586c0835fe523a0ab5966d5947d514c76f"
+        },
+        "date": 1786004746952,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.718,
+            "range": "±2.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.323,
+            "range": "±7.0%",
             "unit": "ms"
           }
         ]
