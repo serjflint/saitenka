@@ -31,7 +31,8 @@ def normalize_match_name(path: str | Path) -> str:
     return unicodedata.normalize("NFC", Path(path).name).casefold()
 
 
-def _normalize_title(title: str) -> str:
+def normalize_title(title: str) -> str:
+    """Fold a parsed title to its match key; SSOT so #24 stats and #64 backlog agree."""
     return unicodedata.normalize("NFC", title).casefold().strip()
 
 
@@ -271,7 +272,7 @@ class BacklogStore:
         title, episode = parse_filename(current)
         rows = self._con.execute(
             "SELECT * FROM media WHERE title_match = ? AND episode IS ? ORDER BY id",
-            (_normalize_title(title), episode),
+            (normalize_title(title), episode),
         ).fetchall()
         if rows:
             return MatchResult(
@@ -306,7 +307,7 @@ class BacklogStore:
                 size,
                 mtime,
                 title,
-                _normalize_title(title),
+                normalize_title(title),
                 episode,
                 now,
                 now,

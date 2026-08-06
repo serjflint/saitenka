@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from overlay.app import paths
+from overlay.app.continuity import episode_identity
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,6 +47,9 @@ class SessionSnapshot:
     jp_seconds: float = 0.0
     en_seconds: float = 0.0
     analysis_json: str | None = None
+    title: str = ""
+    title_match: str = ""
+    episode: int | None = None
 
 
 def summary(snapshot: SessionSnapshot) -> str:
@@ -99,16 +103,38 @@ class SessionStore:
                 mined_count INTEGER NOT NULL,
                 jp_seconds REAL NOT NULL,
                 en_seconds REAL NOT NULL,
-                analysis_json TEXT
+                analysis_json TEXT,
+                title TEXT NOT NULL DEFAULT '',
+                title_match TEXT NOT NULL DEFAULT '',
+                episode INTEGER
             )
             """
         )
+        self._migrate()
+        self._con.execute(
+            "CREATE INDEX IF NOT EXISTS session_series ON session(title_match, episode)"
+        )
         self._con.commit()
+
+    def _migrate(self) -> None:
+        """Add #100 episode-identity columns to a pre-existing session table (no framework)."""
+        have = {row["name"] for row in self._con.execute("PRAGMA table_info(session)")}
+        for name, decl in (
+            ("title", "TEXT NOT NULL DEFAULT ''"),
+            ("title_match", "TEXT NOT NULL DEFAULT ''"),
+            ("episode", "INTEGER"),
+        ):
+            if name not in have:
+                self._con.execute(f"ALTER TABLE session ADD COLUMN {name} {decl}")
 
     def save(self, snapshot: SessionSnapshot) -> None:
         self._con.execute(
             """
-            INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO session (
+                session_id, media_path, media_name, started_at, ended_at, completed,
+                watch_seconds, cue_count, lookup_count, capture_count, mined_count,
+                jp_seconds, en_seconds, analysis_json, title, title_match, episode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 ended_at=excluded.ended_at, completed=excluded.completed,
                 watch_seconds=excluded.watch_seconds, cue_count=excluded.cue_count,
@@ -131,6 +157,9 @@ class SessionStore:
                 snapshot.jp_seconds,
                 snapshot.en_seconds,
                 snapshot.analysis_json,
+                snapshot.title,
+                snapshot.title_match,
+                snapshot.episode,
             ),
         )
         self._con.commit()
@@ -157,6 +186,9 @@ class SessionStore:
                 analysis_json=str(row["analysis_json"])
                 if row["analysis_json"] is not None
                 else None,
+                title=str(row["title"]),
+                title_match=str(row["title_match"]),
+                episode=int(row["episode"]) if row["episode"] is not None else None,
             )
             for row in rows
         )
@@ -214,11 +246,15 @@ class SessionRecorder:
         self._last_language = "jp"
         self._last_cue: tuple[object, ...] | None = None
         self.writer = writer or AsyncSessionWriter()
+        title, title_match, episode = episode_identity(media_path)
         self.snapshot = SessionSnapshot(
             session_id=uuid.uuid4().hex,
             media_path=media_path,
             media_name=Path(media_path).name,
             started_at=now,
+            title=title,
+            title_match=title_match,
+            episode=episode,
         )
         self.writer.submit(self.snapshot)  # crash leaves a durable incomplete session
 

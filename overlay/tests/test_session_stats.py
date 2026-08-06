@@ -85,6 +85,68 @@ def test_async_writer_persists_distinct_and_incomplete_sessions(tmp_path):
     ]
 
 
+def test_recorder_records_episode_identity():
+    writer = FakeWriter()
+    recorder = SessionRecorder(
+        "/anime/[Grp] Nippon Sangoku - 07 [1080p].mkv",
+        clock=lambda: 0.0,
+        wall_clock=lambda: 0.0,
+        writer=writer,
+    )
+
+    assert (recorder.snapshot.title, recorder.snapshot.episode) == ("Nippon Sangoku", 7)
+    assert recorder.snapshot.title_match == "nippon sangoku"
+
+
+def test_episode_identity_round_trips_through_store(tmp_path):
+    path = tmp_path / "sessions.sqlite"
+    store = SessionStore(path)
+    store.save(
+        SessionSnapshot(
+            "s1", "/a/Show 12.mkv", "Show 12.mkv", 1.0, title="Show", title_match="show", episode=12
+        )
+    )
+    store.close()
+
+    reopened = SessionStore(path)
+    (row,) = reopened.recent()
+    reopened.close()
+
+    assert (row.title, row.title_match, row.episode) == ("Show", "show", 12)
+
+
+def test_store_migrates_pre_episode_schema(tmp_path):
+    # A v1 DB with the original 14-column table must gain the episode columns on open.
+    import sqlite3
+
+    path = tmp_path / "sessions.sqlite"
+    con = sqlite3.connect(path)
+    con.execute(
+        """
+        CREATE TABLE session (
+            session_id TEXT PRIMARY KEY, media_path TEXT NOT NULL, media_name TEXT NOT NULL,
+            started_at REAL NOT NULL, ended_at REAL, completed INTEGER NOT NULL,
+            watch_seconds REAL NOT NULL, cue_count INTEGER NOT NULL, lookup_count INTEGER NOT NULL,
+            capture_count INTEGER NOT NULL, mined_count INTEGER NOT NULL, jp_seconds REAL NOT NULL,
+            en_seconds REAL NOT NULL, analysis_json TEXT
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO session VALUES ('old','/a/1.mkv','1.mkv',1.0,NULL,0,0,0,0,0,0,0,0,NULL)"
+    )
+    con.commit()
+    con.close()
+
+    store = SessionStore(path)
+    (row,) = store.recent()
+    # A fresh save must still land against the migrated columns.
+    store.save(SessionSnapshot("new", "/a/Show 03.mkv", "Show 03.mkv", 2.0, episode=3))
+    store.close()
+
+    assert (row.session_id, row.title, row.episode) == ("old", "", None)
+
+
 def test_analysis_snapshot_reuses_shared_result_without_cues():
     result = SimpleNamespace(
         content_token_count=10,
