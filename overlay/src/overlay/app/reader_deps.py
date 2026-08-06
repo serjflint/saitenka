@@ -120,13 +120,17 @@ def _spawn_known_refresh(db, known_cfg) -> None:
     """Background: reconcile the known-word cache against Anki (subset mod-time diff) so the NEXT launch
     reads a current set off disk. Fire-and-forget — a failure (Anki down) leaves the cache as-is; this
     session already colored from it. Daemon so it never holds up shutdown."""
+    from overlay.app.anki import is_unreachable
     from overlay.app.wordlists import refresh_known_cache
 
     def _refresh() -> None:
         try:
             refresh_known_cache(db, known_cfg)
-        except Exception:
-            log.debug("background known-word cache refresh failed", exc_info=True)
+        except Exception as e:
+            # Anki down is expected — one compact line, traceback only for a real fault.
+            log.debug(
+                "background known-word cache refresh failed: %s", e, exc_info=not is_unreachable(e)
+            )
 
     threading.Thread(target=_refresh, name="saitenka-known-refresh", daemon=True).start()
 
@@ -237,11 +241,16 @@ def _validate_mine_fields(anki, mine_conf) -> None:
     """Drop + warn about configured field-map targets that don't exist on the note type, so mining
     writes a valid note instead of silently emptying (or failing on) an unknown field. Best-effort:
     an AnkiConnect hiccup or an unreadable model leaves the map untouched."""
+    from overlay.app.anki import is_unreachable
+
     try:
         real = set(anki.model_field_names(mine_conf.model))
-    except Exception:  # a hiccup reading fields must skip validation, never disable mining
+    except Exception as e:  # a hiccup reading fields must skip validation, never disable mining
         log.debug(
-            "couldn't read %r fields for validation; keeping map", mine_conf.model, exc_info=True
+            "couldn't read %r fields for validation; keeping map: %s",
+            mine_conf.model,
+            e,
+            exc_info=not is_unreachable(e),
         )
         return
     if not real:  # couldn't read the model's fields — can't validate, don't guess

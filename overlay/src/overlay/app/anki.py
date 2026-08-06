@@ -187,6 +187,14 @@ class _AnkiRetryable(AnkiError):
     are plain ``AnkiError`` and never retried."""
 
 
+def is_unreachable(exc: BaseException) -> bool:
+    """True when *exc* just means 'Anki isn't running' — connection refused / timeout, from either the
+    :class:`Anki` client (``_AnkiRetryable``) or a raw ``urllib`` call (``OSError``/``URLError``).
+    Anki can vanish at any moment; that's an expected steady state, so callers log it compactly
+    (no traceback) and carry on."""
+    return isinstance(exc, (_AnkiRetryable, OSError))
+
+
 # logical name -> real field on the note type (Lapis defaults). Kiku shares these names — SubMiner
 # treats the two uniformly and its docs describe Kiku as inheriting Lapis's field settings.
 LAPIS_FIELDS = {
