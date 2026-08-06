@@ -16,7 +16,6 @@ hermetic in tests (no network, no real files).
 
 from __future__ import annotations
 
-import http.client
 import json
 import re
 import shutil
@@ -25,10 +24,10 @@ import sys
 import sysconfig
 import time
 import tomllib
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from overlay.app.anki import ANKI_DOWN_ERRORS
 from overlay.app.config import config_path, load_config
 from overlay.app.paths import cache_dir
 
@@ -94,20 +93,11 @@ def _run(*args: str) -> str:
 
 
 def _anki_call(action: str, **params):
-    from overlay.app.anki import resolve_anki
+    """doctor's AnkiConnect probe — fast-fail (short timeout, no retry) via the single client (SSOT).
+    Raises from :data:`~overlay.app.anki.ANKI_DOWN_ERRORS`; callers catch that and warn."""
+    from overlay.app.anki import Anki
 
-    host, api_key = resolve_anki()  # honors [anki].url / host / port / api_key
-    payload: dict = {"action": action, "version": 6, "params": params}
-    if api_key:
-        payload["key"] = api_key
-    req = urllib.request.Request(  # noqa: S310  # our own probe URL - fixed scheme
-        host, json.dumps(payload).encode(), {"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=5) as r:  # noqa: S310  # our own probe URL - fixed scheme
-        res = json.loads(r.read())
-    if res.get("error"):
-        raise RuntimeError(res["error"])
-    return res.get("result")
+    return Anki()._call(action, timeout=5, attempts=1, **params)
 
 
 def _mpv_conf_path() -> Path:
@@ -342,7 +332,7 @@ def check_anki(deck: str, model: str) -> Check:
     host, _ = resolve_anki()
     try:
         ver = _anki_call("version")
-    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
+    except ANKI_DOWN_ERRORS:
         return Check(
             "anki",
             "warn",
@@ -353,7 +343,7 @@ def check_anki(deck: str, model: str) -> Check:
     try:
         decks = _anki_call("deckNames") or []
         models = _anki_call("modelNames") or []
-    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
+    except ANKI_DOWN_ERRORS:
         return Check("anki", "warn", f"{detail}, but couldn't list decks/models")
     if model not in models:  # a note type can't be auto-created — mining truly can't run without it
         return Check("anki", "fail", f"{detail}, but mining note type {model!r} doesn't exist")
@@ -396,7 +386,7 @@ def _mining_field_problem(model: str) -> str | None:
     )
     try:
         real = set(_anki_call("modelFieldNames", modelName=model) or [])
-    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
+    except ANKI_DOWN_ERRORS:
         return None  # a transient read failure must skip validation, not crash the doctor run
     if not real:
         return None
@@ -438,7 +428,7 @@ def check_known() -> Check:
         return Check("known", "ok", "no known-words deck configured (coloring by freq+JLPT)")
     try:
         decks = set(_anki_call("deckNames") or [])
-    except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
+    except ANKI_DOWN_ERRORS:
         # The `anki` check already owns the single "AnkiConnect is down" warning — don't warn twice
         # for one root cause. This is just a skipped validation, hidden unless --verbose.
         return Check(
