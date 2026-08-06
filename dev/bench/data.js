@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785968427714,
+  "lastUpdate": 1785996991088,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -575,6 +575,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.92,
             "range": "±3.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "467b3cfb0c21bb49c0536df6a14c7f46208a9563",
+          "message": "Merge pull request #200 from serjflint/refactor/30-lifetime-composition\n\nrefactor(#30): decompose the Reader god-object by lifetime (session⊃episode⊃interaction)",
+          "timestamp": "2026-08-06T09:16:03+03:00",
+          "tree_id": "c7c39c3d7057693aa5c89090306b1f67b11aeb75",
+          "url": "https://github.com/serjflint/saitenka/commit/467b3cfb0c21bb49c0536df6a14c7f46208a9563"
+        },
+        "date": 1785996990678,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.868,
+            "range": "±3.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.765,
+            "range": "±12.8%",
             "unit": "ms"
           }
         ]
