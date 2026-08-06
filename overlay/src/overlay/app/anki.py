@@ -99,28 +99,16 @@ def resolve_anki(cfg: dict | None = None) -> tuple[str, str | None]:
     return url, a.get("api_key")
 
 
-def _ping_body(api_key: str | None) -> bytes:
-    payload: dict = {"action": "version", "version": 6}
-    if api_key:
-        payload["key"] = api_key  # AnkiConnect's apiKey travels in the request body, not a header
-    return json.dumps(payload).encode()
-
-
 def anki_reachable(
     host: str | None = None, api_key: str | None = None, timeout: float = 2.0
 ) -> bool:
-    """True if AnkiConnect answers a version ping. Host/key resolve from config when not given."""
-    if host is None:
-        host, api_key = resolve_anki()
-    req = urllib.request.Request(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
-        host, _ping_body(api_key), {"Content-Type": "application/json"}
-    )
+    """The single 'is AnkiConnect answering RIGHT NOW' gate — a fast, no-retry version ping through the
+    one client (SSOT). Host/key resolve from config when not given. Callers that need a boolean
+    (tooltip's ⊕ gate, setup, the startup watcher) use this; never re-implement a probe."""
     try:
-        with urllib.request.urlopen(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
-            req, timeout=timeout
-        ) as r:
-            return b'"result"' in r.read()
-    except (OSError, http.client.HTTPException):
+        Anki(host, api_key)._call("version", timeout=timeout, attempts=1)
+        return True
+    except ANKI_DOWN_ERRORS:
         return False
 
 
@@ -193,6 +181,18 @@ def is_unreachable(exc: BaseException) -> bool:
     Anki can vanish at any moment; that's an expected steady state, so callers log it compactly
     (no traceback) and carry on."""
     return isinstance(exc, (_AnkiRetryable, OSError))
+
+
+# SSOT: the exceptions a single AnkiConnect interaction can raise. Any caller for whom Anki is
+# OPTIONAL (doctor probes, known-word coloring, mining) catches this to degrade instead of crashing.
+# ``AnkiError`` covers both an app error (deck/model missing) and the ``_AnkiRetryable`` down case;
+# the rest are transport/parse failures. Distinguish "just down" from "real fault" with is_unreachable.
+ANKI_DOWN_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    http.client.HTTPException,
+    json.JSONDecodeError,
+    AnkiError,
+)
 
 
 # logical name -> real field on the note type (Lapis defaults). Kiku shares these names — SubMiner
@@ -302,7 +302,28 @@ class Anki:
         self.host = host or rh
         self.api_key = api_key if api_key is not None else rk
 
-    def _call(self, action: str, **params):
+    def _urlopen_json(self, req, action: str, *, timeout: float, trace: bool) -> Any:
+        """POST + parse one AnkiConnect response. ``trace`` splits the IO and CPU spans
+        (``anki_http_call`` / ``anki_json_parse``) for the known-word coloring path's latency budget."""
+        if not trace:
+            with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+                return json.loads(r.read())
+        from overlay import otel_metrics
+
+        with (
+            otel_metrics.traced("anki_http_call", action=action),
+            urllib.request.urlopen(req, timeout=timeout) as r,  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
+        ):
+            raw = r.read()
+        with otel_metrics.traced("anki_json_parse", action=action):
+            return json.loads(raw)
+
+    def _call(
+        self, action: str, *, timeout: float = 20, attempts: int = 2, trace: bool = False, **params
+    ):
+        """The single AnkiConnect JSON-RPC entry point (SSOT). ``timeout``/``attempts`` tune fast-fail
+        (doctor probe, coloring) vs retry-once (mining); ``trace`` adds otel spans. Raises
+        ``_AnkiRetryable`` when Anki is down (see :func:`is_unreachable`), ``AnkiError`` on an app error."""
         payload: dict = {"action": action, "version": 6, "params": params}
         if self.api_key:
             payload["key"] = self.api_key  # AnkiConnect apiKey → request body
@@ -311,14 +332,11 @@ class Anki:
             self.host, body, {"Content-Type": "application/json"}
         )
         for attempt in stamina.retry_context(
-            on=_AnkiRetryable, attempts=2, wait_initial=0.3, wait_max=1.0
+            on=_AnkiRetryable, attempts=attempts, wait_initial=0.3, wait_max=1.0
         ):
             with attempt:
                 try:
-                    with urllib.request.urlopen(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
-                        req, timeout=20
-                    ) as r:
-                        res = json.loads(r.read())
+                    res = self._urlopen_json(req, action, timeout=timeout, trace=trace)
                 except OSError as e:  # connection refused / timeout — transient, retry once
                     raise _AnkiRetryable(f"AnkiConnect unreachable at {self.host}: {e}") from e
                 if res.get("error"):

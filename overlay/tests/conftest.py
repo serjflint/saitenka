@@ -46,10 +46,21 @@ def _hermetic_cache_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _anki_reachable(monkeypatch):
-    """Default: AnkiConnect answers, so the ⊕ button shows when mining is configured (existing tests
-    assume it) and _anki_ok() stays hermetic — no real localhost:8765 ping. Tests for the Anki-closed
-    case patch ``overlay.app.anki.anki_reachable`` to return False."""
+def _anki_down(monkeypatch):
+    """Default: AnkiConnect is UNREACHABLE — the production-realistic state (Anki is usually closed).
+    Making down the default means the graceful-degradation path is what the whole suite exercises, so
+    any code that hard-requires Anki fails a test (Anki is an OPTIONAL component — see the
+    ``test_anki_optional`` contract). Also neutralises ``launch_anki`` so a down probe never spawns a
+    real Anki subprocess. Tests that need Anki reachable (the ⊕ button, live mining/coloring) request
+    the ``anki_up`` fixture; ``test_anki_launch`` restores the real ``launch_anki`` it is testing."""
+    monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *_a, **_k: False)
+    monkeypatch.setattr("overlay.app.anki.launch_anki", lambda *_a, **_k: False)
+
+
+@pytest.fixture
+def anki_up(monkeypatch):
+    """Opt in: AnkiConnect answers. The ⊕ mine button shows and the reachability gate is green, for
+    tests that assert Anki-present behaviour rather than degradation."""
     monkeypatch.setattr("overlay.app.anki.anki_reachable", lambda *_a, **_k: True)
 
 

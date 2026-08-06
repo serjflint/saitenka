@@ -11,8 +11,9 @@ from overlay.app import reader_deps
 
 @pytest.fixture(autouse=True)
 def _no_anki_launch(monkeypatch):
-    """Never launch real Anki from build_reader_deps in tests (conftest already stubs anki_reachable
-    → True, so _maybe_start_anki takes the already-up path; this guards the launch seam too)."""
+    """Never launch real Anki from build_reader_deps. The conftest default is Anki-DOWN, so
+    _maybe_start_anki takes the launch path here; stub launch_anki → True so it reports 'launching'
+    without spawning a real subprocess."""
     monkeypatch.setattr(anki_mod, "launch_anki", lambda *_a, **_k: True)
 
 

@@ -528,12 +528,19 @@ def _build_run_deps(
     that produces them."""
     from overlay.app import reader_deps
 
-    def _on_anki_unreachable() -> None:
-        print(
-            "note: Anki/AnkiConnect not reachable — start Anki (with the AnkiConnect "
-            "add-on). Coloring falls back to freq+JLPT; mining is unavailable until it's up.",
-            file=sys.stderr,
-        )
+    def _on_anki_unreachable(*, launched: bool) -> None:
+        if launched:
+            note = (
+                "note: Anki/AnkiConnect not reachable — launching Anki (needs the AnkiConnect "
+                "add-on). Coloring falls back to freq+JLPT; mining enables once it's up."
+            )
+        else:
+            note = (
+                "warning: Anki is unavailable and couldn't be started — Anki wasn't found or failed "
+                "to launch. Open it manually (with the AnkiConnect add-on). Coloring falls back to "
+                "freq+JLPT; mining stays off until it's up."
+            )
+        print(note, file=sys.stderr)
 
     def _on_known_words_error(e: Exception) -> None:
         print(

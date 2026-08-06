@@ -322,25 +322,12 @@ def _known_signature(decks: dict[str, list[str]]) -> str:
 
 
 def _ankiconnect(host: str, action: str, **params):
-    """One AnkiConnect JSON-RPC call, split into the IO span (``anki_http_call``) and the CPU parse
-    span (``anki_json_parse``) — see the IO-vs-CPU analysis these were added to settle."""
-    import urllib.request
+    """One AnkiConnect JSON-RPC call for the known-word coloring path — no retry, otel-traced (the
+    IO/parse spans settle the IO-vs-CPU budget). Routes through the single :class:`Anki` client (SSOT),
+    so auth (the apiKey this used to silently drop) and error handling live in one place."""
+    from overlay.app.anki import Anki
 
-    from overlay import otel_metrics
-
-    body = json.dumps({"action": action, "version": 6, "params": params}).encode()
-    req = urllib.request.Request(  # noqa: S310  # AnkiConnect on a fixed localhost http scheme
-        host, body, {"Content-Type": "application/json"}
-    )
-    with (
-        otel_metrics.traced("anki_http_call", action=action),
-        urllib.request.urlopen(  # noqa: S310  # AnkiConnect on a fixed localhost http scheme
-            req, timeout=10
-        ) as r,
-    ):
-        raw = r.read()
-    with otel_metrics.traced("anki_json_parse", action=action):
-        return json.loads(raw).get("result")
+    return Anki(host)._call(action, timeout=10, attempts=1, trace=True, **params)
 
 
 @dataclass(frozen=True, slots=True)
