@@ -738,6 +738,51 @@ def check_recent_errors(n: int = 5) -> Check:
     return Check("recent-errors", "warn", "recent log errors:\n    " + "\n    ".join(errs))
 
 
+_OVERLAY_START_RE = re.compile(r"saitenka overlay (\S+) starting")
+
+
+def _norm_version(v: str) -> str:
+    """Drop the volatile ``-dirty`` suffix: an editable checkout's working tree can be dirty at session
+    start but clean at doctor time (or vice versa — a test run rewrites the complexipy snapshot), and
+    that flip alone must not read as a different build. Base + git sha still compare."""
+    return v.removesuffix("-dirty")
+
+
+def check_stale_overlay() -> Check:
+    """Warn when the overlay that LAST ran (its ``… starting`` line in overlay.log) is a different build
+    from the installed one — the 'I reinstalled but nothing changed' trap. The mpv plugin spawns
+    ``saitenka attach`` ONCE per mpv session, so an mpv left open across an update keeps its old modules
+    until you fully quit and relaunch. No log, no version line (a fresh install, or logs predating this
+    line), or an unreadable log → informational, never a false warning."""
+    from overlay.version import overlay_version
+
+    if not LOG_PATH.exists():
+        return Check("overlay-build", "ok", "no overlay session logged yet", info=True)
+    try:
+        text = LOG_PATH.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:  # pragma: no cover
+        return Check("overlay-build", "ok", f"couldn't read overlay log: {e}", info=True)
+    seen = _OVERLAY_START_RE.findall(text)
+    if not seen:
+        return Check(
+            "overlay-build",
+            "ok",
+            "overlay build unknown (log predates the version line)",
+            info=True,
+        )
+    ran, installed = seen[-1], overlay_version()
+    if _norm_version(ran) == _norm_version(installed):
+        return Check(
+            "overlay-build", "ok", f"overlay build matches installed ({installed})", info=True
+        )
+    return Check(
+        "overlay-build",
+        "warn",
+        f"overlay last ran {ran} but {installed} is installed — fully quit and relaunch mpv to load it "
+        "(the attach process is spawned once per mpv session)",
+    )
+
+
 def check_deinflect() -> Check:
     """The optional GPL-3.0 deinflect add-on supplies the tooltip's inflection-chain chips
     (🧩 -て « -いる « -た). The Apache-2.0 core runs without it (no chips shown), so this WARNS with
@@ -864,6 +909,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_jimaku(),
         check_crashes(),
         check_recent_errors(),
+        check_stale_overlay(),
         check_telemetry(),
     ]
     return Report(checks)

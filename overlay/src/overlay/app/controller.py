@@ -1543,7 +1543,12 @@ class Reader:
 
     def run(self, interval: float | None = None) -> None:
         from overlay.render.banded import guard_main_render
+        from overlay.version import overlay_version
 
+        # First line of every session's log: pins WHICH build actually drew (both run + attach reach
+        # here). `doctor` reads it back to catch a stale attach process — an mpv left open across an
+        # editable reinstall keeps its old modules until relaunched (see doctor.check_stale_overlay).
+        log.info("saitenka overlay %s starting", overlay_version())
         guard_main_render(
             on=True
         )  # this IS the render loop — native rasterisation must run on a worker
