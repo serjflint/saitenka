@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786004747816,
+  "lastUpdate": 1786005729012,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -719,6 +719,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.323,
             "range": "±7.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b518df2593d567588cfb208c23f81c0b453f2135",
+          "message": "refactor(anki): AnkiConnect SSOT + Anki-optional as a tested invariant (#204)\n\n* refactor(anki): one AnkiConnect client, probe and error-set (SSOT)\n\nThree separate AnkiConnect request paths (the client, doctor's probe, the\ncoloring path's _ankiconnect) collapsed onto a single parametrised\n`Anki._call(*, timeout, attempts, trace)`. `anki_reachable` and doctor's\n`_anki_call` now route through it too, and the four duplicated except-tuples\nbecame the exported `ANKI_DOWN_ERRORS`. `is_unreachable` stays the sole\n\"just down\" classifier.\n\nFixes a latent bug: the coloring path's `_ankiconnect` silently dropped the\nAnkiConnect apiKey, so a keyed setup would fail known-word coloring.\n\n* feat(run): warn distinctly when Anki can't be started\n\n`_maybe_start_anki` ignored `launch_anki()`'s result and always printed the same\n\"launching…\" note. Now it threads the outcome: when Anki isn't found or the\nlaunch fails, `run` prints a distinct `warning: Anki is unavailable and couldn't\nbe started…` to the terminal and logs it, instead of implying a launch that\nnever happened. The console callback is `on_unreachable(*, launched)`.\n\n* test(anki): default the suite to Anki-down + optional-component contract\n\nAnki is usually closed in production, yet an autouse fixture forced it reachable\nfor all ~1700 tests, so the degradation path was the rare case (how the\ntraceback-on-expected-down bug survived). Flip the default: `_anki_down` makes\nAnkiConnect unreachable and neutralises `launch_anki`; tests that need it up opt\ninto the new `anki_up` fixture (only 2 — the ⊕-button-click tests).\n\nNew `test_anki_optional.py` names the invariant: the SSOT probe up/down, the\ncompact-vs-traceback logging (with a negative control), and the \"couldn't start\"\nterminal warning. Any code that hard-requires Anki now fails a test.",
+          "timestamp": "2026-08-06T11:41:41+03:00",
+          "tree_id": "018f28b8133f59271dc17288890095f6f0a61fb7",
+          "url": "https://github.com/serjflint/saitenka/commit/b518df2593d567588cfb208c23f81c0b453f2135"
+        },
+        "date": 1786005728433,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.799,
+            "range": "±3.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.935,
+            "range": "±14.3%",
             "unit": "ms"
           }
         ]
