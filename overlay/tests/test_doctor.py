@@ -9,6 +9,7 @@ mocked subprocess/urllib, no network, no touching the user's real files.
 
 from __future__ import annotations
 
+import json
 import tomllib
 
 from overlay.app import doctor as doc
@@ -112,6 +113,26 @@ def test_dict_db_check_reports_unimported_title(tmp_path, monkeypatch):
     fails = [c for c in checks if c.status == "fail"]
     assert any("Absent" in c.detail for c in fails)
     assert any(c.status == "ok" and "Present" in c.detail for c in checks)
+
+
+def test_dict_db_default_view_is_a_counts_line_not_a_wall(tmp_path, monkeypatch):
+    # The itemised per-title list is hidden (info); the one visible ok line is the per-kind counts.
+    import dicthelp
+
+    for title in ("Alpha", "Beta"):
+        z = dicthelp.term_zip(tmp_path / f"{title}.zip", title, [["猫", "ねこ", ["cat"]]])
+        dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Alpha", "Beta"]\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    checks = doc.check_dict_db()
+    visible = [c for c in checks if not c.info]
+    assert [c.detail for c in visible] == [
+        "dicts: 2 · freq: 0 · pitch: 0"
+    ]  # one line, not two rows
+    assert all(
+        c.info for c in checks if c.detail.startswith("dicts: Alpha") or "imported in" in c.detail
+    )
 
 
 def test_legacy_files_check_ok_when_none(monkeypatch):
@@ -248,12 +269,16 @@ def test_known_check_ok_when_deck_and_field_present(monkeypatch):
     assert doc.check_known().status == "ok"
 
 
-def test_known_check_warns_when_anki_unreachable(monkeypatch):
+def test_known_check_skips_quietly_when_anki_unreachable(monkeypatch):
+    # The `anki` check owns the single "Anki is down" warning; [known] must not warn a second time
+    # for the same root cause — it degrades to a hidden info line instead.
     def boom(_action, **_kw):
         raise OSError("connection refused")
 
     _patch_known(monkeypatch, {"known": {"JP": ["Word"]}}, boom)
-    assert doc.check_known().status == "warn"
+    c = doc.check_known()
+    assert c.status == "ok" and c.info is True
+    assert "unreachable" in c.detail
 
 
 def test_anki_check_unreachable(monkeypatch):
@@ -293,9 +318,11 @@ def test_version_check_reports_overlay_version(monkeypatch):
 
 def test_windows_and_powershell_checks_are_ok_off_windows(monkeypatch):
     monkeypatch.setattr(doc.sys, "platform", "darwin")
-    assert doc.check_windows().status == "ok"
+    win = doc.check_windows()
+    assert win.status == "ok" and win.info is True  # useless off Windows → hidden by default
     ps = doc.check_powershell()
-    assert ps.status == "ok" and "n/a" in ps.detail  # doesn't shell out off Windows
+    # doesn't shell out off Windows, and its "n/a" line is hidden unless --verbose
+    assert ps.status == "ok" and "n/a" in ps.detail and ps.info is True
 
 
 def test_mpv_socket_check_reports_set_and_unset(monkeypatch):
@@ -303,11 +330,11 @@ def test_mpv_socket_check_reports_set_and_unset(monkeypatch):
     monkeypatch.setattr(doc, "load_config", lambda: {"mpv_socket": r"\\.\pipe\mpvsocket"})
     set_c = doc.check_mpv_socket()
     assert set_c.status == "ok" and "mpvsocket" in set_c.detail
+    assert set_c.info is False  # a configured socket is meaningful — shown by default
     monkeypatch.setattr(doc, "load_config", dict)
     unset_c = doc.check_mpv_socket()
-    assert (
-        unset_c.status == "ok" and "attach to YOUR" in unset_c.detail
-    )  # informational hint, not a warn
+    # unset is the norm → an informational hint (not a warn), hidden unless --verbose
+    assert unset_c.status == "ok" and "attach to YOUR" in unset_c.detail and unset_c.info is True
 
 
 def test_mpv_socket_check_warns_about_locale_mangled_windows_pipe(monkeypatch):
@@ -413,7 +440,7 @@ def test_sub_auto_fuzzy_is_ok(tmp_path, monkeypatch):
     mpvconf.write_text("sub-auto=fuzzy\n")
     monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
     c = doc.check_sub_auto()
-    assert c.status == "ok" and "fuzzy" in c.detail
+    assert c.status == "ok" and "fuzzy" in c.detail and c.info is True  # safe value → hidden
 
 
 def test_dict_db_check_no_db_with_config_fails(tmp_path, monkeypatch):
@@ -489,7 +516,7 @@ def test_telemetry_check_reports_disabled_by_default(tmp_path, monkeypatch):
     cfg.write_text("")
     monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
     c = doc.check_telemetry()
-    assert c.status == "ok" and "disabled" in c.detail
+    assert c.status == "ok" and "disabled" in c.detail and c.info is True  # default state → hidden
 
 
 def test_telemetry_check_enabled_no_trace_yet(tmp_path, monkeypatch):
@@ -524,6 +551,41 @@ def test_recent_errors_tails_log(tmp_path, monkeypatch):
     assert "boom" in c.detail
 
 
+def test_recent_errors_skips_debug_with_error_in_traceback(tmp_path, monkeypatch):
+    # A debug record whose embedded traceback mentions "error" must NOT be surfaced — the level is
+    # what decides, not the word appearing anywhere in the line (the Anki-down noise regression).
+    debug = json.dumps(
+        {
+            "event": "cache refresh failed",
+            "level": "debug",
+            "exception": "ConnectionRefusedError: nope",
+        }
+    )
+    logf = tmp_path / "overlay.log"
+    logf.write_text(debug + "\n")
+    monkeypatch.setattr(doc, "LOG_PATH", logf)
+    c = doc.check_recent_errors()
+    assert c.status == "ok" and "no recent errors" in c.detail
+
+
+def test_recent_errors_collapses_traceback_to_one_line(tmp_path, monkeypatch):
+    # A warning record with a multi-line traceback renders as ONE compact line — never the raw dump.
+    rec = json.dumps(
+        {
+            "event": "refresh failed",
+            "level": "warning",
+            "exception": "Traceback (most recent call last):\n  File x\nURLError: [Errno 61] Connection refused",
+        }
+    )
+    logf = tmp_path / "overlay.log"
+    logf.write_text(rec + "\n")
+    monkeypatch.setattr(doc, "LOG_PATH", logf)
+    c = doc.check_recent_errors()
+    assert c.status == "warn"
+    assert "Traceback" not in c.detail
+    assert "refresh failed — URLError: [Errno 61] Connection refused" in c.detail
+
+
 def test_run_all_checks_and_json():
     # Force every check into a known shape via a stub list; ensure summary + json serialise.
     fake = [doc.Check("mpv", "ok", "ok"), doc.Check("anki", "warn", "meh")]
@@ -537,6 +599,29 @@ def test_run_all_checks_and_json():
 def test_report_fails_on_any_fail():
     report = doc.Report([doc.Check("mpv", "fail", "missing")])
     assert report.exit_code == 1
+
+
+def test_print_report_hides_info_by_default_shows_with_verbose(capsys):
+    report = doc.Report(
+        [
+            doc.Check("mpv", "ok", "mpv present"),
+            doc.Check("windows", "ok", "not Windows (Darwin)", info=True),
+            doc.Check("anki", "warn", "AnkiConnect unreachable"),
+        ]
+    )
+    doc.print_report(report)
+    default = capsys.readouterr().out
+    assert "mpv present" in default and "AnkiConnect unreachable" in default
+    assert "not Windows" not in default  # the info line is hidden in the default view
+
+    doc.print_report(report, verbose=True)
+    assert "not Windows" in capsys.readouterr().out  # --verbose reveals it
+
+
+def test_json_carries_info_lines_even_though_default_view_hides_them():
+    report = doc.Report([doc.Check("windows", "ok", "not Windows", info=True)])
+    j = report.to_json()
+    assert j["checks"][0]["info"] is True  # bug reports keep the full set
 
 
 # --- init wizard -----------------------------------------------------------------------------
