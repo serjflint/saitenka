@@ -314,7 +314,7 @@ def run(
         cyclopts.Parameter(
             negative=(),
             help="extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own "
-            "defaults (force-window/slang/sub-visibility/osd-level/loop-file/start) — mpv is "
+            "defaults (force-window/keep-open/slang/sub-visibility/osd-level/start) — mpv is "
             "last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate "
             "script-opts marker, which we always set last",
         ),

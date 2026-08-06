@@ -31,10 +31,13 @@ def test_core_flags_ipc_server_and_video_last():
     assert "--input-ipc-server=/tmp/s.sock" in argv
     assert "--log-file=/tmp/mpv.log" in argv
     assert argv[-1] == "video.mkv"
-    assert "--loop-file=inf" in argv and "--pause" not in argv
+    # No loop: keep-open=yes holds the last frame at EOF, and a real EOF is what #100 auto-advance
+    # observes. Nothing pauses the interactive path up front.
+    assert "--loop-file=inf" not in argv and "--pause" not in argv
+    assert "--keep-open=yes" in argv
 
 
-def test_screenshot_pauses_instead_of_looping():
+def test_screenshot_pauses_on_the_first_frame():
     argv = _argv(screenshot=True)
     assert "--pause" in argv and "--loop-file=inf" not in argv
 

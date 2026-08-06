@@ -18,8 +18,11 @@ import time
 from pathlib import Path
 from typing import Literal
 
+from overlay.app import session_stats
 from overlay.app.config import config_path, load_config
+from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
+from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
 
 log = logging.getLogger(__name__)
@@ -164,7 +167,6 @@ def _resolve_jimaku_subs(
 def _cached_subtitles(
     video_path: Path, jimaku_title: str | None, episode: int | None, *, resync: bool
 ) -> Path | None:
-    from overlay.app.jimaku import parse_filename
     from overlay.app.subtitle_cache import cached_subs
 
     title, parsed_episode = parse_filename(video_path)
@@ -497,6 +499,140 @@ def _start_run_provider_fetch(
         reader.fetch_japanese_subs_async(startup_factory(str(video_path)))
 
 
+def _auto_advance_enabled(cfg: dict, demo_word: str | None, screenshot: str | None) -> bool:
+    """Opt-in ``[watch].auto_advance``, off for the demo/screenshot paths (they force-hover, not play)."""
+    watch = cfg.get("watch")
+    if demo_word or screenshot or not isinstance(watch, dict):
+        return False
+    return bool(watch.get("auto_advance"))
+
+
+def _install_auto_advance(
+    reader,
+    cfg: dict,
+    video_path: Path,
+    tmp: Path,
+    dur: int,
+    *,
+    enabled: bool,
+    sub_file: str | None,
+    jimaku: bool,
+    jimaku_key: str | None,
+    slang: str,
+    resync: bool,
+) -> None:
+    """Install the eof re-slot hook (#100). run mode owns playback → auto-advance is safe; attach
+    (SyncPlay/external mpv) never reaches here, so it never installs a hook — that mode split IS the
+    SyncPlay gate (#62 precedent). The closure tracks the current file so each advance seeks the NEXT."""
+    if not enabled:
+        return
+    current = {"path": video_path}
+
+    def _advance() -> bool:
+        nxt = resolve_sibling(current["path"], 1)
+        if nxt is None:
+            return False  # no unambiguous next sibling → hold the last frame (keep-open)
+        if reslot_episode(
+            reader,
+            cfg,
+            nxt,
+            tmp,
+            dur,
+            sub_file=sub_file,
+            jimaku=jimaku,
+            jimaku_key=jimaku_key,
+            slang=slang,
+            resync=resync,
+        ):
+            current["path"] = nxt
+            return True
+        return False
+
+    reader.advance_hook = _advance
+
+
+def _await_file_loaded(ipc, target: str, *, timeout: float = 10.0) -> bool:
+    """Block until mpv's ``path`` reflects ``target`` (loadfile is async), or give up after ``timeout``."""
+    want = Path(target).name
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        cur = ipc.command("get_property", "path").get("data")
+        if cur and Path(str(cur)).name == want:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def reslot_episode(
+    reader,
+    cfg: dict,
+    video_path: Path,
+    tmp: Path,
+    dur: int,
+    *,
+    sub_file: str | None,
+    jimaku: bool,
+    jimaku_key: str | None,
+    slang: str,
+    resync: bool,
+) -> bool:
+    """Re-slot the SAME mpv onto ``video_path`` (#100 in-process auto-advance): close the finished
+    episode's stats row, rebind the leak-free ``EpisodeContext``, ``loadfile`` the next file, then
+    re-drive the per-file subtitle/index/recorder/prefetch setup — everything ``run_impl`` does for one
+    file, minus the process launch. Session-scoped state (deck-mined set, backlog, render caches) is
+    untouched by construction. Returns False (and stays put) if the file never loads."""
+    from overlay.app.reader_context import EpisodeContext
+    from overlay.app.subtitle_modes import select_initial
+
+    ipc = reader.ipc
+    title, parsed_episode = parse_filename(video_path)
+    sub_path, en_sub_path, fetch_background, enabled_providers = _resolve_subtitles(
+        cfg,
+        str(video_path),
+        video_path,
+        dur,
+        tmp,
+        sub_file=sub_file,
+        jimaku=jimaku,
+        jimaku_key=jimaku_key,
+        jimaku_title=title,
+        episode=parsed_episode,
+        resync=resync,
+        slang=slang,
+    )
+    session_stats.finish(
+        reader
+    )  # write the just-finished episode complete BEFORE the recorder resets
+    reader.episode = (
+        EpisodeContext()
+    )  # one rebind → every episode-scoped field back to no-episode state
+    ipc.command("loadfile", str(video_path))
+    if not _await_file_loaded(ipc, str(video_path)):
+        log.warning("auto-advance: %s never finished loading — staying at EOF", video_path.name)
+        return False
+    for path in (sub_path, en_sub_path):
+        if path is not None:
+            ipc.command("sub-add", str(path))
+    startup = select_initial(ipc, slang)
+    build_sub_index_for_current_track(reader)
+    reader.configure_subtitle_mode(startup, slang=slang)
+    session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
+    _start_run_provider_fetch(
+        reader,
+        cfg,
+        video_path,
+        providers=(fetch_background if startup.tracks.jp_sid is None else ()),
+        enabled_providers=enabled_providers,
+        jimaku_title=title,
+        episode=parsed_episode,
+        jimaku_key=jimaku_key,
+        resync=resync,
+    )
+    reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
+    log.info("auto-advanced to %s", video_path.name)
+    return True
+
+
 def _build_run_deps(
     *,
     mine: bool,
@@ -803,6 +939,8 @@ def run_impl(
     # exists; without the hoist the build only started after connect, sitting idle through that whole window.
     deps_future = None if (demo_word or screenshot) else begin_deps_build(cfg, _build_deps)
 
+    auto_advance = _auto_advance_enabled(cfg, demo_word, screenshot)
+
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
     sub_path, en_sub_path, fetch_jimaku_in_background, enabled_providers = _resolve_subtitles(
         cfg,
@@ -884,6 +1022,20 @@ def run_impl(
         jimaku_title=jimaku_title,
         episode=episode,
         jimaku_key=jimaku_key,
+        resync=resync,
+    )
+
+    _install_auto_advance(
+        reader,
+        cfg,
+        video_path,
+        tmp,
+        dur,
+        enabled=auto_advance,
+        sub_file=sub_file,
+        jimaku=jimaku,
+        jimaku_key=jimaku_key,
+        slang=slang,
         resync=resync,
     )
 

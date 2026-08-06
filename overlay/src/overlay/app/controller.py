@@ -99,6 +99,8 @@ from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compo
 from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from overlay.app.card_preview import PreviewData
     from overlay.app.render_cache import RenderCache
     from overlay.mpvio.ipc import MpvIPC
@@ -118,7 +120,15 @@ NESTED_ID = OverlayId.NESTED
 
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
-OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text", "sid")
+OBSERVED_PROPS = (
+    "sub-text",
+    "mouse-pos",
+    "osd-dimensions",
+    "pause",
+    "secondary-sub-text",
+    "sid",
+    "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
+)
 
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
@@ -407,6 +417,11 @@ class Reader:
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
         self._observed: dict = {}
+        # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
+        # opt-in (never set under attach, so SyncPlay-managed playback never advances). `_eof_handled`
+        # makes the eof-reached edge one-shot per file (re-armed when a new file clears eof-reached).
+        self.advance_hook: Callable[[], bool] | None = None
+        self._eof_handled = False
         self.osd = (1280, 720)
         # subtitle state (populated by set_subtitle; initialised for the live run() path)
         self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
@@ -1366,12 +1381,28 @@ class Reader:
             handler(self)
 
     # --- run loop -----------------------------------------------------------------------------
+    def _maybe_advance(self) -> None:
+        """On the eof-reached rising edge, ask the installed hook to re-slot to the next episode (#100).
+
+        One-shot per file: `_eof_handled` blocks a repeat call while mpv sits paused at EOF, and re-arms
+        once a fresh file clears eof-reached. A hook that returns False (SyncPlay/attach never installs
+        one, no sibling, ambiguous) is a no-op — mpv just holds the last frame until the user quits."""
+        if self.advance_hook is None:
+            return
+        if self._prop("eof-reached"):
+            if not self._eof_handled:
+                self._eof_handled = True
+                self.advance_hook()
+        else:
+            self._eof_handled = False
+
     def poll_once(self) -> bool:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
             session_stats.tick(self)
+            self._maybe_advance()
             self._flush_paused_nudge()
             ops_before = self.ov.ops
             scroll_steps = self._drain_events()

@@ -42,9 +42,13 @@ def build_mpv_argv(
         f"--slang={slang}",
         "--sub-visibility=no",
         "--osd-level=0",
-        "--pause" if screenshot else "--loop-file=inf",
         f"--start={start}",
     ]
+    if screenshot:
+        # keep-open=yes already holds the last frame at EOF for the interactive path (so a finished file
+        # freezes instead of closing, and #100 auto-advance can see eof-reached). Screenshot mode wants
+        # the FIRST frame held, so it pauses up front instead.
+        cmd.append("--pause")
     cmd.extend(extra_args or [])
     cmd.extend(
         [
