@@ -175,7 +175,7 @@ def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, 
     r.set_subtitle("本命を読む")
     r._enable_mask_atlas()  # no-op when opted out, even though mask-atlas.sqlite exists
     assert r._render_cache() is None  # opt-out beats a present render-cache.sqlite
-    assert r._mask_atlas is None  # opt-out beats a present mask-atlas.sqlite
+    assert r.session.render_cache.mask_atlas is None  # opt-out beats a present mask-atlas.sqlite
 
     ui = Driver(r)
     ui.move_to_word(_content_word(r))

@@ -79,9 +79,9 @@ def footer(reader: Reader, video) -> str:
 
 def preview_mined(reader: Reader, card, tok, video, status: str = "mined") -> None:
     img = None
-    if reader._last_jpg and Path(reader._last_jpg).exists():
-        img = Image.open(reader._last_jpg)
-    secs = audio_duration(reader._last_audio) if reader._last_audio else None
+    if reader.preview.last_jpg and Path(reader.preview.last_jpg).exists():
+        img = Image.open(reader.preview.last_jpg)
+    secs = audio_duration(reader.preview.last_audio) if reader.preview.last_audio else None
     pv = PreviewData(
         status,
         card.expression,
@@ -93,7 +93,7 @@ def preview_mined(reader: Reader, card, tok, video, status: str = "mined") -> No
         secs,
         footer(reader, video),
     )
-    show_preview(reader, pv, reader._last_audio)
+    show_preview(reader, pv, reader.preview.last_audio)
 
 
 def preview_existing(reader: Reader, note_id: int, card, status: str) -> None:
@@ -173,60 +173,58 @@ def _release_preview_keys(reader: Reader) -> None:
 
 def show_preview(reader: Reader, pv: PreviewData, audio_path) -> None:
     # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
-    reader._last_preview, reader._last_audio = pv, audio_path
-    reader._preview_zoom = False
+    reader.preview.last_preview, reader.preview.last_audio = pv, audio_path
+    reader.preview.zoom = False
     render_preview(reader)
     _grab_preview_keys(reader)
 
 
 def render_preview(reader: Reader) -> None:
-    pv = reader._last_preview
+    pv = reader.preview.last_preview
     if pv is None:
         return
-    pr = render_card_preview(pv, width=max(440, reader.tip_width), zoom=reader._preview_zoom)
+    pr = render_card_preview(pv, width=max(440, reader.tip_width), zoom=reader.preview.zoom)
     px, py = round(reader.osd[0] * 0.03), round(reader.osd[1] * 0.06)
     reader.ov.show(pr.image, px, py, oid=OverlayId.PREVIEW)
-    reader._preview_rect = (px, py, pr.image.width, pr.image.height)
+    reader.preview.rect = (px, py, pr.image.width, pr.image.height)
 
     def _screen(r):
         return (px + r[0], py + r[1], r[2], r[3]) if r else None
 
-    reader._preview_close_rect = _screen(pr.close_rect)
-    reader._preview_audio_rect = _screen(pr.audio_rect)
-    reader._preview_image_rect = _screen(pr.image_rect)
-    reader._preview_dup_rect = _screen(pr.dup_rect)
+    reader.preview.close_rect = _screen(pr.close_rect)
+    reader.preview.audio_rect = _screen(pr.audio_rect)
+    reader.preview.image_rect = _screen(pr.image_rect)
+    reader.preview.dup_rect = _screen(pr.dup_rect)
 
 
 def hide_preview(reader: Reader) -> None:
     reader.ov.hide(OverlayId.PREVIEW)
-    reader._last_preview = None
-    reader._preview_rect = reader._preview_close_rect = None
-    reader._preview_audio_rect = reader._preview_image_rect = reader._preview_dup_rect = None
+    reader.preview.clear()
     _release_preview_keys(reader)
 
 
 def click_preview(reader: Reader, x: float, y: float) -> bool:
     """Handle a click on the card preview: ✕ dismiss, screenshot → toggle enlarge, ▶ → play audio.
     An empty click does nothing. Returns True if the click landed on the preview."""
-    if reader._preview_rect is None or not reader._in_rect(reader._preview_rect, x, y):
+    if reader.preview.rect is None or not reader._in_rect(reader.preview.rect, x, y):
         return False
-    if reader._preview_close_rect and reader._in_rect(reader._preview_close_rect, x, y):
+    if reader.preview.close_rect and reader._in_rect(reader.preview.close_rect, x, y):
         hide_preview(reader)
-    elif reader._preview_dup_rect and reader._in_rect(reader._preview_dup_rect, x, y):
+    elif reader.preview.dup_rect and reader._in_rect(reader.preview.dup_rect, x, y):
         reader._add_duplicate()  # ＋ add anyway → mine a second card for this scene
-    elif reader._preview_image_rect and reader._in_rect(reader._preview_image_rect, x, y):
-        reader._preview_zoom = not reader._preview_zoom
+    elif reader.preview.image_rect and reader._in_rect(reader.preview.image_rect, x, y):
+        reader.preview.zoom = not reader.preview.zoom
         render_preview(reader)  # enlarge to verify the frame / shrink back
     elif (
-        reader._preview_audio_rect
-        and reader._in_rect(reader._preview_audio_rect, x, y)
+        reader.preview.audio_rect
+        and reader._in_rect(reader.preview.audio_rect, x, y)
         and reader.play_audio
-        and reader._last_audio
+        and reader.preview.last_audio
     ):
-        play_audio(reader._last_audio)  # ▶ → play the mined clip on demand
+        play_audio(reader.preview.last_audio)  # ▶ → play the mined clip on demand
     return True
 
 
 def replay_preview(reader: Reader) -> None:
-    if reader._last_preview:
-        show_preview(reader, reader._last_preview, reader._last_audio)
+    if reader.preview.last_preview:
+        show_preview(reader, reader.preview.last_preview, reader.preview.last_audio)

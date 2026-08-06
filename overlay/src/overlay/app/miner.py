@@ -161,15 +161,16 @@ class Miner:
 
         ``animated`` overrides ``[mine].animated_screenshot`` for this one mine — the video-mine shortcut
         passes ``True`` regardless of the config default; ``None`` uses the config. The still JPG is always
-        captured locally (``_last_jpg`` drives the preview and is the fallback); the clip becomes the card
-        image only when the encode succeeds. Also stashes ``_last_audio``. Warn-toasts on failure."""
+        captured locally (``preview.last_jpg`` drives the preview and is the fallback); the clip becomes
+        the card image only when the encode succeeds. Also stashes ``preview.last_audio``. Warn-toasts on
+        failure."""
         r = self.r
         # any animated path needs mine_cfg (for the encode opts), so gate the whole thing on it — a per-mine
         # override can't force a clip without a config to encode from.
         want_animated = bool(r.mine_cfg) and (
             r.mine_cfg.animated.enabled if animated is None else animated
         )
-        r._last_jpg = r._last_audio = None
+        r.preview.last_jpg = r.preview.last_audio = None
         try:
             span = current_timespan(
                 r.ipc
@@ -185,13 +186,13 @@ class Miner:
     def _capture_image(
         self, base: str, video, span, *, animated: bool
     ) -> tuple[str, Exception | None]:
-        """The card image: the mpv still (always, → ``_last_jpg``), replaced by an animated clip when
+        """The card image: the mpv still (always, → ``preview.last_jpg``), replaced by an animated clip when
         ``animated`` and the encode succeeds. Returns (media_name, error-or-None)."""
         r = self.r
         try:
             jpg = r._tmp / f"{base}.jpg"
             screenshot(r.ipc, jpg)
-            r._last_jpg = (
+            r.preview.last_jpg = (
                 jpg  # local still — drives the preview and is the fallback (may not be uploaded)
             )
             if animated and video and span:
@@ -222,13 +223,13 @@ class Miner:
         return None
 
     def _capture_audio(self, base: str, video, span) -> tuple[str, Exception | None]:
-        """The cue audio clip (→ ``_last_audio``). Returns (media_name, error-or-None)."""
+        """The cue audio clip (→ ``preview.last_audio``). Returns (media_name, error-or-None)."""
         r = self.r
         try:
             if video and span:
                 aud = r._tmp / f"{base}.m4a"
                 clip_audio(video, span, aud, normalize=r.mine_cfg.normalize_audio)
-                r._last_audio = aud
+                r.preview.last_audio = aud
                 return r.anki.store_media(f"{base}.m4a", aud), None
         except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:
             log.debug("audio capture failed", exc_info=True)
@@ -283,7 +284,7 @@ class Miner:
                     from overlay.app import sidebar
 
                     sidebar.mark_active_mined(r)
-                    r._dup_tok = tok  # remember for an explicit "add anyway"
+                    r.preview.dup_tok = tok  # remember for an explicit "add anyway"
                     r._preview_existing(existing[0], card, "exists")
                     return
             video = r._get("path")

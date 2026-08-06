@@ -20,10 +20,12 @@ from overlay import otel_metrics
 from overlay.app import (
     analysis_overlay,
     backlog,
+    card_preview,
     help_overlay,
     hover_snapshot,
     miner_ui,
     nested_popup,
+    popups,
     prefetch,
     reader_deps,
     session_stats,
@@ -83,6 +85,14 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
+from overlay.app.reader_context import (
+    Delegated,
+    EpisodeContext,
+    InteractionContext,
+    RenderCacheState,
+    SessionContext,
+)
+from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
 from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compounds, tokenize
@@ -90,11 +100,7 @@ from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
     from overlay.app.card_preview import PreviewData
-    from overlay.app.prefetch import RenderAheadReq
     from overlay.app.render_cache import RenderCache
-    from overlay.app.session_stats import SessionRecorder
-    from overlay.app.sub_index import SubIndex
-    from overlay.mask_atlas import MaskAtlas
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
 
@@ -150,6 +156,79 @@ _Nested = PopupView
 class Reader:
     """Owns the reader loop (see module docstring): subtitle draw → hover hit-test → tooltip → mine."""
 
+    # Episode-tier state (app/reader_context.py) exposed under its historical field names so the ~15
+    # call-site modules keep working while they migrate onto ``reader.episode.*`` (#30 lifetime split);
+    # rebinding ``self.episode`` (#100 re-slot) resets all of it in one move, leak-free by construction.
+    jp_sid = Delegated[int | None]("episode.subtitle", "jp_sid")
+    en_sid = Delegated[int | None]("episode.subtitle", "en_sid")
+    subtitle_language = Delegated[subtitle_modes.Language]("episode.subtitle", "language")
+    subtitle_slang = Delegated[str]("episode.subtitle", "slang")
+    _subtitle_results = Delegated[queue.SimpleQueue]("episode.subtitle", "results")
+    _subtitle_fetch_threads = Delegated[list[threading.Thread]]("episode.subtitle", "fetch_threads")
+    _sub_index = Delegated[SubIndex | None]("episode", "sub_index")
+    _nav_idx = Delegated[int]("episode", "nav_idx")
+    _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
+    _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
+    _session_recorder = Delegated[session_stats.SessionRecorder | None](
+        "episode", "session_recorder"
+    )
+    # Help overlay state (app/help_overlay.py HelpState) under its historical flat names.
+    _help_open = Delegated[bool]("help", "open")
+    _help_page = Delegated[int]("help", "page")
+    # Interaction-tier state (app/reader_context.py InteractionContext) under historical flat names.
+    _translate_on = Delegated[bool]("interaction", "translate_on")
+    _trans_text = Delegated[str | None]("interaction", "trans_text")
+    _translation_secondary_sid = Delegated[int | None](
+        "episode.subtitle", "translation_secondary_sid"
+    )
+    # Prefetch runtime state (app/prefetch.py PrefetchState) under its historical flat names.
+    _prefetch_q = Delegated[queue.Queue]("prefetch_state", "q")
+    _head_prefetch_q = Delegated[queue.PriorityQueue]("prefetch_state", "head_q")
+    _head_seq = Delegated[int]("prefetch_state", "head_seq")
+    _head_built = Delegated[int]("prefetch_state", "head_built")
+    _prefetch_gen = Delegated[int]("prefetch_state", "gen")
+    _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
+    _render_ahead_req = Delegated[prefetch.RenderAheadReq | None](
+        "prefetch_state", "render_ahead_req"
+    )
+    _render_ahead_lock = Delegated[threading.Lock]("prefetch_state", "render_ahead_lock")
+    _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
+    # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
+    # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
+    _mined = Delegated[set[str]]("session", "mined")
+    _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
+    _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
+    # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
+    # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
+    _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
+    _tip_rect = Delegated[tuple | None]("tip", "tip_rect")
+    _hide_at = Delegated[float]("tip", "hide_at")
+    _tip_scroll = Delegated[int]("tip", "tip_scroll")
+    _tip_view_h = Delegated[int]("tip", "tip_view_h")
+    _tip_xy = Delegated[tuple[int, int]]("tip", "tip_xy")
+    _tip_state = Delegated[Panel | None]("tip", "tip_state")
+    _tip_key = Delegated[tooltip.PanelKey | None]("tip", "tip_key")
+    _tip_nav = Delegated[list]("tip", "tip_nav")
+    _nest = Delegated[PopupView]("tip", "nest")
+    _scan_target = Delegated[str | None]("tip", "scan_target")
+    _scan_since = Delegated[float]("tip", "scan_since")
+    _word_target = Delegated[int | None]("tip", "word_target")
+    _word_since = Delegated[float]("tip", "word_since")
+    _last_mouse = Delegated[tuple[float, float]]("tip", "last_mouse")
+    _flash_oid = Delegated[int | None]("tip", "flash_oid")
+    _flash_until = Delegated[float]("tip", "flash_until")
+    _hover_reading = Delegated[str]("tip", "hover_reading")
+    _hover_terms = Delegated[tuple[str, ...]]("tip", "hover_terms")
+    _hover_span = Delegated[tuple[int, int] | None]("tip", "hover_span")
+    _kanji_index = Delegated[int]("tip", "kanji_index")
+    _tip_keys_bound = Delegated[bool]("tip", "tip_keys_bound")
+    _tip_tok = Delegated[Token | None]("tip", "tip_tok")
+    _tip_inflected = Delegated[str | None]("tip", "tip_inflected")
+    _crisp_miss = Delegated[str]("tip", "crisp_miss")
+    _crisp_pending = Delegated[bool]("tip", "crisp_pending")
+    _tip_show_cold = Delegated[bool]("tip", "tip_show_cold")
+    _panel_cache = Delegated[OrderedDict]("tip", "panel_cache")
+
     def __init__(
         self,
         ipc: MpvIPC,
@@ -169,6 +248,10 @@ class Reader:
         if legacy_kw:
             o = o.with_overrides(**legacy_kw)
         self.options = o
+        # Episode-lifetime state; the Delegated shims above expose its fields as ``reader.<field>``.
+        # A file change rebinds this (#100 re-slot) — see app/reader_context.py.
+        self.episode = EpisodeContext()
+        self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
@@ -229,21 +312,17 @@ class Reader:
         self.raw_band_ceiling = (
             o.tooltip.raw_band_ceiling_mb * 1024 * 1024
         )  # bytes; 0 = always compress
-        # Cross-session persistent render cache (#149): opt-in; seeds a cold hover's first viewport from
-        # disk for cost-gated (tall) entries. Built lazily on first use so a non-dict session (or the
-        # opt-out) never touches disk. render_cache_min_height gates writes to the pathological tail.
-        self._render_cache_on = o.tooltip.render_cache
-        self._render_cache_max_bytes = o.tooltip.render_cache_max_mb * 1024 * 1024
-        self._render_cache_min_height_px = o.tooltip.render_cache_min_height
-        self._render_cache_obj: RenderCache | None = None
-        self._render_cache_built = False
-        self._render_config_sig: str | None = None
-        self._render_sig_key: tuple[int, int] | None = None
-        self._mask_atlas_on = (
-            o.tooltip.mask_atlas
-        )  # persistent glyph mask atlas (#149 Tier-1), opt-out
-        self._mask_atlas: MaskAtlas | None = (
-            None  # write-back handle (kept alive), or None off/no atlas
+        # Session-lifetime state (app/reader_context.py SessionContext) — durable across every #100
+        # episode re-slot: the #149 persistent render caches (opt-in, built lazily / use-when-available so
+        # a non-dict or opted-out session never touches disk), the in-deck mined set, the Anki
+        # reachability cache, and the review backlog store.
+        self.session = SessionContext(
+            RenderCacheState(
+                cache_on=o.tooltip.render_cache,
+                cache_max_bytes=o.tooltip.render_cache_max_mb * 1024 * 1024,
+                cache_min_height_px=o.tooltip.render_cache_min_height,
+                mask_atlas_on=o.tooltip.mask_atlas,  # persistent glyph mask atlas (#149 Tier-1), opt-out
+            )
         )
         # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
@@ -252,18 +331,10 @@ class Reader:
         # (native glyph masks over 1× geometry). ``crisp_upscale`` off → soft-only (never native).
         self._crisp_on = o.tooltip.crisp_upscale
         self._tip_scale_override = o.tooltip.tip_scale  # >0 fixes _tip_display_scale (see config)
-        self._crisp_miss = (
-            ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
-        )
-        self._crisp_pending = (
-            False  # a soft first paint is up; poll upgrades to crisp once bands warm
-        )
-        self._tip_tok: Token | None = (
-            None  # the base tooltip's source token (for the crisp re-render)
-        )
-        self._tip_inflected: str | None = (
-            None  # its inflected surface (re-rendered on show AND scroll)
-        )
+        # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState). The Delegated shims below
+        # keep the historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/
+        # ``_panel_cache`` names so the hover FSM and its tests are untouched (#30 lifetime split).
+        self.tip = popups.TooltipState()
         from overlay.render.layout_backend import backend_label, resolve_backend
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
@@ -280,7 +351,6 @@ class Reader:
             o.mining.anki_ok_ttl
         )  # seconds an AnkiConnect reachability check is cached
         self.anki_ping_timeout = o.mining.anki_ping_timeout  # reachability ping timeout
-        self._paused_by_tip = False
         # background prefetch: render the paused line's tooltips ahead of the mouse. The worker does
         # CPU-only work (lookup + render + BGRA), NEVER touches the mpv IPC socket (main thread only).
         self.prefetch = o.prefetch
@@ -297,124 +367,40 @@ class Reader:
         # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
         # is a plain panel_cache hit with no new key-matching logic to get wrong.
         self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
-        self._head_prefetch_q: queue.PriorityQueue = queue.PriorityQueue(
-            maxsize=o.perf.head_prefetch_queue_max
-        )
-        self._head_seq = 0  # tie-breaker so priority-queue items never compare HeadPrefetchItems
-        self._head_built = 0  # a speculative head-render job actually ran to completion
+        # Prefetch runtime state (app/prefetch.py PrefetchState): work queues, worker threads, the
+        # generation counter, and the scroll-ahead slot. The Delegated shims below keep the historical
+        # ``reader._prefetch_*``/``_head_*``/``_render_ahead_*`` names working across the hot paths.
+        self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
-        self._prefetch_q: queue.Queue = queue.Queue()
-        self._prefetch_gen = 0  # bumped on line change / resume / seek → cancels in-flight
-        # Scroll-ahead: a single slot (newest scroll wins) the prefetch worker drains to render the
-        # blocks just beyond the visible tooltip OFF the main thread, so the next notch composites a
-        # warm block instead of rasterising it on the scroll frame. Guarded by its own tiny lock.
-        self._render_ahead_req: RenderAheadReq | None = None
-        self._render_ahead_lock = threading.Lock()
-        self._prefetch_key: tuple[str, bool] | None = None
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
         # attribution (did hover-driven scan/nested-popup work land in the same tick as a scroll?)
-        self._tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
         self._runtime_announced = (
             False  # the runtime banner prints once, after prefetch actually starts
         )
         self._stop = threading.Event()
-        self._prefetch_threads: list[threading.Thread] = []
         # translation reveal: manual toggle (`t`), or auto-reveal on hover when opted in.
         # Auto keeps the anti-crutch spirit — the EN only appears while you're actively looking a
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
-        self._translate_on = False
-        self._trans_text: str | None = None
-        self._translation_secondary_sid: int | None = None
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
-        self.jp_sid: int | None = None
-        self.en_sid: int | None = None
-        self.subtitle_language: subtitle_modes.Language = "jp"
-        self.subtitle_slang = "ja,jpn,jp"
-        self._subtitle_results: queue.SimpleQueue = queue.SimpleQueue()
-        self._subtitle_fetch_threads: list[threading.Thread] = []
-        self._subtitle_retry_factory: subtitle_modes.ProviderFetchFactory | None = None
-        self._subtitle_retry_active = False
-        self._subtitle_retry_lock = threading.Lock()
-        self._backlog_store: backlog.BacklogStore | None = None
         self.sidebar = sidebar.SidebarState()
         self.analysis = analysis_overlay.AnalysisState()
-        self._session_recorder: SessionRecorder | None = None
-        self._help_open = False
-        self._help_page = 0
-        self._last_jpg: Path | None = None
-        self._last_audio: Path | str | None = None
-        self._last_preview: PreviewData | None = None
-        self._mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
-        self._anki_cache: tuple[float, bool] = (
-            0.0,
-            False,
-        )  # (checked_at, reachable) — see _anki_ok
-        # card-preview interaction (clickable regions in screen coords; None when hidden)
-        self._preview_rect: tuple | None = None
+        self.help = help_overlay.HelpState()
+        # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
+        # Delegated shims below keep the historical ``reader._last_*``/``_preview_*`` names working.
+        self.preview = card_preview.PreviewState()
         # Forced mouse-section state (see _sync_mouse_capture).
         self._mouse_section_defined = False
         self._mouse_captured = False
         self._mouse_reassert_at = 0.0
-        self._preview_close_rect: tuple | None = None
-        self._preview_audio_rect: tuple | None = None
-        self._preview_image_rect: tuple | None = None
-        self._preview_dup_rect: tuple | None = None
-        self._dup_tok: Token | None = None  # token behind an "exists" preview, for "add anyway"
-        self._preview_zoom = False  # the screenshot is enlarged (toggled by clicking it)
-        self._tip_rect: tuple | None = (
-            None  # (x, y, w, h) of the visible tooltip, for hover keep-alive
-        )
-        self._hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
-        self._tip_scroll = 0
-        self._tip_view_h = 0
-        self._tip_xy: tuple[int, int] = (0, 0)
-        self._tip_state: Panel | None = None  # Panel currently shown
-        self._tip_key: tooltip.PanelKey | None = None  # its cache key
-        # Yomitan-style in-place link navigation: clicking a cross-reference replaces the base
-        # tooltip's content and pushes the previous view here; Esc/back pops it. Cleared when hovering
-        # a new subtitle word (show_tooltip_impl) or on teardown. Empty ⇒ the base is a hovered word.
-        self._tip_nav: list = []
-        self._nest = _Nested()  # nested scan popup (hover a word inside the tooltip → its entry)
-        # Yomitan-style scan delay: the cursor must dwell on a word inside the tooltip before its
-        # popup opens, so drifting across the definition doesn't fire a flurry of popups.
+        # Tooltip scan/switch dwell caps (config) — the runtime dwell state lives on ``self.tip``.
         self.scan_delay = o.tooltip.scan_delay
-        self._scan_target: str | None = (
-            None  # the scan-cell tail the cursor is currently settling on
-        )
-        self._scan_since = 0.0  # when it became the target (dwell start)
-        # subtitle-word switch dwell: transiting the cursor over other words (e.g. the other line of a
-        # two-line sub) on the way to the tooltip must not switch it — only resting on a new word does.
         self.hover_switch_delay = o.tooltip.hover_switch_delay
-        self._word_target: int | None = None
-        self._word_since = 0.0
-        self._last_mouse = (
-            -1.0,
-            -1.0,
-        )  # latest cursor pos — routes the wheel to the popup under it
-        self._flash_oid: int | None = (
-            None  # a popup pulsing a "copied" highlight border (TIP_ID / NESTED_ID)
-        )
-        self._flash_until = 0.0
-        self._hover_reading = ""  # dict-form reading of the hovered word, for TTS
-        # Multi-token dictionary terms starting at the hovered word (数ある over 数), longest-first, and
-        # the token span the longest covers: the tooltip stacks them above the bare word and the
-        # underline spans the match. Empty / None when no longer term starts here.
-        self._hover_terms: tuple[str, ...] = ()
-        self._hover_span: tuple[int, int] | None = None
-        self._kanji_index = 0  # `k` cycles the hovered word's kanji
-        self._tip_keys_bound = False
-        # LRU cache: OrderedDict keyed by panel_key, bounded at panel_cache_max entries. Each Panel
-        # retains only its windowed engine's blocks (zlib-compressed, bounded to the last viewport±
-        # overscan), so the whole cache stays small. On overflow we evict the LEAST-recently-used entry
-        # (the OrderedDict move_to_end protocol) rather than clearing everything (which would lose
-        # already-rendered panels the user is likely to re-hover).
-        self._panel_cache: OrderedDict = OrderedDict()  # key -> Panel
         self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         self._toast_until = 0.0
         # Event-driven property state (observe_property); empty + off until run() calls
@@ -430,13 +416,6 @@ class Reader:
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
         self.hover = -1
-        # subtitle navigation: an index of the external sub file's cues (when known) lets Alt+←/→/↓
-        # render the target line in the overlay INSTANTLY, decoupled from mpv's slow video seek. The
-        # real sub-seek still fires behind it and reconciles once it settles (see _sub_nav).
-        self._sub_index: SubIndex | None = None
-        self._nav_idx = -1  # last cue index we jumped to (chaining hint; -1 = unknown)
-        self._sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
-        self._nav_prev_text = ""  # the cue text showing right before a nav render (see reconcile)
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
@@ -795,19 +774,18 @@ class Reader:
         """The cross-session render cache, USED WHEN AVAILABLE: opened lazily only if a prebuilt
         ``render-cache.sqlite`` already exists (``saitenka prewarm`` builds it). ``None`` when opted out,
         no dict set, or no prebuilt cache — so a fresh install creates nothing and costs nothing."""
-        if not self._render_cache_on or self.dict_set is None:
+        rc = self.session.render_cache
+        if not rc.cache_on or self.dict_set is None:
             return None
-        if not self._render_cache_built:
-            self._render_cache_built = True
+        if not rc.built:
+            rc.built = True
             from overlay.app.paths import cache_dir
             from overlay.app.render_cache import RenderCache
 
             path = cache_dir() / "render-cache.sqlite"
             if path.exists():  # use-when-available — prewarm is the builder, not a live session
-                self._render_cache_obj = RenderCache.open(
-                    path, max_bytes=self._render_cache_max_bytes
-                )
-        return self._render_cache_obj
+                rc.obj = RenderCache.open(path, max_bytes=rc.cache_max_bytes)
+        return rc.obj
 
     def _enable_mask_atlas(self) -> None:
         """Install the persistent glyph mask atlas WHEN AVAILABLE (a prebuilt ``mask-atlas.sqlite``
@@ -820,7 +798,8 @@ class Reader:
         from overlay.app.paths import cache_dir
         from overlay.mask_atlas import MaskAtlas
 
-        if not self._mask_atlas_on or self._mask_atlas is not None:
+        rc = self.session.render_cache
+        if not rc.mask_atlas_on or rc.mask_atlas is not None:
             return
         path = cache_dir() / "mask-atlas.sqlite"
         if not path.exists():  # use-when-available — prewarm builds it
@@ -828,7 +807,7 @@ class Reader:
         atlas = MaskAtlas.open(path)
         if atlas is None:
             return
-        self._mask_atlas = atlas
+        rc.mask_atlas = atlas
         fonts.set_mask_atlas(None, atlas)  # write-back active immediately; reads join once loaded
 
         def _load() -> None:
@@ -844,24 +823,25 @@ class Reader:
     def _render_cache_sig(self) -> str:
         """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
         resolution change recomputes it. Only called when the cache is on (dict_set present)."""
+        rc = self.session.render_cache
         cap = self._tip_cap()
         ck = (self.tip_width, cap)
-        if self._render_config_sig is None or self._render_sig_key != ck:
+        if rc.config_sig is None or rc.sig_key != ck:
             from overlay.app.render_cache import config_signature, dict_set_signature
 
             assert (
                 self.dict_set is not None
             )  # _render_cache() gated on it before any caller reaches here
-            self._render_config_sig = config_signature(
+            rc.config_sig = config_signature(
                 width=self.tip_width, cap=cap, dict_sig=dict_set_signature(self.dict_set)
             )
-            self._render_sig_key = ck
-        return self._render_config_sig
+            rc.sig_key = ck
+        return rc.config_sig
 
     def _render_cache_min_height(self) -> int:
         """Cost gate (px): only heads at least this tall — a non-trivial entry that needs scrolling, the
         pathological tail whose cold build+raster blows the budget — are persisted."""
-        return self._render_cache_min_height_px
+        return self.session.render_cache.cache_min_height_px
 
     def _peek_render_cache(self, key):
         """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None``. Lets a
@@ -995,7 +975,7 @@ class Reader:
             self._tip_rect is not None
             or self.sidebar.open
             or self._help_open
-            or self._preview_rect is not None
+            or self.preview.rect is not None
         )
 
     def _sync_mouse_capture(self) -> None:
@@ -1178,8 +1158,8 @@ class Reader:
     def _add_duplicate(self) -> None:
         """The preview's ＋ button: mine a second card for the current scene even though the
         expression is already in the deck (a different line/episode/anime)."""
-        if self._dup_tok is not None:
-            self._miner.mine_token(self._dup_tok, force=True)
+        if self.preview.dup_tok is not None:
+            self._miner.mine_token(self.preview.dup_tok, force=True)
 
     def _preview_existing(self, note_id: int, card, status: str) -> None:
         if not self.show_preview:

@@ -64,9 +64,10 @@ def _active_index(reader: Reader) -> int:
 
 
 def _ensure_store(reader: Reader) -> BacklogStore:
-    if reader._backlog_store is None:
-        reader._backlog_store = BacklogStore()
-    return reader._backlog_store
+    store = reader._backlog_store  # local narrows cleanly (the shim's __get__ re-widens each read)
+    if store is None:
+        store = reader._backlog_store = BacklogStore()
+    return store
 
 
 def _cue_parts(reader: Reader, cue_index: int, cue: SubCue) -> tuple[tuple[str, tuple], ...]:

@@ -140,8 +140,8 @@ def _make_reader(
     if (
         cache is not None
     ):  # share ONE cache across threads (its conns are per-thread); None → lazy open
-        reader._render_cache_obj = cache
-        reader._render_cache_built = True
+        reader.session.render_cache.obj = cache
+        reader.session.render_cache.built = True
     return reader
 
 
@@ -384,7 +384,8 @@ def _open_build_caches(template, *, atlas_only: bool):
     cache = None
     if not atlas_only:
         cache = RenderCache.open(
-            cache_dir() / "render-cache.sqlite", max_bytes=template._render_cache_max_bytes
+            cache_dir() / "render-cache.sqlite",
+            max_bytes=template.session.render_cache.cache_max_bytes,
         )
         if cache is None:  # pragma: no cover — open() only fails on a broken cache dir
             raise RuntimeError("could not open the render cache")
@@ -504,7 +505,7 @@ def prewarm(
         atlas=atlas,
         gate=template._render_cache_min_height(),
         sig=template._render_cache_sig(),
-        ceiling=template._render_cache_max_bytes,
+        ceiling=template.session.render_cache.cache_max_bytes,
         on_progress=on_progress,
         atlas_only=atlas_only,
         native_scale=atlas_scale,

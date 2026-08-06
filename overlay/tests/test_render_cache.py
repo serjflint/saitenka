@@ -242,7 +242,7 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     # The reader uses the cache only WHEN AVAILABLE, so create + inject it (prewarm's role); then a real
     # cold show must direct-paint from it.
     cache = _cache(tmp_path)
-    r._render_cache_obj, r._render_cache_built = cache, True
+    r.session.render_cache.obj, r.session.render_cache.built = cache, True
     sentinel = np.full(
         (cap, w, 4), 123, dtype=np.uint8
     )  # full_h == view_h == cap → no scrollbar mutates it

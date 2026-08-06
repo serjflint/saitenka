@@ -8,6 +8,7 @@ exploded ``_tip_*`` attributes (so the hover FSM and its tests stay untouched).
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
 
     from overlay.app.render_cache import RenderCache
     from overlay.app.tokenize import Token
+    from overlay.app.tooltip import PanelKey
     from overlay.model import Theme
     from overlay.render.banded import WindowedPanel
     from overlay.render.layout_backend import LayoutBackend
@@ -221,3 +223,51 @@ class PopupView:
         self.scroll = 0
         self.rect: tuple[int, int, int, int] | None = None  # screen rect, for hit-testing
         self.hide_at = 0.0
+
+
+class TooltipState:
+    """Runtime state of the base tooltip + its hover FSM — the big, hot interaction-scoped cluster:
+    the shown panel and its scroll/viewport/screen-rect, the in-place link-nav stack, the nested scan
+    popup, the scan/word dwell timers, the copy-flash pulse, the hovered word's reading/terms/kanji, and
+    the LRU panel cache. Grouped off the ``Reader`` god-object (#30); the ``Delegated`` shims keep every
+    historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/``_panel_cache`` name, so
+    the hover FSM woven through tooltip.py / nested_popup.py and its tests stay untouched."""
+
+    def __init__(self) -> None:
+        self.paused_by_tip = False  # mpv was auto-paused by a tooltip show (resume on hide)
+        self.tip_rect: tuple | None = None  # (x, y, w, h) of the visible tooltip, for keep-alive
+        self.hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
+        self.tip_scroll = 0
+        self.tip_view_h = 0
+        self.tip_xy: tuple[int, int] = (0, 0)
+        self.tip_state: Panel | None = None  # Panel currently shown
+        self.tip_key: PanelKey | None = None  # its cache key
+        # Yomitan-style in-place link nav: a clicked cross-reference pushes the prior view here; Esc pops.
+        self.tip_nav: list = []
+        self.nest = PopupView()  # nested scan popup (hover a word inside the tooltip → its entry)
+        self.scan_target: str | None = None  # scan-cell tail the cursor is settling on (dwell)
+        self.scan_since = 0.0  # when it became the target (dwell start)
+        self.word_target: int | None = (
+            None  # subtitle word the cursor is settling on (switch dwell)
+        )
+        self.word_since = 0.0
+        self.last_mouse = (-1.0, -1.0)  # latest cursor pos — routes the wheel to the popup under it
+        self.flash_oid: int | None = None  # a popup pulsing a "copied" highlight border
+        self.flash_until = 0.0
+        self.hover_reading = ""  # dict-form reading of the hovered word, for TTS
+        self.hover_terms: tuple[str, ...] = ()  # multi-token terms starting at the hovered word
+        self.hover_span: tuple[int, int] | None = None  # token span the longest term covers
+        self.kanji_index = 0  # `k` cycles the hovered word's kanji
+        self.tip_keys_bound = False
+        self.tip_tok: Token | None = None  # base tooltip's source token (for the crisp re-render)
+        self.tip_inflected: str | None = (
+            None  # its inflected surface (re-rendered on show AND scroll)
+        )
+        self.crisp_miss = ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
+        self.crisp_pending = (
+            False  # a soft first paint is up; poll upgrades to crisp once bands warm
+        )
+        self.tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
+        # LRU cache (OrderedDict keyed by PanelKey), bounded at panel_cache_max; each Panel keeps only its
+        # windowed blocks (compressed) so the whole cache stays small. Evict LRU on overflow, not clear.
+        self.panel_cache: OrderedDict = OrderedDict()
