@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 from overlay.app import anki as anki_mod
 
 _REAL_LAUNCH = anki_mod.launch_anki  # captured before the conftest down-fixture stubs it
+
+
+def _fake_open(calls: dict, *, returncode: int = 0, stderr: str = ""):
+    """Stand in for `subprocess.run(["open", "-a", "Anki"], …)` (the macOS launch path)."""
+
+    def run(cmd, **_kwargs):
+        calls["launched"] = cmd
+        return SimpleNamespace(returncode=returncode, stderr=stderr)
+
+    return run
 
 
 @pytest.fixture(autouse=True)
@@ -35,19 +46,20 @@ def test_ensure_launches_when_down_then_comes_up(monkeypatch):
 
     monkeypatch.setattr(anki_mod, "anki_reachable", reachable)
     monkeypatch.setattr(anki_mod.sys, "platform", "darwin")
-    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda cmd, **_k: calls.update(launched=cmd))
+    monkeypatch.setattr(anki_mod.subprocess, "run", _fake_open(calls))
     monkeypatch.setattr(anki_mod.time, "sleep", lambda _s: None)
     assert anki_mod.ensure_anki_running(wait=5) is True
     assert calls["launched"] == ["open", "-a", "Anki"]
 
 
 def test_ensure_returns_false_when_launch_fails(monkeypatch):
+    monkeypatch.setattr(anki_mod.sys, "platform", "darwin")
     monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
 
     def boom(*_a, **_k):
         raise OSError("no such app")
 
-    monkeypatch.setattr(anki_mod.subprocess, "Popen", boom)
+    monkeypatch.setattr(anki_mod.subprocess, "run", boom)
     assert anki_mod.ensure_anki_running(wait=1) is False  # warned + degraded, did not raise
 
 
@@ -94,23 +106,35 @@ def test_find_anki_prefers_configured_executable(tmp_path):
 
 
 def test_launch_anki_is_fire_and_forget_without_polling(monkeypatch):
-    launched = []
+    calls: dict = {}
     monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(anki_mod.subprocess, "Popen", lambda cmd, **_k: launched.append(cmd))
+    monkeypatch.setattr(anki_mod.subprocess, "run", _fake_open(calls))
     reachable = []
     monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: reachable.append(True))
     assert anki_mod.launch_anki() is True
-    assert launched == [["open", "-a", "Anki"]]
+    assert calls["launched"] == ["open", "-a", "Anki"]
     assert reachable == []  # launch never polls — that's the watcher's job
 
 
-def test_launch_anki_false_when_popen_fails(monkeypatch):
+def test_launch_anki_false_when_open_raises(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
 
     def boom(*_a, **_k):
         raise OSError("no such app")
 
-    monkeypatch.setattr(anki_mod.subprocess, "Popen", boom)
+    monkeypatch.setattr(anki_mod.subprocess, "run", boom)
+    assert anki_mod.launch_anki() is False
+
+
+def test_launch_anki_false_when_open_reports_missing_app(monkeypatch):
+    # The real regression: `open -a Anki` exits non-zero when the app isn't found. Popen never saw
+    # that (fire-and-forget always looked like success); `run` + returncode does — so we degrade + warn.
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(
+        anki_mod.subprocess,
+        "run",
+        _fake_open({}, returncode=1, stderr="Unable to find application named 'Anki'"),
+    )
     assert anki_mod.launch_anki() is False
 
 
