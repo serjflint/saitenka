@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786005729012,
+  "lastUpdate": 1786006063338,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -755,6 +755,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.935,
             "range": "±14.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "65e6b3736f40cd5f5a556e3b4770b75938f39a38",
+          "message": "test(extras): contract that optional packages stay optional (#205)\n\nThe base wheel (no extras) must import without deinflect / taffylite / jamdict /\nOpenTelemetry. Assert it behaviourally: in a fresh interpreter, importing the\nconsole-script entry point (`overlay.app.cli`) pulls none of them into\nsys.modules — they load lazily, only when their feature is used. Holds whether\nor not the extras are installed (checks what the eager graph touches, not disk),\nand bites: importing a module that DOES hard-import an extra surfaces it.\n\nComplements test_anki_optional.py — that's the optional *service* (Anki down),\nthis is the optional *packages* (extra absent).",
+          "timestamp": "2026-08-06T11:47:05+03:00",
+          "tree_id": "abf1a589b9e15d8752008fbd8c4d77c56e119b6e",
+          "url": "https://github.com/serjflint/saitenka/commit/65e6b3736f40cd5f5a556e3b4770b75938f39a38"
+        },
+        "date": 1786006062327,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.893,
+            "range": "±3.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.762,
+            "range": "±8.4%",
             "unit": "ms"
           }
         ]
