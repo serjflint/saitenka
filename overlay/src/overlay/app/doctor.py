@@ -52,6 +52,8 @@ class Check:
     name: str
     status: Status
     detail: str
+    info: bool = False  # a passing, purely-informational line — hidden in the default view (kept in
+    # `--json` and shown with `doctor --verbose`), so a healthy run isn't a wall of green noise.
 
 
 @dataclass
@@ -72,7 +74,8 @@ class Report:
     def to_json(self) -> dict:
         return {
             "checks": [
-                {"name": c.name, "status": c.status, "detail": c.detail} for c in self.checks
+                {"name": c.name, "status": c.status, "detail": c.detail, "info": c.info}
+                for c in self.checks
             ],
             "summary": self.counts,
         }
@@ -210,11 +213,13 @@ def _no_db_checks(db_file, *, any_configured: bool) -> list[Check]:
 
 
 def _title_checks(configured: dict[str, list[str]], imported: dict) -> list[Check]:
+    """One check per configured title. A resolved title is an ``info`` line (the full itemised list,
+    shown only with --verbose); a title the config references but the DB lacks is a hard failure."""
     checks: list[Check] = []
     for kind, titles in configured.items():
         for title in titles:
             if title in imported:
-                checks.append(Check(kind, "ok", f"{kind}: {title}"))
+                checks.append(Check(kind, "ok", f"{kind}: {title}", info=True))
             else:
                 checks.append(
                     Check(
@@ -244,7 +249,11 @@ def check_dict_db() -> list[Check]:
     imported = {
         r.title: r for r in db.list_dictionaries() if r.import_order >= 0
     }  # hide system dicts
-    checks = [Check("dict-db", "ok", f"{len(imported)} dictionary/ies imported in {db_file}")]
+    n = {kind: sum(1 for t in titles if t in imported) for kind, titles in configured.items()}
+    checks = [
+        Check("dict-db", "ok", f"dicts: {n['dicts']} · freq: {n['freq']} · pitch: {n['pitch']}"),
+        Check("dict-db", "ok", f"{len(imported)} imported in {db_file}", info=True),
+    ]
     checks += _title_checks(configured, imported)
     return checks
 
@@ -279,7 +288,7 @@ def check_sub_auto() -> Check:
     externals the overlay may read). ``fuzzy``/``exact`` are safe."""
     p = _mpv_conf_path()
     if not p.exists():
-        return Check("sub-auto", "ok", "no mpv.conf — mpv default sub-auto=exact")
+        return Check("sub-auto", "ok", "no mpv.conf — mpv default sub-auto=exact", info=True)
     try:
         text = p.read_text(encoding="utf-8", errors="replace")
     except OSError as e:  # pragma: no cover
@@ -293,7 +302,7 @@ def check_sub_auto() -> Check:
             "mpv.conf sub-auto=all loads every text file in the folder as a subtitle — set "
             "sub-auto=fuzzy (or exact) so the overlay doesn't pick up junk externals",
         )
-    return Check("sub-auto", "ok", f"mpv.conf sub-auto={val}")
+    return Check("sub-auto", "ok", f"mpv.conf sub-auto={val}", info=True)
 
 
 def check_fonts() -> Check:
@@ -430,7 +439,11 @@ def check_known() -> Check:
     try:
         decks = set(_anki_call("deckNames") or [])
     except (OSError, http.client.HTTPException, json.JSONDecodeError, RuntimeError):
-        return Check("known", "warn", "AnkiConnect unreachable — can't verify [known] deck/fields")
+        # The `anki` check already owns the single "AnkiConnect is down" warning — don't warn twice
+        # for one root cause. This is just a skipped validation, hidden unless --verbose.
+        return Check(
+            "known", "ok", "[known] deck/fields unverified — AnkiConnect unreachable", info=True
+        )
     problems = [
         p for deck, fields in known.items() if (p := _known_deck_problem(deck, fields, decks))
     ]
@@ -491,14 +504,18 @@ def check_free_threading() -> Check:
 def check_mpv_ipc() -> Check:
     p = _mpv_conf_path()
     if not p.exists():
-        return Check("mpv-ipc", "ok", "no mpv.conf input-ipc-server — overlay uses its own socket")
+        return Check(
+            "mpv-ipc", "ok", "no mpv.conf input-ipc-server — overlay uses its own socket", info=True
+        )
     try:
         text = p.read_text(encoding="utf-8", errors="replace")
     except OSError as e:  # pragma: no cover
         return Check("mpv-ipc", "warn", f"couldn't read {p}: {e}")
     m = re.search(r"^\s*input-ipc-server\s*=\s*(\S+)", text, re.MULTILINE)
     if not m:
-        return Check("mpv-ipc", "ok", "mpv.conf has no input-ipc-server — no socket to share")
+        return Check(
+            "mpv-ipc", "ok", "mpv.conf has no input-ipc-server — no socket to share", info=True
+        )
     sock = m.group(1)
     owner = KNOWN_SOCKETS.get(sock)
     who = f" (used by {owner})" if owner else ""
@@ -602,8 +619,10 @@ def check_subminer_conflict() -> Check:
             "while it runs. Quit SubMiner (or uninstall its plugin) to use saitenka",
         )
     if subminer_installed():
-        return Check("subminer", "ok", "SubMiner installed but not running (no overlay conflict)")
-    return Check("subminer", "ok", "no SubMiner (no overlay conflict)")
+        return Check(
+            "subminer", "ok", "SubMiner installed but not running (no overlay conflict)", info=True
+        )
+    return Check("subminer", "ok", "no SubMiner (no overlay conflict)", info=True)
 
 
 def check_crashes() -> Check:
@@ -652,7 +671,9 @@ def check_telemetry() -> Check:
 
     opts = resolve_telemetry(load_config())
     if not opts.enabled:
-        return Check("telemetry", "ok", "disabled ([telemetry] enabled = false)")
+        return Check(
+            "telemetry", "ok", "telemetry disabled ([telemetry] enabled = false)", info=True
+        )
     trace_path = latest_trace(
         export_dir(opts)
     )  # newest per-session trace (they rotate, timestamped)
@@ -660,16 +681,48 @@ def check_telemetry() -> Check:
         return Check(
             "telemetry",
             "ok",
-            f"enabled, no trace yet in {export_dir(opts)} (nothing recorded this session, or the "
-            "'telemetry' extra isn't installed)",
+            f"telemetry enabled, no trace yet in {export_dir(opts)} (nothing recorded this session, "
+            "or the 'telemetry' extra isn't installed)",
         )
     st = trace_path.stat()
     return Check(
         "telemetry",
         "ok",
-        f"enabled — last trace {trace_path} ({st.st_size / 1024:.0f} KiB, "
+        f"telemetry enabled — last trace {trace_path} ({st.st_size / 1024:.0f} KiB, "
         f"modified {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(st.st_mtime))})",
     )
+
+
+def _summarize_log_line(ln: str) -> str | None:
+    """Compact one-liner for a recent-errors entry, or ``None`` to skip it.
+
+    Structured (JSON) records are filtered by their real ``level`` — an ``error`` string buried
+    in an ``exception`` traceback must NOT promote a ``debug`` record (e.g. the expected
+    Anki-down cache-refresh noise). The full traceback is collapsed to its final
+    ``ExcType: message`` line so ``doctor`` never dumps a screenful. Non-JSON lines fall back to a
+    word match on the raw text."""
+    try:
+        rec = json.loads(ln)
+    except ValueError:
+        raw = ln.strip()
+        return (
+            _clip(raw) if re.search(r"\b(error|critical|warning)\b", raw, re.IGNORECASE) else None
+        )
+    if not isinstance(rec, dict) or str(rec.get("level", "")).lower() not in {
+        "warning",
+        "error",
+        "critical",
+    }:
+        return None
+    event = str(rec.get("event", "")).strip()
+    if exc := rec.get("exception"):
+        last = next((ln.strip() for ln in reversed(str(exc).splitlines()) if ln.strip()), "")
+        event = f"{event} — {last}" if event and last else event or last
+    return _clip(f"[{rec['level']}] {event}") if event else None
+
+
+def _clip(s: str, width: int = 200) -> str:
+    return s if len(s) <= width else s[: width - 1] + "…"
 
 
 def check_recent_errors(n: int = 5) -> Check:
@@ -679,9 +732,7 @@ def check_recent_errors(n: int = 5) -> Check:
         lines = LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as e:  # pragma: no cover
         return Check("recent-errors", "warn", f"couldn't read log: {e}")
-    errs = [ln for ln in lines if re.search(r"\b(error|critical|warning)\b", ln, re.IGNORECASE)][
-        -n:
-    ]
+    errs = [s for ln in lines if (s := _summarize_log_line(ln))][-n:]
     if not errs:
         return Check("recent-errors", "ok", "no recent errors in the log")
     return Check("recent-errors", "warn", "recent log errors:\n    " + "\n    ".join(errs))
@@ -724,7 +775,7 @@ def check_windows() -> Check:
         return Check(
             "windows", "ok", f"{platform.platform()} (edition {platform.win32_edition() or '?'})"
         )
-    return Check("windows", "ok", f"not Windows ({platform.system()})")
+    return Check("windows", "ok", f"not Windows ({platform.system()})", info=True)
 
 
 def check_powershell() -> Check:
@@ -743,7 +794,7 @@ def check_powershell() -> Check:
             return Check("powershell", "warn", "PowerShell not found / not queryable")
         v = out.stdout.strip()
         return Check("powershell", "ok", f"PowerShell {v}" if v else "PowerShell (version unknown)")
-    return Check("powershell", "ok", "n/a (not Windows)")
+    return Check("powershell", "ok", "n/a (not Windows)", info=True)
 
 
 def check_mpv_socket() -> Check:
@@ -777,12 +828,14 @@ def check_mpv_socket() -> Check:
             "mpv-socket",
             "ok",
             f"no mpv_socket — bare `attach` uses mpv.net's default ({MPVNET_DEFAULT_PIPE})",
+            info=True,
         )
     return Check(
         "mpv-socket",
         "ok",
         "no mpv_socket — plugin mode auto-passes its own; to attach to YOUR already-running mpv set "
         "mpv_socket in overlay.toml (for example /tmp/mpv-socket)",
+        info=True,
     )
 
 
@@ -811,7 +864,6 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_jimaku(),
         check_crashes(),
         check_recent_errors(),
-        check_perf(),
         check_telemetry(),
     ]
     return Report(checks)
@@ -828,20 +880,18 @@ _GLYPH = (
 )
 
 
-def print_report(
-    report: Report, *, summary: bool = False
-) -> None:  # pragma: no cover — formatting/IO
-    """Print the report. ``summary`` collapses the wall of ✓ lines to one count and prints only the
-    ``!``/``✗`` checks in full — same diagnostic power (every problem shown verbatim), a fraction of the
-    lines. Used by the installer / setup wizard, which run doctor repeatedly; plain ``doctor`` stays
-    verbose (the authoritative, itemised source of truth)."""
-    print("[saitenka doctor]" if _WIN else "\033[1;36m[saitenka doctor]\033[0m")
+def _shown_checks(report: Report, *, summary: bool, verbose: bool) -> list[Check]:
+    """The checks to print at each density: ``summary`` → only ``!``/``✗``; ``verbose`` → all;
+    default → everything but the purely-informational ``info`` lines."""
+    if summary:
+        return [c for c in report.checks if c.status != "ok"]
+    if verbose:
+        return report.checks
+    return [c for c in report.checks if not c.info]
+
+
+def _print_footer(report: Report) -> None:  # pragma: no cover — formatting/IO
     s = report.counts
-    shown = [c for c in report.checks if c.status != "ok"] if summary else report.checks
-    for c in shown:
-        print(f"  {_GLYPH.get(c.status, '?')} {c.detail}")
-    if summary and not shown:  # nothing but ✓ — one reassuring line instead of the full list
-        print(f"  {_GLYPH['ok']} all {s['ok']} checks passed")
     if _WIN:
         print(f"\nSummary: {s['ok']} ok / {s['warn']} warn / {s['fail']} fail")
     else:
@@ -853,5 +903,23 @@ def print_report(
         print("Healthy" if _WIN else "Healthy ✅")
     else:
         print("Problems found - see [x] above" if _WIN else "Problems found — see ✗ above ❌")
-    if report.exit_code != 0:
         print("Tip: `saitenka report` bundles this + logs into a zip for a bug report.")
+
+
+def print_report(
+    report: Report, *, summary: bool = False, verbose: bool = False
+) -> None:  # pragma: no cover — formatting/IO
+    """Print the report. Three densities: ``summary`` shows only ``!``/``✗`` (installer/setup, which
+    re-run doctor); default hides purely-informational ``info`` lines (platform, unset sockets, the
+    full dict list) so a healthy run is short but every problem still shows verbatim; ``verbose``
+    shows everything. ``--json`` always carries the full set."""
+    print("[saitenka doctor]" if _WIN else "\033[1;36m[saitenka doctor]\033[0m")
+    shown = _shown_checks(report, summary=summary, verbose=verbose)
+    for c in shown:
+        print(f"  {_GLYPH.get(c.status, '?')} {c.detail}")
+    if summary and not shown:  # nothing but ✓ — one reassuring line instead of the full list
+        print(f"  {_GLYPH['ok']} all {report.counts['ok']} checks passed")
+    hidden = sum(1 for c in report.checks if c.info)
+    if not summary and not verbose and hidden:  # make the collapsed lines discoverable
+        print(f"  {_GLYPH['ok']} +{hidden} informational checks hidden — `--verbose` to show")
+    _print_footer(report)

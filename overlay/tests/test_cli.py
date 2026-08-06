@@ -97,6 +97,24 @@ def test_cli_has_subcommand_skeleton():
         assert cmd in out.stdout, f"subcommand {cmd} missing from --help"
 
 
+def test_every_command_help_stands_up():
+    """Registry-driven smoke: EVERY registered command's ``--help`` binds its full signature and
+    exits 0, so a command that breaks on load (bad annotation, missing import, cyclopts wiring) is
+    caught the moment it's added — no hardcoded list to drift like ``SUBCOMMANDS`` above. In-process,
+    no subprocess/mpv/network. NOT a live test: ``--help`` short-circuits before the command body, so
+    this proves the wiring stands up, not that a command *runs* (that's the ``live`` gate's job)."""
+    import contextlib
+    import io
+
+    app = _cli_app()
+    commands = [n for n in app if not n.startswith("-")]  # skip -h/--help/--version flag entries
+    assert {"run", "doctor", "attach"} <= set(commands)  # enumeration actually found real commands
+    for name in commands:
+        with contextlib.redirect_stdout(io.StringIO()), pytest.raises(SystemExit) as exc:
+            app([name, "--help"], exit_on_error=False)
+        assert exc.value.code == 0, f"`{name} --help` exited {exc.value.code}"
+
+
 def test_repeatable_dict_freq_pitch_flags():
     """--dict/--freq/--pitch are repeatable, order-preserving (argparse append semantics)."""
     app = _cli_app()

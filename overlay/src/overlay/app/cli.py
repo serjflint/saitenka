@@ -387,6 +387,15 @@ def doctor(
             help="collapse passing checks to a count; show only warnings/failures in full",
         ),
     ] = False,
+    verbose: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name=("--verbose", "-v"),
+            negative=(),
+            help="also show informational lines hidden by default (platform, unset sockets, the "
+            "full dictionary list, telemetry state)",
+        ),
+    ] = False,
     mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
     mine_model: str = _MINE_MODEL_DEFAULT,
 ) -> int:  # pragma: no cover — thin CLI wrapper; run_checks/print_report are unit-tested
@@ -397,7 +406,7 @@ def doctor(
     if json_out:
         print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
     else:
-        print_report(report, summary=summary)
+        print_report(report, summary=summary, verbose=verbose)
     return report.exit_code
 
 

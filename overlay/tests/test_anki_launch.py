@@ -117,3 +117,12 @@ def test_wait_until_anki_up_false_on_timeout(monkeypatch):
     assert (
         anki_mod.wait_until_anki_up(wait=0) is False
     )  # deadline already passed → no launch, no hang
+
+
+def test_is_unreachable_flags_anki_down_but_not_app_errors():
+    # Connection refused from either the client or a raw urllib call is "Anki isn't running" —
+    # expected, so callers suppress the traceback. A real app error (bad model) is not.
+    assert anki_mod.is_unreachable(anki_mod._AnkiRetryable("unreachable"))
+    assert anki_mod.is_unreachable(ConnectionRefusedError(61, "refused"))
+    assert not anki_mod.is_unreachable(anki_mod.AnkiError("model not found"))
+    assert not anki_mod.is_unreachable(ValueError("boom"))
