@@ -928,6 +928,7 @@ def _click_center_of_add_button(r, ipc):
     return cx, cy
 
 
+@pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
 def test_header_add_button_click_mines_hovered_word(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
@@ -1244,6 +1245,7 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     assert r.hover_view().nested.state is None  # dismissed after the linger
 
 
+@pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
 def test_nested_add_button_mines_inner_word(monkeypatch):
     from overlay.panel import header_add_rect
 

@@ -4,7 +4,18 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+
 from overlay.app import anki as anki_mod
+
+_REAL_LAUNCH = anki_mod.launch_anki  # captured before the conftest down-fixture stubs it
+
+
+@pytest.fixture(autouse=True)
+def _restore_real_launch(monkeypatch):
+    """This file tests ``launch_anki`` / ``ensure_anki_running`` themselves, so undo the global
+    ``_anki_down`` stub of ``launch_anki`` (every test here patches ``subprocess.Popen`` for safety)."""
+    monkeypatch.setattr(anki_mod, "launch_anki", _REAL_LAUNCH)
 
 
 def test_ensure_returns_immediately_when_reachable(monkeypatch):
