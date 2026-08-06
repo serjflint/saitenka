@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785999378414,
+  "lastUpdate": 1786000671221,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -647,6 +647,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.615,
             "range": "±9.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "40bdceb28fa427abc848c175e2c6139fafeee1f6",
+          "message": "Merge pull request #202 from serjflint/feat/overlay-hidpi-and-telemetry\n\nfix(overlay): hi-dpi chrome scaling + overlay-draw geometry telemetry",
+          "timestamp": "2026-08-06T10:17:22+03:00",
+          "tree_id": "36a9c771e412fc0ab8f03a5bffb791ff7153e25b",
+          "url": "https://github.com/serjflint/saitenka/commit/40bdceb28fa427abc848c175e2c6139fafeee1f6"
+        },
+        "date": 1786000670569,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.79,
+            "range": "±2.8%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.51,
+            "range": "±8.3%",
             "unit": "ms"
           }
         ]
