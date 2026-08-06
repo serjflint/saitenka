@@ -568,6 +568,79 @@ def test_recent_errors_skips_debug_with_error_in_traceback(tmp_path, monkeypatch
     assert c.status == "ok" and "no recent errors" in c.detail
 
 
+def _start_log(*versions: str) -> str:
+    """overlay.log with a ``… starting`` line per session, in the structlog-JSON shape the overlay writes."""
+    return "".join(
+        json.dumps({"event": f"saitenka overlay {v} starting", "level": "info"}) + "\n"
+        for v in versions
+    )
+
+
+def _stale_check(tmp_path, monkeypatch, *, installed: str, logged: tuple[str, ...] | None):
+    import overlay.version as ver
+
+    monkeypatch.setattr(ver, "overlay_version", lambda: installed)
+    logf = tmp_path / "overlay.log"
+    if logged is not None:
+        logf.write_text(_start_log(*logged))
+    monkeypatch.setattr(doc, "LOG_PATH", logf)
+    return doc.check_stale_overlay()
+
+
+def test_stale_overlay_ok_when_running_matches_installed(tmp_path, monkeypatch):
+    c = _stale_check(tmp_path, monkeypatch, installed="1.3.0+gABC", logged=("1.3.0+gABC",))
+    assert c.status == "ok" and c.info  # a healthy match is hidden info, not green noise
+
+
+def test_stale_overlay_warns_when_the_running_build_differs(tmp_path, monkeypatch):
+    c = _stale_check(tmp_path, monkeypatch, installed="1.3.0+g40bdceb", logged=("1.3.0+gOLD",))
+    assert c.status == "warn"
+    assert "1.3.0+gOLD" in c.detail and "1.3.0+g40bdceb" in c.detail
+    assert "relaunch mpv" in c.detail
+
+
+def test_stale_overlay_reads_the_last_session(tmp_path, monkeypatch):
+    # v1 then a relaunch onto v2 (== installed) → the newest start line wins, no warning.
+    c = _stale_check(tmp_path, monkeypatch, installed="v2", logged=("v1", "v2"))
+    assert c.status == "ok"
+
+
+def test_stale_overlay_ignores_a_dirty_suffix_flip(tmp_path, monkeypatch):
+    # Same sha, only the volatile -dirty flipped between session start and doctor time → not stale.
+    c = _stale_check(tmp_path, monkeypatch, installed="1.3.0+gABC", logged=("1.3.0+gABC-dirty",))
+    assert c.status == "ok"
+
+
+def test_stale_overlay_on_a_non_editable_install_never_crashes_or_false_warns(
+    tmp_path, monkeypatch
+):
+    # Packaged (PyPI) install: overlay_version() is the bare release (no +g suffix), the start line is
+    # the same bare version → matches cleanly, no crash.
+    c = _stale_check(tmp_path, monkeypatch, installed="1.3.0", logged=("1.3.0",))
+    assert c.status == "ok"
+
+
+def test_stale_overlay_is_quiet_without_a_start_line(tmp_path, monkeypatch):
+    logf = tmp_path / "overlay.log"
+    logf.write_text(json.dumps({"event": "launching mpv", "level": "info"}) + "\n")
+    monkeypatch.setattr(doc, "LOG_PATH", logf)
+    c = doc.check_stale_overlay()
+    assert c.status == "ok" and c.info  # a log predating the version line must never false-warn
+
+
+def test_stale_overlay_is_quiet_without_a_log(tmp_path, monkeypatch):
+    monkeypatch.setattr(doc, "LOG_PATH", tmp_path / "does-not-exist.log")
+    c = doc.check_stale_overlay()
+    assert c.status == "ok" and c.info
+
+
+def test_start_log_message_matches_the_doctor_regex():
+    # The producer/consumer contract: the message Reader.run() writes ("saitenka overlay <ver> starting")
+    # must stay parseable by the guard's regex.
+    m = doc._OVERLAY_START_RE.search("saitenka overlay 1.3.0+gABC starting")
+    assert m and m.group(1) == "1.3.0+gABC"
+
+
 def test_recent_errors_collapses_traceback_to_one_line(tmp_path, monkeypatch):
     # A warning record with a multi-line traceback renders as ONE compact line — never the raw dump.
     rec = json.dumps(
