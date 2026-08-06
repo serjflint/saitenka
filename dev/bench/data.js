@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786006063338,
+  "lastUpdate": 1786006886887,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -791,6 +791,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.762,
             "range": "±8.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "469b3926c82f7418ebbeacd2babd05996dfb54c6",
+          "message": "test(extras): extend the optional-package contract to run/attach paths (#206)\n\nThe contract checked only the CLI surface (overlay.app.cli). Parametrise it over\nthe run/attach runtime graph too — cli_run (the command impl), reader_deps (the\ndep builder), and controller (the Reader payload with the tooltip/render stack) —\nwhere a stray top-level `import taffylite` / `import saitenka_deinflect` in the\nrender or deinflect code would actually hide. All four entry points pull no extras.",
+          "timestamp": "2026-08-06T12:00:56+03:00",
+          "tree_id": "690ee335abbcba7f547405730b7f984fc33c4517",
+          "url": "https://github.com/serjflint/saitenka/commit/469b3926c82f7418ebbeacd2babd05996dfb54c6"
+        },
+        "date": 1786006886033,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.806,
+            "range": "±3.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.629,
+            "range": "±14.6%",
             "unit": "ms"
           }
         ]
