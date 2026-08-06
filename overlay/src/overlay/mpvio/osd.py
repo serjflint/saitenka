@@ -39,6 +39,25 @@ def _warn_overlay_add(oid: int, w: int, h: int, res: dict) -> None:
     log.warning("overlay-add rejected for oid=%d (%dx%d): %s", oid, w, h, res)
 
 
+def _oid_label(oid: int) -> str:
+    """The overlay's logical name for telemetry (``SUB``/``TIP``/``HELP``/…), read straight off the
+    ``OverlayId`` IntEnum the caller passed — so this low-level layer needs no import of the app-side
+    enum (no mpvio→app dependency). A bare ``int`` falls back to its digits. Read BEFORE ``_oid`` shifts
+    it, since the ``+`` offset returns a plain int that has lost the enum name."""
+    return getattr(oid, "name", None) or str(int(oid))
+
+
+def _set_draw_geometry(span: otel_metrics.SpanSetter, x: int, y: int, w: int, h: int) -> None:
+    """Tag the draw span with the overlay's on-screen geometry. ``w``/``h`` are the ACTUAL uploaded
+    pixel size, so they encode the effective ``ui_scale`` directly — a chrome overlay (help/sidebar/
+    stats) that silently reverts to scale 1.0 shows up here as too-small ``w``/``h`` for its osd. Span
+    attributes only (SpanSetter), never histogram labels — these are high-cardinality."""
+    span.set("w", w)
+    span.set("h", h)
+    span.set("x", int(x))
+    span.set("y", int(y))
+
+
 class Overlay:
     """Manage one or more mpv OSD overlays keyed by id (0..63)."""
 
@@ -76,27 +95,35 @@ class Overlay:
         return path
 
     def show(self, img: Image.Image, x: int = 0, y: int = 0, oid: int = 0) -> dict:
+        label = _oid_label(oid)
         oid = self._oid(oid)
-        with otel_metrics.instrumented(otel_metrics.upload_duration_ms, "upload"):
+        with otel_metrics.instrumented(
+            otel_metrics.upload_duration_ms, "upload", oid=label
+        ) as span:
             data, w, h, stride = to_bgra(img)
             path = self._tempfile(oid)
             path.write_bytes(data)
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
             res = self._add(oid, tail)
+            _set_draw_geometry(span, x, y, w, h)
         self._live[oid], self.ops = tail, self.ops + 1
         _warn_overlay_add(oid, w, h, res)
         return res
 
     def show_bgra(self, bgra: np.ndarray, x: int = 0, y: int = 0, oid: int = 0) -> dict:
         """Upload an already-BGRA (H, W, 4) array — skips the RGBA→BGRA premultiply (fast scroll)."""
+        label = _oid_label(oid)
         oid = self._oid(oid)
-        with otel_metrics.instrumented(otel_metrics.upload_duration_ms, "upload"):
+        with otel_metrics.instrumented(
+            otel_metrics.upload_duration_ms, "upload", oid=label
+        ) as span:
             buf = np.ascontiguousarray(bgra)
             h, w = buf.shape[:2]
             path = self._tempfile(oid)
             path.write_bytes(buf.tobytes())
             tail = (int(x), int(y), str(path), 0, "bgra", w, h, w * 4)
             res = self._add(oid, tail)
+            _set_draw_geometry(span, x, y, w, h)
         self._live[oid], self.ops = tail, self.ops + 1
         _warn_overlay_add(oid, w, h, res)
         return res
