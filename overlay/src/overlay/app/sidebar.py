@@ -47,7 +47,7 @@ def _format_time(seconds: float) -> str:
 
 def _capacity(reader: Reader) -> int:
     height = max(180, round(reader.osd[1] * 0.84))
-    scale = reader.ui_scale
+    scale = reader.chrome_scale
     return max(1, (height - round(52 * scale) - round(28 * scale)) // round(54 * scale))
 
 
@@ -237,7 +237,7 @@ def _summary_rows(reader: Reader) -> list[SidebarRow]:
 def redraw(reader: Reader) -> None:
     if not reader.sidebar.open:
         return
-    scale = reader.ui_scale
+    scale = reader.chrome_scale
     margin = round(18 * scale)
     target_width = min(
         round(620 * scale),

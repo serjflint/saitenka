@@ -466,6 +466,17 @@ class Reader:
         return prefetch.REF_H
 
     @property
+    def chrome_scale(self) -> float:
+        """App-chrome (help / sidebar / stats) display scale: the user's ``ui_scale`` folded with the
+        same ``osd_h / REF_H`` display factor the subtitle and tooltip already track, so the chrome
+        grows on a hi-dpi / large OSD instead of staying at a flat ``ui_scale`` (which, at scale 1.2 on a
+        2x Retina panel, drew help/sidebar/stats tiny beside the OSD-scaled tooltip). The factor is
+        clamped to ``>= 1.0``: it only scales chrome UP for a taller-than-1080p OSD, never below the
+        user's ``ui_scale`` baseline — so every OSD at or under 1080p (including the goldens pinned at
+        1080p) is byte-identical, and a 2x panel gets ~2x chrome."""
+        return self.ui_scale * max(1.0, self.osd[1] / prefetch.REF_H)
+
+    @property
     def bottom_margin(self) -> int:
         return round(self.osd[1] * self.bottom_margin_frac)
 
