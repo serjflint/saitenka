@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785996991088,
+  "lastUpdate": 1785999378414,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -611,6 +611,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.765,
             "range": "±12.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4ac7db18bec1f90808287228d5126ab7c953a250",
+          "message": "fix(doctor): declutter output, one-line Anki-down errors, CLI smoke test (#201)\n\n* fix(anki): don't log tracebacks for expected AnkiConnect-down\n\nAnki can be closed at any moment, so a connection-refused while refreshing the\nknown-word cache or validating mining fields is an expected steady state, not a\nbug. Both sites logged it at debug with exc_info=True, dumping a full urllib\ntraceback into the log — which then surfaced as a screenful in `doctor`.\n\nAdd `anki.is_unreachable(exc)` (True for _AnkiRetryable or a raw OSError/URLError)\nand log those compactly, reserving the traceback for genuinely unexpected faults.\n\n* test(cli): registry-driven smoke test for every command's --help\n\nIterate the cyclopts command registry and assert each command's `--help` binds\nits full signature and exits 0, in-process. Catches a command that breaks on\nload (bad annotation, missing import, wiring) the moment it's added — unlike the\nhardcoded SUBCOMMANDS list, which silently drifts. Not a live test: --help\nshort-circuits before the command body, so it proves the wiring stands up.\n\n* refactor(doctor): collapse informational lines behind --verbose\n\nA healthy `doctor` was a 44-line wall of green. Add a `Check.info` flag for\npassing, purely-informational lines: the default view hides them, `--verbose`\nshows them, `--json` always carries the full set. Cut ~27 noise lines to ~17.\n\n- platform / PowerShell \"n/a\" lines → info off-Windows\n- the full per-dictionary list → info; the visible line is now per-kind counts\n  (`dicts: N · freq: M · pitch: K`); a configured-but-missing title still fails\n- safe `sub-auto`, unset mpv sockets, non-running SubMiner, disabled telemetry → info\n- one Anki-down warning: the `known` check defers to `anki` instead of warning twice\n- drop `check_perf` from doctor (its per-op/RSS is the doctor's own process, not a session)\n- collapse recent-log-errors to a compact per-record line, filtered by structured level\n- footer names the hidden count; telemetry line names its subject\n\nprint_report split into _shown_checks/_print_footer (drops below the complexity gate).",
+          "timestamp": "2026-08-06T09:55:44+03:00",
+          "tree_id": "9c1271dffba68aaeb8d7ddd0d13734f55869c2c8",
+          "url": "https://github.com/serjflint/saitenka/commit/4ac7db18bec1f90808287228d5126ab7c953a250"
+        },
+        "date": 1785999377823,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.674,
+            "range": "±3.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.615,
+            "range": "±9.7%",
             "unit": "ms"
           }
         ]
