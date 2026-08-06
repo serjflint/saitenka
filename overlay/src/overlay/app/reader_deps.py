@@ -13,8 +13,6 @@ pattern) with thin delegating methods on Reader.
 
 from __future__ import annotations
 
-import http.client
-import json
 import logging
 import threading
 import time
@@ -149,6 +147,7 @@ def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
 
     ``fallback_words`` is ``run``'s plain ``--known word1,word2`` list (``attach`` has none);
     ``on_error`` lets ``run`` print a console note instead of the default log-only Anki-failure warning."""
+    from overlay.app.anki import ANKI_DOWN_ERRORS
     from overlay.app.wordlists import KnownWords, refresh_known_cache
 
     if not known_cfg:
@@ -163,16 +162,18 @@ def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
             db, known_cfg
         )  # freshen the cache for next launch, off the critical path
         return cached
-    try:  # cache miss: full load NOW (populates the cache + signature for next time)
-        return refresh_known_cache(db, known_cfg)
-    except (  # Anki closed / AnkiConnect down / malformed reply — color by freq+JLPT only
-        OSError,
-        http.client.HTTPException,
-        json.JSONDecodeError,
+    # Anki closed / AnkiConnect down (incl. the client's _AnkiRetryable, an AnkiError → covered by the
+    # SSOT) / malformed reply — color by freq+JLPT only. The retryable is what used to escape this catch
+    # (the old literal omitted AnkiError) and surface as a full startup traceback for an expected-down Anki.
+    known_load_errors: tuple[type[Exception], ...] = (
+        *ANKI_DOWN_ERRORS,
         AttributeError,
         KeyError,
         TypeError,
-    ) as e:
+    )
+    try:  # cache miss: full load NOW (populates the cache + signature for next time)
+        return refresh_known_cache(db, known_cfg)
+    except known_load_errors as e:
         if on_error is not None:
             on_error(e)
         else:
