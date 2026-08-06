@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786006886887,
+  "lastUpdate": 1786007288736,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -827,6 +827,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.629,
             "range": "±14.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8eb7b8212e3e4e0e92239038812958ccad4af1b4",
+          "message": "Merge pull request #207 from serjflint/feat/100-episode-identity\n\nfeat(continuity): durable episode identity + sibling resolver (#100)",
+          "timestamp": "2026-08-06T12:07:41+03:00",
+          "tree_id": "213726c466ea5b5b15c478b6ffe1e8bda90f30fd",
+          "url": "https://github.com/serjflint/saitenka/commit/8eb7b8212e3e4e0e92239038812958ccad4af1b4"
+        },
+        "date": 1786007288105,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.828,
+            "range": "±3.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.765,
+            "range": "±8.1%",
             "unit": "ms"
           }
         ]
