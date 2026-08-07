@@ -68,20 +68,15 @@ a bare interpreter at the moment of action — a path-qualified one (`.venv/bin/
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate:** `uv run poe all` is the fast pre-push gate (CI mirrors it — `.github/workflows/ci.yml`
-  runs `poe all` on PRs + pushes to main); `uv run poe pre-release` is the slower pre-tag superset (adds
-  the supply-chain, installer, network-link, real-mpv, and bench checks; `release.py` gates on it). Both are defined in `[tool.poe.tasks]` (the source of truth). `cov` is the
-  functional run too (a superset marker set), so the standalone `test` stays the inner loop, not a third
-  suite run. Run the gate before
-  pushing. How to read each failure, the advisory tiers, and the
-  free-threaded / 3.13-pinned-env traps live in the **dev-gate skill** (`.agents/skills/dev-gate/`) — consult it. The real tasks live
-  in `overlay/`; the repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works from the repo
-  root or `overlay/`. Standing constraints while editing (don't relitigate these): `lint` is an
-  **explicit** ruff select (never `ALL`) with flake8-bandit `S` folded in — justify each `# noqa: S…` and
-  each `ignore`; `complexity` is ratcheted against `overlay/complexipy-snapshot.json` — regenerate only
-  after a deliberate refactor, never to silence a regression; the only copyleft allowed in the graph is
-  our own GPL `deinflect`; new advisory tools are test-driven on THIS repo first (`vibe/quality-growth-plan.md`),
-  preferring standalone out-of-process binaries (free-threading-safe).
+- **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
+  `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
+  each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**
+  (`.agents/skills/dev-gate/`). The repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works
+  from the root or `overlay/`. Standing constraints while editing (don't relitigate): `lint` is an
+  **explicit** ruff select (never `ALL`, bandit `S` folded in) — justify each `# noqa`/`ignore`;
+  `complexity` is ratcheted against `overlay/complexipy-snapshot.json` (never regenerate to silence a
+  regression); the only copyleft in the graph is our own GPL `deinflect`; new advisory tools are
+  test-driven on THIS repo first, preferring out-of-process binaries (free-threading-safe).
 - **Inner loop (not a gate):** `uv run poe affected` runs only the tests a change can touch (ruff
   dependency-graph reverse-closure + full-run fallback on blind spots) — seconds instead of the ~32s full
   `poe test`, for the edit→feedback cycle. It over-approximates, never under-selects; `poe all`/`poe
