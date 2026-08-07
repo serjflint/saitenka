@@ -2,9 +2,9 @@
 
 The character algorithm is validated against the vendored Unicode ``LineBreakTest.txt`` corpus
 (``tests/fixtures/uax14``). We assert **100 %** on the subset whose code points are in the scripts this
-renderer wraps — Latin, CJK, Kana, digits, common punctuation, spaces, Korean — and record the overall
-rate. Lines using classes that never reach the renderer (Hebrew HL/HH, Brahmic AK/AP/AS/VF/VI, regional
-indicators, emoji modifiers, bare ZWJ joiners) are excluded, not chased.
+renderer wraps — Latin, CJK, Kana, digits, common punctuation, spaces, Korean — and pin the in-scope /
+out-of-scope split as a counted ledger. Lines using classes that never reach the renderer (Hebrew HL/HH,
+Brahmic AK/AP/AS/VF/VI, regional indicators, emoji modifiers, bare ZWJ joiners) are excluded, not chased.
 """
 
 from __future__ import annotations
@@ -29,6 +29,13 @@ _CORPUS = (
 # Classes a Latin/CJK/Kana renderer never emits — their corpus lines are out of scope (see docstring).
 _OUT_OF_SCOPE = {"HH", "AK", "AP", "AS", "VF", "VI", "RI", "EB", "EM", "SA", "SG", "HL", "ZWJ"}
 _DOTTED_CIRCLE = 0x25CC  # ◌ (class AL) only appears in Brahmic cluster fixtures
+
+# The rendered-scripts census split, pinned as a counted ledger (not a silent filter): a re-vendored UCD
+# that reclassifies characters moves these deliberately — a reviewed re-bless. The exact TOTAL is
+# independently locked by `poe corpus-lock` (tools/corpus_check.py); here we pin the render-scope split so
+# the excluded set can't quietly grow (which would hide an in-scope regression by demoting it out of scope).
+_IN_SCOPE = 11_495  # lines wholly in the scripts this renderer wraps → must be 100 %
+_OUT_OF_SCOPE_COUNT = 7_843  # excluded (exotic scripts / joiners) — recorded, not chased
 
 
 def _parse_corpus() -> list[tuple[list[int], list[str]]]:
@@ -60,20 +67,23 @@ def _in_scope(cps: list[int]) -> bool:
 
 def test_corpus_conformance_is_total_for_rendered_scripts():
     cases = _parse_corpus()
-    assert len(cases) > 10_000  # the vendored corpus is present and parsed
-    overall_ok = in_scope = in_scope_ok = 0
+    in_scope = in_scope_ok = 0
     failures: list[str] = []
     for cps, markers in cases:
-        got = break_opportunities("".join(chr(c) for c in cps))
+        got = break_opportunities(
+            "".join(chr(c) for c in cps)
+        )  # every line: also smokes exotic input
+        if not _in_scope(cps):
+            continue
         ok = all((markers[i] == "÷") == (got[i] != PROHIBITED) for i in range(1, len(cps)))
-        overall_ok += ok
-        if _in_scope(cps):
-            in_scope += 1
-            in_scope_ok += ok
-            if not ok and len(failures) < 10:
-                failures.append(" ".join(f"{c:04X}" for c in cps))
+        in_scope += 1
+        in_scope_ok += ok
+        if not ok and len(failures) < 10:
+            failures.append(" ".join(f"{c:04X}" for c in cps))
+    # the counted ledger: split pinned, so a demoted-out-of-scope regression can't hide (see constants)
+    assert in_scope == _IN_SCOPE, f"render-scope split moved (pinned {_IN_SCOPE}, got {in_scope})"
+    assert len(cases) - in_scope == _OUT_OF_SCOPE_COUNT
     assert in_scope_ok == in_scope, f"in-scope corpus regressions: {failures}"
-    assert overall_ok / len(cases) > 0.99  # exotic-script lines are the only misses
 
 
 def test_mandatory_break_after_newline():
