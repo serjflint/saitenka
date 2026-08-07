@@ -271,3 +271,9 @@ class TooltipState:
         # LRU cache (OrderedDict keyed by PanelKey), bounded at panel_cache_max; each Panel keeps only its
         # windowed blocks (compressed) so the whole cache stays small. Evict LRU on overflow, not clear.
         self.panel_cache: OrderedDict = OrderedDict()
+
+    @property
+    def open(self) -> bool:
+        """Shown iff a tooltip rect is placed — the uniform ``SurfaceState`` predicate the surface
+        registry (app/surfaces.py) reads for mouse-capture/routing."""
+        return self.tip_rect is not None

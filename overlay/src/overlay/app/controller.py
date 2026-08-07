@@ -33,6 +33,7 @@ from overlay.app import (
     sub_picker,
     subnav,
     subtitle_modes,
+    surfaces,
     telemetry,
     tooltip,
     translation,
@@ -695,12 +696,7 @@ class Reader:
         return rx <= x < rx + rw and ry <= y < ry + rh
 
     def _update_hover(self) -> None:
-        if (
-            not getattr(self.ov, "visible", True)
-            or help_overlay.suppress_hover(self)
-            or sidebar.suppress_hover(self)
-            or sub_picker.suppress_hover(self)
-        ):
+        if not getattr(self.ov, "visible", True) or surfaces.suppress_hover(self):
             return
         tooltip.update_hover(self)
 
@@ -761,11 +757,7 @@ class Reader:
         if not self.ov.visible:
             return
         mp = self._get("mouse-pos") or {}
-        if sub_picker.on_click(self, mp.get("x", -1), mp.get("y", -1)):
-            return
-        if sidebar.on_click(self, mp.get("x", -1), mp.get("y", -1)):
-            return
-        tooltip.on_click(self)
+        surfaces.route_click(self, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
         self, tok, inflected, *, mined: bool = False, phrase: tuple[str, ...] = ()
@@ -1005,13 +997,7 @@ class Reader:
             self.ipc.command("define-section", MOUSE_SECTION, "\n".join(lines) + "\n", "force")
 
     def _wants_mouse_capture(self) -> bool:
-        return (
-            self._tip_rect is not None
-            or self.sidebar.open
-            or self.sub_picker.open
-            or self._help_open
-            or self.preview.rect is not None
-        )
+        return surfaces.wants_mouse_capture(self)
 
     def _sync_mouse_capture(self) -> None:
         """Own clicks/wheel while a saitenka surface is up (re-asserting the forced section every 0.5s
@@ -1472,13 +1458,10 @@ class Reader:
             self._flush_paused_nudge()
             ops_before = self.ov.ops
             scroll_steps = self._drain_events()
-            if (
-                scroll_steps
-                and not help_overlay.scroll(self, scroll_steps)
-                and not sub_picker.scroll(self, scroll_steps)
-                and not sidebar.scroll(self, scroll_steps)
-            ):
-                self._scroll_tip(scroll_steps * round(self._tip_ref_h * 0.14))
+            if scroll_steps:
+                surfaces.route_scroll(
+                    self, scroll_steps
+                )  # topmost surface claims it; tooltip is terminal
             self._expire_toast()
             self._expire_flash()
             if self.refresh_osd():
