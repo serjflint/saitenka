@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786146373752,
+  "lastUpdate": 1786146984911,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1007,6 +1007,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.54,
             "range": "±7.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5e72338035145b85cf073b9bfb94ee65e426c5cf",
+          "message": "feat(research): gh_audit.py companion to ground repo maturity (#213)\n\nAdds a stdlib-only activity auditor (stars/archived/releases/commit\nfreshness/license -> MAINTAINED/STALE/ABANDONED/ARCHIVED/FABRICATED) that\nshells `gh` and 404-gates on fabricated repos. Wires it into the skill's\nverification loop alongside verify.py and rot-guards it in smoke.sh.",
+          "timestamp": "2026-08-08T02:56:02+03:00",
+          "tree_id": "cd357495064542d0a14eb00d3763ad8f70a2b26c",
+          "url": "https://github.com/serjflint/saitenka/commit/5e72338035145b85cf073b9bfb94ee65e426c5cf"
+        },
+        "date": 1786146984352,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.749,
+            "range": "±3.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.595,
+            "range": "±9.4%",
             "unit": "ms"
           }
         ]
