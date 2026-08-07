@@ -1,0 +1,27 @@
+id: test-integration-timeout-missing
+valid:
+  # integration/live WITH a timeout — the sanctioned shape
+  - |
+    @pytest.mark.integration
+    @pytest.mark.timeout(5)
+    def test_socket_roundtrip():
+        pass
+  - |
+    @pytest.mark.live
+    @pytest.mark.timeout(30)
+    def test_real_mpv():
+        pass
+  # a non-boundary tier needs no timeout
+  - |
+    @pytest.mark.slow
+    def test_big_corpus():
+        pass
+invalid:
+  - |
+    @pytest.mark.integration
+    def test_socket_roundtrip():
+        pass
+  - |
+    @pytest.mark.live
+    def test_real_mpv():
+        pass

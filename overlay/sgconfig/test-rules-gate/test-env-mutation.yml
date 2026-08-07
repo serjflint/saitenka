@@ -1,10 +1,12 @@
 id: test-env-mutation
 language: python
-severity: warning
+severity: error
 message: >-
   Direct os.environ / putenv mutation leaks process state across tests (and races under free-threading)
   — use monkeypatch.setenv/delenv, which pytest restores automatically. Reads of os.environ are fine.
-note: Axis 2 (Conformance) → non-determinism / cross-test state.
+note: >-
+  GATE rule (`poe test-lint-gate`, in `poe all`) — a hard determinism invariant, baseline-clean, so it
+  blocks a NEW violation, not pre-existing debt. Kept SEPARATE from the advisory sgconfig-tests.yml.
 files:
   - "tests/**/*.py"
 rule:

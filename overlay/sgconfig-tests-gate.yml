@@ -1,0 +1,12 @@
+# ast-grep test-code GATE (`poe test-lint-gate`, IN `poe all`) — the hard test invariants that are
+# baseline-clean today, run at `severity: error` so a NEW violation fails the push gate. Distinct from
+# the advisory sgconfig-tests.yml (the Sharpen Conformance instrument, all `warning`, NOT in `all`):
+# only a rule with ZERO current violations lives here — env mutation and session/module-mutable fixtures
+# (both determinism / free-threading foot-guns per AGENTS.md "Testing"). The sanctioned classicist debt
+# (private-attr asserts, monkeypatch-of-private) deliberately stays advisory — gating it would fight the
+# repo's own stance. A rule graduates here only once its count reaches zero. Planted +/- tests
+# (`poe test-lint-gate-test`) keep each rule from rotting into a no-op.
+ruleDirs:
+  - sgconfig/test-rules-gate
+testConfigs:
+  - testDir: sgconfig/test-rule-tests-gate

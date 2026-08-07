@@ -1,10 +1,12 @@
 id: test-session-mutable-fixture
 language: python
-severity: warning
+severity: error
 message: >-
   A session/module-scoped fixture returning a literal mutable ({}/[]/set()) is shared mutable state — a
   cross-test-pollution and free-threading data-race hazard. Use function scope, or reset/yield per test.
-note: Axis 2 (Conformance) → the "function scope only" invariant (no scope=session|module mutable state).
+note: >-
+  GATE rule (`poe test-lint-gate`, in `poe all`) — the "function scope only" invariant, baseline-clean,
+  so it blocks a NEW violation, not pre-existing debt. Kept SEPARATE from the advisory sgconfig-tests.yml.
 files:
   - "tests/**/*.py"
 rule:

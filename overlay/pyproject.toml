@@ -361,6 +361,12 @@ invariants-test = { shell = "ast-grep test --skip-snapshot-tests" }
 test-lint = { shell = "ast-grep test -c sgconfig-tests.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests.yml tests" }
 test-lint-test = { shell = "ast-grep test -c sgconfig-tests.yml --skip-snapshot-tests" }
 test-lint-json = { shell = "ast-grep scan -c sgconfig-tests.yml --json=compact tests" }
+# GATE (in `all`) — the test-code invariants that are baseline-clean, at `severity: error` so a NEW
+# violation fails the push (config: sgconfig-tests-gate.yml). Only zero-violation rules graduate here
+# from the advisory `test-lint`; the sanctioned classicist debt stays advisory. Tests run first so a
+# rule can't rot into a no-op. Rust binary, no build/FT exposure — same posture as `invariants`.
+test-lint-gate = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests-gate.yml tests" }
+test-lint-gate-test = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests" }
 # OPT-IN taint tier (not in `all`): semgrep dataflow for what ast-grep can't — model output reaching a
 # reading/pitch field via intermediate vars. Pinned to 3.13 (prebuilt clib wheel; semgrep never imports
 # our code, so its interpreter is unrelated to the 3.14t runtime). For 3.14t use the clib-drop crutch:
@@ -617,7 +623,7 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts"]
+all = ["lint", "types", "arch", "invariants", "test-lint-gate", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —

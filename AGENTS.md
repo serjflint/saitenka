@@ -208,10 +208,12 @@ Consult it when adding or rewriting a test.
   behaviour review — re-bless deliberately (e.g. a `unidic-lite` bump), never regenerate to green.
 - **Determinism.** No wall-clock, ambient `random`, or unrestored env in a test; `pytest-randomly`
   stays on to surface order-coupling. Inject the clock at the seam (the suite already does this via
-  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears).
+  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears). The two hardest
+  invariants here — **unrestored env** and **session/module-mutable fixtures** — are now a **gate**
+  (`poe test-lint-gate`, in `all`, baseline-clean at `error`); the rest stay advisory (`poe test-lint`).
 - **Timeouts on anything that can hang.** New `integration`/`live` tests touching a socket/subprocess
   carry `@pytest.mark.timeout(5)` (30 for `live`). Opt-in per test — there is no global default, so
-  legitimately-slow tests are unaffected.
+  legitimately-slow tests are unaffected (advisory `test-integration-timeout-missing` flags a missing one).
 - **Don't add a plugin when a pattern exists.** Data → Hypothesis strategies; flexible asserts →
   `dirty-equals`; IPC → the transport `Fake*`. A new test dependency is a `quality-growth` decision
   (test-drive it on this repo first), not a reflex.
