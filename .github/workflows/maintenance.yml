@@ -1,0 +1,65 @@
+# Scheduled background maintenance — the checks deliberately kept OUT of the per-PR `poe all` because
+# they are advisory or network-bound (so non-deterministic), but which still rot if never run: external
+# URL integrity, dependency CVE drift, and the hygiene tier (dead code / copy-paste). Weekly, not per-PR.
+# Report-only: every step is `continue-on-error` so a finding surfaces in the job summary WITHOUT a red
+# X that reads as a broken build — this run informs, it does not gate (that is `poe all`). It NEVER opens
+# a PR and NEVER merges; the human reads the summary and decides. The agent-driven Sharpen/Grow loops
+# (which PRODUCE fixes → a draft PR) are a SEPARATE, environment-dependent step, not wired here — they
+# need a model-capable runner and stay a deliberate local/opt-in action (AGENTS.md "Quality gates" §6).
+name: Maintenance
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisory:
+    name: advisory + network tier (Linux, 3.14t)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install MeCab (fugashi build dep)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+
+      - name: Install lychee (links-net task)
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2
+        with:
+          tool: lychee
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+
+      - name: Sync (free-threaded 3.14t, full extras)
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      # External URL integrity — the network crawl `poe all` runs only offline (`links`). Rot here is a
+      # doc-maintenance signal, not a build break.
+      - name: Links (network)
+        working-directory: overlay
+        continue-on-error: true
+        run: uv run poe links-net
+
+      # Second-opinion CVE scan over the pinned graph (PyPA + OSV) — new advisories land against a frozen
+      # lockfile, so this only bites on a schedule, never on the unchanged-deps PR.
+      - name: Dependency CVE audit
+        working-directory: overlay
+        continue-on-error: true
+        run: uv run poe pip-audit
+
+      # Cross-module dead code + copy-paste. Advisory (surfaces real findings today), so it reports here
+      # instead of blocking every PR.
+      - name: Hygiene (deadcode + dup)
+        working-directory: overlay
+        continue-on-error: true
+        run: uv run poe hygiene
