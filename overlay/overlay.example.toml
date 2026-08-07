@@ -227,6 +227,14 @@ enabled = false
 # enabled = true
 # summary = true                     # print the session summary on close
 
+# ── [watch] Playback continuity — OFF by default ───────────────────────────────────────────────
+# When on, finishing an episode auto-advances to the next sibling in the same folder (SxxExx / NxNN /
+# bare-number names) in the SAME mpv window — subtitles, index and stats re-slot in place. A missing or
+# ambiguous next file just holds the last frame. Only applies to `saitenka run` (which owns playback);
+# `attach`/SyncPlay sessions never auto-advance.
+# [watch]
+# auto_advance = true
+
 # ── [dictdb] Per-connection SQLite tuning for the consolidated dictionary DB (advanced) ──────────
 # [dictdb]
 # mmap_size = 268435456      # 256 MiB mmap window per read connection

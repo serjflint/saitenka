@@ -215,6 +215,9 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
         # tid scatters unrelated spans across a different synthetic "thread" row each, defeating the
         # point of a timeline view (found by actually opening a real trace in Perfetto and looking).
         span.set_attribute("thread.id", threading.get_native_id())
+        from overlay.session import session_id
+
+        span.set_attribute("session", session_id())  # ties every span to the run in overlay.log
         for k, v in attributes.items():
             span.set_attribute(k, v)
         # Per-thread CPU time across the span. wall (the span's dur) ≫ cpu_ms ⇒ the thread was

@@ -215,6 +215,19 @@ def _collect_telemetry() -> dict[str, str]:
     }
 
 
+def _latest_session(log_text: str) -> str | None:
+    """The session id of the most recent run in the (JSON-lines) overlay log — the run a fresh report
+    is almost always about. None if the log predates session stamping."""
+    for line in reversed(log_text.splitlines()):
+        try:
+            sid = json.loads(line).get("session")
+        except (ValueError, AttributeError):
+            continue
+        if sid:
+            return str(sid)
+    return None
+
+
 def collect(*, include_log: bool = True) -> dict[str, str]:
     """Build ``{archive_member: text}`` for the bundle — all text, all redacted. Pure enough to test
     with fake homes (it only reads files + runs read-only version/doctor checks)."""
@@ -230,8 +243,10 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     members.update(_collect_scripts())
 
     # The rotating overlay log — redacted; opt-out via --no-log (may contain filenames/sentences).
+    session: str | None = None
     if include_log and log_path.exists():
         members["overlay.log"] = redact(log_path.read_text(encoding="utf-8", errors="replace"))
+        session = _latest_session(members["overlay.log"])
 
     # mpv's own log (run launches mpv with --log-file) — the codec / sub-load / track-select side that
     # the overlay log can't see. Redacted + gated like the overlay log (it holds the video path).
@@ -243,14 +258,15 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     members.update(_collect_crashes())
     members.update(_collect_telemetry())
 
-    members["MANIFEST.txt"] = _manifest(members, include_log=include_log)
+    members["MANIFEST.txt"] = _manifest(members, include_log=include_log, session=session)
     return members
 
 
-def _manifest(members: dict[str, str], *, include_log: bool) -> str:
+def _manifest(members: dict[str, str], *, include_log: bool, session: str | None = None) -> str:
     lines = [
         f"saitenka {_overlay_version()} diagnostics bundle",
         f"generated: {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
+        f"latest session: {session or 'n/a (log predates session ids)'}",
         "",
         "PRIVACY — read before sharing:",
         "  • API keys / tokens have been redacted from the config and log.",

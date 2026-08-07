@@ -43,6 +43,23 @@ def _redact_event_dict(
     return event_dict
 
 
+def _add_session(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+    """Stamp the per-process session id on every record, so a report can tell which run each line is
+    from (overlay.log accumulates across runs). File sink only — the console renderer drops it (see
+    :func:`_drop_session`) so the session is quoted once, at launch, not on every stderr line."""
+    from overlay.session import session_id
+
+    event_dict.setdefault("session", session_id())
+    return event_dict
+
+
+def _drop_session(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+    """Console-only: strip the session id so it isn't repeated on every human-readable stderr line (the
+    launch banner already prints it once). It stays in the JSON file log for report run-attribution."""
+    event_dict.pop("session", None)
+    return event_dict
+
+
 def configure_logging(log_path: Path) -> None:
     """Idempotent: a re-exec or repeated test call is a no-op once the root handler is attached."""
     root = logging.getLogger(ROOT_LOGGER_NAME)
@@ -59,6 +76,7 @@ def configure_logging(log_path: Path) -> None:
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         _redact_event_dict,
+        _add_session,
     ]
 
     structlog.configure(
@@ -79,6 +97,7 @@ def configure_logging(log_path: Path) -> None:
         foreign_pre_chain=shared_processors,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _drop_session,  # session is quoted once at launch; keep it off every stderr line
             structlog.dev.ConsoleRenderer(colors=False, sort_keys=True),
         ],
     )

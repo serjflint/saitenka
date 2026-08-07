@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from overlay.app.subtitle_modes import (
     lang_matches as _lang_matches,
@@ -23,7 +25,23 @@ from overlay.app.subtitle_modes import (
     sub_tracks as _sub_tracks,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SubtitleCandidate:
+    """One pickable subtitle source, provider-agnostic (Window 1). ``download`` is an off-thread thunk
+    (no mpv IPC) that fetches + caches the file and returns ``(path, status)`` — the picker runs it
+    through the normal subtitle-fetch pipeline, so it never needs to know which provider produced it."""
+
+    provider: str
+    name: str
+    size: int
+    match: bool  # release/resolution match hint for this encode
+    download: Callable[[], tuple[Path | None, str]]
 
 
 def select_sub_track(ipc, slang: str) -> int | None:
@@ -97,22 +115,188 @@ def fetch_jimaku_path(
     jimaku_title: str | None = None,
     episode: int | None = None,
     resync: bool = True,
+    force: bool = False,
 ) -> tuple[Path | None, str]:
-    """Fetch and optionally resync without touching mpv IPC, so callers may run it off-thread."""
+    """Fetch and optionally resync without touching mpv IPC, so callers may run it off-thread.
+    ``force`` skips the cache so a user-triggered retry re-fetches and re-syncs (overwriting a
+    stale/mistimed cached srt) — the cache-hit path silently reuses a bad prior sync otherwise."""
     from overlay.app.jimaku import JimakuClient, JimakuError
 
     video_path, title, ep = _subtitle_identity(video, jimaku_title, episode)
-    hit, cache_status = _cached_subtitle(video_path, title, ep, resync=resync)
-    if hit is not None:
-        assert cache_status is not None
-        return hit, cache_status
+    if not force:
+        hit, cache_status = _cached_subtitle(video_path, title, ep, resync=resync)
+        if hit is not None:
+            assert cache_status is not None
+            return hit, cache_status
     tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
     try:
-        sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp)
+        sub_path = JimakuClient(jimaku_key).fetch(title, ep, tmp, video=video)
     except JimakuError as e:
         return None, f"jimaku failed: {e}"
     sub_path = _finish_subtitle(video_path, title, ep, sub_path, resync=resync)
     return Path(sub_path), f"jimaku: added {Path(sub_path).name} for {title!r} ep {ep}"
+
+
+def download_candidate_path(
+    video: str,
+    candidate,
+    *,
+    jimaku_key: str | None = None,
+    jimaku_title: str | None = None,
+    episode: int | None = None,
+) -> tuple[Path | None, str]:
+    """Download ONE user-chosen jimaku file (Window 1's source picker) and cache it — deliberately
+    WITHOUT resync. The picker exists so the user selects a natively co-timed source; auto-resync on a
+    sparse reference mangles it, and ``Ctrl+Shift+T`` stays the per-file fallback if it still drifts.
+    ``candidate`` is a :class:`~overlay.app.jimaku.JimakuFile`. Off-thread safe (no mpv IPC)."""
+    from overlay.app.jimaku import JimakuClient, JimakuError
+
+    video_path, title, ep = _subtitle_identity(video, jimaku_title, episode)
+    tmp = tempfile.mkdtemp(prefix="saitenka-jimaku-")
+    try:
+        sub_path = JimakuClient(jimaku_key).download(candidate, tmp)
+    except JimakuError as exc:
+        return None, f"jimaku download failed: {exc}"
+    if video_path.exists():
+        from overlay.app.subtitle_cache import store_subs
+
+        sub_path = store_subs(video_path, title, ep, sub_path, resync=False)
+    return Path(sub_path), f"jimaku: added {Path(sub_path).name}"
+
+
+def download_tsukihime_candidate_path(
+    video: str,
+    release,
+    attachment,
+    *,
+    config: dict | None = None,
+    title_override: str | None = None,
+    episode: int | None = None,
+) -> tuple[Path | None, str]:
+    """Download ONE user-chosen TsukiHime (release, attachment) pair — no resync, like the jimaku
+    picker path. ``release``/``attachment`` are TsukiHime dataclasses from ``episode_candidates``."""
+    from overlay.app.tsukihime import (
+        API_BASE,
+        DEFAULT_RESULT_CAP,
+        DEFAULT_TIMEOUT,
+        TsukiHimeClient,
+        TsukiHimeError,
+    )
+
+    cfg = config or {}
+    video_path, title, ep = _subtitle_identity(video, title_override, episode)
+    dest = tempfile.mkdtemp(prefix="saitenka-tsukihime-")
+    try:
+        client = TsukiHimeClient(
+            api_base=cfg.get("api_base", API_BASE),
+            timeout=float(cfg.get("timeout", DEFAULT_TIMEOUT)),
+            result_cap=int(cfg.get("result_cap", DEFAULT_RESULT_CAP)),
+        )
+        sub_path = client.download_attachment(release, attachment, dest)
+    except (TsukiHimeError, TypeError, ValueError) as exc:
+        return None, f"tsukihime download failed: {exc}"
+    if video_path.exists():
+        from overlay.app.subtitle_cache import store_subs
+
+        sub_path = store_subs(video_path, title, ep, sub_path, resync=False)
+    return Path(sub_path), f"tsukihime: added {Path(sub_path).name}"
+
+
+def _jimaku_download(
+    video: str, jf, jimaku_key: str | None, title_override: str | None
+) -> Callable[[], tuple[Path | None, str]]:
+    return lambda: download_candidate_path(
+        video, jf, jimaku_key=jimaku_key, jimaku_title=title_override
+    )
+
+
+def _jimaku_candidates(
+    video: str, jimaku_key: str | None, title_override: str | None
+) -> list[SubtitleCandidate]:
+    from overlay.app.jimaku import JimakuClient, _resolution_match
+
+    _video_path, title, episode = _subtitle_identity(video, title_override, None)
+    return [
+        SubtitleCandidate(
+            provider="jimaku",
+            name=jf.name,
+            size=jf.size,
+            match=_resolution_match(video, jf.name),
+            download=_jimaku_download(video, jf, jimaku_key, title_override),
+        )
+        for jf in JimakuClient(jimaku_key).episode_files(title, episode, video=video)
+    ]
+
+
+def _tsukihime_download(
+    video: str, release, attachment, config: dict | None, title_override: str | None
+) -> Callable[[], tuple[Path | None, str]]:
+    return lambda: download_tsukihime_candidate_path(
+        video, release, attachment, config=config, title_override=title_override
+    )
+
+
+def _tsukihime_candidates(
+    video: str, config: dict | None, title_override: str | None
+) -> tuple[list[SubtitleCandidate], list[str]]:
+    from overlay.app.jimaku import _resolution_match
+    from overlay.app.tsukihime import (
+        API_BASE,
+        DEFAULT_RESULT_CAP,
+        DEFAULT_TIMEOUT,
+        TsukiHimeClient,
+    )
+
+    cfg = config or {}
+    _video_path, title, episode = _subtitle_identity(video, title_override, None)
+    client = TsukiHimeClient(
+        api_base=cfg.get("api_base", API_BASE),
+        timeout=float(cfg.get("timeout", DEFAULT_TIMEOUT)),
+        result_cap=int(cfg.get("result_cap", DEFAULT_RESULT_CAP)),
+    )
+    pairs, truncated = client.episode_candidates(title, episode)
+    warnings: list[str] = []
+    if truncated:
+        warnings.append(
+            f"tsukihime: search truncated at {client.result_cap} — some releases may be missing"
+        )
+    out = [
+        SubtitleCandidate(
+            provider="tsukihime",
+            name=f"{release.name}{attachment.extension}",
+            size=0,  # TsukiHime attachments don't expose a size
+            match=_resolution_match(video, release.name),
+            download=_tsukihime_download(video, release, attachment, config, title_override),
+        )
+        for release, attachment in pairs
+    ]
+    return out, warnings
+
+
+def list_candidates(
+    video: str,
+    providers: tuple[str, ...],
+    *,
+    jimaku_key: str | None = None,
+    title_override: str | None = None,
+    tsukihime_config: dict | None = None,
+) -> tuple[list[SubtitleCandidate], list[str]]:
+    """Aggregate pickable subtitle candidates across the enabled providers (Window 1). Returns
+    ``(candidates, warnings)``; a provider that raises contributes a warning row instead of an
+    exception, so one dead provider never blanks the panel. No mpv IPC — off-thread safe."""
+    candidates: list[SubtitleCandidate] = []
+    warnings: list[str] = []
+    for provider in providers:
+        try:
+            if provider == "jimaku":
+                candidates.extend(_jimaku_candidates(video, jimaku_key, title_override))
+            elif provider == "tsukihime":
+                found, warn = _tsukihime_candidates(video, tsukihime_config, title_override)
+                candidates.extend(found)
+                warnings.extend(warn)
+        except Exception as exc:  # noqa: BLE001  # any provider failure → a soft warning, never fatal
+            warnings.append(f"{provider}: {exc}")
+    return candidates, warnings
 
 
 def fetch_tsukihime_path(
@@ -122,9 +306,11 @@ def fetch_tsukihime_path(
     title_override: str | None = None,
     episode: int | None = None,
     resync: bool = True,
+    force: bool = False,
     dest_dir: str | Path | None = None,
 ) -> tuple[Path | None, str]:
-    """Fetch a unique TsukiHime match without touching mpv IPC."""
+    """Fetch a unique TsukiHime match without touching mpv IPC. ``force`` skips the cache (see
+    :func:`fetch_jimaku_path`)."""
     from overlay.app.tsukihime import (
         API_BASE,
         DEFAULT_RESULT_CAP,
@@ -135,10 +321,11 @@ def fetch_tsukihime_path(
 
     cfg = config or {}
     video_path, title, requested_episode = _subtitle_identity(video, title_override, episode)
-    hit, cache_status = _cached_subtitle(video_path, title, requested_episode, resync=resync)
-    if hit is not None:
-        assert cache_status is not None
-        return hit, cache_status
+    if not force:
+        hit, cache_status = _cached_subtitle(video_path, title, requested_episode, resync=resync)
+        if hit is not None:
+            assert cache_status is not None
+            return hit, cache_status
     destination = dest_dir or tempfile.mkdtemp(prefix="saitenka-tsukihime-")
     try:
         client = TsukiHimeClient(
@@ -164,9 +351,11 @@ def fetch_provider_path(
     title_override: str | None = None,
     episode: int | None = None,
     resync: bool = True,
+    force: bool = False,
     tsukihime_config: dict | None = None,
 ) -> tuple[Path | None, str]:
-    """Run configured providers in deterministic order without touching playback."""
+    """Run configured providers in deterministic order without touching playback. ``force`` skips the
+    cache so a user retry re-fetches + re-syncs (see :func:`fetch_jimaku_path`)."""
     from overlay.app.subtitle_providers import fetch_first
 
     attempts = []
@@ -181,6 +370,7 @@ def fetch_provider_path(
                         jimaku_title=title_override,
                         episode=episode,
                         resync=resync,
+                        force=force,
                     ),
                 )
             )
@@ -194,6 +384,7 @@ def fetch_provider_path(
                         title_override=title_override,
                         episode=episode,
                         resync=resync,
+                        force=force,
                     ),
                 )
             )

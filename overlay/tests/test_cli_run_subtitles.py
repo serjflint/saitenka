@@ -186,12 +186,16 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
     class Reader:
         retry_factory = None
         startup_fetch = None
+        picker_lister = None
 
         def configure_subtitle_retry(self, factory):
             self.retry_factory = factory
 
         def fetch_japanese_subs_async(self, fetch):
             self.startup_fetch = fetch
+
+        def configure_sub_picker(self, lister):
+            self.picker_lister = lister
 
     def fetch(video, providers, **_kwargs):
         calls.append((video, providers))

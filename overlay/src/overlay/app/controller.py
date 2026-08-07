@@ -30,6 +30,7 @@ from overlay.app import (
     reader_deps,
     session_stats,
     sidebar,
+    sub_picker,
     subnav,
     subtitle_modes,
     telemetry,
@@ -62,10 +63,9 @@ from overlay.app.bindings import (
     SCROLL_UP_MSG,
     SIDEBAR_MSG,
     SPEAK_MSG,
-    SUB_DELAY_MINUS_MSG,
-    SUB_DELAY_PLUS_MSG,
-    SUB_DELAY_RESET_MSG,
+    SUB_ANCHOR_MSG,
     SUB_NEXT_MSG,
+    SUB_PICKER_MSG,
     SUB_PREV_MSG,
     SUB_REPLAY_MSG,
     SUBTITLE_LANGUAGE_MSG,
@@ -99,6 +99,8 @@ from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compo
 from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from overlay.app.card_preview import PreviewData
     from overlay.app.render_cache import RenderCache
     from overlay.mpvio.ipc import MpvIPC
@@ -118,7 +120,15 @@ NESTED_ID = OverlayId.NESTED
 
 # Properties the poll loop consumes event-driven (observe_property) instead of issuing 3–5
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
-OBSERVED_PROPS = ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text", "sid")
+OBSERVED_PROPS = (
+    "sub-text",
+    "mouse-pos",
+    "osd-dimensions",
+    "pause",
+    "secondary-sub-text",
+    "sid",
+    "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
+)
 
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
@@ -285,6 +295,7 @@ class Reader:
         self.annotation_key = o.keys.annotation_key
         self.help_key = o.keys.help_key
         self.subtitle_retry_key = o.keys.subtitle_retry_key
+        self.sub_picker_key = o.keys.sub_picker_key
         self.preview_key = o.keys.preview_key
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
@@ -389,6 +400,8 @@ class Reader:
         self._last_announced_sid: int | None = None
         self._overlay_mpv_state: dict[str, object] | None = None
         self.sidebar = sidebar.SidebarState()
+        self.sub_picker = sub_picker.PickerState()
+        self._sub_picker_lister: Callable[[str], tuple] | None = None
         self.analysis = analysis_overlay.AnalysisState()
         self.help = help_overlay.HelpState()
         # Last-mined card's media + on-screen preview panel (app/card_preview.py PreviewState); the
@@ -407,9 +420,21 @@ class Reader:
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
         self._observed: dict = {}
+        # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
+        # opt-in (never set under attach, so SyncPlay-managed playback never advances). `_eof_handled`
+        # makes the eof-reached edge one-shot per file (re-armed when a new file clears eof-reached).
+        self.advance_hook: Callable[[], bool] | None = None
+        self._eof_handled = False
+        # #100 reactive re-slot: `reslot_hook` fires on EVERY mpv `file-loaded` (our own eof loadfile,
+        # a native autoload/playlist advance, a manual next/prev) so the overlay follows whatever mpv
+        # plays — installed for any interactive run, independent of auto-advance. `_slotted_name` dedups
+        # the file we've already set up (the initial load, or a redundant file-loaded for the same file).
+        self.reslot_hook: Callable[[Path], None] | None = None
+        self._slotted_name: str | None = None
         self.osd = (1280, 720)
         # subtitle state (populated by set_subtitle; initialised for the live run() path)
         self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
+        self._startup_hint_cleared = False  # gates the one-time mpv-OSD "saitenka starting…" clear
         self.sub_text = ""
         self.lines: list[list[Token]] = []
         self.tokens: list[Token] = []
@@ -674,6 +699,7 @@ class Reader:
             not getattr(self.ov, "visible", True)
             or help_overlay.suppress_hover(self)
             or sidebar.suppress_hover(self)
+            or sub_picker.suppress_hover(self)
         ):
             return
         tooltip.update_hover(self)
@@ -735,6 +761,8 @@ class Reader:
         if not self.ov.visible:
             return
         mp = self._get("mouse-pos") or {}
+        if sub_picker.on_click(self, mp.get("x", -1), mp.get("y", -1)):
+            return
         if sidebar.on_click(self, mp.get("x", -1), mp.get("y", -1)):
             return
         tooltip.on_click(self)
@@ -800,11 +828,10 @@ class Reader:
 
     def _enable_mask_atlas(self) -> None:
         """Install the persistent glyph mask atlas WHEN AVAILABLE (a prebuilt ``mask-atlas.sqlite``
-        exists): wire fonts' write-back now, then bulk-load the masks into a shared read dict on a
-        background thread and atomically swap it in (never mutating a dict another thread reads). Once at
-        session start; no-op when opted out or no prebuilt atlas."""
-        import threading
-
+        exists): wire it as fonts' write-back AND lazy per-glyph read source. Reads are on-demand
+        (:meth:`MaskAtlas.get_one`, fronted by the per-thread ``glyph_mask`` LRU), so there's NO bulk load
+        into RAM — the atlas is usable the instant it's opened and startup never stalls on a ~GB deserialize
+        (an 864 MB atlas was ~9 s). Once at session start; no-op when opted out or no prebuilt atlas."""
         from overlay import fonts
         from overlay.app.paths import cache_dir
         from overlay.mask_atlas import MaskAtlas
@@ -819,17 +846,13 @@ class Reader:
         if atlas is None:
             return
         rc.mask_atlas = atlas
-        fonts.set_mask_atlas(None, atlas)  # write-back active immediately; reads join once loaded
-
-        def _load() -> None:
-            loaded: dict = {}
-            n = atlas.load_into(loaded)
-            fonts.set_mask_atlas(
-                loaded, atlas
-            )  # atomic swap → glyph_mask sees the whole dict at once
-            log.info("mask atlas: loaded %d masks", n)
-
-        threading.Thread(target=_load, name="saitenka-mask-atlas-load", daemon=True).start()
+        fonts.set_mask_atlas(
+            None, atlas
+        )  # lazy per-glyph reads + live-miss write-back; no bulk RAM load
+        log.info(
+            "mask atlas: ready — lazy per-glyph reads (%d MB on disk)",
+            atlas.disk_bytes() // 1_000_000,
+        )
 
     def _render_cache_sig(self) -> str:
         """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
@@ -985,6 +1008,7 @@ class Reader:
         return (
             self._tip_rect is not None
             or self.sidebar.open
+            or self.sub_picker.open
             or self._help_open
             or self.preview.rect is not None
         )
@@ -1223,10 +1247,10 @@ class Reader:
 
     def toggle_overlay(self) -> None:
         if self.ov.visible:
-            self._overlay_mpv_state = {
-                "sub-visibility": self._get("sub-visibility"),
-                "osd-level": self._get("osd-level"),
-            }
+            # Only sub-visibility toggles: the overlay renders subs, so hiding it must reveal mpv's own
+            # again. osd-level is left alone (stays at 1) so mpv's native OSD messages — e.g. the
+            # repeatable z/Z/x sub-delay keys — give feedback whether or not the overlay is up.
+            self._overlay_mpv_state = {"sub-visibility": self._get("sub-visibility")}
             self.hover = -1
             self._teardown_tip()
             self.ov.set_visible(visible=False)
@@ -1236,7 +1260,6 @@ class Reader:
                 "sub-visibility",
                 True,  # noqa: FBT003  # mpv IPC wire value
             )
-            self.ipc.command("set_property", "osd-level", 1)
             return
         for name, value in (self._overlay_mpv_state or {}).items():
             if value is not None:
@@ -1291,6 +1314,12 @@ class Reader:
     def toggle_sidebar(self) -> None:
         sidebar.toggle(self)
 
+    def toggle_sub_picker(self) -> None:
+        sub_picker.toggle(self)
+
+    def configure_sub_picker(self, lister: Callable[[str], tuple]) -> None:
+        sub_picker.configure(self, lister)
+
     def toggle_analysis(self) -> None:
         analysis_overlay.toggle(self)
 
@@ -1317,6 +1346,27 @@ class Reader:
                 bind(binding.key, message)
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
+    def _anchor_subtitles(self) -> None:
+        """One-press manual re-time: snap the sub cue nearest the playhead to start NOW. For when
+        auto-sync leaves a residual offset (e.g. a different-length OP), pause as a line's audio
+        begins and press — mpv's ``sub-delay`` shifts so that cue lands here, and every later cue
+        follows by the same offset. The overlay reads the delayed ``sub-text``, so the on-screen line
+        moves with it. Cumulative (anchors from the current delay), so a second anchor refines a first."""
+        index = self._sub_index
+        if index is None or not index.cues:
+            self._toast("No subtitle track to anchor", "warn")
+            return
+        playhead = self._prop("time-pos")
+        if playhead is None:
+            return
+        playhead = float(playhead)
+        delay = float(self._prop("sub-delay") or 0.0)
+        # the cue currently displayed nearest the playhead is the one the user is hearing → snap it
+        nearest = min(index.cues, key=lambda c: abs((c.start + delay) - playhead))
+        new_delay = playhead - nearest.start
+        self.ipc.command("set_property", "sub-delay", f"{new_delay:.3f}")
+        self._toast(f"Subtitles anchored — delay {new_delay:+.1f}s")
+
     # msg -> handler(reader). Subtitle-nav entries render the target cue from the index INSTANTLY
     # (if we have one), then issue the real sub-seek so the video catches up behind it (read the
     # position first: _sub_nav samples sub-start/time-pos before the seek moves them).
@@ -1331,6 +1381,7 @@ class Reader:
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         SIDEBAR_MSG: lambda r: r.toggle_sidebar(),
+        SUB_PICKER_MSG: lambda r: r.toggle_sub_picker(),
         ANALYSIS_MSG: lambda r: r.toggle_analysis(),
         ANNOTATION_MSG: lambda r: r.toggle_annotation_mode(),
         HELP_TOGGLE_MSG: lambda r: r.toggle_help(),
@@ -1349,13 +1400,11 @@ class Reader:
         SUB_PREV_MSG: lambda r: (r._sub_nav(-1), r.ipc.command("sub-seek", "-1")),
         SUB_NEXT_MSG: lambda r: (r._sub_nav(1), r.ipc.command("sub-seek", "1")),
         SUB_REPLAY_MSG: lambda r: (r._sub_nav(0), r.ipc.command("sub-seek", "0")),
-        SUB_DELAY_MINUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "-0.1"),
-        SUB_DELAY_PLUS_MSG: lambda r: r.ipc.command("add", "sub-delay", "0.1"),
         KANJI_MSG: lambda r: r.kanji_current(),
         TIP_UP_MSG: lambda r: r._scroll_tip(-round(r._tip_ref_h * 0.12)),
         TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r._tip_ref_h * 0.12)),
         TIP_CLOSE_MSG: lambda r: r._tip_close_or_back(),
-        SUB_DELAY_RESET_MSG: lambda r: r.ipc.command("set_property", "sub-delay", "0"),
+        SUB_ANCHOR_MSG: lambda r: r._anchor_subtitles(),
     }
 
     def _handle(self, msg: str) -> None:
@@ -1366,18 +1415,67 @@ class Reader:
             handler(self)
 
     # --- run loop -----------------------------------------------------------------------------
+    def _maybe_advance(self) -> None:
+        """On the eof-reached rising edge, ask the installed hook to re-slot to the next episode (#100).
+
+        One-shot per file: `_eof_handled` blocks a repeat call while mpv sits paused at EOF, and re-arms
+        once a fresh file clears eof-reached. A hook that returns False (SyncPlay/attach never installs
+        one, no sibling, ambiguous) is a no-op — mpv just holds the last frame until the user quits."""
+        if self.advance_hook is None:
+            return
+        if self._prop("eof-reached"):
+            if not self._eof_handled:
+                self._eof_handled = True
+                self.advance_hook()
+        else:
+            self._eof_handled = False
+
+    def current_media_path(self) -> Path | None:
+        """mpv's current file as an absolute path (``path`` is verbatim what was loaded, so resolve a
+        relative one against ``working-directory``). None when nothing is loaded. Used by the reactive
+        re-slot and the eof advance to key the #100 sibling resolver off the real filesystem path."""
+        raw = self._prop("path")
+        if not raw:
+            return None
+        p = Path(str(raw)).expanduser()
+        if not p.is_absolute():
+            wd = self._prop("working-directory")
+            if wd:
+                p = Path(str(wd)) / p
+        return p
+
+    def install_reslot_hook(self, hook: Callable[[Path], None], *, initial: Path) -> None:
+        """Follow mpv's ``file-loaded`` from now on (#100): ``hook`` re-slots the overlay onto whatever
+        file mpv loads next — a native autoload/playlist advance, our own eof loadfile, or a manual
+        next/prev. Seed ``initial`` (already set up by ``run_impl``) so its own file-loaded is skipped."""
+        self.reslot_hook = hook
+        self._slotted_name = Path(str(initial)).name
+
+    def _on_file_loaded(self) -> None:
+        """A new file finished loading — re-slot the overlay onto it (once per distinct file). Skips the
+        already-slotted file so the initial load and a redundant file-loaded don't reset stats/subs."""
+        if self.reslot_hook is None:
+            return
+        p = self.current_media_path()
+        if p is None or p.name == self._slotted_name:
+            return
+        self._slotted_name = p.name
+        self.reslot_hook(p)
+
     def poll_once(self) -> bool:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
             self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
             session_stats.tick(self)
+            self._maybe_advance()
             self._flush_paused_nudge()
             ops_before = self.ov.ops
             scroll_steps = self._drain_events()
             if (
                 scroll_steps
                 and not help_overlay.scroll(self, scroll_steps)
+                and not sub_picker.scroll(self, scroll_steps)
                 and not sidebar.scroll(self, scroll_steps)
             ):
                 self._scroll_tip(scroll_steps * round(self._tip_ref_h * 0.14))
@@ -1390,11 +1488,13 @@ class Reader:
                 analysis_overlay.redraw(self)
             self._reconcile_sub_text(self._prop("sub-text") or "")
             self._maybe_log_stall()
+            self._maybe_clear_startup_hint()  # hand off from mpv's OSD breadcrumb once we can draw
             self._apply_pending_deps_or_spinner()
             self._apply_pending_anki_seed()
             tooltip.apply_pending_crisp(self)  # upgrade a soft first paint to crisp once bands warm
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)
+            sub_picker.update(self)
             sidebar.update(self)
             self._update_hover()
             self._sync_mouse_capture()  # own clicks/wheel while a surface is up (this tick, no gap)
@@ -1424,6 +1524,8 @@ class Reader:
             kind = ev.get("event")
             if kind == "property-change":  # observed state — no round-trips
                 self._on_property_change(ev)
+            elif kind == "file-loaded":  # #100: re-slot the overlay onto the newly loaded file
+                self._on_file_loaded()
             elif kind == "client-message":
                 msg = (ev.get("args") or [""])[0]
                 if msg == SCROLL_UP_MSG:
@@ -1447,6 +1549,20 @@ class Reader:
             self._render_nested_view()  # redraw without the highlight border
         elif oid == TIP_ID:
             self._render_tip_view()
+
+    def _maybe_clear_startup_hint(self) -> None:
+        """Drop mpv's "saitenka starting…" OSD breadcrumb the instant OUR overlay can draw (osd-dimensions
+        resolved) — NOT on the first subtitle cue, which a sub-less OP can delay ~30s (the hint's ceiling),
+        leaving a "still starting" impression long after the overlay is live. From here our own surface
+        owns feedback: the spinner while deps load, cues when they appear, nothing when idle."""
+        if self._startup_hint_cleared:
+            return
+        if self._prop("osd-dimensions") in (None, {}):
+            return  # overlay can't place anything yet → keep mpv's breadcrumb until it can
+        self._startup_hint_cleared = True
+        from overlay.app.loading import clear_startup_hint
+
+        clear_startup_hint(self.ipc)
 
     def _apply_pending_deps_or_spinner(self) -> None:
         """Progressive startup: inject background-loaded deps (once), else animate the spinner."""

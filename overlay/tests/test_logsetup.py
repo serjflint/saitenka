@@ -11,7 +11,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from overlay.app import doctor as doc
-from overlay.app.logsetup import _redact_event_dict, configure_logging
+from overlay.app.logsetup import (
+    _add_session,
+    _drop_session,
+    _redact_event_dict,
+    configure_logging,
+)
 
 
 def _configure(tmp_path):
@@ -58,6 +63,23 @@ def test_exception_info_lands_in_json(tmp_path):
 
     (record,) = [d for d in _lines(log_path) if d["event"] == "failed"]
     assert "ZeroDivisionError" in record["exception"]
+
+
+def test_session_is_stamped_on_the_json_file_log(tmp_path):
+    log_path = _configure(tmp_path)
+    logging.getLogger("overlay.test").warning("hello")
+
+    (record,) = [d for d in _lines(log_path) if d["event"] == "hello"]
+    assert record.get("session")  # file lines carry the session for report run-attribution
+
+
+def test_console_processor_drops_session_but_file_processor_keeps_it():
+    """The session is quoted once at launch; it stays in the JSON file (report attribution) but is
+    stripped from the human-readable console line so it isn't repeated on every stderr warning."""
+    stamped = _add_session(None, "warning", {"event": "x"})
+    assert stamped.get("session")
+
+    assert "session" not in _drop_session(None, "warning", dict(stamped))
 
 
 def test_doctor_recent_errors_tails_json_log(tmp_path, monkeypatch):

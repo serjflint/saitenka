@@ -18,12 +18,16 @@ class Reader:
     def __init__(self):
         self.fetch = None
         self.retry_factory = None
+        self.picker_lister = None
 
     def fetch_japanese_subs_async(self, fetch):
         self.fetch = fetch
 
     def configure_subtitle_retry(self, factory):
         self.retry_factory = factory
+
+    def configure_sub_picker(self, lister):
+        self.picker_lister = lister
 
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):

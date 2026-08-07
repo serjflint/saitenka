@@ -78,6 +78,7 @@ class KeyOptions:
     annotation_key: str = "Alt+a"
     help_key: str = "F1"
     subtitle_retry_key: str = "Ctrl+Shift+T"
+    sub_picker_key: str = "Ctrl+j"  # Window 1: jimaku subtitle-source download picker
     preview_key: str = "p"
     hover_pause_key: str = "Alt+p"
     sub_prev_key: str = "Alt+LEFT"
@@ -306,6 +307,17 @@ def resolve_resync_timeout(cfg: dict | None = None) -> int:
     if cfg is None:
         cfg = load_config()
     return int(cfg.get("resync_timeout", 300))
+
+
+def resolve_resync_split_penalty(cfg: dict | None = None) -> float | None:
+    """alass ``--split-penalty`` from top-level ``resync_split_penalty`` in ``overlay.toml`` — its most
+    impactful knob (0–1000; LOWER = more willing to split at a scene/OP boundary, so a source that's
+    right after the OP but early before it can get its own segment offset). ``None`` (the default)
+    passes no flag, leaving alass's built-in default. Ignored by the ffsubsync fallback (no such knob)."""
+    if cfg is None:
+        cfg = load_config()
+    raw = cfg.get("resync_split_penalty")
+    return None if raw is None else float(raw)
 
 
 @dataclass(frozen=True)

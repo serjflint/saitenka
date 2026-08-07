@@ -278,6 +278,57 @@ def render_sidebar(
     return SidebarRender(image, tuple(hits), capacity)
 
 
+def render_picker(
+    rows: list[SidebarRow],
+    *,
+    width: int,
+    height: int,
+    title: str = "Subtitle sources",
+    message: str | None = None,
+    footer: str,
+    scale: float = 1.0,
+) -> SidebarRender:
+    """Render Window 1's download picker: a titled list of jimaku candidates, best-match first.
+    Reuses the sidebar row renderer (so per-row download hitboxes + status pills come for free); the
+    header is a plain title instead of the sidebar's Track/Backlog tabs. ``message`` (loading / error
+    / empty) replaces the row area when there's nothing to list."""
+
+    def px(value: int) -> int:
+        return max(1, round(value * scale))
+
+    width, height = max(320, width), max(180, height)
+    image = Image.new("RGBA", (width, height), SIDEBAR_BG)
+    draw = ImageDraw.Draw(image)
+    title_font = _font(px(22))
+    body_font = _font(px(18))
+    small_font = _font(px(14))
+    header_h, footer_h, row_h = px(52), px(28), px(54)
+    capacity = max(1, (height - header_h - footer_h) // row_h)
+
+    draw.text((px(14), px(16)), title, font=title_font, fill=WHITE, anchor="lm")
+    hits: list[SidebarHitBox] = []
+    if message:
+        draw.text(
+            (width // 2, height // 2), message, font=body_font, fill=SIDEBAR_MUTED, anchor="mm"
+        )
+    for position, row in enumerate(rows[:capacity]):
+        y = header_h + position * row_h
+        hits.extend(
+            _draw_sidebar_row(
+                draw,
+                row,
+                width=width,
+                y=y,
+                row_height=row_h,
+                body_font=body_font,
+                small_font=small_font,
+                scale=scale,
+            )
+        )
+    draw.text((px(14), height - px(14)), footer, font=small_font, fill=SIDEBAR_MUTED, anchor="lm")
+    return SidebarRender(image, tuple(hits), capacity)
+
+
 def render_plain_subtitle(text: str, width: int, *, size: int) -> SubtitleRender:
     """Render a non-Japanese primary track without tokenization or interactive hitboxes."""
     normalized = text.replace("\\N", " ").replace("\n", " ").strip()

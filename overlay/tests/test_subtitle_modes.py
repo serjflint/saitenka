@@ -30,7 +30,21 @@ class FakeIPC:
         if args[:2] == ("set_property", "secondary-sid"):
             self.props["secondary-sid"] = args[2]
         if args[0] == "sub-add":
-            self.tracks.append({"id": 9, "type": "sub", "lang": args[4], "external": True})
+            self.tracks.append(
+                {
+                    "id": 9,
+                    "type": "sub",
+                    "lang": args[4],
+                    "external": True,
+                    "external-filename": args[1],
+                }
+            )
+            if len(args) > 2 and args[2] == "select":  # mpv's "select" flag activates the new track
+                self.props["sid"] = 9
+                for track in self.tracks:
+                    track["selected"] = track["id"] == 9
+        if args[0] == "sub-remove":
+            self.tracks[:] = [t for t in self.tracks if t.get("id") != args[1]]
         return {"data": None}
 
 
@@ -319,7 +333,7 @@ def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypat
     assert len(reader._subtitle_fetch_threads) == 1
     assert messages[:2] == [
         ("Searching Japanese subtitle providers…", "ok"),
-        ("Japanese subtitle search already running", "warn"),
+        ("Subtitle sync already running", "warn"),
     ]
     assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
@@ -340,13 +354,13 @@ def test_runtime_retry_reports_missing_provider_or_media(monkeypatch):
         lambda text, kind="ok": messages.append((text, kind)),
     )
 
-    reader.retry_japanese_subtitles()
-    reader.configure_subtitle_retry(lambda _video: lambda: (None, "unused"))
+    reader.retry_japanese_subtitles()  # no media at all → media error takes precedence
+    ipc.props["path"] = "/videos/Show - 01.mkv"  # media present, but no external subs + no provider
     reader.retry_japanese_subtitles()
 
     assert messages == [
-        ("No Japanese subtitle providers enabled", "warn"),
         ("No media loaded for subtitle search", "warn"),
+        ("No Japanese subtitle providers enabled", "warn"),
     ]
     assert reader._subtitle_fetch_threads == []
 
@@ -377,6 +391,62 @@ def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, m
         "Searching Japanese subtitle providers…",
         "Japanese subtitles ready — Alt+t to switch",
     ]
+
+
+def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path, monkeypatch):
+    # "Retry should just re-time": watching (mistimed) JP → re-sync the CURRENT srt in place (NO
+    # provider query — you already have the subs) and swap the on-screen track for the re-timed file.
+    from overlay.app import resync as resync_mod
+
+    current = tmp_path / "ep3.ja.srt"
+    current.write_text("1\n00:00:02,000 --> 00:00:03,000\nJP\n", encoding="utf-8")
+    jp_external = {
+        "id": 2,
+        "type": "sub",
+        "lang": "jpn",
+        "external": True,
+        "external-filename": str(current),
+    }
+    ipc = FakeIPC([EN.copy(), jp_external])
+    ipc.props["path"] = "/videos/Show - 03.mkv"
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    assert reader.subtitle_language == "jp"
+    messages = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    reader.configure_subtitle_retry(  # the provider factory must NOT be called
+        lambda _v: (_ for _ in ()).throw(AssertionError("queried providers on re-sync"))
+    )
+    resynced = []
+
+    def fake_resync_current(video, sub, **_kw):
+        resynced.append((str(video), str(sub)))
+        sub.write_text(
+            "1\n00:00:05,000 --> 00:00:06,000\nJP\n", encoding="utf-8"
+        )  # re-timed in place
+        return sub
+
+    monkeypatch.setattr(resync_mod, "resync_current", fake_resync_current)
+    ipc.commands.clear()
+
+    reader.retry_japanese_subtitles()
+    reader._subtitle_fetch_threads[0].join(timeout=1)
+    subtitle_modes.apply_fetch_results(reader)
+
+    # video is wrapped in Path before resync → compare the OS-native form (Windows uses backslashes)
+    assert resynced == [(str(Path("/videos/Show - 03.mkv")), str(current))]  # CURRENT sub, no fetch
+    assert ("sub-remove", 2) in ipc.commands  # stale track dropped
+    assert (
+        "sub-add",
+        str(current),
+        "select",
+        "",
+        "jpn",
+    ) in ipc.commands  # re-timed file re-selected
+    assert reader.jp_sid == 9 and reader.subtitle_language == "jp"
+    assert reader._sub_index is not None  # rebuilt against the re-timed cues
+    # single-cue sub → window too small → falls back to a whole-file re-sync (still no provider query)
+    assert "Re-timing subtitles from here…" in messages
 
 
 @pytest.mark.parametrize(

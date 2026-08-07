@@ -132,3 +132,17 @@ def test_scrub_home_replaces_home_path_and_username(monkeypatch):
     out = report._scrub_home(text)
     assert "<HOME>" in out and "<USER>" in out
     assert str(Path.home()) not in out and "leodu" not in out
+
+
+def test_latest_session_reads_the_last_stamped_run():
+    log = '{"event":"a","session":"120000-aa11"}\nnot json\n{"event":"b","session":"130000-bb22"}\n'
+    assert report._latest_session(log) == "130000-bb22"  # newest run, tolerant of non-JSON lines
+
+
+def test_latest_session_is_none_for_a_pre_session_log():
+    assert report._latest_session('{"event":"old"}\n') is None
+
+
+def test_manifest_surfaces_the_latest_session():
+    out = report._manifest({"overlay.log": "x"}, include_log=True, session="140000-cc33")
+    assert "latest session: 140000-cc33" in out

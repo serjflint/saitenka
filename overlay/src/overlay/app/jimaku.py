@@ -312,8 +312,12 @@ class JimakuClient:
             dest.write_bytes(r.read())
         return dest
 
-    def fetch(self, title: str, episode: int | None, dest_dir: str | Path) -> Path:
-        """Search → best entry → best file for the episode → download. Returns the local path."""
+    def episode_files(
+        self, title: str, episode: int | None, *, video: str | None = None
+    ) -> list[JimakuFile]:
+        """Every subtitle file for the episode, best-match first — the source list Window 1's picker
+        shows. Same ordering as :meth:`fetch`'s auto-pick (so ``[0]`` is what fetch would grab); the
+        user overrides it by choosing a differently-timed source from the list."""
         entries = self.search(title)
         if not entries:
             raise JimakuError(f"no jimaku entry for {title!r}")
@@ -321,16 +325,38 @@ class JimakuClient:
         files = self.files(entry["id"], episode)
         if not files:
             raise JimakuError(f"no files for entry {entry.get('name')} ep {episode}")
+        return sorted(files, key=lambda f: _candidate_score(f, episode, video), reverse=True)
 
-        # prefer the episode number in the name, then .srt over .ass, then largest
-        def score(f: JimakuFile) -> tuple:
-            ep_hit = episode is not None and re.search(
-                rf"(?<!\d){episode:02d}(?!\d)|(?<!\d){episode}(?!\d)", f.name
-            )
-            return (bool(ep_hit), f.ext in (".srt", ".ass"), f.ext == ".srt", f.size)
+    def fetch(
+        self, title: str, episode: int | None, dest_dir: str | Path, *, video: str | None = None
+    ) -> Path:
+        """Search → best entry → best file for the episode → download. Returns the local path.
 
-        best = max(files, key=score)
-        return self.download(best, dest_dir)
+        ``video`` (the media filename) steers selection toward the sub whose release MATCHES this
+        encode — an entry commonly carries several sources (AT-X / EX-TV / WebRip) whose cue timing
+        differs by tens of seconds, so grabbing the biggest ``.srt`` mistimes everything (found live:
+        ep03's AT-X sub put the opening 30s late on a CR WebRip). Resolution match is the tiebreaker
+        BEFORE size."""
+        candidates = self.episode_files(title, episode, video=video)
+        best = candidates[0]
+        match = _resolution_match(video, best.name)
+        log.info(
+            "jimaku: picked %s (candidates=%d, resolution_match=%s)",
+            best.name,
+            len(candidates),
+            match,
+        )
+        # One span per fetch records WHICH release won and why — the "wrong release picked by size"
+        # class (live: an AT-X rip chosen over the matching EX source) is invisible in a report otherwise.
+        from overlay import otel_metrics
+
+        with otel_metrics.traced("subtitle.fetch", provider="jimaku") as span:
+            span.set("episode", episode if episode is not None else -1)
+            span.set("candidates", len(candidates))
+            span.set("resolution_match", match)
+            span.set("ext", best.ext or "")
+            span.set("picked", best.name)
+            return self.download(best, dest_dir)
 
 
 # Season+episode forms take precedence over a bare number and yield the E part: S01E05 / s1e5 /
@@ -341,6 +367,47 @@ _FN_NXNN = re.compile(r"\b\d{1,2}x(\d{1,3})(?!\d)", re.IGNORECASE)
 # Bare number, optionally prefixed e/ep/episode. `(?!\d)` (not `\b`) so a trailing word char like the
 # '_' in 'Show_ep05_1080p' still terminates the episode — `\b` failed there ('5' and '_' are both \w).
 _FN_EP = re.compile(r"[-_ ]\s*(?:e|ep|episode)?\s*(\d{1,3})(?!\d)", re.IGNORECASE)
+
+
+# A "1080p" tag implies the standard raster; a per-broadcaster rip that states an anamorphic size
+# (AT-X's 1440x1080) is NOT the same source as a 1080p WebRip and its cue timing drifts (different
+# ad-breaks / eyecatch). Matching resolution is the cheap signal that a sub belongs to THIS encode.
+_STD_WIDTH = {2160: 3840, 1080: 1920, 720: 1280, 576: 1024, 480: 640}
+_RES_WXH = re.compile(r"(\d{3,4})\s*[x×]\s*(\d{3,4})")
+_RES_P = re.compile(r"(?<!\d)(\d{3,4})p(?!\d)", re.IGNORECASE)
+
+
+def _resolutions(name: str) -> set[tuple[int, int]]:
+    """The (width, height) pairs a filename declares — explicit ``WxH`` plus ``Np`` normalised to its
+    standard width (``1080p`` → ``1920x1080``), so a 1080p video matches a ``1920x1080`` sub but not an
+    anamorphic ``1440x1080`` one."""
+    out = {(int(w), int(h)) for w, h in _RES_WXH.findall(name)}
+    out |= {(_STD_WIDTH.get(int(h), 0), int(h)) for h in _RES_P.findall(name)}
+    return out
+
+
+def _resolution_match(video: str | None, sub_name: str) -> bool:
+    """True when the sub's declared resolution overlaps the video's — the strongest cheap signal that
+    it's the matching release (so we don't grab an AT-X rip for a 1080p WebRip just because it's bigger)."""
+    if not video:
+        return False
+    return bool(_resolutions(Path(video).name) & _resolutions(sub_name))
+
+
+def _candidate_score(f: JimakuFile, episode: int | None, video: str | None) -> tuple:
+    """Rank a candidate: episode number → matching release (resolution) → subtitle ext → .srt → size.
+    Shared by :meth:`JimakuClient.fetch` (auto-pick = max) and :meth:`episode_files` (the picker's
+    best-first order), so the picker's top row is exactly what fetch would have grabbed."""
+    ep_hit = episode is not None and re.search(
+        rf"(?<!\d){episode:02d}(?!\d)|(?<!\d){episode}(?!\d)", f.name
+    )
+    return (
+        bool(ep_hit),
+        _resolution_match(video, f.name),
+        f.ext in (".srt", ".ass"),
+        f.ext == ".srt",
+        f.size,
+    )
 
 
 def parse_filename(path: str | Path) -> tuple[str, int | None]:

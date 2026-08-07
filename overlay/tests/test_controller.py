@@ -4,6 +4,8 @@ import functools
 import time
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import overlay.app.controller as C
 from overlay.app import miner_ui, nested_popup, tooltip
@@ -128,22 +130,17 @@ def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch):
 
 
 def test_sub_nav_keybinds_registered_with_single_string():
-    """Alt+LEFT/RIGHT/DOWN and z/Z/x must be registered as keybind + single-string script-message
-    (the known mpv gotcha: split args = key silently dead)."""
+    """Alt+LEFT/RIGHT/DOWN must be registered as keybind + single-string script-message (the known mpv
+    gotcha: split args = key silently dead). z/Z/x are NOT ours — they pass through to mpv's builtin
+    repeatable sub-delay bindings, so we must not shadow them."""
     ipc = FakeIPC()
     Reader(ipc)._register_keybinds()
     binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
-    # Sub-nav keys must be registered
-    assert "Alt+LEFT" in binds, f"Alt+LEFT not registered; binds={list(binds)}"
-    assert "Alt+RIGHT" in binds
-    assert "Alt+DOWN" in binds
-    # Sub-delay keys
-    assert "z" in binds
-    assert "Z" in binds
-    assert "x" in binds
-    # All must use the one-string convention
-    for key in ("Alt+LEFT", "Alt+RIGHT", "Alt+DOWN", "z", "Z", "x"):
+    for key in ("Alt+LEFT", "Alt+RIGHT", "Alt+DOWN"):
+        assert key in binds, f"{key} not registered; binds={list(binds)}"
         assert binds[key].startswith("script-message "), f"{key}: not script-message: {binds[key]}"
+    for native in ("z", "Z", "x"):  # left to mpv's native sub-delay (repeatable, own OSD)
+        assert native not in binds, f"{native} should pass through to mpv, not be bound by saitenka"
 
 
 def test_sub_seek_prev_sends_ipc_command():
@@ -224,6 +221,76 @@ def _msg_for(ipc, key):
         c[1]: c[2].split("script-message ", 1)[1] for c in ipc.commands if c and c[0] == "keybind"
     }
     return binds[key]
+
+
+def test_anchor_snaps_the_nearest_cue_start_to_the_playhead(monkeypatch):
+    # One-press manual re-time: at playhead 9s the nearest cue is さん (@10s), so sub-delay shifts by
+    # -1s to land it here — every later cue follows by the same offset (fixes residual auto-sync drift).
+    r, ipc = _reader_with_index(monkeypatch)
+    monkeypatch.setattr(r, "_toast", lambda *_a, **_k: None)
+    ipc.props["time-pos"] = 9.0
+    ipc.props["sub-delay"] = 0.0
+
+    r._anchor_subtitles()
+
+    assert ("set_property", "sub-delay", "-1.000") in ipc.commands
+
+
+def test_anchor_is_cumulative_from_the_current_delay(monkeypatch):
+    # A second anchor refines a first: from an existing +2s delay, snapping さん (@10s) to playhead 13s
+    # sets an absolute delay of +3s (13 - 10), not +2 plus a fresh guess.
+    r, ipc = _reader_with_index(monkeypatch)
+    monkeypatch.setattr(r, "_toast", lambda *_a, **_k: None)
+    ipc.props["time-pos"] = 13.0
+    ipc.props["sub-delay"] = 2.0
+
+    r._anchor_subtitles()
+
+    assert ("set_property", "sub-delay", "3.000") in ipc.commands
+
+
+def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch):
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    messages: list[str] = []
+    monkeypatch.setattr(r, "_toast", lambda text, *_a: messages.append(text))
+    r._sub_index = None
+
+    r._anchor_subtitles()
+
+    assert messages == ["No subtitle track to anchor"]
+    assert not [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
+
+
+@given(
+    starts_ms=st.lists(st.integers(0, 600_000), min_size=1, max_size=8, unique=True),
+    playhead_ms=st.integers(0, 600_000),
+    delay_ms=st.integers(-10_000, 10_000),
+)
+@settings(max_examples=200, deadline=None)
+def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
+    starts_ms, playhead_ms, delay_ms
+):
+    # The anchor invariant behind the single hand-picked example: whatever the cue set, current delay,
+    # and playhead, the emitted sub-delay makes the nearest displayed cue's effective start coincide
+    # with the playhead — the "snap what I'm hearing to now" contract, over the whole input space.
+    from overlay.app.sub_index import SubCue, SubIndex
+
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    r._toast = lambda *_a, **_k: None  # instance-shadow the toast; assert the delay, not the OSD
+    r._sub_index = SubIndex([SubCue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)])
+    playhead, delay = playhead_ms / 1000, delay_ms / 1000
+    ipc.props["time-pos"] = playhead
+    ipc.props["sub-delay"] = delay
+
+    r._anchor_subtitles()
+
+    emitted = [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
+    assert emitted, "anchor must set sub-delay"
+    new_delay = float(emitted[-1][2])
+    nearest = min(r._sub_index.cues, key=lambda c: abs((c.start + delay) - playhead))
+    assert abs((nearest.start + new_delay) - playhead) < 1e-3  # ±the 3-decimal delay quantisation
 
 
 def test_mine_current_video_forces_the_animated_clip(monkeypatch):

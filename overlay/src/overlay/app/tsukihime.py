@@ -269,14 +269,50 @@ class TsukiHimeClient:
         except (urllib.error.URLError, TimeoutError) as exc:
             raise TsukiHimeError(f"TsukiHime download failed: {exc}") from exc
 
-    def fetch(self, title: str, episode: int | None, dest_dir: str | Path) -> Path:
+    def _search_releases(self, title: str, episode: int | None):
         query = f"{title} {episode}" if episode is not None else title
-        releases, truncated = _matching_releases(
+        return _matching_releases(
             self._get("/search/torrents", q=query, limit=self.result_cap),
             title,
             episode,
             self.result_cap,
         )
+
+    def _release_attachments(self, release: TsukiHimeRelease) -> list[TsukiHimeAttachment]:
+        return _japanese_attachments(
+            self._get(f"/torrents/{release.id}"), imported=release.imported
+        )
+
+    def episode_candidates(
+        self, title: str, episode: int | None
+    ) -> tuple[list[tuple[TsukiHimeRelease, TsukiHimeAttachment]], bool]:
+        """Every (release, JP text attachment) pair for the episode — the interactive picker's list.
+        Deliberately WITHOUT the uniqueness guard :meth:`fetch` enforces: that guard is fetch's
+        *unattended*-safety contract (attach the wrong show silently is worse than nothing), but a human
+        looking at the panel can disambiguate. Returns ``(candidates, truncated)`` so the caller can warn
+        that fuzzy title matching may have missed releases past the search cap."""
+        releases, truncated = self._search_releases(title, episode)
+        candidates = [
+            (release, attachment)
+            for release in releases
+            for attachment in self._release_attachments(release)
+        ]
+        return candidates, truncated
+
+    def download_attachment(
+        self, release: TsukiHimeRelease, attachment: TsukiHimeAttachment, dest_dir: str | Path
+    ) -> Path:
+        """Download + decompress ONE attachment next to ``dest_dir``. Shared by :meth:`fetch` (auto)
+        and the picker's per-candidate download."""
+        subtitle = _decompress_limited(self._download(attachment), self.max_subtitle_bytes)
+        destination = (
+            Path(dest_dir) / f"tsukihime-{release.id}-{attachment.id}{attachment.extension}"
+        )
+        destination.write_bytes(subtitle)
+        return destination
+
+    def fetch(self, title: str, episode: int | None, dest_dir: str | Path) -> Path:
+        releases, truncated = self._search_releases(title, episode)
         if truncated:
             raise TsukiHimeError(
                 f"search is truncated at {self.result_cap} results; cannot prove a unique release"
@@ -287,17 +323,9 @@ class TsukiHimeClient:
                 f"expected one matching release, found {len(releases)}: {candidates}"
             )
         release = releases[0]
-        attachments = _japanese_attachments(
-            self._get(f"/torrents/{release.id}"), imported=release.imported
-        )
+        attachments = self._release_attachments(release)
         if len(attachments) != 1:
             raise TsukiHimeError(
                 f"release {release.name!r} has {len(attachments)} Japanese text attachments"
             )
-        attachment = attachments[0]
-        subtitle = _decompress_limited(self._download(attachment), self.max_subtitle_bytes)
-        destination = (
-            Path(dest_dir) / f"tsukihime-{release.id}-{attachment.id}{attachment.extension}"
-        )
-        destination.write_bytes(subtitle)
-        return destination
+        return self.download_attachment(release, attachments[0], dest_dir)

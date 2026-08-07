@@ -127,6 +127,22 @@ def launch_anki() -> bool:
     else:
         launch = ["anki"]
     log.info("AnkiConnect down — launching Anki (%s)", launch[0])
+    # macOS `open -a` hands off to LaunchServices and exits, so we can WAIT for it and surface a real
+    # failure (e.g. "Unable to find application named 'Anki'") instead of a fire-and-forget Popen that
+    # always looked like success. The app-process platforms (win/linux) must stay non-blocking.
+    if launch[0] == "open":
+        try:
+            res = subprocess.run(launch, check=False, capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as e:
+            log.warning("could not launch Anki automatically: %s", e)
+            return False
+        if res.returncode != 0:
+            log.warning(
+                "could not launch Anki automatically: %s",
+                res.stderr.strip() or f"`open -a Anki` exited {res.returncode}",
+            )
+            return False
+        return True
     try:
         subprocess.Popen(launch, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as e:
