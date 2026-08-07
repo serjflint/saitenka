@@ -154,7 +154,12 @@ prose bloat does, because two copies of a fact drift independently and one goes 
 - **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
   invent something is the doc's bug, not the reader's.
-- **Not a gate.** Same as comments — a review discipline, not a `poe` check.
+- **Structural claims ARE gated.** Prose *altitude* (bloat, duplication) stays a review discipline like
+  comments — but the concrete, checkable claims an agent-facing doc makes (AGENTS.md / ARCHITECTURE.md /
+  each SKILL.md) are bound to the code by `poe docs-refs` + `poe docs-consts` (in `all`): every
+  `poe <task>`, `.agents/<path>`, and module/tool file must resolve, and every constant default in
+  ARCHITECTURE.md's table must match its real symbol and value. A rename or retune that strips a
+  reference or drifts a constant fails the gate. See `tools/docs_check.py`.
 
 ## Testing
 
