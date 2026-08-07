@@ -56,7 +56,9 @@ Read). It only helps while the index is fresh (`repowise update`) and the MCP se
 ## Python: always `uv`
 
 `uv run` / `uvx` / `uv add` — never bare `python`/`pip`/`venv`/`pipx`. Commit `uv.lock`; standalone
-scripts declare deps via PEP 723 inline metadata.
+scripts declare deps via PEP 723 inline metadata. **Enforced, not just asked:** a `PreToolUse` hook
+(`.agents/hooks/block-bare-python.py`, wired in `.claude/settings.json` beside the search guard) denies
+a bare interpreter at the moment of action — a path-qualified one (`.venv/bin/python`) stays fine.
 
 ## Project conventions
 
