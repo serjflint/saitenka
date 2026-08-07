@@ -62,6 +62,11 @@ prompting.** An unverified research brief is a hypothesis, never a result.
    (`AGENTS.md` → **Tooling** / the searching rule). The helper `scripts/verify.py owner/repo …
    https://url …` runs this grounding in one shot — existence (NOT-FOUND ⇒ fabrication), maintenance
    (abandoned = 3yr), latest release, link-resolves — and exits non-zero if anything is unverified.
+   For a whole candidate list at once, `scripts/gh_audit.py owner/repo …` prints a triage table
+   (stars · archived · 90-day commits · latest release · license → a per-repo verdict:
+   MAINTAINED / STALE / ARCHIVED / ABANDONED / FABRICATED), same 404-gate exit — the insight layer
+   above verify.py's pass/fail (it caught a report's "v2.0" claim whose real latest release was two
+   years old).
 5. **Triage the signals → widen / deepen / sharpen.** Read what the round actually returned and pick
    the next move — loop back to step 2, or finalize. Let the signal choose the action:
    - **Widen** when results only confirm known tools, a `gh search` topic surfaces a peer the prose

@@ -66,6 +66,21 @@ if vfy.is_file():
     for shimmed in ('"grep"', '"find"', '"rg"', '"ripgrep"', '"pgrep"'):
         need(shimmed not in src, f"verify.py must not invoke shimmed {shimmed}")
 
+# the activity-audit companion: exists, parses, is grep-free, has the fabrication gate, SKILL points at it
+aud = skill / "scripts" / "gh_audit.py"
+need(aud.is_file(), "scripts/gh_audit.py missing")
+need("gh_audit.py" in text, "SKILL.md lost the scripts/gh_audit.py pointer")
+if aud.is_file():
+    asrc = aud.read_text()
+    try:
+        import ast
+        ast.parse(asrc)
+    except SyntaxError as exc:
+        need(False, f"gh_audit.py does not parse: {exc}")
+    need('"gh"' in asrc and "FABRICATED" in asrc, "gh_audit.py lost its gh call / fabrication gate")
+    for shimmed in ('"grep"', '"find"', '"rg"', '"ripgrep"', '"pgrep"'):
+        need(shimmed not in asrc, f"gh_audit.py must not invoke shimmed {shimmed}")
+
 if fail:
     print("research smoke FAILED")
     for f in fail:
