@@ -82,6 +82,27 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     )
 
 
+def test_startup_hint_clears_when_overlay_live_not_on_first_cue():
+    # Regression: mpv's "saitenka starting…" OSD breadcrumb must clear the moment the overlay can draw
+    # (osd-dimensions resolved), NOT wait for the first subtitle cue — a sub-less OP (no dialogue for
+    # ~30s) otherwise leaves it up long after startup finished, reading as a hang.
+    ipc = FakeIPC()
+    r = Reader(ipc)
+
+    r._maybe_clear_startup_hint()  # osd-dimensions unresolved → overlay can't place anything yet → keep it
+    assert r._startup_hint_cleared is False
+    assert ("show-text", "", 1) not in ipc.commands
+
+    ipc.props["osd-dimensions"] = {"w": 1920, "h": 1080}
+    r._maybe_clear_startup_hint()  # overlay is live → clear now, no subtitle required
+    assert r._startup_hint_cleared is True
+    assert ("show-text", "", 1) in ipc.commands  # empty 1ms show-text == clear_startup_hint
+
+    before = ipc.commands.count(("show-text", "", 1))
+    r._maybe_clear_startup_hint()  # one-shot — never clears twice
+    assert ipc.commands.count(("show-text", "", 1)) == before
+
+
 def test_load_deps_async_marks_loading(monkeypatch):
     import overlay.app.reader_deps as rd
 

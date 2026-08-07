@@ -14,6 +14,8 @@ import urllib.error
 
 import pytest
 import stamina
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from overlay.app import jimaku
 
@@ -219,6 +221,80 @@ def test_fetch_picks_episode_match_srt_over_ass(monkeypatch, tmp_path):
     assert picked["jf"].url == "u-srt"
 
 
+def test_fetch_prefers_the_release_matching_the_video_resolution(monkeypatch, tmp_path):
+    """A jimaku entry carries several sources whose cue timing differs by tens of seconds; the sub whose
+    resolution matches THIS encode wins over a bigger off-release one (live: an AT-X 1440x1080 rip put a
+    1080p WebRip episode 30s out of sync purely because its .srt was larger)."""
+    files = [
+        jimaku.JimakuFile(
+            "[GroupB] Show - 03 (Broadcast 1440x1080 MPEG2 AAC).srt", "u-broadcast", 21_874
+        ),
+        jimaku.JimakuFile("[GroupA] Show - 03 (WebRip 1920x1080 x265 AAC).srt", "u-webrip", 20_689),
+    ]
+    picked: dict = {}
+    monkeypatch.setattr(
+        jimaku.JimakuClient, "search", lambda _self, title: [{"id": 3, "name": title}]
+    )
+    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda _self, _eid, _ep: files)
+    monkeypatch.setattr(
+        jimaku.JimakuClient,
+        "download",
+        lambda _self, jf, _d: picked.setdefault("jf", jf) or tmp_path / jf.name,
+    )
+    _client().fetch("Show", 3, tmp_path, video="[Grp] Show - 03 [1080p CR WEBRip HEVC].mkv")
+    assert (
+        picked["jf"].url == "u-webrip"
+    )  # 1920x1080 match beats the larger 1440x1080 broadcast file
+
+
+def test_fetch_span_records_the_picked_release_and_resolution_match(monkeypatch, tmp_path):
+    """The report signal for the "wrong release picked" class: one subtitle.fetch span per fetch names
+    the winner and whether its resolution matched the video, so a bad pick is visible without the subs."""
+    from contextlib import contextmanager
+
+    from overlay import otel_metrics
+
+    files = [
+        jimaku.JimakuFile("[GroupB] Show - 03 (Broadcast 1440x1080).srt", "u-broadcast", 21_874),
+        jimaku.JimakuFile("[GroupA] Show - 03 (WebRip 1920x1080).srt", "u-webrip", 20_689),
+    ]
+    monkeypatch.setattr(jimaku.JimakuClient, "search", lambda _s, title: [{"id": 3, "name": title}])
+    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda _s, _e, _ep: files)
+    monkeypatch.setattr(jimaku.JimakuClient, "download", lambda _s, jf, _d: tmp_path / jf.name)
+    attrs: dict = {}
+
+    @contextmanager
+    def _traced(_name, **_kw):
+        class _Span:
+            def set(self, k, v):
+                attrs[k] = v
+
+        yield _Span()
+
+    monkeypatch.setattr(otel_metrics, "traced", _traced)
+    _client().fetch("Show", 3, tmp_path, video="[Grp] Show - 03 [1080p WEBRip].mkv")
+
+    assert attrs["picked"] == "[GroupA] Show - 03 (WebRip 1920x1080).srt"
+    assert attrs["resolution_match"] is True  # the 1920x1080 WebRip release matched the 1080p video
+    assert attrs["episode"] == 3
+    assert attrs["candidates"] == 2
+
+
+def test_episode_files_lists_candidates_best_match_first(monkeypatch):
+    """Window 1's source list: same ranking as fetch's auto-pick, best-first — so row 0 is exactly
+    what fetch would have grabbed, and the user overrides a mistimed pick by choosing a lower row."""
+    files = [
+        jimaku.JimakuFile("[GroupB] Show - 03 (Broadcast 1440x1080).srt", "u-broadcast", 21_874),
+        jimaku.JimakuFile("[GroupA] Show - 03 (WebRip 1920x1080).srt", "u-webrip", 20_689),
+        jimaku.JimakuFile("Show - 99.srt", "u-off", 9_999_999),
+    ]
+    monkeypatch.setattr(jimaku.JimakuClient, "search", lambda _s, title: [{"id": 3, "name": title}])
+    monkeypatch.setattr(jimaku.JimakuClient, "files", lambda _s, _e, _ep: files)
+    ordered = _client().episode_files("Show", 3, video="[Grp] Show - 03 [1080p WEBRip].mkv")
+    # 03-in-name beats the huge off-episode file; among the two ep-03 rips the 1920x1080 match wins.
+    assert [f.url for f in ordered] == ["u-webrip", "u-broadcast", "u-off"]
+
+
 def test_fetch_no_entries_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(jimaku.JimakuClient, "search", lambda _self, _title: [])
     with pytest.raises(jimaku.JimakuError, match="no jimaku entry"):
@@ -275,3 +351,62 @@ def test_parse_filename(filename, expected):
     """(title, episode) from a release-named file: strip [group]/(tag), prefer a SxxExx/NxNN season+
     episode over a bare trailing number, tidy the title. No number → episode None."""
     assert jimaku.parse_filename(filename) == expected
+
+
+# --- fuzz: the release-name parsers must never raise on adversarial input -------------------------
+# These consume unfiltered real-world filenames (jimaku file names + the played media name). A crash
+# here aborts the whole subtitle fetch, so the contract is total: any str → a value, never an
+# exception. (Complements sub_index.parse_srt's existing `poe fuzz` never-raise contract.)
+
+
+@given(name=st.text())
+@settings(max_examples=300, deadline=None)
+def test_resolutions_never_raises(name):
+    assert isinstance(jimaku._resolutions(name), set)
+
+
+@given(video=st.text(), sub=st.text())
+@settings(max_examples=300, deadline=None)
+def test_resolution_match_never_raises(video, sub):
+    assert isinstance(jimaku._resolution_match(video or None, sub), bool)
+
+
+@given(name=st.text())
+@settings(max_examples=300, deadline=None)
+def test_parse_filename_never_raises(name):
+    title, episode = jimaku.parse_filename(name)
+    assert isinstance(title, str)
+    assert episode is None or isinstance(episode, int)
+
+
+# --- invariant: resolution-match dominates size in the picker (not just the one live example) ------
+
+_STD_RES = [(1920, 1080), (1280, 720), (3840, 2160)]
+
+
+@given(
+    match_size=st.integers(0, 5_000),  # the matching release is deliberately the SMALLER file…
+    other_size=st.integers(6_000, 999_999),  # …and the non-matching release the larger one
+    res_idx=st.integers(0, len(_STD_RES) - 1),
+)
+@settings(max_examples=100, deadline=None)
+def test_picker_resolution_match_dominates_size(match_size, other_size, res_idx):
+    """The score tuple ranks `_resolution_match` ABOVE `size`, so the release whose resolution matches
+    the video always wins over a bigger off-release file — the property behind the live AT-X-vs-EX bug,
+    generalised past the single hand-picked pair."""
+    w, h = _STD_RES[res_idx]
+    other_w, other_h = _STD_RES[(res_idx + 1) % len(_STD_RES)]  # a different standard raster
+    video = f"[Grp] Show - 03 [{h}p WEBRip HEVC].mkv"
+    match = jimaku.JimakuFile(f"[A] Show - 03 ({w}x{h}).srt", "u-match", match_size)
+    other = jimaku.JimakuFile(f"[B] Show - 03 ({other_w}x{other_h}).srt", "u-other", other_size)
+    picked: dict = {}
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(jimaku.JimakuClient, "search", lambda _s, title: [{"id": 1, "name": title}])
+        mp.setattr(jimaku.JimakuClient, "files", lambda _s, _e, _ep: [other, match])
+        mp.setattr(
+            jimaku.JimakuClient,
+            "download",
+            lambda _s, jf, _d: picked.setdefault("jf", jf) or jimaku.Path(jf.name),
+        )
+        jimaku.JimakuClient(api_key="testkey").fetch("Show", 3, "/tmp", video=video)
+    assert picked["jf"].url == "u-match"  # resolution match beats the larger non-matching file

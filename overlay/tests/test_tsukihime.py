@@ -135,6 +135,46 @@ def test_non_unique_japanese_text_attachment_is_non_destructive(attachments, tmp
     assert not list(tmp_path.iterdir())
 
 
+def test_episode_candidates_lists_every_release_without_the_uniqueness_guard():
+    """The interactive picker's list: ambiguity that ``fetch`` rejects becomes a multi-row list here —
+    a human disambiguates. One detail call per matching release."""
+    search_url = f"{tsukihime.API_BASE}/search/torrents"
+    opener = Opener(
+        [
+            Response(_json(_search("[A] Show - 01.mkv", "[B] Show - 01.mkv")), search_url),
+            Response(_json(_detail(_attachment(9))), f"{tsukihime.API_BASE}/torrents/1"),
+            Response(_json(_detail(_attachment(10))), f"{tsukihime.API_BASE}/torrents/2"),
+        ]
+    )
+
+    pairs, truncated = tsukihime.TsukiHimeClient(opener=opener).episode_candidates("Show", 1)
+
+    assert truncated is False
+    assert [(release.name, attachment.id) for release, attachment in pairs] == [
+        ("[A] Show - 01.mkv", 9),
+        ("[B] Show - 01.mkv", 10),
+    ]
+
+
+def test_episode_candidates_flags_truncation_instead_of_raising():
+    """Unlike ``fetch`` (which raises on a truncated search), the picker path returns ``truncated=True``
+    so the caller can warn that fuzzy matching may have missed releases."""
+    opener = Opener(
+        [
+            Response(
+                _json(_search("[A] Show - 01.mkv", total=5)),
+                f"{tsukihime.API_BASE}/search/torrents",
+            ),
+            Response(_json(_detail(_attachment(9))), f"{tsukihime.API_BASE}/torrents/1"),
+        ]
+    )
+
+    pairs, truncated = tsukihime.TsukiHimeClient(opener=opener).episode_candidates("Show", 1)
+
+    assert truncated is True
+    assert len(pairs) == 1
+
+
 def test_oversized_response_stops_before_json_decode(tmp_path):
     opener = Opener([Response(b"{}x", f"{tsukihime.API_BASE}/search/torrents")])
     client = tsukihime.TsukiHimeClient(opener=opener, max_response_bytes=2)

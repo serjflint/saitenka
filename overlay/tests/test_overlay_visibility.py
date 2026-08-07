@@ -11,7 +11,7 @@ from overlay.mpvio.osd import Overlay
 class FakeIPC:
     def __init__(self):
         self.commands: list[tuple] = []
-        self.props = {"sub-visibility": False, "osd-level": 0}
+        self.props = {"sub-visibility": False}  # osd-level left to mpv; toggle no longer manages it
 
     def command(self, *args):
         self.commands.append(args)
@@ -53,7 +53,7 @@ def test_showing_overlay_restores_latest_hidden_draw():
     overlay.close()
 
 
-def test_alt_o_hides_saitenka_and_restores_native_osd():
+def test_alt_o_hides_saitenka_and_restores_native_subs():
     ipc = FakeIPC()
     reader = Reader(ipc)
     reader.ov.show(_image(), oid=OverlayId.SUB)
@@ -69,7 +69,8 @@ def test_alt_o_hides_saitenka_and_restores_native_osd():
 
     assert ("overlay-remove", OverlayId.SUB) in ipc.commands
     assert ("set_property", "sub-visibility", True) in ipc.commands
-    assert ("set_property", "osd-level", 1) in ipc.commands
+    # osd-level is NOT touched — it stays at mpv's default (1) so native OSD messages work throughout
+    assert not any(c[:2] == ("set_property", "osd-level") for c in ipc.commands)
     reader.close()
 
 
@@ -81,7 +82,7 @@ def test_showing_overlay_restores_saitenka_subtitle_policy():
     reader.toggle_overlay()
 
     assert ipc.props["sub-visibility"] is False
-    assert ipc.props["osd-level"] == 0
+    assert "osd-level" not in ipc.props  # toggle never manages osd-level anymore
 
 
 def test_overlay_toggle_key_is_configurable():

@@ -26,3 +26,4 @@ class OverlayId(IntEnum):
     ANALYSIS = 8  # reserved for #66; keeps the two large surfaces collision-free
     LOADING = 9  # top-left "loading dictionaries" spinner during progressive startup
     HELP = 10
+    PICKER = 11  # Window 1: the jimaku subtitle-source download picker

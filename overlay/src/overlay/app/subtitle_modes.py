@@ -74,6 +74,9 @@ class SubtitleFetchResult:
     status: str
     select_if_unchanged: bool
     initial_sid: int | str | None
+    replace: bool = (
+        False  # a user retry: swap the on-screen (mistimed) JP for the fresh re-synced one
+    )
 
 
 def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
@@ -176,7 +179,11 @@ def announce_track(reader: Reader, sid) -> None:
     for index, track in enumerate(tracks, 1):
         if track.get("id") == sid:
             reader._last_announced_sid = sid
-            reader._toast(f"subtitles: {_language_name(track.get('lang'))} ({index}/{len(tracks)})")
+            name = _language_name(track.get("lang"))
+            # Log the same signal the toast shows: a surprising "unknown language (10/11)" here is the
+            # earliest sign of a wrong-track selection, and belongs in the bundle, not just on screen.
+            log.info("subtitles announced: %s (%d/%d) sid=%s", name, index, len(tracks), sid)
+            reader._toast(f"subtitles: {name} ({index}/{len(tracks)})")
             return
 
 
@@ -224,9 +231,12 @@ def start_fetch(
     *,
     name: str = "sub-provider",
     select_if_unchanged: bool = False,
+    replace: bool = False,
     on_done: Callable[[], None] | None = None,
 ) -> None:
-    """Run provider I/O off-thread; mpv IPC stays on the reader thread."""
+    """Run provider I/O off-thread; mpv IPC stays on the reader thread. ``replace`` (a user retry)
+    swaps the current on-screen JP track for the freshly fetched/re-synced one; the background path
+    leaves ``replace`` false so it never disrupts what you're watching."""
     initial_sid = reader._get("sid") if select_if_unchanged else None
 
     def work() -> None:
@@ -234,7 +244,7 @@ def start_fetch(
             try:
                 path, status = fetch()
                 reader._subtitle_results.put(
-                    SubtitleFetchResult(path, status, select_if_unchanged, initial_sid)
+                    SubtitleFetchResult(path, status, select_if_unchanged, initial_sid, replace)
                 )
             except (
                 Exception
@@ -246,6 +256,7 @@ def start_fetch(
                         f"Japanese subtitle fetch failed: {exc}",
                         select_if_unchanged,
                         initial_sid,
+                        replace,
                     )
                 )
         finally:
@@ -266,29 +277,140 @@ def _finish_retry(reader: Reader) -> None:
         reader.episode.subtitle.retry_active = False
 
 
-def retry(reader: Reader) -> None:
+def _current_external_sub(ipc) -> Path | None:
+    """The on-screen primary subtitle file, if it's an external srt (ours or a user ``--sub-file``)."""
+    from pathlib import Path
+
+    from overlay.app.embedded_subs import _selected_sub_track
+
+    track = _selected_sub_track(ipc)
+    ext = track.get("external-filename") if track else None
+    return Path(ext) if ext else None
+
+
+def _start_resync_window(reader: Reader, video_path: str, sub: Path) -> None:
+    """Re-time the subs you already have from the CURRENT playhead onward (no provider query) — the
+    user's "sync from here" shortcut. A drifting source (right after the OP, early before it) can't be
+    fixed by one whole-file offset, so this re-times only the segment you're watching; press again at
+    the next drift point. Falls back to a whole-file re-sync when the window can't align."""
+    from pathlib import Path
+
+    from overlay.app.resync import resync_current, resync_window
+
+    playhead = reader._get("time-pos")
+    start_s = float(playhead) if playhead is not None else 0.0
+    reader._toast("Re-timing subtitles from here…")
+
+    def do() -> tuple[Path | None, str]:
+        out = resync_window(Path(video_path), sub, start_s=start_s)
+        if out is None:  # window couldn't align → whole-file re-sync (in-place, returns sub)
+            whole = resync_current(Path(video_path), sub)
+            return whole, f"subtitles re-synced: {whole.name}"
+        if out == sub:  # window already aligned here → nothing to swap
+            return None, "subtitles already aligned here"
+        return out, f"subtitles re-timed from {int(start_s)}s"
+
+    start_fetch(
+        reader, do, name="subtitle-resync", replace=True, on_done=lambda: _finish_retry(reader)
+    )
+
+
+def _start_provider_fetch(reader: Reader, video_path: str) -> None:
     factory = reader.episode.subtitle.retry_factory
     if factory is None:
+        _finish_retry(reader)
         reader._toast("No Japanese subtitle providers enabled", "warn")
         return
-    video_path = reader._get("path")
-    if not video_path:
-        reader._toast("No media loaded for subtitle search", "warn")
-        return
-    with reader.episode.subtitle.retry_lock:
-        if reader.episode.subtitle.retry_active:
-            reader._toast("Japanese subtitle search already running", "warn")
-            return
-        reader.episode.subtitle.retry_active = True
     try:
-        fetch = factory(str(video_path))
+        fetch = factory(video_path)
     except Exception as exc:
         _finish_retry(reader)
         log.warning("subtitle retry setup failed", exc_info=True)
         reader._toast(f"Japanese subtitle search failed: {exc}", "warn")
         return
     reader._toast("Searching Japanese subtitle providers…")
-    start_fetch(reader, fetch, name="subtitle-retry", on_done=lambda: _finish_retry(reader))
+    start_fetch(
+        reader, fetch, name="subtitle-retry", replace=True, on_done=lambda: _finish_retry(reader)
+    )
+
+
+def retry(reader: Reader) -> None:
+    """The subtitle-sync keybind. If you already have subs on screen, RE-SYNC them in place (no
+    provider query — you only want them re-timed). Only when there are no external subs does it fall
+    back to querying providers."""
+    video_path = reader._get("path")
+    if not video_path:
+        reader._toast("No media loaded for subtitle search", "warn")
+        return
+    with reader.episode.subtitle.retry_lock:
+        if reader.episode.subtitle.retry_active:
+            reader._toast("Subtitle sync already running", "warn")
+            return
+        reader.episode.subtitle.retry_active = True
+    current = _current_external_sub(reader.ipc)
+    if current is not None:
+        _start_resync_window(reader, video_path, current)
+    else:
+        _start_provider_fetch(reader, video_path)
+
+
+def _replace_japanese_track(reader: Reader, path, status: str) -> None:
+    """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry). Drops the
+    stale external track(s) first — mpv caches an already-loaded external's cues in memory, and
+    ``discover_tracks`` would pick the older duplicate JP — then re-adds + selects the fresh one and
+    rebuilds the lookahead index, so the corrected timing shows immediately."""
+    from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+    for track in sub_tracks(reader.ipc):
+        if track.get("external") and track.get("id") is not None:
+            reader.ipc.command("sub-remove", track["id"])
+    reader.ipc.command("set_property", "secondary-sid", "no")
+    reader._translation_secondary_sid = None
+    reader.ipc.command("sub-add", str(path), "select", "", "jpn")  # "select" → mpv selects it now
+    reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
+    reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
+    reader.subtitle_language = "jp"
+    reader._sub_index = None
+    reader.set_subtitle("")
+    build_sub_index_for_current_track(reader)
+    reader._toast("Japanese subtitles re-synced")
+    log.info("%s", status)
+
+
+def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> None:
+    """Non-disruptive arrival: add the fetched JP track but keep the current selection unless the user
+    hasn't touched it and had no JP yet (then auto-select). Leaves English on screen for an explicit
+    Alt+t otherwise — the background-fetch contract."""
+    path, status = result.path, result.status
+    current_sid = reader._get("sid")
+    had_japanese = reader.jp_sid is not None
+    reader.ipc.command("sub-add", str(path), "auto", "", "jpn")
+    tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
+    reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
+    select_japanese = (
+        result.select_if_unchanged
+        and not had_japanese
+        and current_sid == result.initial_sid
+        and reader.jp_sid is not None
+    )
+    if not select_japanese:
+        reader.ipc.command("set_property", "sid", current_sid if current_sid is not None else "no")
+        reader._toast("Japanese subtitles ready — Alt+t to switch")
+        log.info("%s", status)
+        return
+    reader.ipc.command("set_property", "secondary-sid", "no")
+    reader._translation_secondary_sid = None
+    reader.ipc.command("set_property", "sid", reader.jp_sid)
+    reader.subtitle_language = "jp"
+    reader._sub_index = None
+    reader.set_subtitle("")
+    if reader._translation_visible():
+        setup_secondary(reader)
+    from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+    build_sub_index_for_current_track(reader)
+    reader._toast("Japanese subtitles ready")
+    log.info("%s", status)
 
 
 def apply_fetch_results(reader: Reader) -> None:
@@ -297,40 +419,12 @@ def apply_fetch_results(reader: Reader) -> None:
             result = reader._subtitle_results.get_nowait()
         except queue.Empty:
             return
-        path, status = result.path, result.status
-        if path is None:
-            log.warning("%s", status)
-            reader._toast(status, "warn")
-            continue
-        current_sid = reader._get("sid")
-        had_japanese = reader.jp_sid is not None
-        reader.ipc.command("sub-add", str(path), "auto", "", "jpn")
-        tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
-        reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-        select_japanese = (
-            result.select_if_unchanged
-            and not had_japanese
-            and current_sid == result.initial_sid
-            and reader.jp_sid is not None
-        )
-        if not select_japanese:
-            reader.ipc.command(
-                "set_property", "sid", current_sid if current_sid is not None else "no"
-            )
-            reader._toast("Japanese subtitles ready — Alt+t to switch")
-            log.info("%s", status)
-            continue
-
-        reader.ipc.command("set_property", "secondary-sid", "no")
-        reader._translation_secondary_sid = None
-        reader.ipc.command("set_property", "sid", reader.jp_sid)
-        reader.subtitle_language = "jp"
-        reader._sub_index = None
-        reader.set_subtitle("")
-        if reader._translation_visible():
-            setup_secondary(reader)
-        from overlay.app.embedded_subs import build_sub_index_for_current_track
-
-        build_sub_index_for_current_track(reader)
-        reader._toast("Japanese subtitles ready")
-        log.info("%s", status)
+        if result.path is None:
+            log.warning("%s", result.status)
+            reader._toast(result.status, "warn")
+        # A user retry while watching Japanese swaps the on-screen (mistimed) track for the re-synced
+        # file; from English it falls through to the non-disruptive add (fetch JP, keep EN until Alt+t).
+        elif result.replace and reader.subtitle_language == "jp":
+            _replace_japanese_track(reader, result.path, result.status)
+        else:
+            _add_background_japanese(reader, result)

@@ -15,6 +15,7 @@ TRANS_MSG = "saitenka-translate"
 OVERLAY_TOGGLE_MSG = "saitenka-toggle-overlay"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 SUBTITLE_RETRY_MSG = "saitenka-retry-subtitle-providers"
+SUB_PICKER_MSG = "saitenka-sub-picker"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 BOOKMARK_MSG = "saitenka-toggle-bookmark"
 SIDEBAR_MSG = "saitenka-toggle-sidebar"
@@ -36,9 +37,7 @@ CLICK_MSG = "saitenka-click"
 SUB_PREV_MSG = "saitenka-sub-prev"
 SUB_NEXT_MSG = "saitenka-sub-next"
 SUB_REPLAY_MSG = "saitenka-sub-replay"
-SUB_DELAY_MINUS_MSG = "saitenka-sub-delay-minus"
-SUB_DELAY_PLUS_MSG = "saitenka-sub-delay-plus"
-SUB_DELAY_RESET_MSG = "saitenka-sub-delay-reset"
+SUB_ANCHOR_MSG = "saitenka-sub-anchor"
 KANJI_MSG = "saitenka-kanji"
 TIP_UP_MSG = "saitenka-tip-up"
 TIP_DOWN_MSG = "saitenka-tip-down"
@@ -93,9 +92,15 @@ BINDINGS: tuple[BindingSpec, ...] = (
     ),
     BindingSpec(
         "Essentials & language",
-        "Retry Japanese subtitle providers",
+        "Re-time subtitles from here (or fetch)",
         SUBTITLE_RETRY_MSG,
         key_attr="subtitle_retry_key",
+    ),
+    BindingSpec(
+        "Essentials & language",
+        "Download subtitles (pick source)",
+        SUB_PICKER_MSG,
+        key_attr="sub_picker_key",
     ),
     BindingSpec(
         "Essentials & language",
@@ -118,9 +123,9 @@ BINDINGS: tuple[BindingSpec, ...] = (
     BindingSpec(
         "Subtitle navigation", "Replay current subtitle", SUB_REPLAY_MSG, key_attr="sub_replay_key"
     ),
-    BindingSpec("Subtitle navigation", "Subtitle delay -0.1 s", SUB_DELAY_MINUS_MSG, key="z"),
-    BindingSpec("Subtitle navigation", "Subtitle delay +0.1 s", SUB_DELAY_PLUS_MSG, key="Z"),
-    BindingSpec("Subtitle navigation", "Reset subtitle delay", SUB_DELAY_RESET_MSG, key="x"),
+    BindingSpec(
+        "Subtitle navigation", "Anchor subtitles to current time", SUB_ANCHOR_MSG, key="Ctrl+z"
+    ),
     BindingSpec("Capture & mining", "Bookmark active cue", BOOKMARK_MSG, key_attr="bookmark_key"),
     BindingSpec(
         "Capture & mining",
@@ -238,6 +243,14 @@ BINDINGS: tuple[BindingSpec, ...] = (
         None,
         scope="mpv",
         key="SPACE",
+        source="mpv",
+    ),
+    BindingSpec(
+        "Useful mpv controls",
+        "Subtitle delay −0.1 / +0.1 s (hold to repeat)",
+        None,  # mpv builtin z/Z/x (repeatable, native OSD) — not intercepted by saitenka
+        scope="mpv",
+        key="z / Z / x",
         source="mpv",
     ),
     BindingSpec(

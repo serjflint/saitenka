@@ -10,9 +10,11 @@ Scope + cost (measured on the 9-dict set at a fixed width/theme): the top-32k po
 ~200–350k unique masks ≈ **60–140 MB zlib** — cheaper than the ~1 GB first-viewport cache, but it only
 saves the *raster half* of a build (the first-viewport direct-paint already skips the WHOLE pipeline for a
 cached word). It is **opt-out, USED WHEN AVAILABLE**: ``saitenka prewarm`` builds it; a session with a
-prebuilt ``mask-atlas.sqlite`` bulk-loads it into a shared read dict (:func:`load_into` — ~2–3 s + ~150 MB
-RAM) on a background thread and writes back live misses; no prebuilt atlas → nothing loads. A per-glyph
-SQLite lookup would be too slow for the hot path, hence the one-pass in-memory load. The alpha bytes
+prebuilt ``mask-atlas.sqlite`` reads it LAZILY, one glyph at a time (:func:`get_one`), and writes back
+live misses; no prebuilt atlas → nothing loads. The per-thread ``fonts.glyph_mask`` LRU fronts the atlas,
+so a PK lookup happens at most once per ``(glyph, phase, thread)`` — a session touches only a few thousand
+unique glyphs, so lazy reads cost far less than deserializing all N masks, and startup no longer stalls on
+a full ~GB load into RAM (the earlier design; :func:`load_into` is kept for prewarm/tests). The alpha bytes
 round-trip byte-identically (``Image.frombytes(mode, size, data).im``), so a loaded mask draws
 pixel-for-pixel identically to a fresh ``getmask2`` — proven in ``tests/test_mask_atlas``.
 """
@@ -85,8 +87,9 @@ def deserialize_core(w: int, h: int, mode: str, data: bytes):
 
 class MaskAtlas:
     """A bounded, opt-in SQLite store of ``getmask2`` alpha bitmaps. Best-effort: any :class:`sqlite3.Error`
-    degrades to live rasterisation. Per-thread write connections (WAL); reads go through :meth:`load_into`
-    in one pass, never per-glyph (too slow for the hot path)."""
+    degrades to live rasterisation. Per-thread connections (WAL). Runtime reads are LAZY and per-glyph
+    (:meth:`get_one`, fronted by the per-thread ``glyph_mask`` LRU) — a session pays only for the glyphs it
+    draws, with no bulk load into RAM. :meth:`load_into` (bulk one-pass) is retained for prewarm/tests."""
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -231,6 +234,40 @@ class MaskAtlas:
         except (sqlite3.Error, ValueError):  # pragma: no cover — garbled blob won't reconstruct
             log.debug("mask atlas load failed", exc_info=True)
             return 0
+
+    # A batched `get_many((keys)) → one `... WHERE (font_id,text,mode,sx,sy) IN (…)` is the documented
+    # escape hatch IF query dispatch ever dominates — but measured it does NOT: the cost is the first-touch
+    # disk page-in (~125 µs/glyph on an 864 MB atlas), which a batched query faults in identically; dispatch
+    # is ~6 µs and repeats are free (the glyph_mask LRU + OS page cache). Hiding the page-in needs a
+    # PREDICTIVE background warm (per the tokenized-subs idea), not batching. Not built until it pays.
+    def get_one(self, font_id: str, text: str, mode: str, start: tuple[float, float]):
+        """Lazy single-glyph read: one primary-key ``SELECT`` + deserialize → ``(core, offset)``, or
+        ``None`` on miss/error. The runtime alternative to :meth:`load_into` — the per-thread
+        ``fonts.glyph_mask`` LRU fronts it, so the atlas is queried at most once per
+        ``(glyph, phase, thread)`` and a session pays only for the glyphs it actually draws (a few
+        thousand), never deserializing all N up front. Measured ~6 µs PK lookup + ~150 µs deserialize on
+        an 864 MB / 587k-mask atlas — fine for this second-tier miss path, and it removes the ~9 s / GB
+        bulk-load-into-RAM startup stall. Per-thread WAL connection (:meth:`_conn`) → free-threading-safe
+        under concurrent prefetch-worker reads. Byte-identical to a fresh ``getmask2`` (same round-trip as
+        :meth:`load_into`)."""
+        try:
+            sx, sy = _phase(start)
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT offx, offy, w, h, alpha FROM masks "
+                    "WHERE font_id=? AND text=? AND mode=? AND sx=? AND sy=?",
+                    (font_id, text, mode, sx, sy),
+                )
+                .fetchone()
+            )
+            if row is None:
+                return None
+            offx, offy, w, h, alpha = row
+            return deserialize_core(w, h, mode, zlib.decompress(alpha)), (offx, offy)
+        except (sqlite3.Error, ValueError):  # pragma: no cover — degrade to live raster (safe)
+            log.debug("mask atlas get_one failed", exc_info=True)
+            return None
 
     def count(self) -> int:
         try:

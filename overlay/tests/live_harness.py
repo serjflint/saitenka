@@ -85,7 +85,7 @@ def live_reader(*, paused: bool = True):
             "--force-window=yes",
             "--keep-open=yes",
             "--sub-visibility=no",
-            "--osd-level=0",
+            "--osd-level=1",
             "--pause" if paused else "--loop-file=inf",
             "--no-config",
             f"--sub-file={srt}",

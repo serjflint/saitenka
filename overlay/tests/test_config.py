@@ -7,8 +7,17 @@ from overlay.app.config import (
     config_path,
     expand_paths,
     load_config,
+    resolve_resync_split_penalty,
     resolve_telemetry,
 )
+
+
+def test_resolve_resync_split_penalty_defaults_to_none_and_parses_a_float():
+    assert (
+        resolve_resync_split_penalty({}) is None
+    )  # unset → no --split-penalty flag (alass default)
+    assert resolve_resync_split_penalty({"resync_split_penalty": 3}) == 3.0
+    assert resolve_resync_split_penalty({"resync_split_penalty": 0.5}) == 0.5
 
 
 def test_load_config_and_expand_paths(tmp_path, monkeypatch):

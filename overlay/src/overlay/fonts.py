@@ -179,19 +179,25 @@ def glyph_mask(
 
 
 def _atlas_read(gid: str, text: str, mode: str, start: tuple[float, float]):
-    """A persistent-atlas lookup for a bulk-loaded mask — the mask, or None if the atlas is off / misses.
-    Counts the atlas hit:miss ratio (the "was the prewarm worth it?" telemetry)."""
-    if _ATLAS_MEM is None:
-        return None
-    from overlay.mask_atlas import mem_key
+    """A persistent-atlas lookup — the mask, or None if the atlas is off / misses. Counts the atlas
+    hit:miss ratio (the "was the prewarm worth it?" telemetry). Two sources: a bulk-loaded ``_ATLAS_MEM``
+    dict (prewarm/tests) if present, else a LAZY per-glyph ``get_one`` against the write-back atlas — the
+    per-thread ``glyph_mask`` LRU fronts this, so a session queries each glyph at most once per thread and
+    never bulk-loads the whole atlas into RAM."""
+    if _ATLAS_MEM is not None:
+        from overlay.mask_atlas import mem_key
 
-    amask = _ATLAS_MEM.get(mem_key(gid, text, mode, start))
+        amask = _ATLAS_MEM.get(mem_key(gid, text, mode, start))
+    elif _ATLAS_WRITE is not None:
+        amask = _ATLAS_WRITE.get_one(gid, text, mode, start)
+    else:
+        return None
     if amask is not None:
         if otel_metrics.mask_atlas_hits is not None:
             otel_metrics.mask_atlas_hits.add(1)
         return amask
     if otel_metrics.mask_atlas_misses is not None:
-        otel_metrics.mask_atlas_misses.add(1)  # atlas loaded but this glyph/phase wasn't in it
+        otel_metrics.mask_atlas_misses.add(1)  # atlas on, but this glyph/phase wasn't stored
     return None
 
 

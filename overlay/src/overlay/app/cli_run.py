@@ -325,6 +325,9 @@ def _launch_mpv_and_connect(
         fullscreen=fullscreen,
         extra_args=mpv_arg,
     )
+    from overlay.session import session_id
+
+    print(f"[saitenka] session {session_id()} — quote this when reporting a bug")
     print("launching:", " ".join(cmd))
     log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
     proc = subprocess.Popen(cmd)
@@ -445,6 +448,7 @@ def _provider_fetch_factory(
     episode: int | None,
     resync: bool,
     tsukihime_cfg: dict,
+    force: bool = False,
 ):
     from overlay.app.subselect import fetch_provider_path
 
@@ -456,6 +460,7 @@ def _provider_fetch_factory(
             title_override=jimaku_title,
             episode=episode,
             resync=resync,
+            force=force,
             tsukihime_config=tsukihime_cfg,
         )
 
@@ -485,8 +490,21 @@ def _start_run_provider_fetch(
         episode=episode,
         resync=resync,
         tsukihime_cfg=tsukihime_cfg,
+        force=True,  # a manual retry re-fetches + re-syncs, overriding a stale/mistimed cached srt
     )
     reader.configure_subtitle_retry(retry_factory if enabled_providers else None)
+    if enabled_providers:
+        from overlay.app.subselect import list_candidates
+
+        reader.configure_sub_picker(
+            lambda video: list_candidates(
+                video,
+                enabled_providers,
+                jimaku_key=jimaku_key,
+                title_override=jimaku_title,
+                tsukihime_config=tsukihime_cfg,
+            )
+        )
     if providers:
         startup_factory = _provider_fetch_factory(
             providers,
@@ -499,6 +517,46 @@ def _start_run_provider_fetch(
         reader.fetch_japanese_subs_async(startup_factory(str(video_path)))
 
 
+def _prefetch_sibling_subs(
+    cfg: dict, current_path: Path, *, enabled: bool, jimaku_key: str | None, resync: bool
+) -> None:
+    """Warm the NEXT episode's subtitle cache *during* playback so an eof re-slot loads it
+    synchronously — no cold-start English gap while a background fetch+resync (~seconds) runs. Fire-
+    and-forget: the fetch caches to disk as a side effect and the result is discarded. No-op unless
+    auto-advance is on, a unique next sibling exists (#100 resolver), and a provider is configured."""
+    if not enabled:
+        return
+    nxt = resolve_sibling(current_path, 1)
+    if nxt is None:
+        return
+    _jm = cfg.get("jimaku")
+    jimaku_cfg = _jm if isinstance(_jm, dict) else {}
+    raw_tsukihime = cfg.get("tsukihime")
+    tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
+    providers = _enabled_provider_names(
+        str(nxt), jimaku=False, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
+    )
+    if not providers:
+        return
+    title, episode = parse_filename(nxt)
+    fetch = _provider_fetch_factory(
+        providers,
+        jimaku_key=jimaku_key,
+        jimaku_title=title,
+        episode=episode,
+        resync=resync,
+        tsukihime_cfg=tsukihime_cfg,
+    )(str(nxt))
+
+    def _warm() -> None:
+        try:
+            fetch()  # caches to disk as a side effect; the returned path is discarded
+        except Exception:
+            log.debug("next-episode subtitle prefetch failed", exc_info=True)
+
+    threading.Thread(target=_warm, name="saitenka-prefetch-sub", daemon=True).start()
+
+
 def _auto_advance_enabled(cfg: dict, demo_word: str | None, screenshot: str | None) -> bool:
     """Opt-in ``[watch].auto_advance``, off for the demo/screenshot paths (they force-hover, not play)."""
     watch = cfg.get("watch")
@@ -507,35 +565,62 @@ def _auto_advance_enabled(cfg: dict, demo_word: str | None, screenshot: str | No
     return bool(watch.get("auto_advance"))
 
 
-def _install_auto_advance(
+def _mpv_has_next_playlist_entry(reader) -> bool:
+    """True when mpv has a further playlist entry to advance to on its own (autoload/explicit playlist).
+    At mid-playlist EOF mpv advances NATIVELY (``--keep-open=yes`` only holds the FINAL entry), so on
+    the eof edge we must NOT also loadfile — that would skip an episode. The reactive re-slot picks the
+    native advance up via ``file-loaded`` regardless of whether auto-advance is on."""
+    pos = reader._prop("playlist-pos")
+    count = reader._prop("playlist-count")
+    return isinstance(pos, int) and isinstance(count, int) and 0 <= pos < count - 1
+
+
+def _advance_at_eof(reader) -> bool:
+    """The eof-reached edge with auto-advance on. If mpv will advance itself (a playlist), defer —
+    ``file-loaded`` drives the re-slot. Otherwise ``loadfile`` the next sibling (#100 resolver); its
+    ``file-loaded`` re-slots too. Return False (hold the last frame via keep-open) when there's no
+    unambiguous next episode."""
+    if _mpv_has_next_playlist_entry(reader):
+        return True  # mpv advances natively; the reactive re-slot follows on file-loaded
+    cur = reader.current_media_path()
+    if cur is None:
+        return False
+    nxt = resolve_sibling(cur, 1)
+    if nxt is None:
+        return False  # no unambiguous next sibling → hold the last frame (keep-open)
+    reader.ipc.command("loadfile", str(nxt))  # file-loaded → reslot_hook re-slots the overlay
+    return True
+
+
+def _install_watch_hooks(
     reader,
     cfg: dict,
     video_path: Path,
     tmp: Path,
     dur: int,
     *,
-    enabled: bool,
+    interactive: bool,
+    auto_advance: bool,
     sub_file: str | None,
     jimaku: bool,
     jimaku_key: str | None,
     slang: str,
     resync: bool,
 ) -> None:
-    """Install the eof re-slot hook (#100). run mode owns playback → auto-advance is safe; attach
-    (SyncPlay/external mpv) never reaches here, so it never installs a hook — that mode split IS the
-    SyncPlay gate (#62 precedent). The closure tracks the current file so each advance seeks the NEXT."""
-    if not enabled:
+    """Wire the #100 watch hooks (run mode only — attach/SyncPlay never reaches here, which IS the
+    SyncPlay gate, #62 precedent). ``reslot_hook`` fires on EVERY mpv ``file-loaded`` so the overlay
+    follows a native autoload/playlist advance AND our own loadfile through ONE setup path — installed
+    for any interactive run, independent of auto-advance (so scripts/playlists keep working). The eof
+    ``advance_hook`` is added only when auto-advance is on, to loadfile the next sibling when mpv has no
+    playlist of its own."""
+    if not interactive:
         return
-    current = {"path": video_path}
 
-    def _advance() -> bool:
-        nxt = resolve_sibling(current["path"], 1)
-        if nxt is None:
-            return False  # no unambiguous next sibling → hold the last frame (keep-open)
-        if reslot_episode(
+    def _reslot(path: Path) -> None:
+        reslot_to_current(
             reader,
             cfg,
-            nxt,
+            path,
             tmp,
             dur,
             sub_file=sub_file,
@@ -543,27 +628,39 @@ def _install_auto_advance(
             jimaku_key=jimaku_key,
             slang=slang,
             resync=resync,
-        ):
-            current["path"] = nxt
-            return True
-        return False
+        )
 
-    reader.advance_hook = _advance
-
-
-def _await_file_loaded(ipc, target: str, *, timeout: float = 10.0) -> bool:
-    """Block until mpv's ``path`` reflects ``target`` (loadfile is async), or give up after ``timeout``."""
-    want = Path(target).name
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        cur = ipc.command("get_property", "path").get("data")
-        if cur and Path(str(cur)).name == want:
-            return True
-        time.sleep(0.05)
-    return False
+    reader.install_reslot_hook(_reslot, initial=video_path)
+    if auto_advance:
+        reader.advance_hook = lambda: _advance_at_eof(reader)
+    # Warm episode 2's subs while episode 1 plays, so the first advance re-slots cache-warm (no cold gap).
+    _prefetch_sibling_subs(
+        cfg, video_path, enabled=auto_advance, jimaku_key=jimaku_key, resync=resync
+    )
 
 
-def reslot_episode(
+def _remove_external_sub_tracks(ipc) -> int:
+    """Drop every external subtitle track before a re-slot re-adds the current episode's; return how
+    many were removed (a span attribute — a nonzero count on every advance is the carried-over-sub
+    signature). mpv re-applies the launch ``--sub-file`` (a PRIOR episode's srt) to each playlist
+    entry it advances to AND auto-selects it, so on a native advance the overlay would show the old
+    episode's lines (found live: ep2's srt selected on ep03 as "unknown language 10/11", and its cues
+    indexed). Track ids are stable across removals, so removing from a single snapshot is safe."""
+    data = ipc.command("get_property", "track-list").get("data") or []
+    removed = 0
+    for track in data:
+        if track.get("type") == "sub" and track.get("external") and track.get("id") is not None:
+            log.info(
+                "re-slot: dropping carried-over external sub sid=%s %r",
+                track["id"],
+                track.get("external-filename"),
+            )
+            ipc.command("sub-remove", track["id"])
+            removed += 1
+    return removed
+
+
+def reslot_to_current(
     reader,
     cfg: dict,
     video_path: Path,
@@ -575,62 +672,90 @@ def reslot_episode(
     jimaku_key: str | None,
     slang: str,
     resync: bool,
-) -> bool:
-    """Re-slot the SAME mpv onto ``video_path`` (#100 in-process auto-advance): close the finished
-    episode's stats row, rebind the leak-free ``EpisodeContext``, ``loadfile`` the next file, then
-    re-drive the per-file subtitle/index/recorder/prefetch setup — everything ``run_impl`` does for one
-    file, minus the process launch. Session-scoped state (deck-mined set, backlog, render caches) is
-    untouched by construction. Returns False (and stays put) if the file never loads."""
+) -> None:
+    """Re-index the overlay onto mpv's CURRENT (already-loaded) file — the reactive #100 re-slot fired
+    from ``file-loaded``, so it covers a native autoload/playlist advance and our own eof loadfile
+    alike (NO loadfile here; mpv already loaded the file). Closes the finished episode's stats row,
+    rebinds the leak-free ``EpisodeContext``, drops the carried-over launch ``--sub-file`` and re-adds
+    the current episode's srt language-tagged (so selection can't latch onto a stale sibling's subs),
+    rebuilds the sub-index, restarts the
+    recorder + prefetch, and warms N+1's subs. Session-scoped state (deck-mined set, backlog, render
+    caches) is untouched by construction."""
+    from overlay import otel_metrics
     from overlay.app.reader_context import EpisodeContext
     from overlay.app.subtitle_modes import select_initial
 
     ipc = reader.ipc
     title, parsed_episode = parse_filename(video_path)
-    sub_path, en_sub_path, fetch_background, enabled_providers = _resolve_subtitles(
-        cfg,
-        str(video_path),
-        video_path,
-        dur,
-        tmp,
-        sub_file=sub_file,
-        jimaku=jimaku,
-        jimaku_key=jimaku_key,
-        jimaku_title=title,
-        episode=parsed_episode,
-        resync=resync,
-        slang=slang,
-    )
-    session_stats.finish(
-        reader
-    )  # write the just-finished episode complete BEFORE the recorder resets
-    reader.episode = (
-        EpisodeContext()
-    )  # one rebind → every episode-scoped field back to no-episode state
-    ipc.command("loadfile", str(video_path))
-    if not _await_file_loaded(ipc, str(video_path)):
-        log.warning("auto-advance: %s never finished loading — staying at EOF", video_path.name)
-        return False
-    for path in (sub_path, en_sub_path):
-        if path is not None:
-            ipc.command("sub-add", str(path))
-    startup = select_initial(ipc, slang)
-    build_sub_index_for_current_track(reader)
-    reader.configure_subtitle_mode(startup, slang=slang)
-    session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
-    _start_run_provider_fetch(
-        reader,
-        cfg,
-        video_path,
-        providers=(fetch_background if startup.tracks.jp_sid is None else ()),
-        enabled_providers=enabled_providers,
-        jimaku_title=title,
-        episode=parsed_episode,
-        jimaku_key=jimaku_key,
-        resync=resync,
-    )
-    reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
-    log.info("auto-advanced to %s", video_path.name)
-    return True
+    # One span over the whole re-slot: it's a discrete, non-trivial cost on the reader thread (a cold
+    # re-slot resolves+ffsubsync-resyncs subs, ~1.3s live), and its attributes make a wrong-track
+    # advance queryable from trace.json — not just overlay.log. Span is a no-op with telemetry off.
+    with otel_metrics.traced("subtitle.reslot") as span:
+        sub_path, en_sub_path, fetch_background, enabled_providers = _resolve_subtitles(
+            cfg,
+            str(video_path),
+            video_path,
+            dur,
+            tmp,
+            sub_file=sub_file,
+            jimaku=jimaku,
+            jimaku_key=jimaku_key,
+            jimaku_title=title,
+            episode=parsed_episode,
+            resync=resync,
+            slang=slang,
+        )
+        session_stats.finish(
+            reader
+        )  # write the just-finished episode complete BEFORE the recorder resets
+        reader.episode = (
+            EpisodeContext()
+        )  # one rebind → every episode-scoped field back to no-episode state
+        # drop the carried-over launch --sub-file (a prior episode's srt); a nonzero count each advance
+        # is the carried-over-sub signature
+        span.set("externals_dropped", _remove_external_sub_tracks(ipc))
+        # Tag the JP srt with the caller's own slang token so select_initial's _matching_track picks OUR
+        # srt, not an untagged leftover the auto-selection latched onto (the ep2-on-ep03 bug). "auto"
+        # flag → selection stays select_initial's. First slang token matches whatever slang is set.
+        jp_lang = next((part.strip() for part in slang.split(",") if part.strip()), "jpn")
+        for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
+            if path is not None:
+                ipc.command("sub-add", str(path), "auto", "", lang)
+        startup = select_initial(ipc, slang)
+        span.set(
+            "active", startup.active or "none"
+        )  # the selection outcome, queryable in the trace
+        span.set("jp_sid", startup.tracks.jp_sid if startup.tracks.jp_sid is not None else -1)
+        span.set("en_sid", startup.tracks.en_sid if startup.tracks.en_sid is not None else -1)
+        log.info(  # …and diagnosable from overlay.log alone, without needing the mpv track dump
+            "re-slot: selected subtitles active=%s jp_sid=%s en_sid=%s",
+            startup.active,
+            startup.tracks.jp_sid,
+            startup.tracks.en_sid,
+        )
+        build_sub_index_for_current_track(reader)
+        reader.configure_subtitle_mode(startup, slang=slang)
+        session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
+        if startup.tracks.jp_sid is None and fetch_background:
+            reader._toast(
+                "Fetching Japanese subtitles…"
+            )  # background fetch below; tell the user to wait
+        _start_run_provider_fetch(
+            reader,
+            cfg,
+            video_path,
+            providers=(fetch_background if startup.tracks.jp_sid is None else ()),
+            enabled_providers=enabled_providers,
+            jimaku_title=title,
+            episode=parsed_episode,
+            jimaku_key=jimaku_key,
+            resync=resync,
+        )
+        reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
+        _prefetch_sibling_subs(  # warm episode N+1 so the next re-slot is cache-warm, not a cold fetch
+            cfg, video_path, enabled=True, jimaku_key=jimaku_key, resync=resync
+        )
+        log.info("re-slotted overlay onto %s", video_path.name)
 
 
 def _build_run_deps(
@@ -1025,13 +1150,14 @@ def run_impl(
         resync=resync,
     )
 
-    _install_auto_advance(
+    _install_watch_hooks(
         reader,
         cfg,
         video_path,
         tmp,
         dur,
-        enabled=auto_advance,
+        interactive=not (demo_word or screenshot),
+        auto_advance=auto_advance,
         sub_file=sub_file,
         jimaku=jimaku,
         jimaku_key=jimaku_key,

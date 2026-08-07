@@ -40,8 +40,11 @@ def build_mpv_argv(
         "--force-window=yes",
         "--keep-open=yes",
         f"--slang={slang}",
-        "--sub-visibility=no",
-        "--osd-level=0",
+        "--sub-visibility=no",  # the overlay renders subs itself; this hides mpv's own sub layer
+        # osd-level stays at mpv's default (1) so native OSD messages show — the z/Z/x sub-delay keys
+        # (mpv builtins, repeatable) give feedback. sub-visibility=no already hides the subtitles, so
+        # forcing osd-level=0 (an old over-broad hack) only silenced those messages.
+        "--osd-level=1",
         f"--start={start}",
     ]
     if screenshot:

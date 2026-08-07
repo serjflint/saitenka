@@ -1235,9 +1235,9 @@ def _finish_attach_subtitle_startup(
     if startup is not None:
         reader.configure_subtitle_mode(startup, slang=slang)
     build_sub_index_for_current_track(reader)
-    from overlay.app.subselect import fetch_provider_path
+    from overlay.app.subselect import fetch_provider_path, list_candidates
 
-    def fetch_for(video_path: str, providers: tuple[str, ...]):
+    def fetch_for(video_path: str, providers: tuple[str, ...], *, force: bool = False):
         return lambda: fetch_provider_path(
             video_path,
             providers,
@@ -1245,12 +1245,26 @@ def _finish_attach_subtitle_startup(
             title_override=jimaku_title,
             episode=episode,
             resync=resync,
+            force=force,
             tsukihime_config=tsukihime_config,
         )
 
     reader.configure_subtitle_retry(
-        (lambda video_path: fetch_for(video_path, enabled_providers)) if enabled_providers else None
+        # a manual retry re-fetches + re-syncs, overriding a stale/mistimed cached srt
+        (lambda video_path: fetch_for(video_path, enabled_providers, force=True))
+        if enabled_providers
+        else None
     )
+    if enabled_providers:
+        reader.configure_sub_picker(
+            lambda video: list_candidates(
+                video,
+                enabled_providers,
+                jimaku_key=jimaku_key,
+                title_override=jimaku_title,
+                tsukihime_config=tsukihime_config,
+            )
+        )
     if not fetch_in_background:
         return
     video_path = ipc.command("get_property", "path").get("data")

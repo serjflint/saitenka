@@ -106,7 +106,7 @@ def test_tsukihime_provider_error_returns_soft_status(tmp_path, monkeypatch):
         def __init__(self, **_kwargs):
             pass
 
-        def fetch(self, *_args):
+        def fetch(self, *_args, **_kwargs):
             raise th.TsukiHimeError("malformed detail")
 
     monkeypatch.setattr(th, "TsukiHimeClient", FailingClient)
@@ -153,7 +153,7 @@ def test_tsukihime_fetch_stores_finished_subtitle(tmp_path, monkeypatch):
         def __init__(self, **_kwargs):
             pass
 
-        def fetch(self, _title, _episode, _destination):
+        def fetch(self, _title, _episode, _destination, **_kwargs):
             return downloaded
 
     monkeypatch.setattr(th, "TsukiHimeClient", FakeClient)
@@ -184,7 +184,7 @@ def test_ensure_jimaku_fetches_when_no_jp_track(tmp_path, monkeypatch):
         def __init__(self, key=None):
             pass
 
-        def fetch(self, _title, _ep, _dest):
+        def fetch(self, _title, _ep, _dest, **_kwargs):
             return fetched
 
     import overlay.app.jimaku as jm
@@ -218,6 +218,37 @@ def test_background_jimaku_fetch_reuses_persistent_cache(tmp_path, monkeypatch):
     assert status == f"subtitle cache: using {cached.name} for 'Show' ep 1"
 
 
+def test_force_bypasses_the_persistent_cache_and_refetches(tmp_path, monkeypatch):
+    # The retry keybind passes force=True so a stale/mistimed cached srt (e.g. an ffsubsync no-op that
+    # cached raw under the synced key) is re-fetched + re-synced, not silently reused.
+    import overlay.app.jimaku as jm
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    stale = tmp_path / "stale.srt"
+    stale.write_text("STALE\n", encoding="utf-8")
+    jm.store_subs(video, "Show", 1, stale, resync=False)  # a pre-existing (bad) cache entry
+
+    fresh = tmp_path / "fresh.srt"
+    fresh.write_text("FRESH\n", encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self, _key=None):
+            pass
+
+        def fetch(self, _title, _episode, _dest, **_kwargs):
+            return fresh
+
+    monkeypatch.setattr(jm, "JimakuClient", FakeClient)
+
+    path, _status = subselect.fetch_jimaku_path(str(video), resync=False, force=True)
+
+    assert path is not None and path.read_text(encoding="utf-8") == "FRESH\n"  # cache bypassed
+    # and the fresh sub overwrote the cache, so later (non-force) reads see it too
+    assert jm.cached_subs(video, "Show", 1, resync=False).read_text(encoding="utf-8") == "FRESH\n"
+
+
 def test_background_jimaku_fetch_stores_finished_subtitle(tmp_path, monkeypatch):
     import overlay.app.jimaku as jm
 
@@ -231,7 +262,7 @@ def test_background_jimaku_fetch_stores_finished_subtitle(tmp_path, monkeypatch)
         def __init__(self, _key=None):
             pass
 
-        def fetch(self, _title, _episode, _dest):
+        def fetch(self, _title, _episode, _dest, **_kwargs):
             return downloaded
 
     monkeypatch.setattr(jm, "JimakuClient", FakeClient)
@@ -252,7 +283,7 @@ def _stub_jimaku(monkeypatch, tmp_path, *, ok=True):
         def __init__(self, key=None):
             pass
 
-        def fetch(self, _title, _ep, _dest):
+        def fetch(self, _title, _ep, _dest, **_kwargs):
             if not ok:
                 raise jm.JimakuError("not found")
             return fetched
@@ -333,3 +364,53 @@ def test_provider_path_with_no_providers_reports_none(monkeypatch):
 
     assert path is None
     assert status == "no Japanese subtitle providers enabled"
+
+
+# --- Window 1: provider-agnostic candidate aggregation --------------------------------------------
+
+
+def test_list_candidates_aggregates_providers_in_order(monkeypatch):
+    """list_candidates concatenates each enabled provider's candidates, in the given provider order."""
+
+    def _cand(provider, name, *, match):
+        return subselect.SubtitleCandidate(
+            provider=provider, name=name, size=0, match=match, download=lambda: (None, "")
+        )
+
+    def jimaku(*_args):
+        return [_cand("jimaku", "a.srt", match=True)]
+
+    def tsukihime(*_args):
+        return ([_cand("tsukihime", "b.ass", match=False)], ["tsukihime: search truncated"])
+
+    monkeypatch.setattr(subselect, "_jimaku_candidates", jimaku)
+    monkeypatch.setattr(subselect, "_tsukihime_candidates", tsukihime)
+
+    candidates, warnings = subselect.list_candidates("/v/Show - 01.mkv", ("jimaku", "tsukihime"))
+
+    assert [(c.provider, c.name) for c in candidates] == [
+        ("jimaku", "a.srt"),
+        ("tsukihime", "b.ass"),
+    ]
+    assert warnings == ["tsukihime: search truncated"]
+
+
+def test_list_candidates_turns_a_provider_failure_into_a_warning(monkeypatch):
+    """One dead provider must not blank the panel — it contributes a warning and the others still list."""
+
+    def boom(*_args):
+        raise RuntimeError("no entry")
+
+    def tsukihime(*_args):
+        candidate = subselect.SubtitleCandidate(
+            provider="tsukihime", name="b.ass", size=0, match=False, download=lambda: (None, "")
+        )
+        return ([candidate], [])
+
+    monkeypatch.setattr(subselect, "_jimaku_candidates", boom)
+    monkeypatch.setattr(subselect, "_tsukihime_candidates", tsukihime)
+
+    candidates, warnings = subselect.list_candidates("/v/Show - 01.mkv", ("jimaku", "tsukihime"))
+
+    assert [c.provider for c in candidates] == ["tsukihime"]
+    assert warnings == ["jimaku: no entry"]
