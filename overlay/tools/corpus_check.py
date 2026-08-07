@@ -1,7 +1,7 @@
 """Census-lock for the vendored external-oracle corpora (`poe corpus-lock`).
 
-We STEAL upstream conformance suites as oracles ([[external-oracle-corpus-series]] — UAX #14 linebreak,
-Yomitan deinflect transforms, SubMiner subtitle-cue vectors). But a re-vendor / re-gen can silently DROP
+We STEAL upstream conformance suites as oracles (UAX #14 linebreak, Yomitan deinflect transforms,
+SubMiner subtitle-cue vectors). But a re-vendor / re-gen can silently DROP
 cases and the suite still greens: the denominator is unlocked. This binds it. Per corpus we derive the
 case **census** from its source-of-truth (count + a SHA-256 over the sorted key-set) and assert it EQUALS a
 committed manifest. For UAX #14 the upstream file is vendored, so the census is re-derived independently;
@@ -9,10 +9,10 @@ for the transcribed JSON corpora the fixture IS the census and the lock is again
 re-gen and commit. Either way a dropped case fails the gate until the manifest is **deliberately
 re-blessed** (a reviewed diff) — exactly like a golden or a `docs-consts` constant.
 
-pg83's census-lock (trustme/shitty), grounded: Saitenka-Vault `_source/conformance-oracle-census-lock-
-research.md`. Sibling to `tools/docs_check.py`; same "text explains, checks enforce" idiom. Planted +/-
-controls: `tests/test_corpus_check.py`. Re-bless: `python tools/corpus_check.py show` prints the current
-(count, sha256) for each corpus — paste into `MANIFEST` below when a bump legitimately moves the census.
+The idea is pg83's census-lock (trustme/shitty). Sibling to `tools/docs_check.py`; same "text explains,
+checks enforce" idiom. Planted +/- controls: `tests/test_corpus_check.py`. Re-bless: `python
+tools/corpus_check.py show` prints the current (count, sha256) for each corpus — paste into the registry
+below when a bump legitimately moves the census.
 
 stdlib only (json / gzip / hashlib / pathlib / dataclasses).
 """
