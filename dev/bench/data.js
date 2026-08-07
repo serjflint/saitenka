@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786114438011,
+  "lastUpdate": 1786144691788,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -935,6 +935,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.551,
             "range": "±8.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3f3d31dce92d34ea1dce18577010d814d30b8ee0",
+          "message": "feat(subtitle): provider-agnostic source picker + windowed-resync arc; auto-advance (#100) (#208)\n\n* feat(watch): opt-in post-playback auto-advance to the next episode (#100)\n\nOn finishing an episode, re-slot the SAME mpv onto the next sibling in the\nfolder — smooth continuity without a manual file pick. Opt-in and default-off\n(`[watch].auto_advance`).\n\nAlso drop mpv's `--loop-file=inf` from every path: `--keep-open=yes` (always\nset) already holds the last frame at EOF, so a finished file now freezes on its\nlast frame instead of silently replaying — and a real EOF is exactly what\nauto-advance needs to observe. Screenshot mode still pauses on the first frame.\n\nMechanism (in-process re-slot, not a relaunch/playlist):\n- `controller`: observe `eof-reached`; on its rising edge call an installed\n  `advance_hook` once (re-armed when a fresh file clears eof). No hook → no-op.\n- `cli_run.reslot_episode`: close the finished episode's stats row, rebind the\n  leak-free `EpisodeContext` (#30 seam), `loadfile` the next file, then re-drive\n  the per-file subtitle/index/recorder/prefetch setup — everything `run_impl`\n  does for one file minus the launch. Session-scoped state (deck-mined set,\n  backlog, render caches) is untouched by construction.\n- Next-sibling resolution reuses #100's pure `continuity.resolve_sibling`;\n  missing/ambiguous → hold the last frame.\n\nSyncPlay gate = the mode split: only `run` (which owns playback) installs the\nhook; `attach`/SyncPlay never reach it, so they never auto-advance (#62\nprecedent). The eof edge, the re-slot's state transitions, and the launch flags\nare unit/integration-tested with the IPC fake; the live mpv loadfile/sub-add\nreconciliation is the enabling-user's test-drive.\n\nRefs #100\n\n* fix(anki): no startup traceback when Anki is down; detect a failed auto-launch\n\nTwo defects in the Anki-optional path, both hit when starting `run` with Anki\nclosed (an expected steady state):\n\n- **Traceback on expected-down.** The cache-miss known-word load caught a\n  hardcoded tuple that omitted `AnkiError`, so the client's `_AnkiRetryable`\n  (raised when AnkiConnect is unreachable) escaped to the top-level dep loader\n  and was logged with a full stack. Catch the `ANKI_DOWN_ERRORS` SSOT (which\n  covers `_AnkiRetryable`) instead — degrade to freq+JLPT coloring quietly, as\n  the connection-error path already did.\n- **Silent auto-launch \"success\".** macOS `launch_anki()` fired `open -a Anki`\n  via fire-and-forget `Popen` and always returned True, so a missing/renamed app\n  looked launched. `open -a` hands off and exits, so wait on it (`subprocess.run`)\n  and check the return code — a real failure now warns with mpv's reason and\n  returns False. win/linux stay fire-and-forget (the launch IS the app process).\n\nTests: `_AnkiRetryable` (not just OSError) degrades to the fallback known set;\nmacOS launch returns False when `open` reports the app missing / raises.\n\n* feat(subtitle): provider-agnostic source picker + windowed-resync arc (#100)\n\nWindow 1 — an in-mpv subtitle-source picker across every enabled provider.\nThe auto-pick can't tell a WebRip source from a broadcast rip on identical\n1080p tags (their cue timing differs by seconds), so the panel lists every\ncandidate best-match-first, tagged by provider, and lets the user pick the\nco-timed source; download is un-resynced on purpose (Ctrl+Shift+T stays the\nper-file fallback).\n\n- sub_picker: provider-agnostic panel driven by a lister thunk (built from\n  enabled_providers, like the retry factory) — reuses the sidebar row/hit\n  substrate, the forced mouse section (occlusion + click capture), and the\n  subtitle-fetch pipeline (add/select/re-index for free, no off-thread IPC).\n- subselect.list_candidates aggregates jimaku + tsukihime; a dead provider\n  becomes a warning row, never a blank panel. jimaku.episode_files exposes\n  the ranked list fetch already computed.\n- tsukihime.episode_candidates lists every (release, attachment) with NO\n  uniqueness guard — that guard stays on fetch's unattended path (certainty\n  for the robot, choice for the human).\n\nAlso lands the subtitle-timing arc behind it: windowed \"re-time from here\"\nresync, embedded-ref (native ASS) alignment with an English reference,\nresync_split_penalty, a per-run session id (quoted once at launch + in the\nreport, kept off every console line), rich subtitle.* telemetry, and the\ntools/subtitle_report.py report distiller. z/Z/x pass through to mpv's native\nrepeatable sub-delay (osd-level stays default).\n\n* fix(test): platform-agnostic path assertion in retry-resync test\n\n`_start_resync_window` wraps the video in `Path`, so `str(video)` renders with\nbackslashes on Windows; compare against `str(Path(...))` instead of a\nforward-slash literal.",
+          "timestamp": "2026-08-08T02:17:41+03:00",
+          "tree_id": "bac5d9bf831121a7bdf863eb4b0d243ff712f280",
+          "url": "https://github.com/serjflint/saitenka/commit/3f3d31dce92d34ea1dce18577010d814d30b8ee0"
+        },
+        "date": 1786144690576,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.836,
+            "range": "±3.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.829,
+            "range": "±14.8%",
             "unit": "ms"
           }
         ]
