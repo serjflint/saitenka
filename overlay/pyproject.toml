@@ -361,6 +361,12 @@ invariants-test = { shell = "ast-grep test --skip-snapshot-tests" }
 test-lint = { shell = "ast-grep test -c sgconfig-tests.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests.yml tests" }
 test-lint-test = { shell = "ast-grep test -c sgconfig-tests.yml --skip-snapshot-tests" }
 test-lint-json = { shell = "ast-grep scan -c sgconfig-tests.yml --json=compact tests" }
+# GATE (in `all`) — the test-code invariants that are baseline-clean, at `severity: error` so a NEW
+# violation fails the push (config: sgconfig-tests-gate.yml). Only zero-violation rules graduate here
+# from the advisory `test-lint`; the sanctioned classicist debt stays advisory. Tests run first so a
+# rule can't rot into a no-op. Rust binary, no build/FT exposure — same posture as `invariants`.
+test-lint-gate = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests-gate.yml tests" }
+test-lint-gate-test = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests" }
 # OPT-IN taint tier (not in `all`): semgrep dataflow for what ast-grep can't — model output reaching a
 # reading/pitch field via intermediate vars. Pinned to 3.13 (prebuilt clib wheel; semgrep never imports
 # our code, so its interpreter is unrelated to the 3.14t runtime). For 3.14t use the clib-drop crutch:
@@ -533,6 +539,14 @@ spell = { shell = "cd .. && uvx typos" }
 # drag in git-ignored `vibe/` scratch (Yandex-wiki root-relative links that can't resolve on disk).
 links = { shell = "cd .. && lychee --offline --no-progress $(git ls-files '*.md')" }
 links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress $(git ls-files '*.md')" }
+# GATE (in `all`) — deterministic doc↔code binding (lychee checks link *targets*; these check the
+# claims INSIDE the prose). `docs-refs`: every `poe <task>` / `.agents/<path>` / module|tool file an
+# agent-facing doc (AGENTS.md, ARCHITECTURE.md, each SKILL.md) names must resolve. `docs-consts`: each
+# numeric default in ARCHITECTURE.md's constants table is attributed to its real defining symbol AND
+# equals the code value (both sides bound — a doc-only claim or a dropped one fails). Zero-LLM, stdlib
+# only. Planted +/- controls: tests/test_docs_check.py. See tools/docs_check.py + AGENTS.md "Documentation".
+docs-refs = { shell = "uv run --extra full python tools/docs_check.py refs" }
+docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" }
 # Docs site (Material for MkDocs → Read the Docs). Source lives at the repo root (../mkdocs.yml, ../docs),
 # but the build runs here because this env has the `saitenka` package + `docs` group. `--strict` fails on
 # broken links/nav, so a docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an
@@ -609,7 +623,7 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "complexity", "test-ft", "cov", "deps", "spell", "links"]
+all = ["lint", "types", "arch", "invariants", "test-lint-gate", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —

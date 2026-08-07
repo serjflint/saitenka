@@ -28,6 +28,39 @@ ignore_imports =
     overlay.app.report -> overlay.app.crashlog
     overlay.app.dictdb -> overlay.app.wordlists
 
+[importlinter:contract:layers]
+name = Package layering — a lower layer must not import a higher one
+# Positive DIRECTION contract (no-cycles only forbids round-trips; this forbids a backward edge even
+# without a cycle). High→low follows the data flow: app orchestrates → mpvio bridges → panel/raster
+# compose → draw rasterises → render lays out → sc models the input → model/version are leaf values.
+# TYPE_CHECKING edges don't count (exclude_type_checking_imports). Known RUNTIME backedges are
+# ratcheted below (same posture as no-cycles) — burn them down, never add. ruff analyze counts
+# typing-only edges, so it will show phantom backedges this contract does not: import-linter is the SSOT.
+type = layers
+exhaustive = False
+layers =
+    overlay.app
+    overlay.mpvio
+    overlay.panel
+    overlay.raster
+    overlay.render
+    overlay.draw
+    overlay.sc
+    overlay.model
+# Ratchet baseline (2026-08): pre-existing runtime backedges, same debt no-cycles already grandfathers.
+# - sc.walk imports render/draw for the Inline type (the coupling burned down under the controller split).
+# - draw.chip -> render.layout is the render<->draw cycle's back-edge (render.flow -> draw.chip is the
+#   forward one, so render sits above draw); already grandfathered in no-cycles.
+# - raster.pillow_backend reaches up to panel + mpvio.osd — it is high-level backend glue miscategorised
+#   under raster/; ratcheted here, move it to burn these down. Never add a new entry; only remove.
+ignore_imports =
+    overlay.sc.walk -> overlay.render.ruby
+    overlay.sc.walk -> overlay.render.flow
+    overlay.sc.walk -> overlay.draw.chip
+    overlay.draw.chip -> overlay.render.layout
+    overlay.raster.pillow_backend -> overlay.panel
+    overlay.raster.pillow_backend -> overlay.mpvio.osd
+
 [importlinter:contract:pil-agnostic-core]
 name = sc/ and model.py stay PIL-agnostic
 type = forbidden

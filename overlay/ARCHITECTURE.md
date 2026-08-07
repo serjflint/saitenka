@@ -239,8 +239,10 @@ hovered `EntryGroup.card_index` selects exactly which entry is mined.
 ### Constants, limits, and measured timings
 
 Values are **defaults** unless noted; each lives at the cited symbol (the SSOT — this table points, it
-doesn't own). Timings are order-of-magnitude, measured on the pathological corpus under free-threaded
-3.14t (`examples/bench_responsiveness.py`).
+doesn't own). A number is written inline **only** where `poe docs-consts` binds it (`ident = value`);
+otherwise the row names the symbol, so there's no unchecked copy to drift. Timings are
+order-of-magnitude, measured on the pathological corpus under free-threaded 3.14t
+(`examples/bench_responsiveness.py`).
 
 | Knob / metric | Value | Where |
 | --- | --- | --- |
@@ -248,12 +250,13 @@ doesn't own). Timings are order-of-magnitude, measured on the pathological corpu
 | Estimated height before measure | `seed_height = 200`px | `WindowedPanel` |
 | Scroll overscan (warm margin) | one screen (`overscan = view_h`) | tooltip blit + `Panel.render_ahead` |
 | Wheel step | `round(osd_h·0.08)` ≈ 86px @1080p | `Reader._scroll_tip` |
-| Base tooltip viewport cap | `tip_max_frac = 0.4` of video height | `PerfOptions` |
-| Reference panel width / scale | `384`px @ `scale 1.0` (margin 16, gap 7, body-indent 20) | `panel.py`, `model.Theme` |
-| Prefetch workers | 4 (free-threaded) / 2 (GIL) / pinned | `app/prefetch.py` |
+| Base tooltip viewport cap | `tip_max_frac = 0.4` of video height | `TooltipOptions` |
+| Reference panel width + chrome | `panel.py`'s `width` default; `Theme.margin`/`gap`/`body_indent` | `panel.py`, `model.Theme` |
+| Prefetch workers | `_AUTO_WORKERS_FREE_THREADED` / `_AUTO_WORKERS_GIL`, or pinned `prefetch_workers` | `app/prefetch.py` |
 | Decode-warm lookahead | `prefetch_lookahead = 0` cues | `PerfOptions` |
 | Head-render lookahead / queue | `head_prefetch_lookahead = 1`, `head_prefetch_queue_max = 24` | `PerfOptions` |
-| Decoded-entry LRU / panel LRU | `entry_cache_max = 256`/dict, `panel_cache_max = 128` | `DbOptions`, `PerfOptions` |
+| Decoded-entry LRU | `entry_cache_max = 256`/dict | `DictDbOptions` |
+| Panel LRU | `panel_cache_max = 128` | `TooltipOptions` |
 | Raster cost | ≈0.034ms/px → 256px band ≈9ms | bench |
 | SC-walk cost (pathological) | ≈200ms/row, run once + ahead | bench |
 | Whole tall block (pre-band) | up to 14 700px ≈500ms `getmask2` | bench |

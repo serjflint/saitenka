@@ -1,0 +1,30 @@
+id: test-integration-timeout-missing
+language: python
+severity: warning
+message: >-
+  An `integration`/`live` test crossing a socket/subprocess can HANG the whole suite — add
+  @pytest.mark.timeout(5) (30 for `live`) per AGENTS.md "Testing". Opt-in per test; there is no global
+  default, so a legitimately-slow unit test is unaffected — only the tiers that touch a real boundary.
+note: >-
+  Axis 2 (Conformance) → hang-safety. Forward-looking (existing untimed integration tests are burn-down,
+  hence advisory `warning`, not the gate). Decorator-scoped: a module-level `pytestmark` tier is a known
+  blind spot, same as test-mislevelled-realio.
+files:
+  - "tests/**/*.py"
+rule:
+  kind: decorated_definition
+  all:
+    - has:
+        kind: function_definition
+        has:
+          field: name
+          regex: "^test_"
+    - has:
+        kind: decorator
+        stopBy: end
+        regex: "mark\\.(integration|live)"
+    - not:
+        has:
+          kind: decorator
+          stopBy: end
+          regex: "timeout"

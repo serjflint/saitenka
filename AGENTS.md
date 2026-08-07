@@ -51,7 +51,8 @@ before kill** (`SIGSTOP`); the full recovery drill is `.agents/rules/searching.m
 repowise is a **grounded summary, not ground truth** — its synthesis can be stale or wrong (the
 module/onboarding pages especially; a fresh fact-check found several mislabeled). Trust it for
 orientation, *why*, and blast-radius; **confirm any correctness-critical claim against the code** (LSP /
-Read). It only helps while the index is fresh (`repowise update`) and the MCP server is up.
+Read). It only helps while the index is fresh (`repowise update`) and the MCP server is up — a
+session-start hook (`.agents/hooks/repowise-refresh.py`) flags a stale index after a merge.
 
 ## Python: always `uv`
 
@@ -66,20 +67,15 @@ scripts declare deps via PEP 723 inline metadata.
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
-- **Dev gate:** `uv run poe all` is the fast pre-push gate (CI mirrors it — `.github/workflows/ci.yml`
-  runs `poe all` on PRs + pushes to main); `uv run poe pre-release` is the slower pre-tag superset (adds
-  the supply-chain, installer, network-link, real-mpv, and bench checks; `release.py` gates on it). Both are defined in `[tool.poe.tasks]` (the source of truth). `cov` is the
-  functional run too (a superset marker set), so the standalone `test` stays the inner loop, not a third
-  suite run. Run the gate before
-  pushing. How to read each failure, the advisory tiers, and the
-  free-threaded / 3.13-pinned-env traps live in the **dev-gate skill** (`.agents/skills/dev-gate/`) — consult it. The real tasks live
-  in `overlay/`; the repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works from the repo
-  root or `overlay/`. Standing constraints while editing (don't relitigate these): `lint` is an
-  **explicit** ruff select (never `ALL`) with flake8-bandit `S` folded in — justify each `# noqa: S…` and
-  each `ignore`; `complexity` is ratcheted against `overlay/complexipy-snapshot.json` — regenerate only
-  after a deliberate refactor, never to silence a regression; the only copyleft allowed in the graph is
-  our own GPL `deinflect`; new advisory tools are test-driven on THIS repo first (`vibe/quality-growth-plan.md`),
-  preferring standalone out-of-process binaries (free-threading-safe).
+- **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
+  `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
+  each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**
+  (`.agents/skills/dev-gate/`). The repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works
+  from the root or `overlay/`. Standing constraints while editing (don't relitigate): `lint` is an
+  **explicit** ruff select (never `ALL`, bandit `S` folded in) — justify each `# noqa`/`ignore`;
+  `complexity` is ratcheted against `overlay/complexipy-snapshot.json` (never regenerate to silence a
+  regression); the only copyleft in the graph is our own GPL `deinflect`; new advisory tools are
+  test-driven on THIS repo first, preferring out-of-process binaries (free-threading-safe).
 - **Inner loop (not a gate):** `uv run poe affected` runs only the tests a change can touch (ruff
   dependency-graph reverse-closure + full-run fallback on blind spots) — seconds instead of the ~32s full
   `poe test`, for the edit→feedback cycle. It over-approximates, never under-selects; `poe all`/`poe
@@ -154,7 +150,9 @@ prose bloat does, because two copies of a fact drift independently and one goes 
 - **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
   invent something is the doc's bug, not the reader's.
-- **Not a gate.** Same as comments — a review discipline, not a `poe` check.
+- **Altitude is a review discipline; structural claims are gated.** Bloat/duplication stays a judgment
+  call, not a `poe` check — but broken `poe`/`.agents`/module refs and drifted ARCHITECTURE.md constants
+  fail `poe docs-refs`/`docs-consts` (in `all`).
 
 ## Testing
 
@@ -201,10 +199,11 @@ Consult it when adding or rewriting a test.
   behaviour review — re-bless deliberately (e.g. a `unidic-lite` bump), never regenerate to green.
 - **Determinism.** No wall-clock, ambient `random`, or unrestored env in a test; `pytest-randomly`
   stays on to surface order-coupling. Inject the clock at the seam (the suite already does this via
-  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears).
+  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears). Unrestored env +
+  session/module-mutable fixtures are gated (`poe test-lint-gate`); other coupling stays advisory.
 - **Timeouts on anything that can hang.** New `integration`/`live` tests touching a socket/subprocess
   carry `@pytest.mark.timeout(5)` (30 for `live`). Opt-in per test — there is no global default, so
-  legitimately-slow tests are unaffected.
+  legitimately-slow tests are unaffected (advisory `test-integration-timeout-missing` flags a missing one).
 - **Don't add a plugin when a pattern exists.** Data → Hypothesis strategies; flexible asserts →
   `dirty-equals`; IPC → the transport `Fake*`. A new test dependency is a `quality-growth` decision
   (test-drive it on this repo first), not a reflex.

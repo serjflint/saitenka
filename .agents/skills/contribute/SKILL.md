@@ -54,7 +54,11 @@ PoC feeds the review, a review finding sends you back to the design.
    rationale**. Have it verify independently and classify P0–P3. Fix every P0/P1; resolve or
    explicitly accept each P2; **any code change invalidates the pass** → re-review on the new
    diff. Full criteria and the pattern tables are in the applicable gate (§5 + the adversarial
-   tables).
+   tables). **Cross-family, not merely fresh:** the reviewer must be a *different model family*
+   than the author — a same-family judge is up to **20× more likely** to pass a check it would
+   fail itself (rubric-SPB, arXiv 2604.06996). Prefer a deterministic, family-immune gate where
+   one exists (`poe all` and its enforcers already are); for the LLM pass use a different-vendor
+   CLI (e.g. `ai-jury`) or pin a cross-family judge, and have it reason **before** its verdict.
 5. **Package: issue-first, then a lean draft PR.** File the issue **self-contained** — a
    runnable minimal reproduction anyone can paste, the root cause, delta-only prose, no repo
    internals assumed. Open the PR as a **draft that points to the issue and does not restate

@@ -221,7 +221,11 @@ hard rule, structurally enforced, not a discipline:
   The provider contract is [`ADAPTERS.md`](ADAPTERS.md); [`harness.js`](harness.js) is its Claude
   Workflow adapter and `.agents/skills/sharpen-loop/` is its Codex adapter — one module per run;
   `openPr=false` means dry-run (ledger only), while true permits the worth-it PR (never merges).
-- **Evidence over trust.** Every iteration records a `review` provenance block in the ledger: distinct
+- **Cross-family the judge, where the roster allows.** Isolation strips the author's *rationale*, but a
+  same-**family** reviewer still shares its training blind spots — self-preference lets it uphold an edit
+  it would refute from the outside (rubric-SPB, arXiv:2604.06996: up to **20×** on objective rubrics). So
+  pick a **different-family** model for at least the second (judge) vote; the deterministic Objective gate
+  is family-immune and always runs first. Record the model family per role in the `review` block. Every iteration records a `review` provenance block in the ledger: distinct
   author, skeptic, and judge invocation ids; both reviewer verdicts; and the final verdict. The host
   adapter owns identity and decision composition (see `ADAPTERS.md`). No block, duplicate identities,
   or missing judge on an UPHELD path means the review didn't happen.
