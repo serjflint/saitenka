@@ -74,8 +74,12 @@ def _deinflect_keys() -> list[str]:
 
 
 def _subtitle_keys() -> list[str]:
-    """One key per SubMiner parser vector, by its unique ``name``."""
-    return [c["name"] for c in _json_cases("tests/fixtures/subtitle/subminer_parser_cases.json")]
+    """One key per SubMiner parser vector — the WHOLE case (name/fn/content/expect/…), so a mutated
+    input or expected-parse moves the census even when the unique ``name`` is kept."""
+    return [
+        json.dumps(c, sort_keys=True, ensure_ascii=False)
+        for c in _json_cases("tests/fixtures/subtitle/subminer_parser_cases.json")
+    ]
 
 
 # --- registry --------------------------------------------------------------------------------------
@@ -120,7 +124,7 @@ CORPORA: list[CorpusSpec] = [
         "subtitle",
         _subtitle_keys,
         count=23,
-        sha256="c95212b041f92a7f34f31b0bad5a7a05e8acf65b3f5c71cd5bb542c1eb7c9773",
+        sha256="9315039ebe2150b600b7be758d89cb086762c3a653deacc2ca569168c782dbcd",
     ),
 ]
 

@@ -2,9 +2,9 @@
 
 The character algorithm is validated against the vendored Unicode ``LineBreakTest.txt`` corpus
 (``tests/fixtures/uax14``). We assert **100 %** on the subset whose code points are in the scripts this
-renderer wraps — Latin, CJK, Kana, digits, common punctuation, spaces, Korean — and record the overall
-rate. Lines using classes that never reach the renderer (Hebrew HL/HH, Brahmic AK/AP/AS/VF/VI, regional
-indicators, emoji modifiers, bare ZWJ joiners) are excluded, not chased.
+renderer wraps — Latin, CJK, Kana, digits, common punctuation, spaces, Korean — and pin the in-scope /
+out-of-scope split as a counted ledger. Lines using classes that never reach the renderer (Hebrew HL/HH,
+Brahmic AK/AP/AS/VF/VI, regional indicators, emoji modifiers, bare ZWJ joiners) are excluded, not chased.
 """
 
 from __future__ import annotations
@@ -70,9 +70,11 @@ def test_corpus_conformance_is_total_for_rendered_scripts():
     in_scope = in_scope_ok = 0
     failures: list[str] = []
     for cps, markers in cases:
+        got = break_opportunities(
+            "".join(chr(c) for c in cps)
+        )  # every line: also smokes exotic input
         if not _in_scope(cps):
             continue
-        got = break_opportunities("".join(chr(c) for c in cps))
         ok = all((markers[i] == "÷") == (got[i] != PROHIBITED) for i in range(1, len(cps)))
         in_scope += 1
         in_scope_ok += ok

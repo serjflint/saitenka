@@ -90,6 +90,17 @@ def test_allows_a_duplicate_when_uniqueness_not_required() -> None:
     assert cc._spec_failures(spec) == []
 
 
+def test_subtitle_keys_encode_full_case_not_just_the_name() -> None:
+    # regression guard: a name-only key would silently miss a mutated content/expect (same name) — the
+    # census hash wouldn't move. Assert the derived keys carry more than the bare names, yet still the name.
+    cc = _mod()
+    rel = "tests/fixtures/subtitle/subminer_parser_cases.json"
+    names = [c["name"] for c in cc._json_cases(rel)]
+    keys = cc._subtitle_keys()
+    assert keys != names
+    assert all(n in k for n, k in zip(names, keys, strict=True))
+
+
 def test_flags_an_unreadable_source() -> None:
     cc = _mod()
 
