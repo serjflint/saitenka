@@ -51,7 +51,9 @@ before kill** (`SIGSTOP`); the full recovery drill is `.agents/rules/searching.m
 repowise is a **grounded summary, not ground truth** — its synthesis can be stale or wrong (the
 module/onboarding pages especially; a fresh fact-check found several mislabeled). Trust it for
 orientation, *why*, and blast-radius; **confirm any correctness-critical claim against the code** (LSP /
-Read). It only helps while the index is fresh (`repowise update`) and the MCP server is up.
+Read). It only helps while the index is fresh (`repowise update`) and the MCP server is up — a
+session-start hook (`.agents/hooks/repowise-refresh.py`, wired per-agent) flags a stale index after a
+merge and, opt-in (`SAITENKA_REPOWISE_AUTOUPDATE=1`), launches a background refresh.
 
 ## Python: always `uv`
 
