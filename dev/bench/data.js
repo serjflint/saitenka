@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786090548562,
+  "lastUpdate": 1786114438011,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -899,6 +899,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.762,
             "range": "±7.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7606bd38e1b97db213c78695fda15822784a84fe",
+          "message": "feat(test): census-lock the vendored external-oracle corpora (#211)\n\n* feat(test): census-lock the vendored external-oracle corpora\n\nWe steal upstream conformance suites as oracles (external-oracle-corpus-series:\nUAX #14 linebreak, Yomitan deinflect, SubMiner subtitle), but the denominator was\nunlocked — a re-vendor / re-gen could silently drop or mutate cases and the suite\nstill greened. `poe corpus-lock` (tools/corpus_check.py, now in `all`) binds each\ncorpus's case census (count + a SHA-256 over the sorted key-list) to a committed\nmanifest; drift fails until deliberately re-blessed (`corpus_check.py show`), the\nsame discipline docs-consts applies to constants. Two-sided planted +/- controls\nin tests/test_corpus_check.py. Grounds pg83's census-lock; stdlib-only, sub-second.\n\n* test(linebreak): pin the UAX-14 render-scope split as a counted ledger\n\nReplace the `len(cases) > 10_000` floor and the `> 0.99` rate with exact in-scope /\nout-of-scope counts. The out-of-scope filter was silent — an upstream reclassification\ncould demote an in-scope regression out of scope and hide it. The exact total is now\nlocked by `poe corpus-lock`; this pins the render-scope split, re-blessed deliberately\non a UCD bump.\n\n* test(subtitle): input-equivalence metamorphic oracle + catalog it\n\nparse_srt is invariant to line-endings (CRLF/LF) and trailing blank lines — a\nno-answer-key relation that catches formatting bugs the finite transcribed golden\nmisses, with a negative control proving it has teeth. Add the input-equivalence\nfamily to the oracle catalog and a corpus-lock note to AGENTS.md's Testing section.\n\n* fix(test): census-lock subtitle on full case, not just name (review)\n\nAdversarial review caught that _subtitle_keys hashed only the unique `name`, so a\nre-gen that mutated a case's content/expect (name kept) left the census hash\nunchanged — silently violating the \"or mutates\" guarantee the other two corpora\nuphold. Key on the whole case (json.dumps sort_keys) like deinflect/uax14, re-bless\nthe hash, and add an anti-regression control that the keys encode more than the name.\nAlso keep break_opportunities running on out-of-scope UAX-14 lines (smoke that exotic\ninput never raises) and fix the now-stale \"overall rate\" docstring.\n\n* docs: drop private-notes references from corpus_check docstring",
+          "timestamp": "2026-08-07T17:53:03+03:00",
+          "tree_id": "bd5cd809c52a68bbeba673227121748a24bfb8dc",
+          "url": "https://github.com/serjflint/saitenka/commit/7606bd38e1b97db213c78695fda15822784a84fe"
+        },
+        "date": 1786114436884,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.686,
+            "range": "±3.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.551,
+            "range": "±8.0%",
             "unit": "ms"
           }
         ]
