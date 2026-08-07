@@ -6,8 +6,9 @@ the code — poe task names, `.agents/` paths, module files, and constant defaul
 mechanically verified, so a rename or a retune silently rots the reference. These two zero-LLM passes
 bind each claim to the code, so drift fails the gate instead of misleading the next agent.
 
-  refs   — every ``poe <task>`` a doc names is a real poe task; every ``.agents/{skills,rules,hooks,
-           sharpen,grow,mcp}/<name>`` path and every module/tool file path it cites exists on disk.
+  refs   — every code-font ``poe <task>`` a doc names is a real poe task; every ``.agents/{skills,rules,
+           hooks,sharpen,grow,mcp}/<name>`` path and every package-qualified module/tool path it
+           RECOGNISES exists on disk (best-effort recall — bare filenames / prose refs are out of scope).
   consts — each numeric default in ARCHITECTURE.md's "Constants, limits" table is (a) attributed to
            its real defining symbol and (b) equal to the value the code actually holds. Two-sided:
            a doc-only claim with no registry binding, or a registry entry the doc dropped, both fail.

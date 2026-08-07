@@ -253,7 +253,8 @@ doesn't own). Timings are order-of-magnitude, measured on the pathological corpu
 | Prefetch workers | 4 (free-threaded) / 2 (GIL) / pinned | `app/prefetch.py` |
 | Decode-warm lookahead | `prefetch_lookahead = 0` cues | `PerfOptions` |
 | Head-render lookahead / queue | `head_prefetch_lookahead = 1`, `head_prefetch_queue_max = 24` | `PerfOptions` |
-| Decoded-entry LRU / panel LRU | `entry_cache_max = 256`/dict, `panel_cache_max = 128` | `DictDbOptions`, `TooltipOptions` |
+| Decoded-entry LRU | `entry_cache_max = 256`/dict | `DictDbOptions` |
+| Panel LRU | `panel_cache_max = 128` | `TooltipOptions` |
 | Raster cost | ≈0.034ms/px → 256px band ≈9ms | bench |
 | SC-walk cost (pathological) | ≈200ms/row, run once + ahead | bench |
 | Whole tall block (pre-band) | up to 14 700px ≈500ms `getmask2` | bench |

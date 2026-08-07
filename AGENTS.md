@@ -52,15 +52,12 @@ repowise is a **grounded summary, not ground truth** — its synthesis can be st
 module/onboarding pages especially; a fresh fact-check found several mislabeled). Trust it for
 orientation, *why*, and blast-radius; **confirm any correctness-critical claim against the code** (LSP /
 Read). It only helps while the index is fresh (`repowise update`) and the MCP server is up — a
-session-start hook (`.agents/hooks/repowise-refresh.py`, wired per-agent) flags a stale index after a
-merge and, opt-in (`SAITENKA_REPOWISE_AUTOUPDATE=1`), launches a background refresh.
+session-start hook (`.agents/hooks/repowise-refresh.py`) flags a stale index after a merge.
 
 ## Python: always `uv`
 
 `uv run` / `uvx` / `uv add` — never bare `python`/`pip`/`venv`/`pipx`. Commit `uv.lock`; standalone
-scripts declare deps via PEP 723 inline metadata. **Enforced, not just asked:** a `PreToolUse` hook
-(`.agents/hooks/block-bare-python.py`, wired in `.claude/settings.json` beside the search guard) denies
-a bare interpreter at the moment of action — a path-qualified one (`.venv/bin/python`) stays fine.
+scripts declare deps via PEP 723 inline metadata.
 
 ## Project conventions
 
@@ -153,12 +150,9 @@ prose bloat does, because two copies of a fact drift independently and one goes 
 - **Test it like a reader, not the author.** Before calling a doc done, hand it to a fresh agent — no
   conversation context — with the questions a real reader would ask. A doc that makes a fresh reader
   invent something is the doc's bug, not the reader's.
-- **Structural claims ARE gated.** Prose *altitude* (bloat, duplication) stays a review discipline like
-  comments — but the concrete, checkable claims an agent-facing doc makes (AGENTS.md / ARCHITECTURE.md /
-  each SKILL.md) are bound to the code by `poe docs-refs` + `poe docs-consts` (in `all`): every
-  `poe <task>`, `.agents/<path>`, and module/tool file must resolve, and every constant default in
-  ARCHITECTURE.md's table must match its real symbol and value. A rename or retune that strips a
-  reference or drifts a constant fails the gate. See `tools/docs_check.py`.
+- **Altitude is a review discipline; structural claims are gated.** Bloat/duplication stays a judgment
+  call, not a `poe` check — but broken `poe`/`.agents`/module refs and drifted ARCHITECTURE.md constants
+  fail `poe docs-refs`/`docs-consts` (in `all`).
 
 ## Testing
 
@@ -205,9 +199,8 @@ Consult it when adding or rewriting a test.
   behaviour review — re-bless deliberately (e.g. a `unidic-lite` bump), never regenerate to green.
 - **Determinism.** No wall-clock, ambient `random`, or unrestored env in a test; `pytest-randomly`
   stays on to surface order-coupling. Inject the clock at the seam (the suite already does this via
-  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears). The two hardest
-  invariants here — **unrestored env** and **session/module-mutable fixtures** — are now a **gate**
-  (`poe test-lint-gate`, in `all`, baseline-clean at `error`); the rest stay advisory (`poe test-lint`).
+  `monkeypatch`; reach for `time-machine` only if a real clock-flake appears). Unrestored env +
+  session/module-mutable fixtures are gated (`poe test-lint-gate`); other coupling stays advisory.
 - **Timeouts on anything that can hang.** New `integration`/`live` tests touching a socket/subprocess
   carry `@pytest.mark.timeout(5)` (30 for `live`). Opt-in per test — there is no global default, so
   legitimately-slow tests are unaffected (advisory `test-integration-timeout-missing` flags a missing one).
