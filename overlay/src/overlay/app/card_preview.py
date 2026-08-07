@@ -85,6 +85,12 @@ class PreviewState:
     image_rect: Rect | None = None
     dup_rect: Rect | None = None
 
+    @property
+    def open(self) -> bool:
+        """Shown iff a panel rect is placed — the uniform ``SurfaceState`` predicate the surface
+        registry (app/surfaces.py) reads for mouse-capture/routing."""
+        return self.rect is not None
+
     def clear(self) -> None:
         """Dismiss: forget the composed preview and every clickable region in one move."""
         self.last_preview = None
