@@ -433,7 +433,8 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     reader._subtitle_fetch_threads[0].join(timeout=1)
     subtitle_modes.apply_fetch_results(reader)
 
-    assert resynced == [("/videos/Show - 03.mkv", str(current))]  # re-synced CURRENT sub, no fetch
+    # video is wrapped in Path before resync → compare the OS-native form (Windows uses backslashes)
+    assert resynced == [(str(Path("/videos/Show - 03.mkv")), str(current))]  # CURRENT sub, no fetch
     assert ("sub-remove", 2) in ipc.commands  # stale track dropped
     assert (
         "sub-add",
