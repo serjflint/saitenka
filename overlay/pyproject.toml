@@ -547,6 +547,12 @@ links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress
 # only. Planted +/- controls: tests/test_docs_check.py. See tools/docs_check.py + AGENTS.md "Documentation".
 docs-refs = { shell = "uv run --extra full python tools/docs_check.py refs" }
 docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" }
+# GATE (in `all`) — census-lock the vendored external-oracle corpora (UAX #14, deinflect, subtitle). Each
+# corpus's case census (count + a hash over the sorted key-list) must equal a committed manifest, so a
+# re-vendor / re-gen that silently DROPS or mutates cases fails the gate until the manifest is deliberately
+# re-blessed (`python tools/corpus_check.py show`). Same drift-guard idiom docs-consts applies to constants,
+# here applied to stolen conformance suites. Zero-LLM, stdlib. Planted +/- controls: tests/test_corpus_check.py.
+corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check" }
 # Docs site (Material for MkDocs → Read the Docs). Source lives at the repo root (../mkdocs.yml, ../docs),
 # but the build runs here because this env has the `saitenka` package + `docs` group. `--strict` fails on
 # broken links/nav, so a docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an
@@ -623,7 +629,7 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "test-lint-gate", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts"]
+all = ["lint", "types", "arch", "invariants", "test-lint-gate", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
