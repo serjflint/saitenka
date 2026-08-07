@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786144691788,
+  "lastUpdate": 1786146373752,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -971,6 +971,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.829,
             "range": "±14.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f35c867dc5e87b67a7724e0dd2d125246be365e2",
+          "message": "refactor(overlay): ordered Surface registry for OSD input chains (#212)\n\nThe controller's four input chains — forced-mouse capture, hover suppression,\nwheel scroll, click routing — hand-listed each surface, so a new surface had to\nbe wired into all four by hand; missing one silently left it shown-but-click-\nthrough (the #100 sub-picker occlusion bug).\n\nIntroduce app/surfaces.py: one SurfaceSpec per OSD surface in an explicit\ntopmost-first tuple (help, sub_picker, sidebar, preview, tooltip). Each spec is\na state accessor plus the hover/scroll/click predicates it handles; the four\nchains collapse to iterations over SURFACES. Behaviour is preserved exactly —\none z-order satisfies all four (capture = any-open OR; scroll/click = first\nclaimant, tooltip terminal; preview capture-only, its click stays in the tooltip\nhandler with its diagnostic log).\n\nShown-ness is now the uniform SurfaceState.open: PreviewState/TooltipState gain\nan `open` property (rect/tip_rect is not None); Help/Picker/Sidebar already had\nthe field. An explicit tuple over __init_subclass__ auto-registration keeps\nz-order legible and reviewable — the implicitness is what hid the bug.",
+          "timestamp": "2026-08-08T02:45:44+03:00",
+          "tree_id": "a786a4c81e92303aabb8ea22d8b08837bfe3ffa8",
+          "url": "https://github.com/serjflint/saitenka/commit/f35c867dc5e87b67a7724e0dd2d125246be365e2"
+        },
+        "date": 1786146372539,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.822,
+            "range": "±3.0%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.54,
+            "range": "±7.4%",
             "unit": "ms"
           }
         ]
