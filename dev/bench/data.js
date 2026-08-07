@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786007288736,
+  "lastUpdate": 1786090548562,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -863,6 +863,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.765,
             "range": "±8.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c0cff84c10638e2782e9219b65a05cbae3550100",
+          "message": "Merge pull request #210 from serjflint/feat/harness-doc-checker\n\nfeat: harness-engineering enforcement — doc↔code gates, restraint hooks, cross-family review",
+          "timestamp": "2026-08-07T11:14:51+03:00",
+          "tree_id": "8ad4f6aff18580f87759615052e7374c7f0099c6",
+          "url": "https://github.com/serjflint/saitenka/commit/c0cff84c10638e2782e9219b65a05cbae3550100"
+        },
+        "date": 1786090547552,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.822,
+            "range": "±3.8%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.762,
+            "range": "±7.7%",
             "unit": "ms"
           }
         ]
