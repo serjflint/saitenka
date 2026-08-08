@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786192677279,
+  "lastUpdate": 1786201975173,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1367,6 +1367,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.863,
             "range": "±1.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5b4a17e0f127728180a1cbd2bf86f5e71737a869",
+          "message": "fix(subprocess): UTF-8 everywhere for spawned tools + content-free dict-DB stats (#234)\n\n* fix(subs): adopt an untagged newly-primary track as Japanese\n\nWhen mpv makes a subtitle track primary that saitenka doesn't already know (a manual\ntrack cycle, or a drag-'n'-dropped sub file), on_primary_changed ignored it — so an\nUNTAGGED Japanese track (mpv reports 'unknown language') stayed in the English fallback\nand every cue rendered plain (white, uncolored, left-flowed in an 86%-width box) instead\nof the colored, centered Japanese overlay.\n\nAdopt any newly-primary track that isn't tagged English as the Japanese target and index\nit from disk, mirroring the wildcard rule discover_tracks already uses at startup. English\nis gated on a real, non-empty tag — lang_matches(None, EN_LANGS) is a false wildcard match,\nso an untagged track is never misread as English.\n\n* feat(subs): keybind to force the current track as Japanese (Alt+j)\n\nThe manual override paired with auto-adoption: when the active track is untagged and\nauto-adoption guessed wrong (an untagged track that is really English), or the user just\nwants to assert it, Alt+j forces mpv's current primary track as the Japanese target,\nre-indexes it, and recolors the on-screen cue. Acts from within mpv, no CLI flag.\n\n* feat(subs): identify Japanese by content (kana/kanji), not just language tags\n\nRefine untagged-track adoption: instead of blindly assuming an untagged newly-primary\ntrack is Japanese, classify it by its actual cue text. looks_japanese() checks for\nJapanese script (hiragana/katakana/half-width kana/kanji Unicode blocks); the track is\nindexed from disk first so the cues can be sampled. A dropped untagged Japanese sub\ncolors; a dropped untagged English sub now correctly stays the plain secondary instead of\nbeing miscolored as Japanese — the case a language tag can't decide.\n\n* feat(mpv): auto-reconnect a dropped IPC pipe (mpv.net) + label mpv.net in doctor\n\nmpv.net drops its IPC named pipe mid-session (a transient WinError 109 that vanilla mpv\ndoesn't emit), which killed the overlay until the user relaunched. On a dropped pipe,\npump() now re-dials the SAME endpoint on the IPC thread and replays observers (the\ncontroller re-issues observe_property, which a fresh mpv connection has forgotten).\nBounded by a per-process budget so a genuinely-quit mpv still exits after failed dials;\nclose() marks an intentional shutdown so it never reconnects then. Each attempt/outcome is\nlogged so a report shows whether recovery worked.\n\ndoctor now labels a resolved mpv.net binary as 'mpv.net' even when it reports a parseable\nmpv version, so the report names which player is active.\n\n* fix(subprocess): force encoding=\"utf-8\" on every text-mode subprocess call\n\ntext=True / universal_newlines=True decodes child output with the OS locale\ncodec (cp932/cp1252 on non-UTF-8 Windows). ffprobe stream tags and filenames\nare UTF-8, so on a Japanese-locale box the embedded-sub reference probe and the\nversion/duration/lang probes mojibake or raise — a friend's report showed the\ncp932 bug class (the tag-sidecar write, since removed, hit the same wall).\n\nFix all 12 text-mode sites (anki/conflicts/doctor/media/report/resync/version),\nand enforce it: a new ast-grep rule (subprocess-utf8-encoding) flags any\nsubprocess.*(text=True) without encoding=, run by `poe invariants` (in `poe\nall`). ruff's PLW1514 covers files only — verified no ruff rule catches\nsubprocess. The rule immediately caught two sites a manual sweep missed.\n\n* feat(doctor): content-free dictionary-DB stats in report + doctor\n\nThe report bundle deliberately excludes dictionaries, which left the tags\nquestion (is a dict's `tags` table populated, or is it sidecar-era residue?)\nunanswerable from a bundle. Add `DictionaryDb.stats()` — a content-free\nsnapshot (schema, file size, per-dictionary row counts for\nentries/keys/kanji/term_meta/tags) that names no term, reading, or gloss, so\nit's safe to ship in diagnostics.\n\n`dicts.listing.txt` now carries the schema/size header and per-dict counts;\ndoctor's check_dict_db emits the same counts as info-tier lines (--verbose/--json\nonly). A dict-kind dictionary with entries but no tags is the sidecar-era tell —\nnow visible without guessing, so \"re-import to fix tag pills\" is a fact, not a\nhunch.",
+          "timestamp": "2026-08-08T18:12:30+03:00",
+          "tree_id": "4a9d7c067c7d166143604613d279fbe4dbb6cb04",
+          "url": "https://github.com/serjflint/saitenka/commit/5b4a17e0f127728180a1cbd2bf86f5e71737a869"
+        },
+        "date": 1786201974455,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.314,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.657,
+            "range": "±4.2%",
             "unit": "ms"
           }
         ]
