@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786217753445,
+  "lastUpdate": 1786220955125,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1511,6 +1511,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.173,
             "range": "±2.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1fecb46ac04519851736b92cccfaea3daddedee7",
+          "message": "Merge pull request #239 from serjflint/feat/subtitle-cache-realname\n\nSubtitle cache real-extension storage + doctor resync-toolchain check (#237, #238)",
+          "timestamp": "2026-08-08T23:28:50+03:00",
+          "tree_id": "f2151b041f6f7ab2282b6380a300a6d530305215",
+          "url": "https://github.com/serjflint/saitenka/commit/1fecb46ac04519851736b92cccfaea3daddedee7"
+        },
+        "date": 1786220954635,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.334,
+            "range": "±0.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.386,
+            "range": "±6.6%",
             "unit": "ms"
           }
         ]
