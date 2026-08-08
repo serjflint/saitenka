@@ -149,11 +149,9 @@ def on_primary_changed(reader: Reader, sid) -> None:
     if sid == reader._translation_secondary_sid:
         return
     announce_track(reader, sid)
-    if sid == reader.jp_sid:
-        language: Language = MAIN_LANG
-    elif sid == reader.en_sid:
-        language = SECOND_LANG
-    else:
+    known = sid in {reader.jp_sid, reader.en_sid}
+    language = _primary_role(reader, sid)
+    if language is None:
         return
     if language != reader.subtitle_language:
         reader.subtitle_language = language
@@ -161,10 +159,40 @@ def on_primary_changed(reader: Reader, sid) -> None:
         from overlay.app import analysis_overlay
 
         analysis_overlay.on_index_changed(reader)
+    if not known:  # a track we just adopted (manual switch / drag-'n'-drop) — index it from disk
+        reader._sub_index = None
+        from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+        build_sub_index_for_current_track(reader)
     if reader._translation_visible():
         setup_secondary(reader)
     else:
         release_secondary(reader)
+
+
+def _primary_role(reader: Reader, sid) -> Language | None:
+    """The role of the track mpv just made primary, ADOPTING one that isn't already known.
+
+    A track carrying a real English tag is the known-language secondary; ANY other active track —
+    Japanese-tagged, foreign-tagged, or UNTAGGED — is treated as the target language. The user made
+    it primary (switched tracks, or drag-'n'-dropped a sub file), so an untagged track colors instead
+    of rendering plain. ``None`` only when subs were turned off (``sid`` None). Mirrors the wildcard
+    rule ``discover_tracks`` uses at startup — but ``lang_matches(None, EN_LANGS)`` is a false wildcard
+    match, so English is gated on a real, non-empty tag, never inferred for an untagged track."""
+    if sid is None:
+        return None
+    if sid == reader.jp_sid:
+        return MAIN_LANG
+    if sid == reader.en_sid:
+        return SECOND_LANG
+    lang = next((t.get("lang") for t in sub_tracks(reader.ipc) if t.get("id") == sid), None)
+    if lang and lang_matches(lang, list(EN_LANGS)) and not lang_matches(lang, list(JP_LANGS)):
+        reader.en_sid = sid
+        log.info("subtitle sid=%s (lang=%r) adopted as the English secondary", sid, lang)
+        return SECOND_LANG
+    reader.jp_sid = sid
+    log.info("subtitle sid=%s (lang=%r) adopted as the Japanese primary", sid, lang)
+    return MAIN_LANG
 
 
 def _language_name(lang: str | None) -> str:
