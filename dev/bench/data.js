@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786232315238,
+  "lastUpdate": 1786232627152,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1764,6 +1764,40 @@ window.BENCHMARK_DATA = {
             "value": 8.846,
             "range": "±0.6%",
             "unit": "ms"
+          }
+        ]
+      }
+    ],
+    "Saitenka live jank": [
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "0d80b9166c1c6509648a9e78b00db72f11a85f7a",
+          "message": "Merge pull request #248 from serjflint/fix/e2e-windows-green\n\nfix: green the Windows e2e leg (UTF-8 reads, path-sep test, artifact dirtying)",
+          "timestamp": "2026-08-08T23:38:11Z",
+          "url": "https://github.com/serjflint/saitenka/commit/0d80b9166c1c6509648a9e78b00db72f11a85f7a"
+        },
+        "date": 1786232626684,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "unit": "frames"
           }
         ]
       }
