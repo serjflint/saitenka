@@ -77,6 +77,9 @@ class SubtitleFetchResult:
     replace: bool = (
         False  # a user retry: swap the on-screen (mistimed) JP for the fresh re-synced one
     )
+    force_select: bool = (
+        False  # an explicit picker choice: select the fetched track NOW, even from English
+    )
 
 
 def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
@@ -232,11 +235,14 @@ def start_fetch(
     name: str = "sub-provider",
     select_if_unchanged: bool = False,
     replace: bool = False,
+    force_select: bool = False,
     on_done: Callable[[], None] | None = None,
 ) -> None:
     """Run provider I/O off-thread; mpv IPC stays on the reader thread. ``replace`` (a user retry)
     swaps the current on-screen JP track for the freshly fetched/re-synced one; the background path
-    leaves ``replace`` false so it never disrupts what you're watching."""
+    leaves ``replace`` false so it never disrupts what you're watching. ``force_select`` (the picker's
+    explicit choice) selects the fetched track NOW even from English, overriding the keep-current
+    background contract."""
     initial_sid = reader._get("sid") if select_if_unchanged else None
 
     def work() -> None:
@@ -244,7 +250,9 @@ def start_fetch(
             try:
                 path, status = fetch()
                 reader._subtitle_results.put(
-                    SubtitleFetchResult(path, status, select_if_unchanged, initial_sid, replace)
+                    SubtitleFetchResult(
+                        path, status, select_if_unchanged, initial_sid, replace, force_select
+                    )
                 )
             except (
                 Exception
@@ -257,6 +265,7 @@ def start_fetch(
                         select_if_unchanged,
                         initial_sid,
                         replace,
+                        force_select,
                     )
                 )
         finally:
@@ -364,11 +373,13 @@ def _reset_sub_delay(reader: Reader) -> None:
     reader.ipc.command("set_property", "sub-delay", 0.0)
 
 
-def _replace_japanese_track(reader: Reader, path, status: str) -> None:
-    """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry). Drops the
-    stale external track(s) first — mpv caches an already-loaded external's cues in memory, and
-    ``discover_tracks`` would pick the older duplicate JP — then re-adds + selects the fresh one and
-    rebuilds the lookahead index, so the corrected timing shows immediately."""
+def _replace_japanese_track(
+    reader: Reader, path, status: str, *, toast: str = "Japanese subtitles re-synced"
+) -> None:
+    """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry, or an
+    explicit picker choice). Drops the stale external track(s) first — mpv caches an already-loaded
+    external's cues in memory, and ``discover_tracks`` would pick the older duplicate JP — then re-adds
+    + selects the fresh one and rebuilds the lookahead index, so the corrected timing shows immediately."""
     from overlay.app.embedded_subs import build_sub_index_for_current_track
 
     for track in sub_tracks(reader.ipc):
@@ -384,7 +395,7 @@ def _replace_japanese_track(reader: Reader, path, status: str) -> None:
     reader._sub_index = None
     reader.set_subtitle("")
     build_sub_index_for_current_track(reader)
-    reader._toast("Japanese subtitles re-synced")
+    reader._toast(toast)
     log.info("%s", status)
 
 
@@ -434,6 +445,12 @@ def apply_fetch_results(reader: Reader) -> None:
         if result.path is None:
             log.warning("%s", result.status)
             reader._toast(result.status, "warn")
+        # An explicit picker choice selects the chosen source NOW, from any current language (English
+        # included) — the user picked it on purpose, so the keep-current background contract doesn't apply.
+        elif result.force_select:
+            _replace_japanese_track(
+                reader, result.path, result.status, toast="Japanese subtitles selected"
+            )
         # A user retry while watching Japanese swaps the on-screen (mistimed) track for the re-synced
         # file; from English it falls through to the non-disruptive add (fetch JP, keep EN until Alt+t).
         elif result.replace and reader.subtitle_language == "jp":
