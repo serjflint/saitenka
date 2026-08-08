@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786146984911,
+  "lastUpdate": 1786151019367,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1043,6 +1043,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.595,
             "range": "±9.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cd74d415166c01c5571dbf4776c50dae29b20e5d",
+          "message": "chore(lint): gate ruff PLR0913/PLR0917 (too-many-args) at max-args=10 (#217)\n\nArg count was ungated: PLR0913/PLR0917 were ignored 'deferring to complexipy',\nbut complexipy measures cognitive complexity, not parameter count — so data-\nclumps (the ProviderConfig case) crossed no tripwire. Enable both at a loose\nmax-args=10 (ruff default is 5; the geometry/render helpers legitimately take\n6-8 coords) to catch only egregious clumps, and ratchet down over time (#216).\n\nThe over-10 tail carries a scoped '# noqa: PLR0913' — arg-clumps reference #216\n(bundle into a config object); cli.run/run_impl are a permanent exception\n(cyclopts builds --help/parsing from the flat signature). Only PLR0913/0917\nleave the ignore list; the CCN-adjacent count cousins stay complexipy's job.",
+          "timestamp": "2026-08-08T03:58:44+03:00",
+          "tree_id": "2fa38c908acf6d09184b558b55170457bfdfd985",
+          "url": "https://github.com/serjflint/saitenka/commit/cd74d415166c01c5571dbf4776c50dae29b20e5d"
+        },
+        "date": 1786151018823,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.766,
+            "range": "±3.0%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.636,
+            "range": "±7.8%",
             "unit": "ms"
           }
         ]
