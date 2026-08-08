@@ -8,7 +8,7 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from overlay.app.languages import MAIN_LANG, SECOND_LANG, Language
+from overlay.app.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -149,50 +149,60 @@ def on_primary_changed(reader: Reader, sid) -> None:
     if sid == reader._translation_secondary_sid:
         return
     announce_track(reader, sid)
-    known = sid in {reader.jp_sid, reader.en_sid}
-    language = _primary_role(reader, sid)
-    if language is None:
+    if sid is None:
         return
-    if language != reader.subtitle_language:
-        reader.subtitle_language = language
-        reader._sub_index = None
-        from overlay.app import analysis_overlay
-
-        analysis_overlay.on_index_changed(reader)
-    if not known:  # a track we just adopted (manual switch / drag-'n'-drop) — index it from disk
+    known = sid in {reader.jp_sid, reader.en_sid}
+    if not known:
+        # The user just made this track primary (manual cycle / drag-'n'-drop). Index it from disk
+        # FIRST, so an untagged track can be classified by its actual content just below.
         reader._sub_index = None
         from overlay.app.embedded_subs import build_sub_index_for_current_track
 
         build_sub_index_for_current_track(reader)
+    language = _primary_role(reader, sid)
+    if not known:
+        if language == MAIN_LANG:
+            reader.jp_sid = sid
+        else:
+            reader.en_sid = sid
+        log.info("subtitle sid=%s adopted as %s", sid, language)
+    if language != reader.subtitle_language:
+        reader.subtitle_language = language
+        from overlay.app import analysis_overlay
+
+        analysis_overlay.on_index_changed(reader)
     if reader._translation_visible():
         setup_secondary(reader)
     else:
         release_secondary(reader)
 
 
-def _primary_role(reader: Reader, sid) -> Language | None:
-    """The role of the track mpv just made primary, ADOPTING one that isn't already known.
-
-    A track carrying a real English tag is the known-language secondary; ANY other active track —
-    Japanese-tagged, foreign-tagged, or UNTAGGED — is treated as the target language. The user made
-    it primary (switched tracks, or drag-'n'-dropped a sub file), so an untagged track colors instead
-    of rendering plain. ``None`` only when subs were turned off (``sid`` None). Mirrors the wildcard
-    rule ``discover_tracks`` uses at startup — but ``lang_matches(None, EN_LANGS)`` is a false wildcard
-    match, so English is gated on a real, non-empty tag, never inferred for an untagged track."""
-    if sid is None:
-        return None
+def _primary_role(reader: Reader, sid) -> Language:
+    """Role of the track mpv just made primary. A real Japanese tag → the target; a real English tag →
+    the known-language secondary. An UNTAGGED track is classified by CONTENT — Japanese script (kana or
+    kanji) in the cues just indexed, else the on-screen text → target; otherwise the secondary. So a
+    drag-'n'-dropped untagged Japanese sub colors while an untagged English one stays plain, exactly
+    where a language tag can't decide (``lang_matches(None, EN_LANGS)`` is a false wildcard match)."""
     if sid == reader.jp_sid:
         return MAIN_LANG
     if sid == reader.en_sid:
         return SECOND_LANG
     lang = next((t.get("lang") for t in sub_tracks(reader.ipc) if t.get("id") == sid), None)
-    if lang and lang_matches(lang, list(EN_LANGS)) and not lang_matches(lang, list(JP_LANGS)):
-        reader.en_sid = sid
-        log.info("subtitle sid=%s (lang=%r) adopted as the English secondary", sid, lang)
+    if lang and lang_matches(lang, list(JP_LANGS)):
+        return MAIN_LANG
+    if lang and lang_matches(lang, list(EN_LANGS)):
         return SECOND_LANG
-    reader.jp_sid = sid
-    log.info("subtitle sid=%s (lang=%r) adopted as the Japanese primary", sid, lang)
-    return MAIN_LANG
+    sample = _sample_cue_text(reader)  # no usable tag → decide by the track's actual text
+    return MAIN_LANG if (not sample or looks_japanese(sample)) else SECOND_LANG
+
+
+def _sample_cue_text(reader: Reader, limit: int = 20) -> str:
+    """A few cues of the current track for content-based language ID: the freshly indexed cues if
+    present, else mpv's on-screen cue."""
+    idx = reader._sub_index
+    if idx is not None and len(idx) > 0:
+        return " ".join(cue.text for cue in idx.cues[:limit])
+    return reader.sub_text or ""
 
 
 def _language_name(lang: str | None) -> str:

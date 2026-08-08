@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from overlay.app import subtitle_modes
 from overlay.app.controller import Reader
-from overlay.app.languages import MAIN_LANG, SECOND_LANG
+from overlay.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from overlay.app.sub_index import SubIndex, parse_srt
 from overlay.app.subtitles import SubtitleRender
 from PIL import Image
@@ -598,6 +598,42 @@ def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path):
     assert reader.subtitle_language == MAIN_LANG
     assert reader.jp_sid == 2
     assert reader._sub_index is not None  # indexed from the dropped file
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("岩を砂へ 砂を岩へ", True),  # kanji + hiragana
+        ("ソウルソサエティ", True),  # katakana
+        ("ﾊﾝｶｸ", True),  # half-width katakana
+        ("Turn rock to sand.", False),  # Latin
+        ("", False),  # empty
+        ("12:34 — ♪", False),  # digits/punctuation/symbols only
+    ],
+)
+def test_looks_japanese_detects_script_by_content(text, expected):
+    assert looks_japanese(text) is expected
+
+
+def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path):
+    # Content-based ID: an UNTAGGED English sub (Latin script) the user drops must NOT be miscolored as
+    # Japanese — it stays the plain secondary, unlike an untagged Japanese sub.
+    ipc = FakeIPC([JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    assert reader.subtitle_language == MAIN_LANG
+    srt = tmp_path / "dropped.en.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nTurn rock to sand.\n", encoding="utf-8")
+    ipc.tracks.append(
+        {"id": 3, "type": "sub", "lang": None, "external": True, "external-filename": str(srt)}
+    )
+    _select(ipc, 3)
+
+    subtitle_modes.on_primary_changed(reader, 3)
+
+    assert reader.subtitle_language == SECOND_LANG
+    assert reader.en_sid == 3
+    assert reader.jp_sid == 2  # the Japanese track is not overwritten
 
 
 def test_manual_switch_to_untagged_track_is_adopted_as_japanese():
