@@ -23,6 +23,20 @@ from overlay.model import RichText, Span, Style
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from overlay.model import LinkBox, ScanBox
+
+
+@dataclass(frozen=True)
+class Sinks:
+    """Optional geometry collectors a render pass appends to (both at 1× coords): a :class:`ScanBox` per
+    CJK char for nested scanning, a :class:`LinkBox` per internal ``<a>`` run for click-through. ``None``
+    = don't emit that kind. Frozen binds the fields, not the lists — appending is the point. Shared by the
+    flow and document renderers (the repo-wide "geometry sink" that kept their draw signatures wide)."""
+
+    scan_out: list[ScanBox] | None = None
+    link_out: list[LinkBox] | None = None
+
+
 # Characters that may not start a line (行頭禁則): closing punctuation, small kana, prolonged marks.
 NO_START = set(
     "、。，．・！？：；）］｝〕〉》」』】〙〗〟!?),.:;]}"

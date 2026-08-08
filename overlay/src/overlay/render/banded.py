@@ -215,6 +215,22 @@ def composite_window(
     return out
 
 
+@dataclass(frozen=True)
+class BandedTuning:
+    """Retention/compression knobs for :class:`WindowedPanel` (defaults = the hermetic-test posture).
+
+    - ``seed_height``: placeholder row height before a block is first measured.
+    - ``max_cached_blocks``: LRU cap on retained render bands (``None`` = keep exactly viewport±overscan).
+    - ``compress``: zlib bands on store.
+    - ``raw_band_ceiling``: keep bands RAW until the panel's estimated size crosses this many bytes, then
+      honour ``compress`` (``0`` = no exception, always honour ``compress``)."""
+
+    seed_height: int = 200
+    max_cached_blocks: int | None = None
+    compress: bool = False
+    raw_band_ceiling: int = 0
+
+
 class WindowedPanel:
     """Drive :func:`overlay.panel.panel_rows` from the geometry core: MEASURE a row's height when the
     visible range reaches it, rasterise + retain it in viewport-sized BANDS, and composite viewports
@@ -229,17 +245,14 @@ class WindowedPanel:
     a one-shot :func:`overlay.panel.render_panel` at the same offset (proven in
     ``tests/test_windowed_panel.py``; a band is a shorter block at a within-row offset)."""
 
-    def __init__(  # noqa: PLR0913  # windowed-panel deps + tuning knobs; ratchet to 8 tracked in #216
+    def __init__(
         self,
         rows: Sequence[Row],
         width: int,
         theme: Theme | None = None,
         top_reserve: int = 0,
         *,
-        seed_height: int = 200,
-        max_cached_blocks: int | None = None,
-        compress: bool = False,
-        raw_band_ceiling: int = 0,
+        tuning: BandedTuning | None = None,
         render_block_fn: Callable[[BodyRenderArgs, int, int], tuple] | None = None,
         layout_backend: LayoutBackend | None = None,
     ):
@@ -247,16 +260,19 @@ class WindowedPanel:
         from overlay.render.layout_backend import DEFAULT_BACKEND
         from overlay.render.window import LazyOffsets
 
+        tuning = tuning if tuning is not None else BandedTuning()
         self.theme = theme if theme is not None else _DEFAULT_THEME
         self.width = width
         self.top_reserve = top_reserve
         self._rows = list(rows)
-        self._cap = max_cached_blocks  # LRU pixel-cache cap (None = keep exactly visible±overscan)
-        self._compress = compress
+        self._cap = (
+            tuning.max_cached_blocks
+        )  # LRU pixel-cache cap (None = keep exactly visible±overscan)
+        self._compress = tuning.compress
         # Keep bands raw (no zlib) UNLESS the panel's estimated uncompressed size exceeds this byte
         # ceiling — then compress so one giant entry can't blow the retained budget (raw is ~10× zlib).
         # 0 disables the exception (honour _compress for every band, the pre-1.3 always-compress path).
-        self._raw_band_ceiling = raw_band_ceiling
+        self._raw_band_ceiling = tuning.raw_band_ceiling
         # A truthy value ENABLES the GIL-build process pool in render_ahead (the actual band renderer,
         # render_body_band, is a function-scope import — module-level would cycle body_block →
         # render.document → back through .render). None keeps render_ahead in-process (hermetic tests).
@@ -266,7 +282,7 @@ class WindowedPanel:
             gaps,
             self.theme.margin + top_reserve,
             self.theme.margin,
-            seed_height=seed_height,
+            seed_height=tuning.seed_height,
             backend=layout_backend if layout_backend is not None else DEFAULT_BACKEND,
         )
         # LRU pixel cache (oldest first), keyed by (row, band): a row is rasterised + retained in

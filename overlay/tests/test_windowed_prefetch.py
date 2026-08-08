@@ -13,7 +13,7 @@ import threading
 import numpy as np
 import pytest
 from overlay.panel import Definition, Entry, panel_rows, render_panel
-from overlay.render.banded import WindowedPanel
+from overlay.render.banded import BandedTuning, WindowedPanel
 
 WIDTH = 384
 
@@ -163,7 +163,7 @@ def test_concurrent_worker_and_main_stay_consistent():
     entry = _entry(24)
     total = render_panel(entry, width=WIDTH).height
     ref = render_panel(entry, width=WIDTH)
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=6)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=6))
     vh = 260
     stop = threading.Event()
     errors: list[BaseException] = []

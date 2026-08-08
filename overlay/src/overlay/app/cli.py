@@ -608,6 +608,7 @@ def prewarm(
     from functools import partial
 
     from overlay.app.config import load_config
+    from overlay.app.prewarm import PrewarmOptions
     from overlay.app.prewarm import prewarm as _prewarm
 
     cfg = load_config()
@@ -628,8 +629,11 @@ def prewarm(
             limit,
             on_progress=partial(_prewarm_emit_progress, atlas_only=atlas_only),
             workers=workers,
-            atlas_only=atlas_only,
-            atlas_scale=atlas_scale,  # already resolved to an effective scale (≥ 1.0)
+            opts=PrewarmOptions(
+                atlas_only=atlas_only,
+                atlas_scale=atlas_scale,  # already resolved to an effective scale (≥ 1.0)
+                plateau_stop=atlas_plateau,
+            ),
             on_start=partial(
                 _prewarm_emit_start,
                 atlas_only=atlas_only,
@@ -637,7 +641,6 @@ def prewarm(
                 width=width,
                 height=height,
             ),
-            plateau_stop=atlas_plateau,
         )
     except RuntimeError as e:
         print(f"prewarm: {e}")

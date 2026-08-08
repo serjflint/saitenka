@@ -178,7 +178,7 @@ only synchronous DB touch on the hover path; prefetch usually paid it already.
 then per-dict `(def-name chip, def-body)` pairs. **Nothing is walked or drawn here.** Each def-body row
 closes over one memoised `layout_body_block` handle and exposes `measure()`, `render_window(y0,y1)`,
 `geometry()`, plus the full `render()` (the golden/finish source of truth). `Panel.from_rows` wraps
-them in a `WindowedPanel(compress=True)`. Reference width is `384`px at `scale 1.0`; the runtime
+them in a `WindowedPanel(tuning=BandedTuning(compress=True))`. Reference width is `384`px at `scale 1.0`; the runtime
 `tip_width` scales with window height (mpv's OSD model — same content at any size).
 
 ### Stage 4 — measure (layout-only, no raster) · `render/banded.py` → `body_block.py`
@@ -247,7 +247,7 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
 | Knob / metric | Value | Where |
 | --- | --- | --- |
 | Band raster/cache unit | `_BAND_PX = 256`px | `render/banded.py` |
-| Estimated height before measure | `seed_height = 200`px | `WindowedPanel` |
+| Estimated height before measure | `seed_height = 200`px | `BandedTuning` (`WindowedPanel`) |
 | Scroll overscan (warm margin) | one screen (`overscan = view_h`) | tooltip blit + `Panel.render_ahead` |
 | Wheel step | `round(osd_h·0.08)` ≈ 86px @1080p | `Reader._scroll_tip` |
 | Base tooltip viewport cap | `tip_max_frac = 0.4` of video height | `TooltipOptions` |

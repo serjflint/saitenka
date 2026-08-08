@@ -20,6 +20,7 @@ from overlay.render.flow import (
     render_flow_window,
 )
 from overlay.render.layout import Block as FlowBlock
+from overlay.render.layout import Sinks
 
 if TYPE_CHECKING:
     from overlay.sc.model import Block
@@ -43,8 +44,7 @@ def _render_block(
     indent_px: int,
     gutter_px: int,
     remaining: int | None,
-    scan_out: list[ScanBox] | None,
-    link_out: list[LinkBox] | None,
+    sinks: Sinks,
     clipped_out: list | None,
 ) -> tuple[tuple[int, Image.Image, str, int, list[ScanBox], list[LinkBox]], int]:
     """Render one block's flow (capped at ``remaining``). Returns ``(row, image_height)``."""
@@ -52,8 +52,8 @@ def _render_block(
     gutter = gutter_px if b.kind == "list-item" else 0
     content_w = max(10, width - indent - gutter - padding)
     fb = FlowBlock(width=content_w, padding=0, background=(0, 0, 0, 0))
-    local: list[ScanBox] | None = [] if scan_out is not None else None
-    llocal: list[LinkBox] | None = [] if link_out is not None else None
+    local: list[ScanBox] | None = [] if sinks.scan_out is not None else None
+    llocal: list[LinkBox] | None = [] if sinks.link_out is not None else None
     img = render_flow(
         b.flow, fb, scan_out=local, link_out=llocal, max_height=remaining, clipped_out=clipped_out
     )
@@ -68,8 +68,7 @@ def _render_blocks(
     style: DocStyle,
     max_height: int | None,
     clipped_out: list | None,
-    scan_out: list[ScanBox] | None,
-    link_out: list[LinkBox] | None,
+    sinks: Sinks,
 ) -> list[tuple[int, Image.Image, str, int, list[ScanBox], list[LinkBox]]]:
     """Render each block's flow (capped at the remaining height budget), stopping early when the
     budget runs out — blocks past it are skipped entirely and ``clipped_out`` records the drop."""
@@ -87,8 +86,7 @@ def _render_blocks(
             style.indent_px,
             style.gutter_px,
             remaining,
-            scan_out,
-            link_out,
+            sinks,
             clipped_out,
         )
         if remaining is not None:
@@ -105,8 +103,7 @@ def _composite(
     gutter_px: int,
     base: Style,
     background: RGBA,
-    scan_out: list[ScanBox] | None,
-    link_out: list[LinkBox] | None,
+    sinks: Sinks,
 ) -> Image.Image:
     total_h = (
         padding * 2 + sum(im.height for _, im, *_ in rendered) + gap * max(0, len(rendered) - 1)
@@ -123,12 +120,12 @@ def _composite(
         canvas.alpha_composite(img, (x, y))
         if marker:
             draw_inline(canvas, draw, x - gutter_px, y + baseline, [Span(marker, base)])
-        if scan_out is not None:
+        if sinks.scan_out is not None:
             for sb in local:
-                scan_out.append(ScanBox(sb.text, sb.x + x, sb.y + y, sb.w, sb.h))
-        if link_out is not None:
+                sinks.scan_out.append(ScanBox(sb.text, sb.x + x, sb.y + y, sb.w, sb.h))
+        if sinks.link_out is not None:
             for lb in llocal:
-                link_out.append(LinkBox(lb.query, lb.x + x, lb.y + y, lb.w, lb.h))
+                sinks.link_out.append(LinkBox(lb.query, lb.x + x, lb.y + y, lb.w, lb.h))
         y += img.height + gap
     return canvas
 
@@ -219,8 +216,7 @@ def _draw_window_block(
     lb: LaidBlock,
     y0: int,
     y1: int,
-    scan_out: list[ScanBox] | None,
-    link_out: list[LinkBox] | None,
+    sinks: Sinks,
     *,
     scale: float = 1.0,
 ) -> None:
@@ -231,8 +227,8 @@ def _draw_window_block(
 
     local_y0 = max(0, y0 - lb.top)  # first block-local row inside the window
     local_y1 = min(lb.height, y1 - lb.top)
-    local_scan: list[ScanBox] | None = [] if scan_out is not None else None
-    local_link: list[LinkBox] | None = [] if link_out is not None else None
+    local_scan: list[ScanBox] | None = [] if sinks.scan_out is not None else None
+    local_link: list[LinkBox] | None = [] if sinks.link_out is not None else None
     img = render_flow_window(lb.layout, local_y0, local_y1, local_scan, local_link, scale=scale)
     dst_y = lb.top + local_y0 - y0  # where the drawn band lands in the window (reference px)
     canvas.alpha_composite(img, (round(lb.x * scale), round(dst_y * scale)))
@@ -245,18 +241,21 @@ def _draw_window_block(
             [Span(lb.marker, doc.base)],
             scale=scale,
         )
-    if scan_out is not None and local_scan is not None:
-        scan_out.extend(ScanBox(s.text, s.x + lb.x, s.y + dst_y, s.w, s.h) for s in local_scan)
-    if link_out is not None and local_link is not None:
-        link_out.extend(LinkBox(k.query, k.x + lb.x, k.y + dst_y, k.w, k.h) for k in local_link)
+    if sinks.scan_out is not None and local_scan is not None:
+        sinks.scan_out.extend(
+            ScanBox(s.text, s.x + lb.x, s.y + dst_y, s.w, s.h) for s in local_scan
+        )
+    if sinks.link_out is not None and local_link is not None:
+        sinks.link_out.extend(
+            LinkBox(k.query, k.x + lb.x, k.y + dst_y, k.w, k.h) for k in local_link
+        )
 
 
 def _composite_window(
     doc: DocLayout,
     y0: int,
     y1: int,
-    scan_out: list[ScanBox] | None,
-    link_out: list[LinkBox] | None,
+    sinks: Sinks,
     *,
     scale: float = 1.0,
 ) -> Image.Image:
@@ -273,7 +272,7 @@ def _composite_window(
     draw = ImageDraw.Draw(canvas)
     for lb in doc.blocks:
         if lb.top < y1 and lb.top + lb.height > y0:  # block's band overlaps the window
-            _draw_window_block(canvas, draw, doc, lb, y0, y1, scan_out, link_out, scale=scale)
+            _draw_window_block(canvas, draw, doc, lb, y0, y1, sinks, scale=scale)
     return canvas
 
 
@@ -289,7 +288,7 @@ def render_layout_window(
     """Raster the band ``[y0, y1)`` of an already-laid-out :class:`DocLayout` — the reusable draw the
     banded engine calls per row/band without re-walking or re-wrapping (see :func:`layout_document`).
     ``scale`` > 1 rasters natively (crisp glyph masks at ``size×scale``); geometry stays 1×."""
-    return _composite_window(doc, y0, y1, scan_out, link_out, scale=scale)
+    return _composite_window(doc, y0, y1, Sinks(scan_out, link_out), scale=scale)
 
 
 @dataclass(frozen=True)
@@ -334,6 +333,7 @@ def render_document(
     pixel-identical to the full render cropped to that band, but drawing only the overlapping blocks
     (via :func:`render_flow_window` for the partially-visible ones). Overrides ``max_height``."""
     style = style or _DEFAULT_STYLE
+    sinks = Sinks(scan_out, link_out)
     if y_window is not None:
         doc = layout_document(
             blocks,
@@ -345,17 +345,9 @@ def render_document(
             style.indent_px,
             style.gutter_px,
         )
-        return _composite_window(doc, y_window[0], y_window[1], scan_out, link_out)
+        return _composite_window(doc, y_window[0], y_window[1], sinks)
     base = style.base or Style()
-    rendered = _render_blocks(blocks, width, style, max_height, clipped_out, scan_out, link_out)
+    rendered = _render_blocks(blocks, width, style, max_height, clipped_out, sinks)
     return _composite(
-        rendered,
-        width,
-        style.padding,
-        style.gap,
-        style.gutter_px,
-        base,
-        style.background,
-        scan_out,
-        link_out,
+        rendered, width, style.padding, style.gap, style.gutter_px, base, style.background, sinks
     )

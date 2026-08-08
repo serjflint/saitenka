@@ -145,6 +145,14 @@ def _param_default(dotted: str, cls: str, param: str) -> Callable[[], object]:
     return go
 
 
+def _field_default(dotted: str, cls: str, attr: str) -> Callable[[], object]:
+    def go() -> object:
+        target = getattr(importlib.import_module(dotted), cls)
+        return getattr(target(), attr)  # frozen dataclass instance -> field default
+
+    return go
+
+
 @dataclass(frozen=True)
 class ConstSpec:
     ident: str  # token as written in the doc table
@@ -156,8 +164,8 @@ CONSTS: list[ConstSpec] = [
     ConstSpec("_BAND_PX", "banded.py", _attr("overlay.render.banded", "_BAND_PX")),
     ConstSpec(
         "seed_height",
-        "WindowedPanel",
-        _param_default("overlay.render.banded", "WindowedPanel", "seed_height"),
+        "BandedTuning",
+        _field_default("overlay.render.banded", "BandedTuning", "seed_height"),
     ),
     ConstSpec("tip_max_frac", "TooltipOptions", _cfg("TooltipOptions", "tip_max_frac")),
     ConstSpec("panel_cache_max", "TooltipOptions", _cfg("TooltipOptions", "panel_cache_max")),

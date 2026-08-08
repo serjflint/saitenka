@@ -114,9 +114,10 @@ class Miner:
         r = self.r
         return r.dict_set.pitch_field(tok) if r.dict_set else ("", "")
 
-    def _markers_for(self, tok, card, *, sentence_html, pic, audio, video, misc, tags, freq):
+    def _markers_for(self, tok, card, content: CardContent, *, video, tags):
         """The ``{marker} -> value`` map for the ``[mine.card_format]`` path, or ``None`` when it isn't
-        configured (so ``build_note`` takes the plain ``[mine.fields]`` route and skips this work)."""
+        configured (so ``build_note`` takes the plain ``[mine.fields]`` route and skips this work).
+        Shares the ``CardContent`` the note is built from — same sentence/media/freq, no re-derivation."""
         if not self.r.mine_cfg.card_format:
             return None
         from overlay.app.card_markers import MarkerContext, build_markers
@@ -127,13 +128,13 @@ class Miner:
         return build_markers(
             MarkerContext(
                 card=card,
-                sentence_html=sentence_html,
-                picture=pic,
-                audio=audio,
-                misc=misc,
+                sentence_html=content.sentence_html,
+                picture=content.picture,
+                audio=content.audio,
+                misc=content.misc,
                 doc_title=title,
-                freq_html=freq[0],
-                freq_rank=freq[1],
+                freq_html=content.freq_html,
+                freq_rank=content.freq_sort,
                 pos_en=POS_EN.get(tok.pos, tok.pos or "word"),
                 tags=tags,
                 pitch_html=pitch_html,
@@ -293,31 +294,17 @@ class Miner:
             freq = self.frequency(tok)
             sentence_html = bold_word(r._sentence_html(), tok.surface)
             misc, tags = self.provenance(video), self.mine_tags(video)
-            markers = self._markers_for(
-                tok,
-                card,
+            content = CardContent(
                 sentence_html=sentence_html,
-                pic=pic,
+                picture=pic,
                 audio=audio,
-                video=video,
                 misc=misc,
-                tags=tags,
-                freq=freq,
+                freq_html=freq[0],
+                freq_sort=freq[1],
             )
+            markers = self._markers_for(tok, card, content, video=video, tags=tags)
             note = build_note(
-                r.mine_cfg,
-                card,
-                CardContent(
-                    sentence_html=sentence_html,
-                    picture=pic,
-                    audio=audio,
-                    misc=misc,
-                    freq_html=freq[0],
-                    freq_sort=freq[1],
-                ),
-                tags,
-                allow_duplicate=force,
-                markers=markers,
+                r.mine_cfg, card, content, tags, allow_duplicate=force, markers=markers
             )
             if not force and not r.anki.can_add(note):
                 r._toast(f"can't add {card.expression}", "err")
@@ -361,31 +348,16 @@ class Miner:
                     continue
                 freq = self.frequency(tok)
                 sentence_html = bold_word(sentence, tok.surface)
-                markers = self._markers_for(
-                    tok,
-                    card,
+                content = CardContent(
                     sentence_html=sentence_html,
-                    pic=pic,
+                    picture=pic,
                     audio=audio,
-                    video=video,
                     misc=misc,
-                    tags=tags,
-                    freq=freq,
+                    freq_html=freq[0],
+                    freq_sort=freq[1],
                 )
-                note = build_note(
-                    r.mine_cfg,
-                    card,
-                    CardContent(
-                        sentence_html=sentence_html,
-                        picture=pic,
-                        audio=audio,
-                        misc=misc,
-                        freq_html=freq[0],
-                        freq_sort=freq[1],
-                    ),
-                    tags,
-                    markers=markers,
-                )
+                markers = self._markers_for(tok, card, content, video=video, tags=tags)
+                note = build_note(r.mine_cfg, card, content, tags, markers=markers)
                 if r.anki.can_add(note):
                     r.anki.add_note(note)
                     r._mark_mined(card.expression)

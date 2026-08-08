@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from overlay.panel import Row
-from overlay.render.banded import _BAND_PX, WindowedPanel
+from overlay.render.banded import _BAND_PX, BandedTuning, WindowedPanel
 
 from overlay import otel_metrics
 
@@ -33,7 +33,7 @@ def _fixed_panel(n_blocks: int, **kw) -> WindowedPanel:
         Row(0, lambda _h=BLOCK_H: (Image.new("RGBA", (WIDTH, _h), (0, 0, 0, 0)), [], []))
         for _ in range(n_blocks)
     ]
-    return WindowedPanel(rows, WIDTH, **kw)
+    return WindowedPanel(rows, WIDTH, tuning=BandedTuning(**kw))
 
 
 def _tall_band_row(h: int) -> Row:
@@ -53,7 +53,7 @@ def _tall_band_row(h: int) -> Row:
 
 
 def _banded_panel(heights: list[int], **kw) -> WindowedPanel:
-    return WindowedPanel([_tall_band_row(h) for h in heights], WIDTH, **kw)
+    return WindowedPanel([_tall_band_row(h) for h in heights], WIDTH, tuning=BandedTuning(**kw))
 
 
 @contextlib.contextmanager

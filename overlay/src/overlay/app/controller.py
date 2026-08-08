@@ -1075,7 +1075,7 @@ class Reader:
     def _place_nested(
         self, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None
     ) -> None:
-        nested_popup.place_nested(self, st, key, token, word, wx, wy, wh, tail)
+        nested_popup.place_nested(self, st, key, token, word, nested_popup.Anchor(wx, wy, wh), tail)
 
     # --- clickable cross-reference links ---------------------------------------------------------
     def _tip_link_hit(self, mx: float, my: float):

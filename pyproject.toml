@@ -110,7 +110,7 @@ ignore = [
                # cognitive-complexity, which complexipy already gates. PLR0913 (too-many-args) + PLR0917
                # (too-many-positional) are NOT complexity — arg count is orthogonal to CCN, so nothing
                # measured it and data-clumps went ungated (see the ProviderConfig refactor). Now gated
-               # at max-args=9 below; the data-clumps are bundled into config objects (#216).
+               # at max-args=8 below; the data-clumps are bundled into config objects (#216).
     "global-statement", # global-statement — intentional module-level singletons (caches/registries)
     "redefined-loop-name", # redefined-loop-name — idiomatic reuse in a couple of tight loops
     "unnecessary-lambda", # unnecessary-lambda — fixable-audit (#216): fix is UNSAFE-only (gate's --fix skips it),
@@ -148,11 +148,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.pylint]
-# PLR0913/PLR0917 threshold (vs ruff's default 5). The over-10 data-clumps are now bundled into frozen
-# config objects (#216), so this is ratcheted to 9. The remaining noqas are NOT data-clumps: cyclopts CLI
-# commands (run/run_impl/attach — each flag must be its own parameter) and render-geometry primitives
-# (canvas/coords/sinks). Next ratchet to 8 is tracked in #216. max-positional-args defaults to this value.
-max-args = 9
+# PLR0913/PLR0917 threshold (vs ruff's default 5). Data-clumps are bundled into frozen config objects
+# (#216): the render-geometry primitives that blocked 9→8 are now split (banded.WindowedPanel via
+# BandedTuning; flow._draw_flow_line via _LineSinks + _LinePlacement), so this is ratcheted to 8. The
+# only remaining PLR0913 noqas are the cyclopts CLI commands (run/run_impl/attach — each flag must be its
+# own parameter for --help/parsing). max-positional-args defaults to this value.
+max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
 # Paths are workspace-root-relative (this config is the root SSOT). Glob patterns (`**/tests/**` etc.)
@@ -214,10 +215,12 @@ max-args = 9
 # bad row doesn't abort the run, subprocess/temp-file use, dev dating, non-snake locals, positional
 # bools), but genuine correctness rules stay ON and were FIXED at the source (missing-comma implicit
 # concat, loop-variable capture, unclosed files, bidi/zero-width chars, unspecified text encoding).
-"**/examples/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "lambda-assignment", "FBT", "N"]
+# too-many-{arguments,positional} also relaxed here: a run-once bench/tool signature is not a shipped API,
+# so bundling its params into a config object buys nothing (the library max-args=8 ratchet is #216-scoped).
+"**/examples/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "lambda-assignment", "FBT", "N", "too-many-arguments", "too-many-positional-arguments"]
 # overlay/compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
 "overlay/compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
-"**/tools/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check"]
+"**/tools/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check", "too-many-arguments", "too-many-positional-arguments"]
 ".agents/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "shebang-not-executable"]
 "install/**" = ["print", "implicit-namespace-package", "S", "DTZ", "shebang-not-executable"]
 # vulture's whitelist file is intentionally "dead": bare attribute/name expressions that only exist to

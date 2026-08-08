@@ -448,6 +448,16 @@ def _startup_plan(terms, cache, atlas, *, atlas_only: bool, atlas_scale: float):
     return plan, already_done, start_rows
 
 
+@dataclass(frozen=True)
+class PrewarmOptions:
+    """Atlas-build knobs for :func:`prewarm` — see its docstring for the ``atlas_only`` / ``atlas_scale``
+    / ``plateau_stop`` semantics."""
+
+    atlas_only: bool = False
+    atlas_scale: float = 1.0
+    plateau_stop: int = 0
+
+
 def prewarm(
     width: int,
     height: int,
@@ -455,10 +465,8 @@ def prewarm(
     on_progress=None,
     workers: int = 0,
     *,
-    atlas_only: bool = False,
-    atlas_scale: float = 1.0,
+    opts: PrewarmOptions | None = None,
     on_start=None,
-    plateau_stop: int = 0,
 ) -> PrewarmResult:
     """Build the render cache for the top ``limit`` popular words at the given resolution, rendering in
     PARALLEL across ``workers`` threads (0 = auto) — the free-threaded build renders concurrently, so a
@@ -483,6 +491,7 @@ def prewarm(
     decision — per-resolution blobs would ~4× its storage and wall-time), keyed on the fixed tip_width."""
     from overlay.app.config import load_config
 
+    opts = opts if opts is not None else PrewarmOptions()
     cfg = load_config()
     dict_titles = list(cfg.get("dicts") or [])
     if not dict_titles:
@@ -494,19 +503,19 @@ def prewarm(
     from overlay import fonts
 
     template = _make_reader(width, height, dict_titles, freqs, pitches, None)
-    cache, atlas = _open_build_caches(template, atlas_only=atlas_only)
+    cache, atlas = _open_build_caches(template, atlas_only=opts.atlas_only)
 
     terms = _popular_terms(template.dict_set, limit)
     if atlas is not None:
         atlas.backfill_reference_done()  # native-done ⇒ reference-done, so cross-scale runs can skip it
     plan, already_done, before = _startup_plan(
-        terms, cache, atlas, atlas_only=atlas_only, atlas_scale=atlas_scale
+        terms, cache, atlas, atlas_only=opts.atlas_only, atlas_scale=opts.atlas_scale
     )
     if on_start is not None:
         on_start(plan)
     job = _PrewarmJob(
         reader_factory=lambda: _make_reader(
-            width, height, dict_titles, freqs, pitches, cache, render_cache_on=not atlas_only
+            width, height, dict_titles, freqs, pitches, cache, render_cache_on=not opts.atlas_only
         ),
         cache=cache,
         atlas=atlas,
@@ -515,13 +524,13 @@ def prewarm(
         ceiling=template.session.render_cache.cache_max_bytes,
         on_progress=on_progress,
         tuning=PrewarmTuning(
-            atlas_only=atlas_only,
-            native_scale=atlas_scale,
+            atlas_only=opts.atlas_only,
+            native_scale=opts.atlas_scale,
             total=plan.total,
             already_done=already_done,
             start_rows=before,
             start_nbytes=plan.nbytes,
-            plateau_stop=plateau_stop,
+            plateau_stop=opts.plateau_stop,
         ),
     )
     n_workers = workers if workers > 0 else min(8, (os.cpu_count() or 4))

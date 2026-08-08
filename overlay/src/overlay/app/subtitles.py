@@ -465,6 +465,16 @@ def _draw_visual_lines(
     return boxes
 
 
+@dataclass(frozen=True)
+class SubtitleSpacing:
+    """Padding + inter-line gap for :func:`render_subtitle` (px) — the layout constants a caller can
+    override as one value."""
+
+    pad_x: int = 20
+    pad_y: int = 8
+    line_gap: int = 5
+
+
 def render_subtitle(
     lines: list[list[Token]],
     osd_w: int,
@@ -472,9 +482,8 @@ def render_subtitle(
     hover: int | None = None,
     hover_end: int | None = None,
     styles: list | None = None,
-    pad_x: int = 20,
-    pad_y: int = 8,
-    line_gap: int = 5,
+    *,
+    spacing: SubtitleSpacing | None = None,
 ) -> SubtitleRender:
     """`lines` is a list of source lines (each a token list); global token index is row-major.
 
@@ -482,23 +491,24 @@ def render_subtitle(
     JLPT underline color; the hovered token overrides the text color with the highlight. A merged
     multi-token term highlights the whole span ``[hover, hover_end)`` (defaults to a single token).
     """
+    spacing = spacing or SubtitleSpacing()
     max_w = osd_w * 0.94
-    font, size, measured = _fit_font_size(lines, max_w, pad_x, size)
+    font, size, measured = _fit_font_size(lines, max_w, spacing.pad_x, size)
 
     ascent, descent = font.getmetrics()
     text_h = ascent + descent
-    row_h = text_h + 2 * pad_y
+    row_h = text_h + 2 * spacing.pad_y
 
     # wrap each source line into visual lines
     visual_lines: list[list[tuple[int, Token, float]]] = []
     for row in measured:
-        visual_lines.extend(_wrap_line(row, max_w - 2 * pad_x))
+        visual_lines.extend(_wrap_line(row, max_w - 2 * spacing.pad_x))
     if not visual_lines:
         return SubtitleRender(Image.new("RGBA", (1, 1), (0, 0, 0, 0)), [])
 
-    line_widths = [sum(w for _, _, w in vl) + 2 * pad_x for vl in visual_lines]
+    line_widths = [sum(w for _, _, w in vl) + 2 * spacing.pad_x for vl in visual_lines]
     img_w = int(max(line_widths))
-    img_h = len(visual_lines) * row_h + (len(visual_lines) - 1) * line_gap
+    img_h = len(visual_lines) * row_h + (len(visual_lines) - 1) * spacing.line_gap
     img = Image.new("RGBA", (max(img_w, 1), max(img_h, 1)), (0, 0, 0, 0))
     stroke = max(1, size // 16)
 
@@ -508,10 +518,10 @@ def render_subtitle(
         stroke=stroke,
         ascent=ascent,
         text_h=text_h,
-        pad_x=pad_x,
-        pad_y=pad_y,
+        pad_x=spacing.pad_x,
+        pad_y=spacing.pad_y,
         row_h=row_h,
-        line_gap=line_gap,
+        line_gap=spacing.line_gap,
         img_w=img_w,
     )
     boxes = _draw_visual_lines(
