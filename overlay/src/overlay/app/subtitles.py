@@ -385,57 +385,62 @@ def _fit_font_size(lines: list[list[Token]], max_w: float, pad_x: int, size: int
     return font, size, measured
 
 
-def _draw_token(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    draw: ImageDraw.ImageDraw,
-    tok: Token,
-    x: float,
-    baseline: float,
-    w: float,
-    *,
-    gi: int,
-    y: int,
-    pad_y: int,
-    text_h: int,
-    style,
-    hovered: bool,
-    font,
-    size: int,
-    stroke: int,
-) -> WordBox:
-    """Draw one token's glyphs (+ its JLPT underline, if any) at ``x``/``baseline`` and return its
-    hit box. The hovered token takes the highlight color; else the style's color (or plain white)."""
+@dataclass(frozen=True)
+class _SubStyle:
+    """Render-constant draw style + layout geometry for one subtitle raster — computed once from the
+    fitted font, shared by every line and token draw (so neither helper carries a font/metric clump)."""
+
+    font: object
+    size: int
+    stroke: int
+    ascent: int
+    text_h: int
+    pad_x: int
+    pad_y: int
+    row_h: int
+    line_gap: int
+    img_w: int
+
+
+@dataclass(frozen=True)
+class _Place:
+    """Where one token draws within the raster (flat index + pixel position)."""
+
+    gi: int
+    x: float
+    y: int
+    baseline: float
+    w: float
+
+
+def _draw_token(draw, tok: Token, place: _Place, style, st: _SubStyle, *, hovered: bool) -> WordBox:
+    """Draw one token's glyphs (+ its JLPT underline, if any) at ``place`` and return its hit box. The
+    hovered token takes the highlight color; else the style's color (or plain white)."""
     color = HOVER if hovered else (style.color if style else WHITE)
     draw.text(
-        (x, baseline),
+        (place.x, place.baseline),
         tok.surface,
-        font=font,
+        font=st.font,
         fill=color,
         anchor="ls",
-        stroke_width=stroke,
+        stroke_width=st.stroke,
         stroke_fill=OUTLINE,
     )
     underline = style.underline if style else None
     if underline is not None:
-        uy = baseline + max(2, round(size * 0.10))
-        draw.line([(x, uy), (x + w, uy)], fill=underline, width=max(2, size // 14))
-    return WordBox(gi, int(x), y + pad_y, int(w), text_h)
+        uy = place.baseline + max(2, round(st.size * 0.10))
+        draw.line(
+            [(place.x, uy), (place.x + place.w, uy)], fill=underline, width=max(2, st.size // 14)
+        )
+    return WordBox(place.gi, int(place.x), place.y + st.pad_y, int(place.w), st.text_h)
 
 
-def _draw_visual_lines(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _draw_visual_lines(
     img: Image.Image,
     visual_lines: list[list[tuple[int, Token, float]]],
     line_widths: list[float],
+    st: _SubStyle,
     *,
-    img_w: int,
-    row_h: int,
-    line_gap: int,
-    pad_x: int,
-    pad_y: int,
-    ascent: int,
-    text_h: int,
-    font,
-    size: int,
-    stroke: int,
     styles: list | None,
     hover: int | None,
     hover_end: int | None = None,
@@ -445,33 +450,18 @@ def _draw_visual_lines(  # noqa: PLR0913  # arg-clump — bundle into a config o
     boxes: list[WordBox] = []
     y = 0
     for vl, lw in zip(visual_lines, line_widths, strict=True):
-        left = (img_w - lw) // 2  # centre each line
-        draw.rounded_rectangle([left, y, left + lw - 1, y + row_h - 1], radius=10, fill=BOX)
-        x = float(left + pad_x)
-        baseline = y + pad_y + ascent
+        left = (st.img_w - lw) // 2  # centre each line
+        draw.rounded_rectangle([left, y, left + lw - 1, y + st.row_h - 1], radius=10, fill=BOX)
+        x = float(left + st.pad_x)
+        baseline = y + st.pad_y + st.ascent
         for gi, tok, w in vl:
-            st = styles[gi] if styles and gi < len(styles) else None
+            style = styles[gi] if styles and gi < len(styles) else None
             hovered = hover is not None and hover <= gi < hi_end
             boxes.append(
-                _draw_token(
-                    draw,
-                    tok,
-                    x,
-                    baseline,
-                    w,
-                    gi=gi,
-                    y=y,
-                    pad_y=pad_y,
-                    text_h=text_h,
-                    style=st,
-                    hovered=hovered,
-                    font=font,
-                    size=size,
-                    stroke=stroke,
-                )
+                _draw_token(draw, tok, _Place(gi, x, y, baseline, w), style, st, hovered=hovered)
             )
             x += w
-        y += row_h + line_gap
+        y += st.row_h + st.line_gap
     return boxes
 
 
@@ -512,22 +502,19 @@ def render_subtitle(
     img = Image.new("RGBA", (max(img_w, 1), max(img_h, 1)), (0, 0, 0, 0))
     stroke = max(1, size // 16)
 
-    boxes = _draw_visual_lines(
-        img,
-        visual_lines,
-        line_widths,
-        img_w=img_w,
-        row_h=row_h,
-        line_gap=line_gap,
-        pad_x=pad_x,
-        pad_y=pad_y,
-        ascent=ascent,
-        text_h=text_h,
+    st = _SubStyle(
         font=font,
         size=size,
         stroke=stroke,
-        styles=styles,
-        hover=hover,
-        hover_end=hover_end,
+        ascent=ascent,
+        text_h=text_h,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        row_h=row_h,
+        line_gap=line_gap,
+        img_w=img_w,
+    )
+    boxes = _draw_visual_lines(
+        img, visual_lines, line_widths, st, styles=styles, hover=hover, hover_end=hover_end
     )
     return SubtitleRender(img, boxes)
