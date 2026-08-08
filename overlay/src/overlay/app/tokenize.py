@@ -127,7 +127,7 @@ def strip_inline_furigana(tokens: list[Token]) -> list[Token]:
 def _tagger():
     import fugashi
 
-    return fugashi.Tagger()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # pyrefly: ignore[missing-attribute]  # no stubs
+    return fugashi.Tagger()
 
 
 _HEAD_POS = {"動詞", "形容詞", "形状詞"}  # can start a conjugation chain
