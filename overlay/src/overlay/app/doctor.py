@@ -165,6 +165,45 @@ def check_ffmpeg() -> Check:
     return Check("ffmpeg", "ok", "ffmpeg + aac" + anim)
 
 
+_RESYNC_ALIGNERS = ("alass", "alass-cli")
+
+
+def check_resync() -> Check:
+    """The subtitle-resync toolchain (auto-sync of fetched subs + ``Ctrl+Shift+T``). Resolves
+    ffprobe/ffmpeg the way a GUI-launched attach does — ``find_tool`` + a ``-version`` health-probe,
+    NOT bare ``shutil.which`` on the shell PATH — because a present-but-crashing ffprobe (dangling
+    dylib → SIGABRT) is exactly what read "ok" while every resync silently fell back to a failing audio
+    VAD (#100). Warn-level: resync is optional; without a working ffprobe/ffmpeg it loses the embedded-
+    sub reference and degrades to audio VAD, and without an aligner it can't run at all."""
+    from overlay.mpvio.discover import find_healthy_tool, find_tool
+
+    degraded = []
+    for name in ("ffprobe", "ffmpeg"):
+        path, healthy = find_healthy_tool(name)
+        if path is None:
+            degraded.append(f"{name} not found")
+        elif not healthy:
+            degraded.append(f"{name} present but crashes on `-version` ({path})")
+    aligner = next((b for b in _RESYNC_ALIGNERS if find_tool(b)), None)
+    if aligner is None and find_tool("uvx") is None:
+        return Check(
+            "resync",
+            "warn",
+            "no subtitle aligner — install alass (`brew install alass`) or ensure `uvx` is on PATH "
+            "for the ffsubsync fallback; auto-sync and Ctrl+Shift+T re-sync won't run",
+        )
+    tool = aligner or "uvx ffsubsync"
+    if degraded:
+        return Check(
+            "resync",
+            "warn",
+            f"resync aligner is {tool}, but the embedded-reference extractor is degraded: "
+            + "; ".join(degraded)
+            + " — resync falls back to audio VAD (unreliable on some encodes; the #100 signature)",
+        )
+    return Check("resync", "ok", f"resync ready — {tool} + ffprobe/ffmpeg embedded reference")
+
+
 def check_config() -> Check:
     p = config_path()
     if not p.exists():
@@ -895,6 +934,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_powershell(),
         check_mpv(),
         check_ffmpeg(),
+        check_resync(),
         check_free_threading(),
         check_config(),
         *check_dict_db(),
