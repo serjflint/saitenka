@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786182726008,
+  "lastUpdate": 1786189722149,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1295,6 +1295,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.964,
             "range": "±6.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6787c7d04c75ad5ffafc1495dbace4f906776595",
+          "message": "Merge pull request #229 from serjflint/feat/223-episode-prefetch-cue-retention\n\nfeat(subtitle): full-episode token prefetch + cue retention on track switch (#223)",
+          "timestamp": "2026-08-08T14:47:33+03:00",
+          "tree_id": "816fc8c2db61af976a84ef38e0b2c4852b455b87",
+          "url": "https://github.com/serjflint/saitenka/commit/6787c7d04c75ad5ffafc1495dbace4f906776595"
+        },
+        "date": 1786189721432,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.234,
+            "range": "±0.1%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.646,
+            "range": "±0.2%",
             "unit": "ms"
           }
         ]
