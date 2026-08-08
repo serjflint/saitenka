@@ -358,7 +358,7 @@ class TestCacheMarker:
         assert not marker.exists()
 
         with (
-            patch("shutil.which", return_value="/usr/local/bin/alass"),
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", return_value=MagicMock(returncode=0)),
         ):
             resync.resync(video, src_srt, out_srt)
@@ -376,7 +376,7 @@ class TestCacheMarker:
         marker = tmp_path / "ep01.synced.srt.synced"
 
         with (
-            patch("shutil.which", return_value="/usr/local/bin/alass"),
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", return_value=MagicMock(returncode=1, stdout=b"", stderr=b"")),
             pytest.raises(resync.ResyncFailed),
         ):
@@ -394,7 +394,7 @@ class TestCacheMarker:
         out_srt = tmp_path / "ep01.synced.srt"
 
         with (
-            patch("shutil.which", return_value="/usr/local/bin/alass"),
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch(
                 "subprocess.run",
                 side_effect=subprocess.TimeoutExpired(cmd="alass", timeout=120),
@@ -447,7 +447,7 @@ class TestMaybeResync:
         src_srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nTest\n", encoding="utf-8")
 
         with (
-            patch("shutil.which", return_value="/usr/local/bin/alass"),
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", return_value=MagicMock(returncode=0)),
         ):
             result = resync.maybe_resync(video, src_srt, enabled=True)
@@ -466,7 +466,7 @@ class TestMaybeResync:
         src_srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nTest\n", encoding="utf-8")
 
         with (
-            patch("shutil.which", return_value="/usr/local/bin/alass"),
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", return_value=MagicMock(returncode=1, stdout=b"", stderr=b"")),
         ):
             result = resync.maybe_resync(video, src_srt, enabled=True)
@@ -513,7 +513,7 @@ class TestResyncTelemetry:
             return MagicMock(returncode=0, stderr=b"")
 
         monkeypatch.setattr(
-            resync.shutil, "which", lambda t: "/usr/bin/alass" if t == "alass" else None
+            "overlay.mpvio.discover.find_tool", lambda t: "/b/alass" if t == "alass" else None
         )
         monkeypatch.setattr(resync.subprocess, "run", fake_run)
         with caplog.at_level("INFO"):
