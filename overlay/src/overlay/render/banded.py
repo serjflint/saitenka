@@ -229,7 +229,7 @@ class WindowedPanel:
     a one-shot :func:`overlay.panel.render_panel` at the same offset (proven in
     ``tests/test_windowed_panel.py``; a band is a shorter block at a within-row offset)."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # windowed-panel deps + tuning knobs; ratchet to 8 tracked in #216
         self,
         rows: Sequence[Row],
         width: int,

@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -24,10 +25,81 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
+from overlay.mpvio.launch import MpvLaunchOptions
 
 log = logging.getLogger(__name__)
 
 DEMO_LINE = "門前の小僧習わぬ経を読む"
+
+
+@dataclass(frozen=True)
+class RunSubtitleOptions:
+    """A ``run``'s subtitle-sourcing choices, resolved once from CLI + config and threaded through the
+    resolve → re-slot → watch-hook chain (was a recurring sub_file/jimaku/jimaku_key/slang/resync clump).
+    Per-episode identity (title, episode number) stays a separate arg — the re-slot recomputes it."""
+
+    slang: str
+    sub_file: str | None = None
+    jimaku: bool = False
+    jimaku_key: str | None = None
+    resync: bool = False
+
+
+@dataclass(frozen=True)
+class RunFlags:
+    """The CLI flags that override ReaderOptions defaults — bundled so run_impl's flat cyclopts signature
+    threads one value into :func:`_build_run_options` instead of a dozen (config keys win where unset)."""
+
+    mine_key: str
+    mine_all_key: str
+    translate_key: str
+    preview_key: str
+    tip_height: float
+    tip_scale: float
+    pause_on_tooltip: bool
+    hover_switch_delay: float
+    no_audio_play: bool
+    mine_preview: bool
+    auto_translate: bool
+    prefetch: bool
+    layout_engine: Literal["default", "taffy"]
+
+
+@dataclass(frozen=True)
+class RunDepsRequest:
+    """What ``run`` needs to build the coloring/dict/mining collaborators — the CLI mining flags, the raw
+    ``[mine]`` table (config-only keys ride through it), the known-words source, and the dict/freq/pitch
+    title lists. Bundled so the slow background dep build takes one request value, not a dozen args."""
+
+    mine: bool
+    mine_deck: str
+    mine_model: str
+    mine_key: str
+    mine_all_key: str
+    mine_normalize_audio: bool
+    mine_animated_screenshot: bool
+    raw_mine: dict
+    known_cfg: object
+    known: str
+    color: bool
+    dict_titles: list[str]
+    freq_titles: list[str]
+    pitch_titles: list[str]
+
+
+@dataclass(frozen=True)
+class DemoSpec:
+    """The scripted demo/screenshot actions on the non-interactive ``run`` path: force-hover a word, then
+    optional scroll/translate/mine, then screenshot-or-dwell. Empty ``demo_word`` + no ``screenshot`` =
+    the normal interactive session (``reader.run()``)."""
+
+    demo_word: str | None = None
+    screenshot: str | None = None
+    demo_scroll: int = 0
+    demo_translate: bool = False
+    mine: bool = False
+    bulk: bool = False
+    seconds: float = 0.0
 
 
 def setup_session_telemetry(cfg: dict) -> None:
@@ -209,29 +281,25 @@ def _configured_subtitles(
     return None, providers
 
 
-def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _resolve_subtitles(
     cfg: dict,
     video: str | None,
     video_path: Path,
     dur: int,
     tmp: Path,
+    subs: RunSubtitleOptions,
     *,
-    sub_file: str | None,
-    jimaku: bool,
-    jimaku_key: str | None,
     jimaku_title: str | None,
     episode: int | None,
-    resync: bool,
-    slang: str,
 ) -> tuple[Path | None, Path | None, tuple[str, ...], tuple[str, ...]]:
     """Resolve explicit startup subtitles and defer configured providers until mpv is ready."""
     _jm = cfg.get("jimaku")
     jimaku_cfg = _jm if isinstance(_jm, dict) else {}
     jimaku_on = jimaku_should_fetch(
-        explicit_flag=jimaku,
+        explicit_flag=subs.jimaku,
         cfg_fetch=bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled")),
         video=str(video_path) if video else None,
-        slang=slang,
+        slang=subs.slang,
     )
     raw_tsukihime = cfg.get("tsukihime")
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
@@ -239,24 +307,24 @@ def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config o
         explicit_flag=False,
         cfg_fetch=bool(tsukihime_cfg.get("enabled")),
         video=str(video_path) if video else None,
-        slang=slang,
+        slang=subs.slang,
     )
     log.info(
         "jimaku fetch: %s (flag=%s configured=%s)",
         jimaku_on,
-        jimaku,
+        subs.jimaku,
         bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled")),
     )
     sub_path = en_sub_path = None
     enabled_providers = _enabled_provider_names(
-        video, jimaku=jimaku, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
+        video, jimaku=subs.jimaku, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
     )
     fetch_in_background: tuple[str, ...] = ()
-    if sub_file:
-        sub_path = Path(sub_file).expanduser()
-    elif jimaku_on and jimaku:
+    if subs.sub_file:
+        sub_path = Path(subs.sub_file).expanduser()
+    elif jimaku_on and subs.jimaku:
         sub_path = _resolve_jimaku_subs(
-            video_path, jimaku_title, episode, jimaku_key, jimaku_cfg, resync=resync
+            video_path, jimaku_title, episode, subs.jimaku_key, jimaku_cfg, resync=subs.resync
         )
         if sub_path is None and tsukihime_on:
             fetch_in_background = ("tsukihime",)
@@ -267,7 +335,7 @@ def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config o
             episode,
             jimaku=jimaku_on,
             tsukihime=tsukihime_on,
-            resync=resync,
+            resync=subs.resync,
         )
     elif not video:
         sub_path = tmp / "line.srt"
@@ -277,19 +345,14 @@ def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config o
     return sub_path, en_sub_path, fetch_in_background, enabled_providers
 
 
-def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _launch_mpv_and_connect(
     cfg: dict,
     tmp: Path,
     video_path: Path,
+    opts: MpvLaunchOptions,
     *,
-    slang: str,
-    start: str,
-    screenshot: str | None,
     sub_path,
     en_sub_path,
-    use_config: bool,
-    fullscreen: bool,
-    mpv_arg: list[str] | None = None,
 ) -> tuple:
     """Find + launch mpv and connect its IPC socket. Returns ``(None, None)`` (having already
     printed the reason) when mpv can't be found or its IPC never comes up."""
@@ -312,18 +375,7 @@ def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a con
     from overlay.mpvio.launch import build_mpv_argv
 
     cmd = build_mpv_argv(
-        mpv_bin,
-        sock,
-        mpv_log,
-        video_path,
-        slang=slang,
-        start=start,
-        screenshot=bool(screenshot),
-        sub_path=sub_path,
-        en_sub_path=en_sub_path,
-        use_config=use_config,
-        fullscreen=fullscreen,
-        extra_args=mpv_arg,
+        mpv_bin, sock, mpv_log, video_path, opts, sub_path=sub_path, en_sub_path=en_sub_path
     )
     from overlay.session import session_id
 
@@ -344,27 +396,11 @@ def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a con
     # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
     from overlay.app.loading import show_startup_hint
 
-    show_startup_hint(ipc, screenshot=bool(screenshot))
+    show_startup_hint(ipc, screenshot=opts.screenshot)
     return proc, ipc
 
 
-def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    cfg: dict,
-    *,
-    mine_key: str,
-    mine_all_key: str,
-    translate_key: str,
-    preview_key: str,
-    tip_height: float,
-    tip_scale: float,
-    pause_on_tooltip: bool,
-    hover_switch_delay: float,
-    no_audio_play: bool,
-    mine_preview: bool,
-    auto_translate: bool,
-    prefetch: bool,
-    layout_engine: Literal["default", "taffy"],
-):
+def _build_run_options(cfg: dict, flags: RunFlags):
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
@@ -381,12 +417,12 @@ def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config o
     stats: dict = raw_stats if isinstance(raw_stats, dict) else {}
     return ReaderOptions(
         keys=KeyOptions(
-            mine_key=mine_key,
+            mine_key=flags.mine_key,
             mine_video_key=cfg.get("mine", {}).get("video_key", _ko.mine_video_key),
-            mine_all_key=mine_all_key,
-            translate_key=translate_key,
+            mine_all_key=flags.mine_all_key,
+            translate_key=flags.translate_key,
             overlay_toggle_key=cfg.get("overlay_toggle_key", _ko.overlay_toggle_key),
-            preview_key=preview_key,
+            preview_key=flags.preview_key,
             hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),
             bookmark_key=cfg.get("bookmark_key", _ko.bookmark_key),
@@ -400,30 +436,30 @@ def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config o
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
         ),
         tooltip=TooltipOptions(
-            tip_max_frac=tip_height,
-            tip_scale=tip_scale,
+            tip_max_frac=flags.tip_height,
+            tip_scale=flags.tip_scale,
             nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
-            pause_on_tooltip=pause_on_tooltip,
+            pause_on_tooltip=flags.pause_on_tooltip,
             annotation_mode=cfg.get("annotation_mode", _tt.annotation_mode),
-            hover_switch_delay=hover_switch_delay,
+            hover_switch_delay=flags.hover_switch_delay,
             scan_delay=cfg.get("scan_delay", _tt.scan_delay),
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
-            layout_engine=layout_engine,
+            layout_engine=flags.layout_engine,
             render_cache=bool(cfg.get("render_cache", _tt.render_cache)),
             mask_atlas=bool(cfg.get("mask_atlas", _tt.mask_atlas)),
             render_cache_max_mb=cfg.get("render_cache_max_mb", _tt.render_cache_max_mb),
             render_cache_min_height=cfg.get("render_cache_min_height", _tt.render_cache_min_height),
         ),
         mining=MiningOptions(
-            play_audio=not no_audio_play,
-            show_preview=mine_preview,
+            play_audio=not flags.no_audio_play,
+            show_preview=flags.mine_preview,
             max_bulk=cfg.get("max_bulk", _mo.max_bulk),
             anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
             anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
         ),
-        translation=TranslationOptions(auto_translate=auto_translate),
+        translation=TranslationOptions(auto_translate=flags.auto_translate),
         stats=StatsOptions(
             enabled=bool(stats.get("enabled", False)),
             summary=bool(stats.get("summary", True)),
@@ -436,7 +472,7 @@ def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config o
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
             head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
         ),
-        prefetch=prefetch,
+        prefetch=flags.prefetch,
     )
 
 
@@ -444,13 +480,12 @@ def _start_run_provider_fetch(
     reader,
     cfg: dict,
     video_path: Path,
+    subs: RunSubtitleOptions,
     *,
     providers: tuple[str, ...],
     enabled_providers: tuple[str, ...],
     jimaku_title: str | None,
     episode: int | None,
-    jimaku_key: str | None,
-    resync: bool,
 ) -> None:
     if not providers and not enabled_providers:
         return
@@ -460,10 +495,10 @@ def _start_run_provider_fetch(
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
     pcfg = ProviderConfig(
         enabled_providers=enabled_providers,
-        jimaku_key=jimaku_key,
+        jimaku_key=subs.jimaku_key,
         jimaku_title=jimaku_title,
         episode=episode,
-        resync=resync,
+        resync=subs.resync,
         tsukihime_config=tsukihime_cfg,
     )
     configure_providers(reader, pcfg)  # shared with attach: manual re-sync retry + Ctrl+J picker
@@ -548,20 +583,16 @@ def _advance_at_eof(reader) -> bool:
     return True
 
 
-def _install_watch_hooks(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _install_watch_hooks(
     reader,
     cfg: dict,
     video_path: Path,
     tmp: Path,
     dur: int,
+    subs: RunSubtitleOptions,
     *,
     interactive: bool,
     auto_advance: bool,
-    sub_file: str | None,
-    jimaku: bool,
-    jimaku_key: str | None,
-    slang: str,
-    resync: bool,
 ) -> None:
     """Wire the #100 watch hooks (run mode only — attach/SyncPlay never reaches here, which IS the
     SyncPlay gate, #62 precedent). ``reslot_hook`` fires on EVERY mpv ``file-loaded`` so the overlay
@@ -573,40 +604,19 @@ def _install_watch_hooks(  # noqa: PLR0913  # arg-clump — bundle into a config
         return
 
     def _reslot(path: Path) -> None:
-        reslot_to_current(
-            reader,
-            cfg,
-            path,
-            tmp,
-            dur,
-            sub_file=sub_file,
-            jimaku=jimaku,
-            jimaku_key=jimaku_key,
-            slang=slang,
-            resync=resync,
-        )
+        reslot_to_current(reader, cfg, path, tmp, dur, subs)
 
     reader.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
         reader.advance_hook = lambda: _advance_at_eof(reader)
     # Warm episode 2's subs while episode 1 plays, so the first advance re-slots cache-warm (no cold gap).
     _prefetch_sibling_subs(
-        cfg, video_path, enabled=auto_advance, jimaku_key=jimaku_key, resync=resync
+        cfg, video_path, enabled=auto_advance, jimaku_key=subs.jimaku_key, resync=subs.resync
     )
 
 
 def reslot_to_current(
-    reader,
-    cfg: dict,
-    video_path: Path,
-    tmp: Path,
-    dur: int,
-    *,
-    sub_file: str | None,
-    jimaku: bool,
-    jimaku_key: str | None,
-    slang: str,
-    resync: bool,
+    reader, cfg: dict, video_path: Path, tmp: Path, dur: int, subs: RunSubtitleOptions
 ) -> None:
     """Re-index the overlay onto mpv's CURRENT (already-loaded) file — the reactive #100 re-slot fired
     from ``file-loaded``, so it covers a native autoload/playlist advance and our own eof loadfile
@@ -633,13 +643,9 @@ def reslot_to_current(
             video_path,
             dur,
             tmp,
-            sub_file=sub_file,
-            jimaku=jimaku,
-            jimaku_key=jimaku_key,
+            subs,
             jimaku_title=title,
             episode=parsed_episode,
-            resync=resync,
-            slang=slang,
         )
         session_stats.finish(
             reader
@@ -653,11 +659,11 @@ def reslot_to_current(
         # Tag the JP srt with the caller's own slang token so select_initial's _matching_track picks OUR
         # srt, not an untagged leftover the auto-selection latched onto (the ep2-on-ep03 bug). "auto"
         # flag → selection stays select_initial's. First slang token matches whatever slang is set.
-        jp_lang = next((part.strip() for part in slang.split(",") if part.strip()), "jpn")
+        jp_lang = next((part.strip() for part in subs.slang.split(",") if part.strip()), "jpn")
         for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
             if path is not None:
                 ipc.command("sub-add", str(path), "auto", "", lang)
-        startup = select_initial(ipc, slang)
+        startup = select_initial(ipc, subs.slang)
         span.set(
             "active", startup.active or "none"
         )  # the selection outcome, queryable in the trace
@@ -670,7 +676,7 @@ def reslot_to_current(
             startup.tracks.en_sid,
         )
         build_sub_index_for_current_track(reader)
-        reader.configure_subtitle_mode(startup, slang=slang)
+        reader.configure_subtitle_mode(startup, slang=subs.slang)
         session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
             reader._toast(
@@ -680,37 +686,20 @@ def reslot_to_current(
             reader,
             cfg,
             video_path,
+            subs,
             providers=(fetch_background if startup.tracks.jp_sid is None else ()),
             enabled_providers=enabled_providers,
             jimaku_title=title,
             episode=parsed_episode,
-            jimaku_key=jimaku_key,
-            resync=resync,
         )
         reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
         _prefetch_sibling_subs(  # warm episode N+1 so the next re-slot is cache-warm, not a cold fetch
-            cfg, video_path, enabled=True, jimaku_key=jimaku_key, resync=resync
+            cfg, video_path, enabled=True, jimaku_key=subs.jimaku_key, resync=subs.resync
         )
         log.info("re-slotted overlay onto %s", video_path.name)
 
 
-def _build_run_deps(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    *,
-    mine: bool,
-    mine_deck: str,
-    mine_model: str,
-    mine_key: str,
-    mine_all_key: str,
-    mine_normalize_audio: bool,
-    mine_animated_screenshot: bool,
-    raw_mine: dict,
-    known_cfg,
-    known: str,
-    color: bool,
-    dict_titles: list[str],
-    freq_titles: list[str],
-    pitch_titles: list[str],
-):
+def _build_run_deps(req: RunDepsRequest):
     """Build the coloring/dict/mining collaborators. This is the slow part (the first-run
     dictionary cache build is 25-66s per dict), so ``run_impl`` defers calling this to a BACKGROUND
     thread (see ``reader.load_deps_async``) unless a demo/screenshot needs it synchronously. Must
@@ -745,39 +734,41 @@ def _build_run_deps(  # noqa: PLR0913  # arg-clump — bundle into a config obje
         )
 
     effective_cfg = {
-        "dicts": dict_titles,
-        "freq": freq_titles,
-        "pitch": pitch_titles,
-        "known": known_cfg,
+        "dicts": req.dict_titles,
+        "freq": req.freq_titles,
+        "pitch": req.pitch_titles,
+        "known": req.known_cfg,
         # start from the raw [mine] config (so config-only keys like animated_height/fps/quality/format
         # survive the run path — the both-seams trap), then override with the CLI-threaded values
         "mine": {
-            **raw_mine,
-            "deck": mine_deck,
-            "model": mine_model,
-            "normalize_audio": mine_normalize_audio,
-            "animated_screenshot": mine_animated_screenshot,
+            **req.raw_mine,
+            "deck": req.mine_deck,
+            "model": req.mine_model,
+            "normalize_audio": req.mine_normalize_audio,
+            "animated_screenshot": req.mine_animated_screenshot,
         }
-        if mine
+        if req.mine
         else {},
     }
     scorer, anki, mine_conf, dict_set = reader_deps.build_reader_deps(
         effective_cfg,
-        color=color,
-        mine=mine,
-        known_words=known,
+        color=req.color,
+        mine=req.mine,
+        known_words=req.known,
         on_anki_unreachable=_on_anki_unreachable,
         on_known_words_error=_on_known_words_error,
     )
 
-    if not mine:
+    if not req.mine:
         log.info("mining disabled (no [mine] config / --no-mine)")
     elif anki is not None:
         print(
-            f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
-            f"→ {mine_deck} ({mine_model})"
+            f"mining on — {req.mine_key} mine · {req.mine_all_key or 'Shift+m'} mine-all "
+            f"→ {req.mine_deck} ({req.mine_model})"
         )
-        log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
+        log.info(
+            "mining enabled: deck=%r model=%r key=%r", req.mine_deck, req.mine_model, req.mine_key
+        )
 
     if dict_set is not None:
         print(
@@ -812,70 +803,40 @@ def _wait_for_subtitle_text(reader, ipc, video: str | None) -> str:
     return text or DEMO_LINE
 
 
-def _run_demo_actions(
-    reader,
-    ipc,
-    *,
-    demo_scroll: int,
-    demo_translate: bool,
-    mine: bool,
-    bulk: bool,
-    screenshot: str | None,
-    seconds: float,
-) -> None:
-    for _ in range(demo_scroll):
+def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:
+    for _ in range(demo.demo_scroll):
         reader._scroll_tip(round(reader.osd[1] * 0.12))
-    if demo_translate:
+    if demo.demo_translate:
         reader._setup_secondary()
         reader.toggle_translation()
         time.sleep(0.3)
-    if mine:
-        (reader.bulk_mine if bulk else reader.mine_current)()
+    if demo.mine:
+        (reader.bulk_mine if demo.bulk else reader.mine_current)()
         time.sleep(0.5)
-    if screenshot:
+    if demo.screenshot:
         time.sleep(0.4)
-        r = ipc.command("screenshot-to-file", screenshot, "window")
-        print("screenshot:", r, "->", screenshot)
+        r = ipc.command("screenshot-to-file", demo.screenshot, "window")
+        print("screenshot:", r, "->", demo.screenshot)
         time.sleep(0.3)
     else:
-        time.sleep(seconds)
+        time.sleep(demo.seconds)
 
 
-def _execute_reader_session(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    reader,
-    ipc,
-    *,
-    demo_word: str | None,
-    screenshot: str | None,
-    video: str | None,
-    demo_scroll: int,
-    demo_translate: bool,
-    mine: bool,
-    bulk: bool,
-    seconds: float,
-    translate_key: str,
+def _execute_reader_session(
+    reader, ipc, demo: DemoSpec, *, video: str | None, translate_key: str
 ) -> None:
-    if demo_word or screenshot:
+    if demo.demo_word or demo.screenshot:
         time.sleep(0.8)
         text = _wait_for_subtitle_text(reader, ipc, video)
         print("sub-text:", repr(text))
         reader.set_subtitle(text)
-        target = demo_word or "読む"
+        target = demo.demo_word or "読む"
         idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
         if idx is None:
             idx = next((i for i, t in enumerate(reader.tokens) if t.is_content), 0)
         print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
         reader.set_hover(idx)
-        _run_demo_actions(
-            reader,
-            ipc,
-            demo_scroll=demo_scroll,
-            demo_translate=demo_translate,
-            mine=mine,
-            bulk=bulk,
-            screenshot=screenshot,
-            seconds=seconds,
-        )
+        _run_demo_actions(reader, ipc, demo)
     else:
         print(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "
@@ -977,20 +938,22 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     def _build_deps():
         return _build_run_deps(
-            mine=mine,
-            mine_deck=mine_deck,
-            mine_model=mine_model,
-            mine_key=mine_key,
-            mine_all_key=mine_all_key,
-            mine_normalize_audio=mine_normalize_audio,
-            mine_animated_screenshot=mine_animated_screenshot,
-            raw_mine=cfg.get("mine") or {},
-            known_cfg=known_cfg,
-            known=known,
-            color=color,
-            dict_titles=dict_titles,
-            freq_titles=freq_titles,
-            pitch_titles=pitch_titles,
+            RunDepsRequest(
+                mine=mine,
+                mine_deck=mine_deck,
+                mine_model=mine_model,
+                mine_key=mine_key,
+                mine_all_key=mine_all_key,
+                mine_normalize_audio=mine_normalize_audio,
+                mine_animated_screenshot=mine_animated_screenshot,
+                raw_mine=cfg.get("mine") or {},
+                known_cfg=known_cfg,
+                known=known,
+                color=color,
+                dict_titles=dict_titles,
+                freq_titles=freq_titles,
+                pitch_titles=pitch_titles,
+            )
         )
 
     # Hoist the dep build ahead of mpv launch (interactive path only; demo/screenshot build synchronously
@@ -1003,33 +966,27 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     auto_advance = _auto_advance_enabled(cfg, demo_word, screenshot)
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
+    subs = RunSubtitleOptions(
+        slang=slang, sub_file=sub_file, jimaku=jimaku, jimaku_key=jimaku_key, resync=resync
+    )
     sub_path, en_sub_path, fetch_jimaku_in_background, enabled_providers = _resolve_subtitles(
-        cfg,
-        video,
-        video_path,
-        dur,
-        tmp,
-        sub_file=sub_file,
-        jimaku=jimaku,
-        jimaku_key=jimaku_key,
-        jimaku_title=jimaku_title,
-        episode=episode,
-        resync=resync,
-        slang=slang,
+        cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
     )
 
     proc, ipc = _launch_mpv_and_connect(
         cfg,
         tmp,
         video_path,
-        slang=slang,
-        start=start,
-        screenshot=screenshot,
+        MpvLaunchOptions(
+            slang=slang,
+            start=start,
+            screenshot=bool(screenshot),
+            use_config=use_config,
+            fullscreen=fullscreen,
+            extra_args=mpv_arg,
+        ),
         sub_path=sub_path,
         en_sub_path=en_sub_path,
-        use_config=use_config,
-        fullscreen=fullscreen,
-        mpv_arg=mpv_arg,
     )
     if ipc is None:
         return 2
@@ -1040,19 +997,21 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     opts = _build_run_options(
         cfg,
-        mine_key=mine_key,
-        mine_all_key=mine_all_key,
-        translate_key=translate_key,
-        preview_key=preview_key,
-        tip_height=tip_height,
-        tip_scale=tip_scale,
-        pause_on_tooltip=pause_on_tooltip,
-        hover_switch_delay=hover_switch_delay,
-        no_audio_play=no_audio_play,
-        mine_preview=mine_preview,
-        auto_translate=auto_translate,
-        prefetch=prefetch,
-        layout_engine=layout_engine,
+        RunFlags(
+            mine_key=mine_key,
+            mine_all_key=mine_all_key,
+            translate_key=translate_key,
+            preview_key=preview_key,
+            tip_height=tip_height,
+            tip_scale=tip_scale,
+            pause_on_tooltip=pause_on_tooltip,
+            hover_switch_delay=hover_switch_delay,
+            no_audio_play=no_audio_play,
+            mine_preview=mine_preview,
+            auto_translate=auto_translate,
+            prefetch=prefetch,
+            layout_engine=layout_engine,
+        ),
     )
 
     # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
@@ -1078,12 +1037,11 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         reader,
         cfg,
         video_path,
+        subs,
         providers=(fetch_jimaku_in_background if subtitle_startup.tracks.jp_sid is None else ()),
         enabled_providers=enabled_providers,
         jimaku_title=jimaku_title,
         episode=episode,
-        jimaku_key=jimaku_key,
-        resync=resync,
     )
 
     _install_watch_hooks(
@@ -1092,27 +1050,25 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         video_path,
         tmp,
         dur,
+        subs,
         interactive=not (demo_word or screenshot),
         auto_advance=auto_advance,
-        sub_file=sub_file,
-        jimaku=jimaku,
-        jimaku_key=jimaku_key,
-        slang=slang,
-        resync=resync,
     )
 
     try:
         _execute_reader_session(
             reader,
             ipc,
-            demo_word=demo_word,
-            screenshot=screenshot,
+            DemoSpec(
+                demo_word=demo_word,
+                screenshot=screenshot,
+                demo_scroll=demo_scroll,
+                demo_translate=demo_translate,
+                mine=mine,
+                bulk=bulk,
+                seconds=seconds,
+            ),
             video=video,
-            demo_scroll=demo_scroll,
-            demo_translate=demo_translate,
-            mine=mine,
-            bulk=bulk,
-            seconds=seconds,
             translate_key=translate_key,
         )
     finally:

@@ -14,15 +14,19 @@ from pathlib import Path
 import pytest
 
 from overlay.mpvio.ipc import MpvIPC
-from overlay.mpvio.launch import build_mpv_argv
+from overlay.mpvio.launch import MpvLaunchOptions, build_mpv_argv
 
 FAKE_MPV = Path(__file__).resolve().parent / "fake_mpv.py"
+
+_OPT_FIELDS = ("slang", "start", "screenshot", "use_config", "fullscreen", "extra_args")
 
 
 def _argv(**over) -> list[str]:
     kw = {"slang": "jpn", "start": "1", "screenshot": False}
     kw.update(over)
-    return build_mpv_argv("mpv", "/tmp/s.sock", "/tmp/mpv.log", "video.mkv", **kw)
+    subs = {k: kw.pop(k) for k in ("sub_path", "en_sub_path") if k in kw}
+    opts = MpvLaunchOptions(**{k: v for k, v in kw.items() if k in _OPT_FIELDS})
+    return build_mpv_argv("mpv", "/tmp/s.sock", "/tmp/mpv.log", "video.mkv", opts, **subs)
 
 
 def test_core_flags_ipc_server_and_video_last():
@@ -107,9 +111,7 @@ def test_launched_process_serves_the_ipc_socket(tmp_path):
         sock,
         str(tmp_path / "mpv.log"),
         "video.mkv",
-        slang="jpn",
-        start="1",
-        screenshot=False,
+        MpvLaunchOptions(slang="jpn", start="1", screenshot=False),
     )
     # run fake_mpv.py as the "mpv binary", carrying the same argv build() produced (+ a log sink)
     proc = subprocess.Popen([sys.executable, str(FAKE_MPV), *argv[1:], f"--fake-log={log}"])

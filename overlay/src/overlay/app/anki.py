@@ -421,72 +421,81 @@ def bold_word(sentence: str, surface: str) -> str:
     return f"{esc[:i]}<b>{esc_surface}</b>{esc[i + len(esc_surface) :]}"
 
 
-def _entity_values(card, sentence_html, picture, audio, misc, freq_html, freq_sort) -> dict:
+@dataclass(frozen=True)
+class CardContent:
+    """The rendered per-card content a mine produces — the sentence/media/frequency pieces build_note
+    assembles into fields (each Anki-wrapped at use). Bundled so a mine's content flows as one value."""
+
+    sentence_html: str = ""
+    picture: str = ""
+    audio: str = ""
+    misc: str = ""
+    freq_html: str = ""
+    freq_sort: str = ""
+
+
+_EMPTY_CONTENT = CardContent()  # frozen → safe shared default for build_note
+
+
+def _entity_values(card, content: CardContent) -> dict:
     """logical entity -> content, for the default ``[mine.fields]`` map (media wrapped Anki-ready)."""
     return {
         "expression": card.expression,
         "reading": card.reading,
-        "sentence": sentence_html,
+        "sentence": content.sentence_html,
         "glossary": card.glossary_html,
-        "picture": f'<img src="{picture}">' if picture else "",
-        "audio": f"[sound:{audio}]" if audio else "",
-        "misc": misc,
+        "picture": f'<img src="{content.picture}">' if content.picture else "",
+        "audio": f"[sound:{content.audio}]" if content.audio else "",
+        "misc": content.misc,
         "id": card.idseq,
-        "freq": freq_html,
-        "freq_sort": freq_sort,
+        "freq": content.freq_html,
+        "freq_sort": content.freq_sort,
     }
 
 
-def _card_format_fields(
-    cfg, card, sentence_html, picture, audio, misc, freq_html, freq_sort, tags, markers
-) -> dict:
+def _card_format_fields(cfg, card, content: CardContent, tags, markers) -> dict:
     """Render ``cfg.card_format`` (field -> ``{marker}`` template). ``markers`` from the miner when it
-    has one; otherwise a partial map from these args (pitch/pos/title empty)."""
-    from overlay.app.card_markers import build_markers, render_card_format
+    has one; otherwise a partial map from ``content`` (pitch/pos/title empty)."""
+    from overlay.app.card_markers import MarkerContext, build_markers, render_card_format
 
     if markers is None:
         markers = build_markers(
-            card,
-            sentence_html=sentence_html,
-            picture=picture,
-            audio=audio,
-            misc=misc,
-            doc_title="",
-            freq_html=freq_html,
-            freq_rank=freq_sort,
-            pos_en="",
-            tags=tags,
+            MarkerContext(
+                card=card,
+                sentence_html=content.sentence_html,
+                picture=content.picture,
+                audio=content.audio,
+                misc=content.misc,
+                doc_title="",
+                freq_html=content.freq_html,
+                freq_rank=content.freq_sort,
+                pos_en="",
+                tags=tags,
+            )
         )
     return render_card_format(cfg.card_format, markers)
 
 
-def build_note(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def build_note(
     cfg: MineConfig,
     card: CardData,
-    sentence_html: str,
-    picture: str = "",
-    audio: str = "",
-    misc: str = "",
-    freq_html: str = "",
-    freq_sort: str = "",
+    content: CardContent = _EMPTY_CONTENT,
     tags=(),
     *,
     allow_duplicate: bool = False,
     markers: dict | None = None,
 ) -> dict:
-    """Assemble the AnkiConnect note dict from card data + media filenames. ``tags`` are extra per-card
-    tags (source/episode) added to the config's static tags. ``allow_duplicate`` lets an explicit
-    "add anyway" mine a second card for an expression already in the deck (a different scene).
+    """Assemble the AnkiConnect note dict from card data + rendered ``content``. ``tags`` are extra
+    per-card tags (source/episode) added to the config's static tags. ``allow_duplicate`` lets an
+    explicit "add anyway" mine a second card for an expression already in the deck (a different scene).
 
     ``markers`` is the full ``{marker} -> value`` map for the ``[mine.card_format]`` path — the miner
     builds it (it has the token/dict/video the pitch/pos/title markers need). Omitted, that path falls
-    back to a partial map from these args (pitch/pos/title empty), so ``build_note`` stays usable alone."""
+    back to a partial map from ``content`` (pitch/pos/title empty), so ``build_note`` stays usable alone."""
     if cfg.card_format:
-        note_fields = _card_format_fields(
-            cfg, card, sentence_html, picture, audio, misc, freq_html, freq_sort, tags, markers
-        )
+        note_fields = _card_format_fields(cfg, card, content, tags, markers)
     else:
-        values = _entity_values(card, sentence_html, picture, audio, misc, freq_html, freq_sort)
+        values = _entity_values(card, content)
         note_fields = {real: values.get(logical, "") for logical, real in cfg.fields.items()}
     note_fields.update(cfg.flags)
     all_tags = list(dict.fromkeys(list(cfg.tags) + list(tags)))  # dedupe, keep order

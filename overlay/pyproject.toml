@@ -235,7 +235,7 @@ ignore = [
                # cognitive-complexity, which complexipy already gates. PLR0913 (too-many-args) + PLR0917
                # (too-many-positional) are NOT complexity — arg count is orthogonal to CCN, so nothing
                # measured it and data-clumps went ungated (see the ProviderConfig refactor). Now gated
-               # at max-args=10 below; the over-10 tail carries a `# noqa` + #216 to ratchet down.
+               # at max-args=9 below; the data-clumps are bundled into config objects (#216).
     "PLW0603", # global-statement — intentional module-level singletons (caches/registries)
     "PLW2901", # redefined-loop-name — idiomatic reuse in a couple of tight loops
     "PLW0108", # unnecessary-lambda — several are intentional deferred/lazy thunks
@@ -247,10 +247,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.pylint]
-# PLR0913/PLR0917 threshold. Deliberately loose (10, vs ruff's default 5) so it catches only egregious
-# arg-clumps — the geometry/render helpers legitimately take 6–8 coords. Ratchet DOWN over time as the
-# over-10 tail is bundled into config objects (#216). max-positional-args defaults to this value.
-max-args = 10
+# PLR0913/PLR0917 threshold (vs ruff's default 5). The over-10 data-clumps are now bundled into frozen
+# config objects (#216), so this is ratcheted to 9. The remaining noqas are NOT data-clumps: cyclopts CLI
+# commands (run/run_impl/attach — each flag must be its own parameter) and render-geometry primitives
+# (canvas/coords/sinks). Next ratchet to 8 is tracked in #216. max-positional-args defaults to this value.
+max-args = 9
 
 [tool.ruff.lint.per-file-ignores]
 # cyclopts binds flags via Parameter(...) calls in parameter defaults — that IS its API shape.

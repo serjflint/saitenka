@@ -8,7 +8,7 @@ per-word step against a constructed fake reader, no dicts / no mpv.
 
 from __future__ import annotations
 
-from overlay.app.prewarm import _popular_terms, _PrewarmJob, _startup_plan
+from overlay.app.prewarm import PrewarmTuning, _popular_terms, _PrewarmJob, _startup_plan
 
 
 class _FakePanel:
@@ -99,8 +99,7 @@ def _job(reader_factory, *, atlas=None, on_progress=None, **kw) -> _PrewarmJob:
         sig="sig",
         ceiling=1 << 30,
         on_progress=on_progress,
-        atlas_only=True,
-        **kw,
+        tuning=PrewarmTuning(atlas_only=True, **kw),
     )
 
 

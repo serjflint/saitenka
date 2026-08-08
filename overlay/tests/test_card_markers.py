@@ -8,6 +8,7 @@ from overlay.app.card_markers import (
     CATALOG,
     MARKERS,
     Marker,
+    MarkerContext,
     anki_furigana,
     build_markers,
     render_card_format,
@@ -56,50 +57,58 @@ def test_anki_furigana_falls_back_when_reading_cannot_align():
 def test_cloze_splits_sentence_on_the_bolded_surface():
     # build_markers derives cloze from the already-bolded sentence (bold_word wraps the surface)
     m = build_markers(
-        CardData("読む", "よむ", ""),
-        sentence_html="本を<b>読む</b>のが好き",
-        picture="",
-        audio="",
-        misc="",
-        doc_title="",
-        freq_html="",
-        freq_rank="",
-        pos_en="verb",
-        tags=(),
+        MarkerContext(
+            CardData("読む", "よむ", ""),
+            sentence_html="本を<b>読む</b>のが好き",
+            picture="",
+            audio="",
+            misc="",
+            doc_title="",
+            freq_html="",
+            freq_rank="",
+            pos_en="verb",
+            tags=(),
+        )
     )
     assert (m["cloze-prefix"], m["cloze-body"], m["cloze-suffix"]) == ("本を", "読む", "のが好き")
 
 
 def test_cloze_whole_sentence_is_prefix_when_surface_absent():
     m = build_markers(
-        CardData("x", "", ""),
-        sentence_html="no bold here",
-        picture="",
-        audio="",
-        misc="",
-        doc_title="",
-        freq_html="",
-        freq_rank="",
-        pos_en="",
-        tags=(),
+        MarkerContext(
+            CardData("x", "", ""),
+            sentence_html="no bold here",
+            picture="",
+            audio="",
+            misc="",
+            doc_title="",
+            freq_html="",
+            freq_rank="",
+            pos_en="",
+            tags=(),
+        )
     )
     assert m["cloze-prefix"] == "no bold here" and m["cloze-body"] == "" and m["cloze-suffix"] == ""
 
 
 def test_build_markers_populates_grounded_set_and_wraps_media():
     m = build_markers(
-        CardData("読む", "よむ", "<ol><li>to read</li></ol>", idseq="1234", glosses=("to read",)),
-        sentence_html="本を<b>読む</b>",
-        picture="pic.webp",
-        audio="a.m4a",
-        misc="Show · ep01 · 10:03",
-        doc_title="Show",
-        freq_html="<ul><li>F: 5</li></ul>",
-        freq_rank="5",
-        pos_en="verb",
-        tags=("saitenka::mined", "saitenka::ep::01"),
-        pitch_html="よむ [0]",
-        pitch_positions="0",
+        MarkerContext(
+            CardData(
+                "読む", "よむ", "<ol><li>to read</li></ol>", idseq="1234", glosses=("to read",)
+            ),
+            sentence_html="本を<b>読む</b>",
+            picture="pic.webp",
+            audio="a.m4a",
+            misc="Show · ep01 · 10:03",
+            doc_title="Show",
+            freq_html="<ul><li>F: 5</li></ul>",
+            freq_rank="5",
+            pos_en="verb",
+            tags=("saitenka::mined", "saitenka::ep::01"),
+            pitch_html="よむ [0]",
+            pitch_positions="0",
+        )
     )
     assert m["expression"] == "読む" and m["reading"] == "よむ"
     assert m["furigana"] == "読[よ]む"
@@ -115,16 +124,18 @@ def test_build_markers_populates_grounded_set_and_wraps_media():
 
 def test_build_markers_pitch_empty_when_not_passed():
     m = build_markers(
-        CardData("猫", "ねこ", ""),
-        sentence_html="",
-        picture="",
-        audio="",
-        misc="",
-        doc_title="",
-        freq_html="",
-        freq_rank="",
-        pos_en="noun",
-        tags=(),
+        MarkerContext(
+            CardData("猫", "ねこ", ""),
+            sentence_html="",
+            picture="",
+            audio="",
+            misc="",
+            doc_title="",
+            freq_html="",
+            freq_rank="",
+            pos_en="noun",
+            tags=(),
+        )
     )
     assert (
         m["pitch-accents"] == "" and m["pitch-accent-positions"] == ""
@@ -170,7 +181,7 @@ def test_markers_and_producers_derive_from_one_catalog():
 
 def test_build_markers_produces_exactly_the_shippable_markers():
     # the producer map and the validator can't disagree: build_markers emits precisely MARKERS.
-    assert set(build_markers(_FULL_CARD, **_FULL_KW)) == MARKERS
+    assert set(build_markers(MarkerContext(_FULL_CARD, **_FULL_KW))) == MARKERS
 
 
 def test_catalog_only_addition_surfaces_in_both_markers_and_output(monkeypatch):
@@ -180,7 +191,7 @@ def test_catalog_only_addition_surfaces_in_both_markers_and_output(monkeypatch):
     extra = Marker("test-only", "ship", "a synthetic marker", lambda c: f"X:{c.card.expression}")
     monkeypatch.setattr(cm, "CATALOG", (*CATALOG, extra))
     assert "test-only" in frozenset(m.name for m in cm.CATALOG if m.status == "ship")
-    assert cm.build_markers(_FULL_CARD, **_FULL_KW)["test-only"] == "X:読む"
+    assert cm.build_markers(MarkerContext(_FULL_CARD, **_FULL_KW))["test-only"] == "X:読む"
 
 
 def test_docs_marker_fragment_matches_generator():

@@ -555,35 +555,39 @@ def remove_external_sub_tracks(ipc) -> int:
     return removed
 
 
-def prepare_attach_startup(
-    ipc,
-    *,
-    slang: str = "ja,jpn,jp",
-    sub_file: str | None = None,
-    jimaku: bool = False,
-    jimaku_force: bool = False,
-    jimaku_key: str | None = None,
-    jimaku_title: str | None = None,
-    tsukihime: bool = False,
-    episode: int | None = None,
-    resync: bool = True,
-):
+@dataclass(frozen=True)
+class AttachSubtitleOptions:
+    """An ``attach``'s subtitle-sourcing choices — the attach analog of ``cli_run.RunSubtitleOptions``,
+    resolved once from CLI/config and passed to :func:`prepare_attach_startup` (was a nine-arg clump)."""
+
+    slang: str = "ja,jpn,jp"
+    sub_file: str | None = None
+    jimaku: bool = False
+    jimaku_force: bool = False
+    jimaku_key: str | None = None
+    jimaku_title: str | None = None
+    tsukihime: bool = False
+    episode: int | None = None
+    resync: bool = True
+
+
+def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
     """Select the immediate attach track and defer a missing-JP provider fetch."""
     status = ""
-    if sub_file or jimaku_force:
+    if opts.sub_file or opts.jimaku_force:
         status = ensure_jp_subs(
             ipc,
-            slang=slang,
-            sub_file=sub_file,
-            jimaku=jimaku,
-            jimaku_force=jimaku_force,
-            jimaku_key=jimaku_key,
-            jimaku_title=jimaku_title,
-            episode=episode,
-            resync=resync,
+            slang=opts.slang,
+            sub_file=opts.sub_file,
+            jimaku=opts.jimaku,
+            jimaku_force=opts.jimaku_force,
+            jimaku_key=opts.jimaku_key,
+            jimaku_title=opts.jimaku_title,
+            episode=opts.episode,
+            resync=opts.resync,
         )
 
-    startup = select_initial(ipc, slang)
+    startup = select_initial(ipc, opts.slang)
     if not status:
         if startup.active == "jp":
             status = f"selected JP subtitle track sid={startup.tracks.jp_sid}"
@@ -593,8 +597,8 @@ def prepare_attach_startup(
             status = "no Japanese or English subtitle track found"
     providers: list[str] = []
     if startup.tracks.jp_sid is None:
-        if jimaku and not jimaku_force:
+        if opts.jimaku and not opts.jimaku_force:
             providers.append("jimaku")
-        if tsukihime:
+        if opts.tsukihime:
             providers.append("tsukihime")
     return startup, status, tuple(providers)

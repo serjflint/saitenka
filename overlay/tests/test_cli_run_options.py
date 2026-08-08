@@ -1,32 +1,34 @@
 """overlay.toml keys → ReaderOptions. Pure functions, no IPC/mpv."""
 
-from overlay.app.cli import _build_attach_options
-from overlay.app.cli_run import _build_run_options
+from dataclasses import replace
 
-_BASE_KWARGS = {
-    "mine_key": "Ctrl+m",
-    "mine_all_key": "Shift+m",
-    "translate_key": "t",
-    "preview_key": "p",
-    "tip_height": 0.4,
-    "tip_scale": 0.0,
-    "pause_on_tooltip": True,
-    "hover_switch_delay": 0.15,
-    "no_audio_play": False,
-    "mine_preview": True,
-    "auto_translate": False,
-    "prefetch": True,
-    "layout_engine": "default",
-}
+from overlay.app.cli import _build_attach_options
+from overlay.app.cli_run import RunFlags, _build_run_options
+
+_BASE_FLAGS = RunFlags(
+    mine_key="Ctrl+m",
+    mine_all_key="Shift+m",
+    translate_key="t",
+    preview_key="p",
+    tip_height=0.4,
+    tip_scale=0.0,
+    pause_on_tooltip=True,
+    hover_switch_delay=0.15,
+    no_audio_play=False,
+    mine_preview=True,
+    auto_translate=False,
+    prefetch=True,
+    layout_engine="default",
+)
 
 
 def test_scan_delay_defaults_when_absent_from_config():
-    opts = _build_run_options({}, **_BASE_KWARGS)
+    opts = _build_run_options({}, _BASE_FLAGS)
     assert opts.tooltip.scan_delay == 1.0
 
 
 def test_run_options_pass_layout_engine_through():
-    opts = _build_run_options({}, **{**_BASE_KWARGS, "layout_engine": "taffy"})
+    opts = _build_run_options({}, replace(_BASE_FLAGS, layout_engine="taffy"))
     assert opts.tooltip.layout_engine == "taffy"
 
 
@@ -36,12 +38,12 @@ def test_attach_options_read_layout_engine_from_config():
 
 
 def test_scan_delay_reads_from_config():
-    opts = _build_run_options({"scan_delay": 1.5}, **_BASE_KWARGS)
+    opts = _build_run_options({"scan_delay": 1.5}, _BASE_FLAGS)
     assert opts.tooltip.scan_delay == 1.5
 
 
 def test_run_options_pass_tip_scale_through():
-    opts = _build_run_options({}, **{**_BASE_KWARGS, "tip_scale": 1.5})
+    opts = _build_run_options({}, replace(_BASE_FLAGS, tip_scale=1.5))
     assert opts.tooltip.tip_scale == 1.5
 
 
@@ -53,7 +55,7 @@ def test_attach_options_read_tip_scale_from_config():
 
 
 def test_run_options_read_utility_ui_scale():
-    opts = _build_run_options({"ui_scale": 1.5}, **_BASE_KWARGS)
+    opts = _build_run_options({"ui_scale": 1.5}, _BASE_FLAGS)
     assert opts.panels.scale == 1.5
 
 
@@ -69,8 +71,10 @@ def test_attach_options_read_mine_preview_toggle():
 
 
 def test_run_options_read_mine_preview_toggle():
-    kwargs = {**_BASE_KWARGS, "mine_preview": False}
-    assert _build_run_options({}, **kwargs).mining.show_preview is False
+    assert (
+        _build_run_options({}, replace(_BASE_FLAGS, mine_preview=False)).mining.show_preview
+        is False
+    )
 
 
 def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
@@ -85,20 +89,22 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
         lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
     )
     cli_run._build_run_deps(
-        mine=True,
-        mine_deck="D",
-        mine_model="Lapis",
-        mine_key="Ctrl+m",
-        mine_all_key="Shift+m",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=True,
-        raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
-        known_cfg=None,
-        known="",
-        color=False,
-        dict_titles=[],
-        freq_titles=[],
-        pitch_titles=[],
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="D",
+            mine_model="Lapis",
+            mine_key="Ctrl+m",
+            mine_all_key="Shift+m",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=True,
+            raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
     assert captured["mine"]["animated_screenshot"] is True
     # config-only quality knobs (no CLI flag) must survive the synthetic effective_cfg too
@@ -131,20 +137,22 @@ def test_run_threads_field_map_and_card_kind(monkeypatch):
         lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
     )
     cli_run._build_run_deps(
-        mine=True,
-        mine_deck="D",
-        mine_model="Lapis",
-        mine_key="Ctrl+m",
-        mine_all_key="Shift+m",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=False,
-        raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
-        known_cfg=None,
-        known="",
-        color=False,
-        dict_titles=[],
-        freq_titles=[],
-        pitch_titles=[],
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="D",
+            mine_model="Lapis",
+            mine_key="Ctrl+m",
+            mine_all_key="Shift+m",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=False,
+            raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
     assert captured["mine"]["preset"] == "Kiku"
     assert captured["mine"]["card_kind"] == "sentence"
@@ -162,20 +170,22 @@ def test_run_threads_card_format(monkeypatch):
         lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
     )
     cli_run._build_run_deps(
-        mine=True,
-        mine_deck="D",
-        mine_model="Lapis",
-        mine_key="Ctrl+m",
-        mine_all_key="Shift+m",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=False,
-        raw_mine={"card_format": {"Word": "{expression}"}},
-        known_cfg=None,
-        known="",
-        color=False,
-        dict_titles=[],
-        freq_titles=[],
-        pitch_titles=[],
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="D",
+            mine_model="Lapis",
+            mine_key="Ctrl+m",
+            mine_all_key="Shift+m",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=False,
+            raw_mine={"card_format": {"Word": "{expression}"}},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
     assert captured["mine"]["card_format"] == {"Word": "{expression}"}
 
@@ -194,7 +204,7 @@ def test_run_options_read_hover_pause_key():
             "annotation_mode": "hover",
             "stats": {"enabled": True, "summary": False},
         },
-        **_BASE_KWARGS,
+        _BASE_FLAGS,
     )
     assert opts.keys.hover_pause_key == "Alt+q"
     assert opts.keys.subtitle_language_key == "Alt+l"

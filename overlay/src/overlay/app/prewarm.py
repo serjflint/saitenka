@@ -145,12 +145,32 @@ def _make_reader(
     return reader
 
 
+@dataclass(frozen=True)
+class PrewarmTuning:
+    """A prewarm run's mode + progress/plateau tuning — the ``*``-only options block :class:`_PrewarmJob`
+    used to take as nine keyword args. ``total``/``already_done`` set the tail-projection denominator;
+    ``plateau_stop`` opts into stopping after N dry checkpoints instead of churning the whole tail."""
+
+    atlas_only: bool = False
+    # >1.0 → ALSO raster each word's NATIVE-scale panel so its size×scale glyph masks land in the atlas
+    # (keyed file:size:weight, so native masks are distinct) — makes the hi-dpi crisp upgrade load from
+    # disk instead of paying getmask2 on the first native raster.
+    native_scale: float = 1.0
+    total: int = 0
+    already_done: int = 0
+    start_rows: int = 0
+    start_nbytes: int = 0
+    plateau_stop: int = 0
+    checkpoint_every: int = _CHECKPOINT_EVERY
+    plateau_min: int = _PLATEAU_MIN_NEW
+
+
 class _PrewarmJob:
     """The parallel render loop's shared state + per-word work, as methods so each stays simple (the
     complexity ratchet). Thread-local Readers (own dict conns) share one injected cache; a lock guards
     the counters. A per-word render is independent, so it fans out cleanly across the free-threaded pool."""
 
-    def __init__(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+    def __init__(
         self,
         reader_factory,
         cache: RenderCache | None,
@@ -159,48 +179,35 @@ class _PrewarmJob:
         sig: str,
         ceiling: int,
         on_progress,
-        *,
-        atlas_only: bool = False,
-        native_scale: float = 1.0,
-        total: int = 0,
-        already_done: int = 0,
-        start_rows: int = 0,
-        start_nbytes: int = 0,
-        plateau_stop: int = 0,
-        checkpoint_every: int = _CHECKPOINT_EVERY,
-        plateau_min: int = _PLATEAU_MIN_NEW,
+        tuning: PrewarmTuning,
     ):
         self._make = reader_factory  # () -> a fresh headless Reader with the shared cache
         self.cache = cache  # None in atlas-only mode (the render cache is left untouched)
         self.atlas = atlas  # mask atlas (getmask2 write-back builds it too); None if unavailable
-        self.atlas_only = atlas_only
-        # >1.0 → ALSO raster each word's NATIVE-scale panel so its size×scale glyph masks land in the
-        # atlas (the atlas keys on file:size:weight, so native masks are distinct entries). This makes
-        # the hi-dpi crisp upgrade load from disk instead of paying getmask2 on the first native raster.
-        self.native_scale = native_scale
+        self.atlas_only = tuning.atlas_only
+        self.native_scale = tuning.native_scale
         # If the atlas is empty it still needs building — then a word already in the render cache is NOT
         # skipped (we raster it to fill the atlas, just don't re-store the head). Both fresh → normal.
         # atlas_only forces the raster path for EVERY word (no render-cache side).
-        self.fill_atlas = atlas_only or (atlas is not None and atlas.count() == 0)
+        self.fill_atlas = tuning.atlas_only or (atlas is not None and atlas.count() == 0)
         self.gate = gate
         self.sig = sig
         self.ceiling = ceiling
         self.on_progress = on_progress
-        # Progress / early-stop bookkeeping. ``to_raster`` (population minus the resume-ledger skips) is
-        # the denominator the tail projection extrapolates over; ``plateau_stop`` opts into stopping once
-        # the glyph population saturates (N dry checkpoints) instead of churning the whole 1M-word tail.
-        self.to_raster = max(0, total - already_done)
-        self.plateau_stop = plateau_stop
-        self.checkpoint_every = checkpoint_every
-        self.plateau_min = plateau_min
+        # ``to_raster`` (population minus the resume-ledger skips) is the denominator the tail projection
+        # extrapolates over.
+        self.to_raster = max(0, tuning.total - tuning.already_done)
+        self.plateau_stop = tuning.plateau_stop
+        self.checkpoint_every = tuning.checkpoint_every
+        self.plateau_min = tuning.plateau_min
         self._tls = threading.local()
         self._lock = threading.Lock()
         self.measured = 0
         self.skipped = 0
         self.stop = False
-        self._last_rows = start_rows  # rows at the previous checkpoint → new-mask delta
+        self._last_rows = tuning.start_rows  # rows at the previous checkpoint → new-mask delta
         self._last_ignored = 0  # atlas.ignored at the previous checkpoint → already-cached delta
-        self._start_nbytes = start_nbytes  # run-start footprint → cumulative-rate projection
+        self._start_nbytes = tuning.start_nbytes  # run-start footprint → cumulative-rate projection
         self._dry_streak = 0  # consecutive dry checkpoints, for --atlas-plateau
 
     def _reader(self):
@@ -507,13 +514,15 @@ def prewarm(
         sig=template._render_cache_sig(),
         ceiling=template.session.render_cache.cache_max_bytes,
         on_progress=on_progress,
-        atlas_only=atlas_only,
-        native_scale=atlas_scale,
-        total=plan.total,
-        already_done=already_done,
-        start_rows=before,
-        start_nbytes=plan.nbytes,
-        plateau_stop=plateau_stop,
+        tuning=PrewarmTuning(
+            atlas_only=atlas_only,
+            native_scale=atlas_scale,
+            total=plan.total,
+            already_done=already_done,
+            start_rows=before,
+            start_nbytes=plan.nbytes,
+            plateau_stop=plateau_stop,
+        ),
     )
     n_workers = workers if workers > 0 else min(8, (os.cpu_count() or 4))
     try:

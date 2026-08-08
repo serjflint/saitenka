@@ -221,39 +221,10 @@ CATALOG: tuple[Marker, ...] = (
 MARKERS = frozenset(m.name for m in CATALOG if m.status == "ship")
 
 
-def build_markers(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    card: CardData,
-    *,
-    sentence_html: str,
-    picture: str,
-    audio: str,
-    misc: str,
-    doc_title: str,
-    freq_html: str,
-    freq_rank: str,
-    pos_en: str,
-    tags: tuple[str, ...] | list[str],
-    pitch_html: str = "",
-    pitch_positions: str = "",
-) -> dict[str, str]:
+def build_markers(ctx: MarkerContext) -> dict[str, str]:
     """The ``marker -> value`` map for a mine, produced by running every shippable :data:`CATALOG` entry
-    against a :class:`MarkerContext`. ``pitch_*`` are passed in (the caller has ``dict_set``); they default
-    to empty so a caller without pitch still produces a valid map. Media markers carry the Anki-ready
-    wrappers (``<img src>`` / ``[sound:]``) so a bare ``{screenshot}`` renders the image."""
-    ctx = MarkerContext(
-        card=card,
-        sentence_html=sentence_html,
-        picture=picture,
-        audio=audio,
-        misc=misc,
-        doc_title=doc_title,
-        freq_html=freq_html,
-        freq_rank=freq_rank,
-        pos_en=pos_en,
-        tags=tags,
-        pitch_html=pitch_html,
-        pitch_positions=pitch_positions,
-    )
+    against ``ctx``. Media markers carry the Anki-ready wrappers (``<img src>`` / ``[sound:]``) so a bare
+    ``{screenshot}`` renders the image."""
     out: dict[str, str] = {}
     for marker in CATALOG:
         produce = marker.produce
