@@ -7,6 +7,49 @@ logs.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-09
+
+### Added
+
+- **`set-jimaku-key` verifies the key as you save it.** Right after storing a key, saitenka runs one
+  probe query against jimaku and reports whether it works — so a mis-pasted key is caught at save time
+  instead of on the first subtitle fetch. This targets the Windows PowerShell paste trap, where a plain
+  ++ctrl+v++ in the hidden secret field stores a single character; the immediate check turns that into a
+  clear "bad key" instead of a silent later failure. `--no-verify` skips the probe (best-effort — a
+  network hiccup never blocks the save).
+- **Force file-based jimaku-key storage (`--file` / `[jimaku].keyring = false`).** The OS keyring
+  (Windows Credential Locker) can trip an antivirus prompt on the first jimaku call; you can now opt out
+  of the keyring and keep the key in the config file instead. `saitenka doctor` points at this on Windows
+  when no key is found.
+- **`saitenka setup` now prompts for the mining field map.** The wizard walks the note type's fields and
+  asks which logical value (expression / reading / sentence / audio / picture / …) fills each, so a
+  non-preset note type is configured interactively instead of by hand-editing `[mine.fields]`. On
+  re-setup the current mapping is offered as the default for every field.
+- **`doctor`/`report` dump the full mining field map.** The effective `logical → real` field mapping is
+  now shown in `saitenka doctor` and bundled in `report`, and it warns when a mapping targets a logical
+  entity it doesn't recognise or leaves the note type's first field unwritten — the failure mode behind an
+  "Anki won't add the card" report (an empty note is rejected).
+
+### Fixed
+
+- **Mining keybinds now always register.** In attach / plugin mode the mine keys (++ctrl+m++,
+  ++ctrl+shift+m++, ++shift+m++, and any rebind) did nothing, because their registration was gated on Anki
+  being ready — and Anki loads asynchronously after the keys are bound, with no second pass. They now
+  register unconditionally; the handler checks Anki at press time and shows a toast if it isn't available,
+  instead of the key silently never existing.
+- **Telemetry trace writing self-heals.** When the CTF `trace.json` (or its directory) was removed
+  mid-session by a cache cleanup or rotation, the writer retried the dead append every tick and logged the
+  failure hundreds of times a run. It now recreates the file and continues, logging only a genuinely
+  unwritable target.
+
+### Development
+
+- **Session mode is in the logs.** `run` and `attach` now each emit a `session: mode=…` line at startup,
+  so a diagnostics bundle says which mode produced it.
+- **Mining-keybind observability.** Keybind registration logs its count and whether Anki was live, warns
+  when mpv rejects a bind, logs each dispatched `script-message`, and tags the mine span with whether it
+  captured an animated screenshot — enough to explain a "nothing happened" mine from a report alone.
+
 ## [2.1.0] - 2026-08-08
 
 ### Added
