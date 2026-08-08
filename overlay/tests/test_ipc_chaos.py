@@ -115,23 +115,50 @@ class _ScriptedTransport:
 
 
 def test_pump_reconnects_after_a_dropped_pipe_and_replays_observers():
-    # mpv.net drops the IPC pipe mid-session: the reader hits EOF and sets the gate, but pump() must
-    # re-dial the same endpoint and replay observers instead of surfacing a fatal disconnect.
+    # mpv.net drops the IPC pipe mid-session but stays running: the reader hits EOF and sets the gate,
+    # yet a re-dial reaches a LIVE mpv (it answers the liveness probe), so pump() recovers and replays
+    # observers instead of surfacing a fatal disconnect.
+    a, b = socket.socketpair()
+    b.settimeout(2.0)
     ipc = MpvIPC(r"\\.\pipe\mpvsocket")
     replays: list = []
-    ipc.on_reconnect = lambda: replays.append(ipc._transport)
+    ipc.on_reconnect = lambda: replays.append(True)
     ipc._transport = _ScriptedTransport()  # immediate EOF = dropped pipe
     ipc._start_reader()
     assert ipc._closed.wait(1.0)  # reader saw EOF
-    target = _ScriptedTransport([b'{"event":"seek"}\n'])
-    ipc._dial = lambda _path, _timeout: target
+    ipc._dial = lambda _path, _timeout: UnixSocketTransport(a)
     left_before = ipc._reconnects_left
 
-    ipc.pump()  # must NOT raise — recovers the dropped pipe
+    def serve_probe() -> None:
+        _recv_line(b)  # the get_property pid liveness probe
+        b.sendall(b'{"error":"success","data":4242}\n')  # a live mpv answers
 
-    assert ipc._transport is target
-    assert replays == [target]  # observers replayed after the transport was swapped in
+    th = threading.Thread(target=serve_probe)
+    th.start()
+    ipc.pump()  # must NOT raise — a live re-dial recovers the dropped pipe
+    th.join(2.0)
+
+    assert replays == [True]  # observers replayed after the live reconnect
     assert ipc._reconnects_left == left_before - 1
+    ipc.close()
+    b.close()
+
+
+def test_pump_gives_up_when_a_redial_connects_but_never_replies():
+    # REGRESSION (2.0.1): a self-launched mpv that QUIT leaves a socket that can still accept a connect
+    # yet never replies. Without the liveness probe pump() declared that a "reconnect" and hung the
+    # poll loop for command()'s full timeout, _MAX_RECONNECTS times over. The probe must detect the
+    # dead endpoint and raise, so the overlay exits promptly on quit instead of zombie-hanging.
+    a, b = socket.socketpair()
+    b.close()  # peer gone → reads on `a` hit EOF = a re-dialed-but-dead endpoint (mpv quit)
+    ipc = MpvIPC("x")
+    ipc._dial = lambda _p, _t: UnixSocketTransport(a)
+    ipc._transport = _ScriptedTransport()
+    ipc._start_reader()
+    assert ipc._closed.wait(1.0)
+
+    with pytest.raises(OSError, match="disconnected"):
+        ipc.pump()
     ipc.close()
 
 
