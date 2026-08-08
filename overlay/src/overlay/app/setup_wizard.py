@@ -342,7 +342,8 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
     )
     model_default = intersect_default(cur.get("model", "Lapis"), models)
     mine_model = prompt.select("  Mining note type?", models, default=model_default)
-    mine_kind = _prompt_card_kind(cur)
+    mine_kind = _prompt_card_kind(cur, mine_model)
+    mine_fields = _prompt_mine_fields(anki, mine_model, cur)
     default_known = default_known_deck(decks, sizes, prefer=mine_deck)
     # A yes/no gate (via the wizard's confirm seam, so --yes / non-tty resolve it) makes "no known deck"
     # unambiguously reachable — an autocomplete pre-filled with the default can't cleanly express skip.
@@ -356,18 +357,78 @@ def _offer_anki(confirm: Confirm) -> None:  # pragma: no cover — interactive, 
         known_field = prompt.select("    Field with the word?", fields, default=default_field)
 
     frag = anki_config_fragment(
-        known_deck, known_field, mine_deck, mine_model, existing_mine=cur, card_kind=mine_kind
+        known_deck,
+        known_field,
+        mine_deck,
+        mine_model,
+        existing_mine=cur,
+        card_kind=mine_kind,
+        fields=mine_fields,
     )
     write_config({**cfg, **frag}, confirm=lambda _p: True)
     print("  Anki config written.")
 
 
-def _prompt_card_kind(current: dict) -> str:
+def _prompt_card_kind(current: dict, model: str = "") -> str:
     """Which card template the mine marks. word-and-sentence is the Lapis/Kiku default; 'sentence' is
-    Saitenka's historical marker; 'audio'/'click'/'none' cover the other Lapis-family templates."""
-    default = current.get("card_kind", "word-and-sentence")
+    Saitenka's historical marker; 'audio'/'click'/'none' cover the other Lapis-family templates. A
+    non-preset note type has no ``IsXxxCard`` flag field, so writing one would make the add fail —
+    default it to 'none'."""
+    from overlay.app.anki import PRESETS
+
+    default = current.get("card_kind") or ("word-and-sentence" if model in PRESETS else "none")
     kinds = ["word-and-sentence", "sentence", "audio", "click", "none"]
     return prompt.select("  Card kind?", kinds, default=default)
+
+
+# saitenka entities offered for mapping, in card order. ``expression`` is first and mandatory — it must
+# fill the note type's first field or Anki rejects the note as empty; the rest are skippable.
+_MAP_ENTITIES = ("expression", "reading", "sentence", "glossary", "picture", "audio")
+
+
+def _default_field_for(entity: str, real: list[str], existing: dict, *, first: bool) -> str:
+    """Pre-selected field for an entity: a still-valid prior mapping → a name match (Reading→Reading,
+    audio→SentenceAudio) → the first field for the mandatory ``expression`` (never empty) → ``""`` for a
+    skippable one with no guess. Pure — unit-tested."""
+    prior = existing.get(entity)
+    if prior and prior in real:
+        return prior
+    el = entity.lower()
+    for name in real:
+        if (nl := name.lower()) == el or el in nl:
+            return name
+    return real[0] if first and real else ""
+
+
+def _prompt_mine_fields(anki, model: str, current: dict) -> dict | None:
+    """Map each saitenka entity to one of a NON-preset note type's real fields, so the user never
+    hand-writes ``[mine].fields`` (the mis-map that silently blocks every add). ``None`` when a preset
+    supplies its own map, or the model's fields can't be read (leave any existing map untouched)."""
+    from overlay.app.anki import PRESETS
+
+    if model in PRESETS:
+        return None
+    try:
+        real = list(anki._call("modelFieldNames", modelName=model) or [])
+    except Exception:  # pragma: no cover — a read hiccup just skips guided mapping
+        log.debug("reading %r fields failed", model, exc_info=True)
+        return None
+    if not real:
+        return None
+    raw_fields = current.get("fields")
+    existing = raw_fields if isinstance(raw_fields, dict) else {}
+    print(f"    Map each mined value to a field on {model!r} (Enter accepts the guess):")
+    mapping: dict = {}
+    skip = "(skip)"
+    for entity in _MAP_ENTITIES:  # pragma: no cover — interactive prompt loop
+        mandatory = entity == "expression"
+        default = _default_field_for(entity, real, existing, first=mandatory)
+        picked = prompt.select(
+            f"      {entity}?", real if mandatory else [skip, *real], default=default or skip
+        )
+        if picked and picked != skip:
+            mapping[entity] = picked
+    return mapping or None
 
 
 def anki_config_fragment(
@@ -377,11 +438,15 @@ def anki_config_fragment(
     mine_model: str,
     existing_mine: dict | None = None,
     card_kind: str = "word-and-sentence",
+    fields: dict | None = None,
 ) -> dict:
     """Build the config fragment from the wizard's Anki choices: ``[known]`` deck→[field] (drives
     coloring; empty deck → omitted) + ``[mine]`` deck/model/card_kind (merged over any existing [mine]
-    keys, so a custom key/all_key/field-map survives). Pure — unit-tested."""
+    keys, so a custom key/all_key survives). ``fields`` (the guided logical→real map) replaces any prior
+    ``fields`` when given; ``None`` leaves an existing map untouched (presets / skipped). Pure — unit-tested."""
     mine = {**(existing_mine or {}), "deck": mine_deck, "model": mine_model, "card_kind": card_kind}
+    if fields:
+        mine["fields"] = fields
     frag: dict = {"mine": mine}
     if known_deck:
         frag["known"] = {known_deck: [known_field or "Expression"]}

@@ -180,6 +180,55 @@ def test_anki_config_fragment():
     assert f("K", "", "D", "M")["known"] == {"K": ["Expression"]}  # blank field → default
 
 
+def test_anki_config_fragment_writes_guided_field_map():
+    """The guided [mine].fields map is written through; None leaves any existing map untouched."""
+    from overlay.app.setup_wizard import anki_config_fragment as f
+
+    fields = {"expression": "Front", "reading": "Reading"}
+    frag = f("", "", "D", "Basic Yomi", card_kind="none", fields=fields)
+    assert frag["mine"]["fields"] == fields
+    # None → don't clobber an existing map carried in existing_mine
+    keep = f("", "", "D", "M", existing_mine={"fields": {"expression": "Front"}}, fields=None)
+    assert keep["mine"]["fields"] == {"expression": "Front"}
+
+
+def test_default_field_for_prefers_existing_then_name_match_then_first():
+    """Re-setup shows the current mapping as the default; a fresh map name-matches (Reading->Reading,
+    audio->SentenceAudio) and pins the mandatory expression to the first field so it's never empty."""
+    from overlay.app.setup_wizard import _default_field_for as d
+
+    real = ["Front", "Back", "Sentence", "Reading", "Picture", "SentenceAudio"]
+    # existing (valid) mapping wins — the "current values as defaults on re-setup" contract
+    assert d("expression", real, {"expression": "Back"}, first=True) == "Back"
+    # fresh: name match
+    assert d("reading", real, {}, first=False) == "Reading"
+    assert d("audio", real, {}, first=False) == "SentenceAudio"  # substring match
+    # mandatory expression with no match → the first field (never empty → Anki won't reject)
+    assert d("expression", real, {}, first=True) == "Front"
+    # skippable with no match → "" (offers skip)
+    assert d("glossary", ["Front", "Reading"], {}, first=False) == ""
+    # a stale existing target no longer on the note type is ignored, not returned
+    assert d("reading", real, {"reading": "Gone"}, first=False) == "Reading"
+
+
+def test_prompt_card_kind_defaults_none_for_non_preset(monkeypatch):
+    """A non-preset note type has no IsXxxCard flag field, so writing one blocks the add — default the
+    kind to 'none'; a preset keeps word-and-sentence; an existing choice always wins."""
+    seen = {}
+
+    def _fake_select(_msg, _choices, *, default=""):
+        seen["default"] = default
+        return default
+
+    monkeypatch.setattr(sw.prompt, "select", _fake_select)
+    sw._prompt_card_kind({}, "Basic (optional reversed card) Yomi")
+    assert seen["default"] == "none"
+    sw._prompt_card_kind({}, "Lapis")
+    assert seen["default"] == "word-and-sentence"
+    sw._prompt_card_kind({"card_kind": "sentence"}, "Basic Yomi")  # existing wins
+    assert seen["default"] == "sentence"
+
+
 def test_resolve_mpv_input_accepts_exe_strips_quotes_and_scans_dir(tmp_path):
     exe = tmp_path / ("mpv.exe" if sw.sys.platform == "win32" else "mpv")
     exe.write_text("")
