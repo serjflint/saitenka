@@ -29,7 +29,10 @@ class SubtitleRenderer:
 
     def draw(self, reader: Reader) -> None:
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
-            if reader.subtitle_language == SECOND_LANG:
+            # Draw plain for the known/translation track, OR a cue still awaiting a complete
+            # tokenization (dictionaries loading): the cue shows at cue time and reader_deps
+            # re-renders it annotated once deps land.
+            if reader.subtitle_language == SECOND_LANG or reader._sub_pending is not None:
                 sr = render_plain_subtitle(reader.sub_text, reader.osd[0], size=reader.sub_size)
             else:
                 annotated = reader.annotation_mode == "full" or reader._annotation_hover

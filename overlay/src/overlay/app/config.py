@@ -226,6 +226,11 @@ class PerfOptions:
         24  # bounds in-flight/queued render jobs — the transient-RSS cap:
     )
     # panel_cache's LRU bounds RETAINED size, not concurrently-building PIL objects in flight
+    token_cache_max: int = (
+        2500  # LRU cap on tokenized+scored cues (source line → TokenizedCue) so a
+    )
+    # looped/re-watched/nav-back line skips re-tokenization; sized for a whole episode's cues so a
+    # full-file tokenization prefetch never evicts a cue still needed later in the same file.
 
 
 # Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).

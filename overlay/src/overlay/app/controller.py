@@ -97,6 +97,7 @@ from overlay.app.reader_context import (
 from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
+from overlay.app.token_cache import TokenCache, TokenizedCue
 from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compounds, tokenize
 from overlay.mpvio.osd import Overlay
 
@@ -384,6 +385,9 @@ class Reader:
         # generation counter, and the scroll-ahead slot. The Delegated shims below keep the historical
         # ``reader._prefetch_*``/``_head_*``/``_render_ahead_*`` names working across the hot paths.
         self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
+        # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
+        # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
+        self.token_cache = TokenCache(o.perf.token_cache_max)
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -440,6 +444,9 @@ class Reader:
         self.sub_text = ""
         self.lines: list[list[Token]] = []
         self.tokens: list[Token] = []
+        # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
+        # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
+        self._sub_pending: str | None = None
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
         self.hover = -1
@@ -642,6 +649,7 @@ class Reader:
         self.hover = -1
         self._annotation_hover = False
         self.sub_text = text
+        self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
         self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
         with otel_metrics.traced("hide_preview"):
             self._hide_preview()  # a new cue → dismiss the last card preview
@@ -665,17 +673,37 @@ class Reader:
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = text.replace("\\N", "\n").replace("\r", "")
+        cached = self.token_cache.get(norm)
+        self._apply_tokenized_cue(cached if cached is not None else self._tokenize_cue(norm))
+        # A cue must appear at its cue time even when annotation isn't ready. While the dictionaries
+        # are still loading the tokenization can't be complete (no compound merge, no coloring), so
+        # draw the cue PLAIN now; reader_deps re-renders it in place once deps land. A cache hit or a
+        # deps-ready miss tokenizes synchronously (fast) and annotates immediately.
+        self._sub_pending = norm if self.dict_set is None else None
+        self._draw_subtitle()
+
+    def _tokenize_cue(self, norm: str) -> TokenizedCue:
+        """Tokenize + compound-merge + score one normalized cue into a :class:`TokenizedCue`, memoizing
+        a COMPLETE, non-empty result (see TokenCache.put) so a repeated line is a hit. Pure of overlay
+        state, so a cache hit reproduces it exactly."""
         # Dictionary-attested compound merge (応急+処置 → 応急処置) — one hover/color/mine unit like
         # Yomitan. Optional dict capability, absent until the dicts finish loading (like has_term).
         exists = getattr(self.dict_set, "terms_exist", None)
         with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
-            lines = (tokenize(ln) for ln in norm.split("\n") if ln.strip())
-            self.lines = [merge_dict_compounds(t, exists) if exists else t for t in lines]
-        self.tokens = [t for line in self.lines for t in line]
+            raw = (tokenize(ln) for ln in norm.split("\n") if ln.strip())
+            lines = [merge_dict_compounds(t, exists) if exists else t for t in raw]
+        tokens = [t for line in lines for t in line]
         # score the whole cue (N+1 splits by sentence punctuation across lines); warms lookup cache
         with otel_metrics.traced("score_line"):
-            self.styles = self.scorer.score_line(self.tokens) if self.scorer else None
-        self._draw_subtitle()
+            styles = self.scorer.score_line(tokens) if self.scorer else None
+        cue = TokenizedCue(lines, tokens, styles)
+        # Only memoize a complete annotation — a pre-deps tokenization (no compound-merge dict) is a
+        # transient that must re-attempt on the next identical line once the dicts load.
+        self.token_cache.put(norm, cue, complete=exists is not None)
+        return cue
+
+    def _apply_tokenized_cue(self, cue: TokenizedCue) -> None:
+        self.lines, self.tokens, self.styles = cue.lines, cue.tokens, cue.styles
 
     def _draw_subtitle(self) -> None:
         self.renderer.draw(self)
