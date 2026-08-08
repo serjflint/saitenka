@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from overlay.panel import panel_rows, render_panel
 from overlay.render.banded import WindowedPanel
@@ -18,6 +18,8 @@ from overlay.render.layout_backend import (
     DefaultLayoutBackend,
     FlexColumnBackend,
     LayoutBackend,
+    LayoutResult,
+    Rect,
     TaffyLayoutBackend,
     resolve_backend,
 )
@@ -155,6 +157,13 @@ def test_real_panel_is_pixel_identical_under_either_backend():
     top_pad=st.integers(0, 64),
     bottom_pad=st.integers(0, 64),
 )
+@example(data=[], top_pad=0, bottom_pad=0)  # empty column
+@example(data=[(100, 7)], top_pad=12, bottom_pad=8)  # single row (its trailing gap is dropped)
+@example(data=[(0, 4), (0, 4), (0, 4)], top_pad=10, bottom_pad=10)  # zero-height rows
+@example(data=[(30, 0), (30, 0), (30, 0)], top_pad=0, bottom_pad=0)  # zero gaps, zero padding
+@example(
+    data=[(90_000, 200)], top_pad=64, bottom_pad=64
+)  # large values, at the float-cast boundary
 @settings(max_examples=300, deadline=None)
 def test_taffy_backend_agrees_with_default(data, top_pad, bottom_pad):
     # The parity gate for the Rust engine: taffy's flexbox solver must reproduce the default arithmetic
@@ -197,3 +206,71 @@ def test_real_panel_is_pixel_identical_under_taffy_backend():
         a = np.asarray(default.viewport(scroll, 240))
         b = np.asarray(taffy.viewport(scroll, 240))
         assert np.array_equal(a, b), f"taffy diverged from default at scroll {scroll}"
+
+
+class _ShiftedBackend:
+    """Default geometry with every row pushed down 1px — a deliberately-wrong backend, never resolved,
+    used only as the negative control that proves the parity equality below is non-vacuous."""
+
+    def cumulative(self, heights, gaps, top_pad):
+        s, e = DEFAULT_BACKEND.cumulative(heights, gaps, top_pad)
+        return tuple(v + 1 for v in s), tuple(v + 1 for v in e)
+
+    def solve(self, rows, width, measure=None, *, gaps, top_pad, bottom_pad, x=0):
+        r = DEFAULT_BACKEND.solve(
+            rows, width, measure, gaps=gaps, top_pad=top_pad, bottom_pad=bottom_pad, x=x
+        )
+        return LayoutResult(
+            tuple(v + 1 for v in r.starts),
+            tuple(v + 1 for v in r.ends),
+            tuple(Rect(rc.x, rc.y + 1, rc.w, rc.h) for rc in r.rects),
+            r.order,
+            r.total,
+        )
+
+
+def test_geometry_parity_equality_is_non_vacuous():
+    # Negative control for the cumulative/solve parity gate: a backend off by 1px MUST fail the exact
+    # equality the flex/taffy parity tests assert — proving those `==` checks can fail, not pass blindly.
+    heights, gaps = [40, 60, 20], [5, 10, 99]
+    assert _ShiftedBackend().cumulative(heights, gaps, 8) != DEFAULT_BACKEND.cumulative(
+        heights, gaps, 8
+    )
+    args = {"gaps": gaps, "top_pad": 8, "bottom_pad": 8, "x": 16}
+    assert _ShiftedBackend().solve(heights, WIDTH, **args) != DEFAULT_BACKEND.solve(
+        heights, WIDTH, **args
+    )
+
+
+def test_real_panel_pixel_diff_is_non_vacuous():
+    # Negative control for the pixel differential: two different content windows (top vs a scrolled-down
+    # view of the same tall panel) must NOT be pixel-equal, so a real engine divergence could never slip
+    # past the np.array_equal the panel parity tests use.
+    panel = WindowedPanel(panel_rows(_tall_entry(6), WIDTH), WIDTH, layout_backend=DEFAULT_BACKEND)
+    top = np.asarray(panel.viewport(0, 240))
+    deeper = np.asarray(panel.viewport(240, 240))
+    assert not np.array_equal(top, deeper)
+
+
+@requires_taffy
+@pytest.mark.parametrize("n_defs", [1, 3, 6, 12])
+@pytest.mark.parametrize("width", [280, 384, 512])
+def test_taffy_renders_identically_through_the_config_seam(n_defs, width):
+    # The production path, not the class directly: `[tooltip] layout_engine="taffy"` →
+    # resolve_backend("taffy") → WindowedPanel, differential vs the default across a matrix of entry
+    # shapes and widths — so a divergence the single canonical panel misses is caught.
+    taffy = resolve_backend("taffy")
+    assert isinstance(
+        taffy, TaffyLayoutBackend
+    )  # wheel present, so the real Rust engine is exercised
+    entry = _tall_entry(n_defs)
+    rows = panel_rows(entry, width)
+    total = render_panel(entry, width=width).height
+    default = WindowedPanel(panel_rows(entry, width), width, layout_backend=DEFAULT_BACKEND)
+    taffy_panel = WindowedPanel(rows, width, layout_backend=taffy)
+    for scroll in range(0, max(1, total - 200), 137):
+        a = np.asarray(default.viewport(scroll, 240))
+        b = np.asarray(taffy_panel.viewport(scroll, 240))
+        assert np.array_equal(a, b), (
+            f"taffy≠default at width={width} n_defs={n_defs} scroll={scroll}"
+        )
