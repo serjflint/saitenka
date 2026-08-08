@@ -237,12 +237,13 @@ def _download(reader: Reader, index: int) -> None:
     from overlay.app.subtitle_modes import start_fetch
 
     reader._toast(f"Downloading {candidate.name}…")
+    # force_select: the user explicitly chose this source in the picker, so select it NOW even if the
+    # current track is English (the keep-current background contract is for unattended fetches, not this).
     start_fetch(
         reader,
         candidate.download,
         name="sub-picker-download",
-        replace=True,
-        select_if_unchanged=True,
+        force_select=True,
     )
     close_picker(
         reader

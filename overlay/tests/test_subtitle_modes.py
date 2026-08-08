@@ -433,6 +433,43 @@ def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, m
     ]
 
 
+def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypatch):
+    """An explicit picker choice (``force_select``) selects the chosen source NOW even while English is
+    on screen — the keep-current background contract is for unattended fetches, not a deliberate pick
+    (regression: from English the pick fell through to the background add and left English up)."""
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # English fallback active
+    assert reader.subtitle_language == "en"
+    messages: list[str] = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_args: messages.append(text))
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
+    )
+    path = tmp_path / "episode.ja.srt"
+    path.write_text("Japanese", encoding="utf-8")
+    ipc.commands.clear()
+
+    reader._subtitle_results.put(
+        subtitle_modes.SubtitleFetchResult(
+            path=path,
+            status="picker: chosen",
+            select_if_unchanged=False,
+            initial_sid=1,
+            replace=True,
+            force_select=True,
+        )
+    )
+    subtitle_modes.apply_fetch_results(reader)
+
+    assert (
+        reader.subtitle_language == "jp"
+    )  # took over from English, unlike the background contract
+    assert ("sub-add", str(path), "select", "", "jpn") in ipc.commands  # selected now, not "auto"
+    assert reader.jp_sid == 9
+    assert messages == ["Japanese subtitles selected"]
+
+
 def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path, monkeypatch):
     # "Retry should just re-time": watching (mistimed) JP → re-sync the CURRENT srt in place (NO
     # provider query — you already have the subs) and swap the on-screen track for the re-timed file.

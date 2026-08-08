@@ -143,7 +143,7 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
     do, kwargs = fetches[0]
-    assert kwargs["replace"] is True
+    assert kwargs["force_select"] is True  # an explicit pick takes over now, even from English
     assert do is chosen.download  # the picker runs exactly the chosen candidate's thunk
 
     do()
