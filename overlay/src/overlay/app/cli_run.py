@@ -87,6 +87,21 @@ class RunDepsRequest:
     pitch_titles: list[str]
 
 
+@dataclass(frozen=True)
+class DemoSpec:
+    """The scripted demo/screenshot actions on the non-interactive ``run`` path: force-hover a word, then
+    optional scroll/translate/mine, then screenshot-or-dwell. Empty ``demo_word`` + no ``screenshot`` =
+    the normal interactive session (``reader.run()``)."""
+
+    demo_word: str | None = None
+    screenshot: str | None = None
+    demo_scroll: int = 0
+    demo_translate: bool = False
+    mine: bool = False
+    bulk: bool = False
+    seconds: float = 0.0
+
+
 def setup_session_telemetry(cfg: dict) -> None:
     """Stand up telemetry capture for THIS reader session (opt-in via ``[telemetry].enabled``). Scoped
     to run/attach on purpose — NOT ``cli.main`` — because a one-shot utility command (``report`` /
@@ -788,70 +803,40 @@ def _wait_for_subtitle_text(reader, ipc, video: str | None) -> str:
     return text or DEMO_LINE
 
 
-def _run_demo_actions(
-    reader,
-    ipc,
-    *,
-    demo_scroll: int,
-    demo_translate: bool,
-    mine: bool,
-    bulk: bool,
-    screenshot: str | None,
-    seconds: float,
-) -> None:
-    for _ in range(demo_scroll):
+def _run_demo_actions(reader, ipc, demo: DemoSpec) -> None:
+    for _ in range(demo.demo_scroll):
         reader._scroll_tip(round(reader.osd[1] * 0.12))
-    if demo_translate:
+    if demo.demo_translate:
         reader._setup_secondary()
         reader.toggle_translation()
         time.sleep(0.3)
-    if mine:
-        (reader.bulk_mine if bulk else reader.mine_current)()
+    if demo.mine:
+        (reader.bulk_mine if demo.bulk else reader.mine_current)()
         time.sleep(0.5)
-    if screenshot:
+    if demo.screenshot:
         time.sleep(0.4)
-        r = ipc.command("screenshot-to-file", screenshot, "window")
-        print("screenshot:", r, "->", screenshot)
+        r = ipc.command("screenshot-to-file", demo.screenshot, "window")
+        print("screenshot:", r, "->", demo.screenshot)
         time.sleep(0.3)
     else:
-        time.sleep(seconds)
+        time.sleep(demo.seconds)
 
 
-def _execute_reader_session(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    reader,
-    ipc,
-    *,
-    demo_word: str | None,
-    screenshot: str | None,
-    video: str | None,
-    demo_scroll: int,
-    demo_translate: bool,
-    mine: bool,
-    bulk: bool,
-    seconds: float,
-    translate_key: str,
+def _execute_reader_session(
+    reader, ipc, demo: DemoSpec, *, video: str | None, translate_key: str
 ) -> None:
-    if demo_word or screenshot:
+    if demo.demo_word or demo.screenshot:
         time.sleep(0.8)
         text = _wait_for_subtitle_text(reader, ipc, video)
         print("sub-text:", repr(text))
         reader.set_subtitle(text)
-        target = demo_word or "読む"
+        target = demo.demo_word or "読む"
         idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
         if idx is None:
             idx = next((i for i, t in enumerate(reader.tokens) if t.is_content), 0)
         print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
         reader.set_hover(idx)
-        _run_demo_actions(
-            reader,
-            ipc,
-            demo_scroll=demo_scroll,
-            demo_translate=demo_translate,
-            mine=mine,
-            bulk=bulk,
-            screenshot=screenshot,
-            seconds=seconds,
-        )
+        _run_demo_actions(reader, ipc, demo)
     else:
         print(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "
@@ -1074,14 +1059,16 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         _execute_reader_session(
             reader,
             ipc,
-            demo_word=demo_word,
-            screenshot=screenshot,
+            DemoSpec(
+                demo_word=demo_word,
+                screenshot=screenshot,
+                demo_scroll=demo_scroll,
+                demo_translate=demo_translate,
+                mine=mine,
+                bulk=bulk,
+                seconds=seconds,
+            ),
             video=video,
-            demo_scroll=demo_scroll,
-            demo_translate=demo_translate,
-            mine=mine,
-            bulk=bulk,
-            seconds=seconds,
             translate_key=translate_key,
         )
     finally:
