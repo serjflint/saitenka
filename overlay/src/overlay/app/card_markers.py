@@ -221,7 +221,7 @@ CATALOG: tuple[Marker, ...] = (
 MARKERS = frozenset(m.name for m in CATALOG if m.status == "ship")
 
 
-def build_markers(
+def build_markers(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     card: CardData,
     *,
     sentence_html: str,

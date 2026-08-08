@@ -460,7 +460,7 @@ def _card_format_fields(
     return render_card_format(cfg.card_format, markers)
 
 
-def build_note(
+def build_note(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     cfg: MineConfig,
     card: CardData,
     sentence_html: str,

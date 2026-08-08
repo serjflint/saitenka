@@ -287,7 +287,7 @@ def render_layout_window(
     return _composite_window(doc, y0, y1, scan_out, link_out, scale=scale)
 
 
-def render_document(
+def render_document(  # noqa: PLR0913, PLR0917  # arg-clump — bundle into a config object (#216)
     blocks: list[Block],
     width: int,
     base: Style | None = None,

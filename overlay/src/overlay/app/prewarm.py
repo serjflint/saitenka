@@ -150,7 +150,7 @@ class _PrewarmJob:
     complexity ratchet). Thread-local Readers (own dict conns) share one injected cache; a lock guards
     the counters. A per-word render is independent, so it fans out cleanly across the free-threaded pool."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
         self,
         reader_factory,
         cache: RenderCache | None,

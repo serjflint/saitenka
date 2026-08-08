@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     import os
 
 
-def build_mpv_argv(
+def build_mpv_argv(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     mpv_bin: str,
     sock: str,
     mpv_log: str | os.PathLike,
