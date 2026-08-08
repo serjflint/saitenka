@@ -121,6 +121,39 @@ def test_force_flush_with_nothing_queued_writes_no_file(tmp_path):
     assert not path.exists()  # empty batch → no write, no empty/invalid document
 
 
+def test_write_recreates_a_vanished_trace_file(tmp_path):
+    """A cache cleanup / session rotation can delete the trace file mid-run. The writer must recreate it
+    and keep the batch, not retry the dead ``r+b`` append every tick (the ~579-per-run 'CTF write
+    failed' spam)."""
+    path = tmp_path / "trace.json"
+    proc, _ = _on_gate(path=path)
+    proc.on_end(_make_span())
+    proc.force_flush()
+    assert path.exists()
+
+    path.unlink()  # the file vanishes out from under the writer
+    proc.on_end(_make_span())
+    proc.force_flush()  # must recreate, not raise or give up
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert len(data["traceEvents"]) == 1  # fresh valid document holding the post-vanish batch
+
+
+def test_write_recreates_a_vanished_trace_directory(tmp_path):
+    """Even the parent dir can be cleaned; recreation must mkdir it back, not fail."""
+    path = tmp_path / "sub" / "trace.json"
+    proc, _ = _on_gate(path=path)
+    proc.on_end(_make_span())
+    proc.force_flush()
+
+    for p in (path, path.parent):
+        p.unlink() if p.is_file() else p.rmdir()
+    proc.on_end(_make_span())
+    proc.force_flush()
+
+    assert json.loads(path.read_text(encoding="utf-8"))["traceEvents"]  # recreated dir + file
+
+
 def test_second_flush_appends_without_rewriting_prior_events(tmp_path):
     path = tmp_path / "trace.json"
     proc, _ = _on_gate(path=path)
