@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786173360963,
+  "lastUpdate": 1786177023274,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1151,6 +1151,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.918,
             "range": "±2.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9055fc06ad55fe7e136e34d4f273578ffd29c37c",
+          "message": "feat(quality): one tool-config SSOT at the repo root, over all Python (#216) (#220)\n\n* feat(lint): hoist ruff config to repo root — one SSOT over all Python (#216)\n\nMove [tool.ruff*] from overlay/ to the workspace-root pyproject so a single\nconfig governs overlay + deinflect + taffylite + tools + install + .agents.\nlint/format now run repo-wide (`cd .. && uv run --project overlay ruff …`).\n\n- rule-codes-in-selectors (preview) normalises selectors to rule names.\n- TID251 GPL/layout chokepoint bans moved to per-LINE noqa at each sanctioned\n  import (more precise: a SECOND illicit import in the same file still fails).\n- deinflect/taffylite own self-import exempted (the ban guards OVERLAY).\n- Dev/demo/infra scripts (examples/tools/.agents/install/compare, vulture\n  whitelist) get script-appropriate relaxations (\"harden without fanaticism\");\n  genuine correctness issues FIXED at source: missing-comma implicit concat,\n  loop-variable capture (B023), unclosed file, bidi/zero-width strip-list noqa,\n  unspecified text encoding, deinflect Rule(...) → keyword args.\n\nruff check + format clean across the whole repo.\n\n* feat(quality): complexipy + type-checkers repo-wide; scope types to library (#216)\n\nStage 2+3 of the SSOT unification:\n- complexipy runs repo-wide (overlay + deinflect + taffylite + tools + install\n  + .agents); baseline snapshot moved to the repo root and regenerated. Gate green.\n- mypy/basedpyright/pyrefly cover LIBRARY code (overlay + deinflect) — imported,\n  shipped, contract-bearing. Dev scripts (tools/install/.agents) stay out of the\n  heavy type tier (\"harden without fanaticism\"); ruff + complexipy still cover them.\n  Extending mypy to deinflect caught a real set/tuple type mismatch (now fixed via\n  an explicit `seen` annotation).\n- basedpyright extraPaths + [tool.pyrefly] search-path so first-party imports\n  resolve from source when the checkers run from the repo root.\n- pyrefly ignore for the stubless fugashi.Tagger (matches the pyright/ty ignores).\n\npoe all green (1930 passed, 90.34% cov); deinflect suite green (1290).\n\n* fix(types): resolve taffylite via mypy_path stub, not the root namespace dir (#216)\n\nRunning mypy from the repo root, `import taffylite` resolved to the root\n`taffylite/` directory as an empty namespace package whenever the Rust ext\nwasn't installed (the CI gate env — the layout-engine extra is deliberately\nabsent), so `taffylite.column` errored `attr-defined`. It only passed locally\nbecause the editable ext happened to be installed. Put `taffylite/python` (and\ndeinflect/src) on mypy_path so mypy finds the committed __init__.pyi stub\n(which declares `column`) consistently.\n\n* feat(types): local fugashi stub — drop the triple type-ignore (#216)\n\nfugashi is a Cython MeCab wrapper that ships no py.typed, and an upstream one is\nunlikely, so `fugashi.Tagger()` carried a fragile three-checker ignore (pyright +\nty + pyrefly — whose codes for the same issue already diverged). Add a minimal\nlocal stub (stubs/fugashi.pyi: Tagger + node.surface/.feature) wired via mypy_path\n/ basedpyright stubPath / pyrefly search-path, and drop the ignores. Kept deliberately\nminimal — feature fields are read via getattr, so Any is correct. ty is best-effort\n(|| true) and reads its own config, so it still treats it as unresolved; harmless.\n\npoe all green.",
+          "timestamp": "2026-08-08T11:16:17+03:00",
+          "tree_id": "6c5e139f507b54b77fa0b35d4fb222bb6720c051",
+          "url": "https://github.com/serjflint/saitenka/commit/9055fc06ad55fe7e136e34d4f273578ffd29c37c"
+        },
+        "date": 1786177022722,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.202,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.54,
+            "range": "±3.2%",
             "unit": "ms"
           }
         ]
