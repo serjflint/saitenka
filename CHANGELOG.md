@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-08
+
 ### Added
 
 - **`doctor`/`report` now check the subtitle-resync toolchain.** A new `resync` check resolves
