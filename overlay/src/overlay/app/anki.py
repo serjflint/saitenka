@@ -439,6 +439,25 @@ class CardContent:
 _EMPTY_CONTENT = CardContent()  # frozen → safe shared default for build_note
 
 
+# The logical entities a plain ``[mine.fields]`` map may reference (its LHS keys). A key outside this
+# set writes nothing — the silent-empty-note trap — so doctor validates against it. Kept in lockstep
+# with :func:`_entity_values` by a test.
+KNOWN_ENTITIES = frozenset(
+    {
+        "expression",
+        "reading",
+        "sentence",
+        "glossary",
+        "picture",
+        "audio",
+        "misc",
+        "id",
+        "freq",
+        "freq_sort",
+    }
+)
+
+
 def _entity_values(card, content: CardContent) -> dict:
     """logical entity -> content, for the default ``[mine.fields]`` map (media wrapped Anki-ready)."""
     return {

@@ -651,6 +651,53 @@ def check_jimaku() -> Check:
     return Check("jimaku", "ok", f"jimaku enabled; API key from {src}")
 
 
+def _mine_first_field_unwritten(model: str, targets: set[str]) -> str | None:
+    """The killer add-fails case: the note type's FIRST field (its sort field) is not a target of the
+    map, so it's written empty — and Anki refuses a note whose first field is empty. Needs Anki to read
+    the field order; skipped (``None``) when it's unreachable."""
+    try:
+        real_order = _anki_call("modelFieldNames", modelName=model) or []
+    except ANKI_DOWN_ERRORS:
+        return None
+    if not real_order or real_order[0] in targets:
+        return None
+    return (
+        f"note type's first field {real_order[0]!r} is unmapped — Anki rejects the note as empty; "
+        "map an entity (usually `expression`) to it"
+    )
+
+
+def check_mine_mapping() -> Check:
+    """Dump the resolved mining field map so a report shows exactly what each mined value writes to —
+    the fastest way to spot the mis-mapped / empty-note config a report otherwise hides. Flags the two
+    silent adds-fail traps: an unknown logical entity (writes nothing) and the note type's first field
+    left unmapped (empty note → rejected). ``info`` when clean (shown by ``--verbose`` / kept in
+    ``--json``), ``warn`` when a trap is present."""
+    from overlay.app.anki import KNOWN_ENTITIES
+    from overlay.app.reader_deps import _mine_config_from
+
+    raw = load_config().get("mine")
+    if not isinstance(raw, dict) or not raw:
+        return Check("mine-fields", "ok", "mining not configured", info=True)
+    mc = _mine_config_from(raw)
+    if mc.card_format:  # card_format wins wholesale (#192) — dump templates, not the fields map
+        lines = "\n    ".join(f"{name} = {tmpl!r}" for name, tmpl in mc.card_format.items())
+        body = f"mining card_format for {mc.model!r} (field -> template):\n    {lines}"
+        return Check("mine-fields", "ok", body, info=True)
+    lines = "\n    ".join(f"{logical} -> {real}" for logical, real in mc.fields.items())
+    body = f"mining fields for {mc.model!r} (logical entity -> note field):\n    {lines}"
+    problems: list[str] = []
+    if unknown := sorted(k for k in mc.fields if k not in KNOWN_ENTITIES):
+        problems.append(
+            f"unknown logical entity {unknown} — writes nothing (valid: {sorted(KNOWN_ENTITIES)})"
+        )
+    if first := _mine_first_field_unwritten(mc.model, set(mc.fields.values())):
+        problems.append(first)
+    if problems:
+        return Check("mine-fields", "warn", body + "\n  problem: " + "; ".join(problems))
+    return Check("mine-fields", "ok", body, info=True)
+
+
 def check_subminer_conflict() -> Check:
     """SubMiner injects its own mpv overlay; running it alongside the saitenka plugin draws two
     overlays over one video (flicker / stuck "overlay loading"). Warn when it's live."""
@@ -930,7 +977,16 @@ def check_mpv_socket() -> Check:
     )
 
 
-def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
+def run_checks(deck: str | None = None, model: str | None = None) -> Report:
+    # Resolve the mining deck/model from config when the caller doesn't override (report.py / the
+    # wizards pass nothing) — else the anki check validates the hardcoded Lapis default and mislabels
+    # any other note type as missing.
+    if deck is None or model is None:
+        from overlay.app.reader_deps import _mine_config_from
+
+        mc = _mine_config_from(load_config().get("mine") or {})
+        deck = deck if deck is not None else mc.deck
+        model = model if model is not None else mc.model
     checks: list[Check] = [
         check_version(),
         check_python(),
@@ -948,6 +1004,7 @@ def run_checks(deck: str = "Saitenka::Mining", model: str = "Lapis") -> Report:
         check_tts(),
         check_deinflect(),
         check_anki(deck, model),
+        check_mine_mapping(),
         check_known(),
         check_mpv_ipc(),
         check_mpv_socket(),

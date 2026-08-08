@@ -18,6 +18,16 @@ def test_card_data_from_token():
     assert card.glossary_html.startswith("<ol>")
 
 
+def test_known_entities_match_entity_values_keys():
+    """KNOWN_ENTITIES (what doctor validates a [mine.fields] map against) must stay in lockstep with
+    the actual entities build_note writes — else doctor flags a valid key or misses a bogus one."""
+    from overlay.app.anki import KNOWN_ENTITIES, _entity_values
+    from overlay.app.lookup import CardData
+
+    values = _entity_values(CardData("x", "y", ""), CardContent())
+    assert set(values) == set(KNOWN_ENTITIES)
+
+
 def test_bold_word():
     assert bold_word("私は本を読む", "本") == "私は<b>本</b>を読む"
     assert bold_word("no match here", "本") == "no match here"

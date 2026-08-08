@@ -297,6 +297,66 @@ def test_anki_check_flags_card_format_field_absent_from_note_type(monkeypatch):
     assert c.status == "warn" and "Ghost" in c.detail
 
 
+def test_mine_mapping_not_configured_is_info(monkeypatch):
+    monkeypatch.setattr(doc, "load_config", dict)
+    c = doc.check_mine_mapping()
+    assert c.status == "ok" and c.info and "not configured" in c.detail
+
+
+def test_mine_mapping_dumps_the_full_map_when_clean(monkeypatch):
+    """A report must show the resolved logical->real map so a mis-mapping is visible; a clean map is
+    info-tier (hidden by default, kept in --json)."""
+    cfg = {
+        "mine": {
+            "model": "Basic Yomi",
+            "fields": {"expression": "Front", "reading": "Reading", "sentence": "Sentence"},
+        }
+    }
+    replies = {"modelFieldNames": ["Front", "Reading", "Sentence"]}
+    monkeypatch.setattr(doc, "load_config", lambda: cfg)
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    c = doc.check_mine_mapping()
+    assert c.status == "ok" and c.info
+    assert "Basic Yomi" in c.detail
+    assert "expression -> Front" in c.detail and "reading -> Reading" in c.detail
+
+
+def test_mine_mapping_warns_on_capitalized_logical_keys(monkeypatch):
+    """The friend's bug: capitalized logical keys match no entity, so every field writes empty. Doctor
+    must flag them as unknown, not silently pass."""
+    cfg = {"mine": {"model": "Basic Yomi", "fields": {"Expression": "Graph", "Reading": "Reading"}}}
+    replies = {"modelFieldNames": ["Front", "Reading", "Graph"]}
+    monkeypatch.setattr(doc, "load_config", lambda: cfg)
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    c = doc.check_mine_mapping()
+    assert c.status == "warn"
+    assert "unknown logical entity" in c.detail and "Expression" in c.detail
+
+
+def test_mine_mapping_warns_when_first_field_unmapped(monkeypatch):
+    """Even with valid keys, if nothing maps to the note type's first field it's written empty and Anki
+    rejects the note — doctor catches it via the model's field order."""
+    cfg = {"mine": {"model": "Basic Yomi", "fields": {"expression": "Graph", "reading": "Reading"}}}
+    replies = {"modelFieldNames": ["Front", "Reading", "Graph"]}  # Front is first, unmapped
+    monkeypatch.setattr(doc, "load_config", lambda: cfg)
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    c = doc.check_mine_mapping()
+    assert c.status == "warn"
+    assert "'Front'" in c.detail and "empty" in c.detail
+
+
+def test_run_checks_uses_configured_model_not_lapis_default(monkeypatch):
+    """report.py / the wizards call run_checks() with no args; it must validate the CONFIGURED note
+    type, not the hardcoded Lapis default (the false 'Lapis missing' the friend's report showed)."""
+    cfg = {"mine": {"deck": "Japanese::Mine", "model": "Basic Yomi", "fields": {}}}
+    replies = {"version": 6, "deckNames": ["Japanese::Mine"], "modelNames": ["Basic Yomi"]}
+    monkeypatch.setattr(doc, "load_config", lambda: cfg)
+    monkeypatch.setattr(doc, "_anki_call", lambda action, **_kw: replies.get(action, []))
+    anki = next(c for c in doc.run_checks().checks if c.name == "anki")
+    assert anki.status != "fail"  # 'Basic Yomi' exists → not the Lapis false alarm
+    assert "Lapis" not in anki.detail
+
+
 def _patch_known(monkeypatch, cfg, anki):
     monkeypatch.setattr(doc, "load_config", lambda: cfg)
     monkeypatch.setattr(doc, "_anki_call", anki)
