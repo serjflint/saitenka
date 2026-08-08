@@ -7,8 +7,10 @@ existing executable, or None so the caller can print an install hint.
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -131,18 +133,43 @@ _BIN_DIRS: list[Path] = [
 ]
 
 
+# Tools health-probed with a version flag before we trust a resolved path: a present-but-broken install
+# (dangling dylib → SIGABRT) satisfies which() yet aborts on exec, silently shadowing a working copy
+# elsewhere in the search path. Found live: a MacPorts ffprobe on PATH SIGABRT'd (missing libjxl), so no
+# embedded sub-reference could be extracted and every resync fell back to a failing audio VAD.
+_PROBE_FLAG: dict[str, str] = {"ffmpeg": "-version", "ffprobe": "-version"}
+
+
+@functools.cache
+def _runs_ok(path: str, flag: str) -> bool:
+    """Whether *path* actually executes (exit 0 on *flag*). Cached — a binary's health is stable per run."""
+    try:
+        proc = subprocess.run([path, flag], capture_output=True, timeout=5, check=False)
+        return proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def find_tool(name: str) -> str | None:
     """Resolve a helper binary (ffmpeg/ffprobe/…): PATH, then the standard bin dirs above — so mining
-    works even from a GUI-launched (plugin-mode) mpv whose minimal PATH lacks Homebrew / ~/.local/bin."""
-    on_path = shutil.which(name)
-    if on_path:
-        return on_path
+    works even from a GUI-launched (plugin-mode) mpv whose minimal PATH lacks Homebrew / ~/.local/bin.
+    When PATH and the bin dirs offer more than one copy of a version-probeable tool, a broken one
+    (dangling dylib → SIGABRT) is skipped for a working one further down — a present-but-aborting binary
+    must not shadow a healthy install (found live: a MacPorts ffprobe blocked sub-resync). A lone
+    candidate is returned unprobed, so the single-install common case spawns nothing."""
     exe = name + (".exe" if os.name == "nt" else "")
-    for d in _BIN_DIRS:
-        cand = d / exe
-        if _is_exe(cand):
-            return str(cand)
-    return None
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for c in (shutil.which(name), *(str(d / exe) for d in _BIN_DIRS)):
+        if not c or not _is_exe(Path(c)):
+            continue
+        if (real := os.path.realpath(c)) not in seen:  # dedup a PATH hit that IS a bin-dir entry
+            seen.add(real)
+            candidates.append(c)
+    flag = _PROBE_FLAG.get(name)
+    if not candidates or flag is None or len(candidates) == 1:
+        return candidates[0] if candidates else None
+    return next((c for c in candidates if _runs_ok(c, flag)), candidates[0])
 
 
 def augment_path() -> None:

@@ -167,9 +167,9 @@ def _draw_sidebar_row(
         action_width += px(34)
     status_width = 0
     if row.status:
-        status_text = _ellipsize(draw, row.status, small_font, px(132))
+        status_text = _ellipsize(draw, row.status, small_font, px(188))
         status_width = min(
-            px(148),
+            px(204),
             max(px(44), round(draw.textlength(status_text, font=small_font)) + px(16)),
         )
         status_x = width - action_width - status_width - px(12)

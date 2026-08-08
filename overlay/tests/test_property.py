@@ -16,12 +16,19 @@ from overlay.mpvio.ipc import MpvIPC
 
 
 @given(st.text())
-def test_sanitize_filename_is_always_windows_safe(name):
-    out = paths.sanitize_filename(name)
+def test_sanitize_filename_windows_output_is_windows_safe(name):
+    out = paths._sanitize(name, "_", windows=True)  # force Windows rules regardless of host
     assert out  # never empty
-    assert not paths._INVALID_FILENAME.search(out)  # no <>:"/\|?* or control chars
+    assert not paths._INVALID_WIN.search(out)  # no <>:"/\|?* or control chars
     assert not out.endswith((" ", "."))  # no trailing dot/space (Windows strips them)
     assert out.split(".")[0].upper() not in paths._WIN_RESERVED  # not a reserved device name
+
+
+@given(st.text())
+def test_sanitize_filename_posix_output_is_posix_safe(name):
+    out = paths._sanitize(name, "_", windows=False)
+    assert out  # never empty
+    assert not paths._INVALID_POSIX.search(out)  # no "/" or control chars
 
 
 # JSON-serialised events joined by '\n', then re-sliced at ARBITRARY byte boundaries, must reassemble

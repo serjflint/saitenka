@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import shutil
+import statistics
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -145,6 +146,16 @@ def _embedded_sub_reference(
     return None
 
 
+_BOM = "﻿"  # UTF-8 byte-order mark some jimaku sources prepend
+
+
+def _looks_ass(text: str) -> bool:
+    """ASS/SSA content sniff. Some jimaku sources ship an ASS body under a ``.srt`` name (often + a BOM);
+    alass keys the format off the EXTENSION and rejects it as SubRip ('parse error at line 0'), and
+    ``_parse_cues`` would mis-route it to the SRT parser. Detect by content, not the filename."""
+    return text.lstrip(_BOM).lstrip().startswith(("[Script Info]", "[V4", "[Events]"))
+
+
 _CUE_START = re.compile(r"(\d\d):(\d\d):(\d\d),(\d\d\d)\s*-->")  # SRT: HH:MM:SS,mmm -->
 _ASS_START = re.compile(
     r"(?m)^Dialogue:[^,]*,(\d+):(\d\d):(\d\d)\.(\d\d)"
@@ -234,6 +245,29 @@ def _resync_command(
     )
 
 
+def _alass_ready_source(src: Path, workdir: Path) -> Path:
+    """Give alass a source it can parse. alass keys the format off the extension and does NO format
+    conversion, so an ASS body saved under a ``.srt`` name (some jimaku sources — found live: a NanakoRaws
+    pick → 'parse error at line 0', menu re-time defeated) has to be normalized to a real SRT first. We
+    reparse it (BOM-tolerant) and write a clean ``source.srt`` in *workdir*; a genuine SRT passes through
+    untouched (returns *src*, so the common path writes nothing). The persisted cache / what mpv shows is
+    unchanged — only the aligner's input is normalized."""
+    try:
+        text = src.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return src
+    if not _looks_ass(text):
+        return src
+    from overlay.app.sub_index import parse_ass
+
+    cues = parse_ass(text.lstrip(_BOM))
+    if not cues:  # unparseable → let alass try the original and surface its own error
+        return src
+    ready = workdir / "source.srt"
+    _write_srt(ready, cues)
+    return ready
+
+
 def _select_alignment_reference(video: Path, workdir: Path, details: dict | None) -> Path:
     """The alignment reference: a co-timed embedded text track (sub-to-sub, exact-encode timing) when
     available, else the video itself (audio VAD). ``details`` captures WHY embedded was skipped
@@ -306,7 +340,9 @@ def resync(
     workdir.mkdir(parents=True, exist_ok=True)
     try:
         ref = _select_alignment_reference(video, workdir, details)
-        cmd, tool = _resync_command(ref, src, out, split_penalty=split_penalty)
+        cmd, tool = _resync_command(
+            ref, _alass_ready_source(src, workdir), out, split_penalty=split_penalty
+        )
         if (
             details is not None
         ):  # captured before the workdir (holding the embedded ref) is cleaned up
@@ -464,7 +500,7 @@ def _parse_cues(path: Path):
     from overlay.app.sub_index import parse_ass, parse_srt
 
     text = path.read_text(encoding="utf-8", errors="replace")
-    return parse_ass(text) if path.suffix.lower() == ".ass" else parse_srt(text)
+    return parse_ass(text) if path.suffix.lower() == ".ass" or _looks_ass(text) else parse_srt(text)
 
 
 def _persist_windowed(sub: Path, tmp: Path) -> Path:
@@ -477,7 +513,7 @@ def _persist_windowed(sub: Path, tmp: Path) -> Path:
     return dest
 
 
-def _windowed_offset(
+def _windowed_align(
     video: Path,
     window: list,
     workdir: Path,
@@ -485,13 +521,11 @@ def _windowed_offset(
     *,
     timeout: int | None,
     split_penalty: float | None,
-) -> float | None:
-    """Extract the reference, align *window* to it, and return the MEDIAN offset the aligner applied
-    (robust to a few unmatched SFX cues) — or None on any failure, tagging *span* with tool/reference +
-    a ``fail_reason``. The whole windowed alignment lives here so :func:`resync_window` stays the thin
-    parse→splice→persist orchestration."""
-    import statistics
-
+) -> list | None:
+    """Extract the reference, align *window* to it, and return alass's aligned cues (1:1 with *window*)
+    for the caller to derive the offset from — or None on any failure, tagging *span* with tool/reference
+    + a ``fail_reason``. The whole windowed alignment lives here so :func:`resync_window` stays the thin
+    parse→offset→persist orchestration."""
     ref_details: dict = {}
     ref = _embedded_sub_reference(video, workdir, details=ref_details)
     if ref is None:  # windowed alignment needs a reference; audio VAD on a slice is unreliable
@@ -526,7 +560,19 @@ def _windowed_offset(
     if len(aligned) != len(window):  # alass should preserve cue count; bail if it didn't
         span.set("fail_reason", "cue count changed")
         return None
-    return statistics.median(a.start - w.start for a, w in zip(aligned, window, strict=True))
+    return aligned
+
+
+# Coherence guards on a windowed alignment. A local slice must shift as a near-rigid block, so a wide
+# per-cue spread (or an absurd absolute shift) is proof alass mis-correlated it — a short cold-open window
+# matching a far region (live: a 12-cue slice → +718s, 929s spread) or a slice straddling a cut. Bail so
+# the caller falls back to a whole-file split-align, which has the full episode to correlate against.
+_WINDOW_MAX_DRIFT_S = (
+    5.0  # per-cue spread within the slice (continuous drift over a minute is sub-second)
+)
+_WINDOW_MAX_SHIFT_S = (
+    300.0  # a "sync from here" is seconds, not minutes — a huge offset = wrong region
+)
 
 
 def resync_window(
@@ -535,17 +581,19 @@ def resync_window(
     *,
     start_s: float,
     lookback_s: float = 20.0,
+    lookahead_s: float = 40.0,
     timeout: int | None = None,
     split_penalty: float | None = None,
 ) -> Path | None:
-    """Re-time the CURRENT subtitle segment from ~``start_s`` onward against the embedded reference —
-    for a source that DRIFTS across the episode (a fixed whole-file offset that's right after the OP is
-    early before it; found live: NanakoRaws ep02 ran +4.7s pre-OP → +11s post-OP). Aligns only the
-    window ``[start_s - lookback_s, end]`` and shifts those cues by the median offset the aligner found,
-    leaving earlier cues untouched — press again at the next drift point. Returns the re-timed
-    ``<base>.win.srt`` path; ``sub`` unchanged when the window is already aligned (no net shift); or None
-    on a hard failure (no reference / too few cues / tool failure), so the caller can fall back to a
-    whole-file re-sync."""
+    """Re-time the CURRENT subtitle tail against the embedded reference, deriving the offset from a LOCAL
+    slice around the playhead (``[start_s - lookback_s, start_s + lookahead_s]``, ~a minute) — for a
+    source that DRIFTS across the episode (a whole-file offset that's right after the OP is early before
+    it; live: NanakoRaws ran +4.7s pre-OP → +11s post-OP). Correlating locally keeps the far side of a
+    drift from dragging the offset off the region you're watching (a whole-tail median did exactly that).
+    Applies the single offset to every cue from ``start_s - lookback_s`` on, leaving earlier cues
+    untouched — press again after the next drift point (e.g. once past the OP). Returns the re-timed
+    ``<base>.win.srt`` path; ``sub`` unchanged when already aligned (no shift); or None on a hard failure
+    (no reference / too few cues / tool failure), so the caller can fall back to a whole-file re-sync."""
     from overlay import otel_metrics
     from overlay.app.sub_index import SubCue
 
@@ -562,12 +610,15 @@ def resync_window(
         span.set("trigger", "window")
         span.set("window_start_s", round(start_s, 1))
         boundary = max(0.0, start_s - lookback_s)
+        horizon = start_s + lookahead_s
         try:
             cues = _parse_cues(sub)
         except OSError:
             span.set("outcome", "failed")
             return None
-        window = [c for c in cues if c.start >= boundary]
+        window = [
+            c for c in cues if boundary <= c.start <= horizon
+        ]  # LOCAL slice, not the whole tail
         span.set("window_cues", len(window))
         if len(window) < 2:  # too little to correlate a reliable offset
             span.set("outcome", "failed")
@@ -577,13 +628,30 @@ def resync_window(
         workdir = sub.parent / f".{sub.stem}.winwork"
         workdir.mkdir(parents=True, exist_ok=True)
         try:
-            delta = _windowed_offset(
+            aligned = _windowed_align(
                 video, window, workdir, span, timeout=timeout, split_penalty=split_penalty
             )
-            if delta is None:
+            if aligned is None:
                 span.set("outcome", "failed")
                 return None
+            # ONE offset from the local slice, applied to the whole tail — NOT a whole-tail median (the
+            # post-OP majority dragged that off, mistiming the pre-OP cues you're watching: live
+            # NanakoRaws ep04 gave −11s vs the −5s the region needed). A drift source is a press per side
+            # of the OP; a large drift range means the slice straddled a cut → the offset is a compromise.
+            shifts = [a.start - w.start for a, w in zip(aligned, window, strict=True)]
+            delta = statistics.median(shifts)
+            drift_range = max(shifts) - min(shifts)
             span.set("window_delta_ms", round(delta * 1000))
+            span.set("window_delta_range_ms", round(drift_range * 1000))
+            if drift_range > _WINDOW_MAX_DRIFT_S or abs(delta) > _WINDOW_MAX_SHIFT_S:
+                # incoherent alignment (mis-correlation / straddled a cut) → let the caller fall back to
+                # the whole-file split-align rather than apply a meaningless median.
+                span.set("outcome", "failed")
+                span.set(
+                    "fail_reason",
+                    f"incoherent window (shift {delta:.0f}s, drift range {drift_range:.0f}s)",
+                )
+                return None
             if abs(delta) < 0.001:  # already aligned here → sub unchanged (distinct from failure)
                 span.set("outcome", "synced")
                 return sub
@@ -600,7 +668,7 @@ def resync_window(
         span.set("src_cue_ms", _cue_starts_ms(sub))
         span.set("out_cue_ms", _cue_starts_ms(out_path))
         log.info(
-            "resync: windowed from %.1fs → shifted %d cue(s) by %+dms",
-            start_s, len(window), round(delta * 1000),
+            "resync: windowed from %.1fs → shifted %d cue(s) by %+dms (drift range %dms)",
+            start_s, len(window), round(delta * 1000), round((max(shifts) - min(shifts)) * 1000),
         )  # fmt: skip
         return out_path
