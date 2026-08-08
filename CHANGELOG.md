@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-08
+
 ### Fixed
 
 - **De-inflection now keeps every distinct trace Yomitan shows** (`saitenka-deinflect` 0.1.1). The engine
