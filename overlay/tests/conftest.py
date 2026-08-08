@@ -45,6 +45,17 @@ def _hermetic_cache_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_config(tmp_path, monkeypatch):
+    """Point ``SAITENKA_CONFIG`` at a fresh per-test path (no file → pure defaults) so ``load_config()``
+    never reads the developer's real ``overlay.toml``. Without this, a local knob silently changes
+    behaviour under test and diverges from CI (which has no such file): a real ``[jimaku].keyring = false``
+    flipped ``keyring_enabled()`` off, failing the jimaku-resolver keychain-path tests locally while they
+    passed in CI. Tests that need specific config set ``SAITENKA_CONFIG`` themselves — their ``setenv``
+    runs after this fixture and wins."""
+    monkeypatch.setenv("SAITENKA_CONFIG", str(tmp_path / "overlay.toml"))
+
+
+@pytest.fixture(autouse=True)
 def _anki_down(monkeypatch):
     """Default: AnkiConnect is UNREACHABLE — the production-realistic state (Anki is usually closed).
     Making down the default means the graceful-degradation path is what the whole suite exercises, so
