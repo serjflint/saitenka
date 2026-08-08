@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from overlay.render.document import DocLayout, layout_document, render_document
+from overlay.render.document import DocLayout, DocStyle, layout_document, render_document
 from overlay.sc.walk import walk
 
 if TYPE_CHECKING:
@@ -122,12 +122,14 @@ def render_body_block(
     img = render_document(
         walk(args.content, args.body_style),
         width=args.body_w,
-        base=args.body_style,
-        padding=0,
-        gap=args.gap_px,
-        indent_px=args.indent_px,
-        gutter_px=args.gutter_px,
-        background=(0, 0, 0, 0),
+        style=DocStyle(
+            base=args.body_style,
+            padding=0,
+            gap=args.gap_px,
+            indent_px=args.indent_px,
+            gutter_px=args.gutter_px,
+            background=(0, 0, 0, 0),
+        ),
         scan_out=scan,
         link_out=links,
         max_height=max_h,

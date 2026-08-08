@@ -287,22 +287,35 @@ def render_layout_window(
     return _composite_window(doc, y0, y1, scan_out, link_out, scale=scale)
 
 
-def render_document(  # noqa: PLR0913, PLR0917  # arg-clump — bundle into a config object (#216)
+@dataclass(frozen=True)
+class DocStyle:
+    """Layout geometry + base text style + backdrop for :func:`render_document` — the spacing constants
+    that flow together through layout/composite, bundled so a document's rendering config is one value."""
+
+    base: Style | None = None
+    padding: int = 14
+    gap: int = 4
+    background: RGBA = (0, 0, 0, 0)
+    indent_px: int = INDENT_PX
+    gutter_px: int = GUTTER_PX
+
+
+_DEFAULT_STYLE = DocStyle()  # frozen → safe shared default
+
+
+def render_document(
     blocks: list[Block],
     width: int,
-    base: Style | None = None,
-    padding: int = 14,
-    gap: int = 4,
-    background: RGBA = (0, 0, 0, 0),
+    style: DocStyle | None = None,
+    *,
     scan_out: list[ScanBox] | None = None,
     link_out: list[LinkBox] | None = None,
     max_height: int | None = None,
     clipped_out: list | None = None,
-    indent_px: int = INDENT_PX,
-    gutter_px: int = GUTTER_PX,
     y_window: tuple[int, int] | None = None,
 ) -> Image.Image:
-    """Render blocks stacked top-to-bottom at a fixed panel width.
+    """Render blocks stacked top-to-bottom at a fixed panel width. ``style`` carries the spacing/base/
+    background geometry (defaults to :data:`_DEFAULT_STYLE`).
 
     When ``scan_out`` is given, append per-character :class:`ScanBox`es (document-image coords) for
     nested scanning. When ``link_out`` is given, append per-link :class:`LinkBox`es in the same
@@ -315,22 +328,40 @@ def render_document(  # noqa: PLR0913, PLR0917  # arg-clump — bundle into a co
     ``y_window=(y0, y1)``: rasterise ONLY the band ``[y0, y1)`` into a ``(y1 - y0)``-tall image —
     pixel-identical to the full render cropped to that band, but drawing only the overlapping blocks
     (via :func:`render_flow_window` for the partially-visible ones). Overrides ``max_height``."""
+    style = style or _DEFAULT_STYLE
     if y_window is not None:
-        doc = layout_document(blocks, width, base, padding, gap, background, indent_px, gutter_px)
+        doc = layout_document(
+            blocks,
+            width,
+            style.base,
+            style.padding,
+            style.gap,
+            style.background,
+            style.indent_px,
+            style.gutter_px,
+        )
         return _composite_window(doc, y_window[0], y_window[1], scan_out, link_out)
-    base = base or Style()
+    base = style.base or Style()
     rendered = _render_blocks(
         blocks,
         width,
-        padding,
-        gap,
+        style.padding,
+        style.gap,
         max_height,
         clipped_out,
-        indent_px,
-        gutter_px,
+        style.indent_px,
+        style.gutter_px,
         scan_out,
         link_out,
     )
     return _composite(
-        rendered, width, padding, gap, gutter_px, base, background, scan_out, link_out
+        rendered,
+        width,
+        style.padding,
+        style.gap,
+        style.gutter_px,
+        base,
+        style.background,
+        scan_out,
+        link_out,
     )

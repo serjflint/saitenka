@@ -6,7 +6,7 @@ from pathlib import Path
 from util import assert_golden
 
 from overlay.model import Style
-from overlay.render.document import render_document
+from overlay.render.document import DocStyle, render_document
 from overlay.render.flow import ChipBox, ImgBox, RubyBox
 from overlay.sc.walk import walk
 
@@ -156,13 +156,17 @@ def test_img_becomes_opaque_box():
 
 def test_sc_ruby_golden():
     img = render_document(
-        walk(_load("sc_ruby.json"), BASE), width=240, background=(255, 255, 255, 255)
+        walk(_load("sc_ruby.json"), BASE),
+        width=240,
+        style=DocStyle(background=(255, 255, 255, 255)),
     )
     assert_golden(img, "sc_ruby.png")
 
 
 def test_sc_list_golden():
     img = render_document(
-        walk(_load("sc_list.json"), BASE), width=340, background=(255, 255, 255, 255)
+        walk(_load("sc_list.json"), BASE),
+        width=340,
+        style=DocStyle(background=(255, 255, 255, 255)),
     )
     assert_golden(img, "sc_list.png")
