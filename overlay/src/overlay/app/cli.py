@@ -1502,6 +1502,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         "Ctrl+C to detach (mpv keeps running).",
         flush=True,
     )
+    # Record the mode in the session log — attach/plugin vs run behave differently (async dep load,
+    # other mpv scripts sharing input), so a report must say which one produced it.
+    log.info("session: mode=attach socket=%s", sock)
     try:
         reader.run()
     finally:
