@@ -45,6 +45,7 @@ name. Defaults match the table above. See [Configuration](configuration.md) for 
 | `hover_pause_key` | `Alt+p` | Toggle hover auto-pause |
 | `overlay_toggle_key` | `Alt+o` | Hide/show Saitenka |
 | `subtitle_language_key` | `Alt+t` | Switch primary subtitle between Japanese and English |
+| `subtitle_mark_jp_key` | `Alt+j` | Mark the current track as Japanese (untagged / misdetected subs) |
 | `bookmark_key` | `Alt+b` | Toggle the active cue in the deferred-capture backlog |
 | `sidebar_key` | `\` | Toggle the sidebar |
 | `analysis_key` | `` ` `` | Toggle whole-track subtitle analysis |

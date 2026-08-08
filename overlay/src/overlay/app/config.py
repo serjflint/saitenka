@@ -72,6 +72,7 @@ class KeyOptions:
     translate_key: str = "t"
     overlay_toggle_key: str = "Alt+o"
     subtitle_language_key: str = "Alt+t"
+    subtitle_mark_jp_key: str = "Alt+j"  # force the current track as JP (untagged/misdetected subs)
     bookmark_key: str = "Alt+b"
     sidebar_key: str = "\\"
     analysis_key: str = "`"

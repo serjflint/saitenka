@@ -257,6 +257,31 @@ def toggle(reader: Reader) -> None:
     announce_track(reader, sid)
 
 
+def force_current_as_japanese(reader: Reader) -> None:
+    """Override: treat mpv's current primary subtitle track as the Japanese target, whatever its tag.
+    The manual escape hatch — bound to a key so the user acts in mpv directly — for the rare case
+    auto-adoption guessed wrong (an untagged track that is really English) or never fired."""
+    sid = reader._get("sid")
+    if sid is None:
+        reader._toast("No subtitle track to mark", "warn")
+        return
+    reader.jp_sid = sid
+    if reader.en_sid == sid:
+        reader.en_sid = None
+    if reader.subtitle_language != MAIN_LANG:
+        reader.subtitle_language = MAIN_LANG
+        from overlay.app import analysis_overlay
+
+        analysis_overlay.on_index_changed(reader)
+    reader._sub_index = None
+    from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+    build_sub_index_for_current_track(reader)
+    reader.set_subtitle(reader.sub_text)  # recolor the on-screen cue now, don't wait for the next
+    reader._toast("Marked current subtitles as Japanese")
+    log.info("user forced subtitle sid=%s as the Japanese primary", sid)
+
+
 def start_fetch(
     reader: Reader,
     fetch: ProviderFetch,

@@ -644,6 +644,41 @@ def test_subs_turned_off_adopt_no_track():
     assert reader.jp_sid is None
 
 
+def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatch):
+    # The keybind override: force the CURRENT track to Japanese even when it is tagged English (so it
+    # would auto-classify as the secondary), letting the user correct a wrong guess from within mpv.
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    srt = tmp_path / "manual.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n岩を砂へ\n", encoding="utf-8")
+    ipc.tracks.append(
+        {"id": 2, "type": "sub", "lang": "eng", "external": True, "external-filename": str(srt)}
+    )
+    _select(ipc, 2)
+    messages = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_a: messages.append(text))
+    monkeypatch.setattr(reader, "set_subtitle", lambda *_a: None)
+
+    reader.mark_current_subtitle_japanese()
+
+    assert reader.subtitle_language == MAIN_LANG
+    assert reader.jp_sid == 2
+    assert reader._sub_index is not None
+    assert messages == ["Marked current subtitles as Japanese"]
+
+
+def test_force_current_as_japanese_with_no_track_warns(monkeypatch):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    messages = []
+    monkeypatch.setattr(reader, "_toast", lambda text, kind="ok": messages.append((text, kind)))
+
+    reader.mark_current_subtitle_japanese()
+
+    assert messages == [("No subtitle track to mark", "warn")]
+
+
 def test_announce_names_a_japanese_track(monkeypatch):
     ipc = FakeIPC([EN.copy(), JP.copy()])
     reader = Reader(ipc)
