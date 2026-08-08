@@ -391,69 +391,71 @@ def fetch_provider_path(
     return fetch_first(attempts)
 
 
+@dataclass(frozen=True)
+class ProviderConfig:
+    """Subtitle-source configuration threaded through ``run`` + ``attach``: which providers are enabled,
+    the jimaku credentials/overrides, the resync toggle, and the attach-only initial-selection flags.
+
+    One object so a new knob is a field, not another positional threaded through every fetch / retry /
+    picker / re-slot function — the data-clump the ep-advance report exposed. ``run`` selects its track
+    via its own launch flags, so it leaves the ``slang``/``jimaku``/``jimaku_force``/``tsukihime``
+    selection fields at defaults and populates only the fetch fields; ``attach`` sets all of them. Per-
+    episode overrides (``jimaku_title``/``episode``) are refreshed with :func:`dataclasses.replace` on a
+    re-slot, since the title/episode come from the newly-loaded filename."""
+
+    enabled_providers: tuple[str, ...] = ()
+    jimaku_key: str | None = None
+    jimaku_title: str | None = None
+    episode: int | None = None
+    resync: bool = True
+    tsukihime_config: dict | None = None
+    # attach-only initial-selection flags (run controls selection via its launch --slang/--sub-file)
+    slang: str = "ja,jpn,jp"
+    jimaku: bool = False
+    jimaku_force: bool = False
+    tsukihime: bool = False
+
+
 def provider_fetch_factory(
-    providers: tuple[str, ...],
-    *,
-    jimaku_key: str | None,
-    jimaku_title: str | None,
-    episode: int | None,
-    resync: bool,
-    tsukihime_config: dict | None,
-    force: bool = False,
+    providers: tuple[str, ...], cfg: ProviderConfig, *, force: bool = False
 ) -> Callable[[str], Callable[[], tuple[Path | None, str]]]:
     """``factory(video) -> deferred fetch thunk`` — the one provider-fetch closure both ``run`` and
-    ``attach`` hand to ``fetch_japanese_subs_async`` / ``configure_subtitle_retry``. ``force=True``
+    ``attach`` hand to ``fetch_japanese_subs_async`` / ``configure_subtitle_retry``. ``providers`` is a
+    per-call subset (startup vs retry vs background differ); the rest comes from ``cfg``. ``force=True``
     re-fetches + re-syncs past a stale/mistimed cached srt (the manual retry)."""
 
     def factory(video: str) -> Callable[[], tuple[Path | None, str]]:
         return lambda: fetch_provider_path(
             video,
             providers,
-            jimaku_key=jimaku_key,
-            title_override=jimaku_title,
-            episode=episode,
-            resync=resync,
+            jimaku_key=cfg.jimaku_key,
+            title_override=cfg.jimaku_title,
+            episode=cfg.episode,
+            resync=cfg.resync,
             force=force,
-            tsukihime_config=tsukihime_config,
+            tsukihime_config=cfg.tsukihime_config,
         )
 
     return factory
 
 
-def configure_providers(
-    reader,
-    enabled_providers: tuple[str, ...],
-    *,
-    jimaku_key: str | None,
-    jimaku_title: str | None,
-    episode: int | None,
-    resync: bool,
-    tsukihime_config: dict | None,
-) -> None:
+def configure_providers(reader, cfg: ProviderConfig) -> None:
     """Wire the runtime provider surfaces shared by ``run`` and ``attach``: the manual re-sync retry (a
     force re-fetch) and the ``Ctrl+J`` source picker. Clears the retry to ``None`` when no provider is
     enabled, so a config with providers off can't leave a stale factory bound after a re-slot."""
     reader.configure_subtitle_retry(
-        provider_fetch_factory(
-            enabled_providers,
-            jimaku_key=jimaku_key,
-            jimaku_title=jimaku_title,
-            episode=episode,
-            resync=resync,
-            tsukihime_config=tsukihime_config,
-            force=True,
-        )
-        if enabled_providers
+        provider_fetch_factory(cfg.enabled_providers, cfg, force=True)
+        if cfg.enabled_providers
         else None
     )
-    if enabled_providers:
+    if cfg.enabled_providers:
         reader.configure_sub_picker(
             lambda video: list_candidates(
                 video,
-                enabled_providers,
-                jimaku_key=jimaku_key,
-                title_override=jimaku_title,
-                tsukihime_config=tsukihime_config,
+                cfg.enabled_providers,
+                jimaku_key=cfg.jimaku_key,
+                title_override=cfg.jimaku_title,
+                tsukihime_config=cfg.tsukihime_config,
             )
         )
 

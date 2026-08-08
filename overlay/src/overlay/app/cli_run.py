@@ -454,29 +454,21 @@ def _start_run_provider_fetch(
 ) -> None:
     if not providers and not enabled_providers:
         return
-    from overlay.app.subselect import configure_providers, provider_fetch_factory
+    from overlay.app.subselect import ProviderConfig, configure_providers, provider_fetch_factory
 
     raw_tsukihime = cfg.get("tsukihime")
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
-    configure_providers(  # shared with attach: the manual re-sync retry + Ctrl+J source picker
-        reader,
-        enabled_providers,
+    pcfg = ProviderConfig(
+        enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
         jimaku_title=jimaku_title,
         episode=episode,
         resync=resync,
         tsukihime_config=tsukihime_cfg,
     )
+    configure_providers(reader, pcfg)  # shared with attach: manual re-sync retry + Ctrl+J picker
     if providers:
-        startup_factory = provider_fetch_factory(
-            providers,
-            jimaku_key=jimaku_key,
-            jimaku_title=jimaku_title,
-            episode=episode,
-            resync=resync,
-            tsukihime_config=tsukihime_cfg,
-        )
-        reader.fetch_japanese_subs_async(startup_factory(str(video_path)))
+        reader.fetch_japanese_subs_async(provider_fetch_factory(providers, pcfg)(str(video_path)))
 
 
 def _prefetch_sibling_subs(
@@ -501,16 +493,16 @@ def _prefetch_sibling_subs(
     if not providers:
         return
     title, episode = parse_filename(nxt)
-    from overlay.app.subselect import provider_fetch_factory
+    from overlay.app.subselect import ProviderConfig, provider_fetch_factory
 
-    fetch = provider_fetch_factory(
-        providers,
+    pcfg = ProviderConfig(
         jimaku_key=jimaku_key,
         jimaku_title=title,
         episode=episode,
         resync=resync,
         tsukihime_config=tsukihime_cfg,
-    )(str(nxt))
+    )
+    fetch = provider_fetch_factory(providers, pcfg)(str(nxt))
 
     def _warm() -> None:
         try:

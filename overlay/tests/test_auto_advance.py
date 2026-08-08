@@ -292,9 +292,9 @@ def test_prefetch_warms_the_next_sibling(tmp_path, monkeypatch):
     (tmp_path / "Show - 04.mkv").write_bytes(b"")
     fetched: list[int | None] = []
 
-    def fake_factory(providers, *, episode, **_kw):
+    def fake_factory(providers, cfg, **_kw):
         assert providers == ("jimaku",)
-        return lambda _video: lambda: fetched.append(episode)
+        return lambda _video: lambda: fetched.append(cfg.episode)
 
     monkeypatch.setattr(subselect, "provider_fetch_factory", fake_factory)
 

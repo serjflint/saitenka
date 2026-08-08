@@ -441,11 +441,13 @@ def test_provider_fetch_factory_defers_fetch_and_forwards_every_arg(monkeypatch)
     monkeypatch.setattr(subselect, "fetch_provider_path", fake_fetch)
     factory = subselect.provider_fetch_factory(
         ("jimaku",),
-        jimaku_key="K",
-        jimaku_title="Show",
-        episode=3,
-        resync=False,
-        tsukihime_config={"enabled": True},
+        subselect.ProviderConfig(
+            jimaku_key="K",
+            jimaku_title="Show",
+            episode=3,
+            resync=False,
+            tsukihime_config={"enabled": True},
+        ),
         force=True,
     )
     thunk = factory("/v/Show - 03.mkv")
@@ -468,12 +470,7 @@ def test_configure_providers_wires_retry_and_picker():
     reader = _FakeReader()
     subselect.configure_providers(
         reader,
-        ("jimaku", "tsukihime"),
-        jimaku_key=None,
-        jimaku_title=None,
-        episode=None,
-        resync=True,
-        tsukihime_config={},
+        subselect.ProviderConfig(enabled_providers=("jimaku", "tsukihime"), tsukihime_config={}),
     )
     assert callable(reader.retry_factory)  # a force-refetch retry factory
     assert callable(reader.picker_lister)  # the Ctrl+J source picker
@@ -481,15 +478,7 @@ def test_configure_providers_wires_retry_and_picker():
 
 def test_configure_providers_clears_retry_when_no_provider():
     reader = _FakeReader()
-    subselect.configure_providers(
-        reader,
-        (),
-        jimaku_key=None,
-        jimaku_title=None,
-        episode=None,
-        resync=True,
-        tsukihime_config={},
-    )
+    subselect.configure_providers(reader, subselect.ProviderConfig(enabled_providers=()))
     assert reader.retry_factory is None  # cleared, not left stale after a provider-off re-slot
     assert reader.picker_lister == "unset"  # picker never configured without a provider
 
@@ -504,13 +493,7 @@ def test_configure_providers_retry_forces_a_refetch(monkeypatch):
     )
     reader = _FakeReader()
     subselect.configure_providers(
-        reader,
-        ("jimaku",),
-        jimaku_key=None,
-        jimaku_title=None,
-        episode=None,
-        resync=True,
-        tsukihime_config={},
+        reader, subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={})
     )
 
     reader.retry_factory("/v/x.mkv")()  # factory(video) → thunk → fetch_provider_path

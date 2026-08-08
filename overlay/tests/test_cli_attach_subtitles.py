@@ -46,14 +46,12 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
         reader,
         ipc,
         None,
-        slang="ja,jpn,jp",
+        subselect.ProviderConfig(
+            enabled_providers=("jimaku", "tsukihime"),
+            resync=False,
+            tsukihime_config={"result_cap": 5},
+        ),
         fetch_in_background=("jimaku", "tsukihime"),
-        enabled_providers=("jimaku", "tsukihime"),
-        jimaku_key=None,
-        jimaku_title=None,
-        episode=None,
-        resync=False,
-        tsukihime_config={"result_cap": 5},
     )
 
     assert reader.fetch is not None
@@ -76,13 +74,8 @@ def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch
         reader,
         ipc,
         None,
-        slang="ja,jpn,jp",
+        subselect.ProviderConfig(enabled_providers=("tsukihime",), resync=False),
         fetch_in_background=(),
-        enabled_providers=("tsukihime",),
-        jimaku_key=None,
-        jimaku_title=None,
-        episode=None,
-        resync=False,
     )
 
     assert reader.fetch is None
@@ -155,14 +148,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
         reader,
         ipc,
         Path("/videos/Show - 03.mkv"),
-        slang="ja,jpn,jp",
-        jimaku=True,
-        jimaku_force=False,
-        jimaku_key=None,
-        tsukihime=False,
-        resync=True,
-        tsukihime_config={},
-        enabled_providers=("jimaku",),
+        subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={}, jimaku=True),
     )
 
     assert reader.episode is not episode_before  # fresh EpisodeContext…
