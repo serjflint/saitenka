@@ -86,7 +86,9 @@ class Report:
 def _run(*args: str) -> str:
     """Run a command, returning combined stdout (best-effort; '' on failure)."""
     try:
-        out = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
+        out = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", timeout=10, check=False
+        )
         return (out.stdout or "") + (out.stderr or "")
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -823,6 +825,7 @@ def check_powershell() -> Check:
                 ["powershell", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=5,
                 check=False,
             )

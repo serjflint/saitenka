@@ -71,7 +71,9 @@ def _redact_config(text: str) -> str:
 
 def _first_line(*cmd: str) -> str:
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", timeout=10, check=False
+        )
         lines = ((out.stdout or "") + (out.stderr or "")).strip().splitlines()
         return lines[0] if lines else "no output"
     except (OSError, subprocess.SubprocessError):

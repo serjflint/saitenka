@@ -132,7 +132,9 @@ def launch_anki() -> bool:
     # always looked like success. The app-process platforms (win/linux) must stay non-blocking.
     if launch[0] == "open":
         try:
-            res = subprocess.run(launch, check=False, capture_output=True, text=True, timeout=15)
+            res = subprocess.run(
+                launch, check=False, capture_output=True, text=True, encoding="utf-8", timeout=15
+            )
         except (OSError, subprocess.SubprocessError) as e:
             log.warning("could not launch Anki automatically: %s", e)
             return False

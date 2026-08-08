@@ -112,7 +112,7 @@ def _embedded_sub_reference(
         probe = subprocess.run(
             [ffprobe, "-v", "error", "-select_streams", "s", "-show_entries",
              "stream=index,codec_name:stream_tags=language,NUMBER_OF_FRAMES", "-of", "json", str(video)],
-            capture_output=True, text=True, check=False, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=30,
         )  # fmt: skip
         if probe.returncode != 0:
             _note("probe-failed")

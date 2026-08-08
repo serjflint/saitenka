@@ -26,6 +26,7 @@ def git_revision() -> str | None:
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=1.0,
             check=True,
         ).stdout.strip()
@@ -37,6 +38,7 @@ def git_revision() -> str | None:
         ["git", "-C", str(repo), "status", "--porcelain"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=1.0,
         check=False,
     ).stdout.strip()
