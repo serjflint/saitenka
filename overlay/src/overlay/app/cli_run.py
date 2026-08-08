@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,19 @@ from overlay.mpvio.launch import MpvLaunchOptions
 log = logging.getLogger(__name__)
 
 DEMO_LINE = "門前の小僧習わぬ経を読む"
+
+
+@dataclass(frozen=True)
+class RunSubtitleOptions:
+    """A ``run``'s subtitle-sourcing choices, resolved once from CLI + config and threaded through the
+    resolve → re-slot → watch-hook chain (was a recurring sub_file/jimaku/jimaku_key/slang/resync clump).
+    Per-episode identity (title, episode number) stays a separate arg — the re-slot recomputes it."""
+
+    slang: str
+    sub_file: str | None = None
+    jimaku: bool = False
+    jimaku_key: str | None = None
+    resync: bool = False
 
 
 def setup_session_telemetry(cfg: dict) -> None:
@@ -210,29 +224,25 @@ def _configured_subtitles(
     return None, providers
 
 
-def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _resolve_subtitles(
     cfg: dict,
     video: str | None,
     video_path: Path,
     dur: int,
     tmp: Path,
+    subs: RunSubtitleOptions,
     *,
-    sub_file: str | None,
-    jimaku: bool,
-    jimaku_key: str | None,
     jimaku_title: str | None,
     episode: int | None,
-    resync: bool,
-    slang: str,
 ) -> tuple[Path | None, Path | None, tuple[str, ...], tuple[str, ...]]:
     """Resolve explicit startup subtitles and defer configured providers until mpv is ready."""
     _jm = cfg.get("jimaku")
     jimaku_cfg = _jm if isinstance(_jm, dict) else {}
     jimaku_on = jimaku_should_fetch(
-        explicit_flag=jimaku,
+        explicit_flag=subs.jimaku,
         cfg_fetch=bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled")),
         video=str(video_path) if video else None,
-        slang=slang,
+        slang=subs.slang,
     )
     raw_tsukihime = cfg.get("tsukihime")
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
@@ -240,24 +250,24 @@ def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config o
         explicit_flag=False,
         cfg_fetch=bool(tsukihime_cfg.get("enabled")),
         video=str(video_path) if video else None,
-        slang=slang,
+        slang=subs.slang,
     )
     log.info(
         "jimaku fetch: %s (flag=%s configured=%s)",
         jimaku_on,
-        jimaku,
+        subs.jimaku,
         bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled")),
     )
     sub_path = en_sub_path = None
     enabled_providers = _enabled_provider_names(
-        video, jimaku=jimaku, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
+        video, jimaku=subs.jimaku, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
     )
     fetch_in_background: tuple[str, ...] = ()
-    if sub_file:
-        sub_path = Path(sub_file).expanduser()
-    elif jimaku_on and jimaku:
+    if subs.sub_file:
+        sub_path = Path(subs.sub_file).expanduser()
+    elif jimaku_on and subs.jimaku:
         sub_path = _resolve_jimaku_subs(
-            video_path, jimaku_title, episode, jimaku_key, jimaku_cfg, resync=resync
+            video_path, jimaku_title, episode, subs.jimaku_key, jimaku_cfg, resync=subs.resync
         )
         if sub_path is None and tsukihime_on:
             fetch_in_background = ("tsukihime",)
@@ -268,7 +278,7 @@ def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config o
             episode,
             jimaku=jimaku_on,
             tsukihime=tsukihime_on,
-            resync=resync,
+            resync=subs.resync,
         )
     elif not video:
         sub_path = tmp / "line.srt"
@@ -429,13 +439,12 @@ def _start_run_provider_fetch(
     reader,
     cfg: dict,
     video_path: Path,
+    subs: RunSubtitleOptions,
     *,
     providers: tuple[str, ...],
     enabled_providers: tuple[str, ...],
     jimaku_title: str | None,
     episode: int | None,
-    jimaku_key: str | None,
-    resync: bool,
 ) -> None:
     if not providers and not enabled_providers:
         return
@@ -445,10 +454,10 @@ def _start_run_provider_fetch(
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
     pcfg = ProviderConfig(
         enabled_providers=enabled_providers,
-        jimaku_key=jimaku_key,
+        jimaku_key=subs.jimaku_key,
         jimaku_title=jimaku_title,
         episode=episode,
-        resync=resync,
+        resync=subs.resync,
         tsukihime_config=tsukihime_cfg,
     )
     configure_providers(reader, pcfg)  # shared with attach: manual re-sync retry + Ctrl+J picker
@@ -533,20 +542,16 @@ def _advance_at_eof(reader) -> bool:
     return True
 
 
-def _install_watch_hooks(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _install_watch_hooks(
     reader,
     cfg: dict,
     video_path: Path,
     tmp: Path,
     dur: int,
+    subs: RunSubtitleOptions,
     *,
     interactive: bool,
     auto_advance: bool,
-    sub_file: str | None,
-    jimaku: bool,
-    jimaku_key: str | None,
-    slang: str,
-    resync: bool,
 ) -> None:
     """Wire the #100 watch hooks (run mode only — attach/SyncPlay never reaches here, which IS the
     SyncPlay gate, #62 precedent). ``reslot_hook`` fires on EVERY mpv ``file-loaded`` so the overlay
@@ -558,40 +563,19 @@ def _install_watch_hooks(  # noqa: PLR0913  # arg-clump — bundle into a config
         return
 
     def _reslot(path: Path) -> None:
-        reslot_to_current(
-            reader,
-            cfg,
-            path,
-            tmp,
-            dur,
-            sub_file=sub_file,
-            jimaku=jimaku,
-            jimaku_key=jimaku_key,
-            slang=slang,
-            resync=resync,
-        )
+        reslot_to_current(reader, cfg, path, tmp, dur, subs)
 
     reader.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
         reader.advance_hook = lambda: _advance_at_eof(reader)
     # Warm episode 2's subs while episode 1 plays, so the first advance re-slots cache-warm (no cold gap).
     _prefetch_sibling_subs(
-        cfg, video_path, enabled=auto_advance, jimaku_key=jimaku_key, resync=resync
+        cfg, video_path, enabled=auto_advance, jimaku_key=subs.jimaku_key, resync=subs.resync
     )
 
 
 def reslot_to_current(
-    reader,
-    cfg: dict,
-    video_path: Path,
-    tmp: Path,
-    dur: int,
-    *,
-    sub_file: str | None,
-    jimaku: bool,
-    jimaku_key: str | None,
-    slang: str,
-    resync: bool,
+    reader, cfg: dict, video_path: Path, tmp: Path, dur: int, subs: RunSubtitleOptions
 ) -> None:
     """Re-index the overlay onto mpv's CURRENT (already-loaded) file — the reactive #100 re-slot fired
     from ``file-loaded``, so it covers a native autoload/playlist advance and our own eof loadfile
@@ -618,13 +602,9 @@ def reslot_to_current(
             video_path,
             dur,
             tmp,
-            sub_file=sub_file,
-            jimaku=jimaku,
-            jimaku_key=jimaku_key,
+            subs,
             jimaku_title=title,
             episode=parsed_episode,
-            resync=resync,
-            slang=slang,
         )
         session_stats.finish(
             reader
@@ -638,11 +618,11 @@ def reslot_to_current(
         # Tag the JP srt with the caller's own slang token so select_initial's _matching_track picks OUR
         # srt, not an untagged leftover the auto-selection latched onto (the ep2-on-ep03 bug). "auto"
         # flag → selection stays select_initial's. First slang token matches whatever slang is set.
-        jp_lang = next((part.strip() for part in slang.split(",") if part.strip()), "jpn")
+        jp_lang = next((part.strip() for part in subs.slang.split(",") if part.strip()), "jpn")
         for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
             if path is not None:
                 ipc.command("sub-add", str(path), "auto", "", lang)
-        startup = select_initial(ipc, slang)
+        startup = select_initial(ipc, subs.slang)
         span.set(
             "active", startup.active or "none"
         )  # the selection outcome, queryable in the trace
@@ -655,7 +635,7 @@ def reslot_to_current(
             startup.tracks.en_sid,
         )
         build_sub_index_for_current_track(reader)
-        reader.configure_subtitle_mode(startup, slang=slang)
+        reader.configure_subtitle_mode(startup, slang=subs.slang)
         session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
             reader._toast(
@@ -665,16 +645,15 @@ def reslot_to_current(
             reader,
             cfg,
             video_path,
+            subs,
             providers=(fetch_background if startup.tracks.jp_sid is None else ()),
             enabled_providers=enabled_providers,
             jimaku_title=title,
             episode=parsed_episode,
-            jimaku_key=jimaku_key,
-            resync=resync,
         )
         reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
         _prefetch_sibling_subs(  # warm episode N+1 so the next re-slot is cache-warm, not a cold fetch
-            cfg, video_path, enabled=True, jimaku_key=jimaku_key, resync=resync
+            cfg, video_path, enabled=True, jimaku_key=subs.jimaku_key, resync=subs.resync
         )
         log.info("re-slotted overlay onto %s", video_path.name)
 
@@ -988,19 +967,11 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     auto_advance = _auto_advance_enabled(cfg, demo_word, screenshot)
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
+    subs = RunSubtitleOptions(
+        slang=slang, sub_file=sub_file, jimaku=jimaku, jimaku_key=jimaku_key, resync=resync
+    )
     sub_path, en_sub_path, fetch_jimaku_in_background, enabled_providers = _resolve_subtitles(
-        cfg,
-        video,
-        video_path,
-        dur,
-        tmp,
-        sub_file=sub_file,
-        jimaku=jimaku,
-        jimaku_key=jimaku_key,
-        jimaku_title=jimaku_title,
-        episode=episode,
-        resync=resync,
-        slang=slang,
+        cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
     )
 
     proc, ipc = _launch_mpv_and_connect(
@@ -1065,12 +1036,11 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         reader,
         cfg,
         video_path,
+        subs,
         providers=(fetch_jimaku_in_background if subtitle_startup.tracks.jp_sid is None else ()),
         enabled_providers=enabled_providers,
         jimaku_title=jimaku_title,
         episode=episode,
-        jimaku_key=jimaku_key,
-        resync=resync,
     )
 
     _install_watch_hooks(
@@ -1079,13 +1049,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         video_path,
         tmp,
         dur,
+        subs,
         interactive=not (demo_word or screenshot),
         auto_advance=auto_advance,
-        sub_file=sub_file,
-        jimaku=jimaku,
-        jimaku_key=jimaku_key,
-        slang=slang,
-        resync=resync,
     )
 
     try:

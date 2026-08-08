@@ -101,18 +101,7 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(tmp_path, monke
     monkeypatch.setattr(session_stats, "finish", lambda _reader: None)
     monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
 
-    cli_run.reslot_to_current(
-        reader,
-        {},
-        cur,
-        tmp_path,
-        0,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
-        slang="ja",
-        resync=False,
-    )
+    cli_run.reslot_to_current(reader, {}, cur, tmp_path, 0, cli_run.RunSubtitleOptions(slang="ja"))
 
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)  # mpv already loaded it
     assert reader.episode is not episode_before  # a fresh EpisodeContext…
@@ -154,11 +143,8 @@ def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
         cur,
         tmp_path,
         0,
-        sub_file=str(ep3_srt),  # stand in for the resolved current-episode subtitle
-        jimaku=False,
-        jimaku_key=None,
-        slang="ja,jpn,jp",
-        resync=False,
+        # sub_file stands in for the resolved current-episode subtitle
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp", sub_file=str(ep3_srt)),
     )
 
     assert ("sub-remove", 10) in ipc.commands  # the stale sibling srt is gone
@@ -253,13 +239,9 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path):
         tmp_path / "Show 01.mkv",
         tmp_path,
         0,
+        cli_run.RunSubtitleOptions(slang="ja"),
         interactive=True,
         auto_advance=False,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
-        slang="ja",
-        resync=False,
     )
     assert reader.reslot_hook is not None  # follows file-loaded / playlists
     assert reader.advance_hook is None  # but never drives its own advance
@@ -274,13 +256,9 @@ def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path):
         tmp_path / "Show 01.mkv",
         tmp_path,
         0,
+        cli_run.RunSubtitleOptions(slang="ja"),
         interactive=False,  # demo/screenshot — force-hover, not playback
         auto_advance=False,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
-        slang="ja",
-        resync=False,
     )
     assert reader.reslot_hook is None and reader.advance_hook is None
 

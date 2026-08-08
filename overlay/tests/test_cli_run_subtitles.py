@@ -13,13 +13,9 @@ def _resolve(tmp_path, *, jimaku: bool):
         tmp_path / "episode.mkv",
         30,
         tmp_path,
-        sub_file=None,
-        jimaku=jimaku,
-        jimaku_key=None,
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp", jimaku=jimaku),
         jimaku_title=None,
         episode=None,
-        resync=False,
-        slang="ja,jpn,jp",
     )
 
 
@@ -57,13 +53,9 @@ def test_configured_run_uses_cached_jimaku_subtitle_before_launch(tmp_path, monk
         video,
         30,
         tmp_path,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp", resync=True),
         jimaku_title=None,
         episode=None,
-        resync=True,
-        slang="ja,jpn,jp",
     )
 
     assert sub_path == cached
@@ -86,13 +78,9 @@ def test_configured_run_uses_shared_cache_with_only_tsukihime_enabled(tmp_path, 
         video,
         30,
         tmp_path,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp", resync=True),
         jimaku_title=None,
         episode=None,
-        resync=True,
-        slang="ja,jpn,jp",
     )
 
     assert sub_path == cached
@@ -123,13 +111,9 @@ def test_tsukihime_is_background_only_and_follows_jimaku(tmp_path, monkeypatch):
         tmp_path / "episode.mkv",
         30,
         tmp_path,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),
         jimaku_title=None,
         episode=None,
-        resync=False,
-        slang="ja,jpn,jp",
     )
 
     assert providers == ("jimaku", "tsukihime")
@@ -145,13 +129,9 @@ def test_disabled_tsukihime_does_not_enter_run_provider_chain(tmp_path, monkeypa
         tmp_path / "episode.mkv",
         30,
         tmp_path,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),
         jimaku_title=None,
         episode=None,
-        resync=False,
-        slang="ja,jpn,jp",
     )
 
     assert providers == ()
@@ -167,13 +147,9 @@ def test_embedded_japanese_skips_startup_fetch_but_keeps_runtime_retry(tmp_path,
         tmp_path / "episode.mkv",
         30,
         tmp_path,
-        sub_file=None,
-        jimaku=False,
-        jimaku_key=None,
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),
         jimaku_title=None,
         episode=None,
-        resync=False,
-        slang="ja,jpn,jp",
     )
 
     assert background == ()
@@ -208,12 +184,11 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
         reader,
         {"jimaku": {"enabled": True}, "tsukihime": {"enabled": True}},
         tmp_path / "old.mkv",
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),
         providers=(),
         enabled_providers=("jimaku", "tsukihime"),
         jimaku_title=None,
         episode=None,
-        jimaku_key=None,
-        resync=False,
     )
 
     assert reader.startup_fetch is None
