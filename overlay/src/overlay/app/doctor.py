@@ -778,7 +778,7 @@ def check_deinflect() -> Check:
     (🧩 -て « -いる « -た). The Apache-2.0 core runs without it (no chips shown), so this WARNS with
     how to enable it rather than failing."""
     try:
-        import saitenka_deinflect  # noqa: F401
+        import saitenka_deinflect  # noqa: F401,TID251  # GPL-3.0 chokepoint: doctor is a sanctioned importer (.importlinter gpl-chokepoint)
     except ImportError:
         return Check(
             "deinflect",

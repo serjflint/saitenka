@@ -20,10 +20,9 @@ from typing import NamedTuple
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from overlay.model import Theme
 from overlay.panel import Definition, Entry
+from PIL import Image
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"

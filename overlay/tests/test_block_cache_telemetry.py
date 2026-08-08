@@ -17,9 +17,10 @@ from PIL import Image
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-from overlay import otel_metrics
 from overlay.panel import Row
 from overlay.render.banded import _BAND_PX, WindowedPanel
+
+from overlay import otel_metrics
 
 WIDTH = 384
 BLOCK_H = 100  # every synthetic block is this tall → rendered_px == BLOCK_H * blocks rendered

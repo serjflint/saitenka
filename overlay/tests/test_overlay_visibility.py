@@ -1,11 +1,10 @@
 """Runtime visibility for every Saitenka-owned OSD surface."""
 
-from PIL import Image
-
 from overlay.app.config import KeyOptions, ReaderOptions
 from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId
 from overlay.mpvio.osd import Overlay
+from PIL import Image
 
 
 class FakeIPC:

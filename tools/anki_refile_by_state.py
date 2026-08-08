@@ -57,7 +57,7 @@ def retrievability(s, elapsed_days, decay):
 def classify(ctype, ivl, r, mature_ivl, forgotten_r):
     if ctype == 0:
         return "new"
-    if ctype in (1, 3):
+    if ctype in {1, 3}:
         return "learning"
     if r is not None and r < forgotten_r:
         return "forgotten"
@@ -79,9 +79,7 @@ def anki(action, **params):
 
 
 def sanitize_tag(deck: str) -> str:
-    return "saitenka_orig::" + deck.replace(" ", "_").replace("::", "-").replace(
-        '"', ""
-    )
+    return "saitenka_orig::" + deck.replace(" ", "_").replace("::", "-").replace('"', "")
 
 
 def main() -> None:
@@ -129,9 +127,7 @@ def main() -> None:
     cur = con.cursor()
 
     # modern Anki stores deck hierarchy with \x1f as the separator, not "::"
-    deck_name = {
-        i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")
-    }
+    deck_name = {i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")}
     exclude_pats = args.exclude_deck if args.exclude_deck is not None else ["Backlog"]
 
     def _excluded(name):
@@ -177,9 +173,7 @@ def main() -> None:
         )
     con.close()
 
-    Path(args.plan_out).write_text(
-        json.dumps(plan, ensure_ascii=False), encoding="utf-8"
-    )
+    Path(args.plan_out).write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
 
     # ── summary ──────────────────────────────────────────────────────────────
     by_target = Counter(p["targetDeck"] for p in plan)
@@ -205,9 +199,7 @@ def main() -> None:
     try:
         ver = anki("version")
     except Exception as e:
-        raise SystemExit(
-            f"AnkiConnect unreachable ({e}). Open Anki (with AnkiConnect) first."
-        )
+        raise SystemExit(f"AnkiConnect unreachable ({e}). Open Anki (with AnkiConnect) first.")
     log(f"AnkiConnect v{ver} reachable — applying …")
     # 1) stash origin as tags (group notes by tag)
     by_tag: dict[str, list[int]] = {}

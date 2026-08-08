@@ -10,7 +10,6 @@ source module, since sub_picker imports it at call time).
 from __future__ import annotations
 
 import pytest
-
 from overlay.app import sub_picker, subtitle_modes
 from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId

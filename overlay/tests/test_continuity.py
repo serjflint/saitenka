@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from overlay.app import backlog
 from overlay.app.continuity import episode_identity, resolve_sibling
 

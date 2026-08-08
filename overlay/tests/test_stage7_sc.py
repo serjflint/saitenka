@@ -3,12 +3,11 @@
 import json
 from pathlib import Path
 
-from util import assert_golden
-
 from overlay.model import Style
 from overlay.render.document import DocStyle, render_document
 from overlay.render.flow import ChipBox, ImgBox, RubyBox
 from overlay.sc.walk import walk
+from util import assert_golden
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 BASE = Style(size=26)

@@ -13,7 +13,6 @@ import pytest
 COMPARE = Path(__file__).resolve().parent.parent / "compare"
 sys.path.insert(0, str(COMPARE))
 from cases import CASES  # noqa: E402  # must come after the sys.path setup above
-
 from overlay.app import dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
 from overlay.app.config import load_config  # noqa: E402  # must come after the sys.path setup above
 

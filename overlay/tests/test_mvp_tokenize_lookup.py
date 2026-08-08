@@ -1,7 +1,6 @@
 """MVP: tokenizer (lemma/reading), furigana alignment, and JMdict → Entry adapter."""
 
 import pytest
-
 from overlay.app.lookup import entry_for, furigana
 from overlay.app.tokenize import Token, tokenize
 

@@ -32,8 +32,8 @@ Coverage answers "did this line ever run?" That's necessary but weak. Consider a
 ```python
 def render(text, scale):
     if scale > 1.0:
-        return crisp(text, scale)   # the hi-dpi path
-    return soft(text)               # the 1080p path
+        return crisp(text, scale)  # the hi-dpi path
+    return soft(text)  # the 1080p path
 ```
 
 A suite that only ever calls `render(text, 1.0)` has **100% line coverage of the branch it takes** and can

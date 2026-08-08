@@ -8,7 +8,6 @@ than the private `_parse_*` helpers.
 from __future__ import annotations
 
 import pytest
-
 from overlay.model import Style
 from overlay.sc.walk import inline_flow, link_query
 

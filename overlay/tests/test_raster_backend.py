@@ -50,9 +50,10 @@ def test_pillow_backend_matches_lazy_panel_bytes():
 def test_hit_geometry_is_produced_by_layout_not_raster():
     """ScanBox/LinkBox come from the LAYOUT pass (model.py types, PIL-free) and the backend must
     return exactly what layout computed — a raster swap cannot change hit geometry."""
-    from overlay import model
     from overlay.panel import Definition, Entry, LazyPanel, panel_rows
     from overlay.raster.pillow_backend import PillowBackend
+
+    from overlay import model
 
     body = ["同義語は", {"tag": "a", "href": "?query=見る", "content": "見る"}, "。"]
     e = Entry(headword=["観る"], defs=[Definition("MonoA", body)])

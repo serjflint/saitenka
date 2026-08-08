@@ -1,8 +1,6 @@
 """Whole-episode subtitle sidebar behavior at the Reader seam."""
 
 import pytest
-from PIL import Image
-
 from overlay.app import sidebar
 from overlay.app.backlog import BacklogStore, Capture
 from overlay.app.controller import Reader
@@ -17,6 +15,7 @@ from overlay.app.subtitles import (
     render_sidebar,
 )
 from overlay.app.wordlists import KnownWords
+from PIL import Image
 
 
 class FakeIPC:

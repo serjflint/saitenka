@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from overlay.app.sub_index import parse_ass, parse_cues, parse_srt
 
 _CASES = json.loads(

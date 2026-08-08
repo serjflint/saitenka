@@ -66,7 +66,7 @@ def render_codex(servers: dict) -> str:
 
 
 def merge_codex(block: str, target: Path) -> None:
-    existing = target.read_text() if target.exists() else ""
+    existing = target.read_text(encoding="utf-8") if target.exists() else ""
     if BEGIN in existing and END in existing:
         pre = existing[: existing.index(BEGIN)]
         post = existing[existing.index(END) + len(END) :]
@@ -74,7 +74,7 @@ def merge_codex(block: str, target: Path) -> None:
     else:
         merged = (existing.rstrip("\n") + "\n\n" if existing.strip() else "") + block
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(merged)
+    target.write_text(merged, encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:

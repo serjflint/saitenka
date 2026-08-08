@@ -22,9 +22,7 @@ _CASES = json.loads(
 )["cases"]
 
 
-def _has_term_reasons(
-    source: str, term: str, rule: str | None, reasons: list[str]
-) -> bool:
+def _has_term_reasons(source: str, term: str, rule: str | None, reasons: list[str]) -> bool:
     """Port of Yomitan's fixture ``hasTermReasons``: does any deinflection of ``source`` reach
     ``term`` with matching POS conditions and the exact transform chain?"""
     rule_flags = None if rule is None else condition_flags(rule)

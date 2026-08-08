@@ -8,11 +8,10 @@ import socket
 import threading
 from pathlib import Path
 
-from PIL import Image
-
 from overlay.mpvio.ipc import MpvIPC
 from overlay.mpvio.osd import Overlay, to_bgra
 from overlay.mpvio.transport import UnixSocketTransport
+from PIL import Image
 
 
 def _client_with_server():
@@ -154,7 +153,6 @@ def test_to_bgra_array_byte_identical_to_reference():
     """Property test: to_bgra_array must be byte-identical to the original uint16-multiply
     implementation over random RGBA images (all alphas, all channels)."""
     import numpy as np
-
     from overlay.mpvio.osd import to_bgra_array
 
     def reference(img):

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import pytest
+from overlay.draw import icons
+from overlay.draw.icon_source import Icon, render_icon
 from PIL import Image
 from util import assert_golden
 
 from overlay import fonts
-from overlay.draw import icons
-from overlay.draw.icon_source import Icon, render_icon
 
 
 def _opaque(img) -> int:

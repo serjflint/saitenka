@@ -22,10 +22,9 @@ import threading
 import time
 
 import pytest
-from util import FakeTransport
-
 from overlay.mpvio.ipc import MpvIPC
 from overlay.mpvio.transport import UnixSocketTransport
+from util import FakeTransport
 
 
 def _drain_until(ipc: MpvIPC, deadline: float = 1.0) -> list[dict]:

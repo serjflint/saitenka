@@ -7,9 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pyfakefs.fake_filesystem import OSType
-
 from overlay.app import paths
+from pyfakefs.fake_filesystem import OSType
 
 
 def test_atomic_write_is_crash_safe(fs, monkeypatch):

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from overlay.app import yomitan_db_import as ydb
 
 
@@ -155,7 +154,6 @@ def test_import_reconstructs_zips_that_the_loader_reads(tmp_path):
     assert seen[-1] == (5, 5)  # progress reached the header total
 
     import dicthelp
-
     from overlay.app.yomitan_import import classify_zip
 
     d = dicthelp.load_dict(out / "TestDict.zip")

@@ -25,5 +25,6 @@ With it installed, the overlay picks it up automatically (`saitenka_deinflect`);
 
 ```python
 from saitenka_deinflect import inflection_chain
-inflection_chain("聞こえてた", "聞こえる")   # -> ["-る", "-て", "-た"] (dict→surface order)
+
+inflection_chain("聞こえてた", "聞こえる")  # -> ["-る", "-て", "-た"] (dict→surface order)
 ```

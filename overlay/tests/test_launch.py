@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from overlay.mpvio.ipc import MpvIPC
 from overlay.mpvio.launch import MpvLaunchOptions, build_mpv_argv
 

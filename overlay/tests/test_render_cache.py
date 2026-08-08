@@ -13,7 +13,6 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import numpy as np
-
 from overlay.app.popups import Panel
 from overlay.app.render_cache import (
     RenderCache,
@@ -219,11 +218,10 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     # The whole point of #149's direct-paint: a cold hover the cache HAS uploads the cached pixels
     # WITHOUT the build+measure+raster pipeline. Prove the path (not just identical pixels) with a
     # sentinel array a fresh raster could never produce — if mpv receives the sentinel, it came from disk.
-    from util import FakeIPC
-
     from overlay.app.config import ReaderOptions, TooltipOptions
     from overlay.app.controller import Reader
     from overlay.app.render_cache import content_key
+    from util import FakeIPC
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     r = Reader(

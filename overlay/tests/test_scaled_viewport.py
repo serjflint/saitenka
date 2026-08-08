@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import numpy as np
 import util
-from PIL import Image
-
 from overlay.bgra import to_bgra_array
 from overlay.panel import panel_rows, render_panel
 from overlay.render.banded import WindowedPanel
+from PIL import Image
 
 _W, _VH = 384, 260
 

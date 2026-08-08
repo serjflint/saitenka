@@ -28,8 +28,9 @@ def test_lua_resolves():
 
 def test_existing_loaders_use_the_resolver():
     """fonts / wordlists must load through the resolver so the wheel path works too."""
-    from overlay import fonts
     from overlay.app import wordlists
+
+    from overlay import fonts
 
     assert fonts.ASSETS.exists()
     assert wordlists.JLPT_ZIP.exists()

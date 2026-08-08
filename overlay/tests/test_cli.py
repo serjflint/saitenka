@@ -245,8 +245,9 @@ def test_version_is_wired_to_package_metadata():
     `saitenka` distribution — now pinned via overlay.__version__."""
     from importlib.metadata import version
 
-    import overlay
     from overlay.app.cli import app
+
+    import overlay
 
     assert overlay.__version__ == version("saitenka")
     assert app.version not in {None, "", "0.0.0"}

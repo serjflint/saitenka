@@ -11,7 +11,6 @@ from bisect import bisect_left, bisect_right
 
 from hypothesis import example, given
 from hypothesis import strategies as st
-
 from overlay.render.window import LazyOffsets, OffsetTable, build_offsets
 
 # Realistic tooltip geometry: a handful to ~64 blocks, per-block heights of real rows, small gaps.

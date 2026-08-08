@@ -7,7 +7,6 @@ import lzma
 import urllib.error
 
 import pytest
-
 from overlay.app import tsukihime
 
 

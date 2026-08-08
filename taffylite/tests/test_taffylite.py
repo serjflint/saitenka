@@ -39,9 +39,7 @@ def _reference_cumulative(
 
 
 def _column(heights: list[int], gaps: list[int], top_pad: int) -> tuple[list[int], list[int]]:
-    s, e = taffylite.column(
-        [float(h) for h in heights], [float(g) for g in gaps], float(top_pad)
-    )
+    s, e = taffylite.column([float(h) for h in heights], [float(g) for g in gaps], float(top_pad))
     return list(s), list(e)
 
 

@@ -30,10 +30,9 @@ def _strip_noise(cmd: str) -> str:
     very PR body, or `echo "use grep"`) must not trip the guard. What remains is
     the executable skeleton, where a real invocation sits at a command position.
     """
-    cmd = re.sub(r"<<-?\s*(['\"]?)(\w+)\1.*?\n\2", " ", cmd, flags=re.S)  # heredocs
+    cmd = re.sub(r"<<-?\s*(['\"]?)(\w+)\1.*?\n\2", " ", cmd, flags=re.DOTALL)  # heredocs
     cmd = re.sub(r"'[^']*'", " ", cmd)  # single-quoted
-    cmd = re.sub(r'"[^"]*"', " ", cmd)  # double-quoted
-    return cmd
+    return re.sub(r'"[^"]*"', " ", cmd)  # double-quoted
 
 
 def _offending_binary(cmd: str) -> str | None:
@@ -73,11 +72,17 @@ def main() -> None:
             "Use the Grep/Glob tools for text/file search, the LSP tool "
             "(findReferences/documentSymbol) for symbol nav, or `git grep` / `git ls-files`."
         )
-        print(json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }}))
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason,
+                    }
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

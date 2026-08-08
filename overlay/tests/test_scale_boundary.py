@@ -11,10 +11,9 @@ round-trips back to that element at every scale × view.
 from __future__ import annotations
 
 import pytest
-from tip_fakes import hidpi_reader
-
 from overlay.app import tooltip
 from overlay.app.subtitle_render import NullRenderer
+from tip_fakes import hidpi_reader
 
 _SCALES = [1.5, 2.0]
 

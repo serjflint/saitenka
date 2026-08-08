@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from util import FakeIPC
-
 from overlay.app.controller import Reader
+from util import FakeIPC
 
 
 def test_reader_starts_without_deps():

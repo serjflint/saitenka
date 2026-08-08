@@ -7,10 +7,9 @@ windowed viewport vs a one-shot render_panel crop lives in ``tests/test_windowed
 
 from __future__ import annotations
 
-from util import FakeIPC
-
 from overlay.app.controller import SKIP_POS, Reader
 from overlay.panel import Definition, Entry
+from util import FakeIPC
 
 
 class _FakeDS:

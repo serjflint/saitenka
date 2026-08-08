@@ -32,11 +32,10 @@ class _RecOv:
 
 
 def test_draw_loading_shows_spinner_throttles_then_resumes(monkeypatch):
-    from util import FakeIPC
-
     from overlay.app import reader_deps
     from overlay.app.controller import Reader
     from overlay.app.overlay_ids import OverlayId
+    from util import FakeIPC
 
     # Drive the clock explicitly across the 80 ms throttle window: on a loaded free-threaded (no-GIL)
     # CI runner >80 ms can pass between two Python statements, so a real clock made the throttle
@@ -67,9 +66,8 @@ def test_draw_loading_shows_spinner_throttles_then_resumes(monkeypatch):
 
 
 def test_show_startup_hint_posts_mpv_osd_text():
-    from util import FakeIPC
-
     from overlay.app.loading import STARTUP_HINT, show_startup_hint
+    from util import FakeIPC
 
     ipc = FakeIPC()
     show_startup_hint(ipc)
@@ -78,9 +76,8 @@ def test_show_startup_hint_posts_mpv_osd_text():
 
 def test_show_startup_hint_skipped_for_screenshot():
     # A screenshot capture must not carry the breadcrumb, so it never touches mpv's OSD.
-    from util import FakeIPC
-
     from overlay.app.loading import show_startup_hint
+    from util import FakeIPC
 
     ipc = FakeIPC()
     show_startup_hint(ipc, screenshot=True)
@@ -88,9 +85,8 @@ def test_show_startup_hint_skipped_for_screenshot():
 
 
 def test_clear_startup_hint_empties_the_osd_text():
-    from util import FakeIPC
-
     from overlay.app.loading import clear_startup_hint
+    from util import FakeIPC
 
     ipc = FakeIPC()
     clear_startup_hint(ipc)
@@ -99,9 +95,8 @@ def test_clear_startup_hint_empties_the_osd_text():
 
 def test_first_subtitle_draw_clears_the_startup_hint():
     # The overlay is live once the first cue draws → the breadcrumb must be cleared exactly then.
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     r = Reader(FakeIPC())
     r.ov = _RecOv()
@@ -115,10 +110,9 @@ def test_first_subtitle_draw_clears_the_startup_hint():
 
 
 def test_apply_deps_stops_the_spinner():
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
     from overlay.app.overlay_ids import OverlayId
+    from util import FakeIPC
 
     r = Reader(FakeIPC())
     r.ov = _RecOv()
@@ -133,9 +127,8 @@ def test_load_deps_async_uses_a_custom_build():
     config-only build_reader_deps) and publish its result for the poll loop to inject."""
     import time
 
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     r = Reader(FakeIPC())
     r.ov = _RecOv()
@@ -167,10 +160,9 @@ def test_load_deps_async_consumes_a_prebuilt_hoisted_future():
     consumes that Future (it must NOT build a second time) and publishes the result for the poll loop."""
     import time
 
-    from util import FakeIPC
-
     from overlay.app import reader_deps as rd
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     built = {"n": 0}
 

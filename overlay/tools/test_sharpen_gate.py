@@ -1,5 +1,5 @@
 """Tests for the Sharpen anti-lobotomization gate. Run explicitly (tools/ is outside `poe all`):
-    uv run python -m pytest tools/test_sharpen_gate.py
+uv run python -m pytest tools/test_sharpen_gate.py
 """
 
 from __future__ import annotations
@@ -118,7 +118,9 @@ def test_efficacy_gate_passes_when_targets_earned_and_control_holds():
     targets = [_m("A", 1), _m("B", 2)]
     control = [_m("K", 1), _m("K", 2)]
     killed = {("A", 1), ("K", 1), ("K", 2)}  # A earned; B equivalent; all control still killed
-    rep = sg.efficacy_gate(Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed))
+    rep = sg.efficacy_gate(
+        Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed)
+    )
     assert [m.operator for m in rep.earned] == ["A"]
     assert rep.regressed == []
     assert rep.ok
@@ -128,7 +130,9 @@ def test_efficacy_gate_bounces_when_a_control_mutant_regresses():
     targets = [_m("A", 1)]
     control = [_m("K", 1), _m("K", 2)]
     killed = {("A", 1), ("K", 1)}  # K@2 previously killed, now survives → lobotomy
-    rep = sg.efficacy_gate(Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed))
+    rep = sg.efficacy_gate(
+        Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed)
+    )
     assert rep.score_dropped
     assert not rep.ok
 
@@ -144,5 +148,7 @@ def test_full_control_catches_the_narrowing_bypass_arm_b_misses():
     targets = [_m("NEW", 1)]  # the added assert earns a kill
     control = [_m("WHOLE", 1)]  # the mutant the dropped whole-dict equality used to kill
     killed = {("NEW", 1)}  # WHOLE now survives
-    rep = sg.efficacy_gate(Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed))
+    rep = sg.efficacy_gate(
+        Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed)
+    )
     assert rep.earned and rep.score_dropped and not rep.ok

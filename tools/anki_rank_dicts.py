@@ -134,9 +134,7 @@ def config_fsrs_params(cfg_blob):
         if field in f and isinstance(f[field][-1], (bytes, bytearray)):
             raw = f[field][-1]
             if len(raw) % 4 == 0 and raw:
-                return [
-                    struct.unpack_from("<f", raw, k)[0] for k in range(0, len(raw), 4)
-                ]
+                return [struct.unpack_from("<f", raw, k)[0] for k in range(0, len(raw), 4)]
     return []
 
 
@@ -150,7 +148,7 @@ def deck_config_id(kind_blob):
 def strip_markup(s):
     s = html.unescape(s or "")
     s = re.sub(r"<[^>]+>", "", s)
-    for z in ("​", "﻿", "‎", "‏"):
+    for z in ("\u200b", "﻿", "‎", "‏"):  # noqa: PLE2502  # this line IS the strip-list of invisible/bidi chars
         s = s.replace(z, "")
     return s.strip()
 
@@ -188,7 +186,7 @@ def retrievability(s, elapsed, decay):
 def classify(ctype, ivl, r, mature_ivl, forgotten_r):
     if ctype == 0:
         return "new"
-    if ctype in (1, 3):
+    if ctype in {1, 3}:
         return "learning"
     if r is not None and r < forgotten_r:
         return "forgotten"
@@ -252,9 +250,7 @@ def write_yomitan(out, title, desc, rows):
         z.writestr("index.json", json.dumps(idx, ensure_ascii=False))
         for n in range(0, max(1, len(rows)), 10000):
             chunk = rows[n : n + 10000]
-            bank = [
-                [t, "freq", {"value": int(v), "displayValue": d}] for t, v, d in chunk
-            ]
+            bank = [[t, "freq", {"value": int(v), "displayValue": d}] for t, v, d in chunk]
             z.writestr(
                 f"term_meta_bank_{n // 10000 + 1}.json",
                 json.dumps(bank, ensure_ascii=False),
@@ -263,28 +259,18 @@ def write_yomitan(out, title, desc, rows):
 
 def emit_ranking(out_dir, stem, title, desc, ranked):
     """ranked: list of dicts {term,reading,state,freq,stability,r,nids} in priority order."""
-    rows = [
-        (w["term"], i + 1, f"{w['state']}·f{w['freq'] if w['freq'] else '-'}")
-        for i, w in enumerate(ranked)
-    ]
+    rows = [(w["term"], i + 1, f"{w['state']}·f{w['freq'] or '-'}") for i, w in enumerate(ranked)]
     write_yomitan(out_dir / f"{stem}.zip", title, desc, rows)
     js = [
         {
             "rank": i + 1,
-            **{
-                k: w[k]
-                for k in ("term", "reading", "state", "freq", "stability", "r", "nids")
-            },
+            **{k: w[k] for k in ("term", "reading", "state", "freq", "stability", "r", "nids")},
         }
         for i, w in enumerate(ranked)
     ]
-    (out_dir / f"{stem}.json").write_text(
-        json.dumps(js, ensure_ascii=False, indent=1), "utf-8"
-    )
+    (out_dir / f"{stem}.json").write_text(json.dumps(js, ensure_ascii=False, indent=1), "utf-8")
     top = sorted({nid for w in ranked[:2000] for nid in w["nids"]})
-    (out_dir / f"{stem}.nids.txt").write_text(
-        "nid:" + ",".join(map(str, top)) + "\n", "utf-8"
-    )
+    (out_dir / f"{stem}.nids.txt").write_text("nid:" + ",".join(map(str, top)) + "\n", "utf-8")
     return len(rows), len(top)
 
 
@@ -345,9 +331,7 @@ def main():
     cfg_decay = {}
     for cid, _n, blob in cur.execute("SELECT id,name,config FROM deck_config"):
         p = config_fsrs_params(blob)
-        cfg_decay[cid] = (
-            -p[20] if len(p) >= 21 else (-0.5 if len(p) >= 17 else -FSRS_DEFAULT_DECAY)
-        )
+        cfg_decay[cid] = -p[20] if len(p) >= 21 else (-0.5 if len(p) >= 17 else -FSRS_DEFAULT_DECAY)
     exclude_pats = args.exclude_deck if args.exclude_deck is not None else ["Backlog"]
     deckname, deck_decay = {}, {}
     for did, dname, kind in cur.execute("SELECT id,name,kind FROM decks"):
@@ -425,17 +409,11 @@ def main():
         reading = reading or to_reading(clean)
         if reading == term or not args.readings:
             reading = ""
-        cards = [
-            c
-            for c in note_cards.get(nid, [])
-            if args.include_suspended or not c["suspended"]
-        ]
+        cards = [c for c in note_cards.get(nid, []) if args.include_suspended or not c["suspended"]]
         if not cards:
             continue
         best = max(cards, key=knowledge_score)
-        st = classify(
-            best["type"], best["ivl"], best["r"], args.mature_ivl, args.forgotten_r
-        )
+        st = classify(best["type"], best["ivl"], best["r"], args.mature_ivl, args.forgotten_r)
         k = knowledge_score(best)
         w = words.get(term)
         if w is None or k > w["k"]:
@@ -472,15 +450,13 @@ def main():
             log(f"WARN freq-dict missing: {p}")
     for w in words.values():
         h = harmonic(w["term"], freqs)
-        w["freq"] = int(round(h)) if h else None
+        w["freq"] = round(h) if h else None
 
     # 1) known-ness
-    studied = sorted(
-        (w for w in words.values() if w["state"] != "new"), key=lambda w: w["k"]
-    )
+    studied = sorted((w for w in words.values() if w["state"] != "new"), key=lambda w: w["k"])
     kn = []
     for rank, w in enumerate(studied, 1):
-        rp = f"R{int(round(w['r'] * 100))}" if w["r"] is not None else "R--"
+        rp = f"R{round(w['r'] * 100)}" if w["r"] is not None else "R--"
         sd = f"s{int(w['stability'])}" if w["stability"] else ""
         kn.append(
             (

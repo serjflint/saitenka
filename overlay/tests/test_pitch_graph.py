@@ -43,9 +43,8 @@ def test_graph_width_scales_with_morae():
 
 
 def test_graph_goldens_four_patterns():
-    from PIL import Image
-
     from overlay.draw.pitch import render_pitch_graph
+    from PIL import Image
 
     cases = [
         ("heiban", "ほんめい", 0),  # LHHH, particle stays high
@@ -91,7 +90,6 @@ def test_entry_carries_pitch_accents(tmp_path):
     import zipfile as _zf
 
     import dicthelp
-
     from overlay.app.tokenize import Token
 
     dz = tmp_path / "d.zip"

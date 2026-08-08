@@ -9,7 +9,6 @@ import logging
 
 from hypothesis import given
 from hypothesis import strategies as st
-
 from overlay.app import doctor as doc
 from overlay.app.logsetup import (
     _add_session,

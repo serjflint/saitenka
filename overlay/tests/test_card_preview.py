@@ -1,9 +1,8 @@
 """Post-mine card preview: baked-layout render, HTML/media parse, audio-play command."""
 
-from PIL import Image
-
 from overlay.app.card_preview import PreviewData, PreviewState, render_card_preview
 from overlay.app.miner_ui import _html_items, _html_lines, _media_name
+from PIL import Image
 
 
 def test_preview_state_clear_resets_panel_and_all_rects():

@@ -1,9 +1,8 @@
 """Stage 4: styled runs — bold / colour / size mixed within one wrapped paragraph."""
 
-from util import assert_golden
-
 from overlay.model import Span, Style
 from overlay.render.layout import Block, render_rich
+from util import assert_golden
 
 RED = (200, 40, 40, 255)
 GREY = (120, 120, 120, 255)
@@ -57,7 +56,6 @@ def test_dot_marker_is_a_crisp_medium_circle():
     # The grammar/deinflection marker is a medium green dot (a tiny puzzle piece was unrecognisable).
     # Supersampled → crisp (alpha spans 0..255), centred, round (transparent corners), ~2/3 of the box.
     import numpy as np
-
     from overlay.draw.icons import dot
 
     a = np.asarray(dot(40))[:, :, 3]  # alpha channel

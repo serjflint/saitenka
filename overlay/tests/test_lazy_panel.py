@@ -3,7 +3,6 @@
 import threading
 
 import numpy as np
-
 from overlay.panel import (
     Definition,
     Entry,

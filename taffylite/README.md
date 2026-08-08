@@ -32,7 +32,7 @@ a = t.add_leaf(width=40, height=20)
 b = t.add_leaf(width=40, height=20)
 root = t.add_flex([a, b], direction="column", gap=8, padding=(0, 12, 0, 0))
 t.set_root(root)
-rects = t.compute()          # [(x, y, w, h), …] index-aligned to handles
+rects = t.compute()  # [(x, y, w, h), …] index-aligned to handles
 ```
 
 The measure-callback / Rust-cache design for the *future* intra-block text-layout track (taffy driving

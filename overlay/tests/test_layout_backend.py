@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from overlay.panel import panel_rows, render_panel
 from overlay.render.banded import WindowedPanel
 from overlay.render.layout_backend import (

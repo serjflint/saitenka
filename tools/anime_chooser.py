@@ -56,16 +56,12 @@ MOEDB_CACHE = Path.home() / ".cache" / "saitenka" / "moedb.csv"
 MAC_DEFAULT = "~/Library/Application Support/Anki2/User 1/collection.anki2"
 ANILIST = "https://graphql.anilist.co"
 JIMAKU = "https://jimaku.cc/api"
-UA = {
-    "User-Agent": "saitenka/1.0 (Japanese study tool)"
-}  # AniList/Cloudflare blocks default UA
+UA = {"User-Agent": "saitenka/1.0 (Japanese study tool)"}  # AniList/Cloudflare blocks default UA
 FSRS_DEFAULT_DECAY = 0.1542
 JP = re.compile(r"[぀-ヿ㐀-鿿]")
 TERM_FIELDS = ["expression", "word", "characters", "entry", "vocab"]
 CONCURRENCY = 6
-RARE_RANK = (
-    30000  # freq rank beyond which a word is "rare/hard" (rarity-based difficulty)
-)
+RARE_RANK = 30000  # freq rank beyond which a word is "rare/hard" (rarity-based difficulty)
 
 
 def load_freq(zip_path):
@@ -85,9 +81,7 @@ def load_freq(zip_path):
                 elif isinstance(d, dict):
                     f = d.get("frequency", d)
                     r = f.get("value") if isinstance(f, dict) else f
-                if isinstance(r, int | float) and (
-                    e[0] not in ranks or r < ranks[e[0]]
-                ):
+                if isinstance(r, int | float) and (e[0] not in ranks or r < ranks[e[0]]):
                     ranks[e[0]] = int(r)
     return ranks
 
@@ -99,13 +93,13 @@ def load_moedb(refresh=False):
         req = urllib.request.Request(MOEDB_URL, headers=UA)
         MOEDB_CACHE.write_bytes(urllib.request.urlopen(req, timeout=60).read())
     out = {}
-    with open(MOEDB_CACHE, newline="", encoding="utf-8") as f:
+    with Path(MOEDB_CACHE).open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             aid = (row.get("anilist_id") or "").strip()
             if not aid:
                 continue
 
-            def num(col):
+            def num(col, row=row):
                 v = (row.get(col) or "").strip()
                 return float(v) if v else None
 
@@ -152,7 +146,7 @@ def retrievability(s, elapsed, decay):
     return (1.0 + f * elapsed / s) ** decay
 
 
-def load_word_states(collection, tokmode=None, mature_ivl=21, forgotten_r=0.85):
+def load_word_states(collection, tokmode=None, _mature_ivl=21, forgotten_r=0.85):
     src = Path(os.path.expanduser(collection))
     tmp = Path(tempfile.mkdtemp(prefix="saitenka_chooser_"))
     dst = tmp / "c.anki2"
@@ -167,16 +161,12 @@ def load_word_states(collection, tokmode=None, mature_ivl=21, forgotten_r=0.85):
     flds = {}
     for ntid, ord_, name in cur.execute("SELECT ntid,ord,name FROM fields"):
         flds.setdefault(ntid, {})[name.lower()] = ord_
-    term_ord = {
-        m: next((o[c] for c in TERM_FIELDS if c in o), None) for m, o in flds.items()
-    }
+    term_ord = {m: next((o[c] for c in TERM_FIELDS if c in o), None) for m, o in flds.items()}
     last = dict(cur.execute("SELECT cid, MAX(id) FROM revlog GROUP BY cid"))
     now = time.time() * 1000.0
     note_state = {}
     rank = {"known": 3, "forgotten": 2, "new": 1}
-    for cid, nid, ctype, ivl, data in cur.execute(
-        "SELECT id,nid,type,ivl,data FROM cards"
-    ):
+    for cid, nid, ctype, _ivl, data in cur.execute("SELECT id,nid,type,ivl,data FROM cards"):
         s = dc = None
         if data:
             try:
@@ -186,11 +176,7 @@ def load_word_states(collection, tokmode=None, mature_ivl=21, forgotten_r=0.85):
             except Exception:
                 pass
         elapsed = (now - last[cid]) / 86_400_000.0 if cid in last else None
-        r = (
-            retrievability(s, elapsed, -(dc or FSRS_DEFAULT_DECAY))
-            if elapsed is not None
-            else None
-        )
+        r = retrievability(s, elapsed, -(dc or FSRS_DEFAULT_DECAY)) if elapsed is not None else None
         if ctype == 2 and r is not None and r < forgotten_r:
             st = "forgotten"
         elif ctype == 2:
@@ -211,7 +197,7 @@ def load_word_states(collection, tokmode=None, mature_ivl=21, forgotten_r=0.85):
         raw = re.sub(r"<[^>]+>", "", parts[o])
         raw = re.sub(r"\[[^\]]*\]", "", raw).replace(" ", "").replace("　", "")
         st = note_state[nid]
-        if st not in ("known", "forgotten"):
+        if st not in {"known", "forgotten"}:
             continue
         for term in (v for v in re.split(r"[,，、/／;；]", raw) if v and JP.search(v)):
             forms = {term}
@@ -272,9 +258,7 @@ def pick_episodes(files, n):
         m = re.search(r"(?:s\d+e|[\s\-_#.]e?)(\d{1,3})(?=[\s.\[\(_-]|$)", nm)
         key = m.group(1) if m else nm
         cur = by_ep.get(key)
-        if cur is None or (
-            nm.endswith(".srt") and not cur["name"].lower().endswith(".srt")
-        ):
+        if cur is None or (nm.endswith(".srt") and not cur["name"].lower().endswith(".srt")):
             by_ep[key] = f
     return list(by_ep.values())[:n]
 
@@ -284,9 +268,7 @@ async def jimaku_subs(client, sem, anilist_id, key, download, n_eps):
     async with sem:
         try:
             entries = (
-                await client.get(
-                    f"{JIMAKU}/entries/search?anilist_id={anilist_id}", headers=h
-                )
+                await client.get(f"{JIMAKU}/entries/search?anilist_id={anilist_id}", headers=h)
             ).json()
         except Exception:
             return None, []
@@ -296,9 +278,7 @@ async def jimaku_subs(client, sem, anilist_id, key, download, n_eps):
             return True, []
         try:
             files = (
-                await client.get(
-                    f"{JIMAKU}/entries/{entries[0]['id']}/files", headers=h
-                )
+                await client.get(f"{JIMAKU}/entries/{entries[0]['id']}/files", headers=h)
             ).json()
         except Exception:
             return True, []
@@ -312,26 +292,20 @@ async def jimaku_subs(client, sem, anilist_id, key, download, n_eps):
 
 
 async def fetch(args):
-    async with HttpxAiohttpClient(
-        headers=UA, timeout=30, follow_redirects=True
-    ) as client:
+    async with HttpxAiohttpClient(headers=UA, timeout=30, follow_redirects=True) as client:
         media = await anilist_list(client, args.anilist_user, args.status.split(","))
         log(f"{len(media)} titles ({args.status})")
         if args.airing:
             media = [m for m in media if m["airing"] == "RELEASING"]
             log(f"{len(media)} currently airing (RELEASING)")
-        media = sorted(media, key=lambda m: m["popularity"], reverse=True)[
-            : args.max_series
-        ]
+        media = sorted(media, key=lambda m: m["popularity"], reverse=True)[: args.max_series]
         log(f"processing {len(media)} titles, concurrency={CONCURRENCY}")
         if not args.jimaku_key:
             return media, [(None, [])] * len(media)
         sem = asyncio.Semaphore(CONCURRENCY)
         subs = await asyncio.gather(
             *[
-                jimaku_subs(
-                    client, sem, m["id"], args.jimaku_key, args.deep, args.episodes
-                )
+                jimaku_subs(client, sem, m["id"], args.jimaku_key, args.deep, args.episodes)
                 for m in media
             ]
         )
@@ -414,9 +388,7 @@ def episode_stats(text, known, forgotten, tokmode, freq_ranks):
 def coverage(texts, known, forgotten, tokmode, freq_ranks):
     """Aggregate over up to N sampled episodes; word-level dedup for a stable estimate."""
     stats = [
-        episode_stats(t, known, forgotten, tokmode, freq_ranks)
-        for t in texts
-        if t and t.strip()
+        episode_stats(t, known, forgotten, tokmode, freq_ranks) for t in texts if t and t.strip()
     ]
     if not stats:
         return None
@@ -459,8 +431,8 @@ def main():
     ap.add_argument("--anilist-user", required=True)
     ap.add_argument("--status", default="CURRENT,PLANNING,REPEATING")
     jdef = os.environ.get("JIMAKU_API_KEY")
-    if not jdef and os.path.exists(os.path.expanduser("~/.jimaku")):
-        jdef = open(os.path.expanduser("~/.jimaku")).read().strip()
+    if not jdef and Path(os.path.expanduser("~/.jimaku")).exists():
+        jdef = Path(os.path.expanduser("~/.jimaku")).read_text(encoding="utf-8").strip()
     ap.add_argument("--jimaku-key", default=jdef)
     ap.add_argument("--mode", choices=["n1", "reactivate"], default="n1")
     ap.add_argument(
@@ -490,12 +462,8 @@ def main():
         action="store_false",
         help="disable the MoeDB external difficulty cross-check + no-subs fallback",
     )
-    ap.add_argument(
-        "--moedb-refresh", action="store_true", help="re-download the MoeDB CSV cache"
-    )
-    ap.add_argument(
-        "--deep", action="store_true", help="download+tokenize a sample sub per series"
-    )
+    ap.add_argument("--moedb-refresh", action="store_true", help="re-download the MoeDB CSV cache")
+    ap.add_argument("--deep", action="store_true", help="download+tokenize a sample sub per series")
     ap.add_argument(
         "--max-series",
         type=int,
@@ -507,15 +475,9 @@ def main():
 
     tokmode = make_tokenizer() if args.deep else None
     freq_ranks = {}
-    if (
-        args.deep
-        and args.freq_dict
-        and os.path.exists(os.path.expanduser(args.freq_dict))
-    ):
+    if args.deep and args.freq_dict and Path(os.path.expanduser(args.freq_dict)).exists():
         freq_ranks = load_freq(os.path.expanduser(args.freq_dict))
-        log(
-            f"loaded {len(freq_ranks)} freq ranks ({Path(args.freq_dict).name}) for difficulty"
-        )
+        log(f"loaded {len(freq_ranks)} freq ranks ({Path(args.freq_dict).name}) for difficulty")
     log("loading known/forgotten sets from Anki …")
     known, forgotten = load_word_states(args.collection, tokmode)
     log(f"known {len(known)} · forgotten {len(forgotten)}")
@@ -541,7 +503,7 @@ def main():
                 else None
             ),
         }
-        for m, (avail, texts) in zip(media, sub_results)
+        for m, (avail, texts) in zip(media, sub_results, strict=False)
     ]
 
     def enjoyment(row):
@@ -583,11 +545,7 @@ def main():
     )
     for i, r in enumerate(rows[: args.limit], 1):
         c = r["cov"]
-        moe_v = (
-            r["moe"]["overall"]
-            if (r.get("moe") and r["moe"]["overall"] is not None)
-            else None
-        )
+        moe_v = r["moe"]["overall"] if (r.get("moe") and r["moe"]["overall"] is not None) else None
         cov = f"{c['cov'] * 100:4.0f}%" if c else "  –  "
         new = f"{c['new_words']:>5}" if c else "    –"
         diff = f"{c['difficulty'] * 100:4.0f}%" if c else "    –"

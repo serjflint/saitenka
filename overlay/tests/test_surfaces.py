@@ -9,7 +9,6 @@ that forgets to declare shown-ness is exactly the #100 picker click-through bug)
 from __future__ import annotations
 
 import pytest
-
 from overlay.app import surfaces
 from overlay.app.controller import Reader
 from overlay.app.surfaces import SurfaceSpec

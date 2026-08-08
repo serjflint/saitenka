@@ -7,7 +7,6 @@ for the handful of tests that drive the real tooltip pipeline through ``FakeIPC`
 from __future__ import annotations
 
 import util
-
 from overlay.app.controller import Reader
 
 

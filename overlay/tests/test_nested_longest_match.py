@@ -3,13 +3,12 @@ whole dictionary term, mirroring the base tooltip's forward longest-match on a c
 
 from __future__ import annotations
 
-from util import FakeIPC
-
 from overlay.app import nested_popup
 from overlay.app.controller import Reader
 from overlay.app.tokenize import Token
 from overlay.model import LinkBox, ScanBox
 from overlay.panel import Definition, Entry
+from util import FakeIPC
 
 
 class _DS:

@@ -13,11 +13,11 @@ from __future__ import annotations
 import contextlib
 
 import numpy as np
+from overlay.app.overlay_ids import OverlayId
+from overlay.mpvio.osd import Overlay
 from PIL import Image
 
 from overlay import otel_metrics
-from overlay.app.overlay_ids import OverlayId
-from overlay.mpvio.osd import Overlay
 
 
 class _FakeIPC:

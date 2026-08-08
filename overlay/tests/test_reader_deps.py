@@ -4,7 +4,6 @@ Anki-dependent pieces must degrade to None (never raise) so a closed Anki can't 
 from __future__ import annotations
 
 import pytest
-
 from overlay.app import anki as anki_mod
 from overlay.app import reader_deps
 
@@ -176,7 +175,6 @@ def test_freqdict_load_caps_at_top_x_and_drops_the_uncolorable_tail(tmp_path):
     must not load those rows — a startup win that must stay behavior-identical for ranks within the
     cap. A rank beyond the cap looks up as None (uncolored), exactly as a full load + band() would."""
     import dicthelp
-
     from overlay.app.scoring import FREQ_BAND_TOP_X
     from overlay.app.wordlists import FreqDict
 

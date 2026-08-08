@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from overlay.app import telemetry
 from overlay.app.config import TelemetryOptions
 

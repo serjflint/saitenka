@@ -5,12 +5,11 @@ import json
 import zipfile
 
 import dicthelp
-from util import FakeIPC, assert_golden
-
 from overlay.app.controller import Reader
 from overlay.app.subtitle_render import NullRenderer
 from overlay.app.subtitles import WordBox
 from overlay.app.tokenize import Token
+from util import FakeIPC, assert_golden
 
 
 def _make_dict_zip(path, title, terms=(), kanji=()):

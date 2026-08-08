@@ -29,7 +29,7 @@ from overlay import otel_metrics
 try:
     # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the
     # inflection chain (🧩 -て « -いる « -た); without it the chain is empty and nothing is drawn.
-    from saitenka_deinflect import inflection_chain
+    from saitenka_deinflect import inflection_chain  # noqa: TID251  # GPL chokepoint importer
 except ImportError:  # pragma: no cover — exercised via the deinflect-absent path
 
     def inflection_chain(surface: str, *targets: str) -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)

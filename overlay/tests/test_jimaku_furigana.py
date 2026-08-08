@@ -1,7 +1,6 @@
 """Jimaku filename parsing + Amazon inline-furigana stripping."""
 
 import pytest
-
 from overlay.app.jimaku import JimakuClient, JimakuError, parse_filename
 from overlay.app.tokenize import tokenize
 

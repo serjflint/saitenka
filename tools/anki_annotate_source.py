@@ -57,9 +57,7 @@ def anki(action, **params):
 
 
 def sanitize_tag(deck):
-    return "saitenka_orig::" + deck.replace(" ", "_").replace("::", "-").replace(
-        '"', ""
-    )
+    return "saitenka_orig::" + deck.replace(" ", "_").replace("::", "-").replace('"', "")
 
 
 def main():
@@ -76,18 +74,14 @@ def main():
         default=None,
         help="skip decks under this path (repeatable; default: Backlog, Saitenka)",
     )
-    ap.add_argument(
-        "--apply", action="store_true", help="write via AnkiConnect (Anki open)"
-    )
+    ap.add_argument("--apply", action="store_true", help="write via AnkiConnect (Anki open)")
     args = ap.parse_args()
 
     src = Path(os.path.expanduser(args.collection))
     if not src.exists():
         raise SystemExit(f"collection not found: {src}")
     pat = re.compile(args.deck_pattern)
-    excl = (
-        args.exclude_deck if args.exclude_deck is not None else ["Backlog", "Saitenka"]
-    )
+    excl = args.exclude_deck if args.exclude_deck is not None else ["Backlog", "Saitenka"]
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka_annot_"))
     dst = tmp / "c.anki2"
@@ -100,9 +94,7 @@ def main():
     con.create_collation("unicase", lambda a, b: (a > b) - (a < b))
     cur = con.cursor()
 
-    deck_name = {
-        i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")
-    }
+    deck_name = {i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")}
 
     def excluded(n):
         return any(n == p or n.startswith(p + "::") for p in excl)
@@ -129,9 +121,7 @@ def main():
         o = misc_ord.get(mid)
         parts = flds.split("\x1f")
         misc_empty = o is not None and o < len(parts) and not parts[o].strip()
-        plan.append(
-            {"nid": nid, "deck": deck, "tag": sanitize_tag(deck), "misc": misc_empty}
-        )
+        plan.append({"nid": nid, "deck": deck, "tag": sanitize_tag(deck), "misc": misc_empty})
     con.close()
 
     by_deck = Counter(p["deck"] for p in plan)
@@ -142,9 +132,7 @@ def main():
         log(f"    {n:>5}  {d}")
     if len(by_deck) > 12:
         log(f"    … +{len(by_deck) - 12} more decks")
-    log(
-        f"TOTAL: {len(plan)} notes → tag; {sum(1 for p in plan if p['misc'])} → MiscInfo fill"
-    )
+    log(f"TOTAL: {len(plan)} notes → tag; {sum(1 for p in plan if p['misc'])} → MiscInfo fill")
 
     if not args.apply:
         log("DRY-RUN — nothing written. Re-run with --apply (Anki OPEN) to execute.")
@@ -154,7 +142,7 @@ def main():
         anki("version")
     except Exception as e:
         raise SystemExit(f"AnkiConnect unreachable ({e}). Open Anki first.")
-    # tags (grouped)
+    # ── group note ids by tag ──
     by_tag = {}
     for p in plan:
         by_tag.setdefault(p["tag"], []).append(p["nid"])
@@ -176,9 +164,7 @@ def main():
             ],
         )
         log(f"  MiscInfo {min(i + CHUNK, len(fills))}/{len(fills)}")
-    log(
-        f"APPLY complete. Tagged provenance + filled {len(fills)} MiscInfo. No cards moved."
-    )
+    log(f"APPLY complete. Tagged provenance + filled {len(fills)} MiscInfo. No cards moved.")
 
 
 if __name__ == "__main__":

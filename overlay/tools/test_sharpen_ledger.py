@@ -1,5 +1,5 @@
 """Tests for the sharpen ledger lib. Run explicitly (tools/ is outside `poe all`):
-    uv run python -m pytest tools/test_sharpen_ledger.py
+uv run python -m pytest tools/test_sharpen_ledger.py
 """
 
 from __future__ import annotations

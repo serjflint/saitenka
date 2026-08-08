@@ -1,0 +1,190 @@
+[
+  {
+    "path": "overlay/src/overlay/app/card_preview.py",
+    "file_name": "card_preview.py",
+    "functions": [
+      {
+        "name": "render_card_preview",
+        "complexity": 16
+      }
+    ]
+  },
+  {
+    "path": "overlay/src/overlay/app/dictdb.py",
+    "file_name": "dictdb.py",
+    "functions": [
+      {
+        "name": "_read_term_meta",
+        "complexity": 19
+      }
+    ]
+  },
+  {
+    "path": "overlay/src/overlay/app/sub_index.py",
+    "file_name": "sub_index.py",
+    "functions": [
+      {
+        "name": "parse_ass",
+        "complexity": 18
+      }
+    ]
+  },
+  {
+    "path": "overlay/src/overlay/app/yomitan_db_import.py",
+    "file_name": "yomitan_db_import.py",
+    "functions": [
+      {
+        "name": "import_database",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "overlay/src/overlay/panel.py",
+    "file_name": "panel.py",
+    "functions": [
+      {
+        "name": "panel_rows",
+        "complexity": 31
+      }
+    ]
+  },
+  {
+    "path": "overlay/src/overlay/render/banded.py",
+    "file_name": "banded.py",
+    "functions": [
+      {
+        "name": "WindowedPanel::_render_ahead_parallel",
+        "complexity": 19
+      }
+    ]
+  },
+  {
+    "path": "overlay/src/overlay/sc/walk.py",
+    "file_name": "walk.py",
+    "functions": [
+      {
+        "name": "_Walker::_emit_inline",
+        "complexity": 18
+      },
+      {
+        "name": "_parse_color",
+        "complexity": 19
+      }
+    ]
+  },
+  {
+    "path": "deinflect/src/saitenka_deinflect/engine.py",
+    "file_name": "engine.py",
+    "functions": [
+      {
+        "name": "deinflect",
+        "complexity": 31
+      }
+    ]
+  },
+  {
+    "path": "tools/anime_chooser.py",
+    "file_name": "anime_chooser.py",
+    "functions": [
+      {
+        "name": "sub_lines",
+        "complexity": 16
+      },
+      {
+        "name": "load_freq",
+        "complexity": 22
+      },
+      {
+        "name": "episode_stats",
+        "complexity": 26
+      },
+      {
+        "name": "main",
+        "complexity": 46
+      },
+      {
+        "name": "load_word_states",
+        "complexity": 56
+      }
+    ]
+  },
+  {
+    "path": "tools/anki_annotate_source.py",
+    "file_name": "anki_annotate_source.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 29
+      }
+    ]
+  },
+  {
+    "path": "tools/anki_build_decks.py",
+    "file_name": "anki_build_decks.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 47
+      }
+    ]
+  },
+  {
+    "path": "tools/anki_normalize_fields.py",
+    "file_name": "anki_normalize_fields.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 109
+      }
+    ]
+  },
+  {
+    "path": "tools/anki_rank_dicts.py",
+    "file_name": "anki_rank_dicts.py",
+    "functions": [
+      {
+        "name": "load_freq_dict",
+        "complexity": 33
+      },
+      {
+        "name": "main",
+        "complexity": 91
+      }
+    ]
+  },
+  {
+    "path": "tools/anki_refile_by_state.py",
+    "file_name": "anki_refile_by_state.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 39
+      }
+    ]
+  },
+  {
+    "path": ".agents/hooks/block-shell-search.py",
+    "file_name": "block-shell-search.py",
+    "functions": [
+      {
+        "name": "_offending_binary",
+        "complexity": 16
+      }
+    ]
+  },
+  {
+    "path": ".agents/hooks/comment-review.py",
+    "file_name": "comment-review.py",
+    "functions": [
+      {
+        "name": "flagged_comments",
+        "complexity": 19
+      },
+      {
+        "name": "is_git_commit",
+        "complexity": 19
+      }
+    ]
+  }
+]

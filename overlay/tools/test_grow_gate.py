@@ -61,10 +61,10 @@ def _runner(cut: str = _CUT):
     def run(src: str) -> bool:
         ns: dict = {}
         try:
-            exec(compile(cut + "\n" + src, "<t>", "exec"), ns)  # noqa: S102 — toy CUT, test-only
+            exec(compile(cut + "\n" + src, "<t>", "exec"), ns)
             ns["test_it"]()
             return True
-        except Exception:  # noqa: BLE001 — any raise = the test failed
+        except Exception:
             return False
 
     return run
