@@ -83,8 +83,8 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
     assert reader.sub_picker.candidates == tuple(candidates)
     rows = sub_picker._rows(reader)
     assert [row.text for row in rows] == [c.name for c in candidates]
-    assert rows[0].status == "jimaku · match"  # provider tag + resolution match
-    assert rows[1].status == "tsukihime"
+    assert rows[0].status == "jimaku · srt · match"  # provider · format · resolution-match
+    assert rows[1].status == "tsukihime · ass"
     assert all(row.click_kind == "picker-download" for row in rows)
     assert _picker_adds(ipc)  # the panel painted
 

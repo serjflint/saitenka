@@ -22,6 +22,7 @@ import logging
 import queue
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from overlay.app.overlay_ids import OverlayId
@@ -140,13 +141,20 @@ def update(reader: Reader) -> None:
 def _rows(reader: Reader) -> list[SidebarRow]:
     rows: list[SidebarRow] = []
     for index, candidate in enumerate(reader.sub_picker.candidates):
-        status = f"{candidate.provider} · match" if candidate.match else candidate.provider
+        # provider · format · match — same dot-tag idiom as the provider pill; `match` = the release
+        # RESOLUTION matches this encode (a picker-fetch is never pre-downloaded), `srt`/`ass` the format.
+        ext = Path(candidate.name).suffix.lstrip(".").lower()
+        tags = [
+            candidate.provider,
+            *([ext] if ext else []),
+            *(["match"] if candidate.match else []),
+        ]
         rows.append(
             SidebarRow(
                 value=index,
                 timestamp=_human_size(candidate.size),
                 text=candidate.name,
-                status=status,
+                status=" · ".join(tags),
                 click_kind="picker-download",
             )
         )
@@ -180,7 +188,7 @@ def redraw(reader: Reader) -> None:
     if not state.open:
         return
     scale = reader.chrome_scale
-    width = max(round(420 * scale), min(round(760 * scale), round(reader.osd[0] * 0.5)))
+    width = max(round(480 * scale), min(round(960 * scale), round(reader.osd[0] * 0.62)))
     width = min(width, reader.osd[0] - round(36 * scale))
     height = max(round(220 * scale), round(reader.osd[1] * 0.7))
     x = (reader.osd[0] - width) // 2
