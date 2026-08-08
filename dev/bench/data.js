@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786151019367,
+  "lastUpdate": 1786169213235,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1079,6 +1079,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.636,
             "range": "±7.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "46dede92c771735305ff49667714bd03af132c29",
+          "message": "refactor: bundle arg-clumps into config objects; ratchet ruff max-args to 9 (#216) (#218)\n\n* refactor(mining): bundle note content into config objects (#216)\n\nbuild_markers now takes the MarkerContext it used to construct internally;\nbuild_note takes a CardContent bundle (sentence/media/frequency) instead of\nsix positional content args. Drops two arg-clump noqas.\n\n* refactor(subtitles): bundle draw style+geometry into _SubStyle/_Place (#216)\n\nThe two subtitle draw helpers shared a font/metric/geometry clump computed\nonce per raster; hoist it into a frozen _SubStyle and pass per-token position\nas a _Place. Drops two arg-clump noqas.\n\n* refactor(render): bundle render_document geometry into DocStyle (#216)\n\npadding/gap/background/indent_px/gutter_px/base flow together through\nlayout+composite; bundle into a frozen DocStyle and make the out-params\nkeyword-only. Drops the PLR0913+PLR0917 arg-clump noqa.\n\n* refactor(mpv): bundle launch flags into MpvLaunchOptions (#216)\n\nbuild_mpv_argv and cli_run._launch_mpv_and_connect shared a slang/start/\nscreenshot/use_config/fullscreen/extra_args flag clump; hoist it into a frozen\nMpvLaunchOptions built once in run_impl. Drops two arg-clump noqas.\n\n* refactor(run): bundle subtitle-sourcing clump into RunSubtitleOptions (#216)\n\nsub_file/jimaku/jimaku_key/slang/resync threaded identically through\n_resolve_subtitles, reslot_to_current, _install_watch_hooks and\n_start_run_provider_fetch; bundle into a frozen RunSubtitleOptions built once\nin run_impl (per-episode title/episode stay separate). Drops two arg-clump\nnoqas and pulls the two 9/10-arg neighbours under the threshold too.\n\n* refactor(run): bundle CLI reader-option overrides into RunFlags (#216)\n\n_build_run_options took 14 CLI flags; bundle the 13 overrides into a frozen\nRunFlags built in run_impl (config keys still win where unset). Drops an\narg-clump noqa; tests use dataclasses.replace for per-case overrides.\n\n* refactor(run): bundle dep-build inputs into RunDepsRequest (#216)\n\n_build_run_deps took 14 args (mining flags + raw [mine] + known-words + dict/\nfreq/pitch titles); bundle into a frozen RunDepsRequest built in run_impl.\nDrops the last cli_run arg-clump noqa.\n\n* refactor(run): bundle demo/screenshot actions into DemoSpec (#216)\n\n_execute_reader_session took 11 args; bundle the scripted demo params\n(demo_word/screenshot/scroll/translate/mine/bulk/seconds) into a frozen\nDemoSpec shared with _run_demo_actions. Drops the last cli_run arg-clump noqa.\n\n* refactor(prewarm): bundle _PrewarmJob options into PrewarmTuning (#216)\n\nThe nine keyword-only mode/progress/plateau args become a frozen PrewarmTuning\n(the *-block the ctor already separated). Drops an arg-clump noqa.\n\n* refactor(bench): bundle run_trace knobs into TraceParams (#216)\n\nThe nine argparse-derived --trace knobs become a frozen TraceParams, unpacked\nto locals at the top so the body is untouched. Drops the last arg-clump noqa.\n\n* chore(lint): ratchet ruff max-args 10→9; bundle attach subtitle clump (#216)\n\nAll over-10 data-clumps are now config objects, so drop the threshold to 9.\nNewly exposed at 10: prepare_attach_startup → AttachSubtitleOptions (the attach\nanalog of RunSubtitleOptions); document._render_blocks → threads the existing\nDocStyle. The remaining PLR0913 noqas are NOT data-clumps — cyclopts commands\n(run/run_impl/attach) and render-geometry primitives (flow/banded); next\nratchet to 8 tracked in #216.\n\nAlso fix the two bench-module test loaders to register in sys.modules before\nexec_module — a @dataclass under 'from __future__ import annotations' resolves\nfield types via sys.modules[cls.__module__], which the unregistered manual\nimport left as None.",
+          "timestamp": "2026-08-08T09:06:02+03:00",
+          "tree_id": "cba6500d09cf95643a795064ce88465666ef7c34",
+          "url": "https://github.com/serjflint/saitenka/commit/46dede92c771735305ff49667714bd03af132c29"
+        },
+        "date": 1786169212023,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.316,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.004,
+            "range": "±2.8%",
             "unit": "ms"
           }
         ]
