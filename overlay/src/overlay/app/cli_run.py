@@ -45,6 +45,26 @@ class RunSubtitleOptions:
     resync: bool = False
 
 
+@dataclass(frozen=True)
+class RunFlags:
+    """The CLI flags that override ReaderOptions defaults — bundled so run_impl's flat cyclopts signature
+    threads one value into :func:`_build_run_options` instead of a dozen (config keys win where unset)."""
+
+    mine_key: str
+    mine_all_key: str
+    translate_key: str
+    preview_key: str
+    tip_height: float
+    tip_scale: float
+    pause_on_tooltip: bool
+    hover_switch_delay: float
+    no_audio_play: bool
+    mine_preview: bool
+    auto_translate: bool
+    prefetch: bool
+    layout_engine: Literal["default", "taffy"]
+
+
 def setup_session_telemetry(cfg: dict) -> None:
     """Stand up telemetry capture for THIS reader session (opt-in via ``[telemetry].enabled``). Scoped
     to run/attach on purpose — NOT ``cli.main`` — because a one-shot utility command (``report`` /
@@ -343,23 +363,7 @@ def _launch_mpv_and_connect(
     return proc, ipc
 
 
-def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    cfg: dict,
-    *,
-    mine_key: str,
-    mine_all_key: str,
-    translate_key: str,
-    preview_key: str,
-    tip_height: float,
-    tip_scale: float,
-    pause_on_tooltip: bool,
-    hover_switch_delay: float,
-    no_audio_play: bool,
-    mine_preview: bool,
-    auto_translate: bool,
-    prefetch: bool,
-    layout_engine: Literal["default", "taffy"],
-):
+def _build_run_options(cfg: dict, flags: RunFlags):
     from overlay.app.config import (
         KeyOptions,
         MiningOptions,
@@ -376,12 +380,12 @@ def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config o
     stats: dict = raw_stats if isinstance(raw_stats, dict) else {}
     return ReaderOptions(
         keys=KeyOptions(
-            mine_key=mine_key,
+            mine_key=flags.mine_key,
             mine_video_key=cfg.get("mine", {}).get("video_key", _ko.mine_video_key),
-            mine_all_key=mine_all_key,
-            translate_key=translate_key,
+            mine_all_key=flags.mine_all_key,
+            translate_key=flags.translate_key,
             overlay_toggle_key=cfg.get("overlay_toggle_key", _ko.overlay_toggle_key),
-            preview_key=preview_key,
+            preview_key=flags.preview_key,
             hover_pause_key=cfg.get("hover_pause_key", _ko.hover_pause_key),
             subtitle_language_key=cfg.get("subtitle_language_key", _ko.subtitle_language_key),
             bookmark_key=cfg.get("bookmark_key", _ko.bookmark_key),
@@ -395,30 +399,30 @@ def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config o
             sub_replay_key=cfg.get("sub_replay_key", "Alt+DOWN"),
         ),
         tooltip=TooltipOptions(
-            tip_max_frac=tip_height,
-            tip_scale=tip_scale,
+            tip_max_frac=flags.tip_height,
+            tip_scale=flags.tip_scale,
             nested_max_frac=cfg.get("nested_max_frac", _tt.nested_max_frac),
-            pause_on_tooltip=pause_on_tooltip,
+            pause_on_tooltip=flags.pause_on_tooltip,
             annotation_mode=cfg.get("annotation_mode", _tt.annotation_mode),
-            hover_switch_delay=hover_switch_delay,
+            hover_switch_delay=flags.hover_switch_delay,
             scan_delay=cfg.get("scan_delay", _tt.scan_delay),
             hide_delay=cfg.get("hide_delay", _tt.hide_delay),
             flash_secs=cfg.get("flash_secs", _tt.flash_secs),
             panel_cache_max=cfg.get("panel_cache_max", _tt.panel_cache_max),
-            layout_engine=layout_engine,
+            layout_engine=flags.layout_engine,
             render_cache=bool(cfg.get("render_cache", _tt.render_cache)),
             mask_atlas=bool(cfg.get("mask_atlas", _tt.mask_atlas)),
             render_cache_max_mb=cfg.get("render_cache_max_mb", _tt.render_cache_max_mb),
             render_cache_min_height=cfg.get("render_cache_min_height", _tt.render_cache_min_height),
         ),
         mining=MiningOptions(
-            play_audio=not no_audio_play,
-            show_preview=mine_preview,
+            play_audio=not flags.no_audio_play,
+            show_preview=flags.mine_preview,
             max_bulk=cfg.get("max_bulk", _mo.max_bulk),
             anki_ok_ttl=cfg.get("anki_ok_ttl", _mo.anki_ok_ttl),
             anki_ping_timeout=cfg.get("anki_ping_timeout", _mo.anki_ping_timeout),
         ),
-        translation=TranslationOptions(auto_translate=auto_translate),
+        translation=TranslationOptions(auto_translate=flags.auto_translate),
         stats=StatsOptions(
             enabled=bool(stats.get("enabled", False)),
             summary=bool(stats.get("summary", True)),
@@ -431,7 +435,7 @@ def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config o
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
             head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
         ),
-        prefetch=prefetch,
+        prefetch=flags.prefetch,
     )
 
 
@@ -998,19 +1002,21 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     opts = _build_run_options(
         cfg,
-        mine_key=mine_key,
-        mine_all_key=mine_all_key,
-        translate_key=translate_key,
-        preview_key=preview_key,
-        tip_height=tip_height,
-        tip_scale=tip_scale,
-        pause_on_tooltip=pause_on_tooltip,
-        hover_switch_delay=hover_switch_delay,
-        no_audio_play=no_audio_play,
-        mine_preview=mine_preview,
-        auto_translate=auto_translate,
-        prefetch=prefetch,
-        layout_engine=layout_engine,
+        RunFlags(
+            mine_key=mine_key,
+            mine_all_key=mine_all_key,
+            translate_key=translate_key,
+            preview_key=preview_key,
+            tip_height=tip_height,
+            tip_scale=tip_scale,
+            pause_on_tooltip=pause_on_tooltip,
+            hover_switch_delay=hover_switch_delay,
+            no_audio_play=no_audio_play,
+            mine_preview=mine_preview,
+            auto_translate=auto_translate,
+            prefetch=prefetch,
+            layout_engine=layout_engine,
+        ),
     )
 
     # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /
