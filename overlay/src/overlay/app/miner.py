@@ -14,7 +14,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from overlay.app.anki import AnkiError, bold_word, build_note, dedupe
+from overlay.app.anki import AnkiError, CardContent, bold_word, build_note, dedupe
 from overlay.app.lookup import card_for
 from overlay.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
 
@@ -122,24 +122,26 @@ class Miner:
         configured (so ``build_note`` takes the plain ``[mine.fields]`` route and skips this work)."""
         if not self.r.mine_cfg.card_format:
             return None
-        from overlay.app.card_markers import build_markers
+        from overlay.app.card_markers import MarkerContext, build_markers
         from overlay.app.lookup import POS_EN
 
         title, _ep = source_meta(video)
         pitch_html, pitch_positions = self.pitch(tok)
         return build_markers(
-            card,
-            sentence_html=sentence_html,
-            picture=pic,
-            audio=audio,
-            misc=misc,
-            doc_title=title,
-            freq_html=freq[0],
-            freq_rank=freq[1],
-            pos_en=POS_EN.get(tok.pos, tok.pos or "word"),
-            tags=tags,
-            pitch_html=pitch_html,
-            pitch_positions=pitch_positions,
+            MarkerContext(
+                card=card,
+                sentence_html=sentence_html,
+                picture=pic,
+                audio=audio,
+                misc=misc,
+                doc_title=title,
+                freq_html=freq[0],
+                freq_rank=freq[1],
+                pos_en=POS_EN.get(tok.pos, tok.pos or "word"),
+                tags=tags,
+                pitch_html=pitch_html,
+                pitch_positions=pitch_positions,
+            )
         )
 
     def _card_for(self, tok):
@@ -308,12 +310,14 @@ class Miner:
             note = build_note(
                 r.mine_cfg,
                 card,
-                sentence_html,
-                pic,
-                audio,
-                misc,
-                freq[0],
-                freq[1],
+                CardContent(
+                    sentence_html=sentence_html,
+                    picture=pic,
+                    audio=audio,
+                    misc=misc,
+                    freq_html=freq[0],
+                    freq_sort=freq[1],
+                ),
                 tags,
                 allow_duplicate=force,
                 markers=markers,
@@ -374,12 +378,14 @@ class Miner:
                 note = build_note(
                     r.mine_cfg,
                     card,
-                    sentence_html,
-                    pic,
-                    audio,
-                    misc,
-                    freq[0],
-                    freq[1],
+                    CardContent(
+                        sentence_html=sentence_html,
+                        picture=pic,
+                        audio=audio,
+                        misc=misc,
+                        freq_html=freq[0],
+                        freq_sort=freq[1],
+                    ),
                     tags,
                     markers=markers,
                 )

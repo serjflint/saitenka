@@ -2,7 +2,7 @@
 
 import pytest
 
-from overlay.app.anki import KNOWN_MARKERS, MineConfig, bold_word, build_note
+from overlay.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
 from overlay.app.lookup import card_for
 from overlay.app.media import AnimatedClip, Timespan, clip_audio
 from overlay.app.toast import render_toast
@@ -29,10 +29,9 @@ def test_build_note_maps_lapis_fields():
     note = build_note(
         MineConfig(),
         card_for(tok),
-        "本を<b>読む</b>",
-        picture="p.jpg",
-        audio="a.mp3",
-        misc="ep10 · 10:03",
+        CardContent(
+            sentence_html="本を<b>読む</b>", picture="p.jpg", audio="a.mp3", misc="ep10 · 10:03"
+        ),
     )
     f = note["fields"]
     assert note["modelName"] == "Lapis"
@@ -53,7 +52,9 @@ def test_build_note_maps_lapis_fields():
 def test_build_note_writes_frequency_fields():
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     note = build_note(
-        MineConfig(), card_for(tok), "s", freq_html="<ul><li>FreqA: 12</li></ul>", freq_sort="12"
+        MineConfig(),
+        card_for(tok),
+        CardContent(sentence_html="s", freq_html="<ul><li>FreqA: 12</li></ul>", freq_sort="12"),
     )
     assert note["fields"]["Frequency"] == "<ul><li>FreqA: 12</li></ul>"  # plan: freq → Frequency
     assert note["fields"]["FreqSort"] == "12"
@@ -64,7 +65,7 @@ def test_build_note_merges_source_tags():
     note = build_note(
         MineConfig(),
         card_for(tok),
-        "s",
+        CardContent(sentence_html="s"),
         tags=["saitenka::mined", "saitenka::source::Nippon_Sangoku", "saitenka::ep::10"],
     )
     assert "saitenka" in note["tags"]  # static tool tag kept
@@ -76,7 +77,7 @@ def test_build_note_merges_source_tags():
 def test_custom_field_map_only_writes_mapped():
     cfg = MineConfig(model="Animecards", fields={"expression": "Word", "reading": "Reading"})
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), "s")
+    note = build_note(cfg, card_for(tok), CardContent(sentence_html="s"))
     assert set(note["fields"]) == {"Word", "Reading", "IsWordAndSentenceCard"}
     assert note["fields"]["Word"] == "読む"
 
@@ -92,7 +93,9 @@ def test_custom_field_map_only_writes_mapped():
 )
 def test_build_note_card_kind_sets_exactly_one_marker(card_kind, marker):
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(MineConfig(card_kind=card_kind), card_for(tok), "s")
+    note = build_note(
+        MineConfig(card_kind=card_kind), card_for(tok), CardContent(sentence_html="s")
+    )
     present = [m for m in KNOWN_MARKERS if m in note["fields"]]
     assert (
         present == [marker] and note["fields"][marker] == "1"
@@ -101,14 +104,16 @@ def test_build_note_card_kind_sets_exactly_one_marker(card_kind, marker):
 
 def test_build_note_card_kind_none_sets_no_marker():
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(MineConfig(card_kind="none"), card_for(tok), "s")
+    note = build_note(MineConfig(card_kind="none"), card_for(tok), CardContent(sentence_html="s"))
     assert not any(m in note["fields"] for m in KNOWN_MARKERS)  # no card-template marker at all
 
 
 def test_build_note_unknown_card_kind_falls_back_to_default(caplog):
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     with caplog.at_level("WARNING"):
-        note = build_note(MineConfig(card_kind="bogus"), card_for(tok), "s")
+        note = build_note(
+            MineConfig(card_kind="bogus"), card_for(tok), CardContent(sentence_html="s")
+        )
     assert note["fields"]["IsWordAndSentenceCard"] == "1"  # typo didn't disable the marker
     assert "card_kind" in caplog.text
 
@@ -120,7 +125,7 @@ def test_build_note_card_format_wins_over_fields():
         card_format={"Word": "{expression}", "Furigana": "{furigana}"},
     )
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), "本を<b>読む</b>")
+    note = build_note(cfg, card_for(tok), CardContent(sentence_html="本を<b>読む</b>"))
     assert note["fields"]["Word"] == "読む" and note["fields"]["Furigana"] == "読[よ]む"
     assert "Expression" not in note["fields"]  # the entity map is ignored wholesale
     assert note["fields"]["IsWordAndSentenceCard"] == "1"  # card_kind marker still added
@@ -130,7 +135,7 @@ def test_build_note_card_format_fans_one_entity_into_two_fields():
     # the capability the entity→field map couldn't express: one marker in several fields
     cfg = MineConfig(card_format={"Word": "{expression}", "Key": "{expression}"})
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), "s")
+    note = build_note(cfg, card_for(tok), CardContent(sentence_html="s"))
     assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
 
 
@@ -188,7 +193,9 @@ def test_build_note_card_format_uses_passed_markers():
     # the miner passes a full marker map (pitch/pos the args can't supply); build_note renders it
     cfg = MineConfig(card_format={"Pitch": "{pitch-accents}"})
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), "s", markers={"pitch-accents": "よむ [0]"})
+    note = build_note(
+        cfg, card_for(tok), CardContent(sentence_html="s"), markers={"pitch-accents": "よむ [0]"}
+    )
     assert note["fields"]["Pitch"] == "よむ [0]"
 
 
