@@ -40,6 +40,7 @@ from overlay.app.cli_run import run_impl
 from overlay.app.config import TooltipOptions, config_path, load_config
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.paths import cache_dir
+from overlay.app.subselect import ProviderConfig
 
 log = logging.getLogger(__name__)
 
@@ -1219,58 +1220,86 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
 
 
 def _finish_attach_subtitle_startup(
-    reader,
-    ipc,
-    startup,
-    *,
-    slang: str,
-    fetch_in_background: tuple[str, ...],
-    enabled_providers: tuple[str, ...],
-    jimaku_key: str | None,
-    jimaku_title: str | None,
-    episode: int | None,
-    resync: bool,
-    tsukihime_config: dict | None = None,
+    reader, ipc, startup, cfg: ProviderConfig, *, fetch_in_background: tuple[str, ...]
 ) -> None:
     if startup is not None:
-        reader.configure_subtitle_mode(startup, slang=slang)
+        reader.configure_subtitle_mode(startup, slang=cfg.slang)
     build_sub_index_for_current_track(reader)
-    from overlay.app.subselect import fetch_provider_path, list_candidates
+    from overlay.app.subselect import configure_providers, provider_fetch_factory
 
-    def fetch_for(video_path: str, providers: tuple[str, ...], *, force: bool = False):
-        return lambda: fetch_provider_path(
-            video_path,
-            providers,
-            jimaku_key=jimaku_key,
-            title_override=jimaku_title,
-            episode=episode,
-            resync=resync,
-            force=force,
-            tsukihime_config=tsukihime_config,
-        )
-
-    reader.configure_subtitle_retry(
-        # a manual retry re-fetches + re-syncs, overriding a stale/mistimed cached srt
-        (lambda video_path: fetch_for(video_path, enabled_providers, force=True))
-        if enabled_providers
-        else None
-    )
-    if enabled_providers:
-        reader.configure_sub_picker(
-            lambda video: list_candidates(
-                video,
-                enabled_providers,
-                jimaku_key=jimaku_key,
-                title_override=jimaku_title,
-                tsukihime_config=tsukihime_config,
-            )
-        )
+    configure_providers(reader, cfg)  # shared with run: manual re-sync retry + Ctrl+J source picker
     if not fetch_in_background:
         return
     video_path = ipc.command("get_property", "path").get("data")
     if not video_path:
         return
-    reader.fetch_japanese_subs_async(fetch_for(str(video_path), fetch_in_background))
+    background_fetch = provider_fetch_factory(fetch_in_background, cfg)
+    reader.fetch_japanese_subs_async(background_fetch(str(video_path)))
+
+
+def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
+    """Re-establish Japanese subs when the user's mpv advances to the next episode in ATTACH mode
+    (#100). Reactive only — fired from mpv's ``file-loaded`` (attach never sets ``advance_hook``; the
+    user/SyncPlay owns playback, the #62 gate). Closes the finished stats row, rebinds the leak-free
+    EpisodeContext, drops the carried-over external sub, re-runs the attach selection (which prefers JP
+    and defers a jimaku fetch when the new file has none — so watching continues in Japanese even when
+    the next episode ships no JP track), re-wires the retry/picker, and restarts recorder + prefetch."""
+    from dataclasses import replace
+
+    from overlay import otel_metrics
+    from overlay.app import session_stats
+    from overlay.app.jimaku import parse_filename
+    from overlay.app.reader_context import EpisodeContext
+    from overlay.app.subselect import prepare_attach_startup, remove_external_sub_tracks
+
+    title, episode = parse_filename(path)
+    ep_cfg = replace(
+        cfg, jimaku_title=title, episode=episode
+    )  # per-episode overrides from filename
+    startup = None
+    status = ""
+    fetch_background: tuple[str, ...] = ()
+    with otel_metrics.traced("subtitle.reslot") as span:
+        span.set("mode", "attach")
+        session_stats.finish(reader)  # close the finished episode's row before the recorder resets
+        reader.episode = EpisodeContext()  # one rebind → no prior-episode state leaks
+        span.set("externals_dropped", remove_external_sub_tracks(ipc))
+        try:
+            startup, status, fetch_background = prepare_attach_startup(
+                ipc,
+                slang=ep_cfg.slang,
+                jimaku=ep_cfg.jimaku,
+                jimaku_force=ep_cfg.jimaku_force,
+                jimaku_key=ep_cfg.jimaku_key,
+                jimaku_title=title,
+                tsukihime=ep_cfg.tsukihime,
+                episode=episode,
+                resync=ep_cfg.resync,
+            )
+        except Exception:  # never let sub selection break following the advance
+            log.warning("attach re-slot sub selection failed", exc_info=True)
+        _finish_attach_subtitle_startup(
+            reader, ipc, startup, ep_cfg, fetch_in_background=fetch_background
+        )
+        session_stats.start(reader)  # fresh row; identity read from mpv's now-current path
+        reader.start_prefetch()  # lookahead workers re-key onto the new episode's sub-index
+        span.set("active", (startup.active if startup else None) or "none")
+    log.info("attach re-slot onto %s: %s", path.name, status or "no subtitle selection")
+
+
+def _install_attach_reslot_hook(reader, ipc, cfg: ProviderConfig) -> None:
+    """#100 in attach: follow the user's mpv to the next episode (native autoload/playlist advance) and
+    re-establish JP subs via :func:`_attach_reslot`, so watching continues in Japanese without a manual
+    re-attach. Reactive only (``reslot_hook`` on ``file-loaded``) — attach never sets ``advance_hook``;
+    the user/SyncPlay owns advancing (the #62 gate). No-op if mpv has no current path yet."""
+    current_path = ipc.command("get_property", "path").get("data")
+    if not current_path:
+        return
+
+    def _hook(loaded_path: Path) -> None:
+        _attach_reslot(reader, ipc, loaded_path, cfg)
+
+    reader.install_reslot_hook(_hook, initial=Path(str(current_path)))
 
 
 @app.command
@@ -1407,19 +1436,22 @@ def attach(
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts)  # deps injected asynchronously below
-    _finish_attach_subtitle_startup(
-        reader,
-        ipc,
-        subtitle_startup,
-        slang=slang,
-        fetch_in_background=fetch_jimaku_in_background,
+    provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
         jimaku_title=jimaku_title,
         episode=episode,
         resync=resync,
         tsukihime_config=th,
+        slang=slang,
+        jimaku=jimaku,
+        jimaku_force=jimaku_force,
+        tsukihime=bool(th.get("enabled", False)),
     )
+    _finish_attach_subtitle_startup(
+        reader, ipc, subtitle_startup, provider_cfg, fetch_in_background=fetch_jimaku_in_background
+    )
+    _install_attach_reslot_hook(reader, ipc, provider_cfg)
     reader.load_deps_async(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "

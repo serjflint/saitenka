@@ -440,33 +440,6 @@ def _build_run_options(
     )
 
 
-def _provider_fetch_factory(
-    providers: tuple[str, ...],
-    *,
-    jimaku_key: str | None,
-    jimaku_title: str | None,
-    episode: int | None,
-    resync: bool,
-    tsukihime_cfg: dict,
-    force: bool = False,
-):
-    from overlay.app.subselect import fetch_provider_path
-
-    def factory(video: str):
-        return lambda: fetch_provider_path(
-            video,
-            providers,
-            jimaku_key=jimaku_key,
-            title_override=jimaku_title,
-            episode=episode,
-            resync=resync,
-            force=force,
-            tsukihime_config=tsukihime_cfg,
-        )
-
-    return factory
-
-
 def _start_run_provider_fetch(
     reader,
     cfg: dict,
@@ -481,40 +454,21 @@ def _start_run_provider_fetch(
 ) -> None:
     if not providers and not enabled_providers:
         return
+    from overlay.app.subselect import ProviderConfig, configure_providers, provider_fetch_factory
+
     raw_tsukihime = cfg.get("tsukihime")
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
-    retry_factory = _provider_fetch_factory(
-        enabled_providers,
+    pcfg = ProviderConfig(
+        enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
         jimaku_title=jimaku_title,
         episode=episode,
         resync=resync,
-        tsukihime_cfg=tsukihime_cfg,
-        force=True,  # a manual retry re-fetches + re-syncs, overriding a stale/mistimed cached srt
+        tsukihime_config=tsukihime_cfg,
     )
-    reader.configure_subtitle_retry(retry_factory if enabled_providers else None)
-    if enabled_providers:
-        from overlay.app.subselect import list_candidates
-
-        reader.configure_sub_picker(
-            lambda video: list_candidates(
-                video,
-                enabled_providers,
-                jimaku_key=jimaku_key,
-                title_override=jimaku_title,
-                tsukihime_config=tsukihime_cfg,
-            )
-        )
+    configure_providers(reader, pcfg)  # shared with attach: manual re-sync retry + Ctrl+J picker
     if providers:
-        startup_factory = _provider_fetch_factory(
-            providers,
-            jimaku_key=jimaku_key,
-            jimaku_title=jimaku_title,
-            episode=episode,
-            resync=resync,
-            tsukihime_cfg=tsukihime_cfg,
-        )
-        reader.fetch_japanese_subs_async(startup_factory(str(video_path)))
+        reader.fetch_japanese_subs_async(provider_fetch_factory(providers, pcfg)(str(video_path)))
 
 
 def _prefetch_sibling_subs(
@@ -539,14 +493,16 @@ def _prefetch_sibling_subs(
     if not providers:
         return
     title, episode = parse_filename(nxt)
-    fetch = _provider_fetch_factory(
-        providers,
+    from overlay.app.subselect import ProviderConfig, provider_fetch_factory
+
+    pcfg = ProviderConfig(
         jimaku_key=jimaku_key,
         jimaku_title=title,
         episode=episode,
         resync=resync,
-        tsukihime_cfg=tsukihime_cfg,
-    )(str(nxt))
+        tsukihime_config=tsukihime_cfg,
+    )
+    fetch = provider_fetch_factory(providers, pcfg)(str(nxt))
 
     def _warm() -> None:
         try:
@@ -639,27 +595,6 @@ def _install_watch_hooks(
     )
 
 
-def _remove_external_sub_tracks(ipc) -> int:
-    """Drop every external subtitle track before a re-slot re-adds the current episode's; return how
-    many were removed (a span attribute — a nonzero count on every advance is the carried-over-sub
-    signature). mpv re-applies the launch ``--sub-file`` (a PRIOR episode's srt) to each playlist
-    entry it advances to AND auto-selects it, so on a native advance the overlay would show the old
-    episode's lines (found live: ep2's srt selected on ep03 as "unknown language 10/11", and its cues
-    indexed). Track ids are stable across removals, so removing from a single snapshot is safe."""
-    data = ipc.command("get_property", "track-list").get("data") or []
-    removed = 0
-    for track in data:
-        if track.get("type") == "sub" and track.get("external") and track.get("id") is not None:
-            log.info(
-                "re-slot: dropping carried-over external sub sid=%s %r",
-                track["id"],
-                track.get("external-filename"),
-            )
-            ipc.command("sub-remove", track["id"])
-            removed += 1
-    return removed
-
-
 def reslot_to_current(
     reader,
     cfg: dict,
@@ -683,6 +618,7 @@ def reslot_to_current(
     caches) is untouched by construction."""
     from overlay import otel_metrics
     from overlay.app.reader_context import EpisodeContext
+    from overlay.app.subselect import remove_external_sub_tracks
     from overlay.app.subtitle_modes import select_initial
 
     ipc = reader.ipc
@@ -713,7 +649,7 @@ def reslot_to_current(
         )  # one rebind → every episode-scoped field back to no-episode state
         # drop the carried-over launch --sub-file (a prior episode's srt); a nonzero count each advance
         # is the carried-over-sub signature
-        span.set("externals_dropped", _remove_external_sub_tracks(ipc))
+        span.set("externals_dropped", remove_external_sub_tracks(ipc))
         # Tag the JP srt with the caller's own slang token so select_initial's _matching_track picks OUR
         # srt, not an untagged leftover the auto-selection latched onto (the ep2-on-ep03 bug). "auto"
         # flag → selection stays select_initial's. First slang token matches whatever slang is set.

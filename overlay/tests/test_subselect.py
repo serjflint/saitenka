@@ -414,3 +414,88 @@ def test_list_candidates_turns_a_provider_failure_into_a_warning(monkeypatch):
 
     assert [c.provider for c in candidates] == ["tsukihime"]
     assert warnings == ["jimaku: no entry"]
+
+
+# --- shared run/attach provider wiring (dedup of cli.py + cli_run.py) ------------------------------
+
+
+class _FakeReader:
+    def __init__(self):
+        self.retry_factory = "unset"
+        self.picker_lister = "unset"
+
+    def configure_subtitle_retry(self, factory):
+        self.retry_factory = factory
+
+    def configure_sub_picker(self, lister):
+        self.picker_lister = lister
+
+
+def test_provider_fetch_factory_defers_fetch_and_forwards_every_arg(monkeypatch):
+    seen: dict = {}
+
+    def fake_fetch(video, providers, **kwargs):
+        seen.update(video=video, providers=providers, **kwargs)
+        return None, "ok"
+
+    monkeypatch.setattr(subselect, "fetch_provider_path", fake_fetch)
+    factory = subselect.provider_fetch_factory(
+        ("jimaku",),
+        subselect.ProviderConfig(
+            jimaku_key="K",
+            jimaku_title="Show",
+            episode=3,
+            resync=False,
+            tsukihime_config={"enabled": True},
+        ),
+        force=True,
+    )
+    thunk = factory("/v/Show - 03.mkv")
+
+    assert seen == {}  # deferred — nothing fetches until the thunk is called
+    assert thunk() == (None, "ok")
+    assert seen == {
+        "video": "/v/Show - 03.mkv",
+        "providers": ("jimaku",),
+        "jimaku_key": "K",
+        "title_override": "Show",
+        "episode": 3,
+        "resync": False,
+        "force": True,
+        "tsukihime_config": {"enabled": True},
+    }
+
+
+def test_configure_providers_wires_retry_and_picker():
+    reader = _FakeReader()
+    subselect.configure_providers(
+        reader,
+        subselect.ProviderConfig(enabled_providers=("jimaku", "tsukihime"), tsukihime_config={}),
+    )
+    assert callable(reader.retry_factory)  # a force-refetch retry factory
+    assert callable(reader.picker_lister)  # the Ctrl+J source picker
+
+
+def test_configure_providers_clears_retry_when_no_provider():
+    reader = _FakeReader()
+    subselect.configure_providers(reader, subselect.ProviderConfig(enabled_providers=()))
+    assert reader.retry_factory is None  # cleared, not left stale after a provider-off re-slot
+    assert reader.picker_lister == "unset"  # picker never configured without a provider
+
+
+def test_configure_providers_retry_forces_a_refetch(monkeypatch):
+    """The shared retry factory must pass force=True so a stale/mistimed cached srt is re-fetched."""
+    seen: dict = {}
+    monkeypatch.setattr(
+        subselect,
+        "fetch_provider_path",
+        lambda _video, _providers, **kw: (seen.update(kw), (None, "ok"))[1],
+    )
+    reader = _FakeReader()
+    subselect.configure_providers(
+        reader, subselect.ProviderConfig(enabled_providers=("jimaku",), tsukihime_config={})
+    )
+
+    reader.retry_factory("/v/x.mkv")()  # factory(video) → thunk → fetch_provider_path
+
+    assert seen["force"] is True

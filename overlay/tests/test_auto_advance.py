@@ -4,7 +4,7 @@ AND our own eof loadfile through one setup path; auto-advance only decides wheth
 
 from __future__ import annotations
 
-from overlay.app import cli_run, session_stats
+from overlay.app import cli_run, session_stats, subselect
 from overlay.app.controller import Reader
 
 
@@ -292,11 +292,11 @@ def test_prefetch_warms_the_next_sibling(tmp_path, monkeypatch):
     (tmp_path / "Show - 04.mkv").write_bytes(b"")
     fetched: list[int | None] = []
 
-    def fake_factory(providers, *, episode, **_kw):
+    def fake_factory(providers, cfg, **_kw):
         assert providers == ("jimaku",)
-        return lambda _video: lambda: fetched.append(episode)
+        return lambda _video: lambda: fetched.append(cfg.episode)
 
-    monkeypatch.setattr(cli_run, "_provider_fetch_factory", fake_factory)
+    monkeypatch.setattr(subselect, "provider_fetch_factory", fake_factory)
 
     cli_run._prefetch_sibling_subs(
         {"jimaku": {"enabled": True, "fetch": True}},
@@ -317,7 +317,7 @@ def test_prefetch_warms_the_next_sibling(tmp_path, monkeypatch):
 
 def test_prefetch_is_a_noop_without_provider_or_sibling(tmp_path, monkeypatch):
     calls: list[object] = []
-    monkeypatch.setattr(cli_run, "_provider_fetch_factory", lambda *_a, **_k: calls.append(1))
+    monkeypatch.setattr(subselect, "provider_fetch_factory", lambda *_a, **_k: calls.append(1))
 
     # no provider configured → nothing to warm
     cli_run._prefetch_sibling_subs(
