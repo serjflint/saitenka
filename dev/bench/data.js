@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786169213235,
+  "lastUpdate": 1786173360963,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1115,6 +1115,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.004,
             "range": "±2.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2b7418fe3ff65d0209b18a3957aba4d78bc06573",
+          "message": "feat(lint): adopt ruff preview rules; document PL error/fixable audits (#216) (#219)\n\nEnable ruff `preview = true` and triage the resulting findings across every\nselected family (preview is global, not PL-scoped).\n\nAdopted (auto-fixed): PLR6201 literal-membership (tuple→set), PLW1514\nunspecified-encoding (adds encoding=\"utf-8\" on JP subtitle fixtures — guards the\nWindows CI leg), PLR6104 non-augmented-assignment, RUF031/RUF055/RUF056,\nFURB140 reimplemented-starmap.\n\nPruned with a reason (deliberate/noisy/stylistic): RUF105 (fights the documented\nper-site # noqa convention), RUF069 (deliberate exact float sentinels, e.g.\nscale == 1.0), RUF052, RUF067, PLR6301, PLC2701, PLC1901, PLW0717, S404\n(subprocess launch is intended), FURB113, FURB118, FURB154 (would squash\notel_metrics' 47-name global block into one unwrappable line). B006/B903 scoped\nto tests/**.\n\nAlso records the two audit outcomes from #216's comments: ruff's 38 PLE error\nrules stay fully on (never prune an error sub-rule); pylint's error rules ruff\nlacks are all astroid type-inference checks already owned by poe types, so no\npylint gate earns a place. PLW0108 stays ignored (unsafe-only fix + intentional).\n\npoe all green (1930 passed, 90.32% cov).",
+          "timestamp": "2026-08-08T10:15:14+03:00",
+          "tree_id": "1d9a053d9285b4b7ce55c8e63388222a798d6f9a",
+          "url": "https://github.com/serjflint/saitenka/commit/2b7418fe3ff65d0209b18a3957aba4d78bc06573"
+        },
+        "date": 1786173360423,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.303,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.918,
+            "range": "±2.4%",
             "unit": "ms"
           }
         ]
