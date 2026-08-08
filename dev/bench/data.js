@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786227806021,
+  "lastUpdate": 1786227857024,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1619,6 +1619,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 7.049,
             "range": "±3.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9d12457297e2f3b313121f603c26b88e826384e8",
+          "message": "Merge pull request #244 from serjflint/feat/mining-keybind-observability\n\nfix(mining): mine keybinds silently unbound in attach mode (async Anki)",
+          "timestamp": "2026-08-09T01:23:41+03:00",
+          "tree_id": "d232ed295e4ac296c033e8de9642401628cf410c",
+          "url": "https://github.com/serjflint/saitenka/commit/9d12457297e2f3b313121f603c26b88e826384e8"
+        },
+        "date": 1786227855799,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.291,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.708,
+            "range": "±5.6%",
             "unit": "ms"
           }
         ]
