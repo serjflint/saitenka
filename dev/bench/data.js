@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786201975173,
+  "lastUpdate": 1786202530930,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1403,6 +1403,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.657,
             "range": "±4.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5e826ae9473a665fee6898713a643cdc3011a01c",
+          "message": "test(layout): strengthen two-engine parity — negative controls, boundary examples, config-seam matrix (#232)\n\nUse the taffy Rust engine (dev-only layout-engine extra) as a stronger cross-validation\noracle for the pure-Python layout:\n- pin boundary @examples on the taffy↔default parity property (empty / single / zero-height\n  / zero-gap / large-value float-cast boundary), so edges run every time, not just by chance;\n- add two negative controls proving the parity gates are non-vacuous (a 1px-shifted backend\n  fails the cumulative/solve equality; two content windows fail the pixel diff);\n- differential-test the production seam resolve_backend(\"taffy\") → WindowedPanel across a\n  matrix of entry shapes × widths, not just one canonical panel.",
+          "timestamp": "2026-08-08T18:21:40+03:00",
+          "tree_id": "7ddbe9c44aa05a1a679fbf7755c48037fc16e288",
+          "url": "https://github.com/serjflint/saitenka/commit/5e826ae9473a665fee6898713a643cdc3011a01c"
+        },
+        "date": 1786202529787,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.348,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.078,
+            "range": "±12.5%",
             "unit": "ms"
           }
         ]
