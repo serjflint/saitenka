@@ -4,11 +4,10 @@ import threading
 from pathlib import Path
 
 import pytest
-from PIL import Image
-
 from overlay.app import subtitle_modes
 from overlay.app.controller import Reader
 from overlay.app.subtitles import SubtitleRender
+from PIL import Image
 
 
 class FakeIPC:

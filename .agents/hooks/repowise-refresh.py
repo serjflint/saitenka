@@ -57,15 +57,20 @@ def plan_refresh(
         indexed = json.loads(state.read_text()).get("last_sync_commit")
     except (OSError, ValueError):
         return ("noop", "")
-    if not head or not indexed or head == indexed or seen == head:
+    if not head or not indexed or head in {indexed, seen}:
         return ("noop", "")
     where = f"(indexed {_short(indexed)}, HEAD {_short(head)})"
     if autoupdate and mlx_up:
-        return ("update", f"repowise index stale {where} → launching background `poe repowise-doc-update`")
+        return (
+            "update",
+            f"repowise index stale {where} → launching background `poe repowise-doc-update`",
+        )
     return (
         "remind",
-        f"repowise index behind HEAD {where} — `poe repowise-doc-update` to refresh "
-        "(needs `poe repowise-mlx-serve`; set SAITENKA_REPOWISE_AUTOUPDATE=1 to auto-launch).",
+        (
+            f"repowise index behind HEAD {where} — `poe repowise-doc-update` to refresh "
+            "(needs `poe repowise-mlx-serve`; set SAITENKA_REPOWISE_AUTOUPDATE=1 to auto-launch)."
+        ),
     )
 
 
@@ -89,7 +94,7 @@ def _mlx_reachable(port: int) -> bool:
 
 def _launch_update(repo_root: Path, repowise_dir: Path) -> None:
     log = (repowise_dir / "refresh.log").open("a")
-    subprocess.Popen(  # noqa: S603 — fixed argv, no shell; detached background refresh
+    subprocess.Popen(
         ["uv", "run", "poe", "repowise-doc-update"],
         cwd=repo_root / "overlay",
         stdout=log,
@@ -111,7 +116,11 @@ def main() -> None:
     repo_root = repowise_dir.parent
     head = _head(repo_root)
     port = int(os.environ.get("SAITENKA_REPOWISE_MLX_PORT") or _MLX_PORT_DEFAULT)
-    autoupdate = (os.environ.get("SAITENKA_REPOWISE_AUTOUPDATE") or "").strip().lower() in ("1", "true", "yes")
+    autoupdate = (os.environ.get("SAITENKA_REPOWISE_AUTOUPDATE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     sentinel = repowise_dir / _SENTINEL
     seen = sentinel.read_text().strip() if sentinel.is_file() else None
 

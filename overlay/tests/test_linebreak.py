@@ -14,7 +14,6 @@ from pathlib import Path
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from overlay.render.layout import NO_END, NO_START
 from overlay.render.linebreak import (
     PROHIBITED,

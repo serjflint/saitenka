@@ -1,5 +1,5 @@
 """Tests for the trace-report distiller. Run explicitly (tools/ is outside `poe all`):
-    uv run python -m pytest tools/test_trace_report.py
+uv run python -m pytest tools/test_trace_report.py
 """
 
 from __future__ import annotations
@@ -35,7 +35,9 @@ def test_first_paints_picks_earliest_per_kind():
 def test_first_paints_falls_back_to_cue_redraw_for_subtitle():
     events = [_span("cue_redraw", ts=1200), _span("tooltip_show", ts=2000, cold="False")]
     rows = {label: sp for label, sp, _note in tr.first_paints(events)}
-    assert rows["first subtitle cue paint"]["ts"] == 1200  # no subtitle_render → cue_redraw stands in
+    assert (
+        rows["first subtitle cue paint"]["ts"] == 1200
+    )  # no subtitle_render → cue_redraw stands in
 
 
 def test_first_paints_notes_missing_kind_marker():

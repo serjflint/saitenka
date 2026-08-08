@@ -68,16 +68,22 @@ def _load() -> dict[str, list[Rule]]:
             src = r["re"]  # suffix: "…$"; wholeWord: "^…$"
             if r["type"] == "wholeWord":
                 rs.append(
-                    Rule(False, src.strip("^$"), r.get("de", ""), _flags(r["in"]), _flags(r["out"]))
+                    Rule(
+                        is_suffix=False,
+                        inflected=src.strip("^$"),
+                        deinflected=r.get("de", ""),
+                        cond_in=_flags(r["in"]),
+                        cond_out=_flags(r["out"]),
+                    )
                 )
             else:
                 rs.append(
                     Rule(
-                        True,
-                        src[:-1] if src.endswith("$") else src,
-                        r.get("de", ""),
-                        _flags(r["in"]),
-                        _flags(r["out"]),
+                        is_suffix=True,
+                        inflected=src.removesuffix("$"),
+                        deinflected=r.get("de", ""),
+                        cond_in=_flags(r["in"]),
+                        cond_out=_flags(r["out"]),
                     )
                 )
         out[name] = rs

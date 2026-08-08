@@ -1,9 +1,8 @@
 """Stage 3: line wrapping + block width."""
 
-from util import assert_golden
-
 from overlay.render.layout import NO_START, Block, render_paragraph, tokenize, wrap
 from overlay.render.text import TextOpts
+from util import assert_golden
 
 # A real dictionary definition line (from the 読む entry) — long enough to wrap.
 PARA = "文字で書かれている文や文章を一字ずつ声に出して言う。"

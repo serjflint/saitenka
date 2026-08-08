@@ -17,17 +17,17 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from cases import CASES  # noqa: E402
-
-from overlay import fonts  # noqa: E402
 from overlay.app.config import expand_paths, load_config  # noqa: E402
 from overlay.app.dictionary import DictionarySet  # noqa: E402
 from overlay.app.tokenize import Token  # noqa: E402
 from overlay.panel import render_panel  # noqa: E402
 
+from overlay import fonts  # noqa: E402
+
 REFS = HERE / "refs"
 OUT = HERE / "out"
 PANEL_W = 520
-PANEL_H = 900          # SubMiner refs only show the top of the tooltip; match that height
+PANEL_H = 900  # SubMiner refs only show the top of the tooltip; match that height
 BG = (24, 26, 32, 255)
 FG = (230, 232, 238, 255)
 MUTED = (150, 156, 168, 255)
@@ -38,8 +38,14 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
 
 
 def render_ours(case: dict, ds: DictionarySet) -> Image.Image:
-    tok = Token(surface=case["surface"], lemma=case["lemma"], reading=case["reading"],
-                pos=case["pos"], start=0, end=len(case["surface"]))
+    tok = Token(
+        surface=case["surface"],
+        lemma=case["lemma"],
+        reading=case["reading"],
+        pos=case["pos"],
+        start=0,
+        end=len(case["surface"]),
+    )
     entry = ds.entry_for(tok)
     return render_panel(entry, width=PANEL_W, max_height=None)
 
@@ -68,7 +74,9 @@ def _reference(case: dict) -> tuple[Image.Image, str] | None:
         ref = Image.open(ref_path).convert("RGBA")
         x0, y0, x1, y1 = case["crop"]
         rw, rh = ref.size
-        return ref.crop((int(rw * x0), int(rh * y0), int(rw * x1), int(rh * y1))), "SubMiner (screenshot)"
+        return ref.crop(
+            (int(rw * x0), int(rh * y0), int(rw * x1), int(rh * y1))
+        ), "SubMiner (screenshot)"
     return None
 
 
@@ -99,8 +107,11 @@ def main() -> int:
     if not cfg.get("dicts"):
         print("no dicts in ~/.config/saitenka/overlay.toml — see overlay.example.toml")
         return 2
-    ds = DictionarySet.load(expand_paths(cfg["dicts"]), freq_paths=expand_paths(cfg.get("freq")),
-                            pitch_paths=expand_paths(cfg.get("pitch")))
+    ds = DictionarySet.load(
+        expand_paths(cfg["dicts"]),
+        freq_paths=expand_paths(cfg.get("freq")),
+        pitch_paths=expand_paths(cfg.get("pitch")),
+    )
     OUT.mkdir(exist_ok=True)
     tiles = []
     for case in CASES:

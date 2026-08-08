@@ -3,11 +3,10 @@
 import functools
 import time
 
+import overlay.app.controller as C
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
-import overlay.app.controller as C
 from overlay.app import miner_ui, nested_popup, tooltip
 from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId
@@ -398,7 +397,6 @@ def test_sub_nav_span_and_cue_redraw_span_share_a_trace(monkeypatch, tmp_path):
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.trace import set_tracer_provider
     from opentelemetry.util._once import Once
-
     from overlay.app.otel_export import CTFSpanProcessor
     from overlay.app.telemetry import span_gate
 
@@ -559,9 +557,8 @@ def test_playing_draw_does_not_nudge():
 
 
 def test_overlay_repaint_reissues_live_overlays():
-    from PIL import Image
-
     from overlay.mpvio.osd import Overlay
+    from PIL import Image
 
     ipc = FakeIPC()
     ov = Overlay(ipc)
@@ -759,11 +756,11 @@ def test_panel_cache_avoids_rerender_on_revisit():
 def test_panel_cache_records_otel_render_and_cache_metrics():
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-
-    from overlay import otel_metrics
     from overlay.app.subtitles import WordBox
     from overlay.app.tokenize import Token
     from overlay.panel import Definition, Entry
+
+    from overlay import otel_metrics
 
     class FakeDS:
         def entry_for(self, tok, _inflected=None):
@@ -1658,9 +1655,8 @@ def test_flash_border_drawn_then_cleared(monkeypatch):
 
 
 def _preview_reader(ipc, *, with_audio=True, with_image=True):
-    from PIL import Image as PILImage
-
     from overlay.app.card_preview import PreviewData
+    from PIL import Image as PILImage
 
     r = Reader(ipc)
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
@@ -1905,7 +1901,6 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path):
     """The blended pill's rank is the harmonic mean of the word's rank across every loaded freq dict,
     and it leads the frequency row (before the per-dict pills)."""
     import dicthelp
-
     from overlay.app.fsrs import harmonic_of, rareness_color
     from overlay.app.tokenize import Token
 
@@ -1924,7 +1919,6 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
     per-corpus rank of 1) would crush the harmonic mean if included — it must be skipped, so the pill
     reflects the rank-based dict alone."""
     import dicthelp
-
     from overlay.app.tokenize import Token
 
     rank_z = dicthelp.meta_zip(tmp_path / "r.zip", "RankF", "freq", [["猫", {"frequency": 1500}]])
@@ -1939,7 +1933,6 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path):
 
 def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path):
     import dicthelp
-
     from overlay.app.tokenize import Token
 
     fa = dicthelp.meta_zip(tmp_path / "fc.zip", "FreqC", "freq", [["猫", {"frequency": 1000}]])

@@ -1,5 +1,5 @@
 """Tests for the perf rot-guard's compare seam. Run explicitly (tools/ is outside `poe all`):
-    uv run python -m pytest tools/test_perf_gate.py
+uv run python -m pytest tools/test_perf_gate.py
 """
 
 from __future__ import annotations

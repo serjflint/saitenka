@@ -5,7 +5,6 @@ import zipfile
 
 import dicthelp
 import pytest
-
 from overlay.app.dictdb import DictionaryDb
 from overlay.app.dictionary import (
     FREQ_COLOR,
@@ -772,7 +771,6 @@ def test_pitch_source_reading_and_positions(tmp_path):
 
 def test_read_json_bank_recovers_wrong_crc(tmp_path):
     import pytest
-
     from overlay.app.wordlists import read_json_bank
 
     p = tmp_path / "meta.zip"

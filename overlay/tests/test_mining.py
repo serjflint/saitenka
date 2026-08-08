@@ -1,7 +1,6 @@
 """Mining: card builder, dedup query, sentence bolding, media args, toast (no real Anki add)."""
 
 import pytest
-
 from overlay.app.anki import KNOWN_MARKERS, CardContent, MineConfig, bold_word, build_note
 from overlay.app.lookup import card_for
 from overlay.app.media import AnimatedClip, Timespan, clip_audio
@@ -175,9 +174,8 @@ def test_dedupe_allows_add_when_card_format_has_no_expression_field():
 
 def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch):
     # end-to-end: an already-mined word is detected under card_format (the both-KeyError/false-negative fix)
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
@@ -320,9 +318,8 @@ class _FakeAnki:
 
 
 def test_mine_token_adds_note_with_fields(monkeypatch):
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     ipc = FakeIPC()
     ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
@@ -347,9 +344,8 @@ def test_mine_token_adds_note_with_fields(monkeypatch):
 
 
 def _capture_reader(tmp_path, *, animated_enabled: bool):
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     r = Reader(
         FakeIPC(),
@@ -427,10 +423,9 @@ def test_capture_media_survives_a_timespan_read_error(monkeypatch, tmp_path):
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
     """A per-entry ⊕ passes an explicit CardData, so the mined note is that chosen entry (しりぞく),
     not whatever the default dict-first pick would derive for the token."""
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
     from overlay.app.lookup import CardData
+    from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki()
@@ -446,9 +441,8 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch):
 
 
 def test_mine_token_duplicate_shows_existing(monkeypatch):
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])
@@ -468,10 +462,9 @@ def test_mine_token_duplicate_shows_existing(monkeypatch):
 def test_preview_replay_key_is_tooltip_scoped():
     """`p` (replay preview) is bound only while a tooltip is up, so global `p` keeps mpv's pause
     (the Windows collision). It must NOT be a global startup binding."""
-    from util import FakeIPC
-
     from overlay.app.bindings import PREVIEW_MSG, active_bindings
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     r = Reader(FakeIPC(), anki=object(), mine_cfg=MineConfig())
     global_msgs = {b.spec.message for b in active_bindings(r, "global")}
@@ -483,12 +476,11 @@ def test_preview_replay_key_is_tooltip_scoped():
 def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
     """Showing the preview grabs Esc → close; pressing it hides the preview; closing hands Esc back
     to a no-op when no tooltip is up."""
-    from util import FakeIPC
-
     from overlay.app import miner_ui
     from overlay.app.bindings import PREVIEW_CLOSE_MSG
     from overlay.app.card_preview import PreviewData
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     ipc = FakeIPC()
     r = Reader(ipc, anki=object(), mine_cfg=MineConfig())
@@ -508,9 +500,8 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch):
 def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch):
     """Mining an in-deck word shows "✓ in deck" and adds nothing, but stashes the token; the preview's
     ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
@@ -569,9 +560,8 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
 
 
 def test_bulk_mine_counts_and_toasts(monkeypatch):
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     ipc = FakeIPC()
     anki = _FakeAnki()
@@ -602,12 +592,11 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path):
     """The per-entry ⊕ arrives as a 'mine:<i>' LinkBox; _mine_link mines cards_for(tok)[i] — clicking
     the しりぞく block (index 1) mines that reading/gloss, not the default のく."""
     import dicthelp
-    from util import FakeIPC
-
     from overlay.app import tooltip
     from overlay.app.controller import Reader
     from overlay.app.tokenize import Token
     from overlay.model import LinkBox
+    from util import FakeIPC
 
     d = _make_dict(
         tmp_path / "tk.zip",
@@ -636,9 +625,8 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     """#192: with [mine.card_format] set, the mined note's fields are the rendered {marker} templates —
     furigana, pitch (from the dict), and a cloze-split sentence — not the entity→field map."""
     import dicthelp
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
     pz = dicthelp.meta_zip(
@@ -677,11 +665,10 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     """Per-stacked-entry ✓ state tracks deck membership by expression (Anki's dedup key): mining 退く
     flips every 退く reading-block, since a second reading would be a duplicate expression."""
     import dicthelp
-    from util import FakeIPC
-
     from overlay.app import tooltip
     from overlay.app.controller import Reader
     from overlay.app.tokenize import Token
+    from util import FakeIPC
 
     d = _make_dict(
         tmp_path / "gm.zip",
@@ -700,9 +687,8 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
     that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
     import dicthelp
-    from util import FakeIPC
-
     from overlay.app.controller import Reader
+    from util import FakeIPC
 
     d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
     ds = dicthelp.load_set([d])

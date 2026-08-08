@@ -9,11 +9,13 @@ Properties pinned:
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from saitenka_deinflect import deinflect, inflection_chain
-
 from overlay.app.tokenize import Token, _has_kanji, merge_inflected, strip_inline_furigana
 from overlay.model import Span, Style
 from overlay.render.flow import build_items, ruby, wrap_items
+from saitenka_deinflect import (  # noqa: TID251  # property tests exercise the GPL chain directly, not via the app chokepoint
+    deinflect,
+    inflection_chain,
+)
 
 # --- strategies -----------------------------------------------------------------------------------
 

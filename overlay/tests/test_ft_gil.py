@@ -36,9 +36,10 @@ def test_gil_stays_disabled_with_telemetry_enabled(tmp_path):
     stack (providers, the span writer thread, an instrument snapshot) is the real test — a C
     extension pulled in transitively could still silently re-enable the GIL only once exercised,
     not merely imported."""
-    from overlay import otel_metrics
     from overlay.app.config import TelemetryOptions
     from overlay.app.telemetry import configure, shutdown
+
+    from overlay import otel_metrics
 
     try:
         configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "telemetry")))

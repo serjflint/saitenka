@@ -80,7 +80,9 @@ class Ledger:
 
     @classmethod
     def load(cls, path: Path) -> Ledger:
-        recs = [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        recs = [
+            json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()
+        ]
         return cls(path, recs)
 
     @property

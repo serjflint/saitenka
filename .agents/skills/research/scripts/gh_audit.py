@@ -36,7 +36,7 @@ def _run(cmd: list[str]) -> tuple[int, str]:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
         return p.returncode, p.stdout.strip()
-    except Exception as exc:  # noqa: BLE001 - a flaky net call must not crash the sweep
+    except Exception as exc:
         return 1, f"error: {exc}"
 
 
@@ -61,7 +61,9 @@ def _days_since(iso: str | None) -> int | None:
 
 
 def _commits_90d(repo: str) -> str:
-    since = (datetime.datetime.now(tz=datetime.UTC) - datetime.timedelta(days=90)).date().isoformat()
+    since = (
+        (datetime.datetime.now(tz=datetime.UTC) - datetime.timedelta(days=90)).date().isoformat()
+    )
     data = _gh_json(f"repos/{repo}/commits?since={since}T00:00:00Z&per_page=100")
     if not isinstance(data, list):
         return "?"
@@ -72,7 +74,11 @@ def audit(repo: str) -> dict:
     """One repo -> a dict of ground-truth fields + a one-word verdict."""
     meta = _gh_json(f"repos/{repo}")
     if not isinstance(meta, dict) or "full_name" not in meta:
-        return {"repo": repo, "verdict": "FABRICATED", "note": "404 — no such repo (likely fabricated/renamed)"}
+        return {
+            "repo": repo,
+            "verdict": "FABRICATED",
+            "note": "404 — no such repo (likely fabricated/renamed)",
+        }
 
     pushed = meta.get("pushed_at", "")
     days = _days_since(pushed)
@@ -81,7 +87,11 @@ def audit(repo: str) -> dict:
     lic = (meta.get("license") or {}).get("spdx_id") or "none"
 
     rel = _gh_json(f"repos/{repo}/releases/latest")
-    release = f"{rel['tag_name']} @ {rel['published_at'][:10]}" if isinstance(rel, dict) and rel.get("tag_name") else "—"
+    release = (
+        f"{rel['tag_name']} @ {rel['published_at'][:10]}"
+        if isinstance(rel, dict) and rel.get("tag_name")
+        else "—"
+    )
 
     if archived:
         verdict = "ARCHIVED"

@@ -1,9 +1,8 @@
 """Stage 5: isolated ruby — reading centred over base, both narrow and wide cases."""
 
-from util import assert_golden
-
 from overlay.model import Span, Style
 from overlay.render.ruby import layout_ruby, render_ruby
+from util import assert_golden
 
 BASE = Style(size=44)
 

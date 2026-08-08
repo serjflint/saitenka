@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 
 import pytest
-
 from overlay.app.plugin import _bake_bin
 from overlay.mpvio.ipc import default_ipc_path
 

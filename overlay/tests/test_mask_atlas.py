@@ -10,9 +10,9 @@ from __future__ import annotations
 from collections import OrderedDict
 
 import pytest
+from overlay.mask_atlas import MaskAtlas, deserialize_core, serialize_core
 
 from overlay import fonts
-from overlay.mask_atlas import MaskAtlas, deserialize_core, serialize_core
 
 
 def _font(char: str = "見", size: int = 40):

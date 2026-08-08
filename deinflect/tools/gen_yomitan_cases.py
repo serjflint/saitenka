@@ -35,7 +35,9 @@ YOMITAN_COMMIT = "3af775bda1df"
 
 _CHECKOUT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/yomitan-src")
 SRC = _CHECKOUT / "test" / "language" / "japanese-transforms.test.js"
-OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "japanese_transforms_cases.json"
+OUT = (
+    Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "japanese_transforms_cases.json"
+)
 
 # One category object: `{ category: '..', valid: true|false, tests: [ {term..}, .. ] }`. The lookahead
 # split keys on the category objects (vectors start `{term:`), so each chunk carries one valid flag.
@@ -83,14 +85,11 @@ def main() -> None:
         "checkout at that commit with deinflect/tools/gen_yomitan_cases.py (see its docstring)."
     )
     OUT.write_text(
-        json.dumps({"_source": header, "cases": cases}, ensure_ascii=False, indent=1)
-        + "\n",
+        json.dumps({"_source": header, "cases": cases}, ensure_ascii=False, indent=1) + "\n",
         encoding="utf-8",
     )
     valid = sum(c["valid"] for c in cases)
-    print(
-        f"wrote {len(cases)} vectors to {OUT} ({valid} valid, {len(cases) - valid} negative)"
-    )
+    print(f"wrote {len(cases)} vectors to {OUT} ({valid} valid, {len(cases) - valid} negative)")
 
 
 if __name__ == "__main__":

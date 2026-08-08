@@ -10,14 +10,13 @@ imported dictionary at the bottom.
 from __future__ import annotations
 
 import dicthelp
-from util import FakeIPC
-
 import overlay.app.controller as C
 from overlay.app.controller import Reader
 from overlay.app.scoring import Palette, Scorer
 from overlay.app.subtitle_render import NullRenderer
 from overlay.app.tokenize import Token, merge_dict_compounds, tokenize
 from overlay.app.wordlists import KnownWords
+from util import FakeIPC
 
 
 def _at(

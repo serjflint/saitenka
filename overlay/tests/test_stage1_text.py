@@ -1,8 +1,7 @@
 """Stage 1: plain shaped text → PNG."""
 
-from util import assert_golden
-
 from overlay.render.text import TextOpts, rasterize
+from util import assert_golden
 
 
 def test_plain_text_golden():

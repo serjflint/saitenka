@@ -36,6 +36,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import itertools
+
 import trace_report as tr
 
 _SUB_SPAN_NAMES = ("subtitle.fetch", "subtitle.reslot", "subtitle.resync")
@@ -65,7 +67,9 @@ def diagnose_resync(a: dict) -> str:
     shift_txt = f"{shift:+d}ms" if isinstance(shift, int) else "?ms"
     head = f"{tool} vs {reference}"
     if src and out and src == out:
-        return f"{head} — NO-OP: output == input (shift {shift_txt}) — already aligned OR a tool no-op"
+        return (
+            f"{head} — NO-OP: output == input (shift {shift_txt}) — already aligned OR a tool no-op"
+        )
     # NOTE: we deliberately do NOT compare the first src/ref cue — the two tracks often caption
     # different opening events (JP SFX vs the EN's first spoken line), so cue-1↔cue-1 is a false metric.
     # A uniform shift that's right post-OP but early pre-OP is a SPLIT issue, invisible to a single number.
@@ -105,7 +109,7 @@ def retry_deltas(resyncs: list[dict]) -> list[int | None]:
     its own output). ``None`` where a fingerprint is missing."""
     firsts = [_first(r.get("args", {}).get("out_cue_ms") or []) for r in resyncs]
     out: list[int | None] = [None]
-    for prev, cur in zip(firsts, firsts[1:]):
+    for prev, cur in itertools.pairwise(firsts):
         out.append(cur - prev if prev is not None and cur is not None else None)
     return out
 
@@ -162,7 +166,9 @@ def print_report(src: Path, events: list[dict], log: list[dict]) -> None:
     spans = subtitle_spans(events)
     resyncs = [s for s in spans if s["name"] == "subtitle.resync"]
     session = _session(events)
-    print(f"# saitenka subtitle report — {src.name}" + (f"  (session {session})" if session else ""))
+    print(
+        f"# saitenka subtitle report — {src.name}" + (f"  (session {session})" if session else "")
+    )
     fetches = sum(s["name"] == "subtitle.fetch" for s in spans)
     reslots = sum(s["name"] == "subtitle.reslot" for s in spans)
     print(f"  {fetches} fetch · {reslots} reslot · {len(resyncs)} resync span(s)\n")
@@ -172,7 +178,7 @@ def print_report(src: Path, events: list[dict], log: list[dict]) -> None:
     else:
         t0 = spans[0]["ts"]
         print("## pipeline timeline (t+ from first subtitle event)")
-        deltas = {id(r): d for r, d in zip(resyncs, retry_deltas(resyncs))}
+        deltas = {id(r): d for r, d in zip(resyncs, retry_deltas(resyncs), strict=False)}
         for s in spans:
             label = s["name"].split(".", 1)[1]
             line = _DIAGNOSE[s["name"]](s.get("args", {}))
@@ -188,11 +194,14 @@ def print_report(src: Path, events: list[dict], log: list[dict]) -> None:
         # Convergence verdict across a retry burst.
         moves = [d for d in retry_deltas(resyncs) if d]
         if moves:
-            osc = any(a * b < 0 for a, b in zip(moves, moves[1:]))
+            osc = any(a * b < 0 for a, b in itertools.pairwise(moves))
             print("## retry convergence")
             print(f"  per-retry first-cue moves: {moves}")
-            print("  → OSCILLATING — re-syncing its own output; the SOURCE/reference is wrong, not the offset"
-                  if osc else "  → monotone — each retry refined the previous")
+            print(
+                "  → OSCILLATING — re-syncing its own output; the SOURCE/reference is wrong, not the offset"
+                if osc
+                else "  → monotone — each retry refined the previous"
+            )
             print()
 
     log_lines = notable_log(log)
@@ -214,7 +223,7 @@ def find_cached_sub(video: Path, cache_dir: Path) -> Path | None:
     cands = [
         p
         for p in cache_dir.iterdir()
-        if p.suffix in (".srt", ".ass") and ".synced" not in p.name and p.name.startswith(stem)
+        if p.suffix in {".srt", ".ass"} and ".synced" not in p.name and p.name.startswith(stem)
     ]
     return max(cands, key=lambda p: p.stat().st_size) if cands else None
 
@@ -279,7 +288,9 @@ def _load(path: Path) -> tuple[list[dict], list[dict]]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Distil the subtitle pipeline out of saitenka report(s).")
+    ap = argparse.ArgumentParser(
+        description="Distil the subtitle pipeline out of saitenka report(s)."
+    )
     ap.add_argument("reports", type=Path, nargs="*",
                     help="one or more saitenka-report-*.zip / unzipped dirs / bare trace.json")  # fmt: skip
     ap.add_argument("--video", type=Path,

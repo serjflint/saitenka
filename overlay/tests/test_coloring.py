@@ -4,7 +4,6 @@ from pathlib import Path
 
 import dicthelp
 import pytest
-
 from overlay.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
 from overlay.app.tokenize import tokenize
 from overlay.app.wordlists import FreqDict, KnownForm, KnownWords
@@ -189,7 +188,6 @@ def test_known_cache_is_cache_first_and_diff_refreshes_by_modtime(monkeypatch):
     """The SQLite cache serves the known set instantly; refresh re-fetches ONLY notes whose Anki
     mod-time changed (not the whole deck), and a config-signature change invalidates the cache."""
     import dicthelp
-
     from overlay.app import wordlists as wl
 
     state = {1: (10, "人"), 2: (10, "時間")}  # note_id -> (mod, Entry value)
@@ -228,7 +226,6 @@ def test_known_cache_reconciles_external_anki_edits_additions_and_deletions(monk
     and a deleted note's removal — while re-fetching ONLY the touched notes, and the cache must reflect
     the reconciled set. This is the durability that matters: the cache never goes permanently stale."""
     import dicthelp
-
     from overlay.app import wordlists as wl
 
     state = {1: (10, "人"), 2: (10, "時間"), 3: (10, "猫")}  # note_id -> (mod, Entry value)

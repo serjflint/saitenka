@@ -27,12 +27,11 @@ import pytest
 from hypothesis import HealthCheck, event, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
-from tip_fakes import hidpi_reader
-
 from overlay.app import tooltip
 from overlay.app.subtitle_render import NullRenderer
 from overlay.app.subtitles import WordBox
 from overlay.app.tokenize import Token
+from tip_fakes import hidpi_reader
 
 _SCALES = [1.5, 1.76, 2.0]
 _NAV_QUERY = "見*"  # wildcard → always resolves via LinkingDS.search, so navigate is deterministic

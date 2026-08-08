@@ -142,7 +142,7 @@ def attr_breakdowns(events: list[dict]) -> dict[str, Counter]:
         if e.get("ph") != "X":
             continue
         for k, v in e.get("args", {}).items():
-            if k in ("span_id", "trace_id", "cpu_ms"):
+            if k in {"span_id", "trace_id", "cpu_ms"}:
                 continue
             out[f"{e['name']}.{k}"][str(v)] += 1
     return out
@@ -164,12 +164,22 @@ def first_paints(events: list[dict]) -> list[tuple[str, dict | None, str]]:
     tagged = any(k is not None for k in kinds)
     untagged = "" if tagged else "  (tip_compose has no `kind` — bundle predates the marker)"
     return [
-        ("first subtitle cue paint", _first(spans, "subtitle_render") or _first(spans, "cue_redraw"), ""),
+        (
+            "first subtitle cue paint",
+            _first(spans, "subtitle_render") or _first(spans, "cue_redraw"),
+            "",
+        ),
         ("first tooltip paint (base)", _first(spans, "tooltip_show"), ""),
-        ("first nested tooltip paint",
-         _first(spans, "tip_compose", lambda a: a.get("kind") == "nested"), untagged),
-        ("first clicked tooltip paint",
-         _first(spans, "tip_compose", lambda a: a.get("kind") == "clicked"), untagged),
+        (
+            "first nested tooltip paint",
+            _first(spans, "tip_compose", lambda a: a.get("kind") == "nested"),
+            untagged,
+        ),
+        (
+            "first clicked tooltip paint",
+            _first(spans, "tip_compose", lambda a: a.get("kind") == "clicked"),
+            untagged,
+        ),
     ]
 
 
@@ -191,37 +201,58 @@ def _hit_rate(c: dict[str, float], base: str) -> str:
     return f"{h / tot * 100:5.1f}% ({int(h)}/{int(tot)})" if tot else "   n/a"
 
 
-def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: bool, want_log: bool):
+def print_report(
+    src: Path, events: list[dict], log: list[dict], *, want_spans: bool, want_log: bool
+):
     counters = final_counters(events)
     spans = span_stats(events)
     print(f"# saitenka trace report — {src.name}")
-    print(f"  {len([e for e in events if e.get('ph') == 'X'])} spans, "
-          f"{len({e['name'] for e in events if e.get('ph') == 'C'})} counters, {len(log)} log lines\n")
+    print(
+        f"  {len([e for e in events if e.get('ph') == 'X'])} spans, "
+        f"{len({e['name'] for e in events if e.get('ph') == 'C'})} counters, {len(log)} log lines\n"
+    )
 
     print("## diagnostics")
     swaps = counters.get("crisp.swaps", 0.0)
-    soft = next((sum(1 for e in events if e.get("ph") == "X" and e["name"] == "tip_compose")
-                 for _ in [0]), 0)
+    soft = next(
+        (sum(1 for e in events if e.get("ph") == "X" and e["name"] == "tip_compose") for _ in [0]),
+        0,
+    )
     print(f"  crisp swaps (native composites)      {int(swaps)}")
-    print(f"  soft tip_compose (upscaled blits)    {soft}"
-          f"   → {'mostly crisp' if swaps > soft else 'MOSTLY SOFT — check keyless/navigated views'}")
+    print(
+        f"  soft tip_compose (upscaled blits)    {soft}"
+        f"   → {'mostly crisp' if swaps > soft else 'MOSTLY SOFT — check keyless/navigated views'}"
+    )
     breaks = attr_breakdowns(events)
     reasons = breaks.get("tip_compose.soft_reason")
-    if reasons:  # WHY each soft blit fell back — stale_scale = OSD scale jittered + orphaned the panel
+    if (
+        reasons
+    ):  # WHY each soft blit fell back — stale_scale = OSD scale jittered + orphaned the panel
         print(f"  soft-fallback reasons                {dict(reasons.most_common())}")
     scales = Counter()
     for k in ("scroll_frame.scale", "tip_compose.scale", "crisp_render.scale"):
         scales.update(breaks.get(k, Counter()))
-    if scales:  # distinct display scales seen mid-session — >1 ~equal value ⇒ jitter re-keying crisp
+    if (
+        scales
+    ):  # distinct display scales seen mid-session — >1 ~equal value ⇒ jitter re-keying crisp
         top = scales.most_common(8)
         print(f"  display scales seen ({len(scales)} distinct)  {dict(top)}")
-    for base in ("render_cache", "mask_atlas", "panel_cache", "block_cache", "bgra_memo", "dict_cache"):
+    for base in (
+        "render_cache",
+        "mask_atlas",
+        "panel_cache",
+        "block_cache",
+        "bgra_memo",
+        "dict_cache",
+    ):
         if any(k.startswith(base + ".") for k in counters):
             print(f"  {base:<16} hit-rate           {_hit_rate(counters, base)}")
     jank = next((s for s in spans if s.name == "scroll_frame"), None)
     if jank:
         _, n, _, _, _, p50, p95, p99, mx = jank.row()
-        print(f"  scroll_frame ms                      p50={p50:.1f} p95={p95:.1f} p99={p99:.1f} max={mx:.1f} (n={n})")
+        print(
+            f"  scroll_frame ms                      p50={p50:.1f} p95={p95:.1f} p99={p99:.1f} max={mx:.1f} (n={n})"
+        )
     shows = attr_breakdowns(events).get("tooltip_show.cold")
     if shows:
         print(f"  tooltip_show cold/warm               {dict(shows)}")
@@ -236,10 +267,13 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
                 print(f"  {label:<30} —{note or '  (none this session)'}")
                 continue
             a = sp.get("args", {})
-            tags = " ".join(f"{k}={a[k]}" for k in ("cold", "kind", "soft_reason", "scale")
-                            if k in a)
-            print(f"  {label:<30} t+{(sp['ts'] - t0) / 1000:8.1f}  "
-                  f"dur={sp.get('dur', 0.0) / 1000:6.1f}ms  {tags}")
+            tags = " ".join(
+                f"{k}={a[k]}" for k in ("cold", "kind", "soft_reason", "scale") if k in a
+            )
+            print(
+                f"  {label:<30} t+{(sp['ts'] - t0) / 1000:8.1f}  "
+                f"dur={sp.get('dur', 0.0) / 1000:6.1f}ms  {tags}"
+            )
         kinds = breaks.get("tip_compose.kind")
         if kinds:  # per-kind paint counts once the marker is present
             print(f"  tip_compose by kind                  {dict(kinds.most_common())}")
@@ -249,7 +283,9 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
     if probe_keys:
         n_probe = sum(breaks[probe_keys[0]].values())  # each probe emits every attr once
         print(f"## display sources — why the scale jumps ({n_probe} osd probes)")
-        print("  a STABLE source has 1 value; the JITTERY one(s) drive the scale wobble → key scale off a stable source")
+        print(
+            "  a STABLE source has 1 value; the JITTERY one(s) drive the scale wobble → key scale off a stable source"
+        )
         for k in probe_keys:
             dist = breaks[k]
             src = k.split(".", 1)[1]
@@ -258,10 +294,14 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
         print()
 
     print("## spans by total time (ms)")
-    print(f"  {'name':<22}{'n':>5}{'total':>9}{'self':>9}{'cpu':>8}{'p50':>8}{'p95':>8}{'p99':>8}{'max':>8}")
+    print(
+        f"  {'name':<22}{'n':>5}{'total':>9}{'self':>9}{'cpu':>8}{'p50':>8}{'p95':>8}{'p99':>8}{'max':>8}"
+    )
     for st in spans:
         name, n, total, self_ms, cpu, p50, p95, p99, mx = st.row()
-        print(f"  {name:<22}{n:>5}{total:>9.1f}{self_ms:>9.1f}{cpu:>8.1f}{p50:>8.1f}{p95:>8.1f}{p99:>8.1f}{mx:>8.1f}")
+        print(
+            f"  {name:<22}{n:>5}{total:>9.1f}{self_ms:>9.1f}{cpu:>8.1f}{p50:>8.1f}{p95:>8.1f}{p99:>8.1f}{mx:>8.1f}"
+        )
     print()
 
     print("## counters (final)")
@@ -277,10 +317,20 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
 
     if want_log:
         print("## notable log events (last session)")
-        keys = ("tooltip shown", "click at", "navigat", "back", "using the default layout",
-                "error", "warn", "seek", "teardown")
-        last_seed = max((r["timestamp"] for r in log
-                         if "observing mpv props" in r.get("event", "")), default="")
+        keys = (
+            "tooltip shown",
+            "click at",
+            "navigat",
+            "back",
+            "using the default layout",
+            "error",
+            "warn",
+            "seek",
+            "teardown",
+        )
+        last_seed = max(
+            (r["timestamp"] for r in log if "observing mpv props" in r.get("event", "")), default=""
+        )
         for r in log:
             if last_seed and r.get("timestamp", "") < last_seed:
                 continue
@@ -290,8 +340,12 @@ def print_report(src: Path, events: list[dict], log: list[dict], *, want_spans: 
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Distil a saitenka report bundle into a perf/diagnostics report.")
-    ap.add_argument("report", type=Path, help="path to a saitenka-report-*.zip or an unzipped directory")
+    ap = argparse.ArgumentParser(
+        description="Distil a saitenka report bundle into a perf/diagnostics report."
+    )
+    ap.add_argument(
+        "report", type=Path, help="path to a saitenka-report-*.zip or an unzipped directory"
+    )
     ap.add_argument("--spans", action="store_true", help="also print per-attribute span breakdowns")
     ap.add_argument("--log", action="store_true", help="also print notable overlay.log events")
     args = ap.parse_args()

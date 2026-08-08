@@ -56,7 +56,7 @@ def is_git_commit(cmd: str) -> bool:
         i = 1  # find git's subcommand: first bare token, skipping global flags + their values
         while i < len(toks):
             t = toks[i]
-            if t in ("-C", "-c", "--git-dir", "--work-tree"):  # these take a value
+            if t in {"-C", "-c", "--git-dir", "--work-tree"}:  # these take a value
                 i += 2
                 continue
             if t.startswith("-"):
@@ -94,7 +94,7 @@ def flagged_comments(diff: str) -> list[tuple[str, str]]:
             flush()
             path = m.group(1).strip()
             continue
-        if line.startswith("@@") or line.startswith(("--- ", "+++ ")):
+        if line.startswith(("@@", "--- ", "+++ ")):
             flush()
             continue
         if line.startswith("+") and not line.startswith("+++"):
@@ -114,7 +114,7 @@ def signature(flagged: list[tuple[str, str]]) -> str:
 
 def _git(args: list[str]) -> str:
     try:
-        r = subprocess.run(["git", *args], capture_output=True, text=True, check=False)  # noqa: S603,S607
+        r = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
     except OSError:
         return ""
     return r.stdout
@@ -136,11 +136,13 @@ def _deny(reason: str) -> None:
 
 def _reason(flagged: list[tuple[str, str]]) -> str:
     lines = [
-        f"{len(flagged)} long NEW comment block(s) staged — review each against AGENTS.md "
-        '"Comments" before committing:',
+        (
+            f"{len(flagged)} long NEW comment block(s) staged — review each against AGENTS.md "
+            '"Comments" before committing:'
+        ),
         "  • Information delta only — the *why* / a gotcha / a constraint / a ref, never the *what*.",
         "  • Distil to the irreducible signal — one tight clause beats a paragraph; no teaching tone.",
-        "  • No process scars — no `(plan R4)`, `Stage N`, \"as discussed\".",
+        '  • No process scars — no `(plan R4)`, `Stage N`, "as discussed".',
         "Compress or justify each, then re-run the SAME commit to confirm (or edit + re-stage).",
         "",
     ]

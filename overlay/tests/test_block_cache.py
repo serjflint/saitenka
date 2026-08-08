@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from overlay.panel import Definition, Entry, panel_rows, render_panel
 from overlay.render.banded import CachedBlock, WindowedPanel
 

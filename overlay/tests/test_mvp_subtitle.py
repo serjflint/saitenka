@@ -1,9 +1,8 @@
 """MVP: subtitle rendering (multi-line) + per-word hitbox geometry."""
 
-from util import assert_golden
-
 from overlay.app.subtitles import render_subtitle
 from overlay.app.tokenize import tokenize
+from util import assert_golden
 
 LINE = "門前の小僧習わぬ経を読む"
 

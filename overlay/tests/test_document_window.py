@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from overlay.model import Span, Style
 from overlay.render.document import render_document
 from overlay.sc.model import Block

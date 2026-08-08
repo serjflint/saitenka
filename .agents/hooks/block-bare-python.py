@@ -48,10 +48,9 @@ def _is_bare_forbidden(tok: str) -> bool:
 def _strip_noise(cmd: str) -> str:
     """Drop heredoc bodies and quoted strings — their contents are *data*, so a
     ``python`` inside ``echo "run python"`` or a heredoc must not trip the guard."""
-    cmd = re.sub(r"<<-?\s*(['\"]?)(\w+)\1.*?\n\2", " ", cmd, flags=re.S)  # heredocs
+    cmd = re.sub(r"<<-?\s*(['\"]?)(\w+)\1.*?\n\2", " ", cmd, flags=re.DOTALL)  # heredocs
     cmd = re.sub(r"'[^']*'", " ", cmd)  # single-quoted
-    cmd = re.sub(r'"[^"]*"', " ", cmd)  # double-quoted
-    return cmd
+    return re.sub(r'"[^"]*"', " ", cmd)  # double-quoted
 
 
 def _exec_target(toks: list[str]) -> str | None:

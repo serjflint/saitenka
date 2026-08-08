@@ -136,12 +136,14 @@ def _spec_failures(spec: CorpusSpec) -> list[str]:
     """Drift for ONE corpus: dup keys (if required unique), then count and hash vs the committed manifest."""
     try:
         keys = spec.keys()
-    except Exception as exc:  # noqa: BLE001 — a missing/broken source-of-truth is a real drift signal
+    except Exception as exc:
         return [f"{spec.name}: cannot derive census ({exc!r})"]
     fails: list[str] = []
     if spec.unique and len(set(keys)) != len(keys):
         dups = sorted({k for k in keys if keys.count(k) > 1})
-        fails.append(f"{spec.name}: {len(keys) - len(set(keys))} duplicate case key(s), e.g. {dups[:3]}")
+        fails.append(
+            f"{spec.name}: {len(keys) - len(set(keys))} duplicate case key(s), e.g. {dups[:3]}"
+        )
     count, digest = _census(keys)
     if count != spec.count:
         verb = "shrank" if count < spec.count else "grew"
@@ -169,9 +171,15 @@ def check() -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument(
-        "mode", nargs="?", default="check", choices=("check", "show"), help="check (default) or re-bless print"
+        "mode",
+        nargs="?",
+        default="check",
+        choices=("check", "show"),
+        help="check (default) or re-bless print",
     )
     ns = ap.parse_args(argv)
 

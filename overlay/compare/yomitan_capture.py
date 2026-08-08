@@ -42,7 +42,9 @@ def capture(words: list[str]) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
-            PROFILE, headless=False, viewport={"width": 900, "height": 1400},
+            PROFILE,
+            headless=False,
+            viewport={"width": 900, "height": 1400},
             args=[f"--disable-extensions-except={EXT_PATH}", f"--load-extension={EXT_PATH}"],
         )
         try:
@@ -52,8 +54,9 @@ def capture(words: list[str]) -> None:
             for word in words:
                 page.goto(f"chrome-extension://{ext}/search.html?query={word}", wait_until="load")
                 try:
-                    page.wait_for_selector(".entry, .definition-item, [data-sc-content='glossary']",
-                                           timeout=10000)
+                    page.wait_for_selector(
+                        ".entry, .definition-item, [data-sc-content='glossary']", timeout=10000
+                    )
                 except Exception:
                     print(f"  {word}: no entry rendered (dicts not loaded?)")
                     continue
@@ -67,9 +70,10 @@ def capture(words: list[str]) -> None:
                 for _ in range(60):
                     h = page.evaluate(
                         "() => { const e = document.querySelector('.entry');"
-                        " return e ? Math.round(e.scrollHeight) : 0; }")
+                        " return e ? Math.round(e.scrollHeight) : 0; }"
+                    )
                     stable = stable + 1 if (h == prev and h > 0) else 0
-                    if stable >= 2:            # unchanged across two polls → settled
+                    if stable >= 2:  # unchanged across two polls → settled
                         break
                     prev = h
                     page.wait_for_timeout(150)

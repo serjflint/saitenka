@@ -8,10 +8,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import pytest  # noqa: E402  # must come after the sys.path setup above
-
 import overlay.app.backlog as _backlog  # noqa: E402  # must come after the sys.path setup above
 import overlay.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
+import pytest  # noqa: E402  # must come after the sys.path setup above
 
 # Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
 # Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 `poe crosshair` env), so default test

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hypothesis.strategies as st
 from hypothesis import given
-
 from overlay.app.fsrs import KnownSnap
 from overlay.app.scoring import FUNCTION_POS, Palette, Scorer, mark_n_plus_one
 from overlay.app.tokenize import Token

@@ -9,7 +9,6 @@ default.
 from __future__ import annotations
 
 import util
-
 from overlay.app.controller import Reader
 from overlay.app.prefetch import REF_H
 

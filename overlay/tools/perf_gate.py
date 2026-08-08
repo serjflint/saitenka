@@ -62,13 +62,20 @@ def regressions(
 def _run_synth_bench(reps: int, loops: int) -> dict:
     """Run the `--synth` bench in a subprocess (it re-execs itself with PYTHON_GIL=0) and return the
     metrics dict it writes. Dict-free → needs no overlay.toml, so it runs anywhere (local or CI)."""
-    with tempfile.NamedTemporaryFile("r", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile("r", encoding="utf-8", suffix=".json", delete=False) as f:
         dest = Path(f.name)
     try:
         rc = subprocess.run(  # fixed argv, no shell, our own bench script
             [
-                sys.executable, str(BENCH), "--synth",
-                "--reps", str(reps), "--loops", str(loops), "--json", str(dest),
+                sys.executable,
+                str(BENCH),
+                "--synth",
+                "--reps",
+                str(reps),
+                "--loops",
+                str(loops),
+                "--json",
+                str(dest),
             ],
             check=False,
         ).returncode
@@ -96,7 +103,9 @@ def main() -> int:
         help="fail past base*(1+tol); overrides the per-metric GATED tolerances when set",
     )
     ap.add_argument("--reps", type=int, default=5, help="bench reps (more = steadier percentiles)")
-    ap.add_argument("--loops", type=int, default=3, help="corpus repeats (pools the p99 sample → steadier)")
+    ap.add_argument(
+        "--loops", type=int, default=3, help="corpus repeats (pools the p99 sample → steadier)"
+    )
     args = ap.parse_args()
 
     current = _run_synth_bench(args.reps, args.loops)
@@ -113,7 +122,9 @@ def main() -> int:
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     _print_row(baseline, current)
     regs = regressions(baseline, current, args.tolerance)
-    limit = "the per-metric tolerance" if args.tolerance is None else f"+{args.tolerance * 100:.0f}%"
+    limit = (
+        "the per-metric tolerance" if args.tolerance is None else f"+{args.tolerance * 100:.0f}%"
+    )
     if regs:
         print(f"\nFAIL: perf regressed past {limit}:", file=sys.stderr)
         for k, b, c, r in regs:

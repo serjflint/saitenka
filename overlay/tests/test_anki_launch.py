@@ -6,7 +6,6 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
 from overlay.app import anki as anki_mod
 
 _REAL_LAUNCH = anki_mod.launch_anki  # captured before the conftest down-fixture stubs it

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-
 from overlay.app.sub_index import SubCue, SubIndex, parse_ass, parse_srt
 
 # Hiragana + katakana only — no `<`, `{`, `\`, or whitespace, so _sanitize/_norm leave text untouched

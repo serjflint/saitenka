@@ -20,7 +20,6 @@ from typing import Any
 import hypothesis.strategies as st
 import pytest
 from hypothesis import example, given, settings
-
 from overlay.app import fsrs
 from overlay.app.fsrs import (
     FORGOTTEN_R,

@@ -45,9 +45,7 @@ FEAT_RE = re.compile(r"^feat(\([^)]*\))?:", re.MULTILINE)
 
 def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True, capture: bool = False):
     print(f"$ {' '.join(cmd)}" + (f"   (cwd={cwd})" if cwd else ""))
-    return subprocess.run(
-        cmd, cwd=cwd, check=check, text=True, capture_output=capture
-    )  # noqa: S603 — list args, no shell
+    return subprocess.run(cmd, cwd=cwd, check=check, text=True, capture_output=capture)
 
 
 # --- version -----------------------------------------------------------------------------------
@@ -56,7 +54,7 @@ def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True, capture:
 def read_version() -> str:
     m = VERSION_RE.search(PYPROJECT.read_text())
     if not m:
-        raise RuntimeError(f"couldn't find a `version = \"X.Y.Z\"` line in {PYPROJECT}")
+        raise RuntimeError(f'couldn\'t find a `version = "X.Y.Z"` line in {PYPROJECT}')
     return f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
 
 
@@ -94,8 +92,10 @@ def bump_version(current: str, level: str, *, allow_major: bool) -> str:
         if major == 0 and not allow_major:
             # Pre-1.0 policy (RELEASING.md): minor IS the effective major. A detected breaking
             # change still only bumps the minor unless the human explicitly opts into 1.0.0.
-            print("breaking change detected, but pre-1.0 → bumping minor, not major "
-                  "(pass --allow-major to cut 1.0.0 instead)")
+            print(
+                "breaking change detected, but pre-1.0 → bumping minor, not major "
+                "(pass --allow-major to cut 1.0.0 instead)"
+            )
             return f"{major}.{minor + 1}.0"
         return f"{major + 1}.0.0"
     if level == "minor":
@@ -128,9 +128,7 @@ def insert_changelog_section(notes: str, version: str) -> None:
 def changelog_section(version: str) -> str:
     """Extract the already-released `## [version] - ...` section (for release notes)."""
     text = CHANGELOG.read_text()
-    m = re.search(
-        rf"(## \[{re.escape(version)}\][^\n]*\n.*?)(?=\n## \[|\Z)", text, re.DOTALL
-    )
+    m = re.search(rf"(## \[{re.escape(version)}\][^\n]*\n.*?)(?=\n## \[|\Z)", text, re.DOTALL)
     if not m:
         raise RuntimeError(f"no changelog section found for {version} in {CHANGELOG}")
     return m.group(1).strip() + "\n"
@@ -147,7 +145,9 @@ def build_wheel(version: str) -> Path:
     run(["uv", "build", "--wheel"], cwd=OVERLAY_DIR)
     wheels = list(dist.glob(f"saitenka-{version}-*.whl"))
     if len(wheels) != 1:
-        raise RuntimeError(f"expected exactly one saitenka-{version} wheel in {dist}, found {wheels}")
+        raise RuntimeError(
+            f"expected exactly one saitenka-{version} wheel in {dist}, found {wheels}"
+        )
     return wheels[0]
 
 
@@ -172,9 +172,7 @@ def build_and_smoke_test(version: str) -> Path:
 def require_clean_tree() -> None:
     status = run(["git", "status", "--porcelain"], cwd=REPO_ROOT, capture=True).stdout
     if status.strip():
-        raise RuntimeError(
-            "working tree isn't clean — commit/stash first:\n" + status
-        )
+        raise RuntimeError("working tree isn't clean — commit/stash first:\n" + status)
 
 
 def current_branch() -> str:
@@ -235,7 +233,7 @@ def cmd_prepare(args: PrepareArgs) -> int:
     branch = current_branch()
     print(f"\nReady: {next_version} committed on `{branch}`.")
     if not args.push:
-        print(f"  git push   # then open/update the PR")
+        print("  git push   # then open/update the PR")
     print("Next: get the PR reviewed and merged into main, then run `release.py publish`.")
     return 0
 
@@ -253,9 +251,13 @@ def cmd_publish(args: PublishArgs) -> int:
         run(["git", "fetch", "origin", "main"], cwd=REPO_ROOT)
         branch = current_branch()
         if branch != "main":
-            raise RuntimeError(f"on `{branch}`, not `main` — checkout main first (or pass --no-require-main)")
+            raise RuntimeError(
+                f"on `{branch}`, not `main` — checkout main first (or pass --no-require-main)"
+            )
         local = run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture=True).stdout.strip()
-        remote = run(["git", "rev-parse", "origin/main"], cwd=REPO_ROOT, capture=True).stdout.strip()
+        remote = run(
+            ["git", "rev-parse", "origin/main"], cwd=REPO_ROOT, capture=True
+        ).stdout.strip()
         if local != remote:
             raise RuntimeError("local main isn't up to date with origin/main — `git pull` first")
 
@@ -273,16 +275,22 @@ def cmd_publish(args: PublishArgs) -> int:
     run(["git", "push", "origin", tag], cwd=REPO_ROOT)
 
     notes = changelog_section(version)
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(notes)
         notes_path = Path(f.name)
     # Notes-only GitHub Release — no binary assets. Distribution is PyPI + the hosted install scripts;
     # the auto "Source code" archive covers source. `uv publish` (below) is the load-bearing step.
     run(
         [
-            "gh", "release", "create", tag,
-            "--draft", "--title", version,
-            "--notes-file", str(notes_path),
+            "gh",
+            "release",
+            "create",
+            tag,
+            "--draft",
+            "--title",
+            version,
+            "--notes-file",
+            str(notes_path),
         ],
         cwd=REPO_ROOT,
     )
@@ -294,7 +302,9 @@ def cmd_publish(args: PublishArgs) -> int:
         run(["gh", "release", "edit", tag, "--draft=false"], cwd=REPO_ROOT)
         print(f"\nPublished: {url}")
     else:
-        print(f"\nDraft ready — review it, then publish:\n  gh release edit {tag} --draft=false\n  {url}")
+        print(
+            f"\nDraft ready — review it, then publish:\n  gh release edit {tag} --draft=false\n  {url}"
+        )
     # PyPI is the install channel — this is what makes `uv tool install`/`curl … | sh` see the new
     # version. Manual on purpose (needs your token, irreversible):
     print(f"\nUpload the wheel to PyPI:\n  (cd overlay && uv publish)   # built: {wheel.name}")
@@ -302,39 +312,67 @@ def cmd_publish(args: PublishArgs) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("prepare", help="bump version, insert changelog, build+gate+commit (pre-merge)")
+    p = sub.add_parser(
+        "prepare", help="bump version, insert changelog, build+gate+commit (pre-merge)"
+    )
     p.add_argument(
-        "--notes", type=Path, default=DEFAULT_NOTES,
+        "--notes",
+        type=Path,
+        default=DEFAULT_NOTES,
         help=f"markdown file with the curated changelog entry (default: {DEFAULT_NOTES.name})",
     )
     p.add_argument("--bump", choices=["auto", "patch", "minor", "major"], default="auto")
     p.add_argument("--version", help="exact X.Y.Z override (skips --bump)")
-    p.add_argument("--allow-major", action="store_true", help="let a detected breaking change cross to 1.0.0")
+    p.add_argument(
+        "--allow-major", action="store_true", help="let a detected breaking change cross to 1.0.0"
+    )
     p.add_argument("--push", action="store_true", help="also `git push` after committing")
-    p.add_argument("--skip-gate", action="store_true", help="skip `poe pre-release` (faster iteration only)")
-    p.add_argument("--dry-run", action="store_true", help="print the computed version + notes, change nothing")
+    p.add_argument(
+        "--skip-gate", action="store_true", help="skip `poe pre-release` (faster iteration only)"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="print the computed version + notes, change nothing"
+    )
 
     q = sub.add_parser("publish", help="tag, build, draft-release, optionally publish (post-merge)")
     q.add_argument("--version", help="defaults to overlay/pyproject.toml's current version")
-    q.add_argument("--publish", action="store_true", help="flip the draft live (default: leave as draft)")
+    q.add_argument(
+        "--publish", action="store_true", help="flip the draft live (default: leave as draft)"
+    )
     q.add_argument("--skip-gate", action="store_true", help="skip `poe pre-release`")
     q.add_argument(
-        "--no-require-main", dest="require_main", action="store_false",
+        "--no-require-main",
+        dest="require_main",
+        action="store_false",
         help="allow running off a branch other than main (rare; e.g. re-running after a failed step)",
     )
 
     ns = ap.parse_args()
     if ns.command == "prepare":
-        return cmd_prepare(PrepareArgs(
-            notes=ns.notes, bump=ns.bump, version=ns.version, allow_major=ns.allow_major,
-            push=ns.push, skip_gate=ns.skip_gate, dry_run=ns.dry_run,
-        ))
-    return cmd_publish(PublishArgs(
-        version=ns.version, publish=ns.publish, skip_gate=ns.skip_gate, require_main=ns.require_main,
-    ))
+        return cmd_prepare(
+            PrepareArgs(
+                notes=ns.notes,
+                bump=ns.bump,
+                version=ns.version,
+                allow_major=ns.allow_major,
+                push=ns.push,
+                skip_gate=ns.skip_gate,
+                dry_run=ns.dry_run,
+            )
+        )
+    return cmd_publish(
+        PublishArgs(
+            version=ns.version,
+            publish=ns.publish,
+            skip_gate=ns.skip_gate,
+            require_main=ns.require_main,
+        )
+    )
 
 
 if __name__ == "__main__":

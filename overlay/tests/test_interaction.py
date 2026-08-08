@@ -8,10 +8,9 @@ These use the :class:`Driver` (tests/driver.py) so they read as interaction scri
 from __future__ import annotations
 
 from driver import Driver
-from util import FakeIPC
-
 from overlay.app.controller import Reader
 from overlay.panel import Definition, Entry
+from util import FakeIPC
 
 
 class _FakeDS:
@@ -154,9 +153,10 @@ def test_move_over_word_shows_tooltip_and_switching_words():
 def test_main_flow_renders_with_caches_disabled_even_when_files_exist(tmp_path, monkeypatch):
     # Opt-out of BOTH caches must beat use-when-available: a prebuilt file on disk is ignored, and the
     # live pipeline still renders the tooltip (the caches are pure accelerators, never load-bearing).
-    from overlay import mask_atlas
     from overlay.app.config import ReaderOptions, TooltipOptions
     from overlay.app.render_cache import RenderCache
+
+    from overlay import mask_atlas
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     RenderCache.open(tmp_path / "render-cache.sqlite", max_bytes=1 << 20).close()  # files DO exist

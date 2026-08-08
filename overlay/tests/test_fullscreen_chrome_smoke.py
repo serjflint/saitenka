@@ -10,7 +10,6 @@ was that it did not). Real renderers, no subprocess/socket → default tier.
 from __future__ import annotations
 
 import pytest
-
 from overlay.app import analysis_overlay, help_overlay, sidebar
 from overlay.app.config import PanelOptions, ReaderOptions
 from overlay.app.controller import Reader

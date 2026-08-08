@@ -10,13 +10,13 @@ from __future__ import annotations
 import numpy as np
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from PIL import Image, ImageDraw
-
-from overlay import fonts
 from overlay.mpvio.osd import to_bgra_array
 from overlay.panel import Theme, compose_panel
 from overlay.render.banded import composite_window
 from overlay.render.window import build_offsets
+from PIL import Image, ImageDraw
+
+from overlay import fonts
 
 WIDTH = 384
 BG = (252, 252, 250, 255)  # opaque panel background (Theme().bg)

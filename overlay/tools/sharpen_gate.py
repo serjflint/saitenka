@@ -33,6 +33,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import starmap
 from pathlib import Path
 
 # ---------------------------------------------------------------------------------------------------
@@ -70,7 +71,7 @@ def _query(db: Path, outcome: str, module_def: str | None) -> list[Mutant]:
         params.append(module_def)
     rows = con.execute(sql, params).fetchall()
     con.close()
-    return [Mutant(op, occ, row) for op, occ, row in rows]
+    return list(starmap(Mutant, rows))
 
 
 # A replay predicate: does the current suite kill this mutant? Injectable so the gate logic is testable
@@ -84,7 +85,10 @@ def replay_is_killed(module: Path, m: Mutant, test_cmd: list[str], cwd: Path) ->
     try:
         subprocess.run(
             ["cosmic-ray", "apply", str(module), m.operator, str(m.occurrence)],
-            cwd=cwd, check=True, capture_output=True, text=True,
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         proc = subprocess.run(test_cmd, cwd=cwd, capture_output=True, text=True, check=False)
         return proc.returncode != 0  # a failing test IS the kill signal
@@ -138,7 +142,9 @@ def _asserts_by_test(src: str) -> dict[str, list[ast.Assert]]:
     """Map each ``test_*`` function to its assert statements (module + one class level deep)."""
     out: dict[str, list[ast.Assert]] = {}
     tree = ast.parse(src)
-    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name.startswith("test")]
+    funcs = [
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name.startswith("test")
+    ]
     for fn in funcs:
         out[fn.name] = [n for n in ast.walk(fn) if isinstance(n, ast.Assert)]
     return out
@@ -171,7 +177,11 @@ def _is_trivial(a: ast.Assert) -> bool:
     t = a.test
     if isinstance(t, ast.Constant):
         return bool(t.value)
-    if isinstance(t, ast.Compare) and len(t.comparators) == 1 and isinstance(t.ops[0], (ast.Eq, ast.Is)):
+    if (
+        isinstance(t, ast.Compare)
+        and len(t.comparators) == 1
+        and isinstance(t.ops[0], (ast.Eq, ast.Is))
+    ):
         return ast.dump(t.left) == ast.dump(t.comparators[0])  # x == x
     if isinstance(t, ast.BoolOp) and isinstance(t.op, ast.Or):
         return any(isinstance(v, ast.Constant) and v.value for v in t.values)  # ... or True
@@ -197,7 +207,11 @@ def _cut_derived(a: ast.Assert, cut_leaf: str, cut_names: set[str]) -> bool:
     if not (isinstance(t, ast.Compare) and len(t.comparators) == 1):
         return False
     for side in (t.left, t.comparators[0]):
-        if isinstance(side, ast.Attribute) and isinstance(side.value, ast.Name) and side.value.id == cut_leaf:
+        if (
+            isinstance(side, ast.Attribute)
+            and isinstance(side.value, ast.Name)
+            and side.value.id == cut_leaf
+        ):
             return True  # mod.CONST
         if isinstance(side, ast.Name) and side.id in cut_names:
             return True  # bare CONST imported from the CUT
@@ -211,7 +225,9 @@ class AntiCheatViolation:
     detail: str
 
 
-def anticheat_diff(before_src: str, after_src: str, cut_module: str = "") -> list[AntiCheatViolation]:
+def anticheat_diff(
+    before_src: str, after_src: str, cut_module: str = ""
+) -> list[AntiCheatViolation]:
     """Compare a test file before/after an edit. Bounce a removed/weakened/trivial assertion in a test
     that existed before, and any expected-value-from-CUT assertion. Purely additive edits, and genuine
     *strengthening* (a weak assert replaced by a stronger one), pass clean. Merging a test into another
@@ -232,7 +248,9 @@ def anticheat_diff(before_src: str, after_src: str, cut_module: str = "") -> lis
             orphaned = [a for a in before_asserts if norm(a) not in all_after_norms]
             if orphaned:
                 violations.append(
-                    AntiCheatViolation(name, "removed", f"test removed; {len(orphaned)} assertion(s) lost")
+                    AntiCheatViolation(
+                        name, "removed", f"test removed; {len(orphaned)} assertion(s) lost"
+                    )
                 )
             continue
         missing = {norm(a) for a in before_asserts} - {norm(a) for a in after_asserts}
@@ -251,10 +269,14 @@ def anticheat_diff(before_src: str, after_src: str, cut_module: str = "") -> lis
     for name, after_asserts in after.items():
         for a in after_asserts:
             if _is_trivial(a):
-                violations.append(AntiCheatViolation(name, "trivial", f"line {a.lineno}: always-true assert"))
+                violations.append(
+                    AntiCheatViolation(name, "trivial", f"line {a.lineno}: always-true assert")
+                )
             elif cut_module and _cut_derived(a, cut_leaf, cut_names):
                 violations.append(
-                    AntiCheatViolation(name, "cut-derived", f"line {a.lineno}: expected value read from CUT")
+                    AntiCheatViolation(
+                        name, "cut-derived", f"line {a.lineno}: expected value read from CUT"
+                    )
                 )
     return violations
 
@@ -284,14 +306,32 @@ def _run_anticheat(args: argparse.Namespace) -> int:
 
 def _run_efficacy(args: argparse.Namespace) -> int:
     db = Path(args.db)
-    targets = survivors(db, args.func)  # the survivors in the touched function the sharpen aims to kill
-    control = killed(db, args.func)  # COMPLETE prior-killed set for the function — the regression net
-    test_cmd = [sys.executable, "-m", "pytest", "-x", "-q", "--no-header", "-p", "no:randomly", *args.tests]
+    targets = survivors(
+        db, args.func
+    )  # the survivors in the touched function the sharpen aims to kill
+    control = killed(
+        db, args.func
+    )  # COMPLETE prior-killed set for the function — the regression net
+    test_cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-x",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:randomly",
+        *args.tests,
+    ]
     rep = efficacy_gate(Path(args.module), targets, control, test_cmd, cwd=args.repo)
-    print(f"earned {len(rep.earned)}/{len(targets)} | regressed {len(rep.regressed)}/{rep.checked_control}")
+    print(
+        f"earned {len(rep.earned)}/{len(targets)} | regressed {len(rep.regressed)}/{rep.checked_control}"
+    )
     if rep.regressed:
         for m in rep.regressed:
-            print(f"  REGRESSED {m.operator} @{m.occurrence} (line {m.row}) — was killed, now survives")
+            print(
+                f"  REGRESSED {m.operator} @{m.occurrence} (line {m.row}) — was killed, now survives"
+            )
     print(f"efficacy: {'PASS' if rep.ok else 'BOUNCE'} (score_dropped={rep.score_dropped})")
     return 0 if rep.ok else 1
 
@@ -303,13 +343,21 @@ def _main() -> int:
     a = sub.add_parser("anticheat", help="static assertion-diff of a test file vs a git ref")
     a.add_argument("test_file", type=Path)
     a.add_argument("--ref", default="HEAD")
-    a.add_argument("--cut", default="", help="module-under-test dotted path, for cut-derived detection")
+    a.add_argument(
+        "--cut", default="", help="module-under-test dotted path, for cut-derived detection"
+    )
     a.add_argument("--repo", type=Path, default=Path.cwd())
 
-    e = sub.add_parser("efficacy", help="mutation replay: earned kills + full-control no-regression")
+    e = sub.add_parser(
+        "efficacy", help="mutation replay: earned kills + full-control no-regression"
+    )
     e.add_argument("--db", required=True, help="cosmic-ray session sqlite from a prior campaign")
-    e.add_argument("--module", required=True, help="module path relative to repo, e.g. src/overlay/app/x.py")
-    e.add_argument("--func", required=True, help="the touched function/def name (scopes targets+control)")
+    e.add_argument(
+        "--module", required=True, help="module path relative to repo, e.g. src/overlay/app/x.py"
+    )
+    e.add_argument(
+        "--func", required=True, help="the touched function/def name (scopes targets+control)"
+    )
     e.add_argument("--tests", nargs="+", required=True, help="test files/args the campaign used")
     e.add_argument("--repo", type=Path, default=Path.cwd())
 

@@ -528,8 +528,9 @@ def _atlas_render_pass(reader, corpus, cap, *, count_rasters: bool):
     in-proc memo, is what's exercised). Returns ``(total_getmask2_calls, per_word_render_ms)``."""
     import time as _time
 
-    from overlay import fonts
     from overlay.app.subtitles import WordBox
+
+    from overlay import fonts
 
     n = {"r": 0}
     orig = fonts.ImageFont.FreeTypeFont.getmask2
@@ -564,9 +565,10 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     import os
     import tempfile
 
-    from overlay import fonts, mask_atlas
     from overlay.app.config import ReaderOptions, TooltipOptions
     from overlay.app.paths import cache_dir as _cd
+
+    from overlay import fonts, mask_atlas
 
     ds, tag = _load_dict_set()
     if ds is None:

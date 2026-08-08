@@ -5,9 +5,8 @@ from __future__ import annotations
 import sys
 
 import pytest
-from util import use_platform
-
 from overlay.app import paths
+from util import use_platform
 
 
 @pytest.mark.windows_sim

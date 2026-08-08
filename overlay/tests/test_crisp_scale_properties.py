@@ -13,7 +13,6 @@ from __future__ import annotations
 import util
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from overlay.model import Theme
 from overlay.panel import panel_rows, render_panel
 from overlay.render.banded import WindowedPanel

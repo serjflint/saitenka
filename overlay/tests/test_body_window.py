@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from overlay.body_block import (
     BodyRenderArgs,
     layout_body_block,

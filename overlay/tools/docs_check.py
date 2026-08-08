@@ -233,7 +233,7 @@ def _consts_failures(doc: dict[str, tuple[str, str]], registry: dict[str, ConstS
             )
         try:
             code_value = spec.resolve()
-        except Exception as exc:  # noqa: BLE001 — any resolution failure is a real drift signal
+        except Exception as exc:
             fails.append(f"docs_check: cannot resolve `{ident}` in code ({exc!r})")
             continue
         if float(code_value) != float(literal):

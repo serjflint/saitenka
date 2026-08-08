@@ -10,7 +10,6 @@ import tomllib
 
 from hypothesis import assume, given
 from hypothesis import strategies as st
-
 from overlay.app import paths, report
 from overlay.app.init_wizard import dumps_toml
 from overlay.mpvio.ipc import MpvIPC

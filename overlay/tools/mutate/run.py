@@ -25,7 +25,6 @@ Sharpen gate — consumes that DB directly and never launches a campaign (it can
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -68,7 +67,7 @@ def _pending(db: str) -> bool:
 
 def campaign(name: str, module: str, tests: str, *, force: bool = False) -> None:
     db = db_path(module)
-    if os.path.exists(db) and not force and not _pending(db):
+    if Path(db).exists() and not force and not _pending(db):
         print(f"\n=== {name} ({module}) — reusing complete campaign at {db} ===")
         subprocess.run(["cr-rate", db])
         return
@@ -78,18 +77,20 @@ def campaign(name: str, module: str, tests: str, *, force: bool = False) -> None
         sys.exit(
             f"{module} has uncommitted changes — commit/stash first (mutation edits in place)."
         )
-    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as cfg:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".toml", delete=False) as cfg:
         cfg.write(
             f'[cosmic-ray]\nmodule-path = "{module}"\ntimeout = 30.0\nexcluded-modules = []\n'
             f'test-command = "python -m pytest -x -q --no-header -p no:randomly {tests}"\n'
             f'[cosmic-ray.distributor]\nname = "local"\n'
         )
     try:
-        if force and os.path.exists(db):
-            os.remove(db)
-        if not os.path.exists(db):
+        if force and Path(db).exists():
+            Path(db).unlink()
+        if not Path(db).exists():
             subprocess.run(["cosmic-ray", "init", cfg.name, db], check=True)
-        subprocess.run(["cosmic-ray", "exec", cfg.name, db], check=True)  # resumes pending; no-op if done
+        subprocess.run(
+            ["cosmic-ray", "exec", cfg.name, db], check=True
+        )  # resumes pending; no-op if done
     finally:
         subprocess.run(["git", "checkout", "--", module])  # always restore the in-place mutation
     print(f"\n=== {name} ({module}) ===")

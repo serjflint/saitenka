@@ -1,8 +1,6 @@
 """Acceptance coverage for FSRS maturity colors and their presentation boundary."""
 
 import pytest
-from PIL import Image
-
 from overlay.app import reader_deps
 from overlay.app.config import ReaderOptions, TooltipOptions
 from overlay.app.controller import Reader
@@ -11,6 +9,7 @@ from overlay.app.scoring import Palette, Scorer
 from overlay.app.subtitles import SubtitleRender
 from overlay.app.tokenize import Token
 from overlay.app.wordlists import FreqDict, KnownWords
+from PIL import Image
 
 
 def _token(surface: str = "本") -> Token:

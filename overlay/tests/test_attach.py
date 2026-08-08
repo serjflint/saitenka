@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from overlay.mpvio import discover
 from overlay.mpvio.osd import Overlay
 
@@ -64,7 +63,6 @@ def test_two_clients_share_one_socket():
     import tempfile
 
     from fake_mpv_server import FakeMpvServer
-
     from overlay.mpvio.ipc import MpvIPC
 
     # short base dir: AF_UNIX paths are capped ~104 chars on macOS (pytest's tmp_path is too long)

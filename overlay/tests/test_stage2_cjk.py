@@ -1,9 +1,9 @@
 """Stage 2: mixed JP/EN shapes with font fallback and no missing glyphs (tofu)."""
 
+from overlay.render.text import TextOpts, rasterize
 from util import assert_golden
 
 from overlay import fonts
-from overlay.render.text import TextOpts, rasterize
 
 MIXED = "これは test 日本語。"
 

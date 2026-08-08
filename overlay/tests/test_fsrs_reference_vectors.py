@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from overlay.app import fsrs
 
 _CASES = json.loads(

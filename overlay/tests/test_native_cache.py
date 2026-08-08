@@ -11,7 +11,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import util
-
 from overlay.panel import panel_rows, render_panel
 from overlay.render import banded
 from overlay.render.banded import WindowedPanel

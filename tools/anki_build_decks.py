@@ -73,7 +73,7 @@ def retrievability(s, elapsed, decay):
 def classify(ctype, ivl, r, mature_ivl, forgotten_r):
     if ctype == 0:
         return "new"
-    if ctype in (1, 3):
+    if ctype in {1, 3}:
         return "learning"
     if r is not None and r < forgotten_r:
         return "forgotten"
@@ -81,9 +81,7 @@ def classify(ctype, ivl, r, mature_ivl, forgotten_r):
 
 
 def sanitize_tag(deck):
-    return "saitenka_orig::" + deck.replace(" ", "_").replace("::", "-").replace(
-        '"', ""
-    )
+    return "saitenka_orig::" + deck.replace(" ", "_").replace("::", "-").replace('"', "")
 
 
 # state → (target deck suffix, is it a move?)
@@ -101,9 +99,7 @@ def main():
     ap.add_argument("--collection", default=MAC_DEFAULT)
     ap.add_argument("--root", default="Saitenka")
     ap.add_argument("--backlog", default="Backlog", help="deck prefix to suspend")
-    ap.add_argument(
-        "--reactivate-cap", type=int, default=20, help="forgotten reviews/day"
-    )
+    ap.add_argument("--reactivate-cap", type=int, default=20, help="forgotten reviews/day")
     ap.add_argument("--mining-cap", type=int, default=15, help="new cards/day")
     ap.add_argument("--mature-ivl", type=int, default=21)
     ap.add_argument("--forgotten-r", type=float, default=0.85)
@@ -129,9 +125,7 @@ def main():
     con.create_collation("unicase", lambda a, b: (a > b) - (a < b))
     cur = con.cursor()
 
-    deck_name = {
-        i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")
-    }
+    deck_name = {i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")}
     # per-card decay (per-card cards.data['decay'] else FSRS-6 default)
     last_rev = dict(cur.execute("SELECT cid, MAX(id) FROM revlog GROUP BY cid"))
     now = time.time() * 1000.0
@@ -180,9 +174,7 @@ def main():
 
     by_target = Counter(p["target"] for p in plan)
     log("─" * 54)
-    log(
-        f"whole-collection card states (outside {args.root}/{args.backlog}): {dict(dist)}"
-    )
+    log(f"whole-collection card states (outside {args.root}/{args.backlog}): {dict(dist)}")
     log("routing plan:")
     for tgt, n in sorted(by_target.items()):
         log(f"    → {tgt:22} {n:>6} cards")

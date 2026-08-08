@@ -41,7 +41,7 @@ It passes. It covers `score`. Now suppose a colleague "refactors" it:
 ```python
 def test_score_returns_expected():
     result = score("hello")
-    assert result is not None       # still green, still 100% coverage — and now catches almost nothing
+    assert result is not None  # still green, still 100% coverage — and now catches almost nothing
 ```
 
 The suite is still green. Coverage is unchanged. But the test has been **lobotomized**: `score` could
@@ -104,7 +104,7 @@ for *all* inputs. Instead of:
 
 ```python
 def test_add():
-    assert add(2, 3) == 5           # one example; a mutant that only breaks on 7+11 survives
+    assert add(2, 3) == 5  # one example; a mutant that only breaks on 7+11 survives
 ```
 
 you assert an invariant with [Hypothesis](https://hypothesis.readthedocs.io/) generating the inputs:
@@ -112,9 +112,10 @@ you assert an invariant with [Hypothesis](https://hypothesis.readthedocs.io/) ge
 ```python
 from hypothesis import given, strategies as st
 
+
 @given(a=st.integers(), b=st.integers())
 def test_add_is_commutative(a, b):
-    assert add(a, b) == add(b, a)    # kills a whole class of arithmetic mutants at once
+    assert add(a, b) == add(b, a)  # kills a whole class of arithmetic mutants at once
 ```
 
 Hypothesis *shrinks* a failure to its smallest form; you pin that shrunk case as an `@example` so the
@@ -253,8 +254,10 @@ The heal was one additive test asserting all three tiers on the public return va
 def test_locate_by_text_disambiguates_duplicate_lines_by_timing_then_first():
     idx = SubIndex([SubCue(1.0, 2.0, "同じ"), SubCue(3.0, 4.0, "ちがう"), SubCue(5.0, 6.0, "同じ")])
     dup = "同じ"  # matches cues 0 and 2
-    assert idx.locate(text=dup, preferred=0, sub_start=5.5) == 0   # tier 1: the hint wins
-    assert idx.locate(text=dup, preferred=-1, sub_start=5.5) == 2  # tier 2: window containing sub_start
+    assert idx.locate(text=dup, preferred=0, sub_start=5.5) == 0  # tier 1: the hint wins
+    assert (
+        idx.locate(text=dup, preferred=-1, sub_start=5.5) == 2
+    )  # tier 2: window containing sub_start
     assert idx.locate(text=dup, preferred=-1, sub_start=6.0) == 0  # tier 3: no window → first match
 ```
 

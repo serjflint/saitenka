@@ -31,7 +31,7 @@ def _run(cmd: list[str]) -> tuple[int, str]:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, check=False)
         return p.returncode, p.stdout.strip()
-    except Exception as exc:  # noqa: BLE001 - a flaky net call must not crash the sweep
+    except Exception as exc:
         return 1, f"error: {exc}"
 
 
@@ -52,8 +52,13 @@ def check_repo(repo: str) -> tuple[str, str]:
     _, stars = _run(["gh", "api", f"repos/{repo}", "--jq", ".stargazers_count"])
     _, archived = _run(["gh", "api", f"repos/{repo}", "--jq", ".archived"])
     _, rel = _run(
-        ["gh", "api", f"repos/{repo}/releases/latest", "--jq",
-         '.tag_name + " @ " + (.published_at|.[0:10])']
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/releases/latest",
+            "--jq",
+            '.tag_name + " @ " + (.published_at|.[0:10])',
+        ]
     )
     rel = rel if rel and "message" not in rel.lower() else "(no release)"
     days = _days_since(pushed)

@@ -14,7 +14,6 @@ import json
 import zipfile
 
 import pytest
-
 from overlay.app import yomitan_import as yi
 
 

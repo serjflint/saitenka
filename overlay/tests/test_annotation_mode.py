@@ -1,13 +1,12 @@
 """Learning-annotation visibility remains independent of tooltip and playback state."""
 
 import pytest
-from PIL import Image
-
 from overlay.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from overlay.app.controller import Reader
 from overlay.app.subtitle_render import NullRenderer
 from overlay.app.subtitles import SubtitleRender
 from overlay.app.tooltip import update_hover_impl
+from PIL import Image
 
 
 class FakeIPC:

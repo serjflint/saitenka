@@ -14,11 +14,10 @@ golden): (1) the band's scan/link boxes stay in REFERENCE px — scale-invariant
 from __future__ import annotations
 
 import util
-from PIL import Image
-
 from overlay.model import Span, Style
 from overlay.render.flow import layout_flow, render_flow, render_flow_window
 from overlay.render.layout import Block
+from PIL import Image
 
 _WIDTH, _PAD = 300, 8
 

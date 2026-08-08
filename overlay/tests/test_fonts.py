@@ -5,11 +5,11 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
+from overlay.model import Style
+from overlay.render.layout import Token, _font, draw_token
 from PIL import Image, ImageDraw
 
 from overlay import fonts
-from overlay.model import Style
-from overlay.render.layout import Token, _font, draw_token
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

@@ -1,6 +1,6 @@
 """Type stub for the taffylite Rust extension (shipped with the wheel via maturin `python-source`)."""
 
-from typing import Sequence
+from collections.abc import Sequence
 
 Edges = tuple[float, float, float, float]
 
@@ -31,4 +31,3 @@ def column(
 ) -> tuple[list[int], list[int]]:
     """Row-stack geometry (the ``LayoutBackend.cumulative`` primitive): ``(starts, ends)`` for
     fixed-height rows with per-row trailing gaps inside ``top_pad`` top padding."""
-    ...

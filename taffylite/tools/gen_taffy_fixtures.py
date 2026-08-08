@@ -32,12 +32,7 @@ from pathlib import Path
 TAFFY_TAG = "v0.7.7"
 TAFFY_REPO = "https://github.com/DioxusLabs/taffy"
 
-OUT = (
-    Path(__file__).resolve().parent.parent
-    / "tests"
-    / "fixtures"
-    / "taffy_gentest_flex.json"
-)
+OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "taffy_gentest_flex.json"
 
 # A node is expressible only if every style property it carries is in this whitelist. Anything else
 # (flex_grow/shrink/basis, min/max, aspect_ratio, %/auto content sizing, align_*/justify_*, position,
@@ -140,9 +135,7 @@ def _edges(value: str) -> tuple[float, float, float, float]:
 def _parse_nodes(body: str) -> list[dict]:
     """Every `let nodeX = taffy.new_leaf/new_with_children(Style{..}[, &[..]])`, in declaration order."""
     nodes: list[dict] = []
-    for m in re.finditer(
-        r"let (node\w*) = taffy\s*\.(new_leaf|new_with_children)\(", body
-    ):
+    for m in re.finditer(r"let (node\w*) = taffy\s*\.(new_leaf|new_with_children)\(", body):
         var, kind = m.group(1), m.group(2)
         style_at = body.index("taffy::style::Style {", m.end())
         inner_open = body.index("{", style_at)
@@ -186,9 +179,7 @@ def _to_flex(props: dict[str, str]) -> dict:
     fd = props.get("flex_direction", "")
     if "Reverse" in fd:
         raise Unsupported("reverse flex-direction")
-    direction = (
-        "column" if "Column" in fd else "row"
-    )  # taffy's default is Row (omitted == row)
+    direction = "column" if "Column" in fd else "row"  # taffy's default is Row (omitted == row)
     fw = props.get("flex_wrap", "")
     if "WrapReverse" in fw:
         raise Unsupported("wrap-reverse")
@@ -265,9 +256,7 @@ def build_case(path: Path) -> dict | None:
     handle = {node["var"]: i for i, node in enumerate(nodes)}
     child_vars = {c for node in nodes for c in node["children"]}
     if not child_vars <= handle.keys():
-        raise Unsupported(
-            "child of an unparsed node kind"
-        )  # e.g. new_leaf_with_context (measure)
+        raise Unsupported("child of an unparsed node kind")  # e.g. new_leaf_with_context (measure)
     roots = [node["var"] for node in nodes if node["var"] not in child_vars]
     if len(roots) != 1:
         raise Unsupported(f"{len(roots)} roots")

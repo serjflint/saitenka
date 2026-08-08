@@ -191,7 +191,7 @@ class TaffyLayoutBackend:
     def cumulative(
         self, heights: Sequence[int], gaps: Sequence[int], top_pad: int
     ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-        import taffylite  # lazy chokepoint import (see class docstring); TID251 per-file-ignored here
+        import taffylite  # noqa: TID251  # layout-engine chokepoint: this module is the sole sanctioned importer (see class docstring)
 
         starts, ends = taffylite.column(
             [float(h) for h in heights], [float(g) for g in gaps], float(top_pad)
@@ -230,7 +230,7 @@ def resolve_backend(engine: str) -> LayoutBackend:
     (incl. ``"default"``) is the pure-Python default."""
     if engine == "taffy":
         try:
-            import taffylite  # noqa: F401  # availability probe; the real use is in TaffyLayoutBackend
+            import taffylite  # noqa: F401,TID251  # availability probe; the real use is in TaffyLayoutBackend
         except ImportError:
             import logging
 

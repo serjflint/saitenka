@@ -65,7 +65,8 @@ def _run(cmd: list[str], cwd: Path) -> str:
 def conformance_by_module(root: Path, test_map: dict[str, list[str]]) -> dict[str, tuple[int, int]]:
     """module -> (total hits, actionable hits) from a single `test-lint --json` scan."""
     raw = _run(
-        ["uv", "run", "ast-grep", "scan", "-c", "sgconfig-tests.yml", "--json=compact", "tests"], root
+        ["uv", "run", "ast-grep", "scan", "-c", "sgconfig-tests.yml", "--json=compact", "tests"],
+        root,
     )
     hits = json.loads(raw) if raw.strip() else []
     file_to_module = {t: m for m, ts in test_map.items() for t in ts}
@@ -87,7 +88,9 @@ def churn_and_age(root: Path, module: str, tests: list[str]) -> tuple[int, int |
     last = _run(["git", "log", "-1", "--format=%ct", "--", *paths], root).strip()
     if not last:
         return churn, None
-    now = _run(["git", "log", "-1", "--format=%ct"], root).strip()  # HEAD time; no wall clock in-script
+    now = _run(
+        ["git", "log", "-1", "--format=%ct"], root
+    ).strip()  # HEAD time; no wall clock in-script
     age = (int(now) - int(last)) // 86400 if now else None
     return churn, age
 
@@ -146,7 +149,9 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
             c.excluded = f"open-PR: {min(touched)}"
         elif c.status == sl.SHARPENED_CURRENT:
             c.excluded = "sharpened & unchanged"
-        elif module in grow and (not check_network or any(open_issue(root, i) for i in grow[module])):
+        elif module in grow and (
+            not check_network or any(open_issue(root, i) for i in grow[module])
+        ):
             c.excluded = f"grow-filed{'' if check_network else ' (offline, assumed open)'} ({','.join(grow[module])})"
         cands.append(c)
 
@@ -158,7 +163,7 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
     nsurv = _norm([c.survival or 0.0 for c in live])
     nchurn = _norm([float(c.churn) for c in live])
     for c, a, s, ch in zip(live, nact, nsurv, nchurn, strict=True):
-        bonus = 0.2 if c.status in (sl.UNSEEN, sl.STALE_SHA, sl.STALE_TOOLSET) else 0.0
+        bonus = 0.2 if c.status in {sl.UNSEEN, sl.STALE_SHA, sl.STALE_TOOLSET} else 0.0
         c.score = 0.4 * a + 0.4 * s + 0.2 * ch + bonus
     cands.sort(key=lambda c: (c.excluded != "", -c.score, c.module))
     return cands
@@ -177,13 +182,18 @@ def _fmt(c: Candidate) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--top", type=int, default=0, help="print only the top N live candidates")
-    ap.add_argument("--no-network", action="store_true", help="skip gh (open-PR / grow-issue) checks")
+    ap.add_argument(
+        "--no-network", action="store_true", help="skip gh (open-PR / grow-issue) checks"
+    )
     ap.add_argument("--ledger", default="../.ledger.sharpen.jsonl")
     args = ap.parse_args()
     root = Path.cwd()
     if args.no_network:
-        print("WARNING: --no-network — open-PR exclusion is DISABLED; may pick a module under active "
-              "work. Grow-filed exclusion stays on (fail-closed).", file=sys.stderr)
+        print(
+            "WARNING: --no-network — open-PR exclusion is DISABLED; may pick a module under active "
+            "work. Grow-filed exclusion stays on (fail-closed).",
+            file=sys.stderr,
+        )
     cands = rank(root, (root / args.ledger).resolve(), check_network=not args.no_network)
     live = [c for c in cands if not c.excluded]
     shown = live[: args.top] if args.top else cands

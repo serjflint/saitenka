@@ -20,6 +20,247 @@ preview-features = ["centralized-project-envs"]
 [dependency-groups]
 dev = ["poethepoet>=0.30"]
 
+# ── Repo-wide tool config (SSOT) ──────────────────────────────────────────────────────────────────
+# Ruff / complexipy / the type-checkers live HERE, at the workspace root, so ONE config governs ALL
+# first-party Python — overlay/ (Apache core), deinflect/ (GPL add-on), taffylite/ (Rust bindings), plus
+# tools/, install/, and .agents/ scripts. Ruff discovers this by walking up from each file (the
+# sub-packages carry no [tool.ruff] of their own), so there's no second rule-list to drift. The gate
+# tasks below invoke each tool from the root over the whole tree.
+# NOT hoisted (they encode overlay's ARCHITECTURE, not general policy, so they stay overlay-scoped in
+# overlay/pyproject.toml): import-linter (the GPL/layout chokepoint + layer contracts), deptry (per-package
+# dependency hygiene), corpus-lock / docs-refs / docs-consts, and mutate / fuzz / crosshair (pure-core).
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Explicit whitelist, NOT `select = ["ALL"]`: ALL silently enables new rules on every ruff upgrade and
+# breaks the gate unpredictably. We add categories by choice, favouring ones ruff can AUTO-FIX (cheap to
+# adopt and keep green). Noisy sub-rules of a kept category are pruned in `ignore` with a reason; a
+# category we don't want simply isn't selected. Residual per-site suppressions are `# noqa: … # reason`.
+# preview=true (#216): opt into ruff's preview rules for the SELECTED categories — a deliberate, triaged
+# one-time adoption (fixable ones auto-applied, deliberate/noisy ones pruned in `ignore` with a reason
+# below), NOT the `ALL` foot-gun. It's global (can't scope to one category), so preview findings in every
+# selected family were triaged, not just PL. Re-run `ruff check --preview --statistics` after a ruff bump
+# to catch newly-graduated/added preview rules — same deliberate-adoption discipline as the base select.
+preview = true
+select = [
+    # already had ─────────────────────────────────────────────────────────────────────────────────
+    "E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4", "TID",
+    # new, auto-fixable → near-free to adopt ──────────────────────────────────────────────────────
+    "W",       # pycodestyle warnings (fix)
+    "I",       # isort — import ordering (fix)
+    "RET",     # flake8-return — return-flow simplifications (fix)
+    "PIE",     # flake8-pie — misc modernizations (fix)
+    "FLY",     # flynt — static str.join → f-string (fix)
+    "FURB",    # refurb — modern idioms (fix)
+    "ICN",     # import conventions, e.g. `import numpy as np` (fix)
+    "ISC",     # implicit string concat (ISC001 conflicts with the formatter → ignored below)
+    "FA",      # future annotations (fix)
+    "TC",      # type-checking-only imports → TYPE_CHECKING block (fix)
+    "PGH",     # pygrep-hooks — blanket-noqa / eval / bad type-ignore
+    "NPY",     # NumPy-specific incl. the 2.0 migration (NPY201, fix) — we depend on numpy>=2
+    # new, security / correctness — high signal, low noise (mostly manual, but small) ──────────────
+    "S",       # flake8-bandit — the SAST gate (graduated from the standalone `sec` task)
+    "N",       # pep8-naming
+    "ASYNC", "DTZ", "LOG", "G", "PT", "SLOT", "YTT", "EXE", "T10", "T20", "INT",
+    # pylint — the logic/error rules; count/style cousins pruned in `ignore` ───────────────────────
+    # ERROR policy (#216): all 38 of ruff's PLE rules stay on — NO PLE sub-rule is ever pruned (error
+    # rules → adopt on sight, fixability irrelevant). The pylint error rules ruff does NOT implement
+    # (E0401/E1101/E1102/E1121) are astroid TYPE-INFERENCE checks already owned by poe types
+    # (mypy+basedpyright+pyrefly); test-driving `pylint --disable=all --enable=E` on src produced only
+    # those as false positives (Windows-stdlib, fugashi/taffylite C/Rust exts, guarded-None, a
+    # function-tuple ClassVar) plus E2502, which ruff already covers (PLE2502) — so no pylint gate/advisory
+    # earns a place (zero unique real signal; test-drive-first, per AGENTS.md).
+    "PLE", "PLW", "PLC", "PLR",
+    # 2026-07-27 sweep — readability/maintainability worth the one-time churn ─────────────────────
+    "A",       # flake8-builtins — no shadowing id/type/list/etc.
+    "RSE",     # flake8-raise — no unnecessary parens on raise (fix)
+    "FIX",     # flake8-fixme — no TODO/FIXME/XXX left in the tree; track work in issues instead
+    "TD",      # flake8-todos — same intent as FIX, format/completeness of any TODO that does land
+    "ERA",     # eradicate — commented-out code
+    "PTH",     # flake8-use-pathlib — os.path → pathlib (fix)
+    "BLE",     # flake8-blind-except — no bare `except Exception` swallowing a real error
+    "ARG",     # flake8-unused-arguments — dead parameters
+    "Q",       # flake8-quotes — quote consistency (formatter already enforces this; belt+suspenders)
+    "FBT",     # flake8-boolean-trap — no un-named boolean positional args
+]
+# Each entry prunes a noisy sub-rule of a SELECTED category (a category we don't want just isn't
+# selected above — no ignore needed for it).
+ignore = [
+    # ── Formatter owns these ────────────────────────────────────────────────────────────────────────
+    "line-too-long",    # line length — the formatter governs; JP double-width chars (・/～/×/→) misreport badly
+    "single-line-implicit-string-concatenation",  # single-line-implicit-concat — conflicts with `ruff format`
+    # ── Japanese typography (RUF) ───────────────────────────────────────────────────────────────────
+    "ambiguous-unicode-character-string", "ambiguous-unicode-character-docstring", "ambiguous-unicode-character-comment",  # "ambiguous" unicode — ・ ～ × … are intentional JP typography
+    # ── tryceratops / simplify (inline error strings ARE the UX here) ───────────────────────────────
+    "raise-vanilla-args",  # long messages in raise — a message-class hierarchy would be ceremony without benefit
+    "try-consider-else",  # move-return-to-else — the poll-loop/mining try/return shapes read clearer as-is
+    "suppressible-exception",  # suppress over try/except-pass — remaining pass bodies are log.debug(exc_info=True)
+    # ── flake8-bandit (S): keep the gate, drop the categorically-safe rules ─────────────────────────
+    "assert",    # asserts — invariant / free-threading GIL guardrails; the app never runs under -O
+    "subprocess-without-shell-equals-true",    # subprocess-without-shell — ruff flags ALL subprocess; ours pass list args, no shell
+    "start-process-with-partial-path",    # partial exe path — intentional PATH resolution of mpv/ffmpeg/brew (cross-platform)
+    "start-process-with-no-shell",    # start-process-without-shell — the safe (no-shell) form; flagged only for being direct
+    # ── pylint: keep PLE + logic rules, drop count/style cousins ────────────────────────────────────
+    "import-outside-top-level", # import-outside-top-level — deliberate lazy imports (deinflect/rich/otel/jamdict)
+    "magic-value-comparison", # magic-value — pervasive in rendering/geometry math where the literal IS the meaning
+    "too-many-return-statements", "too-many-branches", "too-many-locals", "too-many-statements", "too-many-boolean-expressions", "too-many-public-methods", "too-many-nested-blocks",
+               # too-many-{returns,branches,locals,statements,public-methods,nested-blocks} — these ARE
+               # cognitive-complexity, which complexipy already gates. PLR0913 (too-many-args) + PLR0917
+               # (too-many-positional) are NOT complexity — arg count is orthogonal to CCN, so nothing
+               # measured it and data-clumps went ungated (see the ProviderConfig refactor). Now gated
+               # at max-args=9 below; the data-clumps are bundled into config objects (#216).
+    "global-statement", # global-statement — intentional module-level singletons (caches/registries)
+    "redefined-loop-name", # redefined-loop-name — idiomatic reuse in a couple of tight loops
+    "unnecessary-lambda", # unnecessary-lambda — fixable-audit (#216): fix is UNSAFE-only (gate's --fix skips it),
+               # and the flagged sites are intentional (controller's uniform dispatch table where
+               # siblings like `lambda r: r.method()` don't reduce; readable test callbacks). Stays.
+    # ── pep8-naming (N) single-rule noise ───────────────────────────────────────────────────────────
+    "error-suffix-on-exception-name",    # exception without Error suffix — our names read fine
+    "lowercase-imported-as-non-lowercase",    # lowercase import aliased to non-lowercase — deliberate module aliases
+    # ── pytest (PT) ─────────────────────────────────────────────────────────────────────────────────
+    "pytest-composite-assertion",   # composite-assertion — `assert a and b` reads fine
+    # ── preview-rule triage (#216) — preview=true is global, so preview finds in EVERY selected family
+    #    were triaged. Fixable ones were auto-applied (RUF031/056/055, FURB140/154, PLR6201/6104, PLW1514);
+    #    these are the deliberate/noisy ones pruned with a reason (same discipline as the stable ignores). ─
+    "noqa-comments",  # noqa-comments — would rewrite every `# noqa: … # reason` into `# ruff: ignore[…]`,
+               # fighting the documented per-site-noqa convention (the rule itself is "opinionated, stylistic")
+    "float-equality-comparison",  # float-equality-comparison — deliberate EXACT sentinels (scale == 1.0 byte-identical path,
+               # geometry), not tolerance bugs; adding math.isclose everywhere would be wrong here
+    "used-dummy-variable",  # used-dummy-variable — `_`-prefixed locals kept alive on purpose (bench keep-alives,
+               # partial tuple-unpacks); the unsafe rename is churn without correctness value
+    "non-empty-init-module",  # non-empty-init-module — the version() try/except in overlay/__init__.py is the standard
+               # installed-dist-vs-source-tree pattern, not stray logic
+    "no-self-use", # no-self-use — 141 sites; methods-as-namespace is deliberate and it's complexity-adjacent
+               # (the PLR count cousins already defer to complexipy)
+    "import-private-name", # import-private-name — deliberate reach into sibling internal APIs (_-prefixed helpers)
+    "compare-to-empty-string", # compare-to-empty-string — no fix, and `x == ""` ≠ `not x` when x may be None/0 (unsafe)
+    "too-many-statements-in-try-clause", # too-many-statements-in-try-clause — complexity-adjacent; defer to complexipy like PLR09xx
+    "suspicious-subprocess-import",    # suspicious-subprocess-import — importing subprocess IS intended (mpv/ffmpeg/brew launch);
+               # sibling of the already-ignored S603/S606/S607, guarded by per-site `# noqa: S…` at each call
+    "repeated-append", # repeated-append — distinct large multi-line appends read clearer one-per-line than bundled
+               # into `.extend((...))`
+    "reimplemented-operator", # reimplemented-operator — a `lambda x: x[0]` sort key is idiomatic; not worth an
+               # `import operator` for 1-2 sites
+    "repeated-global", # repeated-global — collapses otel_metrics' category-grouped 47-name `global` block into
+               # one ~600-char line the formatter can't wrap (no parens on `global`); the grouped form wins
+]
+
+[tool.ruff.lint.pylint]
+# PLR0913/PLR0917 threshold (vs ruff's default 5). The over-10 data-clumps are now bundled into frozen
+# config objects (#216), so this is ratcheted to 9. The remaining noqas are NOT data-clumps: cyclopts CLI
+# commands (run/run_impl/attach — each flag must be its own parameter) and render-geometry primitives
+# (canvas/coords/sinks). Next ratchet to 8 is tracked in #216. max-positional-args defaults to this value.
+max-args = 9
+
+[tool.ruff.lint.per-file-ignores]
+# Paths are workspace-root-relative (this config is the root SSOT). Glob patterns (`**/tests/**` etc.)
+# cover the same tree in every package; ruff UNIONS all matching entries for a file.
+# cyclopts binds flags via Parameter(...) calls in parameter defaults — that IS its API shape.
+# T201: cli.py + cli_run.py are the CLI entrypoint/runtime-banner surface — print() IS the UX,
+# mirrors sgconfig/rules/no-print-in-lib.yml's `ignores:` (which cli_run.py should join too).
+"overlay/src/overlay/app/cli.py" = ["function-call-in-default-argument", "print"]
+"overlay/src/overlay/app/cli_run.py" = ["print"]
+# T201: interactive first-run wizards — print() is the prompt UX, matches no-print-in-lib.yml.
+"overlay/src/overlay/app/init_wizard.py" = ["print"]
+"overlay/src/overlay/app/setup_wizard.py" = ["print"]
+"overlay/src/overlay/app/prompt.py" = ["print"]  # shared prompt seam: the numbered fallback prints its choices
+# Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
+# hoisting five one-use constants would only add indirection.
+"overlay/src/overlay/app/scoring.py" = ["function-call-in-dataclass-default-argument"]
+# NB: the TID251 GPL/layout-engine chokepoint bans are per-LINE `# noqa: TID251 # reason` at each
+# sanctioned import (dictionary.py/doctor.py/layout_backend.py/test_properties.py), NOT per-file —
+# per-line is more precise AND keeps guarding a SECOND illicit import in the same file (defense-in-depth
+# alongside the .importlinter gpl-chokepoint / layout-engine-chokepoint contracts).
+# T201: doctor is a user-invoked diagnostic subcommand — print() IS its report output.
+"overlay/src/overlay/app/doctor.py" = ["print"]
+# T201: user-invoked import subcommand — print() reports progress/results to the terminal.
+"overlay/src/overlay/app/yomitan_import.py" = ["print"]
+# T201: pre-logging bootstrap — runs before configure_logging() attaches handlers, so log.*
+# has nowhere to go yet; matches no-print-in-lib.yml.
+"overlay/src/overlay/app/reader_deps.py" = ["print"]
+"overlay/src/overlay/app/crashlog.py" = ["print"]
+# media.py dispatches on sys.platform with a `return` per branch; the explicit `else` is a DELIBERATE
+# mypy platform-narrowing guard (without it, mypy flags the fall-through as unreachable on the build
+# host). RET's else-after-return "simplification" fights that guard, so opt those rules out here.
+"overlay/src/overlay/app/media.py" = ["superfluous-else-return", "superfluous-else-raise", "superfluous-else-break"]
+# The TID251 saitenka_deinflect/taffylite bans guard OVERLAY importing the add-ons; the add-on packages
+# themselves (and their own tests) import themselves legitimately — exempt them.
+"deinflect/**" = ["banned-api"]
+"taffylite/**" = ["banned-api"]
+# taffylite re-exports its compiled Rust ext via `from .taffylite import *` — the star is unavoidable
+# for a native module with no static names ruff can see.
+"taffylite/python/taffylite/__init__.py" = ["undefined-local-with-import-star", "undefined-local-with-import-star-usage"]
+# Tests legitimately reach into private members and take shortcuts a library shouldn't:
+"**/tests/**" = [
+    "private-member-access",  # white-box access to _private state is how the internals get tested
+    "assert",    # asserts ARE the test framework
+    "hardcoded-password-string", "hardcoded-password-func-arg", "suspicious-non-cryptographic-random-usage",  # fake tokens/passwords + non-crypto random in fixtures
+    "hardcoded-temp-file",    # temp-file paths in tests are throwaway fixtures, not process-lifetime files
+    "try-except-pass",    # try/except/pass in test teardown/probes is fine
+    "magic-value-comparison", # magic values are fine in test expectations
+    "pytest-raises-too-broad", "pytest-assert-in-except", "pytest-composite-assertion",  # broad pytest.raises / assert-in-except / composite asserts are fine here
+    "subprocess-run-without-check", # subprocess.run in tests drives a child then asserts on .returncode/.stdout — the test
+               # IS the check; explicit check= would be noise. (In src/, PLW1510 now gates: every call
+               # carries an explicit check=False after the 2026-07-25 sweep.)
+    "mutable-argument-default",    # mutable-argument-default — a fixture default like `terms=((…, [..]),)` is never mutated;
+               # the rule keeps guarding src (the real Windows-cp1252 bug class), just not test fixtures
+    "class-as-data-structure",    # class-as-data-structure — small test fakes read fine as plain classes, not dataclasses
+]
+# Dev/demo/infra SCRIPTS (bench + demos, dev codegen/anki helpers, agent hooks + skill scripts, the
+# release helper) — NOT shipped library code. "Harden without fanaticism" (#216): the script-appropriate
+# style/security categories are relaxed HERE (os.path over pathlib, a batch script's blanket except so one
+# bad row doesn't abort the run, subprocess/temp-file use, dev dating, non-snake locals, positional
+# bools), but genuine correctness rules stay ON and were FIXED at the source (missing-comma implicit
+# concat, loop-variable capture, unclosed files, bidi/zero-width chars, unspecified text encoding).
+"**/examples/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "lambda-assignment", "FBT", "N"]
+# overlay/compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
+"overlay/compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
+"**/tools/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check"]
+".agents/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "shebang-not-executable"]
+"install/**" = ["print", "implicit-namespace-package", "S", "DTZ", "shebang-not-executable"]
+# vulture's whitelist file is intentionally "dead": bare attribute/name expressions that only exist to
+# mark interface-mandated symbols as used — so useless-expression + undefined-name are the whole point.
+"overlay/.vulture_whitelist.py" = ["useless-expression", "undefined-name"]
+# NOTE: security suppressions in `src/` are DELIBERATELY per-line `# noqa: S…  # reason` at each
+# site (see anki.py/jimaku.py/wordlists.py/crashlog.py/fsrs.py/dictdb.py/doctor.py), not centralized
+# here — a per-line noqa is more precise (a NEW unsafe occurrence in the same file still fails) and
+# self-documents the reason next to the code. Config-level ignores stay reserved for categorical rules.
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"saitenka_deinflect".msg = "GPL-3.0 add-on — only overlay/app/dictionary.py and overlay/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
+"taffylite".msg = "Optional layout engine — only overlay/render/layout_backend.py (TaffyLayoutBackend) may import it (see .importlinter's layout-engine-chokepoint contract)."
+
+[tool.complexipy]
+# Cognitive-complexity gate (uv run poe complexity, folded into poe all), now repo-wide (#216).
+# Ratcheted via a checked-in baseline snapshot (complexipy-snapshot.json, `poe complexity-baseline` to
+# regenerate after a deliberate refactor): the pre-existing high-complexity functions are grandfathered,
+# so the gate only fails on NEW complexity growth, not on adoption. max-complexity-allowed=15 is
+# complexipy's own default — set explicitly so it's visible.
+paths = ["overlay/src/overlay", "deinflect/src", "taffylite/python", "tools", "install", ".agents"]
+max-complexity-allowed = 15
+
+[tool.mypy]
+python_version = "3.13"
+# Repo-wide (#216): the Apache core, the GPL add-on, and the first-party dev scripts. taffylite/python is
+# a thin binding over a Rust ext with a hand-written .pyi — its runtime module has no importable stubs, so
+# it's covered by basedpyright/pyrefly (structural) rather than mypy here.
+files = ["overlay/src/overlay", "deinflect/src", "tools", "install"]
+mypy_path = "overlay/src"
+# Stage 8b tooling: good additional checks, NOT --strict (plan decision).
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
+
+[tool.basedpyright]
+include = ["overlay/src/overlay", "deinflect/src"]
+typeCheckingMode = "basic"
+reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
+
 [tool.poe.tasks]
 all = { cmd = "uv run poe all", cwd = "overlay" }
 lint = { cmd = "uv run poe lint", cwd = "overlay" }

@@ -78,15 +78,14 @@ def classify(changed: list[str]) -> tuple[list[str], set[str], set[str]]:
     changed_tests: set[str] = set()
     for f in changed:
         name = f.rsplit("/", 1)[-1]
-        if f.startswith("deinflect/") or name in ("pyproject.toml", "uv.lock"):
+        if f.startswith("deinflect/") or name in {"pyproject.toml", "uv.lock"}:
             full.append(f)  # code dep overlay imports, or a config/lock change
         elif not f.startswith(OV):
             continue  # docs / install / .github — irrelevant to the overlay suite
         elif (
             name == "conftest.py"
-            or f.startswith(OV + "tests/golden/")
-            or f.endswith(".lua")
-            or f.startswith(OV + "tools/")  # tests file-LOAD tools via importlib — no static edge
+            or f.startswith((OV + "tests/golden/", OV + "tools/"))
+            or f.endswith(".lua")  # tests file-LOAD tools via importlib — no static edge
         ):
             full.append(f)  # fixture injection / data goldens / runtime asset / file-loaded tool
         elif f.endswith(".py"):

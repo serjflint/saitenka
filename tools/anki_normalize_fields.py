@@ -125,9 +125,9 @@ def load_jmdict(zip_path):
 
 def seq_for(term, reading, pair, byterm):
     if (term, reading) in pair:
-        return pair[(term, reading)]
+        return pair[term, reading]
     if (term, term) in pair:  # kana word
-        return pair[(term, term)]
+        return pair[term, term]
     s = byterm.get(term)
     return next(iter(s)) if s and len(s) == 1 else None  # term-only only if unambiguous
 
@@ -186,9 +186,7 @@ def read_templates(cur, mid):
 DEEPLINK_OPEN = '<a href="kanjistudy://word?id={{ID}}">'
 # wrap the vocab-display element (Lapis `front-vocab`, or a bare word field) in the deep-link,
 # mirroring Animecards' `<a href="kanjistudy://word?id={{ID}}"><div ...>{{Word}}</div></a>`
-VOCAB_DIV = re.compile(
-    r'(<div[^>]*class="front-vocab"[^>]*>\s*\{\{Expression\}\}\s*</div>)'
-)
+VOCAB_DIV = re.compile(r'(<div[^>]*class="front-vocab"[^>]*>\s*\{\{Expression\}\}\s*</div>)')
 
 
 def wrap_deeplink(tpl):
@@ -201,9 +199,7 @@ def wrap_deeplink(tpl):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--collection", default=MAC_DEFAULT)
-    ap.add_argument(
-        "--jmdict", default=None, help="JMdict Yomitan zip (auto-detected)"
-    )
+    ap.add_argument("--jmdict", default=None, help="JMdict Yomitan zip (auto-detected)")
     ap.add_argument(
         "--note-type",
         action="append",
@@ -215,9 +211,7 @@ def main():
         action="store_true",
         help="also add kanjistudy:// anchor to templates that lack it",
     )
-    ap.add_argument(
-        "--apply", action="store_true", help="write via AnkiConnect (Anki open)"
-    )
+    ap.add_argument("--apply", action="store_true", help="write via AnkiConnect (Anki open)")
     args = ap.parse_args()
 
     src = Path(os.path.expanduser(args.collection))
@@ -225,14 +219,12 @@ def main():
         raise SystemExit(f"collection not found: {src}")
     jm = args.jmdict or next(
         iter(
-            glob.glob(
-                os.path.expanduser("~/Downloads/JMdict_english_with_examples.zip")
-            )
+            glob.glob(os.path.expanduser("~/Downloads/JMdict_english_with_examples.zip"))
             or glob.glob(os.path.expanduser("~/Downloads/*itendex*.zip"))
         ),
         None,
     )
-    if not jm or not os.path.exists(os.path.expanduser(jm)):
+    if not jm or not Path(os.path.expanduser(jm)).exists():
         raise SystemExit("no JMdict zip found; pass --jmdict PATH")
     jm = os.path.expanduser(jm)
 
@@ -247,13 +239,11 @@ def main():
     con.create_collation("unicase", lambda a, b: (a > b) - (a < b))
     cur = con.cursor()
 
-    ntname = {i: n for i, n in cur.execute("SELECT id,name FROM notetypes")}
+    ntname = dict(cur.execute("SELECT id,name FROM notetypes"))
     flds = {}
     for ntid, ord_, name in cur.execute("SELECT ntid,ord,name FROM fields"):
         flds.setdefault(ntid, {})[ord_] = name
-    dn = {
-        i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")
-    }
+    dn = {i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")}
 
     # target note types: those used in mining/anime/game decks, unless overridden
     if args.note_type:
@@ -403,9 +393,7 @@ def main():
             if upd:
                 anki("updateModelTemplates", model={"name": model, "templates": upd})
                 log(f"deep-linked {model}: {list(upd)}")
-    log(
-        "APPLY complete. MiscInfo now exists on the anime/game types → refiler can dual-fill it."
-    )
+    log("APPLY complete. MiscInfo now exists on the anime/game types → refiler can dual-fill it.")
 
 
 if __name__ == "__main__":
