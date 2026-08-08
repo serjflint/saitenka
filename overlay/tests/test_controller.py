@@ -216,8 +216,12 @@ def _reader_with_index(monkeypatch):
 
 
 def _msg_for(ipc, key):
+    # Only script-message binds carry a message; skip the `keybind KEY ignore` no-op unbinds that
+    # tooltip teardown emits (a key can be bound then neutralised — the bind is what we want here).
     binds = {
-        c[1]: c[2].split("script-message ", 1)[1] for c in ipc.commands if c and c[0] == "keybind"
+        c[1]: c[2].split("script-message ", 1)[1]
+        for c in ipc.commands
+        if c and c[0] == "keybind" and "script-message " in c[2]
     }
     return binds[key]
 
@@ -301,6 +305,20 @@ def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     assert captured == {
         "animated": True
     }  # the video-mine shortcut forces a motion clip for this mine
+
+
+def test_mine_keybinds_register_even_when_anki_absent():
+    """Regression: attach mode loads Anki ASYNC, after _register_keybinds runs — and we never
+    re-register. A requires-gated bind left the mine keys permanently unbound (Ctrl+m/Ctrl+Shift+m/
+    Shift+m did nothing) while the mouse add-button, checked live, still mined. Bindings must register
+    with anki=None and stay bound; the handler no-ops until Anki lands."""
+    from overlay.app.bindings import MINE_ALL_MSG, MINE_MSG, MINE_VIDEO_MSG
+
+    ipc = FakeIPC()
+    Reader(ipc, anki=None)._register_keybinds()  # Anki not up yet (the attach-mode reality)
+    assert _msg_for(ipc, "Ctrl+m") == MINE_MSG
+    assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG
+    assert _msg_for(ipc, "Shift+m") == MINE_ALL_MSG
 
 
 def test_mine_video_key_registers_and_routes_to_the_video_mine():
