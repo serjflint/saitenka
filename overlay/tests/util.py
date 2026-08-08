@@ -217,6 +217,36 @@ class FakeIPC:
         return evs
 
 
+def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
+    """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded
+    ``keybind`` commands. Honours later-binds-over-earlier and the ``keybind KEY ignore`` unbinds that
+    surface teardown emits (a key bound then neutralised drops out). FakeIPC only *records* the bind
+    string — it can't fire the handler — so this is the seam :func:`press` dispatches through."""
+    reg: dict[str, str] = {}
+    for cmd in ipc.commands:
+        if len(cmd) >= 3 and cmd[0] == "keybind":
+            key, spec = cmd[1], cmd[2]
+            if isinstance(spec, str) and spec.startswith("script-message "):
+                reg[key] = spec.removeprefix("script-message ")
+            else:  # "ignore" (or any non-script-message) neutralises the key
+                reg.pop(key, None)
+    return reg
+
+
+def press(reader, ipc: FakeIPC, key: str) -> None:
+    """Fire the handler bound to ``key`` through the REAL dispatch chain — a synthetic mpv
+    ``client-message`` drained by ``reader._drain_events()`` → ``_handle`` → ``_HANDLERS`` — the way an
+    actual keypress does. This is the hop FakeIPC can't simulate on its own (it echoes the bind, never
+    fires it), so a test that only checks ``ipc.commands`` proves saitenka *sent* the bind, not that a
+    press *runs* the action. Raises :class:`KeyError` if ``key`` isn't currently bound — a dead shortcut
+    is exactly the bug this catches (attach-mode mine keys, #244)."""
+    reg = keybind_registry(ipc)
+    if key not in reg:
+        raise KeyError(f"{key!r} is not bound (registered: {sorted(reg)})")
+    ipc.events.append({"event": "client-message", "args": [reg[key]]})
+    reader._drain_events()
+
+
 class FakeTransport:
     """In-memory ``Transport`` double (see ``overlay.mpvio.transport.Transport``) for the transport
     contract suite: the 'server' side pushes bytes to the client with :meth:`feed`; bytes the client
