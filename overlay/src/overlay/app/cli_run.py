@@ -24,6 +24,7 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
+from overlay.mpvio.launch import MpvLaunchOptions
 
 log = logging.getLogger(__name__)
 
@@ -277,19 +278,14 @@ def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config o
     return sub_path, en_sub_path, fetch_in_background, enabled_providers
 
 
-def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
+def _launch_mpv_and_connect(
     cfg: dict,
     tmp: Path,
     video_path: Path,
+    opts: MpvLaunchOptions,
     *,
-    slang: str,
-    start: str,
-    screenshot: str | None,
     sub_path,
     en_sub_path,
-    use_config: bool,
-    fullscreen: bool,
-    mpv_arg: list[str] | None = None,
 ) -> tuple:
     """Find + launch mpv and connect its IPC socket. Returns ``(None, None)`` (having already
     printed the reason) when mpv can't be found or its IPC never comes up."""
@@ -312,18 +308,7 @@ def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a con
     from overlay.mpvio.launch import build_mpv_argv
 
     cmd = build_mpv_argv(
-        mpv_bin,
-        sock,
-        mpv_log,
-        video_path,
-        slang=slang,
-        start=start,
-        screenshot=bool(screenshot),
-        sub_path=sub_path,
-        en_sub_path=en_sub_path,
-        use_config=use_config,
-        fullscreen=fullscreen,
-        extra_args=mpv_arg,
+        mpv_bin, sock, mpv_log, video_path, opts, sub_path=sub_path, en_sub_path=en_sub_path
     )
     from overlay.session import session_id
 
@@ -344,7 +329,7 @@ def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a con
     # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
     from overlay.app.loading import show_startup_hint
 
-    show_startup_hint(ipc, screenshot=bool(screenshot))
+    show_startup_hint(ipc, screenshot=opts.screenshot)
     return proc, ipc
 
 
@@ -1022,14 +1007,16 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg,
         tmp,
         video_path,
-        slang=slang,
-        start=start,
-        screenshot=screenshot,
+        MpvLaunchOptions(
+            slang=slang,
+            start=start,
+            screenshot=bool(screenshot),
+            use_config=use_config,
+            fullscreen=fullscreen,
+            extra_args=mpv_arg,
+        ),
         sub_path=sub_path,
         en_sub_path=en_sub_path,
-        use_config=use_config,
-        fullscreen=fullscreen,
-        mpv_arg=mpv_arg,
     )
     if ipc is None:
         return 2
