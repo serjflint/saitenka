@@ -185,11 +185,11 @@ class TestCommandConstruction:
     def test_split_penalty_adds_the_alass_flag(self):
         """resync_split_penalty threads to alass's --split-penalty (lower → splits more at the OP)."""
         resync = _import_resync()
+        ref, src, out = Path("/ref.ass"), Path("/s.srt"), Path("/o.srt")
         with patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get):
-            cmd, tool = resync._resync_command(
-                Path("/ref.ass"), Path("/s.srt"), Path("/o.srt"), split_penalty=3
-            )
-        assert cmd == ["/b/alass", "--split-penalty", "3", "/ref.ass", "/s.srt", "/o.srt"]
+            cmd, tool = resync._resync_command(ref, src, out, split_penalty=3)
+        # paths stringify with the OS separator (native for the real subprocess) — derive, don't hardcode
+        assert cmd == ["/b/alass", "--split-penalty", "3", str(ref), str(src), str(out)]
         assert tool == "alass"
 
     def test_split_penalty_omitted_when_unset(self):

@@ -1,0 +1,25 @@
+id: read-text-utf8-encoding
+language: python
+severity: error
+message: >-
+  Path.read_text()/write_text() without encoding="utf-8" uses the OS locale codec (cp1252/cp932 on a
+  non-UTF-8 Windows), so a UTF-8 file with any non-ASCII byte raises UnicodeDecodeError. Pass
+  encoding="utf-8" explicitly.
+note: >-
+  ruff PLW1514 covers the DIRECT `Path("x").read_text()` shape but MISSES `(base / name).read_text()` —
+  it can't infer the `/`-operator result is a Path — which is exactly how it slipped into docs_check.py
+  and broke the Windows e2e leg. This closes that shape (the pathlib sibling of subprocess-utf8-encoding).
+files:
+  - "src/overlay/**/*.py"
+  - "tools/**/*.py"
+rule:
+  all:
+    - any:
+        - pattern: $X.read_text($$$)
+        - pattern: $X.write_text($$$)
+    - not:
+        has:
+          stopBy: end
+          pattern:
+            context: f(encoding=$ENC)
+            selector: keyword_argument

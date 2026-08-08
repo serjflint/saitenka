@@ -1,6 +1,7 @@
 """Stage 10: pitch-accent graph — Yomitan's compact morae graph drawn from (reading, downstep)."""
 
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -62,8 +63,12 @@ def test_graph_goldens_four_patterns():
         strip.alpha_composite(i, (x, 0))
         x += i.width + 12
     assert_golden(strip, "pitch_graphs.png")
-    ARTIFACTS.mkdir(exist_ok=True)
-    strip.save(ARTIFACTS / "pitch_graphs.png")  # artifact screenshot (plan Stage 10)
+    # Showcase screenshot lives in tracked artifacts/; refreshing it is opt-in so a normal run (CI too)
+    # never dirties the committed PNG — per-platform FreeType diffs would otherwise block the gh-pages
+    # benchmark-store step (`git switch` aborts on a dirty tree).
+    if os.environ.get("SAITENKA_REFRESH_ARTIFACTS"):
+        ARTIFACTS.mkdir(exist_ok=True)
+        strip.save(ARTIFACTS / "pitch_graphs.png")
 
 
 # --- positions threaded through Entry --------------------------------------------------------------
