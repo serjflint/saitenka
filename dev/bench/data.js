@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786227857024,
+  "lastUpdate": 1786227893743,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1655,6 +1655,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.708,
             "range": "±5.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "92a5cc8f7692cf74fda1adef9ca137aac0b6d95e",
+          "message": "Merge pull request #246 from serjflint/feat/session-mode-logging\n\nfeat(telemetry): log session mode (run vs attach) at startup",
+          "timestamp": "2026-08-09T01:24:25+03:00",
+          "tree_id": "77ddbe0c0a8020911afddaff074b3d3a50f570b8",
+          "url": "https://github.com/serjflint/saitenka/commit/92a5cc8f7692cf74fda1adef9ca137aac0b6d95e"
+        },
+        "date": 1786227892983,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.284,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.244,
+            "range": "±8.2%",
             "unit": "ms"
           }
         ]
