@@ -118,3 +118,32 @@ class TestFindToolHealthProbe:
         monkeypatch.setattr(d.shutil, "which", lambda _n: path_hit)
         monkeypatch.setattr(d, "_BIN_DIRS", [other_dir])
         assert d.find_tool("alass") == path_hit  # PATH hit wins, unprobed
+
+    def test_find_healthy_tool_flags_a_lone_broken_binary(self, tmp_path, monkeypatch):
+        """The doctor case: a lone (unprobed by find_tool) ffprobe that aborts on exec resolves to a
+        path but healthy=False — so doctor flags the #100 SIGABRT that find_tool alone returns as ok."""
+        broken = _script(tmp_path / "ffprobe", 1)
+        monkeypatch.setattr(d.shutil, "which", lambda _n: broken)
+        monkeypatch.setattr(d, "_BIN_DIRS", [])
+        assert d.find_healthy_tool("ffprobe") == (broken, False)
+
+    def test_find_healthy_tool_confirms_a_working_binary(self, tmp_path, monkeypatch):
+        healthy = _script(tmp_path / "ffprobe", 0)
+        monkeypatch.setattr(d.shutil, "which", lambda _n: healthy)
+        monkeypatch.setattr(d, "_BIN_DIRS", [])
+        assert d.find_healthy_tool("ffprobe") == (healthy, True)
+
+    def test_find_healthy_tool_trusts_a_found_tool_with_no_probe_flag(self, tmp_path, monkeypatch):
+        """No registered probe flag (alass) ⇒ found is trusted (can't distinguish broken from a
+        bad-flag exit), so healthy mirrors presence."""
+        alass = _script(
+            tmp_path / "alass", 1
+        )  # would fail a probe, but there's no flag to probe with
+        monkeypatch.setattr(d.shutil, "which", lambda _n: alass)
+        monkeypatch.setattr(d, "_BIN_DIRS", [])
+        assert d.find_healthy_tool("alass") == (alass, True)
+
+    def test_find_healthy_tool_reports_a_missing_tool(self, monkeypatch):
+        monkeypatch.setattr(d.shutil, "which", lambda _n: None)
+        monkeypatch.setattr(d, "_BIN_DIRS", [])
+        assert d.find_healthy_tool("ffprobe") == (None, False)

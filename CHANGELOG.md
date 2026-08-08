@@ -7,6 +7,21 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`doctor`/`report` now check the subtitle-resync toolchain.** A new `resync` check resolves
+  `ffprobe`/`ffmpeg` the way a GUI-launched attach does and **probes** them (`-version`), so a
+  present-but-crashing binary is flagged instead of silently reading "ok" — the failure mode that hid
+  behind a working shell PATH. It also reports whether an aligner (`alass`/`alass-cli` or the `uvx
+  ffsubsync` fallback) is available; without one, re-sync can't run. The result is bundled in `report`.
+
+### Fixed
+
+- **Cached subtitles keep their real format.** A downloaded ASS subtitle was cached under a synthetic
+  `.srt` name, so the aligner (which keys off the extension) had to be rescued by a content sniff. The
+  cache now stores each subtitle under its real filename extension and evicts a stale sibling when a slot
+  is re-downloaded in a different format — so a cached ASS source re-syncs cleanly on its own.
+
 ## [2.0.1] - 2026-08-08
 
 ### Fixed

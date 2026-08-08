@@ -172,6 +172,17 @@ def find_tool(name: str) -> str | None:
     return next((c for c in candidates if _runs_ok(c, flag)), candidates[0])
 
 
+def find_healthy_tool(name: str) -> tuple[str | None, bool]:
+    """Resolve *name* like :func:`find_tool` AND report whether it actually executes — for ``doctor``,
+    which must flag a present-but-broken binary (dangling dylib → SIGABRT) that ``find_tool`` returns
+    unprobed when it's the lone candidate (the hot path can't conjure a working copy, so it doesn't pay
+    the spawn). A tool with no registered probe flag is trusted if found. Returns ``(path, healthy)``."""
+    path = find_tool(name)
+    flag = _PROBE_FLAG.get(name)
+    healthy = bool(path) and (flag is None or _runs_ok(path, flag))
+    return path, healthy
+
+
 def augment_path() -> None:
     """Prepend the standard bin dirs to ``$PATH`` (idempotent) so bare-name subprocesses resolve under
     a GUI launch. Call once at startup. Only existing dirs not already present are added."""

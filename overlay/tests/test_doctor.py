@@ -87,6 +87,49 @@ def test_ffmpeg_check_ok(monkeypatch):
     assert c.status == "ok"
 
 
+def _patch_resync_tools(monkeypatch, *, healthy: dict[str, bool], present: set[str]):
+    """Stub discover's resolvers for check_resync: ``healthy`` maps ffprobe/ffmpeg → runs-ok, ``present``
+    is the set of aligner/uvx names find_tool resolves. check_resync imports both at call time."""
+    import overlay.mpvio.discover as disc
+
+    monkeypatch.setattr(
+        disc,
+        "find_healthy_tool",
+        lambda n: (f"/bin/{n}" if n in healthy else None, healthy.get(n, False)),
+    )
+    monkeypatch.setattr(disc, "find_tool", lambda n: f"/bin/{n}" if n in present else None)
+
+
+def test_resync_check_ok_with_alass(monkeypatch):
+    _patch_resync_tools(monkeypatch, healthy={"ffprobe": True, "ffmpeg": True}, present={"alass"})
+    c = doc.check_resync()
+    assert c.status == "ok"
+    assert "alass" in c.detail
+
+
+def test_resync_check_warns_on_a_broken_ffprobe(monkeypatch):
+    # The #100 signature: ffprobe resolves but aborts on exec → embedded reference lost, audio-VAD fallback.
+    _patch_resync_tools(monkeypatch, healthy={"ffprobe": False, "ffmpeg": True}, present={"alass"})
+    c = doc.check_resync()
+    assert c.status == "warn"
+    assert "ffprobe" in c.detail and "audio VAD" in c.detail
+
+
+def test_resync_check_warns_when_no_aligner(monkeypatch):
+    _patch_resync_tools(monkeypatch, healthy={"ffprobe": True, "ffmpeg": True}, present=set())
+    c = doc.check_resync()
+    assert c.status == "warn"
+    assert "aligner" in c.detail
+
+
+def test_resync_check_ok_via_ffsubsync_fallback(monkeypatch):
+    # No alass, but uvx is present → ffsubsync fallback; both extractors healthy → ready.
+    _patch_resync_tools(monkeypatch, healthy={"ffprobe": True, "ffmpeg": True}, present={"uvx"})
+    c = doc.check_resync()
+    assert c.status == "ok"
+    assert "ffsubsync" in c.detail
+
+
 def test_config_check_parses(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
     cfg.write_text('dicts = ["a.zip"]\n')
