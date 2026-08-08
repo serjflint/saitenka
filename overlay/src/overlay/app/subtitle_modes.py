@@ -354,6 +354,16 @@ def retry(reader: Reader) -> None:
         _start_provider_fetch(reader, video_path)
 
 
+def _reset_sub_delay(reader: Reader) -> None:
+    """Zero mpv's ``sub-delay`` when we (re-)establish authoritative timing by selecting our own track.
+    Our subtitle file IS the timing source of truth — resync rewrites the cue timestamps in the file —
+    so a residual delay must not ride on top. mpv restores ``sub-delay`` from watch-later across runs
+    and keeps it across tracks, so a stale offset from a previous run/track would silently mistime a
+    freshly file-timed track (found live: a resync looked wrong until sub-delay was hand-zeroed). The
+    manual anchor key stays cumulative — it just refines from this clean 0 baseline after a load."""
+    reader.ipc.command("set_property", "sub-delay", 0.0)
+
+
 def _replace_japanese_track(reader: Reader, path, status: str) -> None:
     """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry). Drops the
     stale external track(s) first — mpv caches an already-loaded external's cues in memory, and
@@ -367,6 +377,7 @@ def _replace_japanese_track(reader: Reader, path, status: str) -> None:
     reader.ipc.command("set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
     reader.ipc.command("sub-add", str(path), "select", "", "jpn")  # "select" → mpv selects it now
+    _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
     reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
     reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
     reader.subtitle_language = "jp"
@@ -401,6 +412,7 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     reader.ipc.command("set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
     reader.ipc.command("set_property", "sid", reader.jp_sid)
+    _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
     reader.subtitle_language = "jp"
     reader._sub_index = None
     reader.set_subtitle("")
