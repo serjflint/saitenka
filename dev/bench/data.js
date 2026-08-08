@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786229203092,
+  "lastUpdate": 1786232315238,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1727,6 +1727,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.763,
             "range": "±0.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0d80b9166c1c6509648a9e78b00db72f11a85f7a",
+          "message": "Merge pull request #248 from serjflint/fix/e2e-windows-green\n\nfix: green the Windows e2e leg (UTF-8 reads, path-sep test, artifact dirtying)",
+          "timestamp": "2026-08-09T02:38:11+03:00",
+          "tree_id": "a8f93e655fa6fe330753375e011452b640ce2e0d",
+          "url": "https://github.com/serjflint/saitenka/commit/0d80b9166c1c6509648a9e78b00db72f11a85f7a"
+        },
+        "date": 1786232314635,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.349,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.846,
+            "range": "±0.6%",
             "unit": "ms"
           }
         ]
