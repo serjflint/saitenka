@@ -393,9 +393,9 @@ def _replace_japanese_track(
     reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
     reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
     reader.subtitle_language = MAIN_LANG
-    reader._sub_index = None
     reader.set_subtitle("")
-    build_sub_index_for_current_track(reader)
+    build_sub_index_for_current_track(reader)  # replaces the index on success; retains it if the
+    # just-added track can't resolve yet (rebuild is fail-soft) rather than blanking the cues
     reader._toast(toast)
     log.info("%s", status)
 
@@ -426,13 +426,14 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     reader.ipc.command("set_property", "sid", reader.jp_sid)
     _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
     reader.subtitle_language = MAIN_LANG
-    reader._sub_index = None
     reader.set_subtitle("")
     if reader._translation_visible():
         setup_secondary(reader)
     from overlay.app.embedded_subs import build_sub_index_for_current_track
 
-    build_sub_index_for_current_track(reader)
+    build_sub_index_for_current_track(
+        reader
+    )  # replaces on success; retains prior cues if unresolved
     reader._toast("Japanese subtitles ready")
     log.info("%s", status)
 
