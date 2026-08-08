@@ -299,6 +299,47 @@ def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monke
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
 
+def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypatch):
+    """Auto-selecting our fetched track re-establishes authoritative timing (the file's own cue times),
+    so a sub-delay mpv restored from watch-later must be zeroed — else it silently rides on top."""
+    ipc = FakeIPC()
+    ipc.props["sub-delay"] = 10.0  # stale offset a previous run/track left in mpv
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+    )
+    path = Path(tmp_path / "episode.ja.srt")
+    path.write_text("Japanese")
+
+    reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
+    reader._subtitle_fetch_threads[0].join(timeout=1)
+    subtitle_modes.apply_fetch_results(reader)
+
+    assert reader.subtitle_language == "jp"
+    assert ("set_property", "sub-delay", 0.0) in ipc.commands
+
+
+def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch):
+    """The resync/retry swap re-times the FILE, so it owns timing — drop any persisted mpv sub-delay
+    (the reported bug: a resynced cue looked wrong until sub-delay was hand-zeroed)."""
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    ipc.props["sub-delay"] = -7.5
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # jp mode
+    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+    )
+    path = Path(tmp_path / "episode.synced.srt")
+    path.write_text("Japanese")
+
+    subtitle_modes._replace_japanese_track(reader, path, "resynced")
+
+    assert ("set_property", "sub-delay", 0.0) in ipc.commands
+
+
 def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypatch):
     ipc = FakeIPC([EN.copy()])
     ipc.props["path"] = "/videos/Show - 02.mkv"
