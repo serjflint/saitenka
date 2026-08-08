@@ -23,6 +23,7 @@ import re
 import zipfile
 from dataclasses import dataclass
 from datetime import UTC
+from itertools import starmap
 from typing import TYPE_CHECKING
 
 from overlay.app.tokenize import _has_kanji, kata_to_hira
@@ -451,7 +452,7 @@ class KnownWords:
         for per_deck in db.known_cache_read(list(decks)).values():
             for _mod, note_rows in per_deck.values():
                 seen_row = True
-                forms.extend(KnownForm(*row) for row in note_rows)
+                forms.extend(starmap(KnownForm, note_rows))
         return cls.from_forms(forms) if seen_row else None
 
     @classmethod
@@ -529,7 +530,7 @@ def _merge_forms(ids, fetched, cached) -> list[KnownForm]:
         if i in fetched:
             out.extend(fetched[i])
         else:
-            out.extend(KnownForm(*row) for row in (cached.get(i) or (0, []))[1])
+            out.extend(starmap(KnownForm, (cached.get(i) or (0, []))[1]))
     return out
 
 

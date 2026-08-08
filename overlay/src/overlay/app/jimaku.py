@@ -72,7 +72,7 @@ def prompt_for_key(getpass_fn, input_fn=input, out=print, tries=3) -> str:  # pr
         if attempt == tries - 1:
             break
         try:
-            if input_fn("Re-enter the key? [Y/n] ").strip().lower() in ("n", "no"):
+            if input_fn("Re-enter the key? [Y/n] ").strip().lower() in {"n", "no"}:
                 break
         except EOFError:
             break
@@ -404,7 +404,7 @@ def _candidate_score(f: JimakuFile, episode: int | None, video: str | None) -> t
     return (
         bool(ep_hit),
         _resolution_match(video, f.name),
-        f.ext in (".srt", ".ass"),
+        f.ext in {".srt", ".ass"},
         f.ext == ".srt",
         f.size,
     )

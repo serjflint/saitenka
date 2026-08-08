@@ -105,7 +105,7 @@ def _pick(entries, reading: str, surface: str, lemma: str):
             s += 4
         if lemma in kanji or surface in kanji:
             s += 2
-        if kanji and kanji[0] in (lemma, surface):  # target is the primary kanji form
+        if kanji and kanji[0] in {lemma, surface}:  # target is the primary kanji form
             s += 1
         return s
 

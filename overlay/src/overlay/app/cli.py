@@ -1050,7 +1050,7 @@ def reinstall(
     if ref is not None:
         source = "github"  # an explicit --ref pins the GitHub source
         github_ref = ref
-    elif source in ("auto", "github"):
+    elif source in {"auto", "github"}:
         github_ref = latest_release_tag()  # default the GitHub attempt to the latest release
         print(f"latest release: {github_ref}" if github_ref else "no release info — using main")
     attempts = reinstall_attempts(extras, source=source, github_ref=github_ref)
@@ -1196,15 +1196,15 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             render_cache_min_height=cfg.get("render_cache_min_height", tt.render_cache_min_height),
         ),
         mining=MiningOptions(
-            play_audio=not bool(cfg.get("no_audio_play", False)),
+            play_audio=not bool(cfg.get("no_audio_play")),
             show_preview=bool(mine.get("preview", mo.show_preview)),
             max_bulk=cfg.get("max_bulk", mo.max_bulk),
             anki_ok_ttl=cfg.get("anki_ok_ttl", mo.anki_ok_ttl),
             anki_ping_timeout=cfg.get("anki_ping_timeout", mo.anki_ping_timeout),
         ),
-        translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate", False))),
+        translation=TranslationOptions(auto_translate=bool(cfg.get("auto_translate"))),
         stats=StatsOptions(
-            enabled=bool(stats.get("enabled", False)),
+            enabled=bool(stats.get("enabled")),
             summary=bool(stats.get("summary", True)),
         ),
         panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),

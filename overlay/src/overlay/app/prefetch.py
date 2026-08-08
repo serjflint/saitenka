@@ -345,7 +345,7 @@ def _head_priority(tag: str) -> int | None:
     risking treating an ordinary word as high-priority. A finer ranking could read
     ``Scorer.freq.rank()`` directly instead of the coloring tag string."""
     base = tag.split("/", 1)[0]
-    if base in ("n+1", "forgotten"):
+    if base in {"n+1", "forgotten"}:
         return 0
     if base.startswith("freq-"):
         band = int(base.split("-", 1)[1])

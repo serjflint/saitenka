@@ -176,6 +176,12 @@ line-length = 100
 # breaks the gate unpredictably. We add categories by choice, favouring ones ruff can AUTO-FIX (cheap to
 # adopt and keep green). Noisy sub-rules of a kept category are pruned in `ignore` with a reason; a
 # category we don't want simply isn't selected. Residual per-site suppressions are `# noqa: … # reason`.
+# preview=true (#216): opt into ruff's preview rules for the SELECTED categories — a deliberate, triaged
+# one-time adoption (fixable ones auto-applied, deliberate/noisy ones pruned in `ignore` with a reason
+# below), NOT the `ALL` foot-gun. It's global (can't scope to one category), so preview findings in every
+# selected family were triaged, not just PL. Re-run `ruff check --preview --statistics` after a ruff bump
+# to catch newly-graduated/added preview rules — same deliberate-adoption discipline as the base select.
+preview = true
 select = [
     # already had ─────────────────────────────────────────────────────────────────────────────────
     "E", "F", "B", "SIM", "TRY", "PERF", "RUF", "UP", "C4", "TID",
@@ -197,6 +203,13 @@ select = [
     "N",       # pep8-naming
     "ASYNC", "DTZ", "LOG", "G", "PT", "SLOT", "YTT", "EXE", "T10", "T20", "INT",
     # pylint — the logic/error rules; count/style cousins pruned in `ignore` ───────────────────────
+    # ERROR policy (#216): all 38 of ruff's PLE rules stay on — NO PLE sub-rule is ever pruned (error
+    # rules → adopt on sight, fixability irrelevant). The pylint error rules ruff does NOT implement
+    # (E0401/E1101/E1102/E1121) are astroid TYPE-INFERENCE checks already owned by poe types
+    # (mypy+basedpyright+pyrefly); test-driving `pylint --disable=all --enable=E` on src produced only
+    # those as false positives (Windows-stdlib, fugashi/taffylite C/Rust exts, guarded-None, a
+    # function-tuple ClassVar) plus E2502, which ruff already covers (PLE2502) — so no pylint gate/advisory
+    # earns a place (zero unique real signal; test-drive-first, per AGENTS.md).
     "PLE", "PLW", "PLC", "PLR",
     # 2026-07-27 sweep — readability/maintainability worth the one-time churn ─────────────────────
     "A",       # flake8-builtins — no shadowing id/type/list/etc.
@@ -238,12 +251,38 @@ ignore = [
                # at max-args=9 below; the data-clumps are bundled into config objects (#216).
     "PLW0603", # global-statement — intentional module-level singletons (caches/registries)
     "PLW2901", # redefined-loop-name — idiomatic reuse in a couple of tight loops
-    "PLW0108", # unnecessary-lambda — several are intentional deferred/lazy thunks
+    "PLW0108", # unnecessary-lambda — fixable-audit (#216): fix is UNSAFE-only (gate's --fix skips it),
+               # and the flagged sites are intentional (controller's uniform dispatch table where
+               # siblings like `lambda r: r.method()` don't reduce; readable test callbacks). Stays.
     # ── pep8-naming (N) single-rule noise ───────────────────────────────────────────────────────────
     "N818",    # exception without Error suffix — our names read fine
     "N812",    # lowercase import aliased to non-lowercase — deliberate module aliases
     # ── pytest (PT) ─────────────────────────────────────────────────────────────────────────────────
     "PT018",   # composite-assertion — `assert a and b` reads fine
+    # ── preview-rule triage (#216) — preview=true is global, so preview finds in EVERY selected family
+    #    were triaged. Fixable ones were auto-applied (RUF031/056/055, FURB140/154, PLR6201/6104, PLW1514);
+    #    these are the deliberate/noisy ones pruned with a reason (same discipline as the stable ignores). ─
+    "RUF105",  # noqa-comments — would rewrite every `# noqa: … # reason` into `# ruff: ignore[…]`,
+               # fighting the documented per-site-noqa convention (the rule itself is "opinionated, stylistic")
+    "RUF069",  # float-equality-comparison — deliberate EXACT sentinels (scale == 1.0 byte-identical path,
+               # geometry), not tolerance bugs; adding math.isclose everywhere would be wrong here
+    "RUF052",  # used-dummy-variable — `_`-prefixed locals kept alive on purpose (bench keep-alives,
+               # partial tuple-unpacks); the unsafe rename is churn without correctness value
+    "RUF067",  # non-empty-init-module — the version() try/except in overlay/__init__.py is the standard
+               # installed-dist-vs-source-tree pattern, not stray logic
+    "PLR6301", # no-self-use — 141 sites; methods-as-namespace is deliberate and it's complexity-adjacent
+               # (the PLR count cousins already defer to complexipy)
+    "PLC2701", # import-private-name — deliberate reach into sibling internal APIs (_-prefixed helpers)
+    "PLC1901", # compare-to-empty-string — no fix, and `x == ""` ≠ `not x` when x may be None/0 (unsafe)
+    "PLW0717", # too-many-statements-in-try-clause — complexity-adjacent; defer to complexipy like PLR09xx
+    "S404",    # suspicious-subprocess-import — importing subprocess IS intended (mpv/ffmpeg/brew launch);
+               # sibling of the already-ignored S603/S606/S607, guarded by per-site `# noqa: S…` at each call
+    "FURB113", # repeated-append — distinct large multi-line appends read clearer one-per-line than bundled
+               # into `.extend((...))`
+    "FURB118", # reimplemented-operator — a `lambda x: x[0]` sort key is idiomatic; not worth an
+               # `import operator` for 1-2 sites
+    "FURB154", # repeated-global — collapses otel_metrics' category-grouped 47-name `global` block into
+               # one ~600-char line the formatter can't wrap (no parens on `global`); the grouped form wins
 ]
 
 [tool.ruff.lint.pylint]
@@ -298,6 +337,9 @@ max-args = 9
     "PLW1510", # subprocess.run in tests drives a child then asserts on .returncode/.stdout — the test
                # IS the check; explicit check= would be noise. (In src/, PLW1510 now gates: every call
                # carries an explicit check=False after the 2026-07-25 sweep.)
+    "B006",    # mutable-argument-default — a fixture default like `terms=((…, [..]),)` is never mutated;
+               # the rule keeps guarding src (the real Windows-cp1252 bug class), just not test fixtures
+    "B903",    # class-as-data-structure — small test fakes read fine as plain classes, not dataclasses
 ]
 "examples/**" = ["T201", "S", "INP001", "BLE001", "E731", "FBT001", "FBT002", "FBT003"]  # demo/bench
 "tools/**" = ["T201", "INP001"]  # dev codegen scripts: print() is the output; not an importable package

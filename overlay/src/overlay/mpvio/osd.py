@@ -33,7 +33,7 @@ def _warn_overlay_add(oid: int, w: int, h: int, res: dict) -> None:
     ``success``. This separates 'mpv refused to draw' (bad format/size, unsupported on this build) from
     the IPC-timeout case the transport layer logs; together they pinpoint a 'plays but nothing draws'."""
     err = res.get("error")
-    if err in (None, "success") or oid in _warned_oids:
+    if err in {None, "success"} or oid in _warned_oids:
         return
     _warned_oids.add(oid)
     log.warning("overlay-add rejected for oid=%d (%dx%d): %s", oid, w, h, res)

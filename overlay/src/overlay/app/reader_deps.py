@@ -230,9 +230,9 @@ def _mine_config_from(mc: dict):
     return MineConfig(
         deck=mc.get("deck", base.deck),
         model=mc.get("model", base.model),
-        normalize_audio=bool(mc.get("normalize_audio", False)),
+        normalize_audio=bool(mc.get("normalize_audio")),
         animated=AnimatedClip(
-            enabled=bool(mc.get("animated_screenshot", False)),
+            enabled=bool(mc.get("animated_screenshot")),
             height=int(mc.get("animated_height", 480)),
             fps=int(mc.get("animated_fps", 12)),
             quality=int(mc.get("animated_quality", 75)),

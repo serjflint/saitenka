@@ -67,7 +67,7 @@ def test_snapshot_histogram_reports_exact_max():
 @pytest.mark.usefixtures("registered")
 def test_snapshot_reports_gil_enabled_gauge():
     snap = otel_metrics.snapshot()
-    assert snap["saitenka.runtime.gil_enabled"]["value"] in (0, 1)
+    assert snap["saitenka.runtime.gil_enabled"]["value"] in {0, 1}
 
 
 @pytest.mark.usefixtures("registered")

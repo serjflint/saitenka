@@ -119,7 +119,7 @@ def test_end_to_end_span_reaches_the_ctf_trace_file(tmp_path):
 def test_sample_counters_reads_gil_enabled_and_dropped_spans(tmp_path):
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
     values = telemetry._sample_counters()
-    assert values["runtime.gil_enabled"] in (0.0, 1.0)
+    assert values["runtime.gil_enabled"] in {0.0, 1.0}
     assert values["telemetry.dropped_spans"] == 0.0
 
 

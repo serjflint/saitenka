@@ -461,7 +461,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         ),
         translation=TranslationOptions(auto_translate=flags.auto_translate),
         stats=StatsOptions(
-            enabled=bool(stats.get("enabled", False)),
+            enabled=bool(stats.get("enabled")),
             summary=bool(stats.get("summary", True)),
         ),
         panels=PanelOptions(scale=float(cfg.get("ui_scale", 1.0))),

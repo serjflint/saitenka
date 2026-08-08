@@ -75,10 +75,10 @@ def _resolve(cp: int) -> str:
     """LB1: map the ambiguous classes to a concrete one. AI/SG/XX→AL; SA→CM for combining marks else
     AL; CJ→NS (strict, the JIS default the tooltip wants); the rest pass through."""
     c = _lb_class(cp)
-    if c in ("AI", "SG", "XX"):
+    if c in {"AI", "SG", "XX"}:
         return "AL"
     if c == "SA":
-        return "CM" if unicodedata.category(chr(cp)) in ("Mn", "Mc") else "AL"
+        return "CM" if unicodedata.category(chr(cp)) in {"Mn", "Mc"} else "AL"
     if c == "CJ":
         return "NS"
     return c
@@ -108,7 +108,7 @@ def _bases(text: str) -> tuple[list[str], list[int], list[int]]:
     for i, ch in enumerate(text):
         cp = ord(ch)
         c = _resolve(cp)
-        if c in ("CM", "ZWJ") and bcls and bcls[-1] not in ("BK", "CR", "LF", "NL", "SP", "ZW"):
+        if c in {"CM", "ZWJ"} and bcls and bcls[-1] not in {"BK", "CR", "LF", "NL", "SP", "ZW"}:
             continue  # attaches to its base — not a break boundary, not a new base
         bcls.append("AL" if c == "CM" else c)
         bcps.append(cp)
@@ -122,12 +122,12 @@ def _boundary(cps: Sequence[int], cls: Sequence[str], i: int) -> str:
     b, a = cls[i - 1], cls[i]
 
     # LB4/LB5 mandatory breaks; LB6 never break before one.
-    if b == "BK" or (b == "CR" and a != "LF") or b in ("LF", "NL"):
+    if b == "BK" or (b == "CR" and a != "LF") or b in {"LF", "NL"}:
         return MANDATORY
-    if a in ("BK", "CR", "LF", "NL"):
+    if a in {"BK", "CR", "LF", "NL"}:
         return PROHIBITED
     # LB7 no break before SP/ZW. LB8 break after ZW (across SP). LB8a no break after ZWJ.
-    if a in ("SP", "ZW"):
+    if a in {"SP", "ZW"}:
         return PROHIBITED
     if _prev_nonsp(cls, i) == "ZW":
         return ALLOWED
@@ -144,18 +144,18 @@ def _lb11_18(cps: Sequence[int], cls: Sequence[str], i: int, b: str, a: str) -> 
     """LB11–LB18 (WJ/GL glue, closing-punct/OP, unresolved quotes, the decimal-mark exception, spaces).
     ``None`` falls through to LB19+."""
     # LB11 WJ; LB12/LB12a GL; LB13 no break before CL/CP/EX/SY; LB14 no break after OP (across SP).
-    if a == "WJ" or b in ("WJ", "GL"):
+    if a == "WJ" or b in {"WJ", "GL"}:
         return PROHIBITED
-    if a == "GL" and b not in ("SP", "BA", "HY"):
+    if a == "GL" and b not in {"SP", "BA", "HY"}:
         return PROHIBITED
-    if a in ("CL", "CP", "EX", "SY") or _prev_nonsp(cls, i) == "OP":
+    if a in {"CL", "CP", "EX", "SY"} or _prev_nonsp(cls, i) == "OP":
         return PROHIBITED
     r = _lb15(cps, cls, i, b, a)
     if r is not None:
         return r
     # LB16 (CL|CP) SP* × NS; LB17 B2 SP* × B2; LB18 break after SP.
     prev = _prev_nonsp(cls, i)
-    if (prev in ("CL", "CP") and a == "NS") or (prev == "B2" and a == "B2"):
+    if (prev in {"CL", "CP"} and a == "NS") or (prev == "B2" and a == "B2"):
         return PROHIBITED
     return ALLOWED if b == "SP" else None
 
@@ -182,16 +182,16 @@ def _lb19(cps: Sequence[int], cls: Sequence[str], i: int, b: str, a: str) -> boo
 def _lb20a(cls: Sequence[str], i: int, b: str, a: str) -> bool:
     """LB20a: no break after a word-initial hyphen (a hyphen at sot / after a break/space/CB/GL)."""
     return (
-        b in ("HY", "HH")
+        b in {"HY", "HH"}
         and a == "AL"
-        and (i < 2 or cls[i - 2] in ("BK", "CR", "LF", "NL", "SP", "ZW", "CB", "GL"))
+        and (i < 2 or cls[i - 2] in {"BK", "CR", "LF", "NL", "SP", "ZW", "CB", "GL"})
     )
 
 
 def _lb21a(cps: Sequence[int], cls: Sequence[str], i: int, b: str, a: str) -> bool:
     """LB21a: no break after the hyphen in ``Hebrew HY/BA non-Hebrew``."""
     return (
-        i >= 2 and cls[i - 2] == "HL" and b in ("HY", "BA") and not _is_ea(cps[i - 1]) and a != "HL"
+        i >= 2 and cls[i - 2] == "HL" and b in {"HY", "BA"} and not _is_ea(cps[i - 1]) and a != "HL"
     )
 
 
@@ -204,7 +204,7 @@ def _lb19_onward(cps: Sequence[int], cls: Sequence[str], i: int, b: str, a: str)
     if _lb20a(cls, i, b, a):
         return PROHIBITED
     # LB21 × BA/HY/HH/NS, BB ×; LB21a Hebrew hyphen; LB21b SY × HL; LB22 × IN.
-    if a in ("BA", "HY", "HH", "NS") or b == "BB" or _lb21a(cps, cls, i, b, a):
+    if a in {"BA", "HY", "HH", "NS"} or b == "BB" or _lb21a(cps, cls, i, b, a):
         return PROHIBITED
     if (b == "SY" and a == "HL") or a == "IN":
         return PROHIBITED
@@ -239,9 +239,9 @@ def _lb23_onward(cps: Sequence[int], cls: Sequence[str], i: int, b: str, a: str)
     if _lb25(cls, i, b, a) or _lb28a(cls, i, b, a):  # LB25 numeric runs, LB28a Brahmic syllables
         return PROHIBITED
     # LB30 AL/HL/NU × OP (non-EA); CP (non-EA) × AL/HL/NU.
-    if b in ("AL", "HL", "NU") and a == "OP" and not _is_ea(cps[i]):
+    if b in {"AL", "HL", "NU"} and a == "OP" and not _is_ea(cps[i]):
         return PROHIBITED
-    if b == "CP" and not _is_ea(cps[i - 1]) and a in ("AL", "HL", "NU"):
+    if b == "CP" and not _is_ea(cps[i - 1]) and a in {"AL", "HL", "NU"}:
         return PROHIBITED
     # LB30a RI pairs (glue only an odd-indexed pair); LB30b emoji modifier bases.
     if b == "RI" and a == "RI" and _ri_odd_run(cls, i):
@@ -268,7 +268,7 @@ def _is_lb15a(cps: Sequence[int], cls: Sequence[str], i: int) -> bool:
         j -= 1
     if not (cls[j] == "QU" and _pi(cps[j]) == "Pi"):
         return False
-    return j == 0 or cls[j - 1] in ("BK", "CR", "LF", "NL", "OP", "QU", "GL", "SP", "ZW")
+    return j == 0 or cls[j - 1] in {"BK", "CR", "LF", "NL", "OP", "QU", "GL", "SP", "ZW"}
 
 
 _LB15B_AFTER = ("SP", "GL", "WJ", "CL", "QU", "CP", "EX", "IS", "SY", "BK", "CR", "LF", "NL", "ZW")
@@ -291,22 +291,22 @@ def _lb19a(cps: Sequence[int], cls: Sequence[str], i: int, b: str, a: str) -> bo
 def _lb25(cls: Sequence[str], i: int, b: str, a: str) -> bool:
     """LB25 (17.0 pairwise expansion): keep a numeric expression together — ``PR/PO`` and ``OP/HY/IS``
     around ``NU``, a ``NU (SY|IS)*`` run, and a ``NU (SY|IS)* (CL|CP)?`` run before ``PO/PR``."""
-    if a == "NU" and b in ("HY", "IS", "PR", "PO"):
+    if a == "NU" and b in {"HY", "IS", "PR", "PO"}:
         return True
-    if a == "NU" and b in ("NU", "SY", "IS") and _num_run_before(cls, i):
+    if a == "NU" and b in {"NU", "SY", "IS"} and _num_run_before(cls, i):
         return True
-    if b in ("PR", "PO") and a == "OP":
+    if b in {"PR", "PO"} and a == "OP":
         nxt = cls[i + 1] if i + 1 < len(cls) else ""
         return nxt == "NU" or (nxt == "IS" and i + 2 < len(cls) and cls[i + 2] == "NU")
-    return a in ("PO", "PR") and _num_run_before(cls, i)
+    return a in {"PO", "PR"} and _num_run_before(cls, i)
 
 
 def _num_run_before(cls: Sequence[str], i: int) -> bool:
     """True when position ``i-1`` ends a ``NU (SY|IS)* (CL|CP)?`` numeric run (for LB25)."""
     j = i - 1
-    if cls[j] in ("CL", "CP"):
+    if cls[j] in {"CL", "CP"}:
         j -= 1
-    while j >= 0 and cls[j] in ("SY", "IS"):
+    while j >= 0 and cls[j] in {"SY", "IS"}:
         j -= 1
     return j >= 0 and cls[j] == "NU"
 
@@ -317,9 +317,9 @@ def _lb28a(cls: Sequence[str], i: int, b: str, a: str) -> bool:
     dotted = ("AK", "AS")
     if b == "AP" and a in dotted:
         return True
-    if b in dotted and a in ("VF", "VI"):
+    if b in dotted and a in {"VF", "VI"}:
         return True
-    if b == "VI" and a in ("AK", "AL") and i >= 2 and cls[i - 2] in dotted:
+    if b == "VI" and a in {"AK", "AL"} and i >= 2 and cls[i - 2] in dotted:
         return True
     return b in dotted and a in dotted and i + 1 < len(cls) and cls[i + 1] == "VF"
 
@@ -328,13 +328,13 @@ def _lb28a(cls: Sequence[str], i: int, b: str, a: str) -> bool:
 def _pi(cp: int) -> str:
     """The ``Pi``/``Pf`` (initial/final quote) General_Category, else ``""`` — for the quote rules."""
     c = unicodedata.category(chr(cp))
-    return c if c in ("Pi", "Pf") else ""
+    return c if c in {"Pi", "Pf"} else ""
 
 
 @cache
 def _is_ea(cp: int) -> bool:
     """East_Asian_Width F/W/H — the LB19a/LB21a/LB30 East-Asian exclusion."""
-    return unicodedata.east_asian_width(chr(cp)) in ("F", "W", "H")
+    return unicodedata.east_asian_width(chr(cp)) in {"F", "W", "H"}
 
 
 def _ri_odd_run(cls: Sequence[str], i: int) -> bool:

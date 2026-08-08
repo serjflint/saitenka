@@ -80,7 +80,7 @@ def telemetry_state() -> TelemetryState:
 
     cfg = load_config()
     config_enabled = _config_enabled(cfg)
-    kill = os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in ("true", "1")
+    kill = os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in {"true", "1"}
     installed = telemetry_installed()
     exp = export_dir(resolve_telemetry(cfg))
     latest = latest_trace(exp)  # traces rotate (timestamped per session) — report the newest

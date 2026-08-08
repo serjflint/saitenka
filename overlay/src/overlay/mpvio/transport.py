@@ -99,7 +99,7 @@ class NamedPipeTransport:
             if self._closed:
                 raise OSError("named pipe is closed")
             op, error = operation(self._handle)
-            if error not in (0, self._api.ERROR_IO_PENDING):
+            if error not in {0, self._api.ERROR_IO_PENDING}:
                 op.cancel()
                 raise OSError(error, "named-pipe operation failed")
             setattr(self, attr, op)
@@ -116,13 +116,13 @@ class NamedPipeTransport:
     def read(self, n: int) -> bytes:
         op = self._begin("_read_op", lambda handle: self._api.ReadFile(handle, n, overlapped=True))
         _count, error = self._finish("_read_op", op)
-        if error in (0, getattr(self._api, "ERROR_MORE_DATA", -1)):
+        if error in {0, getattr(self._api, "ERROR_MORE_DATA", -1)}:
             return bytes(op.getbuffer() or b"")
-        if error in (
+        if error in {
             self._api.ERROR_BROKEN_PIPE,
             self._api.ERROR_OPERATION_ABORTED,
             getattr(self._api, "ERROR_NO_DATA", -1),
-        ):
+        }:
             return b""
         raise OSError(error, "named-pipe read failed")
 

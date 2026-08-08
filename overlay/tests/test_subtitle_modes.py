@@ -246,7 +246,7 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
         "overlay.app.embedded_subs.build_sub_index_for_current_track", rebuilt.append
     )
     path = Path(tmp_path / "episode.ja.srt")
-    path.write_text("Japanese")
+    path.write_text("Japanese", encoding="utf-8")
     ipc.commands.clear()
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
@@ -267,7 +267,7 @@ def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path,
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     path = Path(tmp_path / "episode.ja.srt")
-    path.write_text("Japanese")
+    path.write_text("Japanese", encoding="utf-8")
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
     ipc.command("set_property", "sid", 7)
@@ -287,7 +287,7 @@ def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monke
         "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _reader: None
     )
     path = Path(tmp_path / "episode.ja.srt")
-    path.write_text("Japanese")
+    path.write_text("Japanese", encoding="utf-8")
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
     reader._subtitle_fetch_threads[0].join(timeout=1)
@@ -311,7 +311,7 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
         "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
     )
     path = Path(tmp_path / "episode.ja.srt")
-    path.write_text("Japanese")
+    path.write_text("Japanese", encoding="utf-8")
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
     reader._subtitle_fetch_threads[0].join(timeout=1)
@@ -333,7 +333,7 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch):
         "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
     )
     path = Path(tmp_path / "episode.synced.srt")
-    path.write_text("Japanese")
+    path.write_text("Japanese", encoding="utf-8")
 
     subtitle_modes._replace_japanese_track(reader, path, "resynced")
 

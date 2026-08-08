@@ -669,7 +669,7 @@ class DictionarySet:
         ``term*``."""
         glob = _to_glob(pattern)
         if not any(c in glob for c in "*?"):
-            glob = glob + "*"  # a bare query → prefix search
+            glob += "*"  # a bare query → prefix search
         items = self._collect_search_hits(glob, limit)
         li_nodes = _search_result_nodes(items)
         content = (
@@ -817,8 +817,8 @@ class DictionarySet:
             EntryGroup(
                 headword=furigana(term, reading),
                 reading=reading,
-                defs=defs_by_key[(term, reading)],
-                card_index=order[(term, reading)],
+                defs=defs_by_key[term, reading],
+                card_index=order[term, reading],
             )
             for term, reading in sorted(defs_by_key, key=lambda k: order[k])
         ]
