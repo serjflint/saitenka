@@ -122,6 +122,7 @@ def _ffmpeg_encoder_available(encoder: str) -> bool:
             [find_tool("ffmpeg") or "ffmpeg", "-hide_banner", "-encoders"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=15,
             check=False,
         )
@@ -287,7 +288,9 @@ def _voices_out() -> str:
 
 def _run_out(*args: str) -> str:
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
+        r = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", timeout=10, check=False
+        )
         return (r.stdout or "") + (r.stderr or "")
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -337,6 +340,7 @@ def audio_duration(path: str | Path) -> float | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             check=False,
         )
@@ -368,6 +372,7 @@ def has_sub_lang(path: str | Path, langs: str = "ja,jpn,jp") -> bool | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             check=False,
         )

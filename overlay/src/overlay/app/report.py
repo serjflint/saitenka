@@ -71,7 +71,9 @@ def _redact_config(text: str) -> str:
 
 def _first_line(*cmd: str) -> str:
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", timeout=10, check=False
+        )
         lines = ((out.stdout or "") + (out.stderr or "")).strip().splitlines()
         return lines[0] if lines else "no output"
     except (OSError, subprocess.SubprocessError):
@@ -168,16 +170,25 @@ def _collect_dict_inventory() -> dict[str, str]:
     from overlay.app.paths import legacy_dict_artifacts
 
     db_file = db_path()
-    inv = [f"[database] {db_file}"]
-    if db_file.exists():
+    if not db_file.exists():
+        inv = [f"[database] {db_file}", "  (none — run `saitenka import`)"]
+    else:
         try:
-            rows = DictionaryDb.open().list_dictionaries()
-            inv += [f"  [{r.kind}] {r.title}" for r in rows] or ["  (empty)"]
+            st = DictionaryDb.open().stats()
+            inv = [f"[database] {db_file} (schema {st.schema}, {st.size_bytes / 1e6:.0f} MB)"]
+            for d in st.dicts:
+                # per-table counts make a missing tags table (sidecar-era import) visible without
+                # shipping any dictionary content — the whole reason report/doctor can carry this.
+                nums = " ".join(
+                    f"{k}={d.counts[k]}"
+                    for k in ("entries", "keys", "kanji", "term_meta", "tags")
+                    if d.counts[k]
+                )
+                inv.append(f"  [{d.row.kind}] {d.row.title}  {nums}".rstrip())
+            inv += [] if st.dicts else ["  (empty)"]
         except Exception:  # pragma: no cover — diagnostics must never raise
             log.debug("dictionary inventory read failed", exc_info=True)
-            inv += ["  (unreadable)"]
-    else:
-        inv += ["  (none — run `saitenka import`)"]
+            inv = [f"[database] {db_file}", "  (unreadable)"]
     arts = legacy_dict_artifacts()
     if arts:
         inv += ["[legacy — unused, safe to delete]"]

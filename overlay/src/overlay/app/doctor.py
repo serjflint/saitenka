@@ -86,7 +86,9 @@ class Report:
 def _run(*args: str) -> str:
     """Run a command, returning combined stdout (best-effort; '' on failure)."""
     try:
-        out = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
+        out = subprocess.run(
+            args, capture_output=True, text=True, encoding="utf-8", timeout=10, check=False
+        )
         return (out.stdout or "") + (out.stderr or "")
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -136,9 +138,10 @@ def check_mpv() -> Check:
         return Check("mpv", "warn", f"mpv version unparseable — {detail}")
     ver = (int(m.group(1)), int(m.group(2)))
     vs = f"{ver[0]}.{ver[1]}"
+    label = "mpv.net" if "mpvnet" in Path(mpv).name.lower() else "mpv"
     if ver < MPV_MIN:
-        return Check("mpv", "fail", f"mpv {vs} too old — need ≥ 0.37 for overlay-add BGRA")
-    return Check("mpv", "ok", f"mpv {vs} ({mpv})")
+        return Check("mpv", "fail", f"{label} {vs} too old — need ≥ 0.37 for overlay-add BGRA")
+    return Check("mpv", "ok", f"{label} {vs} ({mpv})")
 
 
 def check_ffmpeg() -> Check:
@@ -245,6 +248,15 @@ def check_dict_db() -> list[Check]:
         Check("dict-db", "ok", f"{len(imported)} imported in {db_file}", info=True),
     ]
     checks += _title_checks(configured, imported)
+    # Per-dict row counts (info tier — --verbose/--json only). Surfaces a dict-kind dictionary with
+    # entries but tags=0: a sidecar-era import that never populated the tags table (re-import fixes it).
+    for d in db.stats().dicts:
+        nums = " ".join(
+            f"{k}={d.counts[k]}"
+            for k in ("entries", "keys", "kanji", "term_meta", "tags")
+            if d.counts[k]
+        )
+        checks.append(Check("dict-db", "ok", f"{d.row.kind}: {d.row.title} — {nums}", info=True))
     return checks
 
 
@@ -822,6 +834,7 @@ def check_powershell() -> Check:
                 ["powershell", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=5,
                 check=False,
             )

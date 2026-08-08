@@ -18,9 +18,13 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from overlay import otel_metrics
 from overlay.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTransport
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +69,12 @@ def default_ipc_path(unique: str) -> str:
 # unblocks with a disconnect result instead of hanging.
 _DISCONNECT = object()
 
+# Bounded auto-reconnect budget (per process). mpv.net drops its IPC named pipe mid-session (a
+# transient WinError 109 that vanilla mpv doesn't emit); re-dialing the SAME endpoint recovers it
+# without the user relaunching. A total cap so a genuinely-gone mpv (quit) still exits after a burst
+# of failed dials — no cross-thread reset, so there is no data race on the counter.
+_MAX_RECONNECTS = 30
+
 
 class MpvIPC:
     """Connect to an mpv ``--input-ipc-server`` and send commands, reading JSON replies.
@@ -84,6 +94,14 @@ class MpvIPC:
         self._replies: queue.Queue = queue.Queue(maxsize=1)  # single-flight command replies
         self._closed = threading.Event()
         self._reader: threading.Thread | None = None
+        self._dial: Callable[[str, float], Transport] | None = (
+            None  # set by connect(); reconnect reuses
+        )
+        self._intentional = False  # close() vs a dropped pipe — only the latter reconnects
+        self._reconnects_left = _MAX_RECONNECTS
+        # Replayed on the IPC thread after a successful reconnect (the controller re-issues
+        # observe_property, which mpv forgets on a fresh connection). Set by the owner.
+        self.on_reconnect: Callable[[], None] | None = None
 
     # --- connection ---------------------------------------------------------------------------
     def connect(self, timeout: float = 10.0, interval: float = 0.1) -> MpvIPC:
@@ -92,6 +110,9 @@ class MpvIPC:
         # Windows exposes IPC as a named pipe, Unix as a socket file — identical framing on top (see
         # transport.py). Pick the adapter, then retry-dial until the server is up or the deadline.
         dial = NamedPipeTransport.dial if sys.platform == "win32" else UnixSocketTransport.dial
+        self._dial = (
+            dial  # reused by _reconnect() to re-dial the same endpoint after a dropped pipe
+        )
         while time.monotonic() < deadline:
             try:
                 self._transport = dial(self.path, timeout)
@@ -208,9 +229,42 @@ class MpvIPC:
     def pump(self) -> None:
         """Surface a disconnect so the poll loop stops. The reader thread does the actual socket
         reads now, so steady-state event delivery no longer depends on this being called — but the
-        controller's contract (``pump()`` raises ``OSError`` when mpv goes away) is preserved."""
-        if self._closed.is_set():
+        controller's contract (``pump()`` raises ``OSError`` when mpv goes away) is preserved.
+
+        Before surfacing the disconnect, try to recover a merely-dropped pipe (mpv.net) by re-dialing
+        the same endpoint. Runs on the caller's (IPC/main) thread, so the observer replay it triggers
+        issues commands safely; only an intentional close() or an exhausted/failed reconnect raises."""
+        if not self._closed.is_set():
+            return
+        if self._intentional or not self._reconnect():
             raise OSError("mpv IPC disconnected")
+
+    def _reconnect(self) -> bool:
+        """Re-dial the same endpoint after a dropped pipe; on success restart the reader and replay
+        observers. Bounded by ``_reconnects_left`` so a quit mpv (dials keep failing) still exits."""
+        if self._dial is None or self._reconnects_left <= 0:
+            return False
+        if self._reader is not None and self._reader.is_alive():
+            self._reader.join(timeout=1.0)  # the dropped-pipe reader has set _closed and is exiting
+        self._reconnects_left -= 1
+        try:
+            transport = self._dial(self.path, 1.0)
+        except (OSError, FileNotFoundError) as e:
+            log.info("mpv IPC reconnect: %s unavailable (%s) — mpv has quit", self.path, e)
+            return False
+        self._transport = transport
+        self._buf = b""
+        self._replies = queue.Queue(maxsize=1)
+        self._closed = threading.Event()  # fresh gate for the new reader (old one has exited)
+        self._start_reader()
+        log.warning(
+            "mpv IPC: reconnected to %s after a dropped pipe (%d reconnect(s) left)",
+            self.path,
+            self._reconnects_left,
+        )
+        if self.on_reconnect is not None:
+            self.on_reconnect()  # controller re-issues observe_property (lost on the new connection)
+        return True
 
     def drain_events(self) -> list[dict]:
         """Return and clear buffered async events (collected by the reader thread)."""
@@ -219,6 +273,7 @@ class MpvIPC:
         return evs
 
     def close(self) -> None:
+        self._intentional = True  # a real shutdown, not a dropped pipe — pump() must not reconnect
         self._closed.set()
         if self._transport is not None:
             try:

@@ -12,7 +12,8 @@ import socket
 import threading
 import time
 
-from overlay.mpvio.ipc import MpvIPC
+import pytest
+from overlay.mpvio.ipc import _MAX_RECONNECTS, MpvIPC
 from overlay.mpvio.transport import UnixSocketTransport
 
 
@@ -93,6 +94,76 @@ def test_write_failure_mid_conversation_marks_disconnected():
     finally:
         ipc.close()
         b.close()
+
+
+class _ScriptedTransport:
+    """Delivers queued byte chunks then EOF (``b""``) — a pipe that drops after its data. Reader-only;
+    writes are ignored. Used to drive the auto-reconnect path deterministically (no OS race)."""
+
+    def __init__(self, chunks: list[bytes] | None = None) -> None:
+        self._chunks = list(chunks or [])
+        self.closed = False
+
+    def read(self, _n: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+    def write(self, _data: bytes) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_pump_reconnects_after_a_dropped_pipe_and_replays_observers():
+    # mpv.net drops the IPC pipe mid-session: the reader hits EOF and sets the gate, but pump() must
+    # re-dial the same endpoint and replay observers instead of surfacing a fatal disconnect.
+    ipc = MpvIPC(r"\\.\pipe\mpvsocket")
+    replays: list = []
+    ipc.on_reconnect = lambda: replays.append(ipc._transport)
+    ipc._transport = _ScriptedTransport()  # immediate EOF = dropped pipe
+    ipc._start_reader()
+    assert ipc._closed.wait(1.0)  # reader saw EOF
+    target = _ScriptedTransport([b'{"event":"seek"}\n'])
+    ipc._dial = lambda _path, _timeout: target
+    left_before = ipc._reconnects_left
+
+    ipc.pump()  # must NOT raise — recovers the dropped pipe
+
+    assert ipc._transport is target
+    assert replays == [target]  # observers replayed after the transport was swapped in
+    assert ipc._reconnects_left == left_before - 1
+    ipc.close()
+
+
+def test_pump_does_not_reconnect_after_intentional_close():
+    ipc = MpvIPC("x")
+    ipc._dial = lambda _p, _t: _ScriptedTransport([b'{"event":"y"}\n'])
+    ipc._transport = _ScriptedTransport()
+    ipc._start_reader()
+    assert ipc._closed.wait(1.0)
+
+    ipc.close()  # a real shutdown — must NOT reconnect
+
+    with pytest.raises(OSError, match="disconnected"):
+        ipc.pump()
+
+
+def test_pump_gives_up_when_redial_keeps_failing():
+    # A genuinely-gone mpv (quit): re-dials fail, so pump() consumes an attempt and surfaces the
+    # disconnect (the overlay exits) instead of looping forever.
+    ipc = MpvIPC("x")
+
+    def _fail(_p, _t):
+        raise OSError("pipe gone")
+
+    ipc._dial = _fail
+    ipc._transport = _ScriptedTransport()
+    ipc._start_reader()
+    assert ipc._closed.wait(1.0)
+
+    with pytest.raises(OSError, match="disconnected"):
+        ipc.pump()
+    assert ipc._reconnects_left == _MAX_RECONNECTS - 1
 
 
 def test_stale_late_reply_does_not_answer_the_next_command():

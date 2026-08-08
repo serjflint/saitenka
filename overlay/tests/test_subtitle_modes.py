@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from overlay.app import subtitle_modes
 from overlay.app.controller import Reader
-from overlay.app.languages import SECOND_LANG
+from overlay.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from overlay.app.sub_index import SubIndex, parse_srt
 from overlay.app.subtitles import SubtitleRender
 from PIL import Image
@@ -568,6 +568,151 @@ def test_single_foreign_track_has_no_secondary():
     assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(
         jp_sid=7, en_sid=None
     )
+
+
+def _select(ipc, sid):
+    ipc.props["sid"] = sid
+    for track in ipc.tracks:
+        track["selected"] = track.get("id") == sid
+        if track["selected"]:
+            track["main-selection"] = 0
+
+
+def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path):
+    # Drag-'n'-drop: mpv adds an UNTAGGED external sub ("unknown language") and makes it primary after
+    # startup already fell back to English. It must be adopted as the Japanese primary so cues color
+    # (not the plain English path), and indexed from the file on disk.
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    assert reader.subtitle_language == SECOND_LANG  # only English present at attach
+    srt = tmp_path / "dropped.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n岩を砂へ\n", encoding="utf-8")
+    ipc.tracks.append(
+        {"id": 2, "type": "sub", "lang": None, "external": True, "external-filename": str(srt)}
+    )
+    _select(ipc, 2)
+
+    subtitle_modes.on_primary_changed(reader, 2)
+
+    assert reader.subtitle_language == MAIN_LANG
+    assert reader.jp_sid == 2
+    assert reader._sub_index is not None  # indexed from the dropped file
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("岩を砂へ 砂を岩へ", True),  # kanji + hiragana
+        ("ソウルソサエティ", True),  # katakana
+        ("ﾊﾝｶｸ", True),  # half-width katakana
+        ("Turn rock to sand.", False),  # Latin
+        ("", False),  # empty
+        ("12:34 — ♪", False),  # digits/punctuation/symbols only
+    ],
+)
+def test_looks_japanese_detects_script_by_content(text, expected):
+    assert looks_japanese(text) is expected
+
+
+def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path):
+    # Content-based ID: an UNTAGGED English sub (Latin script) the user drops must NOT be miscolored as
+    # Japanese — it stays the plain secondary, unlike an untagged Japanese sub.
+    ipc = FakeIPC([JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    assert reader.subtitle_language == MAIN_LANG
+    srt = tmp_path / "dropped.en.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nTurn rock to sand.\n", encoding="utf-8")
+    ipc.tracks.append(
+        {"id": 3, "type": "sub", "lang": None, "external": True, "external-filename": str(srt)}
+    )
+    _select(ipc, 3)
+
+    subtitle_modes.on_primary_changed(reader, 3)
+
+    assert reader.subtitle_language == SECOND_LANG
+    assert reader.en_sid == 3
+    assert reader.jp_sid == 2  # the Japanese track is not overwritten
+
+
+def test_manual_switch_to_untagged_track_is_adopted_as_japanese():
+    # The same rule for a manual native track cycle (mpv's `j` key) to an untagged embedded track:
+    # no file to index, but the render language flips to Japanese so the cue colors.
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    ipc.tracks.append({"id": 3, "type": "sub", "lang": ""})  # empty tag == untagged
+    _select(ipc, 3)
+
+    subtitle_modes.on_primary_changed(reader, 3)
+
+    assert reader.subtitle_language == MAIN_LANG
+    assert reader.jp_sid == 3
+
+
+def test_newly_primary_english_tagged_track_is_secondary_not_japanese():
+    # The guard against the false wildcard: a real English tag stays the known-language secondary and
+    # is NOT adopted as Japanese, even though lang_matches(None, EN_LANGS) would wildcard-match.
+    ipc = FakeIPC([JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    assert reader.subtitle_language == MAIN_LANG
+    ipc.tracks.append({"id": 5, "type": "sub", "lang": "eng"})
+    _select(ipc, 5)
+
+    subtitle_modes.on_primary_changed(reader, 5)
+
+    assert reader.subtitle_language == SECOND_LANG
+    assert reader.en_sid == 5
+    assert reader.jp_sid == 2  # the original JP track is untouched
+
+
+def test_subs_turned_off_adopt_no_track():
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    before = reader.subtitle_language
+
+    subtitle_modes.on_primary_changed(reader, None)
+
+    assert reader.subtitle_language == before
+    assert reader.jp_sid is None
+
+
+def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatch):
+    # The keybind override: force the CURRENT track to Japanese even when it is tagged English (so it
+    # would auto-classify as the secondary), letting the user correct a wrong guess from within mpv.
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    srt = tmp_path / "manual.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n岩を砂へ\n", encoding="utf-8")
+    ipc.tracks.append(
+        {"id": 2, "type": "sub", "lang": "eng", "external": True, "external-filename": str(srt)}
+    )
+    _select(ipc, 2)
+    messages = []
+    monkeypatch.setattr(reader, "_toast", lambda text, *_a: messages.append(text))
+    monkeypatch.setattr(reader, "set_subtitle", lambda *_a: None)
+
+    reader.mark_current_subtitle_japanese()
+
+    assert reader.subtitle_language == MAIN_LANG
+    assert reader.jp_sid == 2
+    assert reader._sub_index is not None
+    assert messages == ["Marked current subtitles as Japanese"]
+
+
+def test_force_current_as_japanese_with_no_track_warns(monkeypatch):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    messages = []
+    monkeypatch.setattr(reader, "_toast", lambda text, kind="ok": messages.append((text, kind)))
+
+    reader.mark_current_subtitle_japanese()
+
+    assert messages == [("No subtitle track to mark", "warn")]
 
 
 def test_announce_names_a_japanese_track(monkeypatch):

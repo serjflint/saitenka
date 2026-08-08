@@ -44,6 +44,7 @@ def subminer_running() -> bool:
                 ["tasklist", "/FI", "IMAGENAME eq SubMiner.exe"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=5,
                 check=False,
             )

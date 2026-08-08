@@ -8,7 +8,7 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from overlay.app.languages import MAIN_LANG, SECOND_LANG, Language
+from overlay.app.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -149,15 +149,25 @@ def on_primary_changed(reader: Reader, sid) -> None:
     if sid == reader._translation_secondary_sid:
         return
     announce_track(reader, sid)
-    if sid == reader.jp_sid:
-        language: Language = MAIN_LANG
-    elif sid == reader.en_sid:
-        language = SECOND_LANG
-    else:
+    if sid is None:
         return
+    known = sid in {reader.jp_sid, reader.en_sid}
+    if not known:
+        # The user just made this track primary (manual cycle / drag-'n'-drop). Index it from disk
+        # FIRST, so an untagged track can be classified by its actual content just below.
+        reader._sub_index = None
+        from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+        build_sub_index_for_current_track(reader)
+    language = _primary_role(reader, sid)
+    if not known:
+        if language == MAIN_LANG:
+            reader.jp_sid = sid
+        else:
+            reader.en_sid = sid
+        log.info("subtitle sid=%s adopted as %s", sid, language)
     if language != reader.subtitle_language:
         reader.subtitle_language = language
-        reader._sub_index = None
         from overlay.app import analysis_overlay
 
         analysis_overlay.on_index_changed(reader)
@@ -165,6 +175,34 @@ def on_primary_changed(reader: Reader, sid) -> None:
         setup_secondary(reader)
     else:
         release_secondary(reader)
+
+
+def _primary_role(reader: Reader, sid) -> Language:
+    """Role of the track mpv just made primary. A real Japanese tag → the target; a real English tag →
+    the known-language secondary. An UNTAGGED track is classified by CONTENT — Japanese script (kana or
+    kanji) in the cues just indexed, else the on-screen text → target; otherwise the secondary. So a
+    drag-'n'-dropped untagged Japanese sub colors while an untagged English one stays plain, exactly
+    where a language tag can't decide (``lang_matches(None, EN_LANGS)`` is a false wildcard match)."""
+    if sid == reader.jp_sid:
+        return MAIN_LANG
+    if sid == reader.en_sid:
+        return SECOND_LANG
+    lang = next((t.get("lang") for t in sub_tracks(reader.ipc) if t.get("id") == sid), None)
+    if lang and lang_matches(lang, list(JP_LANGS)):
+        return MAIN_LANG
+    if lang and lang_matches(lang, list(EN_LANGS)):
+        return SECOND_LANG
+    sample = _sample_cue_text(reader)  # no usable tag → decide by the track's actual text
+    return MAIN_LANG if (not sample or looks_japanese(sample)) else SECOND_LANG
+
+
+def _sample_cue_text(reader: Reader, limit: int = 20) -> str:
+    """A few cues of the current track for content-based language ID: the freshly indexed cues if
+    present, else mpv's on-screen cue."""
+    idx = reader._sub_index
+    if idx is not None and len(idx) > 0:
+        return " ".join(cue.text for cue in idx.cues[:limit])
+    return reader.sub_text or ""
 
 
 def _language_name(lang: str | None) -> str:
@@ -227,6 +265,31 @@ def toggle(reader: Reader) -> None:
 
     build_sub_index_for_current_track(reader)
     announce_track(reader, sid)
+
+
+def force_current_as_japanese(reader: Reader) -> None:
+    """Override: treat mpv's current primary subtitle track as the Japanese target, whatever its tag.
+    The manual escape hatch — bound to a key so the user acts in mpv directly — for the rare case
+    auto-adoption guessed wrong (an untagged track that is really English) or never fired."""
+    sid = reader._get("sid")
+    if sid is None:
+        reader._toast("No subtitle track to mark", "warn")
+        return
+    reader.jp_sid = sid
+    if reader.en_sid == sid:
+        reader.en_sid = None
+    if reader.subtitle_language != MAIN_LANG:
+        reader.subtitle_language = MAIN_LANG
+        from overlay.app import analysis_overlay
+
+        analysis_overlay.on_index_changed(reader)
+    reader._sub_index = None
+    from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+    build_sub_index_for_current_track(reader)
+    reader.set_subtitle(reader.sub_text)  # recolor the on-screen cue now, don't wait for the next
+    reader._toast("Marked current subtitles as Japanese")
+    log.info("user forced subtitle sid=%s as the Japanese primary", sid)
 
 
 def start_fetch(

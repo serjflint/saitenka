@@ -70,6 +70,7 @@ from overlay.app.bindings import (
     SUB_PREV_MSG,
     SUB_REPLAY_MSG,
     SUBTITLE_LANGUAGE_MSG,
+    SUBTITLE_MARK_JP_MSG,
     SUBTITLE_RETRY_MSG,
     TIP_CLOSE_MSG,
     TIP_DOWN_MSG,
@@ -292,6 +293,7 @@ class Reader:
         self.translate_key = o.keys.translate_key
         self.overlay_toggle_key = o.keys.overlay_toggle_key
         self.subtitle_language_key = o.keys.subtitle_language_key
+        self.subtitle_mark_jp_key = o.keys.subtitle_mark_jp_key
         self.bookmark_key = o.keys.bookmark_key
         self.sidebar_key = o.keys.sidebar_key
         self.analysis_key = o.keys.analysis_key
@@ -1306,6 +1308,9 @@ class Reader:
     def toggle_subtitle_language(self) -> None:
         subtitle_modes.toggle(self)
 
+    def mark_current_subtitle_japanese(self) -> None:
+        subtitle_modes.force_current_as_japanese(self)
+
     def fetch_japanese_subs_async(self, fetch) -> None:
         subtitle_modes.start_fetch(self, fetch, select_if_unchanged=True)
 
@@ -1405,6 +1410,7 @@ class Reader:
         TRANS_MSG: lambda r: r.toggle_translation(),
         OVERLAY_TOGGLE_MSG: lambda r: r.toggle_overlay(),
         SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
+        SUBTITLE_MARK_JP_MSG: lambda r: r.mark_current_subtitle_japanese(),
         SUBTITLE_RETRY_MSG: lambda r: r.retry_japanese_subtitles(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
@@ -1695,6 +1701,9 @@ class Reader:
         )  # this IS the render loop — native rasterisation must run on a worker
         interval = interval if interval is not None else self.poll_interval
         self.refresh_osd()
+        # Re-register observers after an IPC reconnect (mpv.net drops the pipe mid-session; a fresh
+        # connection has forgotten every observe_property) — runs on the IPC thread inside pump().
+        self.ipc.on_reconnect = self.start_observing
         self.start_observing()  # event-driven property reads from here on
         self._register_keybinds()
         self._seed_mined()

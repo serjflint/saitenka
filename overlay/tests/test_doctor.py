@@ -59,6 +59,17 @@ def test_mpv_check_mpvnet_unparseable_version(monkeypatch):
     assert "mpv.net" in c.detail
 
 
+def test_mpv_check_mpvnet_parseable_version_is_labeled(monkeypatch):
+    # The friend's case: mpv.net reports a parseable "mpv 0.41" — label it mpv.net so the report names
+    # which player is active (its IPC/track quirks differ from vanilla mpv).
+    monkeypatch.setattr(doc, "_run", lambda *_a, **_k: "mpv 0.41.0\n")
+    _patch_find_mpv(monkeypatch, r"C:\\Users\\x\\Programs\\mpv.net\\mpvnet.exe")
+    c = doc.check_mpv()
+    assert c.status == "ok"
+    assert "mpv.net" in c.detail
+    assert "0.41" in c.detail
+
+
 def test_ffmpeg_check_needs_aac(monkeypatch):
     monkeypatch.setattr(doc.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(
@@ -133,6 +144,23 @@ def test_dict_db_default_view_is_a_counts_line_not_a_wall(tmp_path, monkeypatch)
     assert all(
         c.info for c in checks if c.detail.startswith("dicts: Alpha") or "imported in" in c.detail
     )
+
+
+def test_dict_db_lists_per_dict_table_counts_as_info(tmp_path, monkeypatch):
+    # Per-dict row counts are info-tier (--verbose/--json only) — a dict with entries but no tags
+    # token is the sidecar-era import tell, surfaced without cluttering the default view.
+    import dicthelp
+
+    z = dicthelp.term_zip(tmp_path / "Gamma.zip", "Gamma", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Gamma"]\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    checks = doc.check_dict_db()
+    line = next(c for c in checks if c.detail.startswith("dict: Gamma —"))
+    assert line.info and line.status == "ok"
+    assert "entries=1" in line.detail
+    assert "tags=" not in line.detail  # no tag_bank imported → tags omitted (the 0-tags signal)
 
 
 def test_legacy_files_check_ok_when_none(monkeypatch):

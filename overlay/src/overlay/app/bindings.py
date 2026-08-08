@@ -14,6 +14,7 @@ MINE_ALL_MSG = "saitenka-mine-all"
 TRANS_MSG = "saitenka-translate"
 OVERLAY_TOGGLE_MSG = "saitenka-toggle-overlay"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
+SUBTITLE_MARK_JP_MSG = "saitenka-mark-subtitle-japanese"
 SUBTITLE_RETRY_MSG = "saitenka-retry-subtitle-providers"
 SUB_PICKER_MSG = "saitenka-sub-picker"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
@@ -89,6 +90,12 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Switch Japanese / English",
         SUBTITLE_LANGUAGE_MSG,
         key_attr="subtitle_language_key",
+    ),
+    BindingSpec(
+        "Essentials & language",
+        "Mark current track as Japanese",
+        SUBTITLE_MARK_JP_MSG,
+        key_attr="subtitle_mark_jp_key",
     ),
     BindingSpec(
         "Essentials & language",
