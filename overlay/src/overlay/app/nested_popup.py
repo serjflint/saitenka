@@ -9,6 +9,7 @@ Takes ``reader: Reader`` (the AGENTS.md seam pattern); the nested popup's own st
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from overlay.app.overlay_ids import OverlayId
@@ -22,6 +23,15 @@ if TYPE_CHECKING:
 
 TIP_GAP = 12
 NEST_MIN_ABOVE = 140  # min room above an inner word to keep its nested popup above it (else below)
+
+
+@dataclass(frozen=True)
+class Anchor:
+    """The on-screen box a nested popup anchors above/below — the hovered inner word / kanji / link."""
+
+    wx: float
+    wy: float
+    wh: float
 
 
 def _is_ideograph(ch: str) -> bool:
@@ -124,20 +134,20 @@ def open_nested(
     st = reader._panel_for(
         tok, inflected, min_h=reader._tip_cap(), mined=mined, nested=True, extra_terms=extra_terms
     )
-    place_nested(reader, st, key, tok, tok.surface, wx, wy, wh, tail)
+    place_nested(reader, st, key, tok, tok.surface, Anchor(wx, wy, wh), tail)
 
 
-def place_nested(
-    reader: Reader, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None
-) -> None:
+def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
     """Anchor a built :class:`Panel` ``st`` as the nested popup. ``token`` is the inner Token to mine
     via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
     reader._nest.state, reader._nest.key = st, key
     reader._nest.token, reader._nest.word = token, word
     reader._nest.tail = tail
     reader._nest.scroll = 0
-    reader._nest.view_h = nested_view_h(reader, st.full_height, wy)
-    reader._nest.xy = reader._place_panel(st.width, wx, wy, wh, reader._nest.view_h)
+    reader._nest.view_h = nested_view_h(reader, st.full_height, anchor.wy)
+    reader._nest.xy = reader._place_panel(
+        st.width, anchor.wx, anchor.wy, anchor.wh, reader._nest.view_h
+    )
     render_nested_view(reader)
 
 
@@ -192,7 +202,7 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
             except KeyError:
                 pass
     st.render_head(reader._tip_cap())
-    place_nested(reader, st, key, None, pattern, wx, wy, wh)
+    place_nested(reader, st, key, None, pattern, Anchor(wx, wy, wh))
 
 
 def kanji_current(reader: Reader) -> None:
@@ -238,7 +248,7 @@ def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None
             except KeyError:
                 pass
     st.render_head(reader._tip_cap())
-    place_nested(reader, st, key, None, ch, wx, wy, wh)
+    place_nested(reader, st, key, None, ch, Anchor(wx, wy, wh))
 
 
 def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:

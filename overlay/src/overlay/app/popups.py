@@ -59,16 +59,18 @@ class Panel:
         # render_body_band would cycle back through .render at the package level. It's injected as the
         # windowed engine's GIL-build process-pool band renderer for the same reason (see WindowedPanel).
         from overlay.body_block import render_body_band
-        from overlay.render.banded import WindowedPanel
+        from overlay.render.banded import BandedTuning, WindowedPanel
 
         return cls(
             WindowedPanel(
                 rows,
                 width,
                 theme,
-                compress=True,
-                max_cached_blocks=band_cache_max,
-                raw_band_ceiling=raw_band_ceiling,
+                tuning=BandedTuning(
+                    compress=True,
+                    max_cached_blocks=band_cache_max,
+                    raw_band_ceiling=raw_band_ceiling,
+                ),
                 render_block_fn=render_body_band,
                 layout_backend=layout_backend,
             ),

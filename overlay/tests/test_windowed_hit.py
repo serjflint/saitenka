@@ -11,7 +11,7 @@ import util
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from overlay.panel import Entry, LazyPanel, panel_rows, render_panel
-from overlay.render.banded import WindowedPanel
+from overlay.render.banded import BandedTuning, WindowedPanel
 
 WIDTH = 384
 
@@ -35,7 +35,7 @@ def test_scan_and_link_geometry_matches_whole_panel_after_full_scroll():
     total = render_panel(entry, width=WIDTH).height
     ref = LazyPanel(panel_rows(entry, WIDTH), WIDTH)
     ref.finish()
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=4)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=4))
     _drive_full_scroll(wp, total, 260)
     assert wp.scan_boxes() == ref.scan_boxes  # same cells, same panel coords, same order
     assert wp.link_boxes() == ref.link_boxes
@@ -48,7 +48,7 @@ def test_hit_parity_at_every_point(px, py):
     total = render_panel(entry, width=WIDTH).height
     ref = LazyPanel(panel_rows(entry, WIDTH), WIDTH)
     ref.finish()
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=4)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=4))
     _drive_full_scroll(wp, total, 260)
     assert wp.scan_hit(px, py) == _ref_hit(ref.scan_boxes, px, py)  # same word hit as the old path
     assert wp.link_hit(px, py) == _ref_hit(ref.link_boxes, px, py)  # same link hit
@@ -73,7 +73,7 @@ def test_point_inside_a_cell_round_trips_to_that_cell(profile):
 def test_hit_resolves_even_when_the_blocks_pixels_are_evicted():
     entry = _cjk_entry(10)
     total = render_panel(entry, width=WIDTH).height
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=3)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=3))
     # scroll to the bottom: the top blocks' pixels are LRU-evicted, but their geometry is retained.
     wp.viewport(max(0, total - 260), 260)
     top_boxes = [b for b in wp.scan_boxes() if b.y < 200]

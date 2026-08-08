@@ -18,7 +18,7 @@ import pytest
 import util
 from overlay.model import Theme
 from overlay.panel import panel_rows, render_panel
-from overlay.render.banded import WindowedPanel
+from overlay.render.banded import BandedTuning, WindowedPanel
 
 
 def _bgra_band_case():
@@ -31,7 +31,9 @@ def _bgra_band_case():
     warm.viewport_bgra(0, vh)  # scroll through so the target bands are cached + memoised…
     warm.viewport_bgra(max(0, scroll - 60), vh)
     a = warm.viewport_bgra(scroll, vh)  # served from the warm memo
-    cold = WindowedPanel(panel_rows(entry, width, theme), width, theme, max_cached_blocks=1)
+    cold = WindowedPanel(
+        panel_rows(entry, width, theme), width, theme, tuning=BandedTuning(max_cached_blocks=1)
+    )
     b = cold.viewport_bgra(scroll, vh)  # cap=1 → the same bands rastered fresh this call
     warm.viewport(0, total)
     cold.viewport(0, total)

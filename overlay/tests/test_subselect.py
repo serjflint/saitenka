@@ -50,14 +50,14 @@ def test_lang_matches_two_and_three_letter_and_name():
 
 def test_ensure_selects_jp_and_hides_native_subs():
     ipc = FakeIPC(tracks=[EN, JP])
-    msg = subselect.ensure_jp_subs(ipc, slang="ja,jpn,jp")
+    msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(slang="ja,jpn,jp"))
     assert "sid=2" in msg
     assert ipc.sets("sub-visibility") == [False]  # overlay draws its own
 
 
 def test_ensure_no_jp_without_jimaku_reports_gap():
     ipc = FakeIPC(tracks=[EN])
-    msg = subselect.ensure_jp_subs(ipc, slang="ja,jpn,jp")
+    msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(slang="ja,jpn,jp"))
     assert "no Japanese subtitle track" in msg
     assert ipc.sets("sub-visibility") == []  # left mpv alone
 
@@ -176,7 +176,7 @@ def test_ensure_sub_file_is_added_and_selected(tmp_path):
     sub = tmp_path / "ep.ja.srt"
     sub.write_text("1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n", encoding="utf-8")
     ipc = FakeIPC(tracks=[EN])
-    msg = subselect.ensure_jp_subs(ipc, sub_file=str(sub))
+    msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(sub_file=str(sub)))
     assert "ep.ja.srt" in msg
     assert ("sub-add", str(sub), "select") in ipc.calls
 
@@ -200,7 +200,7 @@ def test_ensure_jimaku_fetches_when_no_jp_track(tmp_path, monkeypatch):
     monkeypatch.setattr(jm, "JimakuClient", FakeClient)
     monkeypatch.setattr(jm, "parse_filename", lambda _p: ("Nippon Sangoku", 9))
     # resync off so we don't shell out
-    msg = subselect.ensure_jp_subs(ipc, jimaku=True, resync=False)
+    msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(jimaku=True, resync=False))
     assert "jimaku: added fetched.ja.srt" in msg and "ep 9" in msg
     assert ("sub-add", str(fetched)) in ipc.calls
 
@@ -304,7 +304,9 @@ def _stub_jimaku(monkeypatch, tmp_path, *, ok=True):
 def test_jimaku_force_prefers_jimaku_over_embedded_jp_track(tmp_path, monkeypatch):
     fetched = _stub_jimaku(monkeypatch, tmp_path)
     ipc = FakeIPC(tracks=[EN, JP], path="/v/Nippon Sangoku - 09.mkv")
-    msg = subselect.ensure_jp_subs(ipc, jimaku=True, jimaku_force=True, resync=False)
+    msg = subselect.ensure_jp_subs(
+        ipc, subselect.AttachSubtitleOptions(jimaku=True, jimaku_force=True, resync=False)
+    )
     assert "jimaku: added fetched.ja.srt" in msg
     assert ("sub-add", str(fetched)) in ipc.calls
     assert ipc.sets("sid") == []  # embedded JP track was NOT selected — jimaku won
@@ -313,7 +315,9 @@ def test_jimaku_force_prefers_jimaku_over_embedded_jp_track(tmp_path, monkeypatc
 def test_jimaku_force_falls_back_to_embedded_on_fetch_failure(tmp_path, monkeypatch):
     _stub_jimaku(monkeypatch, tmp_path, ok=False)
     ipc = FakeIPC(tracks=[EN, JP], path="/v/Nippon Sangoku - 09.mkv")
-    msg = subselect.ensure_jp_subs(ipc, jimaku=True, jimaku_force=True, resync=False)
+    msg = subselect.ensure_jp_subs(
+        ipc, subselect.AttachSubtitleOptions(jimaku=True, jimaku_force=True, resync=False)
+    )
     assert "sid=2" in msg  # jimaku failed → embedded JP track selected as fallback
     assert ipc.sets("sid") == [2]
 

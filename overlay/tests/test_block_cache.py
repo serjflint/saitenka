@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from overlay.panel import Definition, Entry, panel_rows, render_panel
-from overlay.render.banded import CachedBlock, WindowedPanel
+from overlay.render.banded import BandedTuning, CachedBlock, WindowedPanel
 
 WIDTH = 384
 
@@ -31,7 +31,9 @@ def test_windowed_equals_full_crop_at_every_offset(compress):
     ref = render_panel(entry, width=WIDTH)
     total, vh = ref.height, 300
     ref_arr = np.asarray(ref, np.int16)
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=8, compress=compress)
+    wp = WindowedPanel(
+        panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=8, compress=compress)
+    )
     for scroll in range(total - vh + 1):  # EVERY offset, 1px steps
         win = np.asarray(wp.viewport(scroll, vh, overscan=60), np.int16)
         assert np.abs(win - ref_arr[scroll : scroll + vh]).max() == 0, (
@@ -41,8 +43,8 @@ def test_windowed_equals_full_crop_at_every_offset(compress):
 
 def test_compressed_cache_round_trips_to_identical_pixels():
     entry = _fabricated(10)
-    plain = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, compress=False)
-    packed = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, compress=True)
+    plain = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(compress=False))
+    packed = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(compress=True))
     for scroll in (0, 200, 500):
         a = np.asarray(plain.viewport(scroll, 260))
         b = np.asarray(packed.viewport(scroll, 260))
@@ -63,7 +65,9 @@ def test_lru_cap_bounds_retained_pixels_under_sustained_scroll():
     entry = _fabricated(64)  # ~a real polysemous word's block count
     total = render_panel(entry, width=WIDTH).height
     cap, vh, overscan = 6, 300, 40
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=cap, compress=True)
+    wp = WindowedPanel(
+        panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=cap, compress=True)
+    )
     peak = 0
     for scroll in range(0, total - vh, 40):
         wp.viewport(scroll, vh, overscan=overscan)
@@ -82,7 +86,7 @@ def test_lru_cap_bounds_retained_pixels_under_sustained_scroll():
 def test_scrolling_back_up_stays_exact_after_lru_eviction():
     entry = _fabricated(40)
     total = render_panel(entry, width=WIDTH).height
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, max_cached_blocks=4)
+    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(max_cached_blocks=4))
     wp.viewport(total - 300, 300)  # bottom: measures everything, LRU-evicts the top's pixels
     ref = render_panel(entry, width=WIDTH).crop((0, 0, WIDTH, 300))
     win = wp.viewport(0, 300)  # back to top: evicted blocks re-render, offsets still exact

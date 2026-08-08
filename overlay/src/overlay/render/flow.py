@@ -15,6 +15,7 @@ from overlay import fonts
 from overlay.model import LinkBox, ScanBox, Span, Style
 from overlay.render.layout import (
     Block,
+    Sinks,
     Token,
     _font,
     _tokenize_span,
@@ -435,37 +436,45 @@ def _update_link_run(
     return link
 
 
-def _draw_flow_line(  # noqa: PLR0913  # render-geometry primitives (canvas/coords/sinks), not a data-clump
+@dataclass(frozen=True)
+class _LinePlacement:
+    """Where one wrapped line sits vertically (reference px): its box height, the baseline offset within
+    that box, and the box's top ``y`` in the panel."""
+
+    box_h: int
+    base_from_top: int
+    y: float
+
+
+def _draw_flow_line(
     img: Image.Image,
     draw: ImageDraw.ImageDraw,
     line: list[Item],
-    line_box_h: int,
-    base_from_top: int,
-    y: float,
-    *,
-    scan_out: list[ScanBox] | None,
-    link_out: list[LinkBox] | None,
+    place: _LinePlacement,
+    sinks: Sinks,
     padding: int,
+    *,
     scale: float = 1.0,
 ) -> None:
     # ``x``/``y`` stay REFERENCE px: the draw projects by ``scale``, but the scan/link boxes are emitted
     # at 1× coords (scale-invariant geometry — the whole point of the scale-boundary arch).
-    baseline = y + base_from_top
+    y, box_h = place.y, place.box_h
+    baseline = y + place.base_from_top
     x = float(padding)
     run: list[tuple[str, float, float]] = []  # contiguous CJK chars: (char, x, width)
     link: tuple[str, float, float] | None = None  # (query, x_start, x_end) of the current link run
     for it in line:
         _draw_item(img, draw, it, x, baseline, scale=scale)
-        if scan_out is not None:
-            run = _update_scan_run(it, x, y, line_box_h, run, scan_out)
-        if link_out is not None:
-            link = _update_link_run(it, x, y, line_box_h, link, link_out)
+        if sinks.scan_out is not None:
+            run = _update_scan_run(it, x, y, box_h, run, sinks.scan_out)
+        if sinks.link_out is not None:
+            link = _update_link_run(it, x, y, box_h, link, sinks.link_out)
         x += it.width
-    if scan_out is not None and run:
-        _flush_scan_run(run, scan_out, y, line_box_h)
-    if link_out is not None and link is not None:
+    if sinks.scan_out is not None and run:
+        _flush_scan_run(run, sinks.scan_out, y, box_h)
+    if sinks.link_out is not None and link is not None:
         q, xs, xe = link
-        link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), line_box_h))
+        sinks.link_out.append(LinkBox(q, round(xs), round(y), round(xe - xs), box_h))
 
 
 def render_flow(
@@ -516,17 +525,15 @@ def render_flow(
         img = Image.new("RGBA", (round(w * scale), max(1, round(h * scale))), block.background)
         draw = ImageDraw.Draw(img)
         y = block.padding
+    sinks = Sinks(scan_out, link_out)
     for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
         _draw_flow_line(
             img,
             draw,
             line,
-            box,
-            base_from_top,
-            y,
-            scan_out=scan_out,
-            link_out=link_out,
-            padding=block.padding,
+            _LinePlacement(box, base_from_top, y),
+            sinks,
+            block.padding,
             scale=scale,
         )
         y += box
@@ -556,18 +563,16 @@ def _render_window(
     img = Image.new("RGBA", (dev_w, dev_h), block.background)
     draw = ImageDraw.Draw(img)
     y = block.padding
+    sinks = Sinks(scan_out, link_out)
     for line, (box, base_from_top, _a) in zip(lines, boxes, strict=True):
         if y < y1 and y + box > y0:  # line's band overlaps the window
             _draw_flow_line(
                 img,
                 draw,
                 line,
-                box,
-                base_from_top,
-                y - y0,
-                scan_out=scan_out,
-                link_out=link_out,
-                padding=block.padding,
+                _LinePlacement(box, base_from_top, y - y0),
+                sinks,
+                block.padding,
                 scale=scale,
             )
         y += box

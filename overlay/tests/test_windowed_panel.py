@@ -14,7 +14,7 @@ import util
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from overlay.panel import Entry, LazyPanel, panel_rows, render_panel
-from overlay.render.banded import WindowedPanel
+from overlay.render.banded import BandedTuning, WindowedPanel
 
 WIDTH = 384
 
@@ -122,8 +122,8 @@ def test_measure_to_warms_the_head_prefix_without_compositing():
 
 def test_retained_nbytes_is_smaller_when_blocks_are_compressed():
     entry = _tall_entry(8)
-    live = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, compress=False)
-    packed = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, compress=True)
+    live = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(compress=False))
+    packed = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, tuning=BandedTuning(compress=True))
     live.viewport(0, 300)
     packed.viewport(0, 300)
     assert live.retained_nbytes > 0
