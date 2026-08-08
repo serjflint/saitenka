@@ -4,6 +4,7 @@ runnable in CI (unlike `--vocab`, which needs real dicts). No timing is asserted
 job; here we pin the pure, CI-load-independent parts."""
 
 import importlib.util
+import sys
 from pathlib import Path
 
 from overlay.panel import Entry
@@ -14,6 +15,9 @@ BENCH_PATH = Path(__file__).resolve().parent.parent / "examples" / "bench_respon
 def _bench_module():
     spec = importlib.util.spec_from_file_location("bench_responsiveness", BENCH_PATH)
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec: a @dataclass under `from __future__ import annotations` resolves field
+    # types via sys.modules[cls.__module__], which is None for an unregistered manual import.
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 

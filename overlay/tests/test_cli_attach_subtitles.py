@@ -135,7 +135,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     monkeypatch.setattr(
         subselect,
         "prepare_attach_startup",
-        lambda _ipc, **_kw: (
+        lambda _ipc, _opts: (
             SubtitleStartup(SubtitleTracks(jp_sid=None, en_sid=1), "en"),
             "selected English fallback sid=1",
             ("jimaku",),

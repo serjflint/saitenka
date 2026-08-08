@@ -433,7 +433,7 @@ def _update_link_run(
     return link
 
 
-def _draw_flow_line(
+def _draw_flow_line(  # noqa: PLR0913  # render-geometry primitives (canvas/coords/sinks), not a data-clump
     img: Image.Image,
     draw: ImageDraw.ImageDraw,
     line: list[Item],

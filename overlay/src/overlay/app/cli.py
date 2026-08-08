@@ -1250,7 +1250,11 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
     from overlay.app import session_stats
     from overlay.app.jimaku import parse_filename
     from overlay.app.reader_context import EpisodeContext
-    from overlay.app.subselect import prepare_attach_startup, remove_external_sub_tracks
+    from overlay.app.subselect import (
+        AttachSubtitleOptions,
+        prepare_attach_startup,
+        remove_external_sub_tracks,
+    )
 
     title, episode = parse_filename(path)
     ep_cfg = replace(
@@ -1267,14 +1271,16 @@ def _attach_reslot(reader, ipc, path: Path, cfg: ProviderConfig) -> None:
         try:
             startup, status, fetch_background = prepare_attach_startup(
                 ipc,
-                slang=ep_cfg.slang,
-                jimaku=ep_cfg.jimaku,
-                jimaku_force=ep_cfg.jimaku_force,
-                jimaku_key=ep_cfg.jimaku_key,
-                jimaku_title=title,
-                tsukihime=ep_cfg.tsukihime,
-                episode=episode,
-                resync=ep_cfg.resync,
+                AttachSubtitleOptions(
+                    slang=ep_cfg.slang,
+                    jimaku=ep_cfg.jimaku,
+                    jimaku_force=ep_cfg.jimaku_force,
+                    jimaku_key=ep_cfg.jimaku_key,
+                    jimaku_title=title,
+                    tsukihime=ep_cfg.tsukihime,
+                    episode=episode,
+                    resync=ep_cfg.resync,
+                ),
             )
         except Exception:  # never let sub selection break following the advance
             log.warning("attach re-slot sub selection failed", exc_info=True)
@@ -1303,7 +1309,7 @@ def _install_attach_reslot_hook(reader, ipc, cfg: ProviderConfig) -> None:
 
 
 @app.command
-def attach(
+def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay an individual parameter
     socket: str | None = None,
     *,
     config: str | None = None,
@@ -1384,7 +1390,7 @@ def attach(
         print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
         return 2
 
-    from overlay.app.subselect import prepare_attach_startup
+    from overlay.app.subselect import AttachSubtitleOptions, prepare_attach_startup
 
     # [jimaku] config table feeds attach defaults so plugin mode (which spawns a bare `attach`) can
     # fetch subs without CLI flags. An explicit --jimaku / --jimaku-key still wins.
@@ -1409,15 +1415,17 @@ def attach(
     try:
         subtitle_startup, status, fetch_jimaku_in_background = prepare_attach_startup(
             ipc,
-            slang=slang,
-            sub_file=sub_file,
-            jimaku=jimaku,
-            jimaku_force=jimaku_force,
-            jimaku_key=jimaku_key,
-            jimaku_title=jimaku_title,
-            tsukihime=bool(th.get("enabled", False)),
-            episode=episode,
-            resync=resync,
+            AttachSubtitleOptions(
+                slang=slang,
+                sub_file=sub_file,
+                jimaku=jimaku,
+                jimaku_force=jimaku_force,
+                jimaku_key=jimaku_key,
+                jimaku_title=jimaku_title,
+                tsukihime=bool(th.get("enabled", False)),
+                episode=episode,
+                resync=resync,
+            ),
         )
         log.info("attach subs: %s", status)  # plugin mode is detached — the log is the only sink
         print("subs:", status, flush=True)

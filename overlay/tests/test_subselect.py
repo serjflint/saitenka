@@ -64,7 +64,9 @@ def test_ensure_no_jp_without_jimaku_reports_gap():
 
 def test_attach_starts_with_english_and_defers_enabled_jimaku():
     ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
-    startup, status, fetch_in_background = subselect.prepare_attach_startup(ipc, jimaku=True)
+    startup, status, fetch_in_background = subselect.prepare_attach_startup(
+        ipc, subselect.AttachSubtitleOptions(jimaku=True)
+    )
     assert startup.active == "en" and startup.tracks.en_sid == 1
     assert "English fallback" in status
     assert fetch_in_background == ("jimaku",)
@@ -73,7 +75,9 @@ def test_attach_starts_with_english_and_defers_enabled_jimaku():
 
 def test_attach_does_not_fetch_when_japanese_is_already_present():
     ipc = FakeIPC(tracks=[EN, JP], path="/v/Has Japanese - 01.mkv")
-    startup, _status, fetch_in_background = subselect.prepare_attach_startup(ipc, jimaku=True)
+    startup, _status, fetch_in_background = subselect.prepare_attach_startup(
+        ipc, subselect.AttachSubtitleOptions(jimaku=True)
+    )
     assert startup.active == "jp"
     assert fetch_in_background == ()
     assert ipc.sets("sid") == [2]
@@ -82,7 +86,9 @@ def test_attach_does_not_fetch_when_japanese_is_already_present():
 def test_attach_orders_enabled_jimaku_before_tsukihime():
     ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
 
-    startup, _status, providers = subselect.prepare_attach_startup(ipc, jimaku=True, tsukihime=True)
+    startup, _status, providers = subselect.prepare_attach_startup(
+        ipc, subselect.AttachSubtitleOptions(jimaku=True, tsukihime=True)
+    )
 
     assert startup.active == "en"
     assert providers == ("jimaku", "tsukihime")
@@ -91,7 +97,9 @@ def test_attach_orders_enabled_jimaku_before_tsukihime():
 def test_disabled_tsukihime_is_absent_from_provider_chain():
     ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
 
-    _startup, _status, providers = subselect.prepare_attach_startup(ipc, tsukihime=False)
+    _startup, _status, providers = subselect.prepare_attach_startup(
+        ipc, subselect.AttachSubtitleOptions(tsukihime=False)
+    )
 
     assert providers == ()
 

@@ -65,29 +65,34 @@ def _render_block(
 def _render_blocks(
     blocks: list[Block],
     width: int,
-    padding: int,
-    gap: int,
+    style: DocStyle,
     max_height: int | None,
     clipped_out: list | None,
-    indent_px: int,
-    gutter_px: int,
     scan_out: list[ScanBox] | None,
     link_out: list[LinkBox] | None,
 ) -> list[tuple[int, Image.Image, str, int, list[ScanBox], list[LinkBox]]]:
     """Render each block's flow (capped at the remaining height budget), stopping early when the
     budget runs out — blocks past it are skipped entirely and ``clipped_out`` records the drop."""
     rendered: list[tuple[int, Image.Image, str, int, list[ScanBox], list[LinkBox]]] = []
-    remaining = None if max_height is None else max(1, max_height - 2 * padding)
+    remaining = None if max_height is None else max(1, max_height - 2 * style.padding)
     for b in blocks:
         if remaining is not None and remaining <= 0 and rendered:
             if clipped_out is not None:
                 clipped_out.append(True)
             break
         row, h = _render_block(
-            b, width, padding, indent_px, gutter_px, remaining, scan_out, link_out, clipped_out
+            b,
+            width,
+            style.padding,
+            style.indent_px,
+            style.gutter_px,
+            remaining,
+            scan_out,
+            link_out,
+            clipped_out,
         )
         if remaining is not None:
-            remaining -= h + gap
+            remaining -= h + style.gap
         rendered.append(row)
     return rendered
 
@@ -342,18 +347,7 @@ def render_document(
         )
         return _composite_window(doc, y_window[0], y_window[1], scan_out, link_out)
     base = style.base or Style()
-    rendered = _render_blocks(
-        blocks,
-        width,
-        style.padding,
-        style.gap,
-        max_height,
-        clipped_out,
-        style.indent_px,
-        style.gutter_px,
-        scan_out,
-        link_out,
-    )
+    rendered = _render_blocks(blocks, width, style, max_height, clipped_out, scan_out, link_out)
     return _composite(
         rendered,
         width,

@@ -4,6 +4,7 @@ first-lookup words by querying the consolidated dict DB for the largest glossary
 import importlib.util
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from overlay.app.dictdb import DictionaryDb
@@ -15,6 +16,9 @@ _DICT_ID = 1
 def _bench_module():
     spec = importlib.util.spec_from_file_location("bench_responsiveness", BENCH_PATH)
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec: a @dataclass under `from __future__ import annotations` resolves field
+    # types via sys.modules[cls.__module__], which is None for an unregistered manual import.
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
