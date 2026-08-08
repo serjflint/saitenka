@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786205208117,
+  "lastUpdate": 1786217753445,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1475,6 +1475,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.762,
             "range": "±2.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a84d744bbe80a2fb2d4eebc565170649f95ad101",
+          "message": "Merge pull request #236 from serjflint/fix/subtitle-resync-reliability-100\n\nfix(resync): reliable manual subtitle re-sync (part of #100)",
+          "timestamp": "2026-08-08T22:35:26+03:00",
+          "tree_id": "2e7aad47e82b60d0c32559281bae3836a4359aaf",
+          "url": "https://github.com/serjflint/saitenka/commit/a84d744bbe80a2fb2d4eebc565170649f95ad101"
+        },
+        "date": 1786217752594,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.375,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.173,
+            "range": "±2.5%",
             "unit": "ms"
           }
         ]
