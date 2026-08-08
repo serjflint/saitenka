@@ -364,8 +364,9 @@ def _current_external_sub(ipc) -> Path | None:
 def _start_resync_window(reader: Reader, video_path: str, sub: Path) -> None:
     """Re-time the subs you already have from the CURRENT playhead onward (no provider query) — the
     user's "sync from here" shortcut. A drifting source (right after the OP, early before it) can't be
-    fixed by one whole-file offset, so this re-times only the segment you're watching; press again at
-    the next drift point. Falls back to a whole-file re-sync when the window can't align."""
+    fixed by one whole-file offset, so this derives the offset from a local slice around the playhead and
+    re-times from there; press again at the next drift point. Falls back to a whole-file re-sync when the
+    window can't align."""
     from pathlib import Path
 
     from overlay.app.resync import resync_current, resync_window

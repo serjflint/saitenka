@@ -240,6 +240,83 @@ class TestCommandConstruction:
             resync.resync(video, src_srt, out_srt)
 
 
+_ASS_BODY = (
+    "﻿[Script Info]\nScriptType: v4.00+\n\n[Events]\n"
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,こんにちは\n"
+    "Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,さようなら\n"
+)
+
+
+class TestAssUnderSrtNormalization:
+    """Some jimaku sources ship an ASS body under a ``.srt`` name (+ BOM). alass parses by extension and
+    won't convert, so it exits 1 ('parse error at line 0') — the live NanakoRaws menu re-time that didn't
+    help. We normalize such a source to real SRT before handing it to alass; a genuine SRT is untouched."""
+
+    def test_looks_ass_detects_body_with_and_without_bom(self):
+        resync = _import_resync()
+        assert resync._looks_ass(_ASS_BODY)  # BOM + [Script Info]
+        assert resync._looks_ass("[V4+ Styles]\n")
+        assert not resync._looks_ass("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
+
+    def test_parse_cues_routes_an_ass_body_under_srt_name_to_the_ass_parser(self, tmp_path):
+        """Content, not extension: an ASS body in a ``.srt`` file must reach the ASS parser (the SRT
+        parser yields zero cues on ``[Script Info]``)."""
+        resync = _import_resync()
+        f = tmp_path / "sneaky.srt"
+        f.write_text(_ASS_BODY, encoding="utf-8")
+        cues = resync._parse_cues(f)
+        assert [c.text for c in cues] == ["こんにちは", "さようなら"]
+
+    def test_resync_normalizes_an_ass_source_before_alass(self, tmp_path):
+        """The source handed to alass is a real SRT written by us, NOT the ASS-under-.srt cache file."""
+        resync = _import_resync()
+        video = tmp_path / "ep.mkv"
+        video.touch()
+        src = tmp_path / "ep-raw.srt"  # ASS body, .srt name
+        src.write_text(_ASS_BODY, encoding="utf-8")
+        seen: dict[str, str] = {}
+
+        def fake_run(cmd, **_kwargs):
+            seen["src_arg"] = cmd[-2]  # <ref> <src> <out> → source is second-to-last
+            seen["src_text"] = Path(cmd[-2]).read_text(
+                encoding="utf-8"
+            )  # workdir cleaned after return
+            Path(cmd[-1]).write_text(
+                "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n", encoding="utf-8"
+            )
+            return MagicMock(returncode=0)
+
+        with (
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
+            patch("subprocess.run", side_effect=fake_run),
+        ):
+            resync.resync(video, src, tmp_path / "out.srt")
+        assert seen["src_arg"] != str(src)  # normalized copy, not the ASS-under-.srt original
+        assert "[Script Info]" not in seen["src_text"]  # it's real SRT now
+        assert "-->" in seen["src_text"] and "こんにちは" in seen["src_text"]
+
+    def test_resync_passes_a_genuine_srt_source_through_untouched(self, tmp_path):
+        """A real SRT is handed to alass verbatim — no needless rewrite / temp copy on the common path."""
+        resync = _import_resync()
+        video = tmp_path / "ep.mkv"
+        video.touch()
+        src = tmp_path / "ep.srt"
+        src.write_text("1\n00:00:01,000 --> 00:00:02,000\nhi\n", encoding="utf-8")
+        seen: dict[str, str] = {}
+
+        def fake_run(cmd, **_kwargs):
+            seen["src_arg"] = cmd[-2]
+            return MagicMock(returncode=0)
+
+        with (
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
+            patch("subprocess.run", side_effect=fake_run),
+        ):
+            resync.resync(video, src, tmp_path / "out.srt")
+        assert seen["src_arg"] == str(src)
+
+
 # ---------------------------------------------------------------------------
 # 2. Cache / marker behaviour
 # ---------------------------------------------------------------------------
@@ -662,6 +739,25 @@ class TestResyncWindow:
 
         return fake_run
 
+    @staticmethod
+    def _fake_split_aligner(resync, split_s: float, near_s: float, far_s: float):
+        """A fake alass that SPLIT-aligns: cues before *split_s* shift by *near_s*, the rest by *far_s* —
+        what a real align computes for a source that drifts across the OP."""
+        from overlay.app.sub_index import SubCue, parse_srt
+
+        def fake_run(cmd, **_kw):
+            inp, outp = Path(cmd[-2]), Path(cmd[-1])
+            cues = parse_srt(inp.read_text(encoding="utf-8"))
+            out = [
+                SubCue(c.start + d, c.end + d, c.text)
+                for c in cues
+                for d in (near_s if c.start < split_s else far_s,)
+            ]
+            resync._write_srt(outp, out)
+            return MagicMock(returncode=0, stdout=b"", stderr=b"")
+
+        return fake_run
+
     def _sub_with_cues(self, tmp_path, starts):
         sub = tmp_path / "ep02.ja.srt"
         from overlay.app.resync import _write_srt
@@ -724,7 +820,90 @@ class TestResyncWindow:
         assert span.attrs["outcome"] == "synced"
         assert span.attrs["window_cues"] == 3  # 40, 50, 60
         assert span.attrs["window_delta_ms"] == -3000
+        assert span.attrs["window_delta_range_ms"] == 0  # constant shift → no drift
         assert span.attrs["reference_lang"] == "eng"
+
+    def test_local_offset_is_not_dragged_by_the_far_side_of_a_drift(self, tmp_path, monkeypatch):
+        """The lookahead cap keeps the offset LOCAL: correlating only the slice around the playhead, a
+        post-OP majority can't drag the number off the pre-OP region you're watching (the live NanakoRaws
+        ep04 bug — a whole-tail median gave −11s where the pre-OP cues needed −5s). Applied to the whole
+        tail; you press again past the OP for the far side."""
+        resync = _import_resync()
+        recorded = _patch_recording_traced(monkeypatch)
+        # pre-OP cues [25,45,70] fall in the local slice; the post-OP majority [110..210] would drag a
+        # whole-tail median to −11s — the cap must keep this press at the local −5s.
+        sub = self._sub_with_cues(
+            tmp_path, [5.0, 25.0, 45.0, 70.0, 110.0, 130.0, 150.0, 170.0, 210.0]
+        )
+        ref = tmp_path / "reference.eng.ass"
+        ref.write_text("[Events]\nDialogue: 0,0:00:25.00,0:00:26.00,D,x\n", encoding="utf-8")
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
+        # playhead 40s, lookback 20 / lookahead 40 → slice [20,80] = [25,45,70]; split at 100s: −5 / −11
+        with (
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
+            patch(
+                "subprocess.run", side_effect=self._fake_split_aligner(resync, 100.0, -5.0, -11.0)
+            ),
+        ):
+            out = resync.resync_window(tmp_path / "ep02.mkv", sub, start_s=40.0, lookback_s=20.0)
+        assert out is not None
+        # head cue 5 untouched; the LOCAL −5s (not the whole-tail median −11s) applied to the whole tail
+        assert resync._cue_starts_ms(out, k=8) == [
+            5000,
+            20000,
+            40000,
+            65000,
+            105000,
+            125000,
+            145000,
+            165000,
+        ]
+        (span,) = recorded
+        assert span.attrs["window_cues"] == 3  # only the local slice was correlated
+        assert (
+            span.attrs["window_delta_ms"] == -5000
+        )  # local, NOT the −11000 a whole-tail median gives
+        assert span.attrs["window_delta_range_ms"] == 0  # slice didn't straddle the OP
+
+    def test_incoherent_window_bails_so_the_caller_falls_back_to_whole_file(
+        self, tmp_path, monkeypatch
+    ):
+        """A short slice can mis-correlate against a far region (live: a 12-cue cold-open window matched
+        ~12 min away → +718s, 929s spread). A wide per-cue spread means the median is meaningless, so
+        resync_window bails (None) and the caller runs a whole-file split-align instead of applying it."""
+        resync = _import_resync()
+        recorded = _patch_recording_traced(monkeypatch)
+        sub = self._sub_with_cues(tmp_path, [30.0, 45.0, 60.0])
+        ref = tmp_path / "reference.eng.ass"
+        ref.write_text("[Events]\nDialogue: 0,0:00:30.00,0:00:31.00,D,x\n", encoding="utf-8")
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
+        # split at 46s inside the window → cues shift wildly apart (−2s vs +700s): incoherent
+        with (
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
+            patch(
+                "subprocess.run", side_effect=self._fake_split_aligner(resync, 46.0, -2.0, 700.0)
+            ),
+        ):
+            out = resync.resync_window(tmp_path / "ep02.mkv", sub, start_s=40.0, lookback_s=20.0)
+        assert out is None  # bail → caller runs whole-file resync_current
+        (span,) = recorded
+        assert span.attrs["outcome"] == "failed"
+        assert "incoherent" in span.attrs["fail_reason"]
+
+    def test_absurd_uniform_shift_bails_even_with_zero_spread(self, tmp_path, monkeypatch):
+        """The spread guard misses a slice mis-matched to a far region UNIFORMLY (range 0, but a +400s
+        offset). The absolute-shift cap catches it — a "sync from here" is seconds, never minutes."""
+        resync = _import_resync()
+        sub = self._sub_with_cues(tmp_path, [30.0, 45.0, 60.0])
+        ref = tmp_path / "reference.eng.ass"
+        ref.write_text("[Events]\nDialogue: 0,0:00:30.00,0:00:31.00,D,x\n", encoding="utf-8")
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
+        with (
+            patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
+            patch("subprocess.run", side_effect=self._fake_aligner(resync, 400.0)),  # uniform +400s
+        ):
+            out = resync.resync_window(tmp_path / "ep02.mkv", sub, start_s=40.0, lookback_s=20.0)
+        assert out is None
 
 
 class TestEmbeddedReferenceTelemetry:
