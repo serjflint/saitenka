@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786202530930,
+  "lastUpdate": 1786205208117,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1439,6 +1439,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.078,
             "range": "±12.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0aba8e5ffa3d1a13e9b3390c5ddde54c91798546",
+          "message": "chore(overlay): release 2.0.1 (#235)\n\n* fix(mpv): don't hang on quit — probe liveness before keeping a reconnect\n\nThe mpv.net auto-reconnect (for transient IPC pipe drops) also fired on a normal mpv quit: a self-launched run-mode mpv exiting is EOF (not our close()), so pump() re-dialed a socket that can accept a connect yet never reply, hanging the poll loop for command()'s full timeout up to _MAX_RECONNECTS times (a ~10s×30 zombie on quit, seen live in a macOS run-mode report). After a re-dial, probe once with a short-timeout get_property: a transient drop answers immediately; a quit yields our disconnected/timeout sentinel, so we bail and let pump() raise → the overlay exits promptly. Any real mpv reply keeps the reconnection. Regression guard in test_ipc_chaos.\n\n* chore(overlay): release 2.0.1",
+          "timestamp": "2026-08-08T19:05:54+03:00",
+          "tree_id": "f7b3860dcc039b2c269251bd5eb41f80357171b0",
+          "url": "https://github.com/serjflint/saitenka/commit/0aba8e5ffa3d1a13e9b3390c5ddde54c91798546"
+        },
+        "date": 1786205207455,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.327,
+            "range": "±0.8%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.762,
+            "range": "±2.4%",
             "unit": "ms"
           }
         ]
