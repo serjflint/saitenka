@@ -120,7 +120,7 @@ class TestCommandConstruction:
         src.write_text("1\n00:00:01,000 --> 00:00:02,000\nT\n", encoding="utf-8")
         ref = tmp_path / "reference.srt"
         ref.write_text("1\n00:00:05,000 --> 00:00:06,000\nEN\n", encoding="utf-8")
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: ref)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
         cmds: list[list[str]] = []
 
         def fake_run(cmd, **_kwargs):
@@ -140,7 +140,7 @@ class TestCommandConstruction:
         aligns to the VIDEO (audio-based) — the fallback must stay wired, not silently drop to a
         no-reference command."""
         resync = _import_resync()
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: None)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: None)
         _result, _out, cmds, (video, src, out_srt) = self._run_with_tools(
             resync, tmp_path, {"alass": "/b/alass"}
         )
@@ -479,7 +479,7 @@ class TestResyncTelemetry:
         src.write_text("1\n00:00:01,000 --> 00:00:02,000\nJP\n", encoding="utf-8")
         ref = tmp_path / "reference.eng.srt"  # reference.<lang>.<ext> → language is recoverable
         ref.write_text("1\n00:00:08,000 --> 00:00:09,000\nEN\n", encoding="utf-8")
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: ref)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
         details: dict = {}
         with (
             patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
@@ -552,7 +552,9 @@ class TestResyncTelemetry:
             )
             return MagicMock(returncode=0, stderr=b"")
 
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: None)  # audio ref
+        monkeypatch.setattr(
+            resync, "_embedded_sub_reference", lambda _v, _w, **_kw: None
+        )  # audio ref
         with (
             patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", side_effect=fake_run),
@@ -581,7 +583,7 @@ class TestResyncTelemetry:
             Path(cmd[-1]).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")  # no shift
             return MagicMock(returncode=0, stderr=b"")
 
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: None)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: None)
         with (
             patch("overlay.mpvio.discover.find_tool", side_effect={"uvx": "/b/uvx"}.get),
             patch("subprocess.run", side_effect=fake_run),
@@ -605,7 +607,7 @@ class TestResyncTelemetry:
         src.write_text("1\n00:00:06,106 --> 00:00:16,116\nJP\n", encoding="utf-8")
         ref = tmp_path / "reference.ass"
         ref.write_text("[Events]\nDialogue: 0,0:00:41.41,0:00:42.05,D,Ah\n", encoding="utf-8")
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: ref)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
         run = MagicMock(returncode=1, stdout=b"error: parse error at line 1164", stderr=b"")
         with (
             patch(
@@ -675,7 +677,7 @@ class TestResyncWindow:
         sub = self._sub_with_cues(tmp_path, [1.0, 5.0, 40.0, 50.0, 60.0])
         ref = tmp_path / "reference.eng.ass"
         ref.write_text("[Events]\nDialogue: 0,0:00:40.00,0:00:41.00,D,x\n", encoding="utf-8")
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: ref)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
         # playhead 45s, lookback 20 → boundary 25s → window = [40, 50, 60]; aligner pulls them 3s earlier
         with (
             patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
@@ -691,7 +693,7 @@ class TestResyncWindow:
         sub = self._sub_with_cues(tmp_path, [1.0, 40.0, 50.0])
         ref = tmp_path / "reference.eng.ass"
         ref.write_text("[Events]\nDialogue: 0,0:00:40.00,0:00:41.00,D,x\n", encoding="utf-8")
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: ref)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
         with (
             patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", side_effect=self._fake_aligner(resync, 0.0)),  # zero offset
@@ -711,7 +713,7 @@ class TestResyncWindow:
         sub = self._sub_with_cues(tmp_path, [1.0, 40.0, 50.0, 60.0])
         ref = tmp_path / "reference.eng.ass"
         ref.write_text("[Events]\nDialogue: 0,0:00:40.00,0:00:41.00,D,x\n", encoding="utf-8")
-        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w: ref)
+        monkeypatch.setattr(resync, "_embedded_sub_reference", lambda _v, _w, **_kw: ref)
         with (
             patch("overlay.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
             patch("subprocess.run", side_effect=self._fake_aligner(resync, -3.0)),
@@ -723,3 +725,45 @@ class TestResyncWindow:
         assert span.attrs["window_cues"] == 3  # 40, 50, 60
         assert span.attrs["window_delta_ms"] == -3000
         assert span.attrs["reference_lang"] == "eng"
+
+
+class TestEmbeddedReferenceTelemetry:
+    """Why resync fell back to audio VAD (the alass 'failed to extract voice segments' path) — recorded
+    on the span so a report distinguishes a minimal attach PATH (tools-missing) from a subs-less file."""
+
+    def test_records_tools_missing_when_ffmpeg_is_unresolved(self, tmp_path, monkeypatch):
+        from overlay.app import resync
+
+        monkeypatch.setattr("overlay.mpvio.discover.find_tool", lambda _name: None)
+        details: dict = {}
+
+        ref = resync._embedded_sub_reference(tmp_path / "v.mkv", tmp_path, details=details)
+
+        assert ref is None
+        assert details["embedded_ref"] == "tools-missing"
+
+    def test_records_no_text_subs_when_the_probe_finds_none(self, tmp_path, monkeypatch):
+        from overlay.app import resync
+
+        monkeypatch.setattr("overlay.mpvio.discover.find_tool", lambda name: f"/b/{name}")
+        probe = subprocess.CompletedProcess([], 0, stdout='{"streams": []}', stderr="")
+        monkeypatch.setattr(resync.subprocess, "run", lambda *_a, **_k: probe)
+        details: dict = {}
+
+        ref = resync._embedded_sub_reference(tmp_path / "v.mkv", tmp_path, details=details)
+
+        assert ref is None
+        assert details["embedded_ref"] == "no-text-subs"
+
+    def test_record_details_surfaces_embedded_ref_on_the_span(self):
+        from overlay.app import resync
+
+        span = _RecordingSpan()
+        resync._record_resync_details(
+            span,
+            {"reference": "audio", "embedded_ref": "tools-missing"},
+            src=Path("s.srt"),
+            out=None,
+        )
+
+        assert span.attrs["embedded_ref"] == "tools-missing"

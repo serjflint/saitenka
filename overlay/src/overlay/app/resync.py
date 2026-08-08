@@ -71,7 +71,9 @@ def _pick_reference_stream(text: list[dict]) -> dict:
     return max(text, key=_cue_count)
 
 
-def _embedded_sub_reference(video: Path, workdir: Path) -> Path | None:
+def _embedded_sub_reference(
+    video: Path, workdir: Path, *, details: dict | None = None
+) -> Path | None:
     """Extract a co-timed EMBEDDED subtitle track from *video* to use as the alignment reference.
 
     A multi-sub release (e.g. Crunchyroll's en/pt/es/… tracks) carries subtitles authored against THIS
@@ -81,11 +83,27 @@ def _embedded_sub_reference(video: Path, workdir: Path) -> Path | None:
     dead-on). Prefers the ENGLISH track the overlay already shows as top-subs (see
     :func:`_pick_reference_stream`). The extracted file is named ``reference.<lang>.<ext>`` so the log +
     telemetry show which track drove the sync. Returns the path in *workdir*, or None when there are no
-    embedded text subs / the tools are missing."""
+    embedded text subs / the tools are missing.
+
+    Records WHY it returned None into ``details['embedded_ref']`` (``tools-missing`` / ``probe-failed`` /
+    ``no-text-subs`` / ``extract-failed`` / ``ok``) so a report shows why resync fell back to audio VAD —
+    the alass "failed to extract voice segments" path, useless on some encodes. ``tools-missing`` is the
+    attach-minimal-PATH signature (ffprobe/ffmpeg unresolved) vs a genuinely subs-less file."""
     from overlay.mpvio.discover import find_tool
+
+    def _note(reason: str) -> None:
+        if details is not None:
+            details["embedded_ref"] = reason
 
     ffprobe, ffmpeg = find_tool("ffprobe"), find_tool("ffmpeg")
     if not ffprobe or not ffmpeg:
+        _note("tools-missing")
+        log.info(
+            "resync: no embedded reference — ffprobe=%s ffmpeg=%s not both on PATH "
+            "(a minimal attach PATH is the usual cause); resync will fall back to audio VAD",
+            bool(ffprobe),
+            bool(ffmpeg),
+        )
         return None
 
     # Fully fail-soft: a missing tool, an odd container, or a probe hiccup just means "no reference" —
@@ -97,6 +115,7 @@ def _embedded_sub_reference(video: Path, workdir: Path) -> Path | None:
             capture_output=True, text=True, check=False, timeout=30,
         )  # fmt: skip
         if probe.returncode != 0:
+            _note("probe-failed")
             return None
         text = [
             s
@@ -104,6 +123,7 @@ def _embedded_sub_reference(video: Path, workdir: Path) -> Path | None:
             if s.get("codec_name") in _TEXT_SUB_CODECS
         ]
         if not text:
+            _note("no-text-subs")
             return None
         chosen = _pick_reference_stream(text)
         lang = str(chosen.get("tags", {}).get("language", "") or "und").lower()
@@ -116,8 +136,13 @@ def _embedded_sub_reference(video: Path, workdir: Path) -> Path | None:
         )  # fmt: skip
     except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError):
         log.debug("embedded-sub reference extraction failed", exc_info=True)
+        _note("extract-failed")
         return None
-    return ref if extracted.returncode == 0 and ref.exists() else None
+    if extracted.returncode == 0 and ref.exists():
+        _note("ok")
+        return ref
+    _note("extract-failed")
+    return None
 
 
 _CUE_START = re.compile(r"(\d\d):(\d\d):(\d\d),(\d\d\d)\s*-->")  # SRT: HH:MM:SS,mmm -->
@@ -209,6 +234,21 @@ def _resync_command(
     )
 
 
+def _select_alignment_reference(video: Path, workdir: Path, details: dict | None) -> Path:
+    """The alignment reference: a co-timed embedded text track (sub-to-sub, exact-encode timing) when
+    available, else the video itself (audio VAD). ``details`` captures WHY embedded was skipped
+    (tools-missing/no-text-subs/…) so a report explains an audio run — the alass 'failed to extract
+    voice segments' path, useless on some encodes."""
+    ref = _embedded_sub_reference(video, workdir, details=details) or video
+    if ref is video:
+        log.info(
+            "resync: using audio VAD (no embedded reference: %s) — alass may fail to extract voice "
+            "segments on some encodes; an embedded text track aligns far more reliably",
+            (details or {}).get("embedded_ref", "unknown"),
+        )
+    return ref
+
+
 def resync(
     video: Path,
     src: Path,
@@ -265,9 +305,7 @@ def resync(
     workdir = out.parent / f".{out.stem}.refwork"
     workdir.mkdir(parents=True, exist_ok=True)
     try:
-        # Prefer a co-timed embedded sub as the reference (sub-to-sub, exact-encode timing); the video's
-        # audio is the fallback only when the file carries no embedded text track.
-        ref = _embedded_sub_reference(video, workdir) or video
+        ref = _select_alignment_reference(video, workdir, details)
         cmd, tool = _resync_command(ref, src, out, split_penalty=split_penalty)
         if (
             details is not None
@@ -316,6 +354,8 @@ def _record_resync_details(span, details: dict, *, src: Path, out: Path | None) 
         span.set("tool", details["tool"])
     if details.get("reference"):
         span.set("reference", details["reference"])
+    if details.get("embedded_ref"):  # why embedded was/wasn't used (tools-missing/no-text-subs/ok)
+        span.set("embedded_ref", details["embedded_ref"])
     if details.get("reference_fmt"):
         span.set("reference_fmt", details["reference_fmt"])
     if details.get("reference_lang"):
@@ -452,9 +492,12 @@ def _windowed_offset(
     parse→splice→persist orchestration."""
     import statistics
 
-    ref = _embedded_sub_reference(video, workdir)
+    ref_details: dict = {}
+    ref = _embedded_sub_reference(video, workdir, details=ref_details)
     if ref is None:  # windowed alignment needs a reference; audio VAD on a slice is unreliable
-        span.set("fail_reason", "no embedded reference")
+        reason = ref_details.get("embedded_ref", "unknown")
+        span.set("embedded_ref", reason)
+        span.set("fail_reason", f"no embedded reference ({reason})")
         return None
     win_srt, out_srt = workdir / "window.srt", workdir / "window.synced.srt"
     _write_srt(win_srt, window)

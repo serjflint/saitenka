@@ -391,6 +391,73 @@ def fetch_provider_path(
     return fetch_first(attempts)
 
 
+def provider_fetch_factory(
+    providers: tuple[str, ...],
+    *,
+    jimaku_key: str | None,
+    jimaku_title: str | None,
+    episode: int | None,
+    resync: bool,
+    tsukihime_config: dict | None,
+    force: bool = False,
+) -> Callable[[str], Callable[[], tuple[Path | None, str]]]:
+    """``factory(video) -> deferred fetch thunk`` — the one provider-fetch closure both ``run`` and
+    ``attach`` hand to ``fetch_japanese_subs_async`` / ``configure_subtitle_retry``. ``force=True``
+    re-fetches + re-syncs past a stale/mistimed cached srt (the manual retry)."""
+
+    def factory(video: str) -> Callable[[], tuple[Path | None, str]]:
+        return lambda: fetch_provider_path(
+            video,
+            providers,
+            jimaku_key=jimaku_key,
+            title_override=jimaku_title,
+            episode=episode,
+            resync=resync,
+            force=force,
+            tsukihime_config=tsukihime_config,
+        )
+
+    return factory
+
+
+def configure_providers(
+    reader,
+    enabled_providers: tuple[str, ...],
+    *,
+    jimaku_key: str | None,
+    jimaku_title: str | None,
+    episode: int | None,
+    resync: bool,
+    tsukihime_config: dict | None,
+) -> None:
+    """Wire the runtime provider surfaces shared by ``run`` and ``attach``: the manual re-sync retry (a
+    force re-fetch) and the ``Ctrl+J`` source picker. Clears the retry to ``None`` when no provider is
+    enabled, so a config with providers off can't leave a stale factory bound after a re-slot."""
+    reader.configure_subtitle_retry(
+        provider_fetch_factory(
+            enabled_providers,
+            jimaku_key=jimaku_key,
+            jimaku_title=jimaku_title,
+            episode=episode,
+            resync=resync,
+            tsukihime_config=tsukihime_config,
+            force=True,
+        )
+        if enabled_providers
+        else None
+    )
+    if enabled_providers:
+        reader.configure_sub_picker(
+            lambda video: list_candidates(
+                video,
+                enabled_providers,
+                jimaku_key=jimaku_key,
+                title_override=jimaku_title,
+                tsukihime_config=tsukihime_config,
+            )
+        )
+
+
 def fetch_jimaku(
     ipc,
     *,
@@ -465,6 +532,25 @@ def ensure_jp_subs(
         ipc, jimaku_key=jimaku_key, jimaku_title=jimaku_title, episode=episode, resync=resync
     )
     return status
+
+
+def remove_external_sub_tracks(ipc) -> int:
+    """Drop every external subtitle track (return the count) — shared by the run and attach re-slots
+    before re-adding the current episode's srt. mpv carries a prior episode's external over a playlist
+    advance AND auto-selects it, so on advance the overlay would show the old episode's lines (found
+    live: ep2's srt selected on ep03 as "unknown language 10/11"). Ids are stable across removals."""
+    data = ipc.command("get_property", "track-list").get("data") or []
+    removed = 0
+    for track in data:
+        if track.get("type") == "sub" and track.get("external") and track.get("id") is not None:
+            log.info(
+                "re-slot: dropping carried-over external sub sid=%s %r",
+                track["id"],
+                track.get("external-filename"),
+            )
+            ipc.command("sub-remove", track["id"])
+            removed += 1
+    return removed
 
 
 def prepare_attach_startup(
