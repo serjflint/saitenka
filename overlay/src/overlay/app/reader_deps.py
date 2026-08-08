@@ -465,6 +465,7 @@ def apply_deps(reader: Reader, deps: dict) -> None:
         # (auto-launched) Anki never stalls startup; the watcher flips it on when Anki comes up.
         _spawn_anki_seed_watcher(reader)
     reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
+    reader.warm_episode_tokens()  # deps arrived after the index built → warm the episode's cues now
     reader._announce_runtime()  # workers are up now — print the banner with the real count (once)
 
 

@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from overlay.app import subtitle_modes
 from overlay.app.controller import Reader
+from overlay.app.languages import SECOND_LANG
+from overlay.app.sub_index import SubIndex, parse_srt
 from overlay.app.subtitles import SubtitleRender
 from PIL import Image
 
@@ -588,6 +590,69 @@ def test_announce_passes_through_an_unknown_language(monkeypatch):
     subtitle_modes.announce_track(reader, 3)
 
     assert seen == ["subtitles: ger (1/1)"]
+
+
+def _one_cue_index() -> SubIndex:
+    return SubIndex(parse_srt("1\n00:00:01,000 --> 00:00:02,000\n本\n"))
+
+
+def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(tmp_path, monkeypatch):
+    """A replace whose rebuild can't resolve the just-added track yet must RETAIN the prior cues,
+    not blank them — the transient track-switch window must never drop a good index."""
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    old = _one_cue_index()
+    reader._sub_index = old
+    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(  # the new track isn't resolvable at this instant
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+    )
+    path = tmp_path / "ep.ja.srt"
+    path.write_text("Japanese", encoding="utf-8")
+
+    subtitle_modes._replace_japanese_track(reader, path, "resynced")
+
+    assert reader._sub_index is old  # cues retained across the unresolved switch
+
+
+def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path):
+    reader = Reader(FakeIPC())
+    old = _one_cue_index()
+    reader._sub_index = old
+
+    reader.load_sub_index(tmp_path / "missing.srt")  # unreadable → load_index returns None
+
+    assert reader._sub_index is old  # a failed parse never blanks a good index
+
+
+def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_path, monkeypatch):
+    """A retime (`replace`) only swaps the JP-primary slot when JP is actually primary; from English
+    it routes to the non-disruptive background add, so it can never overwrite the wrong slot."""
+    ipc = FakeIPC([EN.copy(), JP.copy()])
+    reader = Reader(ipc)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    reader.subtitle_language = SECOND_LANG  # English on screen
+    replaced: list = []
+    monkeypatch.setattr(
+        subtitle_modes, "_replace_japanese_track", lambda *a, **_k: replaced.append(a)
+    )
+    monkeypatch.setattr(reader, "_toast", lambda *_a: None)
+    monkeypatch.setattr(
+        "overlay.app.embedded_subs.build_sub_index_for_current_track", lambda _r: None
+    )
+    path = tmp_path / "ep.ja.srt"
+    path.write_text("Japanese", encoding="utf-8")
+
+    reader._subtitle_results.put(
+        subtitle_modes.SubtitleFetchResult(
+            path=path, status="resynced", select_if_unchanged=False, initial_sid=1, replace=True
+        )
+    )
+    subtitle_modes.apply_fetch_results(reader)
+
+    assert replaced == []  # never clobbered the primary slot from English
+    assert reader.subtitle_language == SECOND_LANG
 
 
 def test_toggle_from_english_returns_to_japanese(monkeypatch):

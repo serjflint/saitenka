@@ -447,6 +447,9 @@ class Reader:
         # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
         # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
         self._sub_pending: str | None = None
+        self._warmed_index: SubIndex | None = (
+            None  # sub index whose cues the episode warm has run for
+        )
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
         self.hover = -1
@@ -672,7 +675,7 @@ class Reader:
             self._draw_subtitle()
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
-        norm = text.replace("\\N", "\n").replace("\r", "")
+        norm = self._cue_norm(text)
         cached = self.token_cache.get(norm)
         self._apply_tokenized_cue(cached if cached is not None else self._tokenize_cue(norm))
         # A cue must appear at its cue time even when annotation isn't ready. While the dictionaries
@@ -681,6 +684,16 @@ class Reader:
         # deps-ready miss tokenizes synchronously (fast) and annotates immediately.
         self._sub_pending = norm if self.dict_set is None else None
         self._draw_subtitle()
+
+    @staticmethod
+    def _cue_norm(text: str) -> str:
+        """The token-cache key for a cue: mpv's sub-text with ASS/CR line breaks normalized to \\n.
+        The SAME transform for a live cue and a warmed one, so an episode-prefetched line is a hit."""
+        return text.replace("\\N", "\n").replace("\r", "")
+
+    def warm_episode_tokens(self) -> None:
+        """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
+        prefetch.warm_episode_tokens(self)
 
     def _tokenize_cue(self, norm: str) -> TokenizedCue:
         """Tokenize + compound-merge + score one normalized cue into a :class:`TokenizedCue`, memoizing

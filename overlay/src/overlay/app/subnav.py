@@ -18,15 +18,20 @@ if TYPE_CHECKING:
 
 def load_sub_index(reader: Reader, path) -> None:
     """Parse the external subtitle file at ``path`` into a cue index so Alt+←/→/↓ can render the
-    target line instantly. Fail-soft: an unreadable/empty/unsupported file just leaves the index
-    None → navigation falls back to a plain mpv sub-seek."""
-    reader._sub_index = load_index(path)
+    target line instantly. Fail-soft: an unreadable/empty/unsupported file RETAINS the prior cues
+    (a transient track-switch/resolve failure must not blank a good index) — navigation still falls
+    back to a plain mpv sub-seek when there was never an index."""
+    idx = load_index(path)
+    if idx is None:
+        return
+    reader._sub_index = idx
     from overlay.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)
     from overlay.app import sidebar
 
     sidebar.on_index_changed(reader)
+    reader.warm_episode_tokens()  # warm the whole episode's cues into the token cache (bg, best-effort)
 
 
 def _get_float(reader: Reader, prop: str) -> float | None:

@@ -22,6 +22,7 @@ from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
     from overlay.app.popups import Panel
+    from overlay.app.sub_index import SubIndex
 
 log = logging.getLogger(__name__)
 
@@ -406,6 +407,34 @@ def upcoming_cue_texts(reader: Reader, n: int) -> list[str]:
     if current < 0:
         return []
     return [idx.cues[i].text for i in range(current + 1, min(len(idx), current + 1 + n))]
+
+
+def warm_episode_tokens(reader: Reader) -> None:
+    """Fire-and-forget: tokenize EVERY cue of the current sub index into ``reader.token_cache`` on a
+    background thread, so no cue pays cold tokenization mid-playback (the whole episode is warm ahead
+    of playback, not just a short window). Best-effort — a key mismatch (mpv re-wrapping a line) just
+    re-tokenizes that cue on demand; a track switch (new index object) supersedes a stale warm. No-op
+    without prefetch, a dictionary, or an index; skips an index already warmed."""
+    idx = reader._sub_index
+    if not reader.prefetch or reader.dict_set is None or idx is None or reader._warmed_index is idx:
+        return
+    reader._warmed_index = idx
+    threading.Thread(
+        target=lambda: _warm_episode_loop(reader, idx), name="saitenka-episode-warm", daemon=True
+    ).start()
+
+
+def _warm_episode_loop(reader: Reader, idx: SubIndex) -> None:
+    warmed = 0
+    for cue in list(idx.cues):
+        if reader._stop.is_set() or reader._sub_index is not idx:
+            return  # closing, or a track switch replaced the index → drop the stale warm
+        try:
+            reader._tokenize_cue(reader._cue_norm(cue.text))
+            warmed += 1
+        except Exception:
+            log.debug("episode token warm failed for a cue", exc_info=True)  # never kill the warm
+    log.info("episode token warm: %d/%d cues into the token cache", warmed, len(idx.cues))
 
 
 # The tooltip's FIXED reference resolution. Tooltip geometry (width, viewport-height cap) is computed
