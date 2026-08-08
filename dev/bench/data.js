@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786182146615,
+  "lastUpdate": 1786182519428,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1223,6 +1223,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.252,
             "range": "±5.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d874d4c608e0d5710e3cd92efdec75388f991a57",
+          "message": "feat(subtitles): picker choice force-selects the source, even from English (#100) (#226)\n\nOpening the source picker while English subtitles are on screen and choosing a\nJP candidate left English up: the pick routed through the non-disruptive\nbackground add, whose auto-select is gated on `not had_japanese and\ncurrent_sid == initial_sid` (a keep-current contract for UNATTENDED fetches). An\nexplicit pick is the opposite intent.\n\nAdd a `force_select` flag threaded picker → start_fetch → SubtitleFetchResult →\napply_fetch_results, which routes to `_replace_japanese_track` (drop stale\nexternal, sub-add \"select\", zero sub-delay, rebuild the index) from any current\nlanguage. The picker drops `replace`/`select_if_unchanged` for it. Toast is\n\"Japanese subtitles selected\".\n\nNote: the alass audio-VAD-from-English item stays open — it needs a real attach\nreport to diagnose the ffprobe/ffmpeg PATH resolution (#215 telemetry).",
+          "timestamp": "2026-08-08T12:48:11+03:00",
+          "tree_id": "d35ecfc65d87de6c5f420503ad4192903e12b606",
+          "url": "https://github.com/serjflint/saitenka/commit/d874d4c608e0d5710e3cd92efdec75388f991a57"
+        },
+        "date": 1786182518426,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.181,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.593,
+            "range": "±4.8%",
             "unit": "ms"
           }
         ]
