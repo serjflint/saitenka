@@ -622,12 +622,16 @@ def check_jimaku() -> Check:
 
     key, src = resolve_jimaku_key(jm.get("key"))
     if not key:
-        return Check(
-            "jimaku",
-            "warn",
+        msg = (
             "jimaku enabled but no API key — run `saitenka set-jimaku-key` (persistent and readable "
-            "by plugin-mode mpv)",
+            "by plugin-mode mpv)"
         )
+        # A Windows AV that blocks the first Credential Locker read makes keychain_get() fail, so a key
+        # the user DID set won't resolve and lands here. Point at the file-based escape hatch.
+        if sys.platform == "win32":
+            msg += ". If your antivirus blocks the Windows keyring, store it in a file instead: "
+            msg += "`saitenka set-jimaku-key --file <key>`"
+        return Check("jimaku", "warn", msg)
     if src == "env":
         # The resolver prefers env over the Keychain, so a key present in BOTH reports src=env. What
         # actually matters for plugin-mode mpv is whether the Keychain has it (it can't read the shell

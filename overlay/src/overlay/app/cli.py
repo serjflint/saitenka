@@ -738,12 +738,23 @@ def set_jimaku_key(
     key: Annotated[
         str | None, cyclopts.Parameter(help="the key (omit to be prompted with hidden input)")
     ] = None,
-) -> int:  # pragma: no cover — interactive/secret I/O; keychain_set is unit-tested
+    *,
+    file: Annotated[
+        bool,
+        cyclopts.Parameter(
+            help="store in the owner-only file, skipping the OS keyring (and persist that opt-out) — "
+            "for Windows AV that flags the first Credential Locker read"
+        ),
+    ] = False,
+    verify: Annotated[
+        bool, cyclopts.Parameter(help="test the key against jimaku.cc right after saving")
+    ] = True,
+) -> int:  # pragma: no cover — interactive/secret I/O; store/verify helpers are unit-tested
     """Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
-    Uses the OS keyring when available, else an owner-only file beside overlay.toml. Either beats a
-    shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/account
-    (API docs: https://jimaku.cc/api/docs).
+    Uses the OS keyring when available, else an owner-only file beside overlay.toml (force the file with
+    ``--file``). Either beats a shell env var, which a GUI-launched mpv can't see. Get a free key at
+    https://jimaku.cc/account (API docs: https://jimaku.cc/api/docs).
 
     Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a
     pasted key can silently truncate to a single character. Right-click to paste at the prompt, or pass
@@ -766,7 +777,7 @@ def set_jimaku_key(
     if not k:
         print("no key entered", file=sys.stderr)
         return 2
-    method, backup = store_jimaku_key(k)
+    method, backup = store_jimaku_key(k, prefer_file=file)
     if method == "keyring":
         print("stored in the OS secret store (Keychain / Credential Locker / Secret Service)")
     else:
@@ -775,6 +786,30 @@ def set_jimaku_key(
         print(f"stored in {key_file_path()} (plaintext, owner-only)")
         if backup:
             print(f"backed up existing config → {backup}")
+    return _verify_saved_jimaku_key(k) if verify else 0
+
+
+def _verify_saved_jimaku_key(
+    k: str,
+) -> int:  # pragma: no cover — thin wrapper; verify_key is tested
+    """Best-effort post-save probe. Catches the wrong-but-full-length key the length guard can't (a
+    typo / revoked / wrong-account key that fails silently mid-video otherwise). A definite rejection
+    is loud + non-zero; a network hiccup never fails a correctly-saved key."""
+    from overlay.app.jimaku import verify_key
+
+    status, msg = verify_key(k)
+    if status == "ok":
+        print(f"verified: {msg}")
+        return 0
+    if status == "bad":
+        print(f"WARNING: jimaku REJECTED the saved key — {msg}", file=sys.stderr)
+        print(
+            "re-copy the full key from https://jimaku.cc/account (right-click to paste at the hidden "
+            "prompt), then re-run set-jimaku-key.",
+            file=sys.stderr,
+        )
+        return 3
+    print(f"note: couldn't verify now ({msg}) — saved anyway.", file=sys.stderr)
     return 0
 
 
@@ -784,21 +819,19 @@ def jimaku_check(
 ) -> int:  # pragma: no cover — thin CLI wrapper; JimakuClient is tested
     """Diagnose jimaku without launching a video: resolve the key and run a test search, printing the
     exact outcome (key found? 200 OK / 401 bad key / 400 + server message / network error)."""
-    from overlay.app.jimaku import JimakuClient, JimakuError, resolve_jimaku_key
+    from overlay.app.jimaku import resolve_jimaku_key, verify_key
 
     key, src = resolve_jimaku_key()
     if not key:
         print("jimaku key: NOT configured — run `saitenka set-jimaku-key`", file=sys.stderr)
         return 1
     print(f"jimaku key: found (from {src}), {len(key)} chars")
-    try:
-        entries = JimakuClient().search(query)
-        head = f" — first: {entries[0].get('name')!r}" if entries else ""
-        print(f"search {query!r}: OK — {len(entries)} entrie(s){head}")
+    status, msg = verify_key(key, query)
+    if status == "ok":
+        print(f"search {query!r}: OK — {msg}")
         return 0
-    except JimakuError as e:
-        print(f"search {query!r}: {e}", file=sys.stderr)
-        return 1
+    print(f"search {query!r}: {msg}", file=sys.stderr)
+    return 1
 
 
 @app.command(name="import-settings", alias="import-yomitan")

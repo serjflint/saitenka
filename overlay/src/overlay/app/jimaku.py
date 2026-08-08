@@ -84,6 +84,27 @@ KEYCHAIN_SERVICE = "saitenka"
 KEYCHAIN_ACCOUNT = "jimaku"
 
 
+def keyring_enabled() -> bool:
+    """Whether to use the OS keyring at all — gates BOTH storing and reading the key (a knob that only
+    threads one seam would half-apply: still triggering the read it was meant to avoid).
+
+    Some Windows AV heuristics flag the first Credential Locker read from a fresh process; opting out
+    stores the key in the owner-only ``jimaku.key`` file and never issues the keyring syscall. Set via
+    ``$SAITENKA_JIMAKU_KEYRING=0`` (a one-off override) or ``[jimaku].keyring = false`` (persistent —
+    what ``set-jimaku-key --file`` writes). Default True."""
+    env = os.environ.get("SAITENKA_JIMAKU_KEYRING")
+    if env is not None:
+        return env.strip().lower() not in {"0", "false", "no", "off"}
+    try:
+        from overlay.app.config import load_config
+
+        jm = load_config().get("jimaku")
+    except Exception:  # pragma: no cover — config load edge cases; default to enabled
+        log.debug("reading [jimaku].keyring failed", exc_info=True)
+        return True
+    return bool(jm["keyring"]) if isinstance(jm, dict) and "keyring" in jm else True
+
+
 class JimakuError(RuntimeError):
     pass
 
@@ -176,10 +197,11 @@ def resolve_jimaku_key(explicit: str | None = None) -> tuple[str | None, str]:
     Every source is ``.strip()``-ed: a stray trailing newline/space (easy to introduce when pasting a
     key, or reading it back from a store) would otherwise make urllib reject the ``Authorization``
     header outright (``ValueError: Invalid header value``)."""
+    keychain = keychain_get() if keyring_enabled() else None  # skip the keyring read when opted out
     for value, source in (
         (explicit, "config"),
         (os.environ.get("JIMAKU_API_KEY"), "env"),
-        (keychain_get(), "keychain"),
+        (keychain, "keychain"),
         (key_file_get(), "file"),
     ):
         cleaned = (value or "").strip()
@@ -357,6 +379,31 @@ class JimakuClient:
             span.set("ext", best.ext or "")
             span.set("picked", best.name)
             return self.download(best, dest_dir)
+
+
+# A real, always-present jimaku entry — an empty result set then means a genuine failure (bad key /
+# server), not "no such anime".
+PROBE_QUERY = "Spy x Family"
+
+
+def verify_key(key: str, query: str = PROBE_QUERY) -> tuple[str, str]:
+    """Best-effort liveness probe for a jimaku key: one test search, classified so a wrong-but-full-length
+    key is caught at save time (the length guard only catches a truncated paste), not mid-video.
+
+    Returns ``(status, message)`` where status is:
+
+    - ``"ok"``      — search succeeded, the key works;
+    - ``"bad"``     — jimaku rejected it (401 bad key / 400) — the key is wrong, re-set it;
+    - ``"unknown"`` — network/transient (offline, timeout, 5xx) — can't tell; the caller must NOT treat
+      this as a bad key (never fail a correct save on a flaky network)."""
+    try:
+        entries = JimakuClient(api_key=key).search(query)
+    except _JimakuRetryable as e:  # network / 429 / 5xx — indeterminate, not the key's fault
+        return "unknown", f"couldn't verify (network/transient): {e}"
+    except JimakuError as e:  # 401/400 — a client error is the key/request itself
+        return "bad", str(e)
+    head = f" — first: {entries[0].get('name')!r}" if entries else ""
+    return "ok", f"{len(entries)} entrie(s){head}"
 
 
 # Season+episode forms take precedence over a bare number and yield the E part: S01E05 / s1e5 /
