@@ -1184,12 +1184,20 @@ class Reader:
 
     def mine_current(self, *, animated: bool | None = None) -> None:
         if not self.anki or not self.mine_cfg:
+            log.info(
+                "mine ignored: anki=%s mine_cfg=%s", self.anki is not None, bool(self.mine_cfg)
+            )
             return
         idx = self._mine_target()
         if idx is None:
             self._toast("no word to mine", "warn")
+            log.info("mine: no target word (animated=%s)", bool(animated))
             return
-        with otel_metrics.traced("anki_mine", source="base"):
+        # Log the KEY-driven mine (still vs video) — without this, the trace can't tell a Ctrl+Shift+m
+        # video-mine from a plain one, and a keypress that reached the handler from one that never did.
+        log.info("mine: %r animated=%s", self.tokens[idx].surface, bool(animated))
+        with otel_metrics.traced("anki_mine", source="base") as span:
+            span.set("animated", bool(animated))
             self._miner.mine_token(self.tokens[idx], animated=animated)
 
     def mine_current_video(self) -> None:
@@ -1371,12 +1379,27 @@ class Reader:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
         # CRITICAL: passing the command as split args silently kills the key — always one string.
         def bind(key: str, msg: str) -> None:
-            self.ipc.command("keybind", key, f"script-message {msg}")
+            reply = self.ipc.command("keybind", key, f"script-message {msg}")
+            # Surface a REJECTED binding (bad key name, or mpv refusing it) — silently dropping mpv's
+            # reply is why a non-firing shortcut (e.g. attach-mode Ctrl+Shift+m) was undiagnosable. In
+            # attach/plugin mode another script or the user's input.conf can also shadow the key; the
+            # registration line is the ground truth for "what did we actually bind".
+            err = reply.get("error") if isinstance(reply, dict) else None
+            if err and err != "success":
+                log.warning("keybind %r -> %s rejected by mpv: %s", key, msg, err)
+            else:
+                log.debug("keybind %r -> script-message %s", key, msg)
 
+        # active_bindings no longer gates on `requires` — bind the anki/tts actions even when the dep
+        # isn't up YET (attach mode loads Anki async, after this runs, and we never re-register). The
+        # handlers (mine_current/bulk_mine/speak) no-op with a toast when the dep is absent.
+        bound = 0
         for binding in active_bindings(self, "global"):
             message = binding.spec.message
             if message is not None:
                 bind(binding.key, message)
+                bound += 1
+        log.info("registered %d global keybinds (anki=%s)", bound, self.anki is not None)
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
     def _anchor_subtitles(self) -> None:
@@ -1442,6 +1465,11 @@ class Reader:
     }
 
     def _handle(self, msg: str) -> None:
+        # Every saitenka script-message that reaches us (key- or mouse-driven) — the ground truth for
+        # "did the keypress arrive". A shortcut that does nothing but never logs here never reached the
+        # overlay (unregistered / shadowed by another mpv script or input.conf), vs. one that logs but
+        # no-ops (a handler-side reason). Debug so it doesn't flood at info.
+        log.debug("script-message: %s", msg)
         if self._help_open and msg not in HELP_MESSAGES:
             return
         handler = self._HANDLERS.get(msg)

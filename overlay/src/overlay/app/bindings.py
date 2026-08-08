@@ -324,15 +324,16 @@ BINDINGS: tuple[BindingSpec, ...] = (
 
 
 def active_bindings(reader: Reader, *scopes: Scope) -> tuple[ActiveBinding, ...]:
-    """Resolve configured keys and omit session actions whose dependency is unavailable."""
+    """Resolve configured keys for the given scopes. A binding is ALWAYS returned once its key is set —
+    ``spec.requires`` ("anki"/"tts") is advisory metadata, NOT a registration gate: the action's handler
+    (``mine_current``/``bulk_mine``/``speak_hovered``) checks the dep live and no-ops with a toast if
+    it's absent. Gating registration on ``requires`` was a bug — Anki loads async in attach mode, after
+    registration runs, and we never re-register, so the mine keys stayed permanently unbound while the
+    mouse add-button (checked live) still worked."""
     wanted = frozenset(scopes)
     out: list[ActiveBinding] = []
     for spec in BINDINGS:
         if wanted and spec.scope not in wanted:
-            continue
-        if spec.requires == "anki" and reader.anki is None:
-            continue
-        if spec.requires == "tts" and not reader._tts_ok:
             continue
         key = getattr(reader, spec.key_attr) if spec.key_attr else spec.key
         if key:
