@@ -243,10 +243,12 @@ max-complexity-allowed = 15
 
 [tool.mypy]
 python_version = "3.13"
-# Repo-wide (#216): the Apache core, the GPL add-on, and the first-party dev scripts. taffylite/python is
-# a thin binding over a Rust ext with a hand-written .pyi — its runtime module has no importable stubs, so
-# it's covered by basedpyright/pyrefly (structural) rather than mypy here.
-files = ["overlay/src/overlay", "deinflect/src", "tools", "install"]
+# LIBRARY code (#216): the Apache core + the GPL add-on — imported, shipped, contract-bearing, so the
+# heavy checker earns its keep (it already caught a real set/tuple mismatch in deinflect). The dev SCRIPTS
+# (tools/install/.agents) are standalone run-once utilities where forcing full annotations is the
+# "fanaticism" to avoid — ruff + complexipy still cover them repo-wide. taffylite/python is a thin binding
+# over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it's out of the type tier too.
+files = ["overlay/src/overlay", "deinflect/src"]
 mypy_path = "overlay/src"
 # Stage 8b tooling: good additional checks, NOT --strict (plan decision).
 check_untyped_defs = true
@@ -256,8 +258,16 @@ warn_unused_ignores = true
 warn_unreachable = true
 ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 
+[tool.pyrefly]
+# Run from the repo root → the first-party source roots must be on the search path (same reason as
+# basedpyright's extraPaths) so `saitenka_deinflect.engine` / `overlay.*` resolve from source.
+search-path = ["overlay/src", "deinflect/src", "taffylite/python"]
+
 [tool.basedpyright]
 include = ["overlay/src/overlay", "deinflect/src"]
+# Run from the repo root, so the first-party source roots must be on the search path explicitly (else
+# `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
+extraPaths = ["overlay/src", "deinflect/src", "taffylite/python"]
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
 

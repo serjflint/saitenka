@@ -221,7 +221,7 @@ test-lint-gate-test = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip
 # our code, so its interpreter is unrelated to the 3.14t runtime). For 3.14t use the clib-drop crutch:
 # `--config-file tools/semgrep/uv.toml --python 3.14t`. ~2s → opt-in; run when touching lookup/scoring/miner.
 invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semgrep/rules.yml src" }
-# Cognitive-complexity gate, ratcheted against complexipy-snapshot.json (config: [tool.complexipy]).
+# Cognitive-complexity gate, ratcheted against ../complexipy-snapshot.json (config: root [tool.complexipy]).
 # Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
 complexity = { shell = "cd .. && uv run --project overlay --extra full complexipy" }
 # Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,

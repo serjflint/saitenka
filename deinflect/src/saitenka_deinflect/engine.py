@@ -113,7 +113,7 @@ def deinflect(text: str) -> list[Deinflection]:
     results = [Deinflection(text, 0, ())]
     # Per-node ancestry of applied rules, frame = (name, rule_index, text_applied_to) — the cycle guard.
     traces: list[tuple[tuple[str, int, str], ...]] = [()]
-    seen = {(text, 0, ())}
+    seen: set[tuple[str, int, tuple[str, ...]]] = {(text, 0, ())}
     i = 0
     while i < len(results):
         cur, tr = results[i], traces[i]
