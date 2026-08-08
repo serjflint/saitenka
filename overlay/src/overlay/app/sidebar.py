@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from overlay.app import analysis_overlay
 from overlay.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
+from overlay.app.languages import SECOND_LANG
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.subtitles import SidebarAction, SidebarRow, render_sidebar
 from overlay.app.tokenize import tokenize
@@ -71,7 +72,7 @@ def _ensure_store(reader: Reader) -> BacklogStore:
 
 
 def _cue_parts(reader: Reader, cue_index: int, cue: SubCue) -> tuple[tuple[str, tuple], ...]:
-    if reader.subtitle_language == "en" or reader.scorer is None:
+    if reader.subtitle_language == SECOND_LANG or reader.scorer is None:
         return ((cue.text.replace("\n", " "), PLAIN),)
     key = (reader.subtitle_language, cue_index, cue.text, id(reader.scorer))
     cached = reader.sidebar.style_cache.get(key)
@@ -189,7 +190,7 @@ def _media_row(record: MediaRecord, statuses: list[str]) -> SidebarRow:
 
 
 def _entry_text(reader: Reader, entry: BacklogEntry) -> str:
-    if reader.subtitle_language == "en":
+    if reader.subtitle_language == SECOND_LANG:
         return entry.en_text or entry.jp_text
     return entry.jp_text or entry.en_text
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from overlay.app.languages import MAIN_LANG, SECOND_LANG
 from overlay.app.subtitle_modes import (
     lang_matches as _lang_matches,
 )
@@ -573,9 +574,9 @@ def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
 
     startup = select_initial(ipc, opts.slang)
     if not status:
-        if startup.active == "jp":
+        if startup.active == MAIN_LANG:
             status = f"selected JP subtitle track sid={startup.tracks.jp_sid}"
-        elif startup.active == "en":
+        elif startup.active == SECOND_LANG:
             status = f"selected English fallback sid={startup.tracks.en_sid}"
         else:
             status = "no Japanese or English subtitle track found"
