@@ -7,6 +7,44 @@ logs.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-08
+
+### Fixed
+
+- **Drag-'n'-dropped / untagged Japanese subtitles are now coloured and centred.** A subtitle track with
+  no language tag — dropped into mpv, or picked by a manual track switch — was treated as the English
+  fallback and drawn as plain white, left-aligned text. saitenka now adopts an untagged newly-primary
+  track as Japanese and identifies Japanese by **content** (kana/kanji), not language tags alone, so FSRS
+  colouring and centred layout apply. Press ++alt+j++ to force the current track as Japanese if a guess is
+  ever wrong (rebindable via `[keys].subtitle_mark_jp_key`).
+- **UTF-8 for every spawned tool.** All `subprocess` text-mode calls now decode child output as UTF-8
+  rather than the OS locale codec. On a non-UTF-8 Windows (e.g. Japanese cp932) the `ffprobe` probes
+  behind embedded-subtitle sync, duration, and language detection could mojibake or raise — they no
+  longer do. (Files were already UTF-8-guarded by ruff `PLW1514`; a new ast-grep rule closes the same gap
+  for subprocess.)
+
+- **No hang on quit.** The new mpv.net auto-reconnect (below) could mistake a normal mpv quit for a
+  dropped pipe and stall the overlay for up to ~10 s before exiting. It now probes that mpv is actually
+  alive before treating a re-dial as a reconnect, so quitting exits promptly.
+
+### Added
+
+- **mpv.net resilience.** mpv.net drops its IPC pipe mid-session; the overlay now auto-reconnects the
+  dropped pipe and replays its property observers instead of exiting, and `saitenka doctor` labels
+  mpv.net explicitly.
+- **Dictionary-database diagnostics.** `saitenka report` and `saitenka doctor --verbose` now show the
+  consolidated DB's schema, file size, and per-dictionary row counts (entries / keys / kanji / term_meta /
+  tags). It names no term, reading, or gloss, so a diagnostics bundle can reveal, for example, a
+  dictionary whose tags never imported — without shipping any dictionary content.
+
+### Development
+
+- **Two-engine layout parity tests hardened** — negative controls that prove the parity oracle can fail,
+  boundary `@example`s, and a production-seam `resolve_backend("taffy")` matrix (taffylite stays a
+  dev-only cross-validation oracle).
+- **New ast-grep gate `subprocess-utf8-encoding`** — flags any `subprocess.*(text=True)` without
+  `encoding=`, run by `poe invariants`.
+
 ## [2.0.0] - 2026-08-08
 
 ### Fixed

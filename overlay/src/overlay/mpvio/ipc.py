@@ -75,6 +75,12 @@ _DISCONNECT = object()
 # of failed dials — no cross-thread reset, so there is no data race on the counter.
 _MAX_RECONNECTS = 30
 
+# After a re-dial, probe that mpv actually answers before declaring the reconnect good. A transient
+# mpv.net pipe drop (mpv still running) replies in milliseconds; a QUIT — including a self-launched
+# run-mode mpv exiting, whose socket can still accept a connect yet never reply — would otherwise hang
+# the poll loop for command()'s full timeout, _MAX_RECONNECTS times over. Bail fast instead → exit.
+_RECONNECT_PROBE_S = 2.0
+
 
 class MpvIPC:
     """Connect to an mpv ``--input-ipc-server`` and send commands, reading JSON replies.
@@ -257,6 +263,19 @@ class MpvIPC:
         self._replies = queue.Queue(maxsize=1)
         self._closed = threading.Event()  # fresh gate for the new reader (old one has exited)
         self._start_reader()
+        # Liveness gate: a re-dial that connects to a QUIT mpv (self-launched run-mode exit, or an
+        # external mpv that closed) can accept the socket yet never reply. Probe once — our sentinels
+        # ("disconnected"/"timeout") mean gone, so bail and let pump() raise; ANY real mpv reply (even
+        # a property error) proves it's live, so keep the reconnection. Prevents the ~10s×N quit hang.
+        if self.command("get_property", "pid", timeout=_RECONNECT_PROBE_S).get("error") in {
+            "disconnected",
+            "timeout",
+        }:
+            log.info(
+                "mpv IPC reconnect: re-dialed %s but it did not reply — mpv has quit", self.path
+            )
+            self._closed.set()
+            return False
         log.warning(
             "mpv IPC: reconnected to %s after a dropped pipe (%d reconnect(s) left)",
             self.path,
