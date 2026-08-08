@@ -89,20 +89,22 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
         lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
     )
     cli_run._build_run_deps(
-        mine=True,
-        mine_deck="D",
-        mine_model="Lapis",
-        mine_key="Ctrl+m",
-        mine_all_key="Shift+m",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=True,
-        raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
-        known_cfg=None,
-        known="",
-        color=False,
-        dict_titles=[],
-        freq_titles=[],
-        pitch_titles=[],
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="D",
+            mine_model="Lapis",
+            mine_key="Ctrl+m",
+            mine_all_key="Shift+m",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=True,
+            raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
     assert captured["mine"]["animated_screenshot"] is True
     # config-only quality knobs (no CLI flag) must survive the synthetic effective_cfg too
@@ -135,20 +137,22 @@ def test_run_threads_field_map_and_card_kind(monkeypatch):
         lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
     )
     cli_run._build_run_deps(
-        mine=True,
-        mine_deck="D",
-        mine_model="Lapis",
-        mine_key="Ctrl+m",
-        mine_all_key="Shift+m",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=False,
-        raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
-        known_cfg=None,
-        known="",
-        color=False,
-        dict_titles=[],
-        freq_titles=[],
-        pitch_titles=[],
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="D",
+            mine_model="Lapis",
+            mine_key="Ctrl+m",
+            mine_all_key="Shift+m",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=False,
+            raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
     assert captured["mine"]["preset"] == "Kiku"
     assert captured["mine"]["card_kind"] == "sentence"
@@ -166,20 +170,22 @@ def test_run_threads_card_format(monkeypatch):
         lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
     )
     cli_run._build_run_deps(
-        mine=True,
-        mine_deck="D",
-        mine_model="Lapis",
-        mine_key="Ctrl+m",
-        mine_all_key="Shift+m",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=False,
-        raw_mine={"card_format": {"Word": "{expression}"}},
-        known_cfg=None,
-        known="",
-        color=False,
-        dict_titles=[],
-        freq_titles=[],
-        pitch_titles=[],
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="D",
+            mine_model="Lapis",
+            mine_key="Ctrl+m",
+            mine_all_key="Shift+m",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=False,
+            raw_mine={"card_format": {"Word": "{expression}"}},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
     assert captured["mine"]["card_format"] == {"Word": "{expression}"}
 

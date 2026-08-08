@@ -65,6 +65,28 @@ class RunFlags:
     layout_engine: Literal["default", "taffy"]
 
 
+@dataclass(frozen=True)
+class RunDepsRequest:
+    """What ``run`` needs to build the coloring/dict/mining collaborators — the CLI mining flags, the raw
+    ``[mine]`` table (config-only keys ride through it), the known-words source, and the dict/freq/pitch
+    title lists. Bundled so the slow background dep build takes one request value, not a dozen args."""
+
+    mine: bool
+    mine_deck: str
+    mine_model: str
+    mine_key: str
+    mine_all_key: str
+    mine_normalize_audio: bool
+    mine_animated_screenshot: bool
+    raw_mine: dict
+    known_cfg: object
+    known: str
+    color: bool
+    dict_titles: list[str]
+    freq_titles: list[str]
+    pitch_titles: list[str]
+
+
 def setup_session_telemetry(cfg: dict) -> None:
     """Stand up telemetry capture for THIS reader session (opt-in via ``[telemetry].enabled``). Scoped
     to run/attach on purpose — NOT ``cli.main`` — because a one-shot utility command (``report`` /
@@ -662,23 +684,7 @@ def reslot_to_current(
         log.info("re-slotted overlay onto %s", video_path.name)
 
 
-def _build_run_deps(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    *,
-    mine: bool,
-    mine_deck: str,
-    mine_model: str,
-    mine_key: str,
-    mine_all_key: str,
-    mine_normalize_audio: bool,
-    mine_animated_screenshot: bool,
-    raw_mine: dict,
-    known_cfg,
-    known: str,
-    color: bool,
-    dict_titles: list[str],
-    freq_titles: list[str],
-    pitch_titles: list[str],
-):
+def _build_run_deps(req: RunDepsRequest):
     """Build the coloring/dict/mining collaborators. This is the slow part (the first-run
     dictionary cache build is 25-66s per dict), so ``run_impl`` defers calling this to a BACKGROUND
     thread (see ``reader.load_deps_async``) unless a demo/screenshot needs it synchronously. Must
@@ -713,39 +719,41 @@ def _build_run_deps(  # noqa: PLR0913  # arg-clump — bundle into a config obje
         )
 
     effective_cfg = {
-        "dicts": dict_titles,
-        "freq": freq_titles,
-        "pitch": pitch_titles,
-        "known": known_cfg,
+        "dicts": req.dict_titles,
+        "freq": req.freq_titles,
+        "pitch": req.pitch_titles,
+        "known": req.known_cfg,
         # start from the raw [mine] config (so config-only keys like animated_height/fps/quality/format
         # survive the run path — the both-seams trap), then override with the CLI-threaded values
         "mine": {
-            **raw_mine,
-            "deck": mine_deck,
-            "model": mine_model,
-            "normalize_audio": mine_normalize_audio,
-            "animated_screenshot": mine_animated_screenshot,
+            **req.raw_mine,
+            "deck": req.mine_deck,
+            "model": req.mine_model,
+            "normalize_audio": req.mine_normalize_audio,
+            "animated_screenshot": req.mine_animated_screenshot,
         }
-        if mine
+        if req.mine
         else {},
     }
     scorer, anki, mine_conf, dict_set = reader_deps.build_reader_deps(
         effective_cfg,
-        color=color,
-        mine=mine,
-        known_words=known,
+        color=req.color,
+        mine=req.mine,
+        known_words=req.known,
         on_anki_unreachable=_on_anki_unreachable,
         on_known_words_error=_on_known_words_error,
     )
 
-    if not mine:
+    if not req.mine:
         log.info("mining disabled (no [mine] config / --no-mine)")
     elif anki is not None:
         print(
-            f"mining on — {mine_key} mine · {mine_all_key or 'Shift+m'} mine-all "
-            f"→ {mine_deck} ({mine_model})"
+            f"mining on — {req.mine_key} mine · {req.mine_all_key or 'Shift+m'} mine-all "
+            f"→ {req.mine_deck} ({req.mine_model})"
         )
-        log.info("mining enabled: deck=%r model=%r key=%r", mine_deck, mine_model, mine_key)
+        log.info(
+            "mining enabled: deck=%r model=%r key=%r", req.mine_deck, req.mine_model, req.mine_key
+        )
 
     if dict_set is not None:
         print(
@@ -945,20 +953,22 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     def _build_deps():
         return _build_run_deps(
-            mine=mine,
-            mine_deck=mine_deck,
-            mine_model=mine_model,
-            mine_key=mine_key,
-            mine_all_key=mine_all_key,
-            mine_normalize_audio=mine_normalize_audio,
-            mine_animated_screenshot=mine_animated_screenshot,
-            raw_mine=cfg.get("mine") or {},
-            known_cfg=known_cfg,
-            known=known,
-            color=color,
-            dict_titles=dict_titles,
-            freq_titles=freq_titles,
-            pitch_titles=pitch_titles,
+            RunDepsRequest(
+                mine=mine,
+                mine_deck=mine_deck,
+                mine_model=mine_model,
+                mine_key=mine_key,
+                mine_all_key=mine_all_key,
+                mine_normalize_audio=mine_normalize_audio,
+                mine_animated_screenshot=mine_animated_screenshot,
+                raw_mine=cfg.get("mine") or {},
+                known_cfg=known_cfg,
+                known=known,
+                color=color,
+                dict_titles=dict_titles,
+                freq_titles=freq_titles,
+                pitch_titles=pitch_titles,
+            )
         )
 
     # Hoist the dep build ahead of mpv launch (interactive path only; demo/screenshot build synchronously
