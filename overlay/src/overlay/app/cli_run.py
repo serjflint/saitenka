@@ -842,6 +842,7 @@ def _execute_reader_session(
             f"reader running — hover words; '{translate_key}' toggles the EN translation; "
             "Ctrl+C or quit mpv to stop."
         )
+        log.info("session: mode=run")  # the mode a bundled report needs (vs attach/plugin)
         reader.run()
 
 
