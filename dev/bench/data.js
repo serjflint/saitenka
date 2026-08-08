@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786232627152,
+  "lastUpdate": 1786232789478,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1763,6 +1763,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.846,
             "range": "±0.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fff58ede191ca20e359b347ba54cb0ea7622a813",
+          "message": "Merge pull request #250 from serjflint/test/hermetic-config\n\ntest(conftest): isolate SAITENKA_CONFIG (hermetic against the dev's real overlay.toml)",
+          "timestamp": "2026-08-09T02:46:00+03:00",
+          "tree_id": "ee9a75045c467cb898439fecda083ddf084e399b",
+          "url": "https://github.com/serjflint/saitenka/commit/fff58ede191ca20e359b347ba54cb0ea7622a813"
+        },
+        "date": 1786232788351,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.32,
+            "range": "±0.1%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.774,
+            "range": "±4.0%",
             "unit": "ms"
           }
         ]
