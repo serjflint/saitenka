@@ -2249,7 +2249,7 @@ def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
         for c in ipc.commands
         if c
         and c[0] == "get_property"
-        and c[1] in ("sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text")
+        and c[1] in {"sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text"}
     ]
     assert gets == [], f"steady-state tick still does blocking property reads: {gets}"
 

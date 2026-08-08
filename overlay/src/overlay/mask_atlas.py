@@ -228,7 +228,7 @@ class MaskAtlas:
             n = 0
             for font_id, text, mode, sx, sy, offx, offy, w, h, alpha in rows:
                 core = deserialize_core(w, h, mode, zlib.decompress(alpha))
-                mem[(font_id, text, mode, sx, sy)] = (core, (offx, offy))
+                mem[font_id, text, mode, sx, sy] = (core, (offx, offy))
                 n += 1
             return n
         except (sqlite3.Error, ValueError):  # pragma: no cover — garbled blob won't reconstruct

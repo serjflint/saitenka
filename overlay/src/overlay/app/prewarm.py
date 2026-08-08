@@ -430,7 +430,7 @@ def _startup_plan(terms, cache, atlas, *, atlas_only: bool, atlas_scale: float):
         # native pass. So a scale-1.0 run counts reference-done words; a scale-N run their intersection.
         done = atlas.done_words(REFERENCE_SCALE)
         if atlas_scale > REFERENCE_SCALE:
-            done = done & atlas.done_words(atlas_scale)
+            done &= atlas.done_words(atlas_scale)
         already_done = sum(1 for term, _ in terms if term in done)
         start_rows, start_nbytes, capped = atlas.count(), atlas.disk_bytes(), False
     elif cache is not None:

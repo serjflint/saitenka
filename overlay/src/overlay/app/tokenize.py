@@ -297,7 +297,7 @@ def _compound_spans(tokens: list[Token]) -> dict[tuple[int, int], str]:
             if chars > _COMPOUND_MAX_CHARS:
                 break
             prev_end = nxt.end
-            spans[(i, j)] = _compound_form(tokens[i : j + 1])
+            spans[i, j] = _compound_form(tokens[i : j + 1])
     return spans
 
 
@@ -352,7 +352,7 @@ def merge_dict_compounds(
         widest = range(min(n - 1, i + _COMPOUND_MAX_TOKENS - 1), i, -1)  # longest span first
         end = next((j for j in widest if spans.get((i, j)) in hits), i)
         if end > i:
-            out.append(_compound_token(tokens[i : end + 1], spans[(i, end)]))
+            out.append(_compound_token(tokens[i : end + 1], spans[i, end]))
             i = end + 1
         else:
             out.append(tokens[i])

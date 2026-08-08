@@ -249,7 +249,7 @@ def test_version_is_wired_to_package_metadata():
     from overlay.app.cli import app
 
     assert overlay.__version__ == version("saitenka")
-    assert app.version not in (None, "", "0.0.0")
+    assert app.version not in {None, "", "0.0.0"}
 
 
 def test_jimaku_should_fetch_decision():

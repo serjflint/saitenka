@@ -305,7 +305,7 @@ def test_check_tts_reports_availability_with_platform_hint(monkeypatch):
 def test_free_threading_check():
     # On any interpreter the check must classify itself without error.
     c = doc.check_free_threading()
-    assert c.status in ("ok", "warn")
+    assert c.status in {"ok", "warn"}
 
 
 def test_version_check_reports_overlay_version(monkeypatch):
@@ -362,7 +362,7 @@ def test_mpv_ipc_coexistence_reports_known_sockets(tmp_path, monkeypatch):
     mpvconf.write_text("input-ipc-server=/tmp/mpv-socket\n")
     monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
     c = doc.check_mpv_ipc()
-    assert c.status in ("ok", "warn")
+    assert c.status in {"ok", "warn"}
     assert "/tmp/mpv-socket" in c.detail  # animecards socket recognised
 
 

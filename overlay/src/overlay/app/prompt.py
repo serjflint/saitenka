@@ -60,7 +60,7 @@ def confirm(message: str, *, default: bool = False) -> bool:
             return default if answer is None else bool(answer)
         except Exception:
             log.debug("questionary confirm failed; using input() fallback", exc_info=True)
-    return input(f"{message} [y/N] ").strip().lower() in ("y", "yes")
+    return input(f"{message} [y/N] ").strip().lower() in {"y", "yes"}
 
 
 def select(message: str, choices: list[str], *, default: str = "") -> str:

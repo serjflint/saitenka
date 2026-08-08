@@ -138,9 +138,9 @@ def parse_cues(content: str, filename: str) -> list[SubCue]:
     """Parse by the filename's extension; if that yields nothing, try BOTH parsers and keep whichever
     found more (mislabelled/extension-less files). Returned cues are sorted by start time."""
     ext = Path(filename).suffix.lower().lstrip(".")
-    if ext in ("srt", "vtt"):
+    if ext in {"srt", "vtt"}:
         cues = parse_srt(content)
-    elif ext in ("ass", "ssa"):
+    elif ext in {"ass", "ssa"}:
         cues = parse_ass(content)
     else:
         cues = []

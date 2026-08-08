@@ -311,7 +311,7 @@ class Reader:
         self.tip_max_frac = o.tooltip.tip_max_frac  # BASE tooltip viewport ≤ this frac of the video
         self.nested_max_frac = o.tooltip.nested_max_frac  # nested (scan) popup viewport frac cap
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
-        if o.tooltip.annotation_mode not in ("full", "hover"):
+        if o.tooltip.annotation_mode not in {"full", "hover"}:
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
         self.annotation_mode = o.tooltip.annotation_mode
         self._annotation_hover = False

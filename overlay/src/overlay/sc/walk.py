@@ -110,15 +110,15 @@ def _apply_style(node: dict, style: Style) -> Style:
 
     weight = st.get("fontWeight")
     if (
-        tag in ("strong", "b")
-        or weight in ("bold", "bolder")
+        tag in {"strong", "b"}
+        or weight in {"bold", "bolder"}
         or (isinstance(weight, (int, float)) and weight >= 600)
     ):
         kw["weight"] = 700
-    if tag in ("em", "i") or st.get("fontStyle") == "italic":
+    if tag in {"em", "i"} or st.get("fontStyle") == "italic":
         kw["italic"] = True
     deco = st.get("textDecorationLine")
-    if tag in ("a", "u") or deco == "underline" or (isinstance(deco, list) and "underline" in deco):
+    if tag in {"a", "u"} or deco == "underline" or (isinstance(deco, list) and "underline" in deco):
         kw["underline"] = True
     if tag == "a":
         kw.setdefault("color", _NAMED["blue"])
@@ -321,12 +321,12 @@ class _Walker:
     def _emit_li(self, node, style: Style, indent: int) -> None:
         # A list item may itself contain nested block content; keep it inline for now unless it has
         # a nested list, which we split into following list-item blocks.
-        if isinstance(node, dict) and node.get("tag") in ("ul", "ol"):
+        if isinstance(node, dict) and node.get("tag") in {"ul", "ol"}:
             self._walk_list(node, style, indent + 1)
             return
         if isinstance(node, list):
             for n in node:
-                if isinstance(n, dict) and n.get("tag") in ("ul", "ol"):
+                if isinstance(n, dict) and n.get("tag") in {"ul", "ol"}:
                     self._flush()
                     self._walk_list(n, style, indent + 1)
                 else:
@@ -346,10 +346,10 @@ class _Walker:
             return
         if isinstance(node, dict):
             tag = node.get("tag")
-            if tag in ("ul", "ol"):
+            if tag in {"ul", "ol"}:
                 self._walk_list(node, style, indent)
                 return
-            if tag in ("div", "p", "details", "summary"):
+            if tag in {"div", "p", "details", "summary"}:
                 self._flush()
                 self._walk_block(node.get("content"), _apply_style(node, style), indent)
                 self._flush()

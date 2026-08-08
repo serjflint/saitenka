@@ -60,7 +60,7 @@ def _present(tool: str) -> bool:
 
     if tool == "mpv":
         return find_mpv() is not None
-    if tool in ("ffmpeg", "ffprobe"):
+    if tool in {"ffmpeg", "ffprobe"}:
         return find_tool(tool) is not None
     return shutil.which(tool) is not None
 

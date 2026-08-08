@@ -27,7 +27,7 @@ def test_atomic_write_is_crash_safe(fs, monkeypatch):
     with pytest.raises(OSError):
         paths.atomic_write_text(target, "new content that must not land\n")
 
-    assert target.read_text() == "original\n"  # untouched
+    assert target.read_text(encoding="utf-8") == "original\n"  # untouched
     assert list(Path("/data").glob(".*.tmp")) == []  # temp cleaned up on failure
 
 

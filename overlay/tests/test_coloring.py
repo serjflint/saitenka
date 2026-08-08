@@ -71,7 +71,7 @@ def test_known_words_surface_only_card_still_matches():
 
 def test_n_plus_one_single_unknown():
     toks = tokenize("私は本を読む")  # content: 本, 読む
-    known = [t.surface in ("私", "本") for t in toks]
+    known = [t.surface in {"私", "本"} for t in toks]
     targets = mark_n_plus_one(toks, known, min_words=2)
     surfaces = {toks[i].surface for i in targets}
     assert surfaces == {"読む"}  # the one unknown content word

@@ -9,6 +9,7 @@ token has a JLPT level (matching SubMiner's "frequency only if no other signal")
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import starmap
 from typing import TYPE_CHECKING, ClassVar
 
 from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
@@ -224,7 +225,7 @@ class Scorer:
 
     def score_line(self, tokens: list[Token]) -> list[TokenStyle]:
         states = [self._fsrs_state(t) for t in tokens]
-        known = [self._known_for(t, state) for t, state in zip(tokens, states, strict=True)]
+        known = list(starmap(self._known_for, zip(tokens, states, strict=True)))
         n1 = (
             mark_n_plus_one(tokens, known, self.min_sentence_words)
             if self.enable_n_plus_one

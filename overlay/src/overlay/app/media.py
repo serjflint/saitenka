@@ -7,7 +7,6 @@ OSD overlay. Audio is cut from the source file over the current subtitle's times
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import sys
@@ -140,7 +139,7 @@ def resolve_animated_encoder(fmt: str) -> tuple[str, str] | None:
         for enc in _WEBP_ENCODERS:
             if _ffmpeg_encoder_available(enc):
                 return enc, "webp"
-    if fmt in ("webp", "gif") and _ffmpeg_encoder_available("gif"):
+    if fmt in {"webp", "gif"} and _ffmpeg_encoder_available("gif"):
         return "gif", "gif"
     return None
 
@@ -302,7 +301,7 @@ def tts_available() -> bool:
     if sys.platform == "win32":
         return "ja-JP" in _voices_out()
     elif sys.platform == "darwin":
-        return bool(re.search(r"ja_JP", _voices_out()))
+        return bool(r"ja_JP" in _voices_out())
     else:
         return shutil.which("espeak") is not None
 

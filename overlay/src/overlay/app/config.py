@@ -367,7 +367,7 @@ def resolve_telemetry(cfg: dict | None = None) -> TelemetryOptions:
     d: dict = raw if isinstance(raw, dict) else {}
     defaults = TelemetryOptions()
     enabled = bool(d.get("enabled", defaults.enabled))
-    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in ("true", "1"):
+    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() in {"true", "1"}:
         enabled = False
     return TelemetryOptions(
         enabled=enabled,

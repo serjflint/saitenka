@@ -173,7 +173,7 @@ def _classify_oracle(
     never imports the private `_classify_state` it's meant to check."""
     if ctype == 0:
         return None  # "new" cards never enter the snapshot
-    if ctype in (1, 3):
+    if ctype in {1, 3}:
         return "learning"
     if r is not None and r < forgotten_r:
         return "forgotten"

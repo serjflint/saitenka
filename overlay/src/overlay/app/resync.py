@@ -36,9 +36,9 @@ def _reference_extract_spec(codec: str) -> tuple[str, list[str]]:
     ``<font>``/``<b>`` tags a strict SubRip parser rejects (live: ep02's embedded credits line
     ``<b>Edição</b>`` → ``alass-cli`` exit 1 → subs left raw → several seconds late). subrip is copied
     verbatim; anything else (mov_text/webvtt) converts to srt, which is clean for those codecs."""
-    if codec in ("ass", "ssa"):
+    if codec in {"ass", "ssa"}:
         return ".ass", ["-c:s", "copy"]
-    if codec in ("subrip", "srt"):
+    if codec in {"subrip", "srt"}:
         return ".srt", ["-c:s", "copy"]
     return ".srt", ["-c:s", "srt"]
 

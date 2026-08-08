@@ -63,7 +63,7 @@ def test_inventory_reports_missing(monkeypatch):
 
 
 def test_missing_tools_filters_present(monkeypatch):
-    monkeypatch.setattr(sw, "_present", lambda t: t in ("uv", "mpv"))
+    monkeypatch.setattr(sw, "_present", lambda t: t in {"uv", "mpv"})
     assert sw.missing_tools(["mpv", "ffmpeg", "uv"]) == ["ffmpeg"]
 
 
