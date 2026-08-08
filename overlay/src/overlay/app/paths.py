@@ -29,8 +29,10 @@ import platformdirs
 
 APP = "saitenka"
 
-# Filename hardening for Windows (invalid chars, reserved device names).
-_INVALID_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# What each platform forbids in a filename. POSIX bans only "/" and control chars (NUL especially);
+# Windows also bans <>:"|?*\ , trailing dots/spaces, and device names.
+_INVALID_WIN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_INVALID_POSIX = re.compile(r"[/\x00-\x1f]")
 _WIN_RESERVED = {
     "CON",
     "PRN",
@@ -51,16 +53,29 @@ def expand(p: str | os.PathLike) -> Path:
     return Path(nfc(os.path.expandvars(str(Path(p).expanduser()))))
 
 
-def sanitize_filename(name: str, replacement: str = "_") -> str:
-    """A filename safe on Windows too: strip invalid chars (``<>:"/\\|?*`` + control), trailing dots/
-    spaces, and reserved device names (``CON``/``PRN``/``NUL``/``COM1``…). Prefixed names like
-    ``saitenka-CON`` are already safe; this is defence-in-depth for content-derived names."""
-    n = _INVALID_FILENAME.sub(replacement, name).rstrip(" .")
+def _windows() -> bool:
+    """Isolated platform check so :func:`sanitize_filename` can be exercised for both rule sets."""
+    return os.name == "nt"
+
+
+def _sanitize(name: str, replacement: str, *, windows: bool) -> str:
+    """Filename hardening under a given platform's rules — the guts of :func:`sanitize_filename`."""
+    if not windows:  # POSIX: only "/" + control chars are illegal — keep the rest of the real name
+        return _INVALID_POSIX.sub(replacement, name) or replacement
+    n = _INVALID_WIN.sub(replacement, name).rstrip(" .")
     if not n:
         return replacement
     if n.split(".")[0].upper() in _WIN_RESERVED:
-        n = f"{replacement}{n}"
+        n = f"{replacement}{n}"  # reserved device name (CON/NUL/…) → prefix so it's inert
     return n
+
+
+def sanitize_filename(name: str, replacement: str = "_") -> str:
+    """Make *name* a legal filename on the CURRENT platform, changing as little as possible. POSIX bans
+    only ``/`` + control chars; Windows also bans ``<>:"|?*\\``, trailing dots/spaces, and reserved
+    device names (``CON``/``NUL``/…). Per-platform because our caches are local — macOS/Linux keep the
+    real source filename (a title's ``:``/``?`` survives), Windows still gets a safe one."""
+    return _sanitize(name, replacement, windows=_windows())
 
 
 def long_path(p: str | os.PathLike) -> Path:

@@ -124,11 +124,37 @@ def test_augment_path_prepends_existing_dirs(monkeypatch, tmp_path):
 
 
 def test_sanitize_filename_windows_hazards():
-    assert paths.sanitize_filename('a<b>c:d"e/f\\g|h?i*j') == "a_b_c_d_e_f_g_h_i_j"
-    assert paths.sanitize_filename("name...  ") == "name"  # trailing dots/spaces stripped
-    assert paths.sanitize_filename("CON").startswith("_")  # reserved device name prefixed
-    assert paths.sanitize_filename("con.txt").startswith("_")  # case-insensitive
-    assert paths.sanitize_filename("") == "_"
+    def s(n: str) -> str:
+        return paths._sanitize(n, "_", windows=True)
+
+    assert s('a<b>c:d"e/f\\g|h?i*j') == "a_b_c_d_e_f_g_h_i_j"
+    assert s("name...  ") == "name"  # trailing dots/spaces stripped
+    assert s("CON").startswith("_")  # reserved device name prefixed
+    assert s("con.txt").startswith("_")  # case-insensitive
+    assert s("") == "_"
+
+
+def test_sanitize_filename_posix_keeps_windows_only_chars():
+    """POSIX bans only ``/`` + control chars, so a punctuation-rich release name survives verbatim —
+    the point of caching a downloaded sub under its real filename on macOS/Linux."""
+
+    def s(n: str) -> str:
+        return paths._sanitize(n, "_", windows=False)
+
+    real = "[NanakoRaws] Ame to Kimi to - 02 (EX 1920x1080).ass"
+    assert s(real) == real  # real release name intact
+    assert s("Re:Zero? - 01.srt") == "Re:Zero? - 01.srt"  # colon / question-mark kept
+    assert s("a/b") == "a_b"  # path separator still replaced
+    assert s("x\x00y") == "x_y"  # NUL / control chars still stripped
+    assert s("CON") == "CON"  # device names aren't reserved on POSIX
+    assert s("") == "_"
+
+
+def test_sanitize_filename_uses_the_host_platform(monkeypatch):
+    monkeypatch.setattr(paths, "_windows", lambda: True)
+    assert paths.sanitize_filename("a:b?") == "a_b_"
+    monkeypatch.setattr(paths, "_windows", lambda: False)
+    assert paths.sanitize_filename("a:b?") == "a:b?"
 
 
 def test_nfc_normalizes_decomposed():
