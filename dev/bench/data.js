@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786177023274,
+  "lastUpdate": 1786182146615,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1187,6 +1187,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.54,
             "range": "±3.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b7964c3cd023ff80d9586be35a413fb8d40fc8af",
+          "message": "refactor(overlay): break all 6 module-import cycles; enforce no-cycles fully (#30) (#221)\n\nDrive .importlinter's no-cycles ignore list from 6 grandfathered entries to\nzero — the contract is now exhaustively enforced. Each cycle was severed behind\na stable seam, behaviour-preserving:\n\n- draw.chip -> render.layout: chip.py moved draw/ -> render/ (it consumes\n  render.layout, so it sits at/above it, not below). No golden text-primitive\n  movement.\n- dictdb <-> yomitan_import and dictdb <-> wordlists: the pure zip/bank-parse\n  helpers (classify_zip, read_json_bank, _title_of, _crc_lenient, _META_BANK)\n  extracted to a new leaf app/bankreader.py that imports nothing from app/, so\n  the DB, settings importer and list builder all sit above it.\n- doctor/report -> crashlog: crash_dir() moved to the leaf app/paths.py (its\n  only dep was cache_dir there anyway), so those modules locate reports without\n  importing the excepthook module (which reaches back to them for the log\n  tail / redaction). crashlog re-exports crash_dir for the monkeypatch seam.\n- controller <-> miner: miner imports SKIP_POS from its true home app/tokenize\n  (like nested_popup/prefetch already do), not from controller.\n\nTests point at the new canonical homes (bankreader). poe all green;\nimport-linter: 6 contracts kept, 0 broken.",
+          "timestamp": "2026-08-08T12:42:03+03:00",
+          "tree_id": "dbc2a1badf9513de92f8f7a19414e721fd8ddf0a",
+          "url": "https://github.com/serjflint/saitenka/commit/b7964c3cd023ff80d9586be35a413fb8d40fc8af"
+        },
+        "date": 1786182145810,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.178,
+            "range": "±3.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.252,
+            "range": "±5.2%",
             "unit": "ms"
           }
         ]
