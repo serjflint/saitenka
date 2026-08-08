@@ -77,7 +77,7 @@ def _code_spans(text: str) -> str:
 
 
 def _poe_tasks() -> set[str]:
-    data = tomllib.loads((_OVERLAY / "pyproject.toml").read_text())
+    data = tomllib.loads((_OVERLAY / "pyproject.toml").read_text(encoding="utf-8"))
     return set(data.get("tool", {}).get("poe", {}).get("tasks", {}))
 
 
@@ -110,7 +110,7 @@ def check_refs() -> list[str]:
     tasks = _poe_tasks()
     fails: list[str] = []
     for doc in _doc_files():
-        fails += _ref_failures(doc.read_text(), str(doc.relative_to(_REPO)), tasks)
+        fails += _ref_failures(doc.read_text(encoding="utf-8"), str(doc.relative_to(_REPO)), tasks)
     return fails
 
 
@@ -186,7 +186,7 @@ _CLAIM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+(?:\.\d+)?)")
 
 def _const_table_rows() -> list[list[str]]:
     """The Constants table as [Knob, Value, Where] rows (header + separator dropped)."""
-    text = (_OVERLAY / "ARCHITECTURE.md").read_text()
+    text = (_OVERLAY / "ARCHITECTURE.md").read_text(encoding="utf-8")
     lines = text.splitlines()
     try:
         start = next(i for i, ln in enumerate(lines) if ln.strip() == _CONST_TABLE_HEADER)

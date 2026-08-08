@@ -1,0 +1,16 @@
+id: read-text-utf8-encoding
+valid:
+  # explicit utf-8 — the fixed form (direct Path and the /-operator shape PLW1514 misses)
+  - Path("a.txt").read_text(encoding="utf-8")
+  - (base / "ARCHITECTURE.md").read_text(encoding="utf-8")
+  - p.write_text(body, encoding="utf-8")
+  # bytes I/O never touches a text codec — not this rule's concern
+  - Path("a.bin").read_bytes()
+  - p.write_bytes(payload)
+invalid:
+  # the /-operator receiver ruff PLW1514 can't infer as a Path — the docs_check.py regression
+  - (base / "ARCHITECTURE.md").read_text()
+  # direct Path, no encoding
+  - Path("a.txt").read_text()
+  # write_text with a positional arg but no encoding
+  - p.write_text(body)
