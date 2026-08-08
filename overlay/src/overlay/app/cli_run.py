@@ -209,7 +209,7 @@ def _configured_subtitles(
     return None, providers
 
 
-def _resolve_subtitles(
+def _resolve_subtitles(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     cfg: dict,
     video: str | None,
     video_path: Path,
@@ -277,7 +277,7 @@ def _resolve_subtitles(
     return sub_path, en_sub_path, fetch_in_background, enabled_providers
 
 
-def _launch_mpv_and_connect(
+def _launch_mpv_and_connect(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     cfg: dict,
     tmp: Path,
     video_path: Path,
@@ -348,7 +348,7 @@ def _launch_mpv_and_connect(
     return proc, ipc
 
 
-def _build_run_options(
+def _build_run_options(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     cfg: dict,
     *,
     mine_key: str,
@@ -548,7 +548,7 @@ def _advance_at_eof(reader) -> bool:
     return True
 
 
-def _install_watch_hooks(
+def _install_watch_hooks(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     reader,
     cfg: dict,
     video_path: Path,
@@ -694,7 +694,7 @@ def reslot_to_current(
         log.info("re-slotted overlay onto %s", video_path.name)
 
 
-def _build_run_deps(
+def _build_run_deps(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     *,
     mine: bool,
     mine_deck: str,
@@ -841,7 +841,7 @@ def _run_demo_actions(
         time.sleep(seconds)
 
 
-def _execute_reader_session(
+def _execute_reader_session(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     reader,
     ipc,
     *,
@@ -884,7 +884,7 @@ def _execute_reader_session(
         reader.run()
 
 
-def run_impl(
+def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the extracted seam)
     video: str | None,
     *,
     config: str | None,

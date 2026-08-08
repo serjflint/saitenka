@@ -1539,7 +1539,7 @@ def _parse_trace_events(zip_path: str) -> tuple[list[dict], dict]:
     return out, meta
 
 
-def run_trace(
+def run_trace(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     zip_path: str,
     rt: dict,
     *,

@@ -385,7 +385,7 @@ def _fit_font_size(lines: list[list[Token]], max_w: float, pad_x: int, size: int
     return font, size, measured
 
 
-def _draw_token(
+def _draw_token(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     draw: ImageDraw.ImageDraw,
     tok: Token,
     x: float,
@@ -421,7 +421,7 @@ def _draw_token(
     return WordBox(gi, int(x), y + pad_y, int(w), text_h)
 
 
-def _draw_visual_lines(
+def _draw_visual_lines(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
     img: Image.Image,
     visual_lines: list[list[tuple[int, Token, float]]],
     line_widths: list[float],

@@ -129,7 +129,7 @@ app = cyclopts.App(
 
 
 @app.command(name="run")
-def run(
+def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual params for --help/parsing
     video: str | None = None,
     *,
     config: Annotated[
