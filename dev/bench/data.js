@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786182519428,
+  "lastUpdate": 1786182726008,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1259,6 +1259,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.593,
             "range": "±4.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "26fdec41b93ae133e23e62054235f54aee372847",
+          "message": "refactor: ratchet ruff max-args 9→8; bundle the remaining arg-clumps (#216) (#224)\n\nComplete the 9→8 max-args ratchet. Lowering the threshold surfaces 11 functions\nat 9 args (not the two the issue predicted); each is bundled behind a cohesive\nfrozen config object or relaxed as a script:\n\nRender (the issue's named blockers):\n- banded.WindowedPanel.__init__ → BandedTuning (seed_height/max_cached_blocks/\n  compress/raw_band_ceiling).\n- flow._draw_flow_line → _LinePlacement + a shared render.layout.Sinks\n  (scan_out/link_out — the repo-wide \"geometry sink\").\n- document.py _render_block/_composite/_draw_window_block (+_render_blocks/\n  _composite_window) → the same shared Sinks; public render_document/\n  render_layout_window signatures unchanged.\n\nApp:\n- miner._markers_for → shares the CardContent the note is built from (drops a\n  7-field re-derivation).\n- prewarm.prewarm → PrewarmOptions (atlas_only/atlas_scale/plateau_stop).\n- subselect.ensure_jp_subs → the existing AttachSubtitleOptions (its sole caller\n  already unpacked it field-by-field).\n- subtitles.render_subtitle → SubtitleSpacing (pad_x/pad_y/line_gap, defaulted —\n  no call site passes them).\n- nested_popup.place_nested → Anchor (wx/wy/wh).\n\nexamples/ and tools/ relax too-many-arguments (run-once scripts, not shipped\nAPIs). docs_check gains _field_default so the seed_height const resolves from\nBandedTuning. poe all green (incl. test-ft + goldens); PLR0913/PLR0917 at 8 = 0\nviolations. Only the cyclopts CLI commands keep a justified noqa.",
+          "timestamp": "2026-08-08T12:51:35+03:00",
+          "tree_id": "5454ca74e4ae03d72eb0a525a76adf2a8dd7e2e4",
+          "url": "https://github.com/serjflint/saitenka/commit/26fdec41b93ae133e23e62054235f54aee372847"
+        },
+        "date": 1786182725007,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.314,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.964,
+            "range": "±6.2%",
             "unit": "ms"
           }
         ]
