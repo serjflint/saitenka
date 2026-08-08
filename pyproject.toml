@@ -249,7 +249,11 @@ python_version = "3.13"
 # "fanaticism" to avoid — ruff + complexipy still cover them repo-wide. taffylite/python is a thin binding
 # over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it's out of the type tier too.
 files = ["overlay/src/overlay", "deinflect/src"]
-mypy_path = "overlay/src"
+# Source roots on the path so first-party + optional-ext imports resolve when mypy runs from the repo
+# root — incl. taffylite/python so `import taffylite` finds the committed .pyi stub (column) rather than
+# the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
+# absent, e.g. the CI gate env — the layout-engine extra is deliberately not installed there).
+mypy_path = ["overlay/src", "deinflect/src", "taffylite/python"]
 # Stage 8b tooling: good additional checks, NOT --strict (plan decision).
 check_untyped_defs = true
 no_implicit_optional = true
