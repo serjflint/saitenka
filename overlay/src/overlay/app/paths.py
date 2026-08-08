@@ -61,7 +61,10 @@ def _windows() -> bool:
 def _sanitize(name: str, replacement: str, *, windows: bool) -> str:
     """Filename hardening under a given platform's rules — the guts of :func:`sanitize_filename`."""
     if not windows:  # POSIX: only "/" + control chars are illegal — keep the rest of the real name
-        return _INVALID_POSIX.sub(replacement, name) or replacement
+        cleaned = _INVALID_POSIX.sub(replacement, name)
+        return (
+            replacement if cleaned in {"", ".", ".."} else cleaned
+        )  # "."/".." resolve to dir refs
     n = _INVALID_WIN.sub(replacement, name).rstrip(" .")
     if not n:
         return replacement

@@ -148,6 +148,8 @@ def test_sanitize_filename_posix_keeps_windows_only_chars():
     assert s("x\x00y") == "x_y"  # NUL / control chars still stripped
     assert s("CON") == "CON"  # device names aren't reserved on POSIX
     assert s("") == "_"
+    assert s(".") == "_"  # "." / ".." resolve to dir refs, not a real filename
+    assert s("..") == "_"
 
 
 def test_sanitize_filename_uses_the_host_platform(monkeypatch):

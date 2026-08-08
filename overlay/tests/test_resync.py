@@ -257,6 +257,7 @@ class TestAssUnderSrtNormalization:
         resync = _import_resync()
         assert resync._looks_ass(_ASS_BODY)  # BOM + [Script Info]
         assert resync._looks_ass("[V4+ Styles]\n")
+        assert resync._looks_ass("[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,D,hi\n")  # no header
         assert not resync._looks_ass("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
 
     def test_parse_cues_routes_an_ass_body_under_srt_name_to_the_ass_parser(self, tmp_path):

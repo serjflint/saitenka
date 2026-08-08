@@ -153,7 +153,7 @@ def _looks_ass(text: str) -> bool:
     """ASS/SSA content sniff. Some jimaku sources ship an ASS body under a ``.srt`` name (often + a BOM);
     alass keys the format off the EXTENSION and rejects it as SubRip ('parse error at line 0'), and
     ``_parse_cues`` would mis-route it to the SRT parser. Detect by content, not the filename."""
-    return text.lstrip(_BOM).lstrip().startswith(("[Script Info]", "[V4"))
+    return text.lstrip(_BOM).lstrip().startswith(("[Script Info]", "[V4", "[Events]"))
 
 
 _CUE_START = re.compile(r"(\d\d):(\d\d):(\d\d),(\d\d\d)\s*-->")  # SRT: HH:MM:SS,mmm -->
