@@ -155,6 +155,13 @@ def legacy_dict_artifacts() -> list[tuple[Path, int, int]]:
     return out
 
 
+def crash_dir() -> Path:
+    """Where crash reports are written (a subdir of the cache dir). Lives here, not in ``crashlog``,
+    so ``doctor``/``report`` can locate reports without importing the excepthook module (which reaches
+    back to them for the log tail / redaction) — the cycle that used to force it."""
+    return cache_dir() / "crashes"
+
+
 # --- mpv / mpv.net dirs (mirror mpv's own resolution) ------------------------------------------
 
 

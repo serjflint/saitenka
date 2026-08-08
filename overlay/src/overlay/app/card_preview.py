@@ -18,10 +18,10 @@ if TYPE_CHECKING:
     from overlay.app.tokenize import Token
 
 from overlay.app.lookup import furigana
-from overlay.draw.chip import ChipStyle, render_chip
 from overlay.draw.icon_source import Icon, render_icon
 from overlay.model import RGBA, Span, Style
 from overlay.panel import _DEFAULT_THEME, Theme
+from overlay.render.chip import ChipStyle, render_chip
 from overlay.render.flow import render_flow
 from overlay.render.layout import Block
 from overlay.sc.walk import inline_flow

@@ -17,6 +17,7 @@ from pathlib import Path
 from overlay.app.anki import AnkiError, CardContent, bold_word, build_note, dedupe
 from overlay.app.lookup import card_for
 from overlay.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
+from overlay.app.tokenize import SKIP_POS
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +43,6 @@ def source_meta(video) -> tuple[str, int | None]:
 def _select_bulk_targets(r) -> list[int]:
     """Token indices ``bulk_mine`` should mine: content words, not already "known"-colored, deduped
     by lemma (first occurrence wins), capped at ``r.max_bulk``."""
-    from overlay.app.controller import SKIP_POS
-
     targets, seen = [], set()
     for i, t in enumerate(r.tokens):
         if not (t.is_content and t.pos not in SKIP_POS):
@@ -70,8 +69,6 @@ class Miner:
     def mine_target(self) -> int | None:
         """Which token to mine: the hovered one, else the N+1 word, else the first content word."""
         r = self.r
-        from overlay.app.controller import SKIP_POS
-
         if r.hover >= 0:
             return r.hover
         if not r.tokens:

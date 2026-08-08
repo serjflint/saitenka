@@ -617,7 +617,7 @@ def check_subminer_conflict() -> Check:
 
 def check_crashes() -> Check:
     """Surface captured crash reports (from crashlog's excepthooks) so the user knows to send them."""
-    from overlay.app.crashlog import crash_dir
+    from overlay.app.paths import crash_dir
 
     d = crash_dir()
     reports = sorted(d.glob("crash-*.log")) if d.exists() else []

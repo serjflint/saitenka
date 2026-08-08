@@ -21,6 +21,10 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
+from overlay.app.paths import (
+    crash_dir,  # re-exported: tests + lifecycle monkeypatch crashlog.crash_dir
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -30,12 +34,6 @@ _SECRET_FLAGS = {"--jimaku-key", "--jimaku_key"}
 
 _installed = False
 _fault_fp = None  # keep the faulthandler file handle alive for the process lifetime
-
-
-def crash_dir() -> Path:
-    from overlay.app.paths import cache_dir
-
-    return cache_dir() / "crashes"
 
 
 def _redacted_command() -> str:

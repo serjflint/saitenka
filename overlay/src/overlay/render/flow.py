@@ -27,7 +27,7 @@ from overlay.render.ruby import RubyBox, _base_size, layout_ruby
 if TYPE_CHECKING:
     from PIL import Image, ImageDraw
 
-    from overlay.draw.chip import ChipStyle, Sprite
+    from overlay.render.chip import ChipStyle, Sprite
 
 
 @dataclass
@@ -101,13 +101,15 @@ class ChipBox:
     """A pre-rendered chip/pill/bordered-label sprite placed inline (text baseline on the line)."""
 
     text: str
-    chip_style: ChipStyle  # runtime import stays lazy to avoid the cycle
+    chip_style: ChipStyle
     _sprite: Sprite | None = None
 
     @property
     def sprite(self):
         if self._sprite is None:
-            from overlay.draw.chip import render_chip
+            from overlay.render.chip import (
+                render_chip,  # deferred: build the sprite on first placement
+            )
 
             self._sprite = render_chip(self.text, self.chip_style)
         return self._sprite

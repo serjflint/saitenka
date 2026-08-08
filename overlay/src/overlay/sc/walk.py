@@ -249,7 +249,7 @@ class _Walker:
         chip_label = label.strip()
         if not (0 < len(chip_label) <= 12 and "\n" not in label):
             return None
-        from overlay.draw.chip import ChipStyle
+        from overlay.render.chip import ChipStyle
 
         cstyle = _apply_style(node, style)
         bg = (
