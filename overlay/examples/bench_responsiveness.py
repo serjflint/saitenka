@@ -24,6 +24,7 @@ import sys
 import sysconfig
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from overlay.app.config import load_config
@@ -1539,25 +1540,36 @@ def _parse_trace_events(zip_path: str) -> tuple[list[dict], dict]:
     return out, meta
 
 
-def run_trace(  # noqa: PLR0913  # arg-clump — bundle into a config object (#216)
-    zip_path: str,
-    rt: dict,
-    *,
-    idle_scale: float,
-    idle_cap_ms: float,
-    loops: int,
-    lookahead: int,
-    head_prefetch: int,
-    workers: int,
-    raw_ceiling_mb: int,
-    require_ft: bool,
-    json_path: str | None,
-) -> int:
+@dataclass(frozen=True)
+class TraceParams:
+    """The ``--trace`` replay knobs (all from argparse): idle compression, the prefetch levers being
+    swept, the free-threading gate, and the JSON baseline sink. Bundled so :func:`run_trace` takes one
+    params value instead of a nine-arg clump."""
+
+    idle_scale: float
+    idle_cap_ms: float
+    loops: int
+    lookahead: int
+    head_prefetch: int
+    workers: int
+    raw_ceiling_mb: int
+    require_ft: bool
+    json_path: str | None
+
+
+def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
     """Replay a report's real event cadence with the idle gaps compressed by ``idle_scale`` (and
     optionally capped) — a stressful-but-real session: the real hover/scroll/cue mix and ordering, the
     real background prefetch workers warming during the (now shorter) gaps, real dict content. Compress
     idle *enough* to starve the workers' keep-ahead margin, not to zero (a machine-gun no user matches).
     Attach py-spy to this process to see where the main-thread critical path goes under load."""
+    idle_scale, idle_cap_ms, loops = params.idle_scale, params.idle_cap_ms, params.loops
+    lookahead, head_prefetch, workers = params.lookahead, params.head_prefetch, params.workers
+    raw_ceiling_mb, require_ft, json_path = (
+        params.raw_ceiling_mb,
+        params.require_ft,
+        params.json_path,
+    )
     ds, tag = _load_dict_set()
     if ds is None:
         print("--trace needs the real dict set (overlay.toml) — nothing to measure")
@@ -1969,15 +1981,17 @@ def main() -> int:
         return run_trace(
             args.trace,
             rt,
-            idle_scale=args.idle_scale,
-            idle_cap_ms=args.idle_cap_ms,
-            loops=args.trace_loops,
-            lookahead=args.trace_lookahead,
-            head_prefetch=args.trace_head_prefetch,
-            workers=args.trace_workers,
-            raw_ceiling_mb=args.trace_raw_ceiling_mb,
-            require_ft=args.require_ft,
-            json_path=args.json,
+            TraceParams(
+                idle_scale=args.idle_scale,
+                idle_cap_ms=args.idle_cap_ms,
+                loops=args.trace_loops,
+                lookahead=args.trace_lookahead,
+                head_prefetch=args.trace_head_prefetch,
+                workers=args.trace_workers,
+                raw_ceiling_mb=args.trace_raw_ceiling_mb,
+                require_ft=args.require_ft,
+                json_path=args.json,
+            ),
         )
 
     if args.timeline:
