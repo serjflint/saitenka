@@ -78,7 +78,10 @@ def test_collect_includes_dict_listing_and_mpv_log(monkeypatch, tmp_path):
     (tmp_path / "cache" / "mpv.log").write_text("[cplayer] mpv 0.40 started\n")
 
     members = report.collect(include_log=True)
-    assert "MyDict" in members["dicts.listing.txt"]  # imported dictionary listed
+    listing = members["dicts.listing.txt"]
+    assert "MyDict" in listing  # imported dictionary listed
+    assert "schema 1" in listing  # header carries schema + size (content-free)
+    assert "entries=1" in listing  # per-table counts — a missing tags table is now visible
     assert "mpv.log" in members and "mpv 0.40 started" in members["mpv.log"]
 
 

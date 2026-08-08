@@ -94,6 +94,30 @@ class DictRow:
     revision: str
 
 
+@dataclass(frozen=True)
+class DictStat:
+    """One imported dictionary's content-free inventory: its :class:`DictRow` plus per-table row
+    counts. A ``dict``-kind dictionary with ``entries`` but ``tags == 0`` is the tell of a
+    sidecar-era import that predates tags-in-sqlite — re-import to populate the tag pills."""
+
+    row: DictRow
+    imported_at: str
+    schema_version: int
+    counts: dict[str, int]  # entries / keys / kanji / term_meta / tags
+
+
+@dataclass(frozen=True)
+class DbStats:
+    """A content-free snapshot of the consolidated DB — safe to put in a diagnostics bundle: it names
+    no term, reading, or gloss, only the schema, file size, and per-dictionary row counts."""
+
+    path: Path
+    exists: bool
+    size_bytes: int
+    schema: int | None
+    dicts: list[DictStat]
+
+
 def _revision_of(zf: zipfile.ZipFile) -> str:
     try:
         return str(json.loads(zf.read("index.json")).get("revision", "") or "")
@@ -577,3 +601,33 @@ class DictionaryDb:
             ).fetchone()[0]
             for t in ("entries", "keys", "kanji", "term_meta", "tags")
         }
+
+    def stats(self) -> DbStats:
+        """Content-free inventory (schema, file size, per-dictionary row counts) for report/doctor —
+        no term/reading/gloss text, so it's safe in a shared diagnostics bundle. One grouped read of
+        the ``dictionaries`` table plus :meth:`dict_counts` per dict (a handful, off any hot path)."""
+        if not self.path.exists():
+            return DbStats(self.path, exists=False, size_bytes=0, schema=None, dicts=[])
+        raw = self.meta_get("schema")
+        meta = {
+            int(r[0]): (r[1] or "", int(r[2] or 0))
+            for r in self._conn().execute(
+                "SELECT id, imported_at, schema_version FROM dictionaries"
+            )
+        }
+        dicts = [
+            DictStat(
+                row,
+                meta.get(row.id, ("", 0))[0],
+                meta.get(row.id, ("", 0))[1],
+                self.dict_counts(row.id),
+            )
+            for row in self.list_dictionaries()
+        ]
+        return DbStats(
+            self.path,
+            exists=True,
+            size_bytes=self.path.stat().st_size,
+            schema=int(raw) if raw is not None and raw.isdigit() else None,
+            dicts=dicts,
+        )

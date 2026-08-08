@@ -111,6 +111,29 @@ def test_import_kanji_and_tags(tmp_path):
     assert k[0] == "ビョウ" and k[1] == "ねこ" and json.loads(k[2]) == ["cat"]
 
 
+def test_stats_reports_schema_size_and_per_dict_counts(tmp_path):
+    tagged = _term_zip(
+        tmp_path / "a.zip", "Tagged", [["猫", "ねこ", ["cat"]]], tags=[["★", "popular", 1]]
+    )
+    untagged = _term_zip(tmp_path / "b.zip", "Untagged", [["犬", "いぬ", ["dog"]]])  # no tag_bank
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    db.import_zip(tagged, imported_at=AT)
+    db.import_zip(untagged, imported_at=AT)
+    st = db.stats()
+    assert st.exists and st.schema == 1 and st.size_bytes > 0
+    by_title = {d.row.title: d for d in st.dicts}
+    assert by_title["Tagged"].counts["tags"] == 1
+    assert by_title["Tagged"].counts["entries"] == 1
+    assert by_title["Tagged"].imported_at == AT and by_title["Tagged"].schema_version == 1
+    # 0 tags for a dict-kind entry is the sidecar-era / no-tag-bank tell the report surfaces
+    assert by_title["Untagged"].counts["tags"] == 0
+
+
+def test_stats_on_a_missing_db_is_empty_not_an_error(tmp_path):
+    st = DictionaryDb(tmp_path / "absent.sqlite").stats()  # never opened → no file on disk
+    assert st.exists is False and st.dicts == [] and st.schema is None and st.size_bytes == 0
+
+
 def test_reimport_replaces_only_that_dictionary(tmp_path):
     a = _term_zip(tmp_path / "a.zip", "AAA", [["猫", "ねこ", ["cat"]]])
     b1 = _term_zip(tmp_path / "b1.zip", "BBB", [["犬", "いぬ", ["dog"]]])

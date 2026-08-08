@@ -248,6 +248,15 @@ def check_dict_db() -> list[Check]:
         Check("dict-db", "ok", f"{len(imported)} imported in {db_file}", info=True),
     ]
     checks += _title_checks(configured, imported)
+    # Per-dict row counts (info tier — --verbose/--json only). Surfaces a dict-kind dictionary with
+    # entries but tags=0: a sidecar-era import that never populated the tags table (re-import fixes it).
+    for d in db.stats().dicts:
+        nums = " ".join(
+            f"{k}={d.counts[k]}"
+            for k in ("entries", "keys", "kanji", "term_meta", "tags")
+            if d.counts[k]
+        )
+        checks.append(Check("dict-db", "ok", f"{d.row.kind}: {d.row.title} — {nums}", info=True))
     return checks
 
 

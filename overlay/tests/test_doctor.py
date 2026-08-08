@@ -146,6 +146,23 @@ def test_dict_db_default_view_is_a_counts_line_not_a_wall(tmp_path, monkeypatch)
     )
 
 
+def test_dict_db_lists_per_dict_table_counts_as_info(tmp_path, monkeypatch):
+    # Per-dict row counts are info-tier (--verbose/--json only) — a dict with entries but no tags
+    # token is the sidecar-era import tell, surfaced without cluttering the default view.
+    import dicthelp
+
+    z = dicthelp.term_zip(tmp_path / "Gamma.zip", "Gamma", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Gamma"]\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    checks = doc.check_dict_db()
+    line = next(c for c in checks if c.detail.startswith("dict: Gamma —"))
+    assert line.info and line.status == "ok"
+    assert "entries=1" in line.detail
+    assert "tags=" not in line.detail  # no tag_bank imported → tags omitted (the 0-tags signal)
+
+
 def test_legacy_files_check_ok_when_none(monkeypatch):
     monkeypatch.setattr("overlay.app.paths.legacy_dict_artifacts", list)
     assert doc.check_legacy_files().status == "ok"
