@@ -1701,6 +1701,9 @@ class Reader:
         )  # this IS the render loop — native rasterisation must run on a worker
         interval = interval if interval is not None else self.poll_interval
         self.refresh_osd()
+        # Re-register observers after an IPC reconnect (mpv.net drops the pipe mid-session; a fresh
+        # connection has forgotten every observe_property) — runs on the IPC thread inside pump().
+        self.ipc.on_reconnect = self.start_observing
         self.start_observing()  # event-driven property reads from here on
         self._register_keybinds()
         self._seed_mined()

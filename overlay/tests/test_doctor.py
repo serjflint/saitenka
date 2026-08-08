@@ -59,6 +59,17 @@ def test_mpv_check_mpvnet_unparseable_version(monkeypatch):
     assert "mpv.net" in c.detail
 
 
+def test_mpv_check_mpvnet_parseable_version_is_labeled(monkeypatch):
+    # The friend's case: mpv.net reports a parseable "mpv 0.41" — label it mpv.net so the report names
+    # which player is active (its IPC/track quirks differ from vanilla mpv).
+    monkeypatch.setattr(doc, "_run", lambda *_a, **_k: "mpv 0.41.0\n")
+    _patch_find_mpv(monkeypatch, r"C:\\Users\\x\\Programs\\mpv.net\\mpvnet.exe")
+    c = doc.check_mpv()
+    assert c.status == "ok"
+    assert "mpv.net" in c.detail
+    assert "0.41" in c.detail
+
+
 def test_ffmpeg_check_needs_aac(monkeypatch):
     monkeypatch.setattr(doc.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(

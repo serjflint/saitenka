@@ -136,9 +136,10 @@ def check_mpv() -> Check:
         return Check("mpv", "warn", f"mpv version unparseable — {detail}")
     ver = (int(m.group(1)), int(m.group(2)))
     vs = f"{ver[0]}.{ver[1]}"
+    label = "mpv.net" if "mpvnet" in Path(mpv).name.lower() else "mpv"
     if ver < MPV_MIN:
-        return Check("mpv", "fail", f"mpv {vs} too old — need ≥ 0.37 for overlay-add BGRA")
-    return Check("mpv", "ok", f"mpv {vs} ({mpv})")
+        return Check("mpv", "fail", f"{label} {vs} too old — need ≥ 0.37 for overlay-add BGRA")
+    return Check("mpv", "ok", f"{label} {vs} ({mpv})")
 
 
 def check_ffmpeg() -> Check:
