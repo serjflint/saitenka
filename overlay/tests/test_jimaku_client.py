@@ -309,6 +309,37 @@ def test_fetch_no_files_raises(monkeypatch, tmp_path):
         _client().fetch("X", 5, tmp_path)
 
 
+# --- verify_key: the post-save / doctor liveness probe classification ----------------------------
+
+
+def test_verify_key_ok_on_search_hit(monkeypatch):
+    """A successful search → ("ok", "<n> entrie(s) …") so set-jimaku-key can confirm the key works."""
+    _patch_urlopen(monkeypatch, _fake_urlopen([{"name": "Spy x Family"}]))
+    status, msg = jimaku.verify_key("goodkey", "Spy x Family")
+    assert status == "ok"
+    assert "1 entrie(s)" in msg and "Spy x Family" in msg
+
+
+def test_verify_key_bad_on_401(monkeypatch):
+    """A full-length but WRONG key (401) → ("bad", …) — the class the length guard can't catch."""
+    _patch_urlopen(monkeypatch, _raising_urlopen(_http_error(401)))
+    status, msg = jimaku.verify_key("wrongkey")
+    assert status == "bad"
+    assert "set-jimaku-key" in msg  # the client's 401 hint is surfaced
+
+
+def test_verify_key_unknown_on_network_error(monkeypatch):
+    """A network/transient failure → ("unknown", …): can't tell, so a correct save is NOT failed."""
+    _patch_urlopen(monkeypatch, _raising_urlopen(urllib.error.URLError("dns dead")))
+    stamina.set_testing(True, attempts=1)
+    try:
+        status, msg = jimaku.verify_key("somekey")
+    finally:
+        stamina.set_testing(False)
+    assert status == "unknown"
+    assert "network" in msg.lower()
+
+
 # --- small helpers --------------------------------------------------------------------------------
 
 

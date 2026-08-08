@@ -136,6 +136,75 @@ def test_store_key_uses_keyring_when_available(monkeypatch, tmp_path):
     assert "key" not in loaded["jimaku"]  # the secret stays in the keyring, not the config
 
 
+def test_keyring_enabled_env_override_wins(monkeypatch, tmp_path):
+    """$SAITENKA_JIMAKU_KEYRING is a one-off override that beats the config file."""
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text("[jimaku]\nkeyring = true\n")
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    for val, want in (("0", False), ("false", False), ("off", False), ("1", True), ("yes", True)):
+        monkeypatch.setenv("SAITENKA_JIMAKU_KEYRING", val)
+        assert jimaku.keyring_enabled() is want
+
+
+def test_keyring_enabled_reads_config_and_defaults_true(monkeypatch, tmp_path):
+    monkeypatch.delenv("SAITENKA_JIMAKU_KEYRING", raising=False)
+    cfg = tmp_path / "overlay.toml"
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    cfg.write_text("[jimaku]\nkeyring = false\n")
+    assert jimaku.keyring_enabled() is False
+    cfg.write_text("[jimaku]\nfetch = true\n")  # key absent → default enabled
+    assert jimaku.keyring_enabled() is True
+
+
+def test_resolve_skips_keychain_when_keyring_disabled(monkeypatch):
+    """A disabled keyring must not issue the read at all (the Windows-AV trigger) — resolve falls
+    straight to the file, never calling keychain_get."""
+    monkeypatch.delenv("JIMAKU_API_KEY", raising=False)
+    monkeypatch.setenv("SAITENKA_JIMAKU_KEYRING", "0")
+
+    def _boom():
+        raise AssertionError("keychain_get must not be called when the keyring is disabled")
+
+    monkeypatch.setattr(jimaku, "keychain_get", _boom)
+    monkeypatch.setattr(jimaku, "key_file_get", lambda: "filekey")
+    assert jimaku.resolve_jimaku_key() == ("filekey", "file")
+
+
+def test_store_key_prefer_file_forces_file_and_persists_optout(monkeypatch, tmp_path):
+    """--file skips the keyring even when it works AND writes [jimaku].keyring=false so a later read
+    also bypasses the Credential Locker (the Windows-AV escape hatch)."""
+    from overlay.app import init_wizard
+    from overlay.app.config import load_config
+
+    cfg = tmp_path / "overlay.toml"
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+
+    def _keyring_must_not_run(_k):
+        raise AssertionError("keychain_set must not run under prefer_file")
+
+    monkeypatch.setattr("overlay.app.jimaku.keychain_set", _keyring_must_not_run)
+    method, _ = init_wizard.store_jimaku_key("MYKEY123", prefer_file=True)
+    assert method == "file"
+    loaded = load_config()
+    assert loaded["jimaku"]["keyring"] is False  # opt-out persisted
+    assert loaded["jimaku"]["fetch"] is True
+    assert cfg.with_name("jimaku.key").read_text(encoding="utf-8") == "MYKEY123\n"
+
+
+def test_store_key_no_backend_fallback_keeps_keyring_enabled(monkeypatch, tmp_path):
+    """A no-backend fallback (headless Linux) uses the file but must NOT record keyring=false — the
+    opt-out is only for a deliberate --file, not a transient missing backend."""
+    from overlay.app import init_wizard
+    from overlay.app.config import load_config
+
+    cfg = tmp_path / "overlay.toml"
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    monkeypatch.setattr("overlay.app.jimaku.keychain_set", lambda _k: False)  # no backend
+    method, _ = init_wizard.store_jimaku_key("MYKEY123")
+    assert method == "file"
+    assert "keyring" not in load_config()["jimaku"]  # not a deliberate opt-out
+
+
 def test_resolve_strips_whitespace_and_newlines(monkeypatch):
     """A stray trailing newline/space (paste artifact) must be stripped — else urllib rejects the
     Authorization header (ValueError: Invalid header value)."""

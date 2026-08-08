@@ -130,19 +130,27 @@ def write_config(
     return backup
 
 
-def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, Path | None]:
+def store_jimaku_key(
+    k: str, confirm: Confirm = lambda _p: True, *, prefer_file: bool = False
+) -> tuple[str, Path | None]:
     """Persist the jimaku key where a plugin-mode (GUI-launched) mpv can read it: the OS secret store
     via ``keyring`` (macOS Keychain / Windows Credential Locker / opt-in Linux Secret Service), else
     a private file next to the config. Returns ``(method, backup)`` where method is ``"keyring"`` or
     ``"file"``.
 
+    ``prefer_file`` (or a disabled keyring — see :func:`jimaku.keyring_enabled`) skips the OS store and
+    persists ``[jimaku].keyring = false`` so a later read also bypasses it — the escape hatch for the
+    Windows AV that flags the first Credential Locker read. A no-backend fallback (headless Linux)
+    still uses the file but leaves keyring enabled — the opt-out is only recorded when it's deliberate.
+
     Either way it writes ``[jimaku].fetch = true``: setting a key MEANS "fetch JP subs from jimaku when
     a file has no JP track", so ``run``/``attach`` act on it without a flag. It also gives the installer
     a plain-text config marker that jimaku is set up (the keyring isn't cheaply readable from a shell)."""
     from overlay.app.config import load_config
-    from overlay.app.jimaku import key_file_set, keychain_set
+    from overlay.app.jimaku import key_file_set, keychain_set, keyring_enabled
 
-    if keychain_set(k):
+    opted_out = prefer_file or not keyring_enabled()
+    if not opted_out and keychain_set(k):
         method = "keyring"
     else:
         key_file_set(k)
@@ -151,6 +159,8 @@ def store_jimaku_key(k: str, confirm: Confirm = lambda _p: True) -> tuple[str, P
     jm = dict(cfg.get("jimaku") or {})
     jm["fetch"] = True
     jm.pop("key", None)
+    if opted_out:  # record the deliberate opt-out so resolve() skips the keyring read too
+        jm["keyring"] = False
     backup = write_config({**cfg, "jimaku": jm}, confirm=confirm, remove=(("jimaku", "key"),))
     return method, backup
 

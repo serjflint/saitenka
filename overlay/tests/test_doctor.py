@@ -544,6 +544,21 @@ def test_jimaku_enabled_without_key_warns(tmp_path, monkeypatch):
     assert c.status == "warn" and "set-jimaku-key" in c.detail
 
 
+def test_jimaku_no_key_on_windows_points_at_file_fallback(tmp_path, monkeypatch):
+    """On Windows a key can silently fail to resolve when AV blocks the Credential Locker read; the
+    no-key warning then points at the `--file` escape hatch."""
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text("[jimaku]\nenabled = true\n")
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    monkeypatch.delenv("JIMAKU_API_KEY", raising=False)
+    from overlay.app import jimaku
+
+    monkeypatch.setattr(jimaku, "keychain_get", lambda: None)  # AV-blocked / empty keyring
+    monkeypatch.setattr(doc.sys, "platform", "win32")
+    c = doc.check_jimaku()
+    assert c.status == "warn" and "--file" in c.detail and "antivirus" in c.detail
+
+
 def test_jimaku_env_only_warns_about_gui(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
     cfg.write_text("[jimaku]\nenabled = true\n")

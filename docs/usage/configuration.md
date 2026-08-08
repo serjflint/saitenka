@@ -184,6 +184,15 @@ $ saitenka set-jimaku-key <your-key>
     (or an owner-only `jimaku.key` beside the config on Linux without the `linux-keyring` extra), so a
     GUI-launched mpv — which can't inherit a shell-only variable — can still read it.
 
+    After saving, it runs a one-shot test search against jimaku.cc and reports whether the key works
+    (`--no-verify` to skip). This catches a wrong-but-full-length key that would otherwise fail silently
+    mid-video; run the same check any time with `saitenka jimaku-check`.
+
+!!! warning "Windows: antivirus flagging the Credential Locker"
+    If your AV blocks the first Credential Locker read, store the key in the owner-only file instead and
+    skip the keyring on both write and read: `saitenka set-jimaku-key --file <your-key>` (it persists
+    `[jimaku] keyring = false`). A one-off `SAITENKA_JIMAKU_KEYRING=0` does the same for a single run.
+
 ## Rebinding keys
 
 Most in-player shortcuts are configurable — `translate_key`, `sub_next_key`, the `[mine]` keys, and
