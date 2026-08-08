@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786221801002,
+  "lastUpdate": 1786227806021,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1583,6 +1583,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.857,
             "range": "±0.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c52136d3a87ac1aa4d9658a5d46768280363494a",
+          "message": "Merge pull request #241 from serjflint/feat/jimaku-verify-and-keyring-optout\n\nfeat(jimaku): verify key after save + keyring opt-out for Windows AV",
+          "timestamp": "2026-08-09T01:22:57+03:00",
+          "tree_id": "357b1d32f2d9c6d45aa2e30338d2b8891ffe9b88",
+          "url": "https://github.com/serjflint/saitenka/commit/c52136d3a87ac1aa4d9658a5d46768280363494a"
+        },
+        "date": 1786227804867,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.921,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.049,
+            "range": "±3.7%",
             "unit": "ms"
           }
         ]
