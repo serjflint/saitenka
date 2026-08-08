@@ -25,10 +25,10 @@ from overlay.body_block import (
     raster_body_window,
     render_body_block,
 )
-from overlay.draw.chip import ChipStyle
 from overlay.draw.icon_source import Icon, render_icon
 from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme
 from overlay.parallel import shared_executor
+from overlay.render.chip import ChipStyle
 from overlay.render.document import GUTTER_PX, INDENT_PX
 from overlay.render.flow import ChipBox, ImgBox, render_flow
 from overlay.render.layout import Block as FlowBlock

@@ -771,7 +771,7 @@ def test_pitch_source_reading_and_positions(tmp_path):
 
 def test_read_json_bank_recovers_wrong_crc(tmp_path):
     import pytest
-    from overlay.app.wordlists import read_json_bank
+    from overlay.app.bankreader import read_json_bank
 
     p = tmp_path / "meta.zip"
     entry = [["本命", "pitch", {"reading": "ほんめい", "pitches": [{"position": 0}]}]]

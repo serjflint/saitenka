@@ -187,7 +187,7 @@ def _collect_dict_inventory() -> dict[str, str]:
 
 def _collect_crashes() -> dict[str, str]:
     """Recent crash reports (already redacted at write time; the whole point of capturing them)."""
-    from overlay.app.crashlog import crash_dir
+    from overlay.app.paths import crash_dir
 
     members: dict[str, str] = {}
     cd = crash_dir()

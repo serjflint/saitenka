@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from overlay.app import paths
+from overlay.app.bankreader import _title_of, classify_zip, read_json_bank
 from overlay.app.config import DictDbOptions, resolve_dictdb
 
 if TYPE_CHECKING:
@@ -91,14 +92,6 @@ class DictRow:
     import_order: int
     source_name: str
     revision: str
-
-
-def _title_of(zf: zipfile.ZipFile, fallback: str) -> str:
-    try:
-        return json.loads(zf.read("index.json")).get("title", fallback) or fallback
-    except Exception:
-        log.debug("index.json title read failed", exc_info=True)
-        return fallback
 
 
 def _revision_of(zf: zipfile.ZipFile) -> str:
@@ -185,8 +178,6 @@ def _read_term_meta(
     and the JLPT ``{"frequency": {"value": -1, "displayValue": "N5"}}`` form) and pitch entries
     (``{"reading", "pitches": [{"position": n}]}``) — the same shapes ``wordlists`` parses at read time.
     """
-    from overlay.app.wordlists import read_json_bank
-
     for name in sorted(zf.namelist()):
         if not (name.startswith("term_meta_bank") and name.endswith(".json")):
             continue
@@ -237,8 +228,6 @@ def _apply_occurrence_ranks(
 
 def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int]]:
     """Yomitan ``tag_bank_*.json`` → [(code, display_name, order)] for defTag pills (★ / priority form)."""
-    from overlay.app.wordlists import read_json_bank
-
     out: list[tuple[str, str, int]] = []
     for name in sorted(zf.namelist()):
         if name.startswith("tag_bank") and name.endswith(".json"):
@@ -393,8 +382,6 @@ class DictionaryDb:
         tables in a single transaction (so a mid-import failure leaves the DB untouched). ``on_bank``,
         if given, is called ``(done, total)`` per bank for progress. Returns the new :class:`DictRow`.
         """
-        from overlay.app.yomitan_import import classify_zip
-
         zp = Path(zip_path)
         kind = classify_zip(zp)
         conn = sqlite3.connect(self.path)
@@ -438,8 +425,6 @@ class DictionaryDb:
     def _load_term_bank(
         self, conn: sqlite3.Connection, zf: zipfile.ZipFile, name: str, did: int, rid: int
     ) -> int:
-        from overlay.app.wordlists import read_json_bank
-
         bank = read_json_bank(zf, name)  # tolerant of wrong-CRC Yomitan zips (data intact)
         if bank is None:
             return rid
@@ -458,8 +443,6 @@ class DictionaryDb:
     def _load_kanji_bank(
         self, conn: sqlite3.Connection, zf: zipfile.ZipFile, name: str, did: int
     ) -> None:
-        from overlay.app.wordlists import read_json_bank
-
         bank = read_json_bank(zf, name)  # [char, onyomi, kunyomi, tags, meanings[], stats{}]
         if bank is None:
             return

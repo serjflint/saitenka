@@ -18,7 +18,6 @@ user to supply a ``--scan-dir`` that contains them.
 from __future__ import annotations
 
 import json
-import re
 import sys
 import zipfile
 from dataclasses import dataclass
@@ -32,11 +31,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 MAX_SETTINGS_BYTES = 50 * 1024 * 1024  # a settings export is < 1 MB; refuse a collection export
-
-# Yomitan dictionary banks: definition dicts ship term_bank glossaries; frequency and pitch dicts
-# ship term_meta banks (``[term, "freq"|"pitch", data]``). We classify by the term_meta MODE — never
-# by the title, and never by mere term_bank presence (pitch dicts carry headword term_banks too).
-_META_BANK = re.compile(r"term_meta_bank_\d+\.json$")
 
 
 class YomitanImportError(RuntimeError):
@@ -55,42 +49,6 @@ class YomitanSettings:
     dictionaries: list[DictRef]  # enabled-first, priority-desc order
     scan_modifier: str
     popup_scale: float
-
-
-def classify_zip(zip_path: str | Path) -> str:
-    """Classify a Yomitan dictionary zip by its CONTENT (the way Yomitan does): ``"freq"`` /
-    ``"pitch"`` / ``"dict"``.
-
-    Definition dictionaries carry ``term_bank_*.json`` glossaries; frequency and pitch dictionaries
-    carry ``term_meta_bank_*.json`` whose entries are ``[term, "freq"|"pitch", data]``. The term-meta
-    **mode wins**: a pitch (or freq) dict often ALSO ships headword ``term_bank`` files — the popular
-    NHK 2016 pitch dict does — so keying off "has a term_bank" would misfile it as a definition dict
-    (the exact bug: pitch accents never rendered because the dict landed in ``dicts``, not ``pitch``).
-    Only when there's no freq/pitch term-meta does a term_bank make it a definition dict. Falls back to
-    ``"dict"`` when the zip can't be read or has no recognisable banks — the title is never consulted.
-    """
-    # Read the term_meta bank CRC-tolerantly: some Yomitan pitch/freq exports (notably NHK 2016
-    # pitch) ship a WRONG stored CRC-32 on intact deflate data, and a strict read would raise
-    # BadZipFile → the dict would silently fall back to "dict" and its pitch/freq never render.
-    from overlay.app.wordlists import read_json_bank
-
-    modes: set[str] = set()
-    try:
-        with zipfile.ZipFile(zip_path) as zf:
-            metas = sorted(n for n in zf.namelist() if _META_BANK.match(n))
-            for n in metas[:2]:  # first bank suffices; try a 2nd only if the 1st yields nothing
-                for entry in read_json_bank(zf, n) or []:
-                    if len(entry) >= 2 and isinstance(entry[1], str):
-                        modes.add(entry[1])
-                if modes:
-                    break
-    except (OSError, KeyError, zipfile.BadZipFile, json.JSONDecodeError, ValueError, TypeError):
-        return "dict"
-    if "pitch" in modes:
-        return "pitch"
-    if "freq" in modes:
-        return "freq"
-    return "dict"
 
 
 def parse_settings(path: str | Path) -> YomitanSettings:

@@ -14,6 +14,7 @@ import json
 import zipfile
 
 import pytest
+from overlay.app import bankreader
 from overlay.app import yomitan_import as yi
 
 
@@ -89,15 +90,18 @@ def test_parse_reads_scan_modifier_and_scale(tmp_path):
 
 def test_classify_by_content(tmp_path):
     # classification looks at the banks, not the filename/title
-    assert yi.classify_zip(_make_dict_zip(tmp_path / "a.zip", "dict")) == "dict"
-    assert yi.classify_zip(_make_dict_zip(tmp_path / "b.zip", "freq")) == "freq"
-    assert yi.classify_zip(_make_dict_zip(tmp_path / "c.zip", "pitch")) == "pitch"
+    assert bankreader.classify_zip(_make_dict_zip(tmp_path / "a.zip", "dict")) == "dict"
+    assert bankreader.classify_zip(_make_dict_zip(tmp_path / "b.zip", "freq")) == "freq"
+    assert bankreader.classify_zip(_make_dict_zip(tmp_path / "c.zip", "pitch")) == "pitch"
     # a pitch dict that ALSO ships headword term_banks (NHK 2016) is still pitch — the term_meta mode
     # wins, so it lands in the `pitch` bucket and pitch accents render (regression: it was mis-filed as
     # a definition dict because it had a term_bank).
-    assert yi.classify_zip(_make_dict_zip(tmp_path / "d.zip", "pitch_with_headwords")) == "pitch"
+    assert (
+        bankreader.classify_zip(_make_dict_zip(tmp_path / "d.zip", "pitch_with_headwords"))
+        == "pitch"
+    )
     # unreadable / missing / non-dictionary zip → safe default
-    assert yi.classify_zip(tmp_path / "missing.zip") == "dict"
+    assert bankreader.classify_zip(tmp_path / "missing.zip") == "dict"
 
 
 def test_classify_tolerates_wrong_crc_pitch(tmp_path, monkeypatch):
@@ -113,7 +117,7 @@ def test_classify_tolerates_wrong_crc_pitch(tmp_path, monkeypatch):
     # sanity: a strict read really does reject this zip (so the tolerant path is what saves it)
     with zipfile.ZipFile(z) as zf, pytest.raises(zipfile.BadZipFile):
         zf.read("term_meta_bank_1.json")
-    assert yi.classify_zip(z) == "pitch"
+    assert bankreader.classify_zip(z) == "pitch"
 
 
 def test_import_zips_buckets_titles_by_content_and_order(tmp_path):

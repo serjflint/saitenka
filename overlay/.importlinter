@@ -9,24 +9,14 @@ name = No import cycles among overlay's top-level packages
 type = acyclic_siblings
 ancestors =
     overlay
-# Ratchet baseline (2026-07-23): overlay/ is NOT layer-pure today (sc/model.py:11 already imports
-# overlay.render; sc/walk.py:19,230 too). These entries
-# grandfather the pre-existing cycles found on adoption so the gate is green on day one; burn them
-# down under the Stage 5 controller.py split, never add new ones. The mpvio<->app cycle (2 imports)
-# was fixed outright, not ratcheted: overlay/app/otel_metrics.py moved to overlay/otel_metrics.py —
-# it's a leaf instrumentation module with no app/ dependencies, so mpvio importing it from app/ was
-# a pure layering accident, not a real coupling. A facade wasn't needed; relocating the module to its
-# correct layer removed the backward edge entirely.
-# Burned down 2026-07-25: render.document -> sc.model and otel_export -> telemetry were removed here
-# when the ruff `TC` autofix moved those (typing-only) imports into TYPE_CHECKING blocks, so they are
-# no longer runtime edges — the ratchet tightened for free. Never re-add; only remove as edges vanish.
-ignore_imports =
-    overlay.draw.chip -> overlay.render.layout
-    overlay.app.dictdb -> overlay.app.yomitan_import
-    overlay.app.doctor -> overlay.app.crashlog
-    overlay.app.controller -> overlay.app.miner
-    overlay.app.report -> overlay.app.crashlog
-    overlay.app.dictdb -> overlay.app.wordlists
+# Fully enforced — zero grandfathered cycles remain (#30, burned down 2026-08-08). Every edge once
+# ratcheted here is gone: mpvio<->app (otel_metrics relocated to its leaf layer) and
+# render.document->sc.model / otel_export->telemetry (moved into TYPE_CHECKING) earlier; then, closing
+# #30, draw.chip->render.layout (chip moved into render/, since it consumes layout), dictdb<->yomitan_import
+# and dictdb<->wordlists (the pure zip-parse helpers classify_zip/read_json_bank/_title_of extracted to the
+# leaf app/bankreader.py), doctor/report<->crashlog (crash_dir() moved to the leaf app/paths.py), and
+# controller<->miner (miner imports SKIP_POS from its real home app/tokenize, not controller).
+# No ignore_imports — the contract is exhaustive. Never add one; only sever edges.
 
 [importlinter:contract:layers]
 name = Package layering — a lower layer must not import a higher one
@@ -47,17 +37,15 @@ layers =
     overlay.draw
     overlay.sc
     overlay.model
-# Ratchet baseline (2026-08): pre-existing runtime backedges, same debt no-cycles already grandfathers.
-# - sc.walk imports render/draw for the Inline type (the coupling burned down under the controller split).
-# - draw.chip -> render.layout is the render<->draw cycle's back-edge (render.flow -> draw.chip is the
-#   forward one, so render sits above draw); already grandfathered in no-cycles.
+# Ratchet baseline (2026-08): pre-existing runtime backedges (a backedge is a direction violation even
+# without a round-trip, so these outlive the no-cycles burn-down).
+# - sc.walk imports render for the Inline type (the coupling burned down under the controller split).
 # - raster.pillow_backend reaches up to panel + mpvio.osd — it is high-level backend glue miscategorised
 #   under raster/; ratcheted here, move it to burn these down. Never add a new entry; only remove.
 ignore_imports =
     overlay.sc.walk -> overlay.render.ruby
     overlay.sc.walk -> overlay.render.flow
-    overlay.sc.walk -> overlay.draw.chip
-    overlay.draw.chip -> overlay.render.layout
+    overlay.sc.walk -> overlay.render.chip
     overlay.raster.pillow_backend -> overlay.panel
     overlay.raster.pillow_backend -> overlay.mpvio.osd
 

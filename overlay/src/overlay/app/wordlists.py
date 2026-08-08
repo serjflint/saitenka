@@ -14,7 +14,6 @@ The freq-value shapes seen in the wild (all handled at import time in ``dictdb``
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import logging
@@ -35,34 +34,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@contextlib.contextmanager
-def _crc_lenient():
-    """Temporarily disable zipfile CRC-32 validation. Some Yomitan dict exporters (notably certain
-    pitch-accent dicts) write wrong/zero CRCs even though the deflate data is perfectly intact;
-    Python's strict check would otherwise reject them. Scoped + restored, single-threaded use."""
-    orig = zipfile.ZipExtFile._update_crc  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # deliberate
-    zipfile.ZipExtFile._update_crc = lambda _self, *_: None  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # patched sig takes the data chunk; ignored
-    try:
-        yield
-    finally:
-        zipfile.ZipExtFile._update_crc = orig  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # restore
-
-
-def read_json_bank(zf: zipfile.ZipFile, name: str):
-    """Read + parse one bank, tolerating a wrong stored CRC (the data is still valid). Returns the
-    decoded list, or None only if the JSON itself is unparseable."""
-    try:
-        return json.loads(zf.read(name))
-    except zipfile.BadZipFile:
-        try:
-            with _crc_lenient():
-                return json.loads(zf.read(name))
-        except (zipfile.BadZipFile, ValueError):
-            return None
-    except ValueError:
-        return None
-
-
 ASSETS = asset("wordlists")  # importlib.resources so the wheel path works too
 JLPT_ZIP = ASSETS / "jlpt.zip"
 
@@ -78,7 +49,7 @@ def ensure_bundled_jlpt(db: DictionaryDb) -> int:
     other dictionary is built only by an explicit ``import`` command."""
     from datetime import datetime
 
-    from overlay.app.dictdb import _title_of
+    from overlay.app.bankreader import _title_of
 
     with zipfile.ZipFile(JLPT_ZIP) as zf:
         title = _title_of(zf, "JLPT")
