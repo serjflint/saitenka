@@ -12,6 +12,7 @@ from overlay.app.controller import Reader
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.subtitle_render import NullRenderer
 from overlay.app.tooltip import PanelKey
+from util import keybind_registry
 
 
 class FakeIPC:
@@ -216,14 +217,9 @@ def _reader_with_index(monkeypatch):
 
 
 def _msg_for(ipc, key):
-    # Only script-message binds carry a message; skip the `keybind KEY ignore` no-op unbinds that
-    # tooltip teardown emits (a key can be bound then neutralised — the bind is what we want here).
-    binds = {
-        c[1]: c[2].split("script-message ", 1)[1]
-        for c in ipc.commands
-        if c and c[0] == "keybind" and "script-message " in c[2]
-    }
-    return binds[key]
+    # The message currently bound to `key` (KeyError if unbound). Shared parse: keybind_registry honours
+    # later-binds-over-earlier and the `keybind KEY ignore` unbinds tooltip teardown emits.
+    return keybind_registry(ipc)[key]
 
 
 def test_anchor_snaps_the_nearest_cue_start_to_the_playhead(monkeypatch):
