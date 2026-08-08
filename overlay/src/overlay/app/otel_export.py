@@ -168,21 +168,33 @@ class CTFSpanProcessor(SpanProcessor):
         return [_counter_event(name, value, ts_ns) for name, value in values.items()]
 
     def _write_events(self, events: list[dict[str, object]]) -> None:
-        """One open + one write for the whole batch. First call creates the document; later calls seek
-        past the trailing ``]}`` and splice the batch in — O(new events), not O(events so far). Caller
-        holds ``_io_lock`` (guards ``_initialized`` + the file position)."""
+        """One open + one write for the whole batch. First call (or after the file vanishes) creates the
+        document; later calls seek past the trailing ``]}`` and splice the batch in — O(new events), not
+        O(events so far). Caller holds ``_io_lock`` (guards ``_initialized`` + the file position)."""
         chunk = b",".join(msgspec.json.encode(e) for e in events)
         try:
-            if not self._initialized:
-                with self._path.open("wb") as f:
-                    f.write(b'{"traceEvents":[' + chunk + self._CLOSING)
-                self._initialized = True
-            else:
-                with self._path.open("r+b") as f:
-                    f.seek(-len(self._CLOSING), 2)
-                    f.write(b"," + chunk + self._CLOSING)
+            self._splice(chunk)
         except OSError:
-            log.debug("CTF write failed", exc_info=True)
+            # The trace file (or its dir) vanished mid-run — a cache cleanup or a session rotation
+            # removed it out from under us. Recreate it and re-write THIS batch, instead of retrying the
+            # dead ``r+b`` append every tick forever (seen ~579×/run at debug). Only a second, immediate
+            # failure is logged — a genuinely unwritable target, not a transient disappearance.
+            self._initialized = False
+            try:
+                self._splice(chunk)
+            except OSError:
+                log.debug("CTF write failed", exc_info=True)
+
+    def _splice(self, chunk: bytes) -> None:
+        if not self._initialized:
+            self._path.parent.mkdir(parents=True, exist_ok=True)  # dir may have been cleaned too
+            with self._path.open("wb") as f:
+                f.write(b'{"traceEvents":[' + chunk + self._CLOSING)
+            self._initialized = True
+        else:
+            with self._path.open("r+b") as f:
+                f.seek(-len(self._CLOSING), 2)
+                f.write(b"," + chunk + self._CLOSING)
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # noqa: ARG002  # base-class signature; unused
         """Drain + write synchronously on the calling thread. Airtight only against a stopped writer
