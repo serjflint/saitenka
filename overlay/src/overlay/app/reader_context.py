@@ -14,12 +14,15 @@ import queue
 import threading
 from typing import TYPE_CHECKING, overload
 
+from overlay.app.languages import MAIN_LANG
+
 if TYPE_CHECKING:
     from overlay.app.backlog import BacklogStore
+    from overlay.app.languages import Language
     from overlay.app.render_cache import RenderCache
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
-    from overlay.app.subtitle_modes import Language, ProviderFetchFactory
+    from overlay.app.subtitle_modes import ProviderFetchFactory
     from overlay.mask_atlas import MaskAtlas
 
 
@@ -61,7 +64,7 @@ class SubtitleSource:
     def __init__(self) -> None:
         self.jp_sid: int | None = None
         self.en_sid: int | None = None
-        self.language: Language = "jp"
+        self.language: Language = MAIN_LANG
         self.slang = "ja,jpn,jp"
         self.results: queue.SimpleQueue = queue.SimpleQueue()
         self.fetch_threads: list[threading.Thread] = []

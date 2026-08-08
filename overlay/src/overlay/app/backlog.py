@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from overlay.app import paths
 from overlay.app.jimaku import parse_filename
+from overlay.app.languages import MAIN_LANG
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,7 +50,7 @@ def _track_metadata(tracks: list[object], sid: int | None) -> dict[str, object]:
 
 def _cue_languages(reader) -> tuple[str, str]:
     secondary = reader._secondary_text()
-    if reader.subtitle_language == "jp":
+    if reader.subtitle_language == MAIN_LANG:
         return reader.sub_text, secondary
     return secondary, reader.sub_text
 
@@ -474,8 +475,12 @@ def capture_current(reader) -> BacklogEntry | None:
         en_text=en_text,
         subtitle_track={
             "language": reader.subtitle_language,
-            "primary_sid": reader.jp_sid if reader.subtitle_language == "jp" else reader.en_sid,
-            "secondary_sid": reader.en_sid if reader.subtitle_language == "jp" else reader.jp_sid,
+            "primary_sid": reader.jp_sid
+            if reader.subtitle_language == MAIN_LANG
+            else reader.en_sid,
+            "secondary_sid": reader.en_sid
+            if reader.subtitle_language == MAIN_LANG
+            else reader.jp_sid,
             "jp_sid": reader.jp_sid,
             "en_sid": reader.en_sid,
             "jp_track": _track_metadata(tracks, reader.jp_sid),

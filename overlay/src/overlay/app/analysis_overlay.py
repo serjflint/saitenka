@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from overlay.app.episode_analysis import analysis_key, analyze_cues
+from overlay.app.languages import MAIN_LANG
 from overlay.app.overlay_ids import OverlayId
 from overlay.render.analysis import render_analysis
 
@@ -54,7 +55,7 @@ def _unavailable(reader: Reader) -> bool:
     # embedded-track id, used only for track SWITCHING) is None whenever the JP subs come from an
     # external / extracted / jimaku .srt loaded straight into _sub_index — so gating on it wrongly
     # reported "Japanese track unavailable" while we were visibly showing (and could analyse) those subs.
-    return reader.subtitle_language != "jp" or reader._sub_index is None
+    return reader.subtitle_language != MAIN_LANG or reader._sub_index is None
 
 
 def request(reader: Reader) -> None:

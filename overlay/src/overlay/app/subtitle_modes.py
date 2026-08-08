@@ -6,7 +6,9 @@ import logging
 import queue
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
+
+from overlay.app.languages import MAIN_LANG, SECOND_LANG, Language
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -19,7 +21,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-Language = Literal["jp", "en"]
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
 JP_LANGS = {"ja", "jpn", "jp", "japanese"}
 
@@ -100,9 +101,9 @@ def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
     active: Language | None = None
     sid = tracks.jp_sid
     if sid is not None:
-        active = "jp"
+        active = MAIN_LANG
     elif tracks.en_sid is not None:
-        active, sid = "en", tracks.en_sid
+        active, sid = SECOND_LANG, tracks.en_sid
     if sid is not None:
         ipc.command("set_property", "sid", sid)
         ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
@@ -112,7 +113,7 @@ def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
 def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,jp") -> None:
     reader.jp_sid = startup.tracks.jp_sid
     reader.en_sid = startup.tracks.en_sid
-    reader.subtitle_language = startup.active or "jp"
+    reader.subtitle_language = startup.active or MAIN_LANG
     reader.subtitle_slang = slang
     if reader._get("secondary-sid") not in {None, False, "no"}:
         reader.ipc.command("set_property", "secondary-sid", "no")
@@ -125,7 +126,7 @@ def setup_secondary(reader: Reader) -> int | None:
     if reader.jp_sid is None and reader.en_sid is None:
         tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
         reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-    sid = reader.en_sid if reader.subtitle_language == "jp" else reader.jp_sid
+    sid = reader.en_sid if reader.subtitle_language == MAIN_LANG else reader.jp_sid
     if sid is None or sid == reader._get("sid"):
         release_secondary(reader)
         return None
@@ -149,9 +150,9 @@ def on_primary_changed(reader: Reader, sid) -> None:
         return
     announce_track(reader, sid)
     if sid == reader.jp_sid:
-        language: Language = "jp"
+        language: Language = MAIN_LANG
     elif sid == reader.en_sid:
-        language = "en"
+        language = SECOND_LANG
     else:
         return
     if language != reader.subtitle_language:
@@ -195,16 +196,16 @@ def toggle(reader: Reader) -> None:
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
     active_sid = reader._get("sid")
     if active_sid == reader.jp_sid:
-        target: Language = "en"
+        target: Language = SECOND_LANG
     elif active_sid == reader.en_sid or (
-        reader.subtitle_language == "jp" and reader.jp_sid is not None
+        reader.subtitle_language == MAIN_LANG and reader.jp_sid is not None
     ):
-        target = "jp"
-    elif reader.subtitle_language == "en" and reader.en_sid is not None:
-        target = "en"
+        target = MAIN_LANG
+    elif reader.subtitle_language == SECOND_LANG and reader.en_sid is not None:
+        target = SECOND_LANG
     else:
-        target = "jp" if reader.jp_sid is not None else "en"
-    sid = reader.en_sid if target == "en" else reader.jp_sid
+        target = MAIN_LANG if reader.jp_sid is not None else SECOND_LANG
+    sid = reader.en_sid if target == SECOND_LANG else reader.jp_sid
     if sid is None:
         reader._toast(f"{target.upper()} subtitles unavailable", "warn")
         return
@@ -391,7 +392,7 @@ def _replace_japanese_track(
     _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
     reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
     reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
-    reader.subtitle_language = "jp"
+    reader.subtitle_language = MAIN_LANG
     reader._sub_index = None
     reader.set_subtitle("")
     build_sub_index_for_current_track(reader)
@@ -424,7 +425,7 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     reader._translation_secondary_sid = None
     reader.ipc.command("set_property", "sid", reader.jp_sid)
     _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
-    reader.subtitle_language = "jp"
+    reader.subtitle_language = MAIN_LANG
     reader._sub_index = None
     reader.set_subtitle("")
     if reader._translation_visible():
@@ -453,7 +454,7 @@ def apply_fetch_results(reader: Reader) -> None:
             )
         # A user retry while watching Japanese swaps the on-screen (mistimed) track for the re-synced
         # file; from English it falls through to the non-disruptive add (fetch JP, keep EN until Alt+t).
-        elif result.replace and reader.subtitle_language == "jp":
+        elif result.replace and reader.subtitle_language == MAIN_LANG:
             _replace_japanese_track(reader, result.path, result.status)
         else:
             _add_background_japanese(reader, result)

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from overlay.app import paths
 from overlay.app.continuity import episode_identity
+from overlay.app.languages import MAIN_LANG, SECOND_LANG
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -243,7 +244,9 @@ class SessionRecorder:
         self._last_tick = clock()
         self._last_persist = self._last_tick
         self._last_paused = True
-        self._last_language = "jp"
+        self._last_language: str = (
+            MAIN_LANG  # raw language string from tick(); not the Language role
+        )
         self._last_cue: tuple[object, ...] | None = None
         self.writer = writer or AsyncSessionWriter()
         title, title_match, episode = episode_identity(media_path)
@@ -271,7 +274,7 @@ class SessionRecorder:
         was_playing = not self._last_paused
         if was_playing:
             watch += elapsed
-            if self._last_language == "en":
+            if self._last_language == SECOND_LANG:
                 en += elapsed
             else:
                 jp += elapsed

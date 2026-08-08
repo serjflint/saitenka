@@ -78,6 +78,7 @@ from overlay.app.bindings import (
     active_bindings,
 )
 from overlay.app.config import ReaderOptions
+from overlay.app.languages import MAIN_LANG, SECOND_LANG
 from overlay.app.media import (
     copy_clipboard,
     tts_available,
@@ -658,7 +659,7 @@ class Reader:
                     text,
                 )
             )
-        if self.subtitle_language == "en":
+        if self.subtitle_language == SECOND_LANG:
             self.lines, self.tokens, self.styles = [], [], None
             self._draw_subtitle()
             return
@@ -707,7 +708,7 @@ class Reader:
         target = bool(
             revealed
             and self.annotation_mode == "hover"
-            and self.subtitle_language == "jp"
+            and self.subtitle_language == MAIN_LANG
             and self.tokens
         )
         if target == self._annotation_hover:

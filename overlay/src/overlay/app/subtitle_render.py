@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from overlay import otel_metrics
+from overlay.app.languages import SECOND_LANG
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.subtitles import render_plain_subtitle, render_subtitle
 
@@ -28,7 +29,7 @@ class SubtitleRenderer:
 
     def draw(self, reader: Reader) -> None:
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
-            if reader.subtitle_language == "en":
+            if reader.subtitle_language == SECOND_LANG:
                 sr = render_plain_subtitle(reader.sub_text, reader.osd[0], size=reader.sub_size)
             else:
                 annotated = reader.annotation_mode == "full" or reader._annotation_hover
