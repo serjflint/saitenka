@@ -57,3 +57,25 @@ def test_not_found_message_is_english_for_a_second_language_profile():
 def test_not_found_message_stays_japanese_for_the_default_profile():
     ds = DictionarySet(dicts=[], language="jp")
     assert "見つかり" in ds.entry_for(_token("食べた", "食べる")).defs[0].content[0]
+
+
+def test_deinflected_base_form_outranks_the_inflected_surface_entry():
+    # A dict that carries BOTH the base "parapluie" and a "parapluies -> plural of" form-entry must
+    # show the base first (live bug: the inflected surface headed the tooltip). The base is in the
+    # deinflected `preferred` set; it wins even though it's shorter than the inflected surface.
+    ds = DictionarySet(dicts=[], language="fr")
+    tok = _token("parapluies", "parapluies")
+    formset = {"parapluies", "parapluie"}
+    preferred = frozenset({"parapluie"})
+    assert ds._rank_key("parapluie", "", tok, formset, preferred) < ds._rank_key(
+        "parapluies", "", tok, formset, preferred
+    )
+
+
+def test_jp_ranking_keeps_longest_match_first_with_no_preferred_set():
+    # JP has no deinflected `preferred` set, so the longest-match-first rule (数ある over 数) is intact —
+    # the second-language base-form preference can't perturb the byte-identical JP path.
+    ds = DictionarySet(dicts=[], language="jp")
+    tok = _token("数", "数")
+    formset = {"数ある", "数"}
+    assert ds._rank_key("数ある", "", tok, formset) < ds._rank_key("数", "", tok, formset)

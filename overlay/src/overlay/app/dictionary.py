@@ -624,22 +624,38 @@ class DictionarySet:
             best = m if best is None else min(best, m)
         return best
 
-    def _rank_key(self, term: str, reading: str, token: Token, formset: set[str]):
+    def _rank_key(
+        self,
+        term: str,
+        reading: str,
+        token: Token,
+        formset: set[str],
+        preferred: frozenset[str] = frozenset(),
+    ):
         """Sort key for choosing/ordering entries: exact-headword first (like Yomitan and
-        :meth:`Dictionary.lookup`), then the LONGEST term (a multi-token phrase 数ある stacks above the
-        bare 数 — Yomitan shows longest-match first), then the reading closest to the token's contextual
-        reading (退いた prefers のく over しりぞく), then the more common reading by frequency rank."""
+        :meth:`Dictionary.lookup`); then a deinflected **base form** ahead of the inflected surface
+        (parapluie outranks its own plural form-entry parapluies — ``preferred`` is empty for JP, so this
+        slot is inert there); then the LONGEST term (a multi-token phrase 数ある stacks above the bare 数);
+        then the reading closest to the token's contextual reading (退いた prefers のく); then the more
+        common reading by frequency rank."""
         return (
             term not in formset,
+            term not in preferred,
             -len(term),
             -_reading_affinity(reading, token.reading),
             self._freq_rank(term, reading) or float("inf"),
         )
 
-    def _best_hit(self, hits: list[DictEntry], token: Token, formset: set[str]) -> DictEntry:
+    def _best_hit(
+        self,
+        hits: list[DictEntry],
+        token: Token,
+        formset: set[str],
+        preferred: frozenset[str] = frozenset(),
+    ) -> DictEntry:
         """The single entry ``card_for`` mines from one dict's hits. ``min`` is stable, so a full tie
         falls back to the dict's own order — the prior ``hits[0]`` behaviour."""
-        return min(hits, key=lambda h: self._rank_key(h.term, h.reading, token, formset))
+        return min(hits, key=lambda h: self._rank_key(h.term, h.reading, token, formset, preferred))
 
     @staticmethod
     def _card_from_hit(hit: DictEntry, token: Token) -> CardData:
@@ -662,12 +678,12 @@ class DictionarySet:
         ``glossary_html``) so the caller can fall back to the JMdict/jamdict source. No JMdict sequence
         id — Yomitan terms carry none. ``extra_terms`` are longer phrases (数ある) that outrank the bare
         word, so a hovered phrase mines the phrase by default."""
-        forms, _ = self._forms(token, extra_terms)
+        forms, _, preferred = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
         for d in self.dicts:
             hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
             if hits:
-                return self._card_from_hit(self._best_hit(hits, token, formset), token)
+                return self._card_from_hit(self._best_hit(hits, token, formset, preferred), token)
         return CardData(
             expression=token.lemma or token.surface, reading=token.reading, glossary_html=""
         )
@@ -680,7 +696,7 @@ class DictionarySet:
         so the caller falls back to the JMdict source. ``cards_for(token)[0] == card_for(token)`` for a
         single dictionary. ``extra_terms`` (longer phrases 数ある) are looked up too and, being longer,
         sort ahead of the bare word."""
-        forms, termforms = self._forms(token, extra_terms)
+        forms, termforms, preferred = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
         batched = self._batch_exact(forms)  # one query for all dicts (no per-dict _fetch)
         by_key: dict[tuple[str, str], CardData] = {}
@@ -694,7 +710,8 @@ class DictionarySet:
             for h in hits:
                 by_key.setdefault((h.term, h.reading), self._card_from_hit(h, token))
         return sorted(
-            by_key.values(), key=lambda c: self._rank_key(c.expression, c.reading, token, formset)
+            by_key.values(),
+            key=lambda c: self._rank_key(c.expression, c.reading, token, formset, preferred),
         )
 
     def _collect_search_hits(self, glob: str, limit: int) -> list[tuple[str, str, str]]:
@@ -901,13 +918,16 @@ class DictionarySet:
         ]
         return tuple(dict.fromkeys(out))[:_DEINFLECT_FORM_CAP]
 
-    def _forms(self, token: Token, extra_terms: Sequence[str]) -> tuple[tuple[str, ...], set[str]]:
-        """Lookup forms + the exact-term set, with second-language deinflected dict forms folded in.
-        Order: phrases, lemma, surface, deinflected candidates, then the reading LAST (a form to match,
-        never an exact *term*). For JP the deinflected list is empty, so this is the prior tuple."""
+    def _forms(
+        self, token: Token, extra_terms: Sequence[str]
+    ) -> tuple[tuple[str, ...], set[str], frozenset[str]]:
+        """Lookup forms, the exact-term set, and the deinflected **base forms** (dictionary forms the
+        surface reduces to — parapluies → parapluie). Order: phrases, lemma, surface, deinflected
+        candidates, then the reading LAST (a form to match, never an exact *term*). For JP the deinflected
+        set is empty, so this is the prior tuple and the base set never perturbs ranking (byte-identical)."""
         deinf = self._deinflected_candidates(token.lemma)
         terms = (*extra_terms, token.lemma, token.surface, *deinf)
-        return (*terms, token.reading), {f for f in terms if f}
+        return (*terms, token.reading), {f for f in terms if f}, frozenset(deinf)
 
     def _empty_def(self) -> Definition:
         """The 'no dictionary hit' placeholder, in the profile's language — English for a second-
@@ -926,7 +946,7 @@ class DictionarySet:
         # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
         # `extra_terms` are longer multi-token phrases starting at this word (数ある over 数); being
         # longer they outrank the bare word and stack above it as their own entries.
-        forms, termforms = self._forms(token, extra_terms)
+        forms, termforms, _ = self._forms(token, extra_terms)
         defs, headword, reading = self._dict_defs(forms, termforms, token.reading)
         if headword is None:
             headword = token.lemma or token.surface
