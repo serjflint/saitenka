@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786277425998,
+  "lastUpdate": 1786278500132,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2303,6 +2303,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 7.099,
             "range": "±7.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5a5ec4cd04a443d440f415b6bd2c25deb4e3bb1e",
+          "message": "Merge pull request #273 from serjflint/chore/ci-split-ft-tests\n\nci: run the free-threaded suite as a parallel job + GIL-on control on t-legs",
+          "timestamp": "2026-08-09T15:27:53+03:00",
+          "tree_id": "153f0d5a75b049c3b67f492bb94c078e006df860",
+          "url": "https://github.com/serjflint/saitenka/commit/5a5ec4cd04a443d440f415b6bd2c25deb4e3bb1e"
+        },
+        "date": 1786278499427,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 7.054,
+            "range": "±0.9%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 10.232,
+            "range": "±6.5%",
             "unit": "ms"
           }
         ]
