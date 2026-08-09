@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786282490604,
+  "lastUpdate": 1786282897574,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2447,6 +2447,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.846,
             "range": "±0.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "32208e97304769bd05a9175f0350319308924625",
+          "message": "Merge pull request #277 from serjflint/chore/scrub-private-refs\n\nchore(docs): remove references to an external private location; ground guidance in public sources",
+          "timestamp": "2026-08-09T16:41:14+03:00",
+          "tree_id": "95783bb866703506c4bd089420a609f622179a53",
+          "url": "https://github.com/serjflint/saitenka/commit/32208e97304769bd05a9175f0350319308924625"
+        },
+        "date": 1786282896942,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.353,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.947,
+            "range": "±2.5%",
             "unit": "ms"
           }
         ]
