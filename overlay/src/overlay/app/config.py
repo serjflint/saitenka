@@ -473,6 +473,28 @@ class ProfileOptions:
     )
 
 
+@dataclass(frozen=True)
+class WordAudioOptions:
+    """Opt-in word-pronunciation audio from a local yomichan/yomitan audio pack (#93) — additive to the
+    mined sentence/scene clip, resolved offline from the expression + reading mining already knows
+    (grounded — never synthesized). Edited as ``[mine]`` table keys by ``saitenka config``; merged into
+    :class:`~overlay.app.anki.MineConfig` (``word_audio_pack``/``word_audio_field``) by
+    :func:`overlay.app.reader_deps._mine_config_from`."""
+
+    word_audio_enabled: bool = field(
+        default=False,
+        metadata={"help": "Attach word-pronunciation audio from a local audio pack."},
+    )
+    word_audio_pack_dir: str | None = field(
+        default=None,
+        metadata={"help": "Local yomichan/yomitan audio-pack directory (blank = disabled)."},
+    )
+    word_audio_field: str = field(
+        default="WordAudio",
+        metadata={"help": "Note field the word-pronunciation audio is written to."},
+    )
+
+
 def resolve_telemetry(cfg: dict | None = None) -> TelemetryOptions:
     """:class:`TelemetryOptions` from the ``[telemetry]`` config table. ``$OTEL_SDK_DISABLED`` (the
     standard OTel env var) forces ``enabled=False`` even if the config table turns it on — it's the
