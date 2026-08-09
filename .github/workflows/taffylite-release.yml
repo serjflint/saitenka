@@ -60,8 +60,12 @@ jobs:
           name: wheels-linux-${{ matrix.arch }}
           path: taffylite/dist
 
-  # macOS: not containerized, so interpreters come from `actions/setup-python` on the host (unlike
-  # Linux, no co-install issue here — only Windows needs one interpreter per job, see below).
+  # macOS: arm64 only. The Intel (`macos-13`/x86_64) leg is dropped — GitHub is retiring the Intel
+  # runner pool (chronically queue-starved) and taffylite is an OPTIONAL extra with a byte-identical
+  # pure-Python fallback (DefaultLayoutBackend), so an Intel-Mac user with no wheel degrades gracefully
+  # (or builds from the sdist with a Rust toolchain); `full` doesn't even pull `layout-engine`. Revisit
+  # via arm64→x86_64 cross-compile only if Intel demand appears. Interpreters come from `setup-python`
+  # on the host (no Linux-style co-install issue; only Windows needs one interpreter per job, below).
   macos:
     name: wheels (macos ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -72,9 +76,6 @@ jobs:
           - runner: macos-14 # arm64
             arch: arm64
             target: aarch64-apple-darwin
-          - runner: macos-13 # x86_64 (macos-latest/14+ dropped Intel runners)
-            arch: x86_64
-            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
