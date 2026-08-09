@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786263114359,
+  "lastUpdate": 1786268447288,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1871,6 +1871,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.051,
             "range": "±4.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "833c96db427aba538fc526ac27f128a8a0c7b7aa",
+          "message": "Merge pull request #261 from serjflint/feat/tokenizer-strategy-spike\n\nrefactor(tokenize): Reader-owned Tokenizer strategy seam (#254 spike)",
+          "timestamp": "2026-08-09T12:40:18+03:00",
+          "tree_id": "f212235b7630b8db97ae625c5f6eb374ea415863",
+          "url": "https://github.com/serjflint/saitenka/commit/833c96db427aba538fc526ac27f128a8a0c7b7aa"
+        },
+        "date": 1786268446146,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.255,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.57,
+            "range": "±1.2%",
             "unit": "ms"
           }
         ]
