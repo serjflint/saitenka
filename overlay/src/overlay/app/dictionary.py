@@ -98,6 +98,17 @@ FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
 
 
+_JMDICT_LIKE = re.compile(r"jmdict|jitendex", re.IGNORECASE)
+
+
+def _looks_like_jmdict(title: str) -> bool:
+    """True for a dict title that's JMdict itself or a JMdict-derived dict (Jitendex, …) — the only
+    titles whose Yomitan ``seq`` is guaranteed to equal the Kanji Study ``ent_seq`` (#255). A non-JMdict
+    dict's ``seq`` has no such guarantee, so its entries never populate ``card.idseq``: better no
+    deep-link than a wrong one."""
+    return bool(_JMDICT_LIKE.search(title))
+
+
 def _short_freq_name(title: str) -> str:
     """Freq-pill display name: strip the ``Saitenka`` product prefix (``Saitenka Known`` → ``Known``)
     so our own frequency lists don't waste pill width. Case-insensitive; other dicts pass through."""
@@ -117,6 +128,12 @@ class DictEntry:
     # DictionarySet.entry_for) can compare entries by their *source* bytes instead of re-encoding the
     # already-decoded glossary, which is expensive for large monolingual entries.
     raw_glossary: str = ""
+    # The dict's Yomitan `seq` (entries.seq, opt-in persisted — #255), or None when absent/not
+    # persisted. Only trustworthy as a Kanji Study deep-link id for a JMdict-derived dict — see
+    # `_looks_like_jmdict`. `dict_title` carries the source dict's title so DictionarySet._card_from_hit
+    # can gate on it without threading a separate lookup.
+    seq: int | None = None
+    dict_title: str = ""
 
 
 def _to_glob(pattern: str) -> str:
@@ -296,7 +313,15 @@ class Dictionary:
             return cached
         if otel_metrics.dict_cache_misses is not None:
             otel_metrics.dict_cache_misses.add(1)
-        entry = DictEntry(row[1], row[2], msgspec_json.decode(row[3]), row[4], raw_glossary=row[3])
+        entry = DictEntry(
+            row[1],
+            row[2],
+            msgspec_json.decode(row[3]),
+            row[4],
+            raw_glossary=row[3],
+            seq=row[5],
+            dict_title=self.title,
+        )
         evicted = False
         with self._entry_lock:
             # First-writer-wins: another thread may have decoded + inserted this eid while we decoded it
@@ -316,14 +341,14 @@ class Dictionary:
     # ORDER BY e.id makes row order deterministic so DictionarySet._batch_exact (one IN-list query
     # for every dict at once) reassembles byte-identically to these per-(dict,form) point queries.
     _EXACT_Q = (
-        "SELECT e.id, e.term, e.reading, e.glossary, e.tags FROM keys k "
+        "SELECT e.id, e.term, e.reading, e.glossary, e.tags, e.seq FROM keys k "
         "JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
         "WHERE k.dict_id = ? AND k.key = ? ORDER BY e.id"
     )
     # Wildcard forms GLOB the key column, capping DISTINCT entry ids (a term keys itself twice — by
     # term AND reading — so a raw key LIMIT would under-count entries after dedup).
     _GLOB_Q = (
-        "SELECT e.id, e.term, e.reading, e.glossary, e.tags FROM entries e "
+        "SELECT e.id, e.term, e.reading, e.glossary, e.tags, e.seq FROM entries e "
         "WHERE e.dict_id = ? AND e.id IN "
         "(SELECT DISTINCT id FROM keys WHERE dict_id = ? AND key GLOB ? LIMIT ?)"
     )
@@ -596,10 +621,14 @@ class DictionarySet:
     @staticmethod
     def _card_from_hit(hit: DictEntry, token: Token) -> CardData:
         glosses = _glosses_of(hit.glossary)
+        # `seq` only becomes card.idseq for a JMdict-derived dict (#255) — a plain Yomitan dict's `seq`
+        # isn't guaranteed to be a JMdict ent_seq, and a wrong deep-link id is worse than none.
+        idseq = str(hit.seq) if hit.seq and _looks_like_jmdict(hit.dict_title) else ""
         return CardData(
             expression=hit.term or token.lemma or token.surface,
             reading=hit.reading or token.reading,
             glossary_html="<ol>" + "".join(f"<li>{g}</li>" for g in glosses) + "</ol>",
+            idseq=idseq,
             glosses=tuple(glosses),
         )
 
@@ -709,7 +738,7 @@ class DictionarySet:
         dids = [d.dict_id for d in self.dicts]
         din, kin = ",".join("?" * len(dids)), ",".join("?" * len(keys))
         query = (
-            "SELECT k.dict_id, k.key, e.id, e.term, e.reading, e.glossary, e.tags "  # noqa: S608 — only bind-placeholder counts (din/kin) interpolated; every value is parameterized
+            "SELECT k.dict_id, k.key, e.id, e.term, e.reading, e.glossary, e.tags, e.seq "  # noqa: S608 — only bind-placeholder counts (din/kin) interpolated; every value is parameterized
             "FROM keys k JOIN entries e ON k.dict_id = e.dict_id AND k.id = e.id "
             f"WHERE k.dict_id IN ({din}) AND k.key IN ({kin}) ORDER BY e.id"
         )
@@ -719,7 +748,7 @@ class DictionarySet:
         ):
             rows = conn.execute(query, (*dids, *keys)).fetchall()
         out: dict[int, dict[str, list]] = {}
-        for r in rows:  # r = (dict_id, key, e.id, e.term, e.reading, e.glossary, e.tags)
+        for r in rows:  # r = (dict_id, key, e.id, e.term, e.reading, e.glossary, e.tags, e.seq)
             out.setdefault(r[0], {}).setdefault(r[1], []).append(r[2:])
         return out
 

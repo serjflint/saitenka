@@ -407,6 +407,16 @@ class DictDbOptions:
     entry_cache_max: int = field(
         default=256, metadata={"help": "LRU cap on decoded DictEntry objects, per Dictionary."}
     )
+    # Opt-in: persist each term_bank entry's Yomitan `seq` (term_bank[6]) into `entries.seq`. For a
+    # JMdict-derived dict (JMdict itself, Jitendex, …) `seq` == the Kanji Study deep-link id, so this
+    # lets mining fill `card.idseq` offline, without the `jmdict` extra (#255). The column always exists
+    # (additive migration); this flag only gates whether import writes values into it.
+    persist_seq: bool = field(
+        default=False,
+        metadata={
+            "help": "Persist each entry's Yomitan seq into entries.seq for offline deep-link IDs."
+        },
+    )
 
 
 def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
@@ -421,6 +431,7 @@ def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
         cache_size_kib=int(d.get("cache_size_kib", defaults.cache_size_kib)),
         dexie_chunk_size=int(d.get("dexie_chunk_size", defaults.dexie_chunk_size)),
         entry_cache_max=int(d.get("entry_cache_max", defaults.entry_cache_max)),
+        persist_seq=bool(d.get("persist_seq", defaults.persist_seq)),
     )
 
 

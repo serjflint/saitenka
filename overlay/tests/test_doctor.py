@@ -904,6 +904,95 @@ def test_deeplink_id_warns_on_ent_seq_marker_without_a_source(monkeypatch):
     assert doc.check_deeplink_id().status == "warn"
 
 
+def test_deeplink_id_warn_mentions_the_backfill_tool(monkeypatch):
+    """#255: pre-existing cards are never touched retroactively — the warning must point at the
+    one-time backfill script, or a user with an old empty-ID card has no way to discover it."""
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    monkeypatch.setattr(doc, "load_config", dict)
+    c = doc.check_deeplink_id()
+    assert "anki_normalize_fields.py" in c.detail
+
+
+def _import_jitendex(tmp_path, *, persist_seq: bool, title: str = "Jitendex"):
+    """Import a one-entry dict into the per-test hermetic DB, choosing whether the term's `seq`
+    (term_bank[6], here 1) actually gets persisted — the axis the whole #255 seq-source check turns on."""
+    import dicthelp
+    from overlay.app.config import DictDbOptions
+    from overlay.app.dictdb import DictionaryDb
+
+    z = dicthelp.term_zip(tmp_path / "j.zip", title, [["猫", "ねこ", ["cat"]]])
+    db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=persist_seq))
+    db.import_zip(z, imported_at=dicthelp.AT)
+
+
+def test_dictdb_seq_source_unavailable_when_seq_never_persisted(tmp_path, monkeypatch):
+    # imported with persist_seq OFF → every row's seq is NULL, so no id source however the config reads.
+    _import_jitendex(tmp_path, persist_seq=False)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is False
+
+
+def test_dictdb_seq_source_unavailable_for_a_non_jmdict_dict(tmp_path, monkeypatch):
+    # even with seq populated, a non-JMdict-derived title's seq is not a Kanji Study id → not a source.
+    _import_jitendex(tmp_path, persist_seq=True, title="MyOwnDict")
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["MyOwnDict"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is False
+
+
+def test_dictdb_seq_source_unavailable_when_persist_seq_flipped_on_after_import(
+    tmp_path, monkeypatch
+):
+    """The P1 false-ok: persist_seq turned on AFTER import leaves seq all-NULL, but the config says
+    persist_seq=true and the JMdict-derived dict is present. The check must key off the DATA (no
+    populated seq row), not config intent — otherwise it reports a source that writes empty."""
+    _import_jitendex(tmp_path, persist_seq=False)  # seq NULL on disk
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n\n[dictdb]\npersist_seq = true\n')  # flipped on later
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is False
+    assert doc._dictdb_seq_configured_but_unpopulated() is True  # the precise misconfig
+
+
+def test_dictdb_seq_source_available_when_seq_actually_populated(tmp_path, monkeypatch):
+    # imported WITH persist_seq on → a non-NULL seq row exists → a genuine offline id source.
+    _import_jitendex(tmp_path, persist_seq=True)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is True
+    assert doc._dictdb_seq_configured_but_unpopulated() is False
+
+
+def test_deeplink_id_ok_via_dictdb_seq_source_when_populated(tmp_path, monkeypatch):
+    """With jamdict absent but a JMdict-derived dict whose seq is actually populated, the check reports
+    ok (a working source), not warn."""
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    _import_jitendex(tmp_path, persist_seq=True)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    c = doc.check_deeplink_id()
+    assert c.status == "ok" and c.info
+    assert "persist_seq" in c.detail
+
+
+def test_deeplink_id_warns_when_persist_seq_enabled_but_dict_not_reimported(tmp_path, monkeypatch):
+    """The P1 fix at the check level: the 'enabled persist_seq but never re-imported' misconfig must
+    surface as a warn with a re-import hint, not a false ok."""
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    _import_jitendex(tmp_path, persist_seq=False)  # seq NULL
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    c = doc.check_deeplink_id()
+    assert c.status == "warn"
+    assert "re-import" in c.detail.lower()
+
+
 # --- init wizard -----------------------------------------------------------------------------
 
 

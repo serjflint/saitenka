@@ -140,6 +140,16 @@ mines the hovered word with a clip for that one card. If your AnkiConnect endpoi
 !!! note "Anki starts itself"
     When mining (or Anki-backed coloring) is on, Saitenka launches Anki for you if it's closed.
 
+**Kanji Study deep-link ID.** The default field map's `id -> ID` fills from the JMdict `ent_seq`, which
+makes `kanjistudy://word?id={{ID}}` deep-link into Android's Kanji Study app from a mined card. It needs
+one of two sources: the optional `jmdict` extra (jamdict), or an imported JMdict-derived dictionary
+(JMdict itself, Jitendex, …) with `[dictdb] persist_seq = true` — re-import the dict after enabling it so
+its `seq` gets persisted. `saitenka doctor` reports which source (if any) is active. Neither source
+touches cards mined before it existed; backfill an existing deck with
+`uv run --extra full python tools/backfill_deeplink_id.py --apply` (dry-run by default — it enumerates
+the `[mine] deck`, resolves each empty `ID` with the same source config uses, and never overwrites a
+filled field). `tools/anki_normalize_fields.py` is an alternative that fills from a JMdict Yomitan zip.
+
 ## Tooltip
 
 `[tooltip]` geometry and feel actually live as **top-level** keys (above the first `[table]` header).

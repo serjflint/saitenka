@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS dictionaries(
   id INTEGER PRIMARY KEY, title TEXT UNIQUE, kind TEXT, import_order INTEGER,
   source_name TEXT, revision TEXT, imported_at TEXT, schema_version INTEGER);
 CREATE TABLE IF NOT EXISTS entries(
-  dict_id INTEGER, id INTEGER, term TEXT, reading TEXT, glossary TEXT, tags TEXT,
+  dict_id INTEGER, id INTEGER, term TEXT, reading TEXT, glossary TEXT, tags TEXT, seq INTEGER,
   PRIMARY KEY(dict_id, id));
 CREATE TABLE IF NOT EXISTS keys(dict_id INTEGER, key TEXT, id INTEGER);
 CREATE TABLE IF NOT EXISTS kanji(
@@ -296,6 +296,12 @@ class DictionaryDb:
         try:
             conn.execute("PRAGMA journal_mode=WAL")  # persists in the DB header; enables ro readers
             conn.executescript(_SCHEMA_SQL)
+            # Additive migration for a DB created before `entries.seq` existed (#255): CREATE TABLE IF
+            # NOT EXISTS above never touches an existing table's columns, so a pre-#255 DB needs this
+            # explicit ALTER. Safe to re-run (guarded by table_info) and doesn't disturb existing rows.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(entries)")}
+            if "seq" not in cols:
+                conn.execute("ALTER TABLE entries ADD COLUMN seq INTEGER")
             row = conn.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
             if row is None:
                 conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(DB_SCHEMA),))
@@ -452,15 +458,17 @@ class DictionaryDb:
         bank = read_json_bank(zf, name)  # tolerant of wrong-CRC Yomitan zips (data intact)
         if bank is None:
             return rid
+        persist_seq = self._opts.persist_seq
         rows, keys = [], []
         for e in bank:  # [term, reading, defTags, rules, score, glossary[], seq, termTags]
             rid += 1
             term, reading = e[0], e[1] or e[0]
-            rows.append((did, rid, term, reading, json.dumps(e[5], ensure_ascii=False), e[2]))
+            seq = e[6] if persist_seq and len(e) > 6 and isinstance(e[6], int) else None
+            rows.append((did, rid, term, reading, json.dumps(e[5], ensure_ascii=False), e[2], seq))
             keys.append((did, term, rid))
             if reading != term:
                 keys.append((did, reading, rid))
-        conn.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?)", rows)
+        conn.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?,?)", rows)
         conn.executemany("INSERT INTO keys VALUES(?,?,?)", keys)
         return rid
 

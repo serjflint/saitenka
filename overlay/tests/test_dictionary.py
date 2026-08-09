@@ -304,6 +304,60 @@ def test_card_for_uses_user_dictionary(tmp_path):
     assert card.glosses == ("to read", "to peruse")
 
 
+def test_card_for_fills_idseq_from_a_jmdict_derived_dicts_persisted_seq(tmp_path):
+    """#255: with `[dictdb] persist_seq` on and an imported JMdict-derived dict (title matches
+    Jitendex/JMdict), the dict-first mining path fills `card.idseq` from that dict's Yomitan `seq`
+    (== the Kanji Study ent_seq) — offline, without the `jmdict` extra."""
+    from overlay.app.config import DictDbOptions
+    from overlay.app.dictdb import DictionaryDb
+
+    d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
+    db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
+    ds = dicthelp.load_set([d], on=db)
+    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    card = ds.card_for(tok)
+    assert card.idseq == "1"
+
+
+def test_card_for_leaves_idseq_empty_for_a_non_jmdict_dict(tmp_path):
+    """A plain (non-JMdict-derived) dict's `seq` isn't guaranteed to be a JMdict ent_seq, so it must
+    never become `card.idseq` — a wrong deep-link id is worse than none (#255)."""
+    from overlay.app.config import DictDbOptions
+    from overlay.app.dictdb import DictionaryDb
+
+    d = _make_dict(tmp_path / "md.zip", "MyOwnDict", [["読む", "よむ", ["to read"]]])  # seq=1
+    db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
+    ds = dicthelp.load_set([d], on=db)
+    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    card = ds.card_for(tok)
+    assert card.idseq == ""
+
+
+def test_card_for_leaves_idseq_empty_when_persist_seq_is_off(tmp_path):
+    """Even a JMdict-derived title's `seq` never reaches `card.idseq` when `persist_seq` wasn't
+    enabled at import — the column stays NULL, so there's nothing to trust."""
+    d = _make_dict(tmp_path / "jx2.zip", "JMdict", [["読む", "よむ", ["to read"]]])
+    ds = dicthelp.load_set([d])  # default DictDbOptions: persist_seq=False
+    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
+    assert ds.card_for(tok).idseq == ""
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("JMdict [2026-06-27]", True),
+        ("Jitendex.zip [2026-06-27]", True),
+        ("jitendex-yomitan", True),
+        ("Saitenka Known", False),
+        ("BCCWJ Frequency", False),
+    ],
+)
+def test_looks_like_jmdict(title, expected):
+    from overlay.app.dictionary import _looks_like_jmdict
+
+    assert _looks_like_jmdict(title) is expected
+
+
 def test_card_for_prefers_contextual_reading_over_dict_order(tmp_path):
     """退いた: both 退く entries are exact-headword hits, so the tie-break falls to the reading closest
     to the token's contextual (surface) reading — のいた shares の with のく, picking it over the
@@ -871,7 +925,7 @@ def test_entry_cache_survives_concurrent_access_from_workers(tmp_path):
     dic._entry_cache_max = 8
     # A working set ~2x the cap so every thread constantly hits (move_to_end) AND overflows (popitem) —
     # the exact interleaving that raced. Rows are synthetic so the hot loop never touches SQLite.
-    rows = [(i, f"語{i}", f"ご{i}", f'["gloss {i}"]', "") for i in range(16)]
+    rows = [(i, f"語{i}", f"ご{i}", f'["gloss {i}"]', "", None) for i in range(16)]
     errors: list[BaseException] = []
     start = threading.Barrier(8)
 

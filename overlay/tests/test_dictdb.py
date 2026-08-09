@@ -4,6 +4,7 @@ import json
 import zipfile
 
 import pytest
+from overlay.app.config import DictDbOptions
 from overlay.app.dictdb import DictionaryDb
 
 AT = "2026-07-23T00:00:00"  # fixed imported_at — no Date.now in the store, stamped by the caller
@@ -372,3 +373,51 @@ def test_rank_based_freq_is_left_as_is(tmp_path):
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     row = db.import_zip(fz, imported_at=AT)
     assert _ranks(db, row.id) == {"本命": 8912}
+
+
+# --- entries.seq (#255: opt-in persistence of the Yomitan seq / JMdict ent_seq) -----------------
+
+
+def test_seq_column_exists_but_is_null_by_default(tmp_path):
+    """The `entries.seq` column is always present (additive schema), but import leaves it NULL unless
+    `[dictdb] persist_seq` opts in — the default install pays no extra-storage cost."""
+    z = _term_zip(tmp_path / "d.zip", "Jitendex", [["読む", "よむ", ["to read"]]])
+    db = DictionaryDb.open(tmp_path / "db.sqlite")  # default DictDbOptions: persist_seq=False
+    row = db.import_zip(z, imported_at=AT)
+    seq = db._conn().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
+    assert seq is None
+
+
+def test_persist_seq_opt_in_writes_the_bank_seq(tmp_path):
+    """With `[dictdb] persist_seq = true`, the term_bank's `seq` (element [6], the JMdict `ent_seq`
+    for a JMdict-derived dict) lands in `entries.seq`."""
+    z = _term_zip(tmp_path / "d.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1 (i+1)
+    db = DictionaryDb.open(tmp_path / "db.sqlite", DictDbOptions(persist_seq=True))
+    row = db.import_zip(z, imported_at=AT)
+    seq = db._conn().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
+    assert seq == 1
+
+
+def test_seq_column_added_additively_to_a_pre_255_db(tmp_path):
+    """A DB created before `entries.seq` existed must gain the column on next open (ALTER TABLE), not
+    error or silently keep the stale schema — CREATE TABLE IF NOT EXISTS alone never adds a column to
+    an existing table."""
+    p = tmp_path / "db.sqlite"
+    import sqlite3
+
+    conn = sqlite3.connect(p)
+    conn.executescript(
+        "CREATE TABLE entries(dict_id INTEGER, id INTEGER, term TEXT, reading TEXT, "
+        "glossary TEXT, tags TEXT, PRIMARY KEY(dict_id, id));"
+        "CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);"
+    )
+    conn.execute("INSERT INTO entries VALUES(1, 1, '猫', 'ねこ', '[\"cat\"]', '')")
+    conn.commit()
+    conn.close()
+
+    db = DictionaryDb.open(p)  # triggers _ensure_schema's additive migration
+    cols = {r[1] for r in db._conn().execute("PRAGMA table_info(entries)")}
+    assert "seq" in cols
+    # the pre-existing row survives the migration, with seq defaulting to NULL
+    row = db._conn().execute("SELECT term, seq FROM entries WHERE dict_id=1 AND id=1").fetchone()
+    assert row == ("猫", None)
