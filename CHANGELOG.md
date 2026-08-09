@@ -7,6 +7,27 @@ logs.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-10
+
+### Added
+
+- **Second-language reading engine — French (#254).** Reading profiles no longer just *declare* a
+  non-Japanese language, they make it work end-to-end: a Latin-script tokenizer segments the text, the
+  optional `deinflect` add-on reduces an inflected word to its dictionary form (Yomitan-derived French
+  rules), scoped Yomitan dictionaries are looked up, and mining writes a French note type. Proven on
+  French anime subtitles — hover `parapluies` and you get the entry for `parapluie` ("umbrella"), not a
+  bare "plural of" redirect. Manage profiles with the new `saitenka profile` subcommand
+  (`list`/`show`/`add`/`use`/`remove`); `saitenka doctor` validates each profile's language, tokenizer,
+  and scoped dictionaries.
+- **Profiles pick their own subtitle track and font.** A non-Japanese profile now selects its language's
+  subtitle track automatically (instead of grabbing the Japanese one or a stale fetched subtitle), and
+  renders Latin / Cyrillic / Greek text in NotoSans for proper letterforms and word spacing.
+
+### Changed
+
+- The `deinflect` and `full` extras now require `saitenka-deinflect>=0.2.0` (the French rule set and the
+  per-language deinflection API).
+
 ## [2.3.0] - 2026-08-09
 
 ### Added
