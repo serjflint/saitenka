@@ -110,6 +110,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from overlay.app.card_preview import PreviewData
+    from overlay.app.dictionary import DictionarySet
     from overlay.app.render_cache import RenderCache
     from overlay.mpvio.ipc import MpvIPC
     from overlay.panel import Freq
@@ -408,7 +409,7 @@ class Reader:
         self._profile_idx = 0
         # Optional dict re-scoper (#254 W3): profile → its scoped DictionarySet, installed by the CLI
         # alongside the cycle so a live switch re-scopes dictionaries too, not just the tokenizer.
-        self._dict_scoper: Callable[[Profile], object] | None = None
+        self._dict_scoper: Callable[[Profile], DictionarySet | None] | None = None
         # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam, selected
         # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
         self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
@@ -751,7 +752,9 @@ class Reader:
         self.token_cache.clear()
 
     def set_profile_cycle(
-        self, profiles: Sequence[Profile], dict_scoper: Callable[[Profile], object] | None = None
+        self,
+        profiles: Sequence[Profile],
+        dict_scoper: Callable[[Profile], DictionarySet | None] | None = None,
     ) -> None:
         """Install the ordered profile cycle the live switcher rotates through (cli wiring, #254 D8). An
         empty or single-entry cycle keeps the switcher inert; the cursor starts at the active profile.
