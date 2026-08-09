@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Literal
 
@@ -66,51 +66,95 @@ SUB_NAV_DEFAULTS: dict[str, str] = {
 class KeyOptions:
     """mpv keybinds owned by the overlay."""
 
-    mine_key: str = "Ctrl+m"
-    mine_video_key: str = "Ctrl+Shift+m"  # mine the hovered word with an animated (motion) clip
-    mine_all_key: str = "Shift+m"
-    translate_key: str = "t"
-    overlay_toggle_key: str = "Alt+o"
-    subtitle_language_key: str = "Alt+t"
-    subtitle_mark_jp_key: str = "Alt+j"  # force the current track as JP (untagged/misdetected subs)
-    bookmark_key: str = "Alt+b"
-    sidebar_key: str = "\\"
-    analysis_key: str = "`"
-    annotation_key: str = "Alt+a"
-    help_key: str = "F1"
-    subtitle_retry_key: str = "Ctrl+Shift+T"
-    sub_picker_key: str = "Ctrl+j"  # Window 1: jimaku subtitle-source download picker
-    preview_key: str = "p"
-    hover_pause_key: str = "Alt+p"
-    sub_prev_key: str = "Alt+LEFT"
-    sub_next_key: str = "Alt+RIGHT"
-    sub_replay_key: str = "Alt+DOWN"
+    mine_key: str = field(
+        default="Ctrl+m", metadata={"help": "Mine the hovered word (still frame)."}
+    )
+    mine_video_key: str = field(
+        default="Ctrl+Shift+m",
+        metadata={"help": "Mine the hovered word with an animated (motion) clip."},
+    )
+    mine_all_key: str = field(
+        default="Shift+m", metadata={"help": "Bulk-mine every word on the line."}
+    )
+    translate_key: str = field(default="t", metadata={"help": "Reveal the line's EN translation."})
+    overlay_toggle_key: str = field(
+        default="Alt+o", metadata={"help": "Toggle the overlay on/off."}
+    )
+    subtitle_language_key: str = field(
+        default="Alt+t", metadata={"help": "Cycle the subtitle track / language."}
+    )
+    subtitle_mark_jp_key: str = field(
+        default="Alt+j",
+        metadata={"help": "Force the current track as JP (untagged/misdetected subs)."},
+    )
+    bookmark_key: str = field(default="Alt+b", metadata={"help": "Bookmark the current line."})
+    sidebar_key: str = field(default="\\", metadata={"help": "Toggle the sidebar."})
+    analysis_key: str = field(default="`", metadata={"help": "Open the episode-analysis panel."})
+    annotation_key: str = field(default="Alt+a", metadata={"help": "Cycle the annotation mode."})
+    help_key: str = field(default="F1", metadata={"help": "Show the keybind help overlay."})
+    subtitle_retry_key: str = field(
+        default="Ctrl+Shift+T", metadata={"help": "Retry subtitle fetch/resync."}
+    )
+    sub_picker_key: str = field(
+        default="Ctrl+j", metadata={"help": "Open the jimaku subtitle-source download picker."}
+    )
+    preview_key: str = field(default="p", metadata={"help": "Toggle the card-preview panel."})
+    hover_pause_key: str = field(default="Alt+p", metadata={"help": "Toggle pause-on-hover."})
+    sub_prev_key: str = field(
+        default="Alt+LEFT", metadata={"help": "Jump to the previous subtitle line."}
+    )
+    sub_next_key: str = field(
+        default="Alt+RIGHT", metadata={"help": "Jump to the next subtitle line."}
+    )
+    sub_replay_key: str = field(
+        default="Alt+DOWN", metadata={"help": "Replay the current subtitle line from its start."}
+    )
 
 
 @dataclass(frozen=True)
 class TooltipOptions:
     """Tooltip geometry + hover feel."""
 
-    sub_size: int | None = None  # subtitle font override (None = scale to video)
-    tip_scale: float = 0.0  # reference→display factor for the tooltip crisp render. 0 = AUTO
-    # (osd_h/REF_H: 1.0 @1080p, 2.0 @4K — tracks the video viewport). A positive value FIXES it
-    # regardless of resolution — 1.5 renders crisp native glyph masks at 1.5× on any display, a
-    # cosmetic preference independent of playback res. Also the scale `saitenka prewarm` builds the
-    # mask atlas at, so the crisp upgrade lands from disk instead of paying getmask2 on first native raster.
+    sub_size: int | None = field(
+        default=None, metadata={"help": "Subtitle font size override (blank = scale to video)."}
+    )
+    # 0 = AUTO (osd_h/REF_H: 1.0 @1080p, 2.0 @4K — tracks the video viewport). A positive value FIXES it
+    # regardless of resolution; also the scale `saitenka prewarm` builds the mask atlas at, so the crisp
+    # upgrade lands from disk instead of paying getmask2 on first native raster.
+    tip_scale: float = field(
+        default=0.0,
+        metadata={"help": "Crisp-render reference→display factor (0 = auto by resolution)."},
+    )
     bottom_margin_frac: float = 0.06
     tip_max_frac: float = 0.4  # BASE tooltip viewport ≤ this fraction of the video height
-    nested_max_frac: float = (
-        0.6  # nested (scan) popup viewport ≤ this fraction — deliberately roomier
+    nested_max_frac: float = field(
+        default=0.6, metadata={"help": "Nested (scan) popup height as a fraction of the video."}
     )
-    pause_on_tooltip: bool = (
-        True  # freeze the frame the moment a tooltip opens — the mining default
+    pause_on_tooltip: bool = field(
+        default=True,
+        metadata={"help": "Freeze the frame the moment a tooltip opens (mining default)."},
     )
-    annotation_mode: Literal["full", "hover"] = "full"
-    scan_delay: float = 1.0  # dwell before a nested scan popup opens
-    hover_switch_delay: float = 0.15  # dwell before the tooltip switches to a NEW word
-    hide_delay: float = 0.6  # seconds the tooltip lingers after the cursor leaves the word
-    flash_secs: float = 0.22  # how long the "copied" highlight border pulses on a popup
-    panel_cache_max: int = 128  # LRU cap on cached (compressed) rendered tooltip panels
+    annotation_mode: Literal["full", "hover"] = field(
+        default="full",
+        metadata={"help": "Annotate every word (full) or only the hovered one (hover)."},
+    )
+    scan_delay: float = field(
+        default=1.0, metadata={"help": "Dwell (seconds) before a nested scan popup opens."}
+    )
+    hover_switch_delay: float = field(
+        default=0.15,
+        metadata={"help": "Dwell (seconds) before the tooltip switches to a new word."},
+    )
+    hide_delay: float = field(
+        default=0.6,
+        metadata={"help": "Seconds the tooltip lingers after the cursor leaves the word."},
+    )
+    flash_secs: float = field(
+        default=0.22, metadata={"help": 'Duration of the "copied" highlight pulse on a popup.'}
+    )
+    panel_cache_max: int = field(
+        default=128, metadata={"help": "LRU cap on cached (compressed) rendered tooltip panels."}
+    )
     band_cache_max: int = 128  # LRU cap on retained 256px render BANDS *per* windowed panel — the
     # layer under panel_cache_max. Bounds a single tall tooltip's warm pixels to a scroll-back WINDOW,
     # not the whole block: 128 bands ≈ 32k px kept warm — well past the viewport so short scrolls back
@@ -124,94 +168,111 @@ class TooltipOptions:
     # UNLESS the panel's estimated uncompressed size exceeds this many MB, when its bands compress so one
     # pathological entry can't blow the retained-pixel budget (raw is ~10× the zlib size). 0 = always
     # compress (the pre-1.3 behavior). The visible/warm window is bounded by band_cache_max either way.
-    layout_engine: Literal["default", "taffy"] = (
-        "default"  # tooltip block-geometry backend. "default"
+    # "default" = always-available pure-Python backend; "taffy" = the optional taffylite Rust flexbox
+    # engine (needs saitenka[layout-engine]); byte-identical geometry. A missing wheel falls back, logged.
+    layout_engine: Literal["default", "taffy"] = field(
+        default="default", metadata={"help": "Tooltip block-geometry backend."}
     )
-    # = the always-available pure-Python DefaultLayoutBackend. "taffy" = the optional taffylite Rust
-    # flexbox engine (needs saitenka[layout-engine]); byte-identical geometry, chosen for a mature CSS
-    # engine's robustness, not speed. An unset/missing wheel falls back to "default", logged, never fatal.
-    render_cache: bool = True  # cross-session persistent render cache (#149), OPT-OUT: USED WHEN
-    # AVAILABLE — if a `render-cache.sqlite` exists (built by `saitenka prewarm`), a cold first-ever hover
-    # on a cost-gated (tall/pathological) entry paints its precomposed first viewport straight from disk
-    # (copy+upload, skipping the build+raster) and live hovers extend it. No prebuilt cache → nothing is
-    # created and it costs nothing. Set false to ignore an existing cache. Miss/resolution change → live.
-    crisp_upscale: bool = True  # OPT-OUT: on a hi-dpi display the tooltip composites its ONE reference panel at NATIVE
-    # resolution (crisp glyph masks over the 1× geometry — the scale-as-boundary arch), scroll-ahead
-    # warming the next native bands off the main thread. Set false to paint only the soft 1× upscale. No
-    # effect at 1080p (display scale 1.0, where native == the upscale).
-    mask_atlas: bool = (
-        True  # persistent glyph mask atlas (#149 Tier-1), OPT-OUT: USED WHEN AVAILABLE —
+    # OPT-OUT: when a `render-cache.sqlite` (built by `saitenka prewarm`) exists, a cold first hover on a
+    # tall entry paints its precomposed first viewport straight from disk. No prebuilt cache → costs nothing.
+    render_cache: bool = field(
+        default=True, metadata={"help": "Use an on-disk render cache when one exists."}
     )
-    # if a `mask-atlas.sqlite` exists (built by `saitenka prewarm`), getmask2 alpha bitmaps load from disk
-    # (~half the raster CPU) so cache-miss / scroll / post-paint builds skip re-rasterising. ~150 MB RAM
-    # bulk-loaded once in the background at startup. No prebuilt atlas → nothing loads. Set false to ignore.
-    render_cache_max_mb: int = (
-        2048  # THE size bound: LRU byte ceiling on the on-disk render cache. Each
+    # OPT-OUT: on a hi-dpi display composite the reference panel at NATIVE resolution (crisp glyph masks
+    # over 1× geometry). No effect at 1080p (native == the upscale). False = paint only the soft 1× upscale.
+    crisp_upscale: bool = field(
+        default=True, metadata={"help": "Composite at native resolution on hi-dpi displays."}
     )
-    # stored head is the first viewport (height-capped at the tooltip cap) ≈ 32 KiB compressed, so the
-    # whole ~32k popular-word set is ~900 MB — this 2 GB default holds it all with headroom for the
-    # runtime write-back to add rarer hovered words on top; lower it to spend less disk.
-    render_cache_min_height: int = (
-        512  # eligibility gate (px), keeps the big render cache to NON-TRIVIAL panels: skip a head
+    # OPT-OUT: when a `mask-atlas.sqlite` (built by `saitenka prewarm`) exists, getmask2 alpha bitmaps load
+    # from disk (~half the raster CPU); ~150 MB RAM bulk-loaded once at startup. No atlas → nothing loads.
+    mask_atlas: bool = field(
+        default=True, metadata={"help": "Use an on-disk glyph mask atlas when one exists."}
     )
-    # shorter than this. EMPIRICALLY CALIBRATED — a < 512px entry cold-renders (get + layout + first-
-    # viewport raster) in ~8ms, already within budget, so it's not worth a render-cache row; 512–1024px is
-    # ~18ms, 4096px ~31ms. (Glyph coverage for those trivial words still lands in the mask atlas, which is
-    # per-glyph and covers the full population.) Cache SIZE is bounded by render_cache_max_mb + LRU too.
+    # LRU byte ceiling on the on-disk render cache. The ~32k popular-word set is ~900 MB; 2 GB holds it all
+    # with headroom for runtime write-back. Lower it to spend less disk.
+    render_cache_max_mb: int = field(
+        default=2048, metadata={"help": "On-disk render-cache size ceiling (MiB)."}
+    )
+    # Eligibility gate (px): a shorter entry cold-renders within budget, so it's not worth a cache row.
+    # EMPIRICALLY CALIBRATED — <512px ~8ms, 512–1024px ~18ms, 4096px ~31ms.
+    render_cache_min_height: int = field(
+        default=512, metadata={"help": "Minimum panel height (px) eligible for the render cache."}
+    )
 
 
 @dataclass(frozen=True)
 class MiningOptions:
     """Mining-flow behaviour (the Anki client/deck config stays in anki.MineConfig)."""
 
-    play_audio: bool = True
-    show_preview: bool = (
-        True  # auto-pop the card-preview panel after a mine (Esc/next-cue dismisses)
+    play_audio: bool = field(
+        default=True, metadata={"help": "Play the sentence audio after a mine."}
     )
-    max_bulk: int = 12  # cap on words mined in one "mine all" bulk action
-    anki_ok_ttl: float = 3.0  # seconds an AnkiConnect reachability check is cached for
-    anki_ping_timeout: float = 0.4  # timeout for the reachability ping (hot hover path)
+    show_preview: bool = field(
+        default=True, metadata={"help": "Auto-pop the card-preview panel after a mine."}
+    )
+    max_bulk: int = field(
+        default=12, metadata={"help": 'Cap on words mined in one "mine all" bulk action.'}
+    )
+    anki_ok_ttl: float = field(
+        default=3.0, metadata={"help": "Seconds an AnkiConnect reachability check is cached for."}
+    )
+    anki_ping_timeout: float = field(
+        default=0.4, metadata={"help": "Timeout (seconds) for the reachability ping."}
+    )
 
 
 @dataclass(frozen=True)
 class TranslationOptions:
     """EN-translation reveal behaviour."""
 
-    auto_translate: bool = False
+    auto_translate: bool = field(
+        default=False, metadata={"help": "Reveal the EN translation automatically on each line."}
+    )
 
 
 @dataclass(frozen=True)
 class StatsOptions:
     """Local immersion history; explicit opt-in and independent of telemetry."""
 
-    enabled: bool = False
-    summary: bool = True
+    enabled: bool = field(
+        default=False, metadata={"help": "Record local immersion-session history."}
+    )
+    summary: bool = field(
+        default=True, metadata={"help": "Print a session summary when a file ends."}
+    )
 
 
 @dataclass(frozen=True)
 class PanelOptions:
     """Scale for the help, sidebar, and episode-analysis utility surfaces."""
 
-    scale: float = 1.0
+    scale: float = field(
+        default=1.0, metadata={"help": "Scale for the help/sidebar/analysis panels."}
+    )
 
 
 @dataclass(frozen=True)
 class PerfOptions:
     """Background-work tuning: poll cadence, prefetch parallelism, and speculative line lookahead."""
 
-    poll_interval: float = 0.025  # main loop tick — trades CPU usage against input latency
+    poll_interval: float = field(
+        default=0.025, metadata={"help": "Main-loop tick (seconds) — CPU usage vs input latency."}
+    )
     # Tooltip-warming worker threads (persistent, whole session). Mostly a RAM knob: each holds its own
     # per-thread SQLite page cache (~[dictdb].cache_size_kib, 32 MiB default) + a per-thread FreeType
     # face cache + (free-threaded) its own allocator arena, so RSS scales ~linearly with the count.
     # 0 = auto (a flat 4 free-threaded where render parallelizes; 2 on a GIL build where extra workers
     # only contend); a positive value pins it explicitly on BOTH builds — lower it to cap RAM.
-    prefetch_workers: int = 0
-    prefetch_lookahead: int = (
-        0  # upcoming subtitle cues to WARM ahead of the current line (0 = only
+    prefetch_workers: int = field(
+        default=0,
+        metadata={"help": "Tooltip-warming worker threads (0 = auto). Mostly a RAM knob."},
     )
-    # the current line). Each decodes+caches the next cue's dictionary glossaries during idle playback,
-    # so the first hover after the line advances (or an Alt+→ nav) is already warm. Needs an external
-    # sub index — embedded/jimaku tracks have none, so it's a no-op there.
+    # Each decodes+caches the next cue's glossaries during idle playback so the first hover after the line
+    # advances is warm. Needs an external sub index — embedded/jimaku tracks have none (a no-op there).
+    prefetch_lookahead: int = field(
+        default=0,
+        metadata={"help": "Subtitle cues to decode-warm ahead of the current line (0 = none)."},
+    )
 
     # Speculatively renders the SAME viewport-capped head a real hover would (via the same
     # panel_for()/panel_cache path — a cache hit at hover time, no separate cache tier or key-matching
@@ -220,18 +281,21 @@ class PerfOptions:
     # Selectivity IS the RAM/CPU cap: most upcoming words never get a render job at all, only the ones
     # worth the extra cost over plain decode. Needs a sub index + a scorer (for the n+1/known/freq
     # signal); a no-op without either.
-    head_prefetch_lookahead: int = 1  # upcoming cues to consider for head pre-render (0 = off);
-    # deliberately a SEPARATE, shallower knob than prefetch_lookahead — render jobs cost far more
-    # than decode-only warm jobs, so this should stay shorter-range even when lookahead is generous
-    head_prefetch_queue_max: int = (
-        24  # bounds in-flight/queued render jobs — the transient-RSS cap:
+    # A SEPARATE, shallower knob than prefetch_lookahead — render jobs cost far more than decode-only warm
+    # jobs, so this stays shorter-range even when lookahead is generous.
+    head_prefetch_lookahead: int = field(
+        default=1, metadata={"help": "Upcoming cues to consider for head pre-render (0 = off)."}
     )
-    # panel_cache's LRU bounds RETAINED size, not concurrently-building PIL objects in flight
-    token_cache_max: int = (
-        2500  # LRU cap on tokenized+scored cues (source line → TokenizedCue) so a
+    # panel_cache's LRU bounds RETAINED size, not concurrently-building PIL objects in flight.
+    head_prefetch_queue_max: int = field(
+        default=24,
+        metadata={"help": "Cap on in-flight/queued head-render jobs (transient-RSS bound)."},
     )
-    # looped/re-watched/nav-back line skips re-tokenization; sized for a whole episode's cues so a
-    # full-file tokenization prefetch never evicts a cue still needed later in the same file.
+    # Sized for a whole episode's cues so a full-file tokenization prefetch never evicts a cue still needed.
+    token_cache_max: int = field(
+        default=2500,
+        metadata={"help": "LRU cap on tokenized+scored cues (source line → TokenizedCue)."},
+    )
 
 
 # Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).
@@ -331,10 +395,18 @@ class DictDbOptions:
     """Per-connection SQLite tuning for the consolidated dictionary DB (``dictdb.py``), plus the
     chunk size used when re-chunking a streamed dexie database export into Yomitan-format banks."""
 
-    mmap_size: int = 268_435_456  # 256 MiB mmap window per read connection
-    cache_size_kib: int = 32_768  # 32 MiB page cache per read connection
-    dexie_chunk_size: int = 10_000  # entries per bank file when importing a dexie export
-    entry_cache_max: int = 256  # LRU cap on decoded DictEntry objects, per Dictionary instance
+    mmap_size: int = field(
+        default=268_435_456, metadata={"help": "SQLite mmap window per read connection (bytes)."}
+    )
+    cache_size_kib: int = field(
+        default=32_768, metadata={"help": "SQLite page cache per read connection (KiB)."}
+    )
+    dexie_chunk_size: int = field(
+        default=10_000, metadata={"help": "Entries per bank file when importing a dexie export."}
+    )
+    entry_cache_max: int = field(
+        default=256, metadata={"help": "LRU cap on decoded DictEntry objects, per Dictionary."}
+    )
 
 
 def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
@@ -358,9 +430,15 @@ class TelemetryOptions:
     ``enabled`` is the actual opt-in switch. ``sample_hot_path``
     bounds the cost of instrumenting the per-tick hit-test path (0.0 = never sample it)."""
 
-    enabled: bool = False
-    export_dir: str | None = None  # None = paths.cache_dir() / "telemetry"
-    sample_hot_path: float = 0.0  # [0.0, 1.0]
+    enabled: bool = field(
+        default=False, metadata={"help": "Master switch for runtime tracing/metrics."}
+    )
+    export_dir: str | None = field(
+        default=None, metadata={"help": "Trace/metric export dir (blank = cache_dir()/telemetry)."}
+    )
+    sample_hot_path: float = field(
+        default=0.0, metadata={"help": "Sampling rate [0.0–1.0] for the per-tick hit-test path."}
+    )
 
 
 def resolve_telemetry(cfg: dict | None = None) -> TelemetryOptions:
