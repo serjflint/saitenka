@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786285281201,
+  "lastUpdate": 1786292049206,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2555,6 +2555,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.835,
             "range": "±1.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d63a0428092c4e37700fbee088280958c5ef221c",
+          "message": "Merge pull request #280 from serjflint/test/install-bootstrap-smoke\n\ntest: cross-OS install-bootstrap smoke (e2e install-smoke leg)",
+          "timestamp": "2026-08-09T19:13:22+03:00",
+          "tree_id": "88d6172f16e31cf224baac7096bff7a61723106b",
+          "url": "https://github.com/serjflint/saitenka/commit/d63a0428092c4e37700fbee088280958c5ef221c"
+        },
+        "date": 1786292048616,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.298,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.644,
+            "range": "±0.6%",
             "unit": "ms"
           }
         ]
