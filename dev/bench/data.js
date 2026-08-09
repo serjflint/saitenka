@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786282897574,
+  "lastUpdate": 1786283723566,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2483,6 +2483,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.947,
             "range": "±2.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7150e5cc25a98379fae6ffe8d3e096f60f99e2d3",
+          "message": "Merge pull request #278 from serjflint/chore/bench-ci-tooling-rot\n\nchore(tooling): fix bench/CI rot + expand type-check scope to examples/tools/install/.agents",
+          "timestamp": "2026-08-09T16:54:32+03:00",
+          "tree_id": "19d54a80154c00060eb08014358291fe57595fba",
+          "url": "https://github.com/serjflint/saitenka/commit/7150e5cc25a98379fae6ffe8d3e096f60f99e2d3"
+        },
+        "date": 1786283722387,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.285,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.751,
+            "range": "±1.6%",
             "unit": "ms"
           }
         ]
