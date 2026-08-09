@@ -34,7 +34,10 @@ EXE_NAME = "saitenka.exe" if os.name == "nt" else "saitenka"
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
     print(f"$ {' '.join(cmd)}", flush=True)
-    return subprocess.run(cmd, text=True, capture_output=True, **kw)
+    # Force UTF-8: `text=True` alone decodes with the platform locale (cp1252 on Windows), which chokes
+    # on the CLI's non-ASCII help/doctor output (UnicodeDecodeError → stdout=None). Same trap as the
+    # repo's subprocess-utf8-encoding ast-grep rule.
+    return subprocess.run(cmd, encoding="utf-8", errors="replace", capture_output=True, **kw)
 
 
 def _build_wheel() -> Path:
