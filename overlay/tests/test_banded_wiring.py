@@ -7,7 +7,7 @@ windowed viewport vs a one-shot render_panel crop lives in ``tests/test_windowed
 
 from __future__ import annotations
 
-from overlay.app.controller import SKIP_POS, Reader
+from overlay.app.controller import Reader
 from overlay.panel import Definition, Entry
 from util import FakeIPC
 
@@ -35,7 +35,7 @@ def _reader() -> Reader:
 
 
 def _content_word(r: Reader) -> int:
-    return next(i for i, t in enumerate(r.tokens) if t.is_content and t.pos not in SKIP_POS)
+    return next(i for i, t in enumerate(r.tokens) if r.tokenizer.is_content(t))
 
 
 def test_tooltip_renders_lazily_and_hit_tests_end_to_end():

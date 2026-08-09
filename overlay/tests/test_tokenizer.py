@@ -41,6 +41,12 @@ class _FakeTokenizer:
     def tokenize(self, _line, *, _strip_furigana=True, _merge=True):
         return []
 
+    def is_content(self, _token):
+        return True
+
+    def is_skippable(self, token):
+        return not token.surface.strip()
+
     def query_token(self, _query):
         return None
 
@@ -176,6 +182,43 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     nested_popup.open_link(reader, lb, (0, 0), 0)
 
     assert "query_token" in spy.calls
+
+
+def test_unidic_is_content_matches_pos_whitelist():
+    """Negative control: the JP strategy's content-ness is exactly the unidic POS whitelist — a 名詞 is
+    content, a 助詞 (particle) is not — so nothing about Japanese classification moved."""
+    tok = UnidicTokenizer()
+    assert tok.is_content(Token("本", "本", "ほん", "名詞", 0, 1))
+    assert not tok.is_content(Token("は", "は", "は", "助詞", 0, 1))
+    assert tok.is_skippable(Token("。", "。", "", "補助記号", 0, 1))
+    assert not tok.is_skippable(Token("本", "本", "ほん", "名詞", 0, 1))
+
+
+class _ParticleContentTokenizer(_FakeTokenizer):
+    """Inverts the JP partition: only 助詞 (particles) count as content. A tokenizer is free to define
+    content-ness however it likes — the mine path must follow whatever strategy the reader holds."""
+
+    def is_content(self, token):
+        return token.pos == "助詞"
+
+
+def test_mine_target_follows_the_active_tokenizers_content_partition():
+    """The word ``mine_target`` picks is decided by ``reader.tokenizer.is_content``, not baked JP POS.
+    Same tokens, two strategies → two different mined tokens; the unidic case is the JP negative
+    control (the 名詞, never the 助詞)."""
+    from overlay.app.miner import Miner
+
+    particle = Token("は", "は", "は", "助詞", 0, 1)
+    noun = Token("本", "本", "ほん", "名詞", 1, 2)
+
+    jp = Reader(FakeIPC())
+    jp.tokens = [particle, noun]
+    assert Miner(jp).mine_target() == 1  # unidic: the noun is the content word
+
+    swapped = Reader(FakeIPC())
+    swapped.use_tokenizer(_ParticleContentTokenizer())
+    swapped.tokens = [particle, noun]
+    assert Miner(swapped).mine_target() == 0  # swapped: the particle is now "content"
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache():

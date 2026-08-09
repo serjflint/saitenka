@@ -18,7 +18,6 @@ from pathlib import Path
 from overlay.app.anki import AnkiError, CardContent, bold_word, build_note, dedupe
 from overlay.app.lookup import card_for
 from overlay.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
-from overlay.app.tokenize import SKIP_POS
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ def _select_bulk_targets(r) -> list[int]:
     by lemma (first occurrence wins), capped at ``r.max_bulk``."""
     targets, seen = [], set()
     for i, t in enumerate(r.tokens):
-        if not (t.is_content and t.pos not in SKIP_POS):
+        if not r.tokenizer.is_content(t):
             continue
         if r.styles and r.styles[i].tag == "known":
             continue
@@ -79,7 +78,7 @@ class Miner:
                 if s.tag.startswith("n+1"):
                     return i
         for i, t in enumerate(r.tokens):
-            if t.is_content and t.pos not in SKIP_POS:
+            if r.tokenizer.is_content(t):
                 return i
         return 0
 

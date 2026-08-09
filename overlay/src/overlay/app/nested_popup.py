@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel, PopupView
 from overlay.app.prefetch import cap_for
-from overlay.app.tokenize import SKIP_POS
 from overlay.panel import panel_rows
 
 if TYPE_CHECKING:
@@ -90,7 +89,7 @@ def show_nested(reader: Reader, sb) -> None:
     popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
     tokens = reader.tokenizer.tokenize(sb.text)
     tok = tokens[0] if tokens else None
-    if tok is None or tok.pos in SKIP_POS or not tok.surface.strip():
+    if tok is None or reader.tokenizer.is_skippable(tok):
         hide_nested(reader)
         return
     if tok.surface == reader._nest.word and reader._nest.state is not None:

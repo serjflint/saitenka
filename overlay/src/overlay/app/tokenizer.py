@@ -25,13 +25,16 @@ if TYPE_CHECKING:
 
 class Tokenizer(Protocol):
     """The language-dependent operations the reader/tooltip/mining route through. A profile owns one;
-    swapping it reroutes tokenization, phrase probing and inflection without touching any call site."""
+    swapping it reroutes tokenization, content/skip classification, phrase probing and inflection
+    without touching any call site — so a non-Japanese strategy defines its own content-ness."""
 
     name: str
 
     def tokenize(
         self, line: str, *, strip_furigana: bool = True, merge: bool = True
     ) -> list[Token]: ...
+    def is_content(self, token: Token) -> bool: ...
+    def is_skippable(self, token: Token) -> bool: ...
     def query_token(self, query: str) -> Token | None: ...
     def inflected_in(self, tokens: list[Token], index: int) -> str: ...
     def phrase_terms(
@@ -51,6 +54,14 @@ class UnidicTokenizer:
         self, line: str, *, strip_furigana: bool = True, merge: bool = True
     ) -> list[Token]:
         return _jp.tokenize(line, strip_furigana=strip_furigana, merge=merge)
+
+    def is_content(self, token: Token) -> bool:
+        """A content word worth annotating/mining — the unidic POS whitelist (名詞/動詞/形容詞/…)."""
+        return token.pos in _jp.CONTENT_POS
+
+    def is_skippable(self, token: Token) -> bool:
+        """Not worth a tooltip/hit-test — unidic symbol/punct/whitespace POS, or a blank surface."""
+        return token.pos in _jp.SKIP_POS or not token.surface.strip()
 
     def query_token(self, query: str) -> Token | None:
         return _jp.query_token(query)
