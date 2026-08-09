@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786273634358,
+  "lastUpdate": 1786275182462,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2195,6 +2195,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.621,
             "range": "±4.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e251760043caa8e39393fa211b36367ddadbae45",
+          "message": "Merge pull request #270 from serjflint/feat/254-p2-profile-config\n\nfeat(profiles): [profiles.*] config surface + active-profile routing (#254 p2)",
+          "timestamp": "2026-08-09T14:32:39+03:00",
+          "tree_id": "07e9a5fc348a20a168294f189d1f2b1d91566c8a",
+          "url": "https://github.com/serjflint/saitenka/commit/e251760043caa8e39393fa211b36367ddadbae45"
+        },
+        "date": 1786275181853,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.311,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.78,
+            "range": "±2.4%",
             "unit": "ms"
           }
         ]
