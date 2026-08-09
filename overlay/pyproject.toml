@@ -38,11 +38,11 @@ Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
 # core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
 deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language= API (#254)
 # Optional layout engine: the taffy (CSS flexbox) row-stack solver behind the LayoutBackend seam
-# (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0) — kept OUT of `full` and its own
-# extra because free-threaded cp314t wheels are still niche (needs a prebuilt wheel or a Rust
-# toolchain), so a default install stays pure-Python. The pure-Python DefaultLayoutBackend is the
-# always-available, byte-identical fallback; this is additive and parity-gated. `[tool.uv.sources]`
-# resolves it from the in-repo ../taffylite for dev; it is not yet published to PyPI.
+# (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0), published to PyPI (0.1.0, #231) with
+# prebuilt cp313/cp314/cp314t wheels incl. free-threaded — kept OUT of `full` so a default install stays
+# pure-Python. The pure-Python DefaultLayoutBackend is the always-available, byte-identical fallback; this
+# is additive and parity-gated. `saitenka[layout-engine]` resolves taffylite from PyPI. (For hacking on the
+# in-repo Rust crate, add a `[tool.uv.sources]` editable path override or `uv run --with-editable ../taffylite`.)
 layout-engine = ["taffylite>=0.1.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
@@ -79,14 +79,10 @@ full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
 saitenka = "overlay.app.cli:main"
 
 [tool.uv.sources]
-# Dev editable resolution of the in-repo optional layout engine (the `layout-engine` extra above).
-# Only pulled when that extra is selected, so the default `--extra full` env never builds the Rust
-# wheel. Stripped from published metadata — a PyPI install of `saitenka[layout-engine]` needs taffylite
-# on PyPI (future work), same additive-optional posture as the extra note above.
-taffylite = { path = "../taffylite", editable = true }
 # Dev editable resolution of the GPL add-on so overlay changes see local deinflect edits (e.g. the
 # French rule set / language= API). Stripped from published metadata — a PyPI `saitenka[deinflect]`
-# install still pulls the published saitenka-deinflect wheel.
+# install still pulls the published saitenka-deinflect wheel. (taffylite is no longer sourced editable —
+# the `layout-engine` extra resolves the published wheel from PyPI, #231/#282.)
 saitenka-deinflect = { path = "../deinflect", editable = true }
 
 [tool.uv]
