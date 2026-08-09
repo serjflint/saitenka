@@ -24,7 +24,9 @@ from overlay.app.config import config_path, load_config
 from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
+from overlay.app.languages import MAIN_LANG
 from overlay.app.paths import cache_dir
+from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
 log = logging.getLogger(__name__)
@@ -260,7 +262,7 @@ def _enabled_provider_names(
         ("jimaku", jimaku or bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled"))),
         ("tsukihime", bool(tsukihime_cfg.get("enabled"))),
     )
-    return tuple(provider for provider, enabled in flags if enabled)
+    return enabled_providers_for(MAIN_LANG, flags)
 
 
 def _configured_subtitles(
@@ -275,9 +277,7 @@ def _configured_subtitles(
     cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync)
     if cached is not None:
         return cached, ()
-    providers = tuple(
-        provider for provider, enabled in (("jimaku", jimaku), ("tsukihime", tsukihime)) if enabled
-    )
+    providers = enabled_providers_for(MAIN_LANG, (("jimaku", jimaku), ("tsukihime", tsukihime)))
     return None, providers
 
 
