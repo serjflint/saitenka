@@ -21,6 +21,7 @@ from overlay.app.profiles import (
     canonical_language,
     configured_profiles,
     default_tokenizer_for,
+    profile_names,  # re-exported: the canonical impl lives on the profiles leaf (cycle-free for doctor)
     resolve_profile,
     scope_config,
     validate_language_code,
@@ -76,12 +77,6 @@ def remove_paths(cfg: dict, name: str) -> tuple[tuple[str, ...], ...]:
     if cfg.get("active_profile") == name:
         paths.append(("active_profile",))
     return tuple(paths)
-
-
-def profile_names(cfg: dict) -> list[str]:
-    """Named ``[profiles.*]`` in sorted order (the switcher's cycle order after the base default)."""
-    raw = cfg.get("profiles")
-    return sorted(raw) if isinstance(raw, dict) else []
 
 
 def render_list(cfg: dict) -> list[str]:

@@ -323,8 +323,7 @@ def check_profiles() -> list[Check]:
     """Validate every configured reading profile (#254 W5): its tokenizer is registered, its language
     codes are well-formed, and its scoped dictionary titles are actually imported — plus a dangling
     ``active_profile`` selector. A single-profile (JP default) config yields one info line."""
-    from overlay.app.profile_cli import profile_names
-    from overlay.app.profiles import resolve_profile
+    from overlay.app.profiles import profile_names, resolve_profile
     from overlay.app.tokenizer import get_tokenizer
 
     cfg = load_config()

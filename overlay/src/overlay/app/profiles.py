@@ -97,6 +97,12 @@ def _table(cfg: dict, key: str) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def profile_names(cfg: dict) -> list[str]:
+    """Named ``[profiles.*]`` in sorted order (the switcher's cycle order after the base default). Lives
+    on this leaf module so both the CLI and doctor read it without importing the CLI (cycle-free)."""
+    return sorted(_table(cfg, "profiles"))
+
+
 def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str | None, dict]:
     """``(name, raw)`` for the active profile: the ``[profile]`` singular default table (what
     ``saitenka config`` edits) with ``[profiles.<name>]`` overlaid on top. ``name`` is the selector
