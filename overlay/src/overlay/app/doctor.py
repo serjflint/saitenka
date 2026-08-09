@@ -26,12 +26,17 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from overlay.app.anki import ANKI_DOWN_ERRORS
 from overlay.app.config import config_path, load_config
 from overlay.app.paths import cache_dir
 
-Status = str  # "ok" | "warn" | "fail"
+# A closed set — the type-checker now rejects a typo'd status literal at every Check(...) call site,
+# and VALID_STATUSES is the runtime SSOT `Report.counts` buckets by (so a status outside the set can't
+# silently vanish from the tally and erode `exit_code`, which keys off `counts["fail"]`).
+Status = Literal["ok", "warn", "fail"]
+VALID_STATUSES: tuple[Status, ...] = ("ok", "warn", "fail")
 
 LOG_PATH = cache_dir() / "overlay.log"
 ANKI_HOST = "http://127.0.0.1:8765"
@@ -61,9 +66,9 @@ class Report:
 
     @property
     def counts(self) -> dict[str, int]:
-        out = {"ok": 0, "warn": 0, "fail": 0}
+        out: dict[str, int] = dict.fromkeys(VALID_STATUSES, 0)
         for c in self.checks:
-            out[c.status] = out.get(c.status, 0) + 1
+            out[c.status] += 1  # c.status is a closed Literal — always a real bucket
         return out
 
     @property
