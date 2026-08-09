@@ -13,6 +13,10 @@ logs.
   fire-and-forget player whose handle was discarded, so dismissing the preview (✕, ++esc++, a new
   subtitle cue, or ++p++) left the audio running. The player handle is now retained and stopped on
   every dismiss path, and a second ++▶++ press replaces the clip instead of stacking a second one.
+- **The sidebar bookmark (B) button no longer silently does nothing.** It re-checked that the clicked
+  row was still the active cue at click time, so if playback advanced a cue between the sidebar redraw
+  and your click, the click was dropped with no feedback (while ++alt+b++ on the same cue worked). The
+  button now bookmarks unconditionally, matching the keybind.
 
 ## [2.2.0] - 2026-08-09
 

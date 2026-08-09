@@ -372,9 +372,13 @@ def _activate_hit(reader: Reader, hit) -> None:
         reader.sidebar.scroll = 0
     elif _seek_hit(reader, hit):
         return
-    elif hit.kind == "bookmark" and hit.value == _active_index(reader):
+    elif hit.kind == "bookmark":
+        # No active-index re-check: the B/+ actions render ONLY on the active row, so re-gating on
+        # `hit.value == _active_index` at click time just DROPS the click when playback drifted a cue
+        # between redraw and click (#252) — the silent no-op the ungated Alt+b never had. Both paths now
+        # act on the live cue; capture_current toasts if there genuinely isn't one.
         reader.toggle_bookmark()
-    elif hit.kind == "mine" and hit.value == _active_index(reader):
+    elif hit.kind == "mine":
         reader.mine_current()
     elif hit.kind == "relink":
         video = reader._get("path")
