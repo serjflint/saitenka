@@ -86,17 +86,50 @@ def _table(cfg: dict, key: str) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
-def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
-    """The active :class:`Profile` for ``cfg``. ``override`` (the ``--profile`` CLI flag) wins over the
-    config's ``active_profile`` selector. No profile configured → the built-in JP default."""
+def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str | None, dict]:
+    """``(name, raw)`` for the active profile: the ``[profile]`` singular default table (what
+    ``saitenka config`` edits) with ``[profiles.<name>]`` overlaid on top. ``name`` is the selector
+    (``override`` — the ``--profile`` flag — beats the config's ``active_profile``), or ``None`` for the
+    built-in default. Shared by :func:`resolve_profile` (identity fields) and :func:`scope_config`
+    (dict/mine scoping) so the profile table is parsed once per concern."""
     name = override or cfg.get("active_profile")
-    raw = dict(
-        _table(cfg, "profile")
-    )  # singular default-profile table (what `saitenka config` edits)
+    raw = dict(_table(cfg, "profile"))  # singular default-profile table
     if name:
         named = _table(cfg, "profiles").get(name)
         if isinstance(named, dict):
             raw.update(named)  # named overlay on top of the default table
+    return name, raw
+
+
+# Flat-cfg keys a profile scopes (D4/D6). ``dicts``/``freq``/``pitch`` are dictionary TITLE lists — a
+# profile REPLACES them wholesale (a French profile consults only its own dicts, never the JP set).
+_LIST_SCOPED = ("dicts", "freq", "pitch")
+
+
+def scope_config(cfg: dict, override: str | None = None) -> dict:
+    """Overlay the active profile's scoped tables onto the flat cfg (design D1-A), returning the cfg the
+    dep builders (``build_reader_deps`` / ``_mine_config_from``) should read. ``dicts``/``freq``/``pitch``
+    lists replace the top-level lists; a ``[profiles.<name>.mine]`` table merges key-wise OVER ``[mine]``
+    (a profile can override just the deck and inherit the rest). Returns the SAME cfg object when the
+    active profile scopes none of these — so the default profile (no ``[profiles.*]``) is byte-identical
+    and every existing ``cfg.get(...)`` reader stays untouched."""
+    _, raw = _active_profile_table(cfg, override)
+    lists = {k: list(raw[k]) for k in _LIST_SCOPED if isinstance(raw.get(k), list)}
+    mine = raw.get("mine")
+    if not lists and not isinstance(mine, dict):
+        return cfg
+    out = dict(cfg)
+    out.update(lists)
+    if isinstance(mine, dict):
+        base = cfg.get("mine")
+        out["mine"] = {**(base if isinstance(base, dict) else {}), **mine}
+    return out
+
+
+def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
+    """The active :class:`Profile` for ``cfg``. ``override`` (the ``--profile`` CLI flag) wins over the
+    config's ``active_profile`` selector. No profile configured → the built-in JP default."""
+    name, raw = _active_profile_table(cfg, override)
     defaults = ProfileOptions()
     language = canonical_language(validate_language_code(str(raw.get("language", MAIN_LANG))))
     second = canonical_language(validate_language_code(str(raw.get("second", defaults.second))))

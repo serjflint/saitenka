@@ -26,7 +26,7 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import configured_profiles, resolve_profile
+from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -155,6 +155,39 @@ def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
     """Flag values win over the config file. Values are dictionary **titles** resolved against the
     consolidated DB (imported once) — not paths, so no ~/$VAR expansion is needed."""
     return list(flag_vals or []) or list(cfg.get(key) or [])
+
+
+def default_mine_target(mine: dict) -> tuple[str, str]:
+    """The ``(deck, model)`` a ``[mine]`` table implies with no explicit CLI flag: deck default
+    ``Saitenka::Mining``; model an explicit ``model`` else the ``preset`` name (Lapis/Kiku) else Lapis.
+    The single home for this derivation — ``_resolve_mine_model`` and the ``#254`` profile scoping both
+    call it, so ``run``/``doctor``/attach target the same note type (the both-seams trap)."""
+    deck = mine.get("deck", "Saitenka::Mining")
+    model = mine.get("model") or mine.get("preset") or "Lapis"
+    return deck, model
+
+
+def _mine_table(cfg: dict) -> dict:
+    mine = cfg.get("mine")
+    return mine if isinstance(mine, dict) else {}
+
+
+def _scope_cfg_to_profile(
+    cfg: dict, mine_deck: str | None, mine_model: str | None
+) -> tuple[dict, str, str]:
+    """Overlay the active profile's dict/freq/pitch + [mine] onto ``cfg`` (#254 D4/D6), returning the
+    scoped cfg plus the effective ``(mine_deck, mine_model)``. ``mine_deck``/``mine_model`` are ``None``
+    when their CLI flag wasn't passed — then the deck/model is resolved from the SCOPED [mine] (the active
+    profile's, or the runtime top-level [mine] honoring ``--config``). An explicit (non-``None``) flag
+    wins. Resolving off the scoped runtime cfg — never an import-time baked default — is what fixes the
+    ``--config other.toml`` + profile case where the old comparison-baseline misfired."""
+    cfg = scope_config(cfg)
+    deck, model = default_mine_target(_mine_table(cfg))
+    return (
+        cfg,
+        (deck if mine_deck is None else mine_deck),
+        (model if mine_model is None else mine_model),
+    )
 
 
 def jimaku_should_fetch(
@@ -891,8 +924,8 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     freq: list[str] | None,
     pitch: list[str] | None,
     mine: bool,
-    mine_deck: str,
-    mine_model: str,
+    mine_deck: str | None,  # None = flag not passed → resolved from the active profile / [mine]
+    mine_model: str | None,
     mine_key: str,
     mine_all_key: str,
     mine_normalize_audio: bool,
@@ -922,6 +955,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     profile_cycle = configured_profiles(
         cfg
     )  # the [profiles.*] the live switcher (D8) rotates through
+    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); a not-passed
+    # --mine-deck/--mine-model (None) yields to the profile's own deck/model (see _scope_cfg_to_profile).
+    cfg, mine_deck, mine_model = _scope_cfg_to_profile(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
