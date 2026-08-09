@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786268819120,
+  "lastUpdate": 1786269061118,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1943,6 +1943,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.804,
             "range": "±2.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d9247e9778f24d4849313cdb4771b7c21c5f83af",
+          "message": "Merge pull request #262 from serjflint/feat/231-225-infra\n\ninfra: taffylite PyPI release workflow (#231) + ast-grep named-args advisory (#225)",
+          "timestamp": "2026-08-09T12:50:13+03:00",
+          "tree_id": "2610d4a4c4f13f6c0d51ecafb16249ac79c9eae8",
+          "url": "https://github.com/serjflint/saitenka/commit/d9247e9778f24d4849313cdb4771b7c21c5f83af"
+        },
+        "date": 1786269059997,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.857,
+            "range": "±0.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.832,
+            "range": "±1.6%",
             "unit": "ms"
           }
         ]
