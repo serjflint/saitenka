@@ -133,6 +133,7 @@ dev = [
     "import-linter>=2.13",
     "complexipy>=6.2.0",
     "ruff>=0.16",
+    "deptry>=0.23",
 ]
 # Lean group for the `/tmp/venv-py-spy` profiling venv (the `*-pyspy` poe tasks below) — just the one
 # binary, so that venv doesn't drag in mypy/pyrefly/memray/… via `dev`. Was previously (wrongly, per a
@@ -431,10 +432,11 @@ pages = { shell = "cd .. && bash install/publish-pages.sh" }
 # legitimate site (subprocess launch of mpv/ffmpeg/anki, localhost/HTTPS urlopen, the dictdb SQL) and
 # the four categorically-safe rules in `ignore`. semgrep taint (the cross-file layer `S` can't do)
 # stays as the opt-in `invariants-taint`.
-# GATE (in `all`) — unused/missing/misplaced deps. deptry, run in-project (uv run --with) so PIL→pillow
-# etc. resolve via installed metadata; running it isolated via uvx misreports everything. Clean after
+# GATE (in `all`) — unused/missing/misplaced deps. deptry lives in the `dev` group (synced by the cached
+# project `.venv`, incl. in CI's `uv sync --locked --extra full`), so this runs against the already-built
+# env instead of `--with deptry` minting a fresh ephemeral overlay env every gate run. Clean after
 # the [tool.deptry] ignores (declared rich, forward-declared filelock). JSON for agents: add `-o dep.json`.
-deps = { shell = "uv run --extra full --with deptry deptry src" }
+deps = { shell = "uv run --extra full deptry src" }
 # ADVISORY — cross-module dead code (ruff `F` only catches unused imports/locals). vulture with a
 # whitelist for interface-mandated params (structlog processors, OTel exporter overrides, signal
 # handlers) that are "unused" by signature but required. Tune with --min-confidence.
