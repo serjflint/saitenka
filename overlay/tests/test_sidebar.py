@@ -132,6 +132,45 @@ def test_active_cue_actions_use_existing_reader_flows(kind, method, monkeypatch)
     assert invoked == [method]
 
 
+@pytest.mark.parametrize(
+    ("kind", "method"), [("bookmark", "toggle_bookmark"), ("mine", "mine_current")]
+)
+def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, method, monkeypatch):
+    """#252: B/+ render only on the active row, so re-gating the click on `hit.value == active` dropped
+    it silently when playback advanced a cue between redraw and click. The click must fire regardless of
+    the clicked row's value vs the now-active index — parity with the ungated Alt+b."""
+    reader, _ipc = _reader(active=9)  # the live cue has moved on since the row was drawn
+    _capture_render(monkeypatch)
+    invoked = []
+    monkeypatch.setattr(reader, method, lambda: invoked.append(method))
+    reader.sidebar.open = True
+    reader.sidebar.rect = (100, 100, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox(kind, 3, 0, 0, 40, 40),)  # row 3, no longer active
+
+    sidebar.on_click(reader, 110, 110)
+
+    assert invoked == [method]  # not the old silent no-op
+
+
+def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
+    """Parity pin: the sidebar B button and the Alt+b keybind both funnel into ``toggle_bookmark`` — so
+    the sidebar path can't silently diverge from the keybind again."""
+    from overlay.app.bindings import BOOKMARK_MSG
+
+    reader, _ipc = _reader(active=3)
+    _capture_render(monkeypatch)
+    invoked = []
+    monkeypatch.setattr(reader, "toggle_bookmark", lambda: invoked.append("toggle"))
+
+    Reader._HANDLERS[BOOKMARK_MSG](reader)  # the Alt+b path
+    reader.sidebar.open = True
+    reader.sidebar.rect = (100, 100, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)
+    sidebar.on_click(reader, 110, 110)  # the sidebar-button path
+
+    assert invoked == ["toggle", "toggle"]  # one flow, two entry points
+
+
 def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
     reader.subtitle_language = "en"
