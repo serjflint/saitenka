@@ -45,6 +45,17 @@ def _hermetic_cache_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_primary_font():
+    """Reset the global font-chain lead after each test. A test that constructs a non-JP Reader sets
+    ``fonts.set_primary_font('NotoSans.ttf')``; under pytest-randomly a later font/render test would then
+    see NotoSans lead. Restore the JP-universal default so the chain can't leak across tests."""
+    from overlay import fonts
+
+    yield
+    fonts.set_primary_font(None)
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_config(tmp_path, monkeypatch):
     """Point ``SAITENKA_CONFIG`` at a fresh per-test path (no file → pure defaults) so ``load_config()``
     never reads the developer's real ``overlay.toml``. Without this, a local knob silently changes

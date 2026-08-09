@@ -403,6 +403,7 @@ class Reader:
         # sentinels the primary/secondary state machine compares. Default = today's JP profile.
         self.profile: Profile = profile or DEFAULT_PROFILE
         self.langs = self.profile.langs  # concrete language codes; consumers key identity off this
+        self._apply_font_mode()  # Latin-first font order for a non-JP profile (nicer Latin typography)
         # The ordered cycle the live switcher (#254 D8) rotates through; a single entry (the default
         # path) makes cycle_profile a no-op. cli installs the real cycle via set_profile_cycle.
         self.profiles: tuple[Profile, ...] = (self.profile,)
@@ -766,6 +767,15 @@ class Reader:
             (i for i, p in enumerate(self.profiles) if p.name == self.profile.name), 0
         )
 
+    def _apply_font_mode(self) -> None:
+        """Lead the font fallback chain with the font best suited to the active profile's script (a
+        European profile → NotoSans; JP → the universal default). One source of truth for both __init__
+        and cycle_profile so the two can't drift."""
+        from overlay import fonts
+        from overlay.app.profiles import primary_font_for
+
+        fonts.set_primary_font(primary_font_for(self.profile.langs.main))
+
     def cycle_profile(self) -> None:
         """Cycle the active reading profile among the configured ``[profiles.*]`` at runtime (#254 D8).
         A no-op with a single configured profile (the default path). Resolves the new tokenizer FULLY
@@ -795,6 +805,7 @@ class Reader:
         self._profile_idx = idx
         self.profile = new
         self.langs = new.langs  # provider gating + identity read live off this
+        self._apply_font_mode()  # switch Latin-first font order with the profile
         self.use_tokenizer(
             tok
         )  # swaps the strategy AND clears the token cache (bumps its generation)

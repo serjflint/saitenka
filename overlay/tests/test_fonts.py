@@ -225,3 +225,32 @@ def test_glyph_width_eviction_counter_records_capacity_drops(monkeypatch):
             fonts.text_width(font, chr(0x4E00 + i))
         sampled = telemetry._sample_counters()
     assert sampled.get("glyph_width.evictions", 0) == 16
+
+
+def test_notosans_lead_prefers_it_for_a_covered_run():
+    """A European profile leads the chain with NotoSans (wider space + crisp letterforms) instead of the
+    universal NotoSansJP that also covers ASCII. The autouse fixture restores the default after."""
+    fonts.set_primary_font("NotoSans.ttf")
+    assert fonts.font_for_run("rain") == "NotoSans.ttf"
+    assert fonts.primary_font() == "NotoSans.ttf"
+    assert fonts.font_for_char("a") == "NotoSans.ttf"
+
+
+def test_default_font_lead_is_the_universal_jp_font_so_goldens_are_unchanged():
+    fonts.set_primary_font(None)
+    assert fonts.font_for_run("rain") == "NotoSansJP.ttf"
+    assert fonts.primary_font() == "NotoSansJP.ttf"
+    assert fonts.font_order() == fonts.FONT_FILES
+
+
+def test_notosans_lead_still_falls_back_to_notosansjp_for_cjk():
+    # A JP name embedded in a French gloss must still resolve — NotoSansJP trails NotoSans, not dropped.
+    fonts.set_primary_font("NotoSans.ttf")
+    assert fonts.font_for_char("考") == "NotoSansJP.ttf"
+
+
+def test_cyrillic_leads_with_notosans_for_free():
+    # The generalization win: a Cyrillic run leads with NotoSans (it covers Cyrillic) — no new font, no
+    # new flag. A Russian profile's primary_font_for('ru') selects it (see test_profiles).
+    fonts.set_primary_font("NotoSans.ttf")
+    assert fonts.font_for_run("дождь") == "NotoSans.ttf"

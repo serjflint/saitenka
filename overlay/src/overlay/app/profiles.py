@@ -72,23 +72,41 @@ def validate_language_code(code: str) -> str:
     return code
 
 
-# Latin-script language codes (ISO-639-1, region subtags folded off) that segment with the ``latin``
-# strategy — Yomitan's own European-language set. Membership is by *script*, not a promise the
-# deinflector has rules for every one (only fr ships transforms today); an unlisted language still must
-# name its tokenizer explicitly.
+# Language codes (ISO-639-1, region subtags folded off) by primary script. All three groups share the
+# whitespace ``latin`` tokenizer (it is script-agnostic — words are space-delimited in each) AND lead the
+# font fallback chain with NotoSans (crisp European letterforms). Membership is by *script*, not a promise
+# the deinflector ships rules for every one (only fr does today); an unlisted language must name its
+# tokenizer explicitly. Onboarding a writing system = extend one set (Cyrillic/Greek already work).
 _LATIN_SCRIPT = frozenset(
     {"fr", "es", "de", "it", "pt", "nl", "ca", "ro", "sv", "da", "no", "nb", "nn", "fi", "pl"}
 )
+_CYRILLIC_SCRIPT = frozenset({"ru", "uk", "be", "bg", "sr", "mk"})
+_GREEK_SCRIPT = frozenset({"el"})
+# Whitespace-segmented European scripts: `latin` tokenizer + NotoSans-led font chain.
+_EUROPEAN_SCRIPTS = _LATIN_SCRIPT | _CYRILLIC_SCRIPT | _GREEK_SCRIPT
+
+
+def _base_code(language: str) -> str:
+    """The primary subtag, lowercased (``de-CH`` → ``de``)."""
+    return language.split("-", 1)[0].lower()
+
+
+def primary_font_for(language: str) -> str | None:
+    """The vendored font that should LEAD the fallback chain for ``language``'s script, or ``None`` for
+    the JP-universal default (:func:`overlay.fonts.set_primary_font`). European scripts (Latin/Cyrillic/
+    Greek — all covered by NotoSans) lead with it; Japanese and any unlisted script keep the default so
+    their goldens stay byte-identical."""
+    return "NotoSans.ttf" if _base_code(language) in _EUROPEAN_SCRIPTS else None
 
 
 def default_tokenizer_for(language: str) -> str:
     """The tokenizer a profile gets when it omits ``tokenizer`` (``language`` already canonicalised).
-    Japanese → ``unidic``; a known Latin-script language → ``latin`` (Yomitan's whitespace model). Any
+    Japanese → ``unidic``; a whitespace-segmented European script (Latin/Cyrillic/Greek) → ``latin``. Any
     other language must name its tokenizer explicitly — there is no safe guess, and silently falling back
     would mis-segment an unknown script with no signal. Fail fast instead."""
     if language == "jp":
         return "unidic"
-    if language.split("-", 1)[0].lower() in _LATIN_SCRIPT:
+    if _base_code(language) in _EUROPEAN_SCRIPTS:
         return "latin"
     raise ValueError(
         f"no default tokenizer for language {language!r}; set a profile tokenizer explicitly "

@@ -99,14 +99,14 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
     while i < n:
         ch = text[i]
         if ch == "\n":
-            tokens.append(Token("\n", fonts.FONT_FILES[0], "space", 0.0, style, href))
+            tokens.append(Token("\n", fonts.primary_font(), "space", 0.0, style, href))
             i += 1
         elif ch.isspace():
             j = i
             while j < n and text[j].isspace() and text[j] != "\n":
                 j += 1
             seg = text[i:j]
-            f = fonts.FONT_FILES[0]
+            f = fonts.primary_font()
             tokens.append(
                 Token(seg, f, "space", fonts.text_width(_font(f, style), seg), style, href)
             )

@@ -555,3 +555,31 @@ def test_launch_identity_default_profile_keeps_jp_and_the_passed_slang():
     ident = resolve_launch_identity({"slang": "ja,jpn,jp"}, profile_override=None, slang="en")
     assert ident.language == "jp"
     assert ident.slang == "en"  # profile derives nothing → the passed fallback stands
+
+
+# --- primary_font_for: per-script font chain lead (generalizes past the Latin/JP binary) ------------
+
+
+def test_primary_font_for_european_scripts_leads_with_notosans():
+    from overlay.app.profiles import primary_font_for
+
+    assert primary_font_for("fr") == "NotoSans.ttf"  # Latin
+    assert primary_font_for("ru") == "NotoSans.ttf"  # Cyrillic — generalizes for free
+    assert primary_font_for("el") == "NotoSans.ttf"  # Greek
+    assert primary_font_for("de-CH") == "NotoSans.ttf"  # region subtag folded off
+
+
+def test_primary_font_for_japanese_and_unknown_keep_the_default_lead():
+    from overlay.app.profiles import primary_font_for
+
+    assert primary_font_for("jp") is None  # JP-universal default → goldens unchanged
+    assert (
+        primary_font_for("zh") is None
+    )  # unlisted script → default (system fallback handles glyphs)
+
+
+def test_cyrillic_language_defaults_to_the_latin_whitespace_tokenizer():
+    # The whitespace tokenizer is script-agnostic, so a Cyrillic profile needs no explicit tokenizer.
+    from overlay.app.profiles import default_tokenizer_for
+
+    assert default_tokenizer_for("ru") == "latin"

@@ -288,14 +288,46 @@ def _system_font_for_char(ch: str) -> str | None:
     return None
 
 
+# The vendored fallback chain LEADS with the font best suited to the active profile's primary script:
+# NotoSans for European scripts (crisp Latin/Cyrillic/Greek letterforms + a proper word space), the
+# universal NotoSansJP for Japanese — and always as the trailing fallback, so a glyph the lead lacks
+# (CJK in a French gloss) still resolves. A read-mostly module VALUE (a font file, not a Latin/non-Latin
+# bit — Cyrillic/Greek lead with NotoSans too), set once per profile activation by the reader from its
+# language. Unset → the JP-universal default, so JP renders — and every JP golden — stay byte-identical.
+_DEFAULT_PRIMARY = FONT_FILES[0]  # NotoSansJP — universal coverage
+_active_primary: str = _DEFAULT_PRIMARY
+
+
+def set_primary_font(file: str | None) -> None:
+    """Set the vendored font that LEADS the fallback chain (``None`` → the JP-universal default). The
+    reader chooses it from the active profile's script (:func:`overlay.app.profiles.primary_font_for`);
+    glyphs the lead lacks still fall through the rest of the chain."""
+    global _active_primary
+    _active_primary = file or _DEFAULT_PRIMARY
+
+
+def primary_font() -> str:
+    """The chain's lead = the default/space font (replaces bare ``FONT_FILES[0]`` at the
+    space/newline/empty-line sites so those track the active script too)."""
+    return _active_primary
+
+
+def font_order() -> tuple[str, ...]:
+    """The fallback chain, led by :func:`primary_font` with the rest trailing (NotoSansJP always trails
+    when it isn't the lead, so CJK still resolves). Equals ``FONT_FILES`` under the JP default."""
+    if _active_primary == _DEFAULT_PRIMARY:
+        return FONT_FILES
+    return (_active_primary, *(f for f in FONT_FILES if f != _active_primary))
+
+
 def font_for_char(ch: str) -> str:
     """The font file that renders this glyph: first the vendored fallback chain (deterministic), then a
     best-effort OS-font tier for a glyph none of the vendored subsets carry. Falls back to the vendored
     primary (tofu) only when even the system has nothing."""
-    for f in FONT_FILES:
+    for f in font_order():
         if covers(f, ch):
             return f
-    return _system_font_for_char(ch) or FONT_FILES[0]
+    return _system_font_for_char(ch) or primary_font()
 
 
 def _covers_all(file: str, text: str) -> bool:
@@ -322,10 +354,10 @@ def font_for_run(text: str) -> str:
     covers it all — then a best-effort system font covering the whole run, else the vendored primary.
     Fixes the tofu where a word's FIRST char resolved to a font that lacks a LATER glyph (a Latin 'z' +
     an IPA 'ɛ' the Latin Noto has but the JP one doesn't) WITHOUT fragmenting a coverable word."""
-    for f in FONT_FILES:
+    for f in font_order():
         if _covers_all(f, text):
             return f
-    return _system_font_covering(text) or FONT_FILES[0]
+    return _system_font_covering(text) or primary_font()
 
 
 @dataclass(frozen=True)
