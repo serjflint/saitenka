@@ -123,6 +123,61 @@ def test_reader_owns_unidic_tokenizer_by_default():
     assert reader.tokenizer.name == "unidic"
 
 
+class _SpyTokenizer(_FakeTokenizer):
+    """Records which Protocol method each call site reached, so a test can assert ROUTING (the call
+    happened through the active strategy) without caring about the JP-specific return value."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def tokenize(self, line, *, strip_furigana=True, merge=True):
+        self.calls.append("tokenize")
+        return super().tokenize(line, _strip_furigana=strip_furigana, _merge=merge)
+
+    def query_token(self, query):
+        self.calls.append("query_token")
+        return super().query_token(query)
+
+    def phrase_terms(self, tokens, index, has_term):
+        self.calls.append("phrase_terms")
+        return super().phrase_terms(tokens, index, has_term)
+
+
+def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
+    """A profile swap (``use_tokenizer``) must reroute the base tooltip's hover phrase-probe through
+    the NEW strategy, not the JP module functions directly — the core of #254 phase 3a.2."""
+    from overlay.app import tooltip
+
+    class _DS:
+        def has_term(self, *_forms):
+            return True
+
+    reader = Reader(FakeIPC(), dict_set=_DS())
+    spy = _SpyTokenizer()
+    reader.use_tokenizer(spy)
+    reader.tokens = [Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
+
+    tooltip.resolve_hover(reader, 0)
+
+    assert "phrase_terms" in spy.calls
+
+
+def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
+    """A profile swap must reroute a clicked cross-reference link's whole-query lookup through the
+    NEW strategy, not ``tokenize.py``'s ``query_token`` directly."""
+    from overlay.app import nested_popup
+    from overlay.model import LinkBox
+
+    reader = Reader(FakeIPC(), dict_set=object())
+    spy = _SpyTokenizer()
+    reader.use_tokenizer(spy)
+    lb = LinkBox("query", 0, 0, 10, 10)
+
+    nested_popup.open_link(reader, lb, (0, 0), 0)
+
+    assert "query_token" in spy.calls
+
+
 def test_use_tokenizer_swaps_strategy_and_clears_cache():
     reader = Reader(FakeIPC())
     tok = Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)
