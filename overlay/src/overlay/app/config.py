@@ -92,6 +92,10 @@ class KeyOptions:
     analysis_key: str = field(default="`", metadata={"help": "Open the episode-analysis panel."})
     annotation_key: str = field(default="Alt+a", metadata={"help": "Cycle the annotation mode."})
     help_key: str = field(default="F1", metadata={"help": "Show the keybind help overlay."})
+    profile_cycle_key: str = field(
+        default="Alt+Shift+p",
+        metadata={"help": "Cycle the active reading profile (no-op with a single profile)."},
+    )
     subtitle_retry_key: str = field(
         default="Ctrl+Shift+T", metadata={"help": "Retry subtitle fetch/resync."}
     )

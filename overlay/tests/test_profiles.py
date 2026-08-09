@@ -8,6 +8,7 @@ from overlay.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, Rea
 from overlay.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
+    configured_profiles,
     resolve_profile,
     validate_language_code,
 )
@@ -228,3 +229,38 @@ def test_profile_is_an_immutable_value_object():
     profile = Profile(name="fr", langs=ReaderLanguages("fr", "en"), tokenizer="latin")
     with pytest.raises((AttributeError, TypeError)):
         profile.name = "de"  # frozen — swappable by replacement, never mutation
+
+
+# --- configured_profiles: the ordered cycle the live switcher (D8) rotates through ----------------
+
+
+def test_configured_profiles_is_a_single_default_when_nothing_is_configured():
+    """No ``[profiles.*]`` → one profile (the JP default), so the live switcher is inert."""
+    profiles = configured_profiles({})
+    assert profiles == [DEFAULT_PROFILE]
+
+
+def test_configured_profiles_lists_the_base_then_named_by_sorted_name():
+    """The base ``[profile]`` default first, then each ``[profiles.<name>]`` by sorted name — a
+    deterministic cycle order independent of ``active_profile``."""
+    cfg = {
+        "active_profile": "fr",  # must NOT reorder the cycle — the base stays first
+        "profiles": {
+            "fr": {"language": "fr", "tokenizer": "latin"},
+            "de": {"language": "de", "tokenizer": "latin"},
+        },
+    }
+    names = [p.name for p in configured_profiles(cfg)]
+    assert names == ["default", "de", "fr"]  # base, then sorted names
+
+
+def test_configured_profiles_base_is_the_default_table_not_the_active_named_profile():
+    """The base is resolved WITHOUT ``active_profile`` — it's the genuine ``[profile]`` default, not
+    whichever named profile is active."""
+    cfg = {
+        "active_profile": "fr",
+        "profile": {"second": "de"},  # the base default table
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}},
+    }
+    base = configured_profiles(cfg)[0]
+    assert base.name == "default" and base.langs.main == "jp" and base.langs.second == "de"

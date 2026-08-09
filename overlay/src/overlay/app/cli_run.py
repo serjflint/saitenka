@@ -26,7 +26,7 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import resolve_profile
+from overlay.app.profiles import configured_profiles, resolve_profile
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -438,6 +438,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
             analysis_key=cfg.get("analysis_key", _ko.analysis_key),
             annotation_key=cfg.get("annotation_key", _ko.annotation_key),
             help_key=cfg.get("help_key", _ko.help_key),
+            profile_cycle_key=cfg.get("profile_cycle_key", _ko.profile_cycle_key),
             subtitle_retry_key=cfg.get("subtitle_retry_key", _ko.subtitle_retry_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
@@ -918,6 +919,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
+    profile_cycle = configured_profiles(
+        cfg
+    )  # the [profiles.*] the live switcher (D8) rotates through
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
@@ -1055,10 +1059,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             options=opts,
             profile=active_profile,
         )
+        reader.set_profile_cycle(profile_cycle)
     else:
         reader = Reader(
             ipc, options=opts, profile=active_profile
         )  # deps injected asynchronously below
+        reader.set_profile_cycle(profile_cycle)
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)
