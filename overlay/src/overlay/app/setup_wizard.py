@@ -374,11 +374,10 @@ def _prompt_card_kind(current: dict, model: str = "") -> str:
     Saitenka's historical marker; 'audio'/'click'/'none' cover the other Lapis-family templates. A
     non-preset note type has no ``IsXxxCard`` flag field, so writing one would make the add fail —
     default it to 'none'."""
-    from overlay.app.anki import PRESETS
+    from overlay.app.anki import CARD_KINDS, PRESETS
 
     default = current.get("card_kind") or ("word-and-sentence" if model in PRESETS else "none")
-    kinds = ["word-and-sentence", "sentence", "audio", "click", "none"]
-    return prompt.select("  Card kind?", kinds, default=default)
+    return prompt.select("  Card kind?", list(CARD_KINDS), default=default)
 
 
 # saitenka entities offered for mapping, in card order. ``expression`` is first and mandatory — it must
