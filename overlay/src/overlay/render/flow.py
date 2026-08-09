@@ -155,6 +155,36 @@ class ChipBox:
 Inline = Span | RubyBox | ImgBox | ChipBox
 
 
+def render_chip_row(
+    chips: list[ChipBox], gap: int, width: int, *, scale: float = 1.0
+) -> Image.Image:
+    """Lay a PURE-chip row out through the 2-D layout seam (``solve_row``): fixed-size pills packed
+    left-to-right with a UNIFORM ``gap``, wrapping to width — replacing the old ``Span("  ")``-separated
+    flow, whose gap varied with the font's space metric and left a trailing phantom line (#146 Phase B).
+
+    Geometry is 1× (reference px, engine-independent — ``solve_row`` is parity-gated so the pure-Python
+    default and taffy place identically); the sprites composite at ``scale`` for the crisp native raster.
+    Chips carry no scan/link geometry, so this returns just the image."""
+    from PIL import Image as _Image
+
+    from overlay.render.layout_backend import DEFAULT_BACKEND
+
+    sizes = [(c.sprite.width, c.sprite.height) for c in chips]
+    rects, _used, height = DEFAULT_BACKEND.solve_row(sizes, gap=gap, max_width=width)
+    img = _Image.new(
+        "RGBA", (max(1, round(width * scale)), max(1, round(height * scale))), (0, 0, 0, 0)
+    )
+    for chip, rect in zip(chips, rects, strict=True):
+        spr = chip.sprite.image
+        if scale != 1.0:  # opaque pre-rendered pill → upscale (not a glyph mask)
+            spr = spr.resize(
+                (max(1, round(spr.width * scale)), max(1, round(spr.height * scale))),
+                _Image.Resampling.LANCZOS,
+            )
+        img.alpha_composite(spr, (round(rect.x * scale), round(rect.y * scale)))
+    return img
+
+
 def ruby(base_text: str, reading: str, style: Style | None = None) -> RubyBox:
     return layout_ruby([Span(base_text, style or Style())], reading)
 

@@ -141,14 +141,15 @@ def test_viewport_is_pixel_identical_to_render_panel_crop(profile, scroll_frac, 
     # windowed viewport == one-shot render_panel crop, now ACROSS the scale × width × entry matrix (was
     # only Theme() @ WIDTH). The engine must window byte-identically at hi-dpi — the crisp native panel
     # rasters at Theme(scale)/width×scale, a path the old scale-1.0 property never exercised.
-    theme, width, entry = profile.theme, profile.width, profile.entry()
-    ref_full = render_panel(entry, width=width, theme=theme)
+    ref_full = (
+        profile.reference_render()
+    )  # single-source (width, theme): the panel and its crop agree
     total = ref_full.height
     view_h = min(view_h, total)
     scroll = int(scroll_frac * max(0, total - view_h))
-    wp = WindowedPanel(panel_rows(entry, width, theme), width, theme)
+    wp = profile.windowed()
     win = wp.viewport(scroll, view_h)
-    ref = ref_full.crop((0, scroll, width, scroll + view_h))
+    ref = ref_full.crop((0, scroll, profile.width, scroll + view_h))
     assert win.size == ref.size
     diff = np.abs(np.asarray(win, np.int16) - np.asarray(ref, np.int16))
     assert diff.max() == 0

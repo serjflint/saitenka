@@ -153,6 +153,44 @@ def test_img_becomes_opaque_box():
     assert any(isinstance(x, ImgBox) for b in blocks for x in b.flow)
 
 
+def test_table_renders_rows_as_lines_with_separated_cells():
+    # A table is no longer flattened to a blob: each row is a line (\n) and cells are │-separated, so
+    # the grid structure survives. Header cells are bold.
+    node = {
+        "tag": "table",
+        "content": [
+            {
+                "tag": "tr",
+                "content": [{"tag": "th", "content": "語"}, {"tag": "th", "content": "訓"}],
+            },
+            {
+                "tag": "tr",
+                "content": [{"tag": "td", "content": "生"}, {"tag": "td", "content": "い"}],
+            },
+        ],
+    }
+    text = "".join(s.text for b in walk(node, BASE) for s in b.flow if hasattr(s, "text"))
+    assert text == "語 │ 訓\n生 │ い"  # rows split by \n, cells by │, no trailing separator/newline
+    header = next(s for b in walk(node, BASE) for s in b.flow if getattr(s, "text", "") == "語")
+    assert header.style.weight == 700  # th cells are bold
+
+
+def test_table_without_the_fix_would_be_a_blob():
+    # Negative control: the fix is non-vacuous — the SAME cells run together into one blob if rows and
+    # cells aren't separated. Proves the assertion above tests real structure, not incidental text.
+    node = {
+        "tag": "table",
+        "content": [
+            {
+                "tag": "tr",
+                "content": [{"tag": "td", "content": "生"}, {"tag": "td", "content": "い"}],
+            }
+        ],
+    }
+    text = "".join(s.text for b in walk(node, BASE) for s in b.flow if hasattr(s, "text"))
+    assert "│" in text and text != "生い"
+
+
 def test_sc_ruby_golden():
     img = render_document(
         walk(_load("sc_ruby.json"), BASE),

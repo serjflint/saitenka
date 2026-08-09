@@ -30,7 +30,7 @@ from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, T
 from overlay.parallel import shared_executor
 from overlay.render.chip import ChipStyle
 from overlay.render.document import GUTTER_PX, INDENT_PX
-from overlay.render.flow import ChipBox, ImgBox, render_flow
+from overlay.render.flow import ChipBox, ImgBox, render_chip_row, render_flow
 from overlay.render.layout import Block as FlowBlock
 from overlay.sc.walk import inline_flow
 
@@ -453,17 +453,15 @@ def panel_rows(
     if entry.freqs:
 
         def _freqs(freqs=tuple(entry.freqs), *, scale: float = 1.0):
-            fflow: list = []
-            for f in freqs:
-                # freq pills are secondary signal → render a notch smaller than the def pills (px19)
-                # and body (px23), so more fit on the row and they don't compete with the readings.
-                fflow.append(
-                    ChipBox(
-                        f.name, ChipStyle(size=theme.px(16), weight=600, bg=f.color, value=f.value)
-                    )
-                )
-                fflow.append(Span("  ", Style(size=theme.px(16))))
-            return _flow_row(fflow, content_w, 1.7, render_scale=scale), [], []
+            # freq pills are secondary signal → render a notch smaller than the def pills (px19) and
+            # body (px23), so more fit on the row and they don't compete with the readings. Laid out
+            # through the 2-D seam (solve_row): a uniform gap that wraps to width, replacing the old
+            # "  "-space separators (whose gap drifted with the font metric + left a trailing line).
+            chips = [
+                ChipBox(f.name, ChipStyle(size=theme.px(16), weight=600, bg=f.color, value=f.value))
+                for f in freqs
+            ]
+            return render_chip_row(chips, theme.px(8), content_w, scale=scale), [], []
 
         rows.append(Row(m, _freqs))
 
