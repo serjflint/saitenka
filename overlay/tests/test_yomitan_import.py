@@ -67,7 +67,28 @@ def _make_dict_zip(path, kind, *, title=None):
                 "term_meta_bank_1.json",
                 json.dumps([["猫", "pitch", {"reading": "ねこ", "pitches": [{"position": 0}]}]]),
             )
+        elif (
+            kind == "combined"
+        ):  # a real definition dict that ALSO ships frequency meta (seth-js French)
+            zf.writestr("term_bank_1.json", json.dumps([["chat", "", "", "", 0, ["cat"], 1, ""]]))
+            zf.writestr("term_meta_bank_1.json", json.dumps([["chat", "freq", 42]]))
     return path
+
+
+def test_combined_dict_fills_both_dict_and_freq_roles(tmp_path):
+    """A definition dict that ALSO ships frequency meta (the seth-js French dict) is BOTH — its 448k
+    glossaries must not be dropped by the frequency mode winning. classify_zip's primary is 'dict'."""
+    z = _make_dict_zip(tmp_path / "fr.zip", "combined")
+    assert bankreader.zip_roles(z) == frozenset({"dict", "freq"})
+    assert bankreader.classify_zip(z) == "dict"
+
+
+def test_nhk_style_headword_stub_is_pitch_only_not_dict(tmp_path):
+    """The negative control the single-role rule protected: a pitch dict with an EMPTY-glossary headword
+    term_bank (NHK 2016) stays pitch-only — the glossary-content check must not promote it to 'dict'."""
+    z = _make_dict_zip(tmp_path / "nhk.zip", "pitch_with_headwords")
+    assert bankreader.zip_roles(z) == frozenset({"pitch"})
+    assert bankreader.classify_zip(z) == "pitch"
 
 
 def test_parse_orders_enabled_dicts_by_priority(tmp_path):
