@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786270143216,
+  "lastUpdate": 1786270396872,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2015,6 +2015,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.02,
             "range": "±7.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f8ac0b82462f6b1be10211936b6a0bf3c0c8719f",
+          "message": "Merge pull request #266 from serjflint/feat/254-t2-route-callers\n\nrefactor(tokenize): route remaining callers through reader.tokenizer (#254 3a.2)",
+          "timestamp": "2026-08-09T13:12:47+03:00",
+          "tree_id": "0e73533b413a9a2fead8aee7c1e2c164110b33ca",
+          "url": "https://github.com/serjflint/saitenka/commit/f8ac0b82462f6b1be10211936b6a0bf3c0c8719f"
+        },
+        "date": 1786270395775,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.256,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.838,
+            "range": "±1.8%",
             "unit": "ms"
           }
         ]
