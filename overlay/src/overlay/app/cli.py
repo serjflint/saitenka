@@ -1439,7 +1439,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
         return 2
 
+    from overlay.app.languages import MAIN_LANG
     from overlay.app.subselect import AttachSubtitleOptions, prepare_attach_startup
+    from overlay.app.subtitle_providers import enabled_providers_for
 
     # [jimaku] config table feeds attach defaults so plugin mode (which spawns a bare `attach`) can
     # fetch subs without CLI flags. An explicit --jimaku / --jimaku-key still wins.
@@ -1453,10 +1455,8 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     )  # force implies fetch
     jimaku_key = jimaku_key or jm.get("key")
     resync = resync and bool(jm.get("resync", True))
-    enabled_providers = tuple(
-        provider
-        for provider, enabled in (("jimaku", jimaku), ("tsukihime", bool(th.get("enabled"))))
-        if enabled
+    enabled_providers = enabled_providers_for(
+        MAIN_LANG, (("jimaku", jimaku), ("tsukihime", bool(th.get("enabled"))))
     )
 
     subtitle_startup = None

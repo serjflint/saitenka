@@ -104,6 +104,21 @@ def test_disabled_tsukihime_is_absent_from_provider_chain():
     assert providers == ()
 
 
+def test_attach_startup_provider_list_matches_the_registry_enablement_for_ja():
+    """Single source of truth: the deferred initial-fetch list from prepare_attach_startup must equal
+    the registry/language-gated enablement the retry+picker use (cli.py), so the two can't diverge
+    under a non-jp profile. jimaku_force is fetched ahead, so it's excluded from the deferred list."""
+    from overlay.app.languages import MAIN_LANG
+    from overlay.app.subtitle_providers import enabled_providers_for
+
+    ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
+    _startup, _status, providers = subselect.prepare_attach_startup(
+        ipc, subselect.AttachSubtitleOptions(jimaku=True, tsukihime=True)
+    )
+
+    assert providers == enabled_providers_for(MAIN_LANG, (("jimaku", True), ("tsukihime", True)))
+
+
 def test_tsukihime_provider_error_returns_soft_status(tmp_path, monkeypatch):
     import overlay.app.jimaku as jm
     import overlay.app.tsukihime as th

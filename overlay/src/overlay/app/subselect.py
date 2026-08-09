@@ -25,6 +25,14 @@ from overlay.app.subtitle_modes import (
 from overlay.app.subtitle_modes import (
     sub_tracks as _sub_tracks,
 )
+from overlay.app.subtitle_providers import (
+    ProviderContext,
+    SubtitleProvider,
+    enabled_providers_for,
+    fetch_first,
+    get_provider,
+    register_provider,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -274,6 +282,64 @@ def _tsukihime_candidates(
     return out, warnings
 
 
+def _jimaku_provider_candidates(
+    video: str, ctx: ProviderContext
+) -> tuple[list[SubtitleCandidate], list[str]]:
+    return _jimaku_candidates(video, ctx.jimaku_key, ctx.title_override), []
+
+
+def _jimaku_provider_fetch(
+    video: str, ctx: ProviderContext
+) -> Callable[[], tuple[Path | None, str]]:
+    return lambda: fetch_jimaku_path(
+        video,
+        jimaku_key=ctx.jimaku_key,
+        jimaku_title=ctx.title_override,
+        episode=ctx.episode,
+        resync=ctx.resync,
+        force=ctx.force,
+    )
+
+
+def _tsukihime_provider_candidates(
+    video: str, ctx: ProviderContext
+) -> tuple[list[SubtitleCandidate], list[str]]:
+    return _tsukihime_candidates(video, ctx.tsukihime_config, ctx.title_override)
+
+
+def _tsukihime_provider_fetch(
+    video: str, ctx: ProviderContext
+) -> Callable[[], tuple[Path | None, str]]:
+    return lambda: fetch_tsukihime_path(
+        video,
+        config=ctx.tsukihime_config,
+        title_override=ctx.title_override,
+        episode=ctx.episode,
+        resync=ctx.resync,
+        force=ctx.force,
+    )
+
+
+# Both providers are Japanese-only today — capability, not a branch, so a future non-JP profile
+# excludes them without touching this module (#254 phase 1).
+register_provider(
+    SubtitleProvider(
+        name="jimaku",
+        languages=frozenset({"jp"}),
+        candidates=_jimaku_provider_candidates,
+        fetch_attempt=_jimaku_provider_fetch,
+    )
+)
+register_provider(
+    SubtitleProvider(
+        name="tsukihime",
+        languages=frozenset({"jp"}),
+        candidates=_tsukihime_provider_candidates,
+        fetch_attempt=_tsukihime_provider_fetch,
+    )
+)
+
+
 def list_candidates(
     video: str,
     providers: tuple[str, ...],
@@ -285,16 +351,19 @@ def list_candidates(
     """Aggregate pickable subtitle candidates across the enabled providers (Window 1). Returns
     ``(candidates, warnings)``; a provider that raises contributes a warning row instead of an
     exception, so one dead provider never blanks the panel. No mpv IPC — off-thread safe."""
+    ctx = ProviderContext(
+        jimaku_key=jimaku_key, title_override=title_override, tsukihime_config=tsukihime_config
+    )
     candidates: list[SubtitleCandidate] = []
     warnings: list[str] = []
     for provider in providers:
+        entry = get_provider(provider)
+        if entry is None:
+            continue
         try:
-            if provider == "jimaku":
-                candidates.extend(_jimaku_candidates(video, jimaku_key, title_override))
-            elif provider == "tsukihime":
-                found, warn = _tsukihime_candidates(video, tsukihime_config, title_override)
-                candidates.extend(found)
-                warnings.extend(warn)
+            found, warn = entry.candidates(video, ctx)
+            candidates.extend(found)
+            warnings.extend(warn)
         except Exception as exc:  # noqa: BLE001  # any provider failure → a soft warning, never fatal
             warnings.append(f"{provider}: {exc}")
     return candidates, warnings
@@ -357,38 +426,19 @@ def fetch_provider_path(
 ) -> tuple[Path | None, str]:
     """Run configured providers in deterministic order without touching playback. ``force`` skips the
     cache so a user retry re-fetches + re-syncs (see :func:`fetch_jimaku_path`)."""
-    from overlay.app.subtitle_providers import fetch_first
-
-    attempts = []
-    for provider in providers:
-        if provider == "jimaku":
-            attempts.append(
-                (
-                    provider,
-                    lambda: fetch_jimaku_path(
-                        video,
-                        jimaku_key=jimaku_key,
-                        jimaku_title=title_override,
-                        episode=episode,
-                        resync=resync,
-                        force=force,
-                    ),
-                )
-            )
-        elif provider == "tsukihime":
-            attempts.append(
-                (
-                    provider,
-                    lambda: fetch_tsukihime_path(
-                        video,
-                        config=tsukihime_config,
-                        title_override=title_override,
-                        episode=episode,
-                        resync=resync,
-                        force=force,
-                    ),
-                )
-            )
+    ctx = ProviderContext(
+        jimaku_key=jimaku_key,
+        title_override=title_override,
+        tsukihime_config=tsukihime_config,
+        episode=episode,
+        resync=resync,
+        force=force,
+    )
+    attempts = [
+        (provider, entry.fetch_attempt(video, ctx))
+        for provider in providers
+        if (entry := get_provider(provider)) is not None
+    ]
     return fetch_first(attempts)
 
 
@@ -580,10 +630,14 @@ def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
             status = f"selected English fallback sid={startup.tracks.en_sid}"
         else:
             status = "no Japanese or English subtitle track found"
-    providers: list[str] = []
+    # Same registry/language gate as the retry+picker enablement (cli.py) — one source of truth for
+    # "which providers are on", so a non-jp profile can't leave this initial fetch chasing jimaku while
+    # the picker excludes it. ``jimaku_force`` already fetched ahead in ensure_jp_subs, so it's excluded
+    # from the deferred list here.
+    providers: tuple[str, ...] = ()
     if startup.tracks.jp_sid is None:
-        if opts.jimaku and not opts.jimaku_force:
-            providers.append("jimaku")
-        if opts.tsukihime:
-            providers.append("tsukihime")
-    return startup, status, tuple(providers)
+        providers = enabled_providers_for(
+            MAIN_LANG,
+            (("jimaku", opts.jimaku and not opts.jimaku_force), ("tsukihime", opts.tsukihime)),
+        )
+    return startup, status, providers
