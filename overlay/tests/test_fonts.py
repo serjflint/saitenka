@@ -137,6 +137,58 @@ def test_glyph_width_counters_record_miss_then_hit():
     assert sampled.get("glyph_width.hits", 0) >= 1
 
 
+def test_tokenize_splits_a_mixed_coverage_word_so_no_glyph_is_tofu():
+    """Regression (French IPA pronunciation `/ma.ɡa.zɛ̃/`): 'z' is in NotoSansJP but 'ɛ' + the combining
+    tilde are ONLY in the Latin NotoSans. A word run must split at the font boundary — inheriting the
+    first char's JP font rendered the IPA glyphs as tofu. Invariant: every glyph in a token is covered by
+    that token's font."""
+    from overlay.render.layout import _tokenize_span
+
+    toks = _tokenize_span("/ma.ɡa.zɛ̃/", Style(size=20))
+    for t in toks:
+        for ch in t.text:
+            if ch.isspace() or ord(ch) < 0x20:
+                continue
+            assert fonts.covers(t.file, ch), f"{ch!r} U+{ord(ch):04X} not covered by {t.file}"
+    # the IPA vowel+tilde specifically lands in the Latin font that has it, not the JP one
+    assert any(t.text == "ɛ̃" and t.file == "NotoSans.ttf" for t in toks)
+
+
+def test_font_for_char_falls_back_to_a_system_font_when_vendored_lacks_it(monkeypatch):
+    """Best-effort OS tier: a glyph outside the vendored subsets (Hangul) resolves to a system font
+    instead of tofu. Monkeypatched so it's deterministic regardless of the CI box's actual fonts."""
+    ch = "한"  # outside the vendored JP/Latin subsets
+    assert not any(fonts.covers(f, ch) for f in fonts.FONT_FILES)
+    monkeypatch.setattr(
+        fonts, "_system_font_for_char", lambda c: "/sys/Broad.ttf" if c == ch else None
+    )
+    assert fonts.font_for_char(ch) == "/sys/Broad.ttf"
+
+
+def test_font_for_char_last_resort_is_the_vendored_primary(monkeypatch):
+    """When even the OS has nothing, fall back to the vendored primary (tofu) rather than crash."""
+    monkeypatch.setattr(fonts, "_system_font_for_char", lambda _c: None)
+    assert fonts.font_for_char("한") == fonts.FONT_FILES[0]
+
+
+def test_missing_glyphs_accounts_for_the_system_tier(monkeypatch):
+    ch = "한"
+    monkeypatch.setattr(fonts, "_system_font_for_char", lambda c: "/sys/x.ttf" if c == ch else None)
+    assert fonts.missing_glyphs(ch) == []  # a system font renders it → not tofu
+    monkeypatch.setattr(fonts, "_system_font_for_char", lambda _c: None)
+    assert fonts.missing_glyphs(ch) == [ch]  # nothing renders it → genuine tofu
+
+
+def test_tokenize_keeps_a_single_font_word_whole_for_the_atlas():
+    """The common case — an all-one-font word (Latin covered by NotoSansJP) — must stay ONE token, so
+    the split doesn't fragment the atlas working set (or shift existing goldens)."""
+    from overlay.render.layout import _tokenize_span
+
+    toks = _tokenize_span("parapluies", Style(size=20))
+    assert len(toks) == 1
+    assert toks[0].text == "parapluies" and toks[0].file == "NotoSansJP.ttf"
+
+
 def test_glyph_mask_cache_is_bounded(monkeypatch):
     monkeypatch.setattr(fonts, "_MASK_CACHE_MAX", 4)
     fonts._tls.masks = None

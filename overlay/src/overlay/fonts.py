@@ -8,10 +8,13 @@ split any string into runs by the first font that actually has each glyph (no to
 
 from __future__ import annotations
 
+import os
+import sys
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
 
 from fontTools.ttLib import TTFont
 from PIL import ImageFont
@@ -221,12 +224,75 @@ def covers(file: str, ch: str) -> bool:
     return ord(ch) in _coverage(file)
 
 
+# Best-effort system-font tier (appended AFTER the vendored chain). Goldens are built against the
+# EMBEDDED fonts only — deterministic across machines — so they never reach this tier (their content is
+# vendored-covered). Everything else (an exotic script / rare IPA the subset lacks) is best-effort: we
+# consult the OS's own fonts so a real glyph renders instead of tofu, accepting that the exact pixels
+# then depend on the machine. Empty on a box with none of these dirs → behaviour is exactly the old
+# vendored-only path.
+def _system_font_dirs() -> tuple[Path, ...]:
+    home = Path.home()
+    if sys.platform == "darwin":
+        return (
+            Path("/System/Library/Fonts"),
+            Path("/System/Library/Fonts/Supplemental"),
+            Path("/Library/Fonts"),
+            home / "Library/Fonts",
+        )
+    if sys.platform.startswith("win"):
+        return (Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",)
+    return (
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+        home / ".local/share/fonts",
+        home / ".fonts",
+    )
+
+
+@cache
+def _system_font_files() -> tuple[str, ...]:
+    """Discovered OS font files (``.ttf``/``.otf`` only — ``.ttc`` collections are skipped: cmap probing
+    a face index is unreliable). Broad-coverage families (Arial Unicode, Noto, DejaVu, *Symbol*) are
+    tried first so a lookup usually matches on the first probe. Enumerated once, cached for the session."""
+    found: list[str] = []
+    for d in _system_font_dirs():
+        if not d.is_dir():
+            continue
+        try:
+            found.extend(str(p) for p in d.rglob("*") if p.suffix.lower() in {".ttf", ".otf"})
+        except OSError:
+            continue
+
+    def _priority(path: str) -> int:
+        name = path.rsplit("/", 1)[-1].lower()
+        broad = ("arial unicode", "notosans", "noto sans", "dejavusans", "symbol", "unifont")
+        return 0 if any(b in name for b in broad) else 1
+
+    return tuple(sorted(set(found), key=lambda p: (_priority(p), p)))
+
+
+@cache
+def _system_font_for_char(ch: str) -> str | None:
+    """First OS font (by :func:`_system_font_files` order) whose cmap has ``ch``, or ``None``. Cached per
+    char — only ever consulted for a glyph NO vendored font covers, so it's off the hot path."""
+    cp = ord(ch)
+    for f in _system_font_files():
+        try:
+            if cp in _coverage(f):
+                return f
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # unreadable/odd font — skip, best-effort
+    return None
+
+
 def font_for_char(ch: str) -> str:
-    """First vendored file in the fallback chain that has this glyph (falls back to primary)."""
+    """The font file that renders this glyph: first the vendored fallback chain (deterministic), then a
+    best-effort OS-font tier for a glyph none of the vendored subsets carry. Falls back to the vendored
+    primary (tofu) only when even the system has nothing."""
     for f in FONT_FILES:
         if covers(f, ch):
             return f
-    return FONT_FILES[0]
+    return _system_font_for_char(ch) or FONT_FILES[0]
 
 
 @dataclass(frozen=True)
@@ -250,11 +316,12 @@ def resolve_runs(text: str) -> list[ShapedRun]:
 
 
 def missing_glyphs(text: str) -> list[str]:
-    """Characters no vendored font covers (would render as tofu). Excludes whitespace/control."""
+    """Characters that would truly render as tofu — no vendored font AND no best-effort system font
+    covers them. Excludes whitespace/control. (Genuine tofu, so it accounts for the OS-font tier.)"""
     out: list[str] = []
     for ch in text:
         if ch.isspace() or ord(ch) < 0x20:
             continue
-        if not any(covers(f, ch) for f in FONT_FILES):
+        if not any(covers(f, ch) for f in FONT_FILES) and _system_font_for_char(ch) is None:
             out.append(ch)
     return out
