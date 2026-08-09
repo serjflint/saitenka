@@ -12,17 +12,21 @@ NOT in ``conftest.py`` (which 131 test modules depend on) — see the section be
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import os
 import sys
 import threading
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pytest
 from overlay.model import Theme
-from overlay.panel import Definition, Entry
+from overlay.panel import Definition, Entry, Freq, panel_rows, render_panel
 from PIL import Image
+
+if TYPE_CHECKING:
+    from overlay.render.layout_backend import LayoutBackend
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
@@ -339,11 +343,60 @@ def many_homograph_entry(n_defs: int = 12) -> Entry:
     )
 
 
+def chip_heavy_entry(n_defs: int = 5) -> Entry:
+    """Header dense with chips/pills — word tags, a three-way freq row, a reading-label pill, an
+    inflection chain, and per-def defTag chips — the chip-row shape Phase B reflows to width."""
+    return Entry(
+        headword=["恐らく", {"tag": "rt", "content": "おそらく"}],
+        tags=["副", "常用", "★", "priority form"],
+        freqs=[
+            Freq("JPDB", "1234", (200, 80, 120, 255)),
+            Freq("BCCWJ", "5678", (80, 140, 200, 255)),
+            Freq("アニメ", "342", (120, 170, 90, 255)),
+        ],
+        reading_label=("大辞泉", "おそらく"),
+        inflection_chain=["-て", "-いる", "-た"],
+        defs=[
+            Definition(f"辞書{i}", ["おおかた。たぶん。恐らく間違いない。"], tags=["★", "文語"])
+            for i in range(n_defs)
+        ],
+    )
+
+
+def ruby_heavy_entry(n_defs: int = 4) -> Entry:
+    """Furigana ruby boxes packed inline — the nested-flex ruby-clearance shape Phase B targets."""
+    body = [
+        "彼は",
+        {"tag": "rt", "content": "かれ"},
+        "、",
+        {"tag": "rt", "content": "まいにち"},
+        "毎日",
+        {"tag": "rt", "content": "べんきょう"},
+        "勉強する。",
+    ]
+    return Entry(
+        headword=["勉強", {"tag": "rt", "content": "べんきょう"}],
+        defs=[Definition(f"辞書{i}", body, tags=["★"]) for i in range(n_defs)],
+    )
+
+
+def wide_cjk_entry(n_defs: int = 3) -> Entry:
+    """Long unbroken CJK paragraphs → the tallest wrap-by-width range (kinsoku under pressure)."""
+    para = "親譲りの無鉄砲で小供の時から損ばかりしている。" * 4
+    return Entry(
+        headword=["無鉄砲", {"tag": "rt", "content": "むてっぽう"}],
+        defs=[Definition(f"辞書{i}", [para]) for i in range(n_defs)],
+    )
+
+
 ENTRY_FACTORIES = {
     "short": short_entry,
     "tall": tall_entry,
     "cjk_links": cjk_links_entry,
     "many_homograph": many_homograph_entry,
+    "chip_heavy": chip_heavy_entry,
+    "ruby_heavy": ruby_heavy_entry,
+    "wide_cjk": wide_cjk_entry,
 }
 
 
@@ -364,9 +417,49 @@ class Profile(NamedTuple):
     def id(self) -> str:  # a readable pytest node-id suffix
         return f"s{self.theme.scale}-w{self.width}-{self.entry_key}"
 
+    def windowed(self, *, backend: LayoutBackend | None = None, **tuning):
+        """Build the ``WindowedPanel`` for this corner — the ONE place ``panel_rows`` and
+        ``WindowedPanel`` are fed ``(width, theme)``, so the two can't silently disagree (the hi-dpi
+        footgun where a test lays out at one geometry and windows at another). ``backend`` selects the
+        layout engine (the outer matrix axis); extra kwargs pass through (e.g. ``tuning=``)."""
+        from overlay.render.banded import WindowedPanel
 
-# Curated corners, NOT the 3×2×4 Cartesian product — each row targets a distinct interaction the
-# post-PBT modes added. ``Profile(Theme(), 384, "tall")`` reproduces the exact pre-existing assertions.
+        rows = panel_rows(self.entry(), self.width, self.theme)
+        return WindowedPanel(rows, self.width, self.theme, layout_backend=backend, **tuning)
+
+    def reference_render(self) -> Image.Image:
+        """The one-shot ``render_panel`` image at THIS corner's ``(width, theme)`` — what the windowed
+        viewport is diffed against. Same single-source-of-geometry contract as ``windowed``."""
+        return render_panel(self.entry(), width=self.width, theme=self.theme)
+
+    def reference_total(self) -> int:
+        """Full reference height — the scroll extent the windowed engine must reproduce."""
+        return self.reference_render().height
+
+
+def layout_backends() -> list[tuple[str, LayoutBackend]]:
+    """(name, backend) pairs for the layout-engine matrix axis: the pure-Python default + the independent
+    flex-column solver always, plus the Rust ``taffy`` engine when the ``layout-engine`` wheel is present
+    (skipped otherwise, like ``test_layout_backend``). All three place row-stack geometry identically, so
+    a per-backend sweep proves the display↔hit seam holds under each — the Rust path included."""
+    from overlay.render.layout_backend import (
+        DefaultLayoutBackend,
+        FlexColumnBackend,
+        TaffyLayoutBackend,
+    )
+
+    backends: list[tuple[str, LayoutBackend]] = [
+        ("default", DefaultLayoutBackend()),
+        ("flex", FlexColumnBackend()),
+    ]
+    if importlib.util.find_spec("taffylite") is not None:
+        backends.append(("taffy", TaffyLayoutBackend()))
+    return backends
+
+
+# Curated corners, NOT the full Cartesian product — each row targets a distinct interaction the
+# post-PBT modes (and Phase-B layout work) added. ``Profile(Theme(), 384, "tall")`` reproduces the exact
+# pre-existing assertions.
 PROFILES: list[Profile] = [
     Profile(Theme(), 384, "tall"),  # the pre-existing baseline — keeps old coverage byte-identical
     Profile(Theme(scale=2.0), 640, "cjk_links"),  # hi-dpi crisp path + links + reference tip width
@@ -374,4 +467,9 @@ PROFILES: list[Profile] = [
         Theme(scale=1.76), 640, "many_homograph"
     ),  # the real fractional bug scale, tallest wrap
     Profile(Theme(), 640, "short"),  # width change WITHOUT scale — isolates wrap-by-width
+    Profile(
+        Theme(scale=1.5), 512, "chip_heavy"
+    ),  # chip/pill rows at hi-dpi — Phase-B chip-wrap shape
+    Profile(Theme(), 384, "ruby_heavy"),  # dense inline furigana — Phase-B ruby-clearance shape
+    Profile(Theme(scale=2.0), 384, "wide_cjk"),  # narrow + hi-dpi → the tallest kinsoku wrap
 ]
