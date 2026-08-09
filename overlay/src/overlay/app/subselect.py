@@ -614,6 +614,7 @@ class AttachSubtitleOptions:
     tsukihime: bool = False
     episode: int | None = None
     resync: bool = True
+    language: str = MAIN_LANG  # active profile's main language — gates provider eligibility
 
 
 def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
@@ -637,7 +638,7 @@ def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
     providers: tuple[str, ...] = ()
     if startup.tracks.jp_sid is None:
         providers = enabled_providers_for(
-            MAIN_LANG,
+            opts.language,
             (("jimaku", opts.jimaku and not opts.jimaku_force), ("tsukihime", opts.tsukihime)),
         )
     return startup, status, providers

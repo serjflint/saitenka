@@ -89,6 +89,7 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
+from overlay.app.profiles import DEFAULT_PROFILE, Profile
 from overlay.app.reader_context import (
     Delegated,
     EpisodeContext,
@@ -255,6 +256,7 @@ class Reader:
         dict_set=None,
         options: ReaderOptions | None = None,
         renderer: SubtitleRenderer | NullRenderer | None = None,
+        profile: Profile | None = None,
         **legacy_kw,
     ):
         """``options`` is the canonical grouped-knobs object (see app/config.py; a new knob is one
@@ -393,9 +395,14 @@ class Reader:
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
         # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
         self.token_cache = TokenCache(o.perf.token_cache_max)
-        # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam. A
-        # profile switch (#254) swaps it via use_tokenizer; default is Japanese (unidic).
-        self.tokenizer: Tokenizer = get_tokenizer()
+        # Active reading profile (#254) — the identity layer (main/second language codes + tokenizer
+        # name), held as swappable state for a live switch (D8). Distinct from the subtitle *role*
+        # sentinels the primary/secondary state machine compares. Default = today's JP profile.
+        self.profile: Profile = profile or DEFAULT_PROFILE
+        self.langs = self.profile.langs  # concrete language codes; consumers key identity off this
+        # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam, selected
+        # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
+        self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)

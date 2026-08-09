@@ -452,6 +452,27 @@ class TelemetryOptions:
     )
 
 
+@dataclass(frozen=True)
+class ProfileOptions:
+    """One reading profile's identity (#254): the main/second language CODES and the tokenizer strategy
+    NAME. Edited inline as the ``[profile]`` default table by ``saitenka config``; named
+    ``[profiles.<name>]`` tables (selected by top-level ``active_profile``) overlay it. The tokenizer is
+    a separate, user-overridable field — NOT derived from the language — so one strategy serves a family
+    (``unidic`` for ja; a future ``latin`` for fr/es/…). Resolved into a runtime ``Profile`` by
+    :func:`overlay.app.profiles.resolve_profile`."""
+
+    language: str = field(
+        default="jp", metadata={"help": "Main (target) language code — open, e.g. jp, fr, de-CH."}
+    )
+    tokenizer: str = field(
+        default="unidic",
+        metadata={"help": "Tokenizer strategy name (a registered tokenizer; jp uses unidic)."},
+    )
+    second: str = field(
+        default="en", metadata={"help": "Second (known/translation) language code."}
+    )
+
+
 def resolve_telemetry(cfg: dict | None = None) -> TelemetryOptions:
     """:class:`TelemetryOptions` from the ``[telemetry]`` config table. ``$OTEL_SDK_DISABLED`` (the
     standard OTel env var) forces ``enabled=False`` even if the config table turns it on — it's the
