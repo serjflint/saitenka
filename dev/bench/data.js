@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786281072522,
+  "lastUpdate": 1786282490604,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2411,6 +2411,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 7.373,
             "range": "±3.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6493dc562911887da2119d4cd63c38732ad1b274",
+          "message": "Merge pull request #276 from serjflint/chore/promote-memory-to-rules\n\nchore(agents): promote repo-specific durable constraints to .agents/rules + AGENTS.md",
+          "timestamp": "2026-08-09T16:34:25+03:00",
+          "tree_id": "a8663cfc22786c87413b1f6fa114bdf871f1990a",
+          "url": "https://github.com/serjflint/saitenka/commit/6493dc562911887da2119d4cd63c38732ad1b274"
+        },
+        "date": 1786282489580,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.881,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.846,
+            "range": "±0.6%",
             "unit": "ms"
           }
         ]
