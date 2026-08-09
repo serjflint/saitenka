@@ -231,6 +231,39 @@ def test_mine_config_from_unknown_preset_warns_and_uses_lapis(caplog):
     assert cfg.fields == MineConfig().fields and "unknown mining preset" in caplog.text
 
 
+def test_mine_config_from_wires_word_audio_pack_when_enabled(tmp_path):
+    """#93: `_mine_config_from` (the run/attach-shared seam) resolves [mine].word_audio_* into the
+    runtime MineConfig it hands the miner."""
+    from overlay.app.reader_deps import _mine_config_from
+
+    cfg = _mine_config_from(
+        {
+            "word_audio_enabled": True,
+            "word_audio_pack_dir": str(tmp_path),
+            "word_audio_field": "Pronunciation",
+        }
+    )
+    assert cfg.word_audio_pack == tmp_path
+    assert cfg.word_audio_field == "Pronunciation"
+
+
+def test_mine_config_from_leaves_word_audio_off_by_default():
+    from overlay.app.reader_deps import _mine_config_from
+
+    cfg = _mine_config_from({"deck": "X"})
+    assert cfg.word_audio_pack is None
+    assert (
+        cfg.word_audio_field == "WordAudio"
+    )  # default field name still set (inert without a pack)
+
+
+def test_mine_config_from_ignores_pack_dir_when_word_audio_disabled(tmp_path):
+    from overlay.app.reader_deps import _mine_config_from
+
+    cfg = _mine_config_from({"word_audio_pack_dir": str(tmp_path)})  # enabled defaults False
+    assert cfg.word_audio_pack is None
+
+
 def test_timespan_padding():
     ts = Timespan(10.0, 12.0).padded(0.5)
     assert ts.start == 9.5 and ts.end == 12.5
@@ -681,6 +714,78 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path):
     assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
     assert f["Sentence"] == "本を<b>読む</b>"  # cloze markers reassembled around the surface
     assert set(f) == {"Word", "Furigana", "Pitch", "Sentence", "Freq", "IsWordAndSentenceCard"}
+
+
+# --- #93: word-pronunciation audio attach at the mine-time add_note seam --------------------------
+
+
+def _word_audio_pack(tmp_path, term: str, reading: str, filename: str):
+    import json
+
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "index.json").write_text(
+        json.dumps({"index": {term: {reading: [filename]}}}, ensure_ascii=False), encoding="utf-8"
+    )
+    (pack / filename).write_bytes(b"fake-opus-bytes")
+    return pack
+
+
+def test_mine_token_attaches_word_audio_when_pack_resolves(monkeypatch, tmp_path):
+    from overlay.app.controller import Reader
+    from util import FakeIPC
+
+    pack = _word_audio_pack(tmp_path, "読む", "よむ", "yomu.opus")
+    ipc = FakeIPC()
+    anki = _FakeAnki()
+    cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
+    r = Reader(ipc, anki=anki, mine_cfg=cfg)
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert len(anki.added) == 1
+    note = anki.added[0]
+    assert note["fields"]["WordAudio"] == "[sound:yomu.opus]"
+    assert "yomu.opus" in anki.stored  # storeMediaFile called with the resolved file
+
+
+def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tmp_path):
+    """The pack has no entry for this word — the field must stay unset, not an empty [sound:] tag."""
+    from overlay.app.controller import Reader
+    from util import FakeIPC
+
+    pack = _word_audio_pack(tmp_path, "書く", "かく", "kaku.opus")  # different word
+    ipc = FakeIPC()
+    anki = _FakeAnki()
+    cfg = MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
+    r = Reader(ipc, anki=anki, mine_cfg=cfg)
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert len(anki.added) == 1
+    assert "WordAudio" not in anki.added[0]["fields"]
+    assert anki.stored == []  # never stores media for a miss
+
+
+def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
+    """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
+    from overlay.app.controller import Reader
+    from util import FakeIPC
+
+    ipc = FakeIPC()
+    anki = _FakeAnki()
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig())
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert "WordAudio" not in anki.added[0]["fields"]
+    assert anki.stored == []
 
 
 def test_group_mined_of_marks_entries_by_expression(tmp_path):
