@@ -286,6 +286,12 @@ smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdis
 # frame-drop counters — the true real-time signal the headless benches can't see. Needs a display; the
 # E2E GUI tier runs it under Xvfb. --max-drops is the catastrophic-jank gate.
 jank-live = { shell = "SAITENKA_LIVE=1 uv run --extra full python examples/jank_live.py --json jank.json --bench-json jank-bench.json --max-drops 30" }
+# Install-bootstrap smoke — the ONLY tier that drives the packaged `uv tool install` entrypoint on a
+# clean machine (assets from the installed wheel, PATH handoff, setup wizard non-tty path). `--source
+# wheel` (default) builds + installs the current tree; `--source pypi` validates the published artifact
+# (release tag). `--no-project`: the orchestrator is stdlib-only and installs saitenka GLOBALLY, so it
+# needs no dev env. CI-only (the e2e install-smoke leg runs it across all 3 OSes) — NOT in `all`.
+install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
 # Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
 # `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
 stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
