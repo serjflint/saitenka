@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786275182462,
+  "lastUpdate": 1786276981284,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2231,6 +2231,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.78,
             "range": "±2.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0c2c231869a26c7a68aab017ce4d24579878cca9",
+          "message": "Merge pull request #271 from serjflint/feat/93-word-audio\n\nfeat(mine): offline word-pronunciation audio from local yomichan packs (#93)",
+          "timestamp": "2026-08-09T15:02:33+03:00",
+          "tree_id": "9f55671df247b551946f04b257823952beb2a10e",
+          "url": "https://github.com/serjflint/saitenka/commit/0c2c231869a26c7a68aab017ce4d24579878cca9"
+        },
+        "date": 1786276980448,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.396,
+            "range": "±0.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.147,
+            "range": "±2.2%",
             "unit": "ms"
           }
         ]
