@@ -241,3 +241,7 @@ enabled = false
 # cache_size_kib = 32768     # 32 MiB page cache per read connection
 # entry_cache_max = 256      # LRU cap on decoded dictionary entries, per dictionary
 # dexie_chunk_size = 10000   # entries per bank file when importing a dexie (5.x) export
+# persist_seq = false        # persist each term's Yomitan `seq` (opt-in, extra storage) — for a
+#                            # JMdict-derived dict (JMdict itself, Jitendex, …) this is the Kanji Study
+#                            # deep-link id, so mining can fill it offline without the `jmdict` extra.
+#                            # Re-import a dict after turning this on to populate `seq` on its entries.

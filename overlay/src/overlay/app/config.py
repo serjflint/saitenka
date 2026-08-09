@@ -335,6 +335,12 @@ class DictDbOptions:
     cache_size_kib: int = 32_768  # 32 MiB page cache per read connection
     dexie_chunk_size: int = 10_000  # entries per bank file when importing a dexie export
     entry_cache_max: int = 256  # LRU cap on decoded DictEntry objects, per Dictionary instance
+    # Opt-in: persist each term_bank entry's Yomitan `seq` (term_bank[6]) into `entries.seq`. For a
+    # JMdict-derived dict (JMdict itself, Jitendex, …) `seq` == the Kanji Study deep-link id, so this
+    # lets mining fill `card.idseq` offline, without the `jmdict` extra (#255). Off by default — extra
+    # storage most installs don't need. The column itself always exists (additive migration); this flag
+    # only gates whether import actually writes values into it.
+    persist_seq: bool = False
 
 
 def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
@@ -349,6 +355,7 @@ def resolve_dictdb(cfg: dict | None = None) -> DictDbOptions:
         cache_size_kib=int(d.get("cache_size_kib", defaults.cache_size_kib)),
         dexie_chunk_size=int(d.get("dexie_chunk_size", defaults.dexie_chunk_size)),
         entry_cache_max=int(d.get("entry_cache_max", defaults.entry_cache_max)),
+        persist_seq=bool(d.get("persist_seq", defaults.persist_seq)),
     )
 
 

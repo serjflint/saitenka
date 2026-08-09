@@ -30,8 +30,8 @@ def _make_db(path: Path, entries) -> DictionaryDb:
     conn = sqlite3.connect(path)
     for i, (term, reading, glossary) in enumerate(entries, 1):
         conn.execute(
-            "INSERT INTO entries VALUES(?,?,?,?,?,?)",
-            (_DICT_ID, i, term, reading, json.dumps(glossary, ensure_ascii=False), ""),
+            "INSERT INTO entries VALUES(?,?,?,?,?,?,?)",
+            (_DICT_ID, i, term, reading, json.dumps(glossary, ensure_ascii=False), "", None),
         )
         conn.execute("INSERT INTO keys VALUES(?,?,?)", (_DICT_ID, term, i))
     conn.commit()
