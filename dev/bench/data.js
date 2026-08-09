@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786279594178,
+  "lastUpdate": 1786281072522,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2375,6 +2375,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.059,
             "range": "±3.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f213e9de7f01b0dc08597c3972a53c1474cec16e",
+          "message": "Merge pull request #275 from serjflint/chore/gitignore-claude-md\n\nchore: untrack CLAUDE.md (keep repo agent-agnostic; local git-ignored shim)",
+          "timestamp": "2026-08-09T16:10:46+03:00",
+          "tree_id": "fe7e1c70720876d8b4c918c34f296ddfbedeffc8",
+          "url": "https://github.com/serjflint/saitenka/commit/f213e9de7f01b0dc08597c3972a53c1474cec16e"
+        },
+        "date": 1786281071350,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.986,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.373,
+            "range": "±3.6%",
             "unit": "ms"
           }
         ]
