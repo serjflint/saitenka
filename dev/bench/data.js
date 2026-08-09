@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786269061118,
+  "lastUpdate": 1786270143216,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1979,6 +1979,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.832,
             "range": "±1.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "47d394117c8fda0e1dfc31ef97f790e0805067e5",
+          "message": "Merge pull request #265 from serjflint/feat/257-config-editor\n\nfeat(cli): interactive `saitenka config` editor + typed schema catalog (#257)",
+          "timestamp": "2026-08-09T13:08:39+03:00",
+          "tree_id": "879632fe2abb283a4753bf951908ad702656b577",
+          "url": "https://github.com/serjflint/saitenka/commit/47d394117c8fda0e1dfc31ef97f790e0805067e5"
+        },
+        "date": 1786270142648,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.235,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.02,
+            "range": "±7.1%",
             "unit": "ms"
           }
         ]
