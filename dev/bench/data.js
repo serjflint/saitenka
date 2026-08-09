@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786272369427,
+  "lastUpdate": 1786273634358,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2159,6 +2159,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.633,
             "range": "±1.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e12cd845c2c96f829d2e90961d809839cdf9797a",
+          "message": "Merge pull request #269 from serjflint/chore/ci-uv-cache-suffix\n\nci: per-interpreter uv cache-suffix so 3.15/3.15t numpy build persists",
+          "timestamp": "2026-08-09T14:06:51+03:00",
+          "tree_id": "29b9efac05471f8078092eafd1f8fe67ef1885ce",
+          "url": "https://github.com/serjflint/saitenka/commit/e12cd845c2c96f829d2e90961d809839cdf9797a"
+        },
+        "date": 1786273633805,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.241,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.621,
+            "range": "±4.8%",
             "unit": "ms"
           }
         ]
