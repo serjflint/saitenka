@@ -728,6 +728,30 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):
     assert f["Glossary"] == "<ol><li>DICTGLOSS-read</li></ol>"  # from the user dict
 
 
+def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_path):
+    """#255 end-to-end: dict-first mining with an imported JMdict-derived dict (Jitendex-titled) and
+    `[dictdb] persist_seq` on writes the real Kanji Study deep-link `ID` field — without jamdict."""
+    import dicthelp
+    from overlay.app.config import DictDbOptions
+    from overlay.app.controller import Reader
+    from overlay.app.dictdb import DictionaryDb
+    from util import FakeIPC
+
+    d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
+    db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
+    ds = dicthelp.load_set([d], on=db)
+    ipc = FakeIPC()
+    ipc.props["path"] = "/x/Show - 01.mkv"
+    anki = _FakeAnki()
+    r = Reader(ipc, anki=anki, mine_cfg=MineConfig(), dict_set=ds)
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("", ""))
+    monkeypatch.setattr(r, "_preview_mined", lambda _card, _tok, _video: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert anki.added[0]["fields"]["ID"] == "1"
+
+
 def test_card_for_degrades_without_jamdict(monkeypatch):
     """When the optional jmdict extra (jamdict) isn't installed, card_for degrades to an
     expression-only card instead of crashing — the broad except in lookup is load-bearing."""
