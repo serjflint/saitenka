@@ -3,6 +3,7 @@ the tomlkit round-trip — driven through the ``prompt`` seam with a scripted fa
 """
 
 import sys
+from dataclasses import fields
 
 import pytest
 from overlay.app import config_editor as ce
@@ -161,6 +162,77 @@ def test_run_editor_writes_nothing_when_no_edits(tmp_path, monkeypatch):
     _script(monkeypatch, selects=[ce._DONE], texts=[])
     assert ce.run_editor(cfg) == 0
     assert not cfg.exists()  # declined at the section menu → no file created
+
+
+# --- drift guard: the catalog is derived from fields(); a new config.py knob can't go silently missing --
+
+
+@pytest.mark.parametrize(("section", "dc", "_table"), ce._DC_SECTIONS)
+def test_every_group_field_is_exposed_or_explicitly_exempt(section, dc, _table):
+    """Completeness per group: every dataclass field is either editable in `saitenka config` or listed in
+    the documented EXEMPT set — so adding a field to config.py without a decision fails the gate here."""
+    covered = {s.field_name for s in ce.catalog() if s.section == section and s.field_name}
+    exempt = ce._EXEMPT.get(section, frozenset())
+    all_fields = {f.name for f in fields(dc)}
+    assert covered | exempt == all_fields  # nothing unaccounted-for
+    assert not (covered & exempt)  # a field is exposed XOR exempt, never both
+    assert exempt <= all_fields  # no stale name lingering in EXEMPT after a rename
+
+
+def test_newly_wired_toggles_are_reachable():
+    """P1: `no_audio_play` / `prefetch` / `resync` are genuinely config-wired and must be editable."""
+    labels = {s.label for s in ce.catalog()}
+    assert {"no_audio_play", "prefetch", "resync"} <= labels
+
+
+def test_non_config_wired_fields_stay_unexposed():
+    """The runtime never reads these from overlay.toml (its dataclass is built without them), so exposing
+    them would write a key the user mistakes for a change. They must remain absent from the catalog."""
+    paths = {s.toml_path for s in ce.catalog()}
+    assert ("sub_size",) not in paths
+    assert ("crisp_upscale",) not in paths
+    assert ("token_cache_max",) not in paths
+    assert ("sub_picker_key",) not in paths
+
+
+# --- P1: editing one key in a table must not revert its untouched siblings (deep-merge, not shallow) ---
+
+
+def test_editing_one_table_key_keeps_siblings_on_disk_default():
+    """Repro of the shallow-merge data-loss: after editing `[mine].key`, the sibling `[mine].preview`
+    still defaults to its on-disk value, not the built-in — so accepting the shown default can't revert it."""
+    key = next(s for s in ce.catalog() if s.toml_path == ("mine", "key"))
+    preview = next(s for s in ce.catalog() if s.toml_path == ("mine", "preview"))
+    cfg = {"mine": {"key": "Ctrl+m", "preview": False}}
+    proposal: dict = {}
+    ce.apply_edit(proposal, key, "Ctrl+n")
+    merged = ce._deep_merge(cfg, proposal)
+    assert ce.current_default(preview, merged) is False  # on-disk, NOT the built-in True
+    assert ce.current_default(key, merged) == "Ctrl+n"  # the edit is visible too
+
+
+def test_run_editor_edits_two_table_keys_and_preserves_the_third(tmp_path, monkeypatch):
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text(
+        "[dictdb]\nmmap_size = 111\ncache_size_kib = 222\ndexie_chunk_size = 333\n",
+        encoding="utf-8",
+    )
+    _script(
+        monkeypatch,
+        selects=["dictdb", "mmap_size", "dictdb", "cache_size_kib", ce._DONE],
+        texts=["999", "888"],
+    )
+    assert ce.run_editor(cfg) == 0
+    import tomllib
+
+    doc = tomllib.loads(cfg.read_text(encoding="utf-8"))
+    assert doc["dictdb"]["mmap_size"] == 999 and doc["dictdb"]["cache_size_kib"] == 888
+    assert doc["dictdb"]["dexie_chunk_size"] == 333  # untouched sibling survives the two edits
+
+
+def test_coerce_str_strips_surrounding_whitespace():
+    slang = next(s for s in ce.catalog() if s.label == "slang")
+    assert ce.coerce(slang, "  ja,en  ") == "ja,en"
 
 
 def test_run_editor_non_tty_makes_no_changes(tmp_path, monkeypatch):

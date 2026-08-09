@@ -29,6 +29,7 @@ from overlay.app.config import (
     MiningOptions,
     PanelOptions,
     PerfOptions,
+    ReaderOptions,
     StatsOptions,
     TelemetryOptions,
     TooltipOptions,
@@ -59,6 +60,7 @@ class OptionSpec:
     help: str = ""
     choices: tuple[str, ...] = ()
     optional: bool = False
+    field_name: str = ""  # the source dataclass field ("" for a standalone top-level scalar)
 
 
 def _classify(annotation: object) -> tuple[Kind, tuple[str, ...], bool]:
@@ -97,57 +99,71 @@ def _spec(section: str, dc: Any, name: str, toml_path: tuple[str, ...]) -> Optio
         help=str(field.metadata.get("help", "")),
         choices=choices,
         optional=optional,
+        field_name=name,
     )
 
 
-# TOML addresses for the reader-option fields that DON'T map to their own name at top level. Everything
-# else in a reader group is a flat top-level key named after the field.
-_KEY_TOML = {
+# TOML addresses for reader-option fields whose on-disk key differs from a flat top-level ``(name,)``.
+_KEY_TOML: dict[str, tuple[str, ...]] = {
     "mine_key": ("mine", "key"),
     "mine_video_key": ("mine", "video_key"),
     "mine_all_key": ("mine", "all_key"),
     "preview_key": ("mine", "preview_key"),
 }
-_FLAT_KEYS = [
-    "translate_key",
-    "overlay_toggle_key",
-    "hover_pause_key",
-    "subtitle_language_key",
-    "subtitle_mark_jp_key",
-    "bookmark_key",
-    "sidebar_key",
-    "analysis_key",
-    "annotation_key",
-    "help_key",
-    "subtitle_retry_key",
-    "sub_picker_key",
-    "sub_prev_key",
-    "sub_next_key",
-    "sub_replay_key",
+_TOML_OVERRIDES: dict[str, dict[str, tuple[str, ...]]] = {
+    "keys": _KEY_TOML,
+    "mining": {"show_preview": ("mine", "preview")},
+}
+
+# Fields deliberately NOT exposed in `saitenka config`. The completeness guard (test_config_editor) fails
+# if a NEW dataclass field is neither exposed nor listed here — so drift from config.py can't go silent.
+# Each reason is load-bearing: exposing a non-wired field would write a key the runtime silently ignores.
+_EXEMPT: dict[str, frozenset[str]] = {
+    # Read off the dataclass but NEVER populated from overlay.toml — both TooltipOptions(...) construction
+    # sites (cli.py / cli_run.py) omit them, so writing the key is a no-op the user mistakes for a change.
+    # (tip_max_frac IS wired, but is edited as the top-level `tip_height` scalar in the general section.)
+    "tooltip": frozenset(
+        {
+            "sub_size",
+            "crisp_upscale",
+            "bottom_margin_frac",
+            "band_cache_max",
+            "raw_band_ceiling_mb",
+            "tip_max_frac",
+        }
+    ),
+    "perf": frozenset({"token_cache_max"}),  # PerfOptions(...) omits it — not config-wired
+    "keys": frozenset({"subtitle_mark_jp_key", "sub_picker_key"}),  # no config read at either site
+    "mining": frozenset({"play_audio"}),  # written inverted as top-level `no_audio_play` (general)
+    "panels": frozenset({"scale"}),  # exposed as the top-level `ui_scale` scalar (general)
+}
+
+# (section, dataclass, table). Table groups write ``(table, field)``; a reader group writes flat top-level.
+_DC_SECTIONS: list[tuple[str, Any, str | None]] = [
+    ("keys", KeyOptions, None),
+    ("tooltip", TooltipOptions, None),
+    ("mining", MiningOptions, None),
+    ("translation", TranslationOptions, None),
+    ("panels", PanelOptions, None),
+    ("perf", PerfOptions, None),
+    ("stats", StatsOptions, "stats"),
+    ("dictdb", DictDbOptions, "dictdb"),
+    ("telemetry", TelemetryOptions, "telemetry"),
 ]
-_TOOLTIP_FIELDS = [
-    "tip_scale",
-    "nested_max_frac",
-    "pause_on_tooltip",
-    "annotation_mode",
-    "scan_delay",
-    "hover_switch_delay",
-    "hide_delay",
-    "flash_secs",
-    "panel_cache_max",
-    "layout_engine",
-    "render_cache",
-    "mask_atlas",
-    "render_cache_max_mb",
-    "render_cache_min_height",
-]
-_PERF_FIELDS = [
-    "poll_interval",
-    "prefetch_workers",
-    "prefetch_lookahead",
-    "head_prefetch_lookahead",
-    "head_prefetch_queue_max",
-]
+
+
+def _group_specs(section: str, dc: Any, table: str | None) -> list[OptionSpec]:
+    """Every non-exempt field of a group dataclass, in definition order — derived from ``fields()`` so a
+    new knob in config.py appears automatically (can't drift out of sync with a hand-kept list)."""
+    exempt = _EXEMPT.get(section, frozenset())
+    overrides = _TOML_OVERRIDES.get(section, {})
+    specs = []
+    for f in fields(dc):
+        if f.name in exempt:
+            continue
+        path = overrides.get(f.name) or ((table, f.name) if table else (f.name,))
+        specs.append(_spec(section, dc, f.name, path))
+    return specs
 
 
 def _general_specs() -> list[OptionSpec]:
@@ -212,31 +228,37 @@ def _general_specs() -> list[OptionSpec]:
             "alass --split-penalty (0–1000; lower = more willing to split). Blank = alass default.",
             optional=True,
         ),
+        OptionSpec(
+            "general",
+            "no_audio_play",
+            ("no_audio_play",),
+            "bool",
+            not MiningOptions().play_audio,
+            "Suppress the sentence audio played after a mine.",
+        ),
+        OptionSpec(
+            "general",
+            "prefetch",
+            ("prefetch",),
+            "bool",
+            ReaderOptions().prefetch,
+            "Warm upcoming cues / tooltips ahead of playback.",
+        ),
+        OptionSpec(
+            "general",
+            "resync",
+            ("resync",),
+            "bool",
+            ReaderOptions().resync,
+            "Auto-resync jimaku-sourced subtitles via alass/ffsubsync.",
+        ),
     ]
 
 
 def _build_catalog() -> list[OptionSpec]:
     specs = _general_specs()
-    specs += [
-        _spec("keys", KeyOptions, n, _KEY_TOML.get(n, (n,))) for n in [*_FLAT_KEYS, *_KEY_TOML]
-    ]
-    specs += [_spec("tooltip", TooltipOptions, n, (n,)) for n in _TOOLTIP_FIELDS]
-    specs += [
-        _spec("mining", MiningOptions, n, (n,))
-        for n in ("max_bulk", "anki_ok_ttl", "anki_ping_timeout")
-    ]
-    specs.append(_spec("mining", MiningOptions, "show_preview", ("mine", "preview")))
-    specs.append(_spec("translation", TranslationOptions, "auto_translate", ("auto_translate",)))
-    specs += [_spec("perf", PerfOptions, n, (n,)) for n in _PERF_FIELDS]
-    specs += [_spec("stats", StatsOptions, n, ("stats", n)) for n in ("enabled", "summary")]
-    specs += [
-        _spec("dictdb", DictDbOptions, n, ("dictdb", n))
-        for n in ("mmap_size", "cache_size_kib", "dexie_chunk_size", "entry_cache_max")
-    ]
-    specs += [
-        _spec("telemetry", TelemetryOptions, n, ("telemetry", n))
-        for n in ("enabled", "export_dir", "sample_hot_path")
-    ]
+    for section, dc, table in _DC_SECTIONS:
+        specs += _group_specs(section, dc, table)
     return specs
 
 
@@ -278,6 +300,20 @@ def _get_path(doc: Mapping, path: tuple[str, ...]) -> object:
 _UNSET = object()
 
 
+def _deep_merge(base: Mapping, over: Mapping) -> dict:
+    """Recursively merge ``over`` onto ``base``. A shallow ``{**base, **over}`` would replace a whole
+    nested table when only one of its keys was edited this session — reverting the untouched siblings'
+    ``current_default`` to the built-in default, silently dropping the on-disk value on write."""
+    out = dict(base)
+    for key, value in over.items():
+        existing = out.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            out[key] = _deep_merge(existing, value)
+        else:
+            out[key] = value
+    return out
+
+
 def current_default(spec: OptionSpec, cfg: Mapping) -> object:
     """Default to offer: the value already in ``cfg`` (a prior edit or the on-disk config) if set, else
     the built-in default — the explicit precedence the feature asks for."""
@@ -299,7 +335,7 @@ def coerce(spec: OptionSpec, raw: str) -> object:
         return int(text)
     if spec.kind == "float":
         return float(text)
-    return raw
+    return text
 
 
 def _to_str(value: object) -> str:
@@ -361,7 +397,7 @@ def run_editor(dest: Path | None = None) -> int:  # pragma: no cover — interac
         if label == _BACK:
             continue
         spec = next(s for s in specs if s.label == label)
-        merged = {**cfg, **proposal}
+        merged = _deep_merge(cfg, proposal)
         value = prompt_value(spec, current_default(spec, merged))
         apply_edit(proposal, spec, value)
     if not proposal:
