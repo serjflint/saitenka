@@ -16,6 +16,7 @@ OVERLAY_TOGGLE_MSG = "saitenka-toggle-overlay"
 SUBTITLE_LANGUAGE_MSG = "saitenka-toggle-subtitle-language"
 SUBTITLE_MARK_JP_MSG = "saitenka-mark-subtitle-japanese"
 SUBTITLE_RETRY_MSG = "saitenka-retry-subtitle-providers"
+PROFILE_CYCLE_MSG = "saitenka-cycle-profile"
 SUB_PICKER_MSG = "saitenka-sub-picker"
 HOVER_PAUSE_MSG = "saitenka-toggle-hover-pause"
 BOOKMARK_MSG = "saitenka-toggle-bookmark"
@@ -102,6 +103,12 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Re-time subtitles from here (or fetch)",
         SUBTITLE_RETRY_MSG,
         key_attr="subtitle_retry_key",
+    ),
+    BindingSpec(
+        "Essentials & language",
+        "Cycle reading profile",
+        PROFILE_CYCLE_MSG,
+        key_attr="profile_cycle_key",
     ),
     BindingSpec(
         "Essentials & language",

@@ -432,11 +432,19 @@ def warm_episode_tokens(reader: Reader) -> None:
 
 def _warm_episode_loop(reader: Reader, idx: SubIndex) -> None:
     warmed = 0
+    # The generation this warm belongs to: a live profile swap (#254 D8) clears the cache and bumps it,
+    # so a worker mid-tokenize with the OLD tokenizer can't put() a stale-language entry after the swap
+    # — the gen is threaded into every put (dropped under the cache lock on mismatch) AND breaks the loop.
+    gen = reader.token_cache.generation
     for cue in list(idx.cues):
-        if reader._stop.is_set() or reader._sub_index is not idx:
-            return  # closing, or a track switch replaced the index → drop the stale warm
+        if (
+            reader._stop.is_set()
+            or reader._sub_index is not idx
+            or reader.token_cache.generation != gen
+        ):
+            return  # closing, a track switch replaced the index, or a profile swap → drop the stale warm
         try:
-            reader._tokenize_cue(reader._cue_norm(cue.text))
+            reader._tokenize_cue(reader._cue_norm(cue.text), generation=gen)
             warmed += 1
         except Exception:
             log.debug("episode token warm failed for a cue", exc_info=True)  # never kill the warm

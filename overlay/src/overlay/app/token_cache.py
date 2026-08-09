@@ -46,6 +46,17 @@ class TokenCache:
         self._data: OrderedDict[str, TokenizedCue] = OrderedDict()
         self._max = max(1, maxsize)
         self._lock = threading.Lock()
+        # Bumped on every clear() so a background worker that captured the generation before a profile
+        # swap can't land a stale-language entry AFTER the swap cleared the cache (#254 D8 race). The
+        # check and the swap's clear share this lock, so the compare-then-store is atomic vs the clear.
+        self._gen = 0
+
+    @property
+    def generation(self) -> int:
+        """The current cache generation — a background warm captures this at its start and passes it to
+        :meth:`put`, so a profile swap (which bumps it via :meth:`clear`) drops the warm's in-flight puts."""
+        with self._lock:
+            return self._gen
 
     def get(self, text: str) -> TokenizedCue | None:
         with self._lock:
@@ -54,12 +65,16 @@ class TokenCache:
                 self._data.move_to_end(text)
             return cue
 
-    def put(self, text: str, cue: TokenizedCue, *, complete: bool = True) -> None:
+    def put(
+        self, text: str, cue: TokenizedCue, *, complete: bool = True, generation: int | None = None
+    ) -> None:
         # Never store an empty or incomplete tokenization — a later identical line must get
         # another shot at annotations (empty = a miss re-tries; incomplete = re-tries once deps load).
         if not cue.tokens or not complete:
             return
         with self._lock:
+            if generation is not None and generation != self._gen:
+                return  # a profile swap cleared+bumped the cache after this cue was tokenized → drop it
             self._data[text] = cue
             self._data.move_to_end(text)
             while len(self._data) > self._max:
@@ -68,6 +83,9 @@ class TokenCache:
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
+            self._gen += (
+                1  # invalidate any generation captured before this clear (see put/generation)
+            )
 
     def __len__(self) -> int:
         with self._lock:

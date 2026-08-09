@@ -141,4 +141,16 @@ def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
     )
 
 
+def configured_profiles(cfg: dict) -> list[Profile]:
+    """The ordered cycle the live switcher (D8) rotates through: the base ``[profile]`` default first,
+    then each ``[profiles.<name>]`` overlay by sorted name (deterministic order). A config with no
+    ``[profiles.*]`` (or none at all) yields a single-element list, so the switcher is inert on the
+    default path. The base is resolved WITHOUT ``active_profile`` so it's the genuine default table, not
+    whichever named profile is currently active."""
+    base = resolve_profile({k: v for k, v in cfg.items() if k != "active_profile"})
+    profiles = [base]
+    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_table(cfg, "profiles")))
+    return profiles
+
+
 DEFAULT_PROFILE = resolve_profile({})  # the JP default; construction default for a headless reader

@@ -182,7 +182,9 @@ def test_defaults_match_legacy(tmp_path, monkeypatch):
         assert kw["seconds"] == pytest.approx(60.0)
         assert kw["tip_height"] == pytest.approx(0.4)
         assert kw["hover_switch_delay"] == pytest.approx(0.15)
-        assert kw["mine_deck"] == "Saitenka::Mining" and kw["mine_model"] == "Lapis"
+        # deck/model default to None (flag-not-passed sentinel, #254) — the concrete deck/model is
+        # resolved at runtime from the active profile / runtime [mine], not baked into the signature.
+        assert kw["mine_deck"] is None and kw["mine_model"] is None
         assert kw["mine_key"] == "Ctrl+m" and kw["mine_all_key"] == "Shift+m"
         assert kw["translate_key"] == "t" and kw["preview_key"] == "p"
         assert kw["video"] is None

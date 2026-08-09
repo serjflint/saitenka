@@ -63,6 +63,7 @@
 # annotation_key = "Alt+a"  # toggle full and hover-only learning annotations
 # help_key = "F1"  # toggle the compact in-player shortcut reference
 # subtitle_retry_key = "Ctrl+Shift+T"  # retry enabled Japanese subtitle providers
+# profile_cycle_key = "Alt+Shift+p"  # cycle the active reading profile at runtime (no-op with one profile)
 # annotation_mode = "full"  # "full" (default) or neutral until the subtitle is hovered
 # banded = true              # windowed (O(viewport)) tooltip renderer (default); SAITENKA_BANDED=0/1 overrides
 

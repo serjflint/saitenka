@@ -26,7 +26,7 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import resolve_profile, scope_config
+from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -158,10 +158,10 @@ def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
 
 
 def default_mine_target(mine: dict) -> tuple[str, str]:
-    """The ``(deck, model)`` a ``[mine]`` table implies with no explicit CLI flag. The ``run`` signature's
-    ``--mine-deck``/``--mine-model`` defaults AND the profile-scoped fallback (#254) share this, so a
-    profile's ``[mine]`` deck/model isn't silently clobbered by the top-level-seeded CLI default when the
-    user didn't pass the flag. Model mirrors ``_build_mining``'s preset→model derivation (both-seams trap)."""
+    """The ``(deck, model)`` a ``[mine]`` table implies with no explicit CLI flag: deck default
+    ``Saitenka::Mining``; model an explicit ``model`` else the ``preset`` name (Lapis/Kiku) else Lapis.
+    The single home for this derivation — ``_resolve_mine_model`` and the ``#254`` profile scoping both
+    call it, so ``run``/``doctor``/attach target the same note type (the both-seams trap)."""
     deck = mine.get("deck", "Saitenka::Mining")
     model = mine.get("model") or mine.get("preset") or "Lapis"
     return deck, model
@@ -172,21 +172,22 @@ def _mine_table(cfg: dict) -> dict:
     return mine if isinstance(mine, dict) else {}
 
 
-def _scope_cfg_to_profile(cfg: dict, mine_deck: str, mine_model: str) -> tuple[dict, str, str]:
+def _scope_cfg_to_profile(
+    cfg: dict, mine_deck: str | None, mine_model: str | None
+) -> tuple[dict, str, str]:
     """Overlay the active profile's dict/freq/pitch + [mine] onto ``cfg`` (#254 D4/D6), returning the
-    scoped cfg plus the effective ``(mine_deck, mine_model)``. The top-level [mine] deck/model default is
-    captured BEFORE scoping so a still-default ``--mine-deck``/``--mine-model`` flag yields to the
-    profile's own deck/model instead of clobbering it; an explicitly-changed flag still wins."""
-    top_deck, top_model = default_mine_target(_mine_table(cfg))
+    scoped cfg plus the effective ``(mine_deck, mine_model)``. ``mine_deck``/``mine_model`` are ``None``
+    when their CLI flag wasn't passed — then the deck/model is resolved from the SCOPED [mine] (the active
+    profile's, or the runtime top-level [mine] honoring ``--config``). An explicit (non-``None``) flag
+    wins. Resolving off the scoped runtime cfg — never an import-time baked default — is what fixes the
+    ``--config other.toml`` + profile case where the old comparison-baseline misfired."""
     cfg = scope_config(cfg)
-    scoped = _mine_table(cfg)
-    if scoped:
-        scoped_deck, scoped_model = default_mine_target(scoped)
-        if mine_deck == top_deck:
-            mine_deck = scoped_deck
-        if mine_model == top_model:
-            mine_model = scoped_model
-    return cfg, mine_deck, mine_model
+    deck, model = default_mine_target(_mine_table(cfg))
+    return (
+        cfg,
+        (deck if mine_deck is None else mine_deck),
+        (model if mine_model is None else mine_model),
+    )
 
 
 def jimaku_should_fetch(
@@ -470,6 +471,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
             analysis_key=cfg.get("analysis_key", _ko.analysis_key),
             annotation_key=cfg.get("annotation_key", _ko.annotation_key),
             help_key=cfg.get("help_key", _ko.help_key),
+            profile_cycle_key=cfg.get("profile_cycle_key", _ko.profile_cycle_key),
             subtitle_retry_key=cfg.get("subtitle_retry_key", _ko.subtitle_retry_key),
             sub_prev_key=cfg.get("sub_prev_key", "Alt+LEFT"),
             sub_next_key=cfg.get("sub_next_key", "Alt+RIGHT"),
@@ -922,8 +924,8 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     freq: list[str] | None,
     pitch: list[str] | None,
     mine: bool,
-    mine_deck: str,
-    mine_model: str,
+    mine_deck: str | None,  # None = flag not passed → resolved from the active profile / [mine]
+    mine_model: str | None,
     mine_key: str,
     mine_all_key: str,
     mine_normalize_audio: bool,
@@ -950,8 +952,11 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
-    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); yields the profile's deck/model
-    # when the CLI flag is still at its top-level default (see _scope_cfg_to_profile).
+    profile_cycle = configured_profiles(
+        cfg
+    )  # the [profiles.*] the live switcher (D8) rotates through
+    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); a not-passed
+    # --mine-deck/--mine-model (None) yields to the profile's own deck/model (see _scope_cfg_to_profile).
     cfg, mine_deck, mine_model = _scope_cfg_to_profile(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
@@ -1090,10 +1095,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             options=opts,
             profile=active_profile,
         )
+        reader.set_profile_cycle(profile_cycle)
     else:
         reader = Reader(
             ipc, options=opts, profile=active_profile
         )  # deps injected asynchronously below
+        reader.set_profile_cycle(profile_cycle)
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)

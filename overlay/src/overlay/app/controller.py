@@ -61,6 +61,7 @@ from overlay.app.bindings import (
     OVERLAY_TOGGLE_MSG,
     PREVIEW_CLOSE_MSG,
     PREVIEW_MSG,
+    PROFILE_CYCLE_MSG,
     SCROLL_DOWN_MSG,
     SCROLL_UP_MSG,
     SIDEBAR_MSG,
@@ -106,7 +107,7 @@ from overlay.app.tokenizer import Tokenizer, get_tokenizer
 from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from overlay.app.card_preview import PreviewData
     from overlay.app.render_cache import RenderCache
@@ -304,6 +305,7 @@ class Reader:
         self.analysis_key = o.keys.analysis_key
         self.annotation_key = o.keys.annotation_key
         self.help_key = o.keys.help_key
+        self.profile_cycle_key = o.keys.profile_cycle_key
         self.subtitle_retry_key = o.keys.subtitle_retry_key
         self.sub_picker_key = o.keys.sub_picker_key
         self.preview_key = o.keys.preview_key
@@ -400,6 +402,10 @@ class Reader:
         # sentinels the primary/secondary state machine compares. Default = today's JP profile.
         self.profile: Profile = profile or DEFAULT_PROFILE
         self.langs = self.profile.langs  # concrete language codes; consumers key identity off this
+        # The ordered cycle the live switcher (#254 D8) rotates through; a single entry (the default
+        # path) makes cycle_profile a no-op. cli installs the real cycle via set_profile_cycle.
+        self.profiles: tuple[Profile, ...] = (self.profile,)
+        self._profile_idx = 0
         # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam, selected
         # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
         self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
@@ -710,10 +716,11 @@ class Reader:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
         prefetch.warm_episode_tokens(self)
 
-    def _tokenize_cue(self, norm: str) -> TokenizedCue:
+    def _tokenize_cue(self, norm: str, *, generation: int | None = None) -> TokenizedCue:
         """Tokenize + compound-merge + score one normalized cue into a :class:`TokenizedCue`, memoizing
         a COMPLETE, non-empty result (see TokenCache.put) so a repeated line is a hit. Pure of overlay
-        state, so a cache hit reproduces it exactly."""
+        state, so a cache hit reproduces it exactly. ``generation`` (the background episode-warm passes
+        its captured value) gates the store: a profile swap that cleared the cache mid-warm drops it."""
         # Dictionary-attested compound merge (応急+処置 → 応急処置) — one hover/color/mine unit like
         # Yomitan. Optional dict capability, absent until the dicts finish loading (like has_term).
         exists = getattr(self.dict_set, "terms_exist", None)
@@ -727,7 +734,7 @@ class Reader:
         cue = TokenizedCue(lines, tokens, styles)
         # Only memoize a complete annotation — a pre-deps tokenization (no compound-merge dict) is a
         # transient that must re-attempt on the next identical line once the dicts load.
-        self.token_cache.put(norm, cue, complete=exists is not None)
+        self.token_cache.put(norm, cue, complete=exists is not None, generation=generation)
         return cue
 
     def _apply_tokenized_cue(self, cue: TokenizedCue) -> None:
@@ -739,6 +746,50 @@ class Reader:
         segmentation into the new profile."""
         self.tokenizer = tokenizer
         self.token_cache.clear()
+
+    def set_profile_cycle(self, profiles: Sequence[Profile]) -> None:
+        """Install the ordered profile cycle the live switcher rotates through (cli wiring, #254 D8). An
+        empty or single-entry cycle keeps the switcher inert; the cursor starts at the active profile."""
+        self.profiles = tuple(profiles) or (self.profile,)
+        self._profile_idx = next(
+            (i for i, p in enumerate(self.profiles) if p.name == self.profile.name), 0
+        )
+
+    def cycle_profile(self) -> None:
+        """Cycle the active reading profile among the configured ``[profiles.*]`` at runtime (#254 D8).
+        A no-op with a single configured profile (the default path). Resolves the new tokenizer FULLY
+        before touching any live state, so an unresolvable profile leaves the old one intact (atomic
+        revert). On success re-resolves the reader's identity — tokenizer, ``langs`` (which gates
+        providers), ``profile`` — clears+re-arms the token warm (the cache-clear-vs-warm race is closed
+        by the cache generation gate), re-tokenizes the on-screen cue, and flashes the new profile."""
+        if len(self.profiles) <= 1:
+            return  # nothing to switch to — inert on the default single-profile path
+        idx = (self._profile_idx + 1) % len(self.profiles)
+        new = self.profiles[idx]
+        try:
+            tok = get_tokenizer(new.tokenizer)  # resolve BEFORE any swap → atomic on a bad profile
+        except ValueError:
+            self._toast(f"profile {new.name!r}: unknown tokenizer {new.tokenizer!r}", "warn")
+            return
+        self._profile_idx = idx
+        self.profile = new
+        self.langs = new.langs  # provider gating + identity read live off this
+        self.use_tokenizer(
+            tok
+        )  # swaps the strategy AND clears the token cache (bumps its generation)
+        self._warmed_index = None  # re-arm the episode warm under the new tokenizer/generation
+        self._retokenize_current_cue()
+        self.warm_episode_tokens()
+        self._toast(f"profile: {new.name} ({new.langs.main})")
+
+    def _retokenize_current_cue(self) -> None:
+        """Re-render the on-screen cue under the freshly-swapped tokenizer — set_subtitle's tokenize
+        path without its teardown/recording side effects. No-op when nothing's shown or the secondary
+        (English) track is up (which never tokenizes)."""
+        if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
+            return
+        self._apply_tokenized_cue(self._tokenize_cue(self._cue_norm(self.sub_text)))
+        self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
         self.renderer.draw(self)
@@ -1455,6 +1506,7 @@ class Reader:
         SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
         SUBTITLE_MARK_JP_MSG: lambda r: r.mark_current_subtitle_japanese(),
         SUBTITLE_RETRY_MSG: lambda r: r.retry_japanese_subtitles(),
+        PROFILE_CYCLE_MSG: lambda r: r.cycle_profile(),
         HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
         BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
         SIDEBAR_MSG: lambda r: r.toggle_sidebar(),

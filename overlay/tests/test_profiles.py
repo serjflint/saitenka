@@ -8,6 +8,7 @@ from overlay.app.languages import DEFAULT_LANGUAGES, MAIN_LANG, SECOND_LANG, Rea
 from overlay.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
+    configured_profiles,
     resolve_profile,
     scope_config,
     validate_language_code,
@@ -354,9 +355,9 @@ def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
     assert default_mine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")
 
 
-def test_run_path_scoping_prefers_profile_deck_over_a_still_default_flag():
-    """The run seam's guard: with the CLI --mine-deck/--mine-model still at the top-level [mine] default,
-    the active profile's own deck/model win (they'd otherwise be silently clobbered)."""
+def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
+    """The run seam: a not-passed --mine-deck/--mine-model (the None sentinel) resolves to the active
+    profile's own deck/model — they'd otherwise fall back to the base [mine]."""
     from overlay.app.cli_run import _scope_cfg_to_profile
 
     cfg = {
@@ -370,15 +371,14 @@ def test_run_path_scoping_prefers_profile_deck_over_a_still_default_flag():
             }
         },
     }
-    # top-level defaults (what cyclopts seeds when the flag isn't passed) → profile values win
-    scoped, deck, model = _scope_cfg_to_profile(cfg, "Saitenka::Mining", "Lapis")
+    scoped, deck, model = _scope_cfg_to_profile(cfg, None, None)  # None = flag not passed
     assert (deck, model) == ("French::Mining", "FrenchNote")
     assert scoped["mine"]["deck"] == "French::Mining"
 
 
 def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
-    """An explicitly-passed --mine-deck (differs from the top-level default) still wins over the profile
-    — the flag is the user's deliberate override for this launch."""
+    """An explicitly-passed --mine-deck (a non-None value) still wins over the profile — the flag is the
+    user's deliberate override for this launch."""
     from overlay.app.cli_run import _scope_cfg_to_profile
 
     cfg = {
@@ -388,5 +388,67 @@ def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
             "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
         },
     }
-    _scoped, deck, _model = _scope_cfg_to_profile(cfg, "CLI::Explicit", "Lapis")
+    _scoped, deck, _model = _scope_cfg_to_profile(cfg, "CLI::Explicit", None)
     assert deck == "CLI::Explicit"  # explicit flag beats the profile deck
+
+
+def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default():
+    """P1 regression: `saitenka run --config other.toml` whose top-level [mine].deck differs from the
+    import-time default config's deck, PLUS an active profile with its OWN deck. The profile's deck must
+    win — never the --config top-level, never the import-time default. The old comparison-baseline guard
+    misfired here (it compared against the import-time default, misreading an unset flag as explicit)."""
+    from overlay.app.cli_run import _scope_cfg_to_profile
+
+    # This is what `load_config(--config other.toml)` yields at RUNTIME (deck ≠ the import-time default).
+    runtime_cfg = {
+        "mine": {"deck": "Other::TopLevel", "model": "Lapis"},
+        "active_profile": "fr",
+        "profiles": {
+            "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
+        },
+    }
+    _scoped, deck, model = _scope_cfg_to_profile(runtime_cfg, None, None)  # neither flag passed
+    assert (
+        deck == "French::Mining"
+    )  # the profile deck — not "Other::TopLevel", not the import default
+    assert model == "Lapis"  # profile omits model → inherited from the --config top-level [mine]
+
+    # And with NO active profile, an unset flag resolves to the --config top-level [mine] (honors --config,
+    # not the import-time default) — the second half of the same P1.
+    _s2, deck2, _m2 = _scope_cfg_to_profile({"mine": {"deck": "Other::TopLevel"}}, None, None)
+    assert deck2 == "Other::TopLevel"
+
+
+# --- configured_profiles: the ordered cycle the live switcher (D8) rotates through ----------------
+
+
+def test_configured_profiles_is_a_single_default_when_nothing_is_configured():
+    """No ``[profiles.*]`` → one profile (the JP default), so the live switcher is inert."""
+    profiles = configured_profiles({})
+    assert profiles == [DEFAULT_PROFILE]
+
+
+def test_configured_profiles_lists_the_base_then_named_by_sorted_name():
+    """The base ``[profile]`` default first, then each ``[profiles.<name>]`` by sorted name — a
+    deterministic cycle order independent of ``active_profile``."""
+    cfg = {
+        "active_profile": "fr",  # must NOT reorder the cycle — the base stays first
+        "profiles": {
+            "fr": {"language": "fr", "tokenizer": "latin"},
+            "de": {"language": "de", "tokenizer": "latin"},
+        },
+    }
+    names = [p.name for p in configured_profiles(cfg)]
+    assert names == ["default", "de", "fr"]  # base, then sorted names
+
+
+def test_configured_profiles_base_is_the_default_table_not_the_active_named_profile():
+    """The base is resolved WITHOUT ``active_profile`` — it's the genuine ``[profile]`` default, not
+    whichever named profile is active."""
+    cfg = {
+        "active_profile": "fr",
+        "profile": {"second": "de"},  # the base default table
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}},
+    }
+    base = configured_profiles(cfg)[0]
+    assert base.name == "default" and base.langs.main == "jp" and base.langs.second == "de"

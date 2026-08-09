@@ -33,10 +33,10 @@ from overlay import __version__
 
 # _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
 from overlay.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
+from overlay.app.cli_run import default_mine_target, run_impl
 from overlay.app.cli_run import (
     jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
 )
-from overlay.app.cli_run import run_impl
 from overlay.app.config import TooltipOptions, config_path, load_config
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.paths import cache_dir
@@ -110,8 +110,9 @@ _mine_cfg = _cfg.get("mine", {}) if isinstance(_cfg.get("mine"), dict) else {}
 def _resolve_mine_model(mine_cfg: dict) -> str:
     """The mining note type: an explicit ``[mine].model``, else the ``[mine].preset`` name (Lapis/Kiku
     imply their own model), else Lapis. Mirrors what ``_build_mining`` derives on the attach seam, so
-    ``run``/``doctor`` target the SAME note type a preset-only config mines to (the both-seams trap)."""
-    return mine_cfg.get("model") or mine_cfg.get("preset") or "Lapis"
+    ``run``/``doctor`` target the SAME note type a preset-only config mines to (the both-seams trap).
+    Delegates to the shared ``default_mine_target`` so this derivation lives in ONE place."""
+    return default_mine_target(mine_cfg)[1]
 
 
 _MINE_MODEL_DEFAULT = _resolve_mine_model(_mine_cfg)
@@ -223,8 +224,11 @@ def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual par
             help="one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)",
         ),
     ] = bool(_mine_cfg.get("enabled", bool(_mine_cfg))),
-    mine_deck: str = _mine_cfg.get("deck", "Saitenka::Mining"),
-    mine_model: str = _MINE_MODEL_DEFAULT,
+    # None = flag not passed → the active profile's (or runtime [mine]'s) deck/model is resolved at
+    # runtime in run_impl (#254). This makes the default honor --config AND a profile, not the
+    # import-time default-path config baked into a literal default. An explicit flag still wins.
+    mine_deck: str | None = None,
+    mine_model: str | None = None,
     mine_normalize_audio: Annotated[
         bool,
         cyclopts.Parameter(
@@ -1228,6 +1232,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             analysis_key=cfg.get("analysis_key", ko.analysis_key),
             annotation_key=cfg.get("annotation_key", ko.annotation_key),
             help_key=cfg.get("help_key", ko.help_key),
+            profile_cycle_key=cfg.get("profile_cycle_key", ko.profile_cycle_key),
             subtitle_retry_key=cfg.get("subtitle_retry_key", ko.subtitle_retry_key),
             sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
             sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
@@ -1409,7 +1414,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
-    from overlay.app.profiles import resolve_profile, scope_config
+    from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
     from overlay.app.reader_deps import warm_tokenizer
 
     cfg = load_config(config)
@@ -1417,6 +1422,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
+    profile_cycle = configured_profiles(
+        cfg
+    )  # the [profiles.*] the live switcher (D8) rotates through
     # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6) before the dep build reads them;
     # attach has no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/
     # model/field-map directly. Byte-identical for the default profile.
@@ -1516,6 +1524,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts, profile=active_profile)  # deps injected asynchronously below
+    reader.set_profile_cycle(profile_cycle)
     provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
