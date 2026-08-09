@@ -175,7 +175,9 @@ def test_english_rows_are_plain_and_skip_japanese_analysis(monkeypatch):
     reader, _ipc = _reader(cue_count=1)
     reader.subtitle_language = "en"
     reader.scorer = object()
-    monkeypatch.setattr(sidebar, "tokenize", lambda _text: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(
+        reader.tokenizer, "tokenize", lambda _text: (_ for _ in ()).throw(AssertionError)
+    )
 
     rows, total = sidebar._track_rows(reader, 0, 1, 0)
 
@@ -188,7 +190,9 @@ def test_rows_use_shared_episode_analysis_when_ready():
     reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
     reader.sub_text = "私は本を読む。"
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
-    reader.analysis.current = analyze_cues(list(reader._sub_index.cues), reader.scorer)
+    reader.analysis.current = analyze_cues(
+        list(reader._sub_index.cues), reader.scorer, reader.tokenizer
+    )
 
     rows, _total = sidebar._track_rows(reader, 0, 1, 0)
 
@@ -200,7 +204,9 @@ def test_track_change_clears_stale_analysis_before_sidebar_redraw(monkeypatch):
     reader.jp_sid = 1
     reader.scorer = Scorer(known=KnownWords.from_set(["私", "本"]))
     reader._sub_index = SubIndex([SubCue(0.0, 1.0, "私は本を読む。")])
-    reader.analysis.current = analyze_cues(list(reader._sub_index.cues), reader.scorer)
+    reader.analysis.current = analyze_cues(
+        list(reader._sub_index.cues), reader.scorer, reader.tokenizer
+    )
     reader.sidebar.open = True
     reader._loading = True
     calls = _capture_render(monkeypatch)
@@ -278,6 +284,116 @@ def test_mining_marks_matching_backlog_cue_without_creating_a_store(tmp_path, mo
     assert store.entry(entry.id).status == "mined"
 
 
+def test_mine_tab_lists_this_episodes_mined_cards(tmp_path):
+    from overlay.app.mined_store import MinedCardStore
+
+    video = tmp_path / "Show - 03.mkv"
+    reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
+    store = MinedCardStore(tmp_path / "mined.sqlite")
+    store.record(
+        note_id=111,
+        video_path=str(video),
+        cue_start=0.0,
+        cue_end=0.8,
+        expression="本",
+        reading="ほん",
+    )
+    store.record(
+        note_id=222,
+        video_path=str(video),
+        cue_start=1.0,
+        cue_end=1.5,
+        expression="猫",
+        reading="ねこ",
+    )
+    store.record(  # a sibling episode must not leak in
+        note_id=333,
+        video_path=str(tmp_path / "Show - 04.mkv"),
+        cue_start=0.0,
+        cue_end=0.8,
+        expression="犬",
+        reading="いぬ",
+    )
+    reader._mined_store = store
+
+    rows = sidebar._mine_rows(reader)
+
+    assert [(row.value, row.click_kind, row.status) for row in rows] == [
+        (111, "mine-open", "mined"),
+        (222, "mine-open", "mined"),
+    ]
+    assert "本" in rows[0].text and "ほん" in rows[0].text
+    assert rows[0].active is True  # its cue span matches the active cue (0.0–0.8)
+
+
+def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
+    from overlay.app import mined_store
+
+    video = tmp_path / "Show - 03.mkv"
+    reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "absent.sqlite")
+
+    assert sidebar._mine_rows(reader) == []
+    assert reader._mined_store is None
+    assert not (tmp_path / "absent.sqlite").exists()
+
+
+def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
+    from overlay.app.mined_store import MinedCardStore
+
+    video = tmp_path / "Show - 03.mkv"
+    reader, ipc = _reader(cue_count=1, props={"path": str(video)})
+    store = MinedCardStore(tmp_path / "mined.sqlite")
+    store.record(
+        note_id=111,
+        video_path=str(video),
+        cue_start=0.0,
+        cue_end=0.8,
+        expression="本",
+        reading="ほん",
+    )
+    reader._mined_store = store
+    _capture_render(monkeypatch)
+    reader.sidebar.open = True
+    reader.sidebar.view = "mine"
+    reader.sidebar.rect = (0, 0, 400, 500)
+    reader.sidebar.hits = (SidebarHitBox("mine-open", 111, 0, 0, 200, 40),)
+
+    sidebar.on_click(reader, 10, 10)
+
+    assert ("set_property", "time-pos", 0.0) in ipc.commands  # seeks even with Anki down
+
+
+def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, monkeypatch):
+    from overlay.app import miner_ui
+    from overlay.app.mined_store import MinedCardStore
+
+    video = tmp_path / "Show - 03.mkv"
+    reader, _ipc = _reader(cue_count=1, props={"path": str(video)})
+    store = MinedCardStore(tmp_path / "mined.sqlite")
+    store.record(
+        note_id=111,
+        video_path=str(video),
+        cue_start=0.0,
+        cue_end=0.8,
+        expression="本",
+        reading="ほん",
+    )
+    reader._mined_store = store
+    reader.anki = object()
+    reader.mine_cfg = object()
+    opened = []
+    monkeypatch.setattr(
+        miner_ui,
+        "preview_existing",
+        lambda _r, nid, card, status: opened.append((nid, card.expression, status)),
+    )
+
+    sidebar._open_mined(reader, 111)
+
+    assert opened == [(111, "本", "exists")]
+
+
 def test_renderer_windows_rows_and_bounds_hitboxes():
     rows = [
         SidebarRow(
@@ -296,6 +412,7 @@ def test_renderer_windows_rows_and_bounds_hitboxes():
     assert [(hit.kind, hit.value) for hit in rendered.hitboxes] == [
         ("view:track", 0),
         ("view:backlog", 0),
+        ("view:mine", 0),
         ("bookmark", 0),
         ("seek", 0),
     ]

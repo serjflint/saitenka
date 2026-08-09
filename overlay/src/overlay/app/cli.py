@@ -683,6 +683,19 @@ def init() -> int:  # pragma: no cover — interactive wizard, exercised live
     return run_init()
 
 
+@app.command
+def config() -> (
+    int
+):  # pragma: no cover — interactive editor; the schema/coercion core is unit-tested
+    """Interactively edit ``overlay.toml``: pick a section → an option → a typed field, comment-preserving.
+
+    Offers the current value (or the built-in default) and round-trips through tomlkit, so every other
+    key + comment survives. On a non-tty it writes nothing (the prompts return their defaults)."""
+    from overlay.app.config_editor import run_editor
+
+    return run_editor()
+
+
 @app.command(name="import")
 def import_dicts(
     paths: Annotated[

@@ -8,16 +8,16 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from overlay.app import analysis_overlay
+from overlay.app import analysis_overlay, mined_store
 from overlay.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
 from overlay.app.languages import SECOND_LANG
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.subtitles import SidebarAction, SidebarRow, render_sidebar
-from overlay.app.tokenize import tokenize
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
-    from overlay.app.sub_index import SubCue
+    from overlay.app.mined_store import MinedCard
+    from overlay.app.sub_index import SubCue, SubIndex
 
 SIDEBAR_ID = OverlayId.SIDEBAR
 MANUAL_SCROLL_HOLD = 1.5
@@ -78,7 +78,7 @@ def _cue_parts(reader: Reader, cue_index: int, cue: SubCue) -> tuple[tuple[str, 
     cached = reader.sidebar.style_cache.get(key)
     if cached is not None:
         return cached
-    tokens = tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
+    tokens = reader.tokenizer.tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
     styles = reader.scorer.score_line(tokens)
     parts = tuple((token.surface, style.color) for token, style in zip(tokens, styles, strict=True))
     reader.sidebar.style_cache[key] = parts
@@ -235,6 +235,65 @@ def _summary_rows(reader: Reader) -> list[SidebarRow]:
     )
 
 
+def _mined_row(card: MinedCard, active_cue: SubCue | None) -> SidebarRow:
+    text = f"{card.expression}（{card.reading}）" if card.reading else card.expression
+    is_active = bool(
+        active_cue
+        and abs(active_cue.start - card.cue_start) < 0.05
+        and abs(active_cue.end - card.cue_end) < 0.05
+    )
+    return SidebarRow(
+        value=card.note_id,
+        timestamp=_format_time(card.cue_start),
+        text=text,
+        parts=((text.replace("\n", " "), PLAIN),),
+        status="mined",
+        active=is_active,
+        click_kind="mine-open",
+    )
+
+
+def _mine_rows(reader: Reader) -> list[SidebarRow]:
+    """This episode's mined cards (#253), newest cue order, each openable in the card preview. Never
+    materialises an empty store just by opening the tab (mirrors ``mark_active_mined``'s guard)."""
+    video = reader._get("path")
+    if not video:
+        return []
+    if reader._mined_store is None and not mined_store.db_path().exists():
+        return []
+    index: SubIndex | None = reader._sub_index
+    active = _active_index(reader)
+    active_cue = index.cues[active] if index is not None and active >= 0 else None
+    store = mined_store.ensure_store(reader)
+    return [_mined_row(card, active_cue) for card in store.for_path(video)]
+
+
+def _open_mined(reader: Reader, note_id: int) -> None:
+    """Open a mined card from the Mine tab: seek to its cue (offline-safe), then round-trip the full
+    preview via the retained note id when Anki is reachable."""
+    store = mined_store.ensure_store(reader)
+    card = store.by_note_id(note_id)
+    if card is None:
+        return
+    reader.ipc.command("set_property", "time-pos", card.cue_start)
+    if reader.anki and reader.mine_cfg:
+        from overlay.app import miner_ui
+
+        miner_ui.preview_existing(
+            reader, note_id, _MinedPreviewCard(card.expression, card.reading), "exists"
+        )
+
+
+@dataclass(frozen=True)
+class _MinedPreviewCard:
+    """The minimal card shape ``miner_ui.preview_existing`` reads — the live Anki note fields override
+    these, so only expression/reading (retained at mine time) are needed as the offline fallback."""
+
+    expression: str
+    reading: str
+    glosses: tuple[str, ...] = ()
+
+
 def redraw(reader: Reader) -> None:
     if not reader.sidebar.open:
         return
@@ -255,6 +314,12 @@ def redraw(reader: Reader) -> None:
             rows, total = _track_rows(reader, reader.sidebar.scroll, capacity, active)
             if reader._sub_index is None or len(reader._sub_index) == 0:
                 unavailable = "Subtitle cue index unavailable"
+        elif reader.sidebar.view == "mine":
+            all_rows = _mine_rows(reader)
+            total = len(all_rows)
+            rows = all_rows[reader.sidebar.scroll : reader.sidebar.scroll + capacity]
+            if not rows:
+                unavailable = "No mined cards for this episode"
         else:
             all_rows = _summary_rows(reader)
             total = len(all_rows)
@@ -262,7 +327,7 @@ def redraw(reader: Reader) -> None:
             if not rows:
                 unavailable = "Backlog is empty"
     except (OSError, sqlite3.Error, ValueError) as exc:
-        rows, total, unavailable = [], 0, f"Backlog unavailable: {exc}"
+        rows, total, unavailable = [], 0, f"{reader.sidebar.view.title()} unavailable: {exc}"
     rendered = render_sidebar(
         rows,
         width=width,
@@ -380,6 +445,8 @@ def _activate_hit(reader: Reader, hit) -> None:
         reader.toggle_bookmark()
     elif hit.kind == "mine":
         reader.mine_current()
+    elif hit.kind == "mine-open":
+        _open_mined(reader, hit.value)
     elif hit.kind == "relink":
         video = reader._get("path")
         if video:

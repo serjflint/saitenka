@@ -222,7 +222,8 @@ def test_english_primary_is_plain_and_noninteractive(monkeypatch):
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(
-        "overlay.app.controller.tokenize",
+        reader.tokenizer,
+        "tokenize",
         lambda _text: (_ for _ in ()).throw(AssertionError("English must not be tokenized")),
     )
     monkeypatch.setattr(

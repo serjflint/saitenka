@@ -5,7 +5,10 @@ from overlay.app.fsrs import KnownSnap
 from overlay.app.scoring import Scorer, mark_n_plus
 from overlay.app.sub_index import SubCue, SubIndex
 from overlay.app.tokenize import tokenize
+from overlay.app.tokenizer import UnidicTokenizer
 from overlay.app.wordlists import FreqDict, JlptDict, KnownWords
+
+TOKENIZER = UnidicTokenizer()
 
 
 def test_episode_metrics_dedupe_lemmas_and_kanji_and_classify_n_plus():
@@ -15,7 +18,7 @@ def test_episode_metrics_dedupe_lemmas_and_kanji_and_classify_n_plus():
     ]
     scorer = Scorer(known=KnownWords.from_set(["私", "本", "彼"]))
 
-    result = analyze_cues(cues, scorer)
+    result = analyze_cues(cues, scorer, TOKENIZER)
 
     assert result.sentence_count == 2
     assert result.n_plus_one_count == 1
@@ -28,7 +31,9 @@ def test_episode_metrics_dedupe_lemmas_and_kanji_and_classify_n_plus():
 
 
 def test_sentence_count_includes_a_sentence_without_eligible_content_words():
-    result = analyze_cues([SubCue(0, 1, "はい。")], Scorer(known=KnownWords.from_set([])))
+    result = analyze_cues(
+        [SubCue(0, 1, "はい。")], Scorer(known=KnownWords.from_set([])), TOKENIZER
+    )
 
     assert result.sentence_count == 1
     assert result.content_token_count == 0
@@ -50,7 +55,7 @@ def test_forgotten_words_are_unknown_and_proper_nouns_do_not_become_unknown_type
         fsrs_snap=KnownSnap.of({"読む": "forgotten"}),
     )
 
-    result = analyze_cues([SubCue(0, 1, "太郎は本を読む。")], scorer)
+    result = analyze_cues([SubCue(0, 1, "太郎は本を読む。")], scorer, TOKENIZER)
 
     assert "読む" in result.unknown_lemmas
     assert "太郎" not in result.unknown_lemmas
@@ -58,7 +63,7 @@ def test_forgotten_words_are_unknown_and_proper_nouns_do_not_become_unknown_type
 
 def test_optional_sources_degrade_and_configured_sources_report_distributions():
     cue = SubCue(0, 1, "本を読む。")
-    plain = analyze_cues([cue], Scorer(known=KnownWords.from_set([])))
+    plain = analyze_cues([cue], Scorer(known=KnownWords.from_set([])), TOKENIZER)
     sourced = analyze_cues(
         [cue],
         Scorer(
@@ -66,6 +71,7 @@ def test_optional_sources_degrade_and_configured_sources_report_distributions():
             jlpt=JlptDict({"本": "N5"}),
             freq=FreqDict({"本": 1, "読む": 5000}),
         ),
+        TOKENIZER,
     )
 
     assert plain.jlpt_distribution is None

@@ -23,6 +23,7 @@ from overlay.app import (
     card_preview,
     help_overlay,
     hover_snapshot,
+    mined_store,
     miner_ui,
     nested_popup,
     popups,
@@ -99,7 +100,8 @@ from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
 from overlay.app.token_cache import TokenCache, TokenizedCue
-from overlay.app.tokenize import SKIP_POS, Token, inflected_in, merge_dict_compounds, tokenize
+from overlay.app.tokenize import SKIP_POS, Token
+from overlay.app.tokenizer import Tokenizer, get_tokenizer
 from overlay.mpvio.osd import Overlay
 
 if TYPE_CHECKING:
@@ -212,6 +214,7 @@ class Reader:
     _mined = Delegated[set[str]]("session", "mined")
     _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
     _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
+    _mined_store = Delegated[mined_store.MinedCardStore | None]("session", "mined_store")
     # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
     # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
     _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
@@ -390,6 +393,9 @@ class Reader:
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
         # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
         self.token_cache = TokenCache(o.perf.token_cache_max)
+        # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam. A
+        # profile switch (#254) swaps it via use_tokenizer; default is Japanese (unidic).
+        self.tokenizer: Tokenizer = get_tokenizer()
         self._cache_lock = (
             threading.Lock()
         )  # tiny lock: only the cache dict mutation (build is lock-free)
@@ -705,8 +711,8 @@ class Reader:
         # Yomitan. Optional dict capability, absent until the dicts finish loading (like has_term).
         exists = getattr(self.dict_set, "terms_exist", None)
         with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
-            raw = (tokenize(ln) for ln in norm.split("\n") if ln.strip())
-            lines = [merge_dict_compounds(t, exists) if exists else t for t in raw]
+            raw = (self.tokenizer.tokenize(ln) for ln in norm.split("\n") if ln.strip())
+            lines = [self.tokenizer.merge_dict_compounds(t, exists) if exists else t for t in raw]
         tokens = [t for line in lines for t in line]
         # score the whole cue (N+1 splits by sentence punctuation across lines); warms lookup cache
         with otel_metrics.traced("score_line"):
@@ -719,6 +725,13 @@ class Reader:
 
     def _apply_tokenized_cue(self, cue: TokenizedCue) -> None:
         self.lines, self.tokens, self.styles = cue.lines, cue.tokens, cue.styles
+
+    def use_tokenizer(self, tokenizer: Tokenizer) -> None:
+        """Swap the active tokenizer strategy (a profile switch, #254). Clears the token cache —
+        cached tokenizations are strategy-specific, so a stale entry would leak the old language's
+        segmentation into the new profile."""
+        self.tokenizer = tokenizer
+        self.token_cache.clear()
 
     def _draw_subtitle(self) -> None:
         self.renderer.draw(self)
@@ -966,7 +979,7 @@ class Reader:
         return prefetch.upcoming_cue_texts(self, n)
 
     def _inflected_surface(self, index: int) -> str:
-        return inflected_in(self.tokens, index)
+        return self.tokenizer.inflected_in(self.tokens, index)
 
     def _telemetry_gauges(self) -> dict[str, float]:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
@@ -1767,5 +1780,7 @@ class Reader:
             print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # requested close summary
         if self._backlog_store is not None:
             self._backlog_store.close()
+        if self._mined_store is not None:
+            self._mined_store.close()
         self.ov.close()
         shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir

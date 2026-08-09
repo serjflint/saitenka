@@ -167,6 +167,8 @@ max-args = 8
 "overlay/src/overlay/app/init_wizard.py" = ["print"]
 "overlay/src/overlay/app/setup_wizard.py" = ["print"]
 "overlay/src/overlay/app/prompt.py" = ["print"]  # shared prompt seam: the numbered fallback prints its choices
+# T201: the `saitenka config` editor is a user-invoked interactive subcommand — print() is its UX.
+"overlay/src/overlay/app/config_editor.py" = ["print"]
 # Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
 # hoisting five one-use constants would only add indirection.
 "overlay/src/overlay/app/scoring.py" = ["function-call-in-dataclass-default-argument"]

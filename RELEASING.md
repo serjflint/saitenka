@@ -95,6 +95,27 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 9. **Post-release:** confirm the Release + both PyPI packages are live, `## [Unreleased]` is empty on
    top, the tag matches `pyproject.toml`, and `uv tool install "saitenka[full]"` pulls the new version.
 
+## taffylite (optional Rust layout engine)
+
+`taffylite` (the pyo3 binding behind the dev-only `layout-engine` extra, #146) versions and publishes
+**independently** of the steps above, via its own `.github/workflows/taffylite-release.yml`:
+
+- **Tag namespace:** `taffylite-vX.Y.Z` (own `Cargo.toml`/`taffylite/pyproject.toml` `version`, not
+  saitenka's `vX.Y.Z`). Tag the merged commit by SHA, same as step 7 above, and push it — that's the
+  sole trigger.
+- **Build:** a maturin wheel matrix (manylinux x86_64/aarch64, macOS arm64/x86_64, Windows x86_64) ×
+  every free-threading-capable interpreter maturin's `--find-interpreter` finds on each runner
+  (cp313/cp314/cp314t; cp315t once 3.15 ships and the runners carry it — no abi3, so each interpreter
+  needs its own wheel, see `taffylite/Cargo.toml`), plus an sdist.
+- **Publish:** Trusted Publishing (OIDC, no token) to PyPI project `taffylite`, same as the packages
+  above. `workflow_dispatch` does a TestPyPI dry-run of the current commit.
+- **One-time PyPI setup** (already done): a pending Trusted Publisher for `taffylite` on both pypi.org
+  and test.pypi.org, repo `serjflint/saitenka`, workflow `taffylite-release.yml`.
+
+Publishing this doesn't change `saitenka[layout-engine]`'s dev-only posture — flipping
+`overlay/pyproject.toml`'s `[tool.uv.sources]` editable pin to resolve from PyPI is separate follow-up
+work, gated on the first real `taffylite` publish existing to resolve against.
+
 ## Notes
 
 - **Compare-link footers** in `CHANGELOG.md` need tags to exist. No `v0.2.0` tag was ever cut; to make

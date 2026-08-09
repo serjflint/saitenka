@@ -239,6 +239,8 @@ _CARD_KIND_MARKER: dict[str, str | None] = {
     "none": None,
 }
 _DEFAULT_CARD_KIND = "word-and-sentence"
+# Card-kind choices in offer order (the SSOT for every picker: setup wizard + `saitenka config`).
+CARD_KINDS = ("word-and-sentence", "sentence", "audio", "click", "none")
 
 # Known-good note types: (field map, default card kind). A preset spares the user spelling the map
 # out; both Lapis and Kiku use the shared LAPIS_FIELDS names, differing only in card template.
