@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786270396872,
+  "lastUpdate": 1786271515677,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2051,6 +2051,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.838,
             "range": "±1.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a3b086033d5b1342114b0e55bf8fe7143995295c",
+          "message": "Merge pull request #264 from serjflint/feat/255-deeplink-id-remainder\n\nfeat(dictdb): offline deep-link ID via entries.seq + doctor data-check (#255)",
+          "timestamp": "2026-08-09T13:31:31+03:00",
+          "tree_id": "6b31accdf736cb3efda3dbb86f8ee4ca636fdb9b",
+          "url": "https://github.com/serjflint/saitenka/commit/a3b086033d5b1342114b0e55bf8fe7143995295c"
+        },
+        "date": 1786271515064,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.305,
+            "range": "±0.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.849,
+            "range": "±0.8%",
             "unit": "ms"
           }
         ]
