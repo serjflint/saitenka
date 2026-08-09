@@ -128,6 +128,12 @@ app = cyclopts.App(
     ),
 )
 
+# `saitenka profile <list|show|add|use|remove>` — reading-profile CRUD (#254 W4). Imported here, not
+# at top, because it attaches to `app`, which must exist first.
+from overlay.app.profile_cli import profile_app  # noqa: E402
+
+app.command(profile_app)
+
 
 @app.command(name="run")
 def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual params for --help/parsing

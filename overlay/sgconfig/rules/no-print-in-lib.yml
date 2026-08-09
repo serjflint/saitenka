@@ -11,6 +11,7 @@ files:
 # bootstrap (reader_deps, crashlog). Core runtime must log.
 ignores:
   - "src/overlay/app/cli.py"
+  - "src/overlay/app/profile_cli.py"
   - "src/overlay/app/*wizard*.py"
   - "src/overlay/app/doctor.py"
   - "src/overlay/app/yomitan_import.py"
