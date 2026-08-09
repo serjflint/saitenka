@@ -36,7 +36,7 @@ Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
 # core deps so the default install stays Apache-2.0-clean. See ../LICENSING.md.
-deinflect = ["saitenka-deinflect>=0.1.0"]
+deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language= API (#254)
 # Optional layout engine: the taffy (CSS flexbox) row-stack solver behind the LayoutBackend seam
 # (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0) — kept OUT of `full` and its own
 # extra because free-threaded cp314t wheels are still niche (needs a prebuilt wheel or a Rust
@@ -84,6 +84,10 @@ saitenka = "overlay.app.cli:main"
 # wheel. Stripped from published metadata — a PyPI install of `saitenka[layout-engine]` needs taffylite
 # on PyPI (future work), same additive-optional posture as the extra note above.
 taffylite = { path = "../taffylite", editable = true }
+# Dev editable resolution of the GPL add-on so overlay changes see local deinflect edits (e.g. the
+# French rule set / language= API). Stripped from published metadata — a PyPI `saitenka[deinflect]`
+# install still pulls the published saitenka-deinflect wheel.
+saitenka-deinflect = { path = "../deinflect", editable = true }
 
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a

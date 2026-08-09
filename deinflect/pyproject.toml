@@ -1,7 +1,7 @@
 [project]
 name = "saitenka-deinflect"
-version = "0.1.1"
-description = "Japanese deinflection chain for saitenka — derived from Yomitan (GPL-3.0)"
+version = "0.2.0"
+description = "Deinflection chains for saitenka (Japanese + French) — derived from Yomitan (GPL-3.0)"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "GPL-3.0-or-later"

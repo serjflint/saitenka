@@ -9,6 +9,7 @@ from overlay.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
     configured_profiles,
+    resolve_launch_identity,
     resolve_profile,
     scope_config,
     validate_language_code,
@@ -172,11 +173,19 @@ def test_ja_alias_canonicalizes_so_it_keeps_jp_tokenizer_and_providers(monkeypat
     )
 
 
-def test_non_jp_language_without_a_tokenizer_fails_fast():
-    """P2 regression: no silent unidic fallback for a non-JP language — omitting ``tokenizer`` raises a
-    clear error instead of mis-segmenting a non-JP script as Japanese."""
+def test_unknown_script_language_without_a_tokenizer_fails_fast():
+    """P2 regression: no silent unidic fallback for a language with no known script — omitting
+    ``tokenizer`` raises a clear error instead of mis-segmenting it as Japanese. A KNOWN Latin-script
+    code (fr/es/…) now defaults to ``latin`` (see below); only genuinely-unknown scripts fail fast."""
     with pytest.raises(ValueError, match="no default tokenizer"):
-        resolve_profile({"profile": {"language": "fr"}})
+        resolve_profile({"profile": {"language": "zh"}})
+
+
+def test_latin_script_language_defaults_to_the_latin_tokenizer():
+    """A Latin-script language resolves the ``latin`` strategy with no explicit ``tokenizer`` (#254 W1)."""
+    profile = resolve_profile({"profile": {"language": "fr"}})
+    assert profile.tokenizer == "latin"
+    assert profile.langs.main == "fr"
 
 
 # --- the reader keys tokenizer + language identity off the active profile -------------------------
@@ -192,6 +201,44 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages():
     assert isinstance(reader.tokenizer, _FakeLatinTokenizer)  # selected, not unidic
     assert reader.langs.main == "fr" and reader.langs.second == "en"
     assert reader.profile is profile
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_profile_rescopes_the_dict_set_live():
+    """A live profile cycle (#254 W3) swaps not just the tokenizer/langs but the dictionary set — the
+    scoper the CLI installs is consulted and its result replaces reader.dict_set."""
+    register_tokenizer("latin", _FakeLatinTokenizer)
+    jp = resolve_profile({})  # default (jp/unidic)
+    fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
+    jp_dicts, fr_dicts = object(), object()  # sentinels — cycle must select by profile
+
+    reader = Reader(FakeIPC(), profile=jp)
+    reader.dict_set = jp_dicts
+    reader.set_profile_cycle([jp, fr], lambda p: fr_dicts if p.langs.main == "fr" else jp_dicts)
+
+    reader.cycle_profile()
+
+    assert reader.profile is fr
+    assert reader.langs.main == "fr"
+    assert reader.dict_set is fr_dicts  # rescoped, not left on the JP dict set
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_profile_without_a_scoper_keeps_the_dict_set():
+    """No scoper installed (the pre-W3 wiring / single-DB path) → a cycle leaves dict_set untouched,
+    so the switcher stays backward-compatible."""
+    register_tokenizer("latin", _FakeLatinTokenizer)
+    jp = resolve_profile({})
+    fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
+    reader = Reader(FakeIPC(), profile=jp)
+    sentinel = object()
+    reader.dict_set = sentinel
+    reader.set_profile_cycle([jp, fr])  # no dict_scoper
+
+    reader.cycle_profile()
+
+    assert reader.profile is fr
+    assert reader.dict_set is sentinel  # unchanged
 
 
 # --- open language codes: accepted (not whitelisted), agnostic-provider fallback ------------------
@@ -355,11 +402,19 @@ def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
     assert default_mine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")
 
 
+def _scope_and_mine(cfg, mine_deck, mine_model):
+    """The run seam, post-dedup: the shared identity spine scopes the cfg, then _resolve_mine_target
+    resolves the effective deck/model off it. Mirrors run_impl's two lines."""
+    from overlay.app.cli_run import _resolve_mine_target
+
+    scoped = resolve_launch_identity(cfg, profile_override=None, slang="ja,jpn,jp").cfg
+    deck, model = _resolve_mine_target(scoped, mine_deck, mine_model)
+    return scoped, deck, model
+
+
 def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
     """The run seam: a not-passed --mine-deck/--mine-model (the None sentinel) resolves to the active
     profile's own deck/model — they'd otherwise fall back to the base [mine]."""
-    from overlay.app.cli_run import _scope_cfg_to_profile
-
     cfg = {
         "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
         "active_profile": "fr",
@@ -371,7 +426,7 @@ def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
             }
         },
     }
-    scoped, deck, model = _scope_cfg_to_profile(cfg, None, None)  # None = flag not passed
+    scoped, deck, model = _scope_and_mine(cfg, None, None)  # None = flag not passed
     assert (deck, model) == ("French::Mining", "FrenchNote")
     assert scoped["mine"]["deck"] == "French::Mining"
 
@@ -379,8 +434,6 @@ def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
 def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
     """An explicitly-passed --mine-deck (a non-None value) still wins over the profile — the flag is the
     user's deliberate override for this launch."""
-    from overlay.app.cli_run import _scope_cfg_to_profile
-
     cfg = {
         "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
         "active_profile": "fr",
@@ -388,7 +441,7 @@ def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
             "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
         },
     }
-    _scoped, deck, _model = _scope_cfg_to_profile(cfg, "CLI::Explicit", None)
+    _scoped, deck, _model = _scope_and_mine(cfg, "CLI::Explicit", None)
     assert deck == "CLI::Explicit"  # explicit flag beats the profile deck
 
 
@@ -397,8 +450,6 @@ def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default()
     import-time default config's deck, PLUS an active profile with its OWN deck. The profile's deck must
     win — never the --config top-level, never the import-time default. The old comparison-baseline guard
     misfired here (it compared against the import-time default, misreading an unset flag as explicit)."""
-    from overlay.app.cli_run import _scope_cfg_to_profile
-
     # This is what `load_config(--config other.toml)` yields at RUNTIME (deck ≠ the import-time default).
     runtime_cfg = {
         "mine": {"deck": "Other::TopLevel", "model": "Lapis"},
@@ -407,7 +458,7 @@ def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default()
             "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
         },
     }
-    _scoped, deck, model = _scope_cfg_to_profile(runtime_cfg, None, None)  # neither flag passed
+    _scoped, deck, model = _scope_and_mine(runtime_cfg, None, None)  # neither flag passed
     assert (
         deck == "French::Mining"
     )  # the profile deck — not "Other::TopLevel", not the import default
@@ -415,7 +466,7 @@ def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default()
 
     # And with NO active profile, an unset flag resolves to the --config top-level [mine] (honors --config,
     # not the import-time default) — the second half of the same P1.
-    _s2, deck2, _m2 = _scope_cfg_to_profile({"mine": {"deck": "Other::TopLevel"}}, None, None)
+    _s2, deck2, _m2 = _scope_and_mine({"mine": {"deck": "Other::TopLevel"}}, None, None)
     assert deck2 == "Other::TopLevel"
 
 
@@ -452,3 +503,83 @@ def test_configured_profiles_base_is_the_default_table_not_the_active_named_prof
     }
     base = configured_profiles(cfg)[0]
     assert base.name == "default" and base.langs.main == "jp" and base.langs.second == "de"
+
+
+def test_non_jp_profile_derives_slang_from_its_language():
+    # #254: a French profile selects the French subtitle track, not the JP default (which used to let a
+    # cached JP jimaku srt hijack the track). Derived from the language's primary subtag.
+    cfg = {"active_profile": "fr", "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}}}
+    assert resolve_profile(cfg).slang == "fr"
+
+
+def test_profile_region_subtag_is_folded_off_for_slang():
+    cfg = {"active_profile": "ch", "profiles": {"ch": {"language": "de-CH", "tokenizer": "latin"}}}
+    assert resolve_profile(cfg).slang == "de"
+
+
+def test_explicit_profile_slang_wins_over_the_derived_one():
+    # A profile can pin its own track priority (e.g. a release that tags French as the 3-letter "fra").
+    cfg = {
+        "active_profile": "fr",
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin", "slang": "fra,fr"}},
+    }
+    assert resolve_profile(cfg).slang == "fra,fr"
+
+
+def test_japanese_default_leaves_slang_unset_for_the_ambient_default():
+    # None → run/attach keep the top-level slang (byte-identical JP path); no track-selection change.
+    assert resolve_profile({}).slang is None
+    assert DEFAULT_PROFILE.slang is None
+
+
+# --- resolve_launch_identity: the shared run/attach spine ------------------------------------------
+
+
+def test_launch_identity_resolves_scoped_cfg_slang_and_language_for_a_profile():
+    # The one seam run + attach both call: --profile override, active profile, scoped cfg, effective
+    # slang, language. Extracting it is what stops slang/language drifting between the two entrypoints.
+    cfg = {
+        "slang": "ja,jpn,jp",
+        "dicts": ["JP dict"],
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin", "dicts": ["FR dict"]}},
+    }
+    ident = resolve_launch_identity(cfg, profile_override="fr", slang="ja,jpn,jp")
+    assert ident.profile.name == "fr"
+    assert ident.language == "fr"
+    assert ident.slang == "fr"  # derived from the profile language, not the JP fallback
+    assert ident.cfg["dicts"] == ["FR dict"]  # scoped to the profile's dicts
+
+
+def test_launch_identity_default_profile_keeps_jp_and_the_passed_slang():
+    # No profile → JP language, slang stays whatever the CLI/config passed (byte-identical launch).
+    ident = resolve_launch_identity({"slang": "ja,jpn,jp"}, profile_override=None, slang="en")
+    assert ident.language == "jp"
+    assert ident.slang == "en"  # profile derives nothing → the passed fallback stands
+
+
+# --- primary_font_for: per-script font chain lead (generalizes past the Latin/JP binary) ------------
+
+
+def test_primary_font_for_european_scripts_leads_with_notosans():
+    from overlay.app.profiles import primary_font_for
+
+    assert primary_font_for("fr") == "NotoSans.ttf"  # Latin
+    assert primary_font_for("ru") == "NotoSans.ttf"  # Cyrillic — generalizes for free
+    assert primary_font_for("el") == "NotoSans.ttf"  # Greek
+    assert primary_font_for("de-CH") == "NotoSans.ttf"  # region subtag folded off
+
+
+def test_primary_font_for_japanese_and_unknown_keep_the_default_lead():
+    from overlay.app.profiles import primary_font_for
+
+    assert primary_font_for("jp") is None  # JP-universal default → goldens unchanged
+    assert (
+        primary_font_for("zh") is None
+    )  # unlisted script → default (system fallback handles glyphs)
+
+
+def test_cyrillic_language_defaults_to_the_latin_whitespace_tokenizer():
+    # The whitespace tokenizer is script-agnostic, so a Cyrillic profile needs no explicit tokenizer.
+    from overlay.app.profiles import default_tokenizer_for
+
+    assert default_tokenizer_for("ru") == "latin"

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from overlay.app import prompt
+from overlay.app.bankreader import zip_roles
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -148,7 +149,10 @@ def import_zips(
             progress(i, total, name, 0, 0)
         sink = (lambda d, t, i=i, name=name: progress(i, total, name, d, t)) if progress else None
         row = db.import_zip(zp, imported_at=imported_at, import_order=i, on_bank=sink)
-        buckets[bucket_of[row.kind]].append(row.title)
+        # A zip can fill several roles (a combined definition+frequency dict) — register the title in
+        # EVERY matching config bucket so it's consulted for each, not just its primary kind.
+        for role in sorted(zip_roles(zp)):
+            buckets[bucket_of[role]].append(row.title)
     if progress:
         progress(total, total, "", 0, 0)
     return {k: v for k, v in buckets.items() if v}

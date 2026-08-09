@@ -8,10 +8,13 @@ split any string into runs by the first font that actually has each glyph (no to
 
 from __future__ import annotations
 
+import os
+import sys
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import cache
+from pathlib import Path
 
 from fontTools.ttLib import TTFont
 from PIL import ImageFont
@@ -221,12 +224,140 @@ def covers(file: str, ch: str) -> bool:
     return ord(ch) in _coverage(file)
 
 
+# Best-effort system-font tier (appended AFTER the vendored chain). Goldens are built against the
+# EMBEDDED fonts only — deterministic across machines — so they never reach this tier (their content is
+# vendored-covered). Everything else (an exotic script / rare IPA the subset lacks) is best-effort: we
+# consult the OS's own fonts so a real glyph renders instead of tofu, accepting that the exact pixels
+# then depend on the machine. Empty on a box with none of these dirs → behaviour is exactly the old
+# vendored-only path.
+def _system_font_dirs() -> tuple[Path, ...]:
+    home = Path.home()
+    plat = str(
+        sys.platform
+    )  # via a local so the type-checker (pinned platform) keeps all branches live
+    if plat == "darwin":
+        return (
+            Path("/System/Library/Fonts"),
+            Path("/System/Library/Fonts/Supplemental"),
+            Path("/Library/Fonts"),
+            home / "Library/Fonts",
+        )
+    if plat.startswith("win"):
+        return (Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",)
+    return (
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+        home / ".local/share/fonts",
+        home / ".fonts",
+    )
+
+
+@cache
+def _system_font_files() -> tuple[str, ...]:
+    """Discovered OS font files (``.ttf``/``.otf`` only — ``.ttc`` collections are skipped: cmap probing
+    a face index is unreliable). Broad-coverage families (Arial Unicode, Noto, DejaVu, *Symbol*) are
+    tried first so a lookup usually matches on the first probe. Enumerated once, cached for the session."""
+    found: list[str] = []
+    for d in _system_font_dirs():
+        if not d.is_dir():
+            continue
+        try:
+            found.extend(str(p) for p in d.rglob("*") if p.suffix.lower() in {".ttf", ".otf"})
+        except OSError:
+            continue
+
+    def _priority(path: str) -> int:
+        name = path.rsplit("/", 1)[-1].lower()
+        broad = ("arial unicode", "notosans", "noto sans", "dejavusans", "symbol", "unifont")
+        return 0 if any(b in name for b in broad) else 1
+
+    return tuple(sorted(set(found), key=lambda p: (_priority(p), p)))
+
+
+@cache
+def _system_font_for_char(ch: str) -> str | None:
+    """First OS font (by :func:`_system_font_files` order) whose cmap has ``ch``, or ``None``. Cached per
+    char — only ever consulted for a glyph NO vendored font covers, so it's off the hot path."""
+    cp = ord(ch)
+    for f in _system_font_files():
+        try:
+            if cp in _coverage(f):
+                return f
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # unreadable/odd font — skip, best-effort
+    return None
+
+
+# The vendored fallback chain LEADS with the font best suited to the active profile's primary script:
+# NotoSans for European scripts (crisp Latin/Cyrillic/Greek letterforms + a proper word space), the
+# universal NotoSansJP for Japanese — and always as the trailing fallback, so a glyph the lead lacks
+# (CJK in a French gloss) still resolves. A read-mostly module VALUE (a font file, not a Latin/non-Latin
+# bit — Cyrillic/Greek lead with NotoSans too), set once per profile activation by the reader from its
+# language. Unset → the JP-universal default, so JP renders — and every JP golden — stay byte-identical.
+_DEFAULT_PRIMARY = FONT_FILES[0]  # NotoSansJP — universal coverage
+_active_primary: str = _DEFAULT_PRIMARY
+
+
+def set_primary_font(file: str | None) -> None:
+    """Set the vendored font that LEADS the fallback chain (``None`` → the JP-universal default). The
+    reader chooses it from the active profile's script (:func:`overlay.app.profiles.primary_font_for`);
+    glyphs the lead lacks still fall through the rest of the chain."""
+    global _active_primary
+    _active_primary = file or _DEFAULT_PRIMARY
+
+
+def primary_font() -> str:
+    """The chain's lead = the default/space font (replaces bare ``FONT_FILES[0]`` at the
+    space/newline/empty-line sites so those track the active script too)."""
+    return _active_primary
+
+
+def font_order() -> tuple[str, ...]:
+    """The fallback chain, led by :func:`primary_font` with the rest trailing (NotoSansJP always trails
+    when it isn't the lead, so CJK still resolves). Equals ``FONT_FILES`` under the JP default."""
+    if _active_primary == _DEFAULT_PRIMARY:
+        return FONT_FILES
+    return (_active_primary, *(f for f in FONT_FILES if f != _active_primary))
+
+
 def font_for_char(ch: str) -> str:
-    """First vendored file in the fallback chain that has this glyph (falls back to primary)."""
-    for f in FONT_FILES:
+    """The font file that renders this glyph: first the vendored fallback chain (deterministic), then a
+    best-effort OS-font tier for a glyph none of the vendored subsets carry. Falls back to the vendored
+    primary (tofu) only when even the system has nothing."""
+    for f in font_order():
         if covers(f, ch):
             return f
-    return FONT_FILES[0]
+    return _system_font_for_char(ch) or primary_font()
+
+
+def _covers_all(file: str, text: str) -> bool:
+    cov = _coverage(file)
+    return all(ord(c) in cov for c in text)
+
+
+def _system_font_covering(text: str) -> str | None:
+    """First OS font whose cmap has EVERY char of ``text`` (a whole word run in an exotic script), or
+    ``None``. Not cached (word strings are unbounded) — only reached for a run no vendored font covers,
+    and ``_coverage`` per file is cached, so cost is bounded by the system-font count."""
+    for f in _system_font_files():
+        try:
+            if _covers_all(f, text):
+                return f
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def font_for_run(text: str) -> str:
+    """The single font for a whole word run: the first in the vendored chain covering EVERY char — so the
+    word renders in ONE consistent font and is byte-identical to the pre-split path when a vendored font
+    covers it all — then a best-effort system font covering the whole run, else the vendored primary.
+    Fixes the tofu where a word's FIRST char resolved to a font that lacks a LATER glyph (a Latin 'z' +
+    an IPA 'ɛ' the Latin Noto has but the JP one doesn't) WITHOUT fragmenting a coverable word."""
+    for f in font_order():
+        if _covers_all(f, text):
+            return f
+    return _system_font_covering(text) or primary_font()
 
 
 @dataclass(frozen=True)
@@ -250,11 +381,12 @@ def resolve_runs(text: str) -> list[ShapedRun]:
 
 
 def missing_glyphs(text: str) -> list[str]:
-    """Characters no vendored font covers (would render as tofu). Excludes whitespace/control."""
+    """Characters that would truly render as tofu — no vendored font AND no best-effort system font
+    covers them. Excludes whitespace/control. (Genuine tofu, so it accounts for the OS-font tier.)"""
     out: list[str] = []
     for ch in text:
         if ch.isspace() or ord(ch) < 0x20:
             continue
-        if not any(covers(f, ch) for f in FONT_FILES):
+        if not any(covers(f, ch) for f in FONT_FILES) and _system_font_for_char(ch) is None:
             out.append(ch)
     return out

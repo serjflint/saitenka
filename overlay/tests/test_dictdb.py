@@ -62,6 +62,23 @@ def test_import_term_dict_populates_entries_keys_and_meta(tmp_path):
     assert hit[0] == "読む"
 
 
+def test_import_combined_dict_loads_both_glossaries_and_freq_meta(tmp_path):
+    """A combined definition+frequency dict (the seth-js French dict) imports BOTH its term_bank
+    glossaries AND its term_meta — the frequency mode no longer wins and drops the 448k definitions.
+    Regression for the classifier bug the real French import surfaced."""
+    p = tmp_path / "fr.zip"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": "FR", "format": 3, "revision": "r1"}))
+        zf.writestr("term_bank_1.json", json.dumps([["chat", "", "", "", 0, ["cat"], 1, ""]]))
+        zf.writestr("term_meta_bank_1.json", json.dumps([["chat", "freq", 42]]))
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    row = db.import_zip(str(p), imported_at=AT)
+    assert row.kind == "dict"  # primary — definitions win
+    counts = db.dict_counts(row.id)
+    assert counts["entries"] == 1  # the glossary loaded (was 0 under the single-role bug)
+    assert counts["term_meta"] == 1  # AND the frequency meta loaded
+
+
 def test_import_freq_and_pitch_go_to_term_meta(tmp_path):
     fz = _meta_zip(
         tmp_path / "f.zip", "FreqA", "freq", [["本命", {"reading": "ほんめい", "frequency": 8912}]]

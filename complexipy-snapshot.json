@@ -78,7 +78,7 @@
     "file_name": "engine.py",
     "functions": [
       {
-        "name": "deinflect",
+        "name": "Deinflector::deinflect",
         "complexity": 31
       }
     ]

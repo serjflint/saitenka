@@ -81,20 +81,32 @@ def _font(file: str, style: Style):
     return fonts.load(fonts.FontSpec(file, style.size, style.weight))
 
 
+def _word_run(text: str, i: int, n: int) -> tuple[str, int]:
+    """The maximal letter run starting at ``i`` → ``(font_file, end_index)``. The whole word renders in
+    ONE font — the first covering EVERY char (:func:`fonts.font_for_run`) — so it stays consistent and
+    byte-identical to the pre-split path when a vendored font covers it all, while fixing the tofu where
+    the first char's font lacked a later glyph (a Latin 'z' + an IPA 'ɛ'). Kerning is a no-op (Pillow has
+    no libraqm; pure advance), so one-font runs draw exactly as per-glyph."""
+    j = i
+    while j < n and _is_word_char(text[j]):
+        j += 1
+    return fonts.font_for_run(text[i:j]), j
+
+
 def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Token]:
     tokens: list[Token] = []
     i, n = 0, len(text)
     while i < n:
         ch = text[i]
         if ch == "\n":
-            tokens.append(Token("\n", fonts.FONT_FILES[0], "space", 0.0, style, href))
+            tokens.append(Token("\n", fonts.primary_font(), "space", 0.0, style, href))
             i += 1
         elif ch.isspace():
             j = i
             while j < n and text[j].isspace() and text[j] != "\n":
                 j += 1
             seg = text[i:j]
-            f = fonts.FONT_FILES[0]
+            f = fonts.primary_font()
             tokens.append(
                 Token(seg, f, "space", fonts.text_width(_font(f, style), seg), style, href)
             )
@@ -104,14 +116,8 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
             tokens.append(Token(ch, f, "cjk", fonts.text_width(_font(f, style), ch), style, href))
             i += 1
         elif _is_word_char(ch):
-            # A maximal LETTER run (with its combining marks) = one word token — kerning is a no-op
-            # here (Pillow has no libraqm; layout is pure advance), so drawing this run is byte-identical
-            # to drawing its glyphs individually, but keeping it whole lets the atlas key on real words.
-            j = i
-            while j < n and _is_word_char(text[j]):
-                j += 1
+            f, j = _word_run(text, i, n)
             seg = text[i:j]
-            f = fonts.font_for_char(seg[0])
             tokens.append(
                 Token(seg, f, "word", fonts.text_width(_font(f, style), seg), style, href)
             )

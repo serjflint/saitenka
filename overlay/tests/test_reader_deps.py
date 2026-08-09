@@ -284,3 +284,42 @@ def test_known_falls_back_on_ankiretryable_not_just_oserror(monkeypatch):
     scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
 
     assert scorer == {"known": "empty-known"}  # caught, degraded — no traceback escapes
+
+
+def test_run_path_language_is_threaded_not_re_resolved(monkeypatch):
+    # Regression: the run path rebuilds a minimal effective_cfg WITHOUT the [profiles.*] table, so
+    # build_reader_deps must use the explicitly-passed language — re-resolving from that cfg would
+    # wrongly return the JP default and silently no-op second-language deinflection (French tooltips
+    # showed only the "non-lemma" redirect, never the base word).
+    seen = {}
+
+    def _spy(_db, _d, _f, _p, language="jp"):
+        seen["language"] = language
+        return None, None
+
+    monkeypatch.setattr(reader_deps, "_build_dict_set", _spy)
+    eff = {
+        "dicts": ["X"],
+        "freq": [],
+        "pitch": [],
+    }  # no active_profile / profiles → would resolve JP
+    reader_deps.build_reader_deps(eff, color=False, mine=False, language="fr")
+    assert seen["language"] == "fr"
+
+
+def test_attach_path_resolves_language_from_the_profile_when_unset(monkeypatch):
+    # attach passes the full cfg and no explicit language, so it must resolve from the active profile.
+    seen = {}
+
+    def _spy(_db, _d, _f, _p, language="jp"):
+        seen["language"] = language
+        return None, None
+
+    monkeypatch.setattr(reader_deps, "_build_dict_set", _spy)
+    cfg = {
+        "dicts": ["X"],
+        "active_profile": "fr",
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}},
+    }
+    reader_deps.build_reader_deps(cfg, color=False, mine=False)
+    assert seen["language"] == "fr"

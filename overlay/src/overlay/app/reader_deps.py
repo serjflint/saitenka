@@ -90,7 +90,13 @@ def _spawn_anki_seed_watcher(reader: Reader) -> None:
     ).start()
 
 
-def _build_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_titles: list[str]):
+def _build_dict_set(
+    db,
+    dict_titles: list[str],
+    freq_titles: list[str],
+    pitch_titles: list[str],
+    language: str = "jp",
+):
     """Returns ``(dict_set, freq_rows)`` — ``freq_rows`` is reused by ``_load_freq_dict`` so it isn't
     re-resolved. A configured title with no imported dictionary is warned and skipped."""
     dict_set = None
@@ -117,8 +123,33 @@ def _build_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_ti
                 log.warning(msg)
                 print(msg, file=sys.stderr, flush=True)
         if d_rows or freq_rows or p_rows:
-            dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows)
+            dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows, language=language)
     return dict_set, freq_rows
+
+
+def make_dict_scoper(cfg: dict):
+    """A ``profile → DictionarySet | None`` callable the live switcher uses to re-scope dictionaries on
+    a profile cycle (#254 W3). Captures the raw ``cfg`` and one DB handle; each call resolves that
+    profile's scoped ``dicts``/``freq``/``pitch`` titles (``None`` when it scopes none, i.e. inherits the
+    top-level set — the reader then keeps its current dict set). Cheap: ``from_db`` resolves titles to
+    rows, it doesn't bulk-load (lookups stay lazy SQL)."""
+    from overlay.app.dictdb import DictionaryDb
+    from overlay.app.dictionary import DictionarySet
+    from overlay.app.profiles import scope_config
+
+    db = DictionaryDb.open()
+
+    def scope(profile):
+        override = None if profile.name == "default" else profile.name
+        scoped = scope_config(cfg, override=override)
+        dicts = scoped.get("dicts") or []
+        freq = scoped.get("freq") or []
+        pitch = scoped.get("pitch") or []
+        if not (dicts or freq or pitch):
+            return None
+        return DictionarySet.from_db(db, dicts, freq, pitch, language=profile.langs.main)
+
+    return scope
 
 
 def _spawn_known_refresh(db, known_cfg) -> None:
@@ -322,6 +353,7 @@ def build_reader_deps(
     known_words: str = "",
     on_anki_unreachable=None,
     on_known_words_error=None,
+    language: str | None = None,
 ):
     """Return ``(scorer, anki, mine_conf, dict_set)`` from ``cfg``. ``scorer`` + ``dict_set`` power
     coloring/underlines/pills/tooltips; ``anki`` + ``mine_conf`` power mining.
@@ -337,9 +369,16 @@ def build_reader_deps(
     so logging is all it can do) — see :func:`_maybe_start_anki`/:func:`_load_known_words`. This one
     implementation backs both ``run`` and ``attach`` (`cli_run.py`'s own copy of this used to drift
     out of sync with it — see CHANGELOG)."""
+    from overlay.app.profiles import resolve_profile
+
     dict_titles = list(cfg.get("dicts") or [])
     freq_titles = list(cfg.get("freq") or [])
     pitch_titles = list(cfg.get("pitch") or [])
+    # `language` is passed explicitly by the run path (its effective_cfg drops the profile table, so
+    # resolve_profile here would wrongly return the JP default); attach passes the full cfg and lets it
+    # resolve. Either way it routes the deinflection chain to the right rule set.
+    if language is None:
+        language = resolve_profile(cfg).langs.main
     known_cfg = cfg.get("known")
     fallback_words = [w for w in known_words.split(",") if w]
 
@@ -362,7 +401,9 @@ def build_reader_deps(
         anki_ready = ex.submit(
             _maybe_start_anki, mc, known_cfg, mine=mine, on_unreachable=on_anki_unreachable
         )
-        dictset_fut = ex.submit(_build_dict_set, db, dict_titles, freq_titles, pitch_titles)
+        dictset_fut = ex.submit(
+            _build_dict_set, db, dict_titles, freq_titles, pitch_titles, language
+        )
         jlpt_fut = ex.submit(_load_jlpt_dict, db) if want_scorer else None
         fsrs_fut = ex.submit(_load_fsrs_snapshot, cfg)
 

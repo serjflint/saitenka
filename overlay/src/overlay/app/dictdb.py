@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from overlay.app import paths
-from overlay.app.bankreader import _title_of, classify_zip, read_json_bank
+from overlay.app.bankreader import _title_of, classify_zip, read_json_bank, zip_roles
 from overlay.app.config import DictDbOptions, resolve_dictdb
 
 if TYPE_CHECKING:
@@ -413,7 +413,9 @@ class DictionaryDb:
         if given, is called ``(done, total)`` per bank for progress. Returns the new :class:`DictRow`.
         """
         zp = Path(zip_path)
-        kind = classify_zip(zp)
+        roles = zip_roles(zp)  # a zip can fill several: definitions + freq/pitch (a combined dict)
+        kind = classify_zip(zp)  # primary, for the display column
+        has_meta = bool(roles & {"freq", "pitch"})
         conn = sqlite3.connect(self.path)
         try:
             conn.execute("PRAGMA synchronous=NORMAL")
@@ -427,12 +429,14 @@ class DictionaryDb:
                     (title, kind, import_order, zp.name, _revision_of(zf), imported_at, DB_SCHEMA),
                 )
                 did = int(cur.lastrowid or 0)
-                if kind == "dict":
+                # Load every role's banks — a combined dict gets BOTH its glossaries AND its meta, so a
+                # definition+frequency dict no longer loses its 448k definitions to the frequency mode.
+                if "dict" in roles:
                     self._load_dict_banks(conn, zf, did, on_bank)
-                else:  # 'freq' | 'pitch'
+                if has_meta:
                     occ = _is_occurrence_based(zf)
                     self._load_meta_banks(conn, zf, did, on_bank, occurrence_based=occ)
-                    if kind == "freq":
+                    if "freq" in roles:
                         # Persist the ORIGINAL frequency mode so the harmonic-blend pill can exclude
                         # occurrence-based dicts (their converted rank is a per-corpus dense rank, not
                         # comparable to a real rank-based list — only ranks may be blended). Same
@@ -441,7 +445,7 @@ class DictionaryDb:
                             "INSERT OR REPLACE INTO meta VALUES(?, ?)",
                             (f"freqmode:{did}", "occurrence" if occ else "rank"),
                         )
-            if kind != "dict":
+            if has_meta:
                 # Keep term_meta's query-planner stats fresh after every freq/pitch import — see
                 # _ensure_schema's one-time catch-up for the reasoning (PitchSource.accents needs
                 # ANALYZE to pick idx_meta_reading/idx_meta_term over a full scan).

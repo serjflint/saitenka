@@ -58,6 +58,10 @@ class Profile:
     name: str
     langs: ReaderLanguages
     tokenizer: str
+    # Subtitle-track language priority this profile selects (mpv --slang order). ``None`` = the ambient
+    # top-level default stands (byte-identical JP path). A non-JP profile derives it from its language so
+    # it picks that track, not the JP default; an explicit ``slang`` in the profile table wins.
+    slang: str | None = None
 
 
 def validate_language_code(code: str) -> str:
@@ -68,13 +72,42 @@ def validate_language_code(code: str) -> str:
     return code
 
 
+# Language codes (ISO-639-1, region subtags folded off) by primary script. All three groups share the
+# whitespace ``latin`` tokenizer (it is script-agnostic — words are space-delimited in each) AND lead the
+# font fallback chain with NotoSans (crisp European letterforms). Membership is by *script*, not a promise
+# the deinflector ships rules for every one (only fr does today); an unlisted language must name its
+# tokenizer explicitly. Onboarding a writing system = extend one set (Cyrillic/Greek already work).
+_LATIN_SCRIPT = frozenset(
+    {"fr", "es", "de", "it", "pt", "nl", "ca", "ro", "sv", "da", "no", "nb", "nn", "fi", "pl"}
+)
+_CYRILLIC_SCRIPT = frozenset({"ru", "uk", "be", "bg", "sr", "mk"})
+_GREEK_SCRIPT = frozenset({"el"})
+# Whitespace-segmented European scripts: `latin` tokenizer + NotoSans-led font chain.
+_EUROPEAN_SCRIPTS = _LATIN_SCRIPT | _CYRILLIC_SCRIPT | _GREEK_SCRIPT
+
+
+def _base_code(language: str) -> str:
+    """The primary subtag, lowercased (``de-CH`` → ``de``)."""
+    return language.split("-", 1)[0].lower()
+
+
+def primary_font_for(language: str) -> str | None:
+    """The vendored font that should LEAD the fallback chain for ``language``'s script, or ``None`` for
+    the JP-universal default (:func:`overlay.fonts.set_primary_font`). European scripts (Latin/Cyrillic/
+    Greek — all covered by NotoSans) lead with it; Japanese and any unlisted script keep the default so
+    their goldens stay byte-identical."""
+    return "NotoSans.ttf" if _base_code(language) in _EUROPEAN_SCRIPTS else None
+
+
 def default_tokenizer_for(language: str) -> str:
     """The tokenizer a profile gets when it omits ``tokenizer`` (``language`` already canonicalised).
-    Only Japanese has a built-in default (``unidic``); any other language must name its tokenizer
-    explicitly — there is no safe guess, and silently falling back to the JP tokenizer would mis-segment
-    a non-JP script with no signal. Fail fast instead."""
+    Japanese → ``unidic``; a whitespace-segmented European script (Latin/Cyrillic/Greek) → ``latin``. Any
+    other language must name its tokenizer explicitly — there is no safe guess, and silently falling back
+    would mis-segment an unknown script with no signal. Fail fast instead."""
     if language == "jp":
         return "unidic"
+    if _base_code(language) in _EUROPEAN_SCRIPTS:
+        return "latin"
     raise ValueError(
         f"no default tokenizer for language {language!r}; set a profile tokenizer explicitly "
         f'(e.g. tokenizer = "latin")'
@@ -84,6 +117,12 @@ def default_tokenizer_for(language: str) -> str:
 def _table(cfg: dict, key: str) -> dict:
     raw = cfg.get(key)
     return raw if isinstance(raw, dict) else {}
+
+
+def profile_names(cfg: dict) -> list[str]:
+    """Named ``[profiles.*]`` in sorted order (the switcher's cycle order after the base default). Lives
+    on this leaf module so both the CLI and doctor read it without importing the CLI (cycle-free)."""
+    return sorted(_table(cfg, "profiles"))
 
 
 def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str | None, dict]:
@@ -138,7 +177,28 @@ def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
         name=str(name) if name else "default",
         langs=ReaderLanguages(main=language, second=second),
         tokenizer=tokenizer,
+        slang=_profile_slang(raw, language),
     )
+
+
+def effective_slang(profile: Profile, fallback: str) -> str:
+    """The subtitle-language priority a launch uses: the active profile's own (a non-JP or slang-set
+    profile) if it has one, else the CLI/config ``fallback``. The one place ``run``/``attach`` resolve
+    it, so a non-JP profile stops selecting the JP track (#254)."""
+    return profile.slang or fallback
+
+
+def _profile_slang(raw: dict, language: str) -> str | None:
+    """The subtitle-track language priority a profile implies (see :attr:`Profile.slang`). Explicit
+    ``slang`` wins; else a non-JP profile derives it from its language's primary subtag (``de-CH`` →
+    ``de``) so it selects THAT track instead of the JP default; a JP profile returns ``None`` (the
+    ambient default stands, byte-identical)."""
+    explicit = raw.get("slang")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    if language != MAIN_LANG:
+        return language.split("-", 1)[0]
+    return None
 
 
 def configured_profiles(cfg: dict) -> list[Profile]:
@@ -151,6 +211,42 @@ def configured_profiles(cfg: dict) -> list[Profile]:
     profiles = [base]
     profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_table(cfg, "profiles")))
     return profiles
+
+
+@dataclass(frozen=True)
+class LaunchIdentity:
+    """The profile-derived identity a ``run``/``attach`` launch needs, resolved ONCE from raw cfg +
+    CLI flags by :func:`resolve_launch_identity`. Both entrypoints read off this instead of each
+    re-deriving the spine — the recurring run/attach drift (slang, then dict-set language) came from
+    duplicating these steps, so a new profile-aware field must be added here, not in two runners."""
+
+    cfg: dict  # profile-scoped (dicts/freq/pitch/mine/slang/jimaku overlaid)
+    profile: Profile  # the active profile
+    slang: str  # effective subtitle-track priority (profile's own, else the CLI/config fallback)
+    profile_cycle: list[Profile]  # the live switcher's cycle order
+
+    @property
+    def language(self) -> str:
+        """The active profile's main language — routes tokenizer + deinflection + provider gating."""
+        return self.profile.langs.main
+
+
+def resolve_launch_identity(
+    cfg: dict, *, profile_override: str | None, slang: str
+) -> LaunchIdentity:
+    """The shared run/attach spine: apply ``--profile``, resolve the active profile, scope the cfg, and
+    derive the effective slang + switcher cycle. The ONE place this happens, so a profile-aware field
+    can't drift between the two entrypoints. ``cfg`` is the raw loaded config; the returned ``cfg`` is
+    the scoped one the dep builders read."""
+    if profile_override:  # --profile beats the config's active_profile selector for this launch
+        cfg = {**cfg, "active_profile": profile_override}
+    active = resolve_profile(cfg)
+    return LaunchIdentity(
+        cfg=scope_config(cfg),
+        profile=active,
+        slang=effective_slang(active, slang),
+        profile_cycle=configured_profiles(cfg),
+    )
 
 
 DEFAULT_PROFILE = resolve_profile({})  # the JP default; construction default for a headless reader

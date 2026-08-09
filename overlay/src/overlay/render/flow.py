@@ -257,7 +257,7 @@ def _item_line_box(line: list[Item], scale: float) -> tuple[int, int, int]:
         a, d, s = it.metrics()
         ascent, descent, size = max(ascent, a), max(descent, d), max(size, s)
     if ascent == 0:
-        a, d = _font(fonts.FONT_FILES[0], Style()).getmetrics()
+        a, d = _font(fonts.primary_font(), Style()).getmetrics()
         ascent, descent, size = a, d, Style().size
     lead = round(size * (scale - 1.0))
     box = ascent + descent + lead

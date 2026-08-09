@@ -26,13 +26,21 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
+from overlay.app.profiles import resolve_launch_identity, resolve_profile
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
 log = logging.getLogger(__name__)
 
 DEMO_LINE = "門前の小僧習わぬ経を読む"
+
+
+def _dict_scoper_for(cfg: dict, profile_cycle):
+    """The live dict re-scoper (#254 W3) for the profile switcher — only when there's more than one
+    profile to cycle through (else a switch is inert, so no need to open a DB handle for it)."""
+    from overlay.app.reader_deps import make_dict_scoper
+
+    return make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
 
 
 @dataclass(frozen=True)
@@ -88,6 +96,10 @@ class RunDepsRequest:
     dict_titles: list[str]
     freq_titles: list[str]
     pitch_titles: list[str]
+    # Active profile's main language — the run path rebuilds a minimal effective_cfg without the profile
+    # table, so the language must be threaded explicitly or the dict set defaults to JP and the
+    # second-language deinflection lookup silently no-ops (#254).
+    language: str = "jp"
 
 
 @dataclass(frozen=True)
@@ -172,22 +184,17 @@ def _mine_table(cfg: dict) -> dict:
     return mine if isinstance(mine, dict) else {}
 
 
-def _scope_cfg_to_profile(
+def _resolve_mine_target(
     cfg: dict, mine_deck: str | None, mine_model: str | None
-) -> tuple[dict, str, str]:
-    """Overlay the active profile's dict/freq/pitch + [mine] onto ``cfg`` (#254 D4/D6), returning the
-    scoped cfg plus the effective ``(mine_deck, mine_model)``. ``mine_deck``/``mine_model`` are ``None``
-    when their CLI flag wasn't passed — then the deck/model is resolved from the SCOPED [mine] (the active
-    profile's, or the runtime top-level [mine] honoring ``--config``). An explicit (non-``None``) flag
-    wins. Resolving off the scoped runtime cfg — never an import-time baked default — is what fixes the
-    ``--config other.toml`` + profile case where the old comparison-baseline misfired."""
-    cfg = scope_config(cfg)
+) -> tuple[str, str]:
+    """Effective ``(mine_deck, mine_model)`` for a run. ``cfg`` is ALREADY profile-scoped (by
+    :func:`~overlay.app.profiles.resolve_launch_identity`). ``mine_deck``/``mine_model`` are ``None`` when
+    their CLI flag wasn't passed — then the deck/model is resolved from the SCOPED [mine] (the active
+    profile's, or the runtime top-level [mine] honoring ``--config``); an explicit flag wins. Resolving
+    off the scoped runtime cfg — never an import-time baked default — is what fixes the ``--config
+    other.toml`` + profile case where the old comparison-baseline misfired."""
     deck, model = default_mine_target(_mine_table(cfg))
-    return (
-        cfg,
-        (deck if mine_deck is None else mine_deck),
-        (model if mine_model is None else mine_model),
-    )
+    return (deck if mine_deck is None else mine_deck, model if mine_model is None else mine_model)
 
 
 def jimaku_should_fetch(
@@ -309,10 +316,14 @@ def _configured_subtitles(
     resync: bool,
     language: str,
 ) -> tuple[Path | None, tuple[str, ...]]:
-    cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync)
+    providers = enabled_providers_for(language, (("jimaku", jimaku), ("tsukihime", tsukihime)))
+    # Reuse a cached provider-sourced subtitle only when some provider actually serves this language —
+    # both jimaku and tsukihime are Japanese-only, so a JP srt cached from a prior run must not hijack a
+    # second-language profile's track (it would otherwise load as an external track over the French one).
+    serves = enabled_providers_for(language, (("jimaku", True), ("tsukihime", True)))
+    cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync) if serves else None
     if cached is not None:
         return cached, ()
-    providers = enabled_providers_for(language, (("jimaku", jimaku), ("tsukihime", tsukihime)))
     return None, providers
 
 
@@ -803,6 +814,7 @@ def _build_run_deps(req: RunDepsRequest):
         known_words=req.known,
         on_anki_unreachable=_on_anki_unreachable,
         on_known_words_error=_on_known_words_error,
+        language=req.language,
     )
 
     if not req.mine:
@@ -947,17 +959,17 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     from overlay.app.controller import Reader
     from overlay.app.reader_deps import begin_deps_build, warm_tokenizer
 
-    cfg = load_config(config)
-    if profile:  # --profile overrides the config's active_profile selector for this launch
-        cfg = dict(cfg)
-        cfg["active_profile"] = profile
-    active_profile = resolve_profile(cfg)
-    profile_cycle = configured_profiles(
-        cfg
-    )  # the [profiles.*] the live switcher (D8) rotates through
-    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); a not-passed
-    # --mine-deck/--mine-model (None) yields to the profile's own deck/model (see _scope_cfg_to_profile).
-    cfg, mine_deck, mine_model = _scope_cfg_to_profile(cfg, mine_deck, mine_model)
+    # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
+    # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift.
+    ident = resolve_launch_identity(load_config(config), profile_override=profile, slang=slang)
+    cfg, active_profile, slang, profile_cycle = (
+        ident.cfg,
+        ident.profile,
+        ident.slang,
+        ident.profile_cycle,
+    )
+    # A not-passed --mine-deck/--mine-model (None) yields to the profile's own deck/model.
+    mine_deck, mine_model = _resolve_mine_target(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
@@ -1019,6 +1031,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 dict_titles=dict_titles,
                 freq_titles=freq_titles,
                 pitch_titles=pitch_titles,
+                language=active_profile.langs.main,
             )
         )
 
@@ -1095,12 +1108,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             options=opts,
             profile=active_profile,
         )
-        reader.set_profile_cycle(profile_cycle)
+        reader.set_profile_cycle(profile_cycle, _dict_scoper_for(cfg, profile_cycle))
     else:
         reader = Reader(
             ipc, options=opts, profile=active_profile
         )  # deps injected asynchronously below
-        reader.set_profile_cycle(profile_cycle)
+        reader.set_profile_cycle(profile_cycle, _dict_scoper_for(cfg, profile_cycle))
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)

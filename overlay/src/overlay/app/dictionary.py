@@ -27,12 +27,18 @@ import msgspec.json as msgspec_json
 from overlay import otel_metrics
 
 try:
-    # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the
-    # inflection chain (🧩 -て « -いる « -た); without it the chain is empty and nothing is drawn.
-    from saitenka_deinflect import inflection_chain  # noqa: TID251  # GPL chokepoint importer
+    # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the inflection
+    # chain (🧩 -て « -いる « -た) AND — for a second-language profile whose tokenizer has no lemma —
+    # supplies the dictionary form(s) to look up (parapluies → parapluie). Without it the chain is
+    # empty and second-language lookup falls back to the raw surface.
+    from saitenka_deinflect import deinflect as _deinflect  # noqa: TID251  # GPL chokepoint
+    from saitenka_deinflect import inflection_chain  # noqa: TID251  # GPL chokepoint
 except ImportError:  # pragma: no cover — exercised via the deinflect-absent path
 
-    def inflection_chain(surface: str, *targets: str) -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)
+    def inflection_chain(surface: str, *targets: str, language: str = "ja") -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)
+        return []
+
+    def _deinflect(text: str, *, language: str = "ja") -> list[Deinflection]:  # noqa: ARG001  # must match saitenka_deinflect.deinflect's signature (conditional-variant check)
         return []
 
 
@@ -60,6 +66,8 @@ def _emit_sql_span() -> bool:
 
 if TYPE_CHECKING:
     from collections.abc import Container, Sequence
+
+    from saitenka_deinflect import Deinflection  # noqa: TID251  # GPL chokepoint (type only)
 
     from overlay.app.dictdb import DictionaryDb, DictRow
     from overlay.app.tokenize import Token
@@ -96,6 +104,14 @@ def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
 
 FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
+
+# Cap on deinflected dictionary-form candidates folded into one lookup — the French suffix ruleset
+# over-generates, and a real word resolves within the first handful; the rest only miss.
+_DEINFLECT_FORM_CAP = 24
+
+# Japanese language codes — the MeCab lemma is already the dict form and the JP not-found message is
+# Japanese, so these keep every JP path byte-identical. `jp` is the overlay's internal code, `ja` ISO.
+_JP_LANGS = frozenset({"jp", "ja"})
 
 
 _JMDICT_LIKE = re.compile(r"jmdict|jitendex", re.IGNORECASE)
@@ -425,6 +441,9 @@ class DictionarySet:
     dicts: list[Dictionary]
     freqs: list[FreqSource] = field(default_factory=list)
     pitches: list[PitchSource] = field(default_factory=list)
+    # Active profile's main language (#254) — routes the deinflection chain to the right rule set.
+    # Yomitan's ``jp`` default keeps every existing JP path byte-identical.
+    language: str = "jp"
 
     @classmethod
     def from_rows(
@@ -433,12 +452,15 @@ class DictionarySet:
         dict_rows: Sequence[DictRow],
         freq_rows: Sequence[DictRow] = (),
         pitch_rows: Sequence[DictRow] = (),
+        *,
+        language: str = "jp",
     ) -> DictionarySet:
         """Build an ordered dictionary set from already-resolved :class:`DictRow`s of the given DB."""
         return cls(
             dicts=[Dictionary(db, r) for r in dict_rows],
             freqs=[FreqSource(db, r) for r in freq_rows],
             pitches=[PitchSource(db, r) for r in pitch_rows],
+            language=language,
         )
 
     @classmethod
@@ -450,6 +472,7 @@ class DictionarySet:
         pitch_titles: Sequence[str] = (),
         *,
         strict: bool = False,
+        language: str = "jp",
     ) -> DictionarySet:
         """Resolve config **titles** to imported dictionaries of ``db`` and build the set, preserving
         order. Missing titles are skipped; with ``strict`` a single missing title raises
@@ -465,7 +488,7 @@ class DictionarySet:
                 + ". "
                 + _MISSING_HINT
             )
-        return cls.from_rows(db, d_rows, f_rows, p_rows)
+        return cls.from_rows(db, d_rows, f_rows, p_rows, language=language)
 
     def has_term(self, *forms: str | None) -> bool:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""
@@ -601,22 +624,38 @@ class DictionarySet:
             best = m if best is None else min(best, m)
         return best
 
-    def _rank_key(self, term: str, reading: str, token: Token, formset: set[str]):
+    def _rank_key(
+        self,
+        term: str,
+        reading: str,
+        token: Token,
+        formset: set[str],
+        preferred: frozenset[str] = frozenset(),
+    ):
         """Sort key for choosing/ordering entries: exact-headword first (like Yomitan and
-        :meth:`Dictionary.lookup`), then the LONGEST term (a multi-token phrase 数ある stacks above the
-        bare 数 — Yomitan shows longest-match first), then the reading closest to the token's contextual
-        reading (退いた prefers のく over しりぞく), then the more common reading by frequency rank."""
+        :meth:`Dictionary.lookup`); then a deinflected **base form** ahead of the inflected surface
+        (parapluie outranks its own plural form-entry parapluies — ``preferred`` is empty for JP, so this
+        slot is inert there); then the LONGEST term (a multi-token phrase 数ある stacks above the bare 数);
+        then the reading closest to the token's contextual reading (退いた prefers のく); then the more
+        common reading by frequency rank."""
         return (
             term not in formset,
+            term not in preferred,
             -len(term),
             -_reading_affinity(reading, token.reading),
             self._freq_rank(term, reading) or float("inf"),
         )
 
-    def _best_hit(self, hits: list[DictEntry], token: Token, formset: set[str]) -> DictEntry:
+    def _best_hit(
+        self,
+        hits: list[DictEntry],
+        token: Token,
+        formset: set[str],
+        preferred: frozenset[str] = frozenset(),
+    ) -> DictEntry:
         """The single entry ``card_for`` mines from one dict's hits. ``min`` is stable, so a full tie
         falls back to the dict's own order — the prior ``hits[0]`` behaviour."""
-        return min(hits, key=lambda h: self._rank_key(h.term, h.reading, token, formset))
+        return min(hits, key=lambda h: self._rank_key(h.term, h.reading, token, formset, preferred))
 
     @staticmethod
     def _card_from_hit(hit: DictEntry, token: Token) -> CardData:
@@ -639,12 +678,12 @@ class DictionarySet:
         ``glossary_html``) so the caller can fall back to the JMdict/jamdict source. No JMdict sequence
         id — Yomitan terms carry none. ``extra_terms`` are longer phrases (数ある) that outrank the bare
         word, so a hovered phrase mines the phrase by default."""
-        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        forms, _, preferred = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
         for d in self.dicts:
             hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
             if hits:
-                return self._card_from_hit(self._best_hit(hits, token, formset), token)
+                return self._card_from_hit(self._best_hit(hits, token, formset, preferred), token)
         return CardData(
             expression=token.lemma or token.surface, reading=token.reading, glossary_html=""
         )
@@ -657,9 +696,8 @@ class DictionarySet:
         so the caller falls back to the JMdict source. ``cards_for(token)[0] == card_for(token)`` for a
         single dictionary. ``extra_terms`` (longer phrases 数ある) are looked up too and, being longer,
         sort ahead of the bare word."""
-        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        forms, termforms, preferred = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
-        termforms = {f for f in (*extra_terms, token.lemma, token.surface) if f}
         batched = self._batch_exact(forms)  # one query for all dicts (no per-dict _fetch)
         by_key: dict[tuple[str, str], CardData] = {}
         for d in self.dicts:
@@ -672,7 +710,8 @@ class DictionarySet:
             for h in hits:
                 by_key.setdefault((h.term, h.reading), self._card_from_hit(h, token))
         return sorted(
-            by_key.values(), key=lambda c: self._rank_key(c.expression, c.reading, token, formset)
+            by_key.values(),
+            key=lambda c: self._rank_key(c.expression, c.reading, token, formset, preferred),
         )
 
     def _collect_search_hits(self, glob: str, limit: int) -> list[tuple[str, str, str]]:
@@ -865,6 +904,41 @@ class DictionarySet:
                     pitches.append(item)
         return pitches
 
+    def _deinflected_candidates(self, lemma: str) -> tuple[str, ...]:
+        """Candidate dictionary forms for a second-language surface. The Latin tokenizer has no
+        morphological analyzer, so its lemma is the inflected surface — the deinflector supplies the
+        actual dictionary form(s) to look up (parapluies → parapluie, chats → chat). Empty for JP,
+        whose MeCab lemma is already the dict form, so every JP lookup stays byte-identical. Bounded:
+        the French suffix ruleset over-generates (harmless — a spurious form just misses in the DB —
+        but it needn't bloat the IN-list)."""
+        if self.language in _JP_LANGS or not lemma:
+            return ()
+        out = [
+            d.text for d in _deinflect(lemma, language=self.language) if d.text and d.text != lemma
+        ]
+        return tuple(dict.fromkeys(out))[:_DEINFLECT_FORM_CAP]
+
+    def _forms(
+        self, token: Token, extra_terms: Sequence[str]
+    ) -> tuple[tuple[str, ...], set[str], frozenset[str]]:
+        """Lookup forms, the exact-term set, and the deinflected **base forms** (dictionary forms the
+        surface reduces to — parapluies → parapluie). Order: phrases, lemma, surface, deinflected
+        candidates, then the reading LAST (a form to match, never an exact *term*). For JP the deinflected
+        set is empty, so this is the prior tuple and the base set never perturbs ranking (byte-identical)."""
+        deinf = self._deinflected_candidates(token.lemma)
+        terms = (*extra_terms, token.lemma, token.surface, *deinf)
+        return (*terms, token.reading), {f for f in terms if f}, frozenset(deinf)
+
+    def _empty_def(self) -> Definition:
+        """The 'no dictionary hit' placeholder, in the profile's language — English for a second-
+        language profile (a French learner shouldn't see a Japanese sentence)."""
+        text = (
+            "（辞書に見つかりませんでした）"
+            if self.language in _JP_LANGS
+            else "(not found in dictionary)"
+        )
+        return Definition("—", [text])
+
     def entry_for(
         self, token: Token, inflected: str | None = None, *, extra_terms: Sequence[str] = ()
     ) -> Entry:
@@ -872,8 +946,7 @@ class DictionarySet:
         # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
         # `extra_terms` are longer multi-token phrases starting at this word (数ある over 数); being
         # longer they outrank the bare word and stack above it as their own entries.
-        forms = (*extra_terms, token.lemma, token.surface, token.reading)
-        termforms = {f for f in (*extra_terms, token.lemma, token.surface) if f}
+        forms, termforms, _ = self._forms(token, extra_terms)
         defs, headword, reading = self._dict_defs(forms, termforms, token.reading)
         if headword is None:
             headword = token.lemma or token.surface
@@ -889,8 +962,10 @@ class DictionarySet:
             headword=header,
             tags=[],
             freqs=self._freq_pills(forms, reading),
-            defs=defs or [Definition("—", ["（辞書に見つかりませんでした）"])],
-            inflection_chain=inflection_chain(inflected or token.surface, token.lemma, headword),
+            defs=defs or [self._empty_def()],
+            inflection_chain=inflection_chain(
+                inflected or token.surface, token.lemma, headword, language=self.language
+            ),
             reading=reading or token.reading,
             pitches=pitches,
             groups=groups,

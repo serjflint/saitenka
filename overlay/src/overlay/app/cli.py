@@ -128,6 +128,12 @@ app = cyclopts.App(
     ),
 )
 
+# `saitenka profile <list|show|add|use|remove>` — reading-profile CRUD (#254 W4). Imported here, not
+# at top, because it attaches to `app`, which must exist first.
+from overlay.app.profile_cli import profile_app  # noqa: E402
+
+app.command(profile_app)
+
 
 @app.command(name="run")
 def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual params for --help/parsing
@@ -1414,21 +1420,19 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
-    from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
+    from overlay.app.profiles import resolve_launch_identity
     from overlay.app.reader_deps import warm_tokenizer
 
-    cfg = load_config(config)
-    if profile:  # --profile overrides the config's active_profile selector for this launch
-        cfg = dict(cfg)
-        cfg["active_profile"] = profile
-    active_profile = resolve_profile(cfg)
-    profile_cycle = configured_profiles(
-        cfg
-    )  # the [profiles.*] the live switcher (D8) rotates through
-    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6) before the dep build reads them;
-    # attach has no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/
-    # model/field-map directly. Byte-identical for the default profile.
-    cfg = scope_config(cfg)
+    # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
+    # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
+    # no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/model directly.
+    ident = resolve_launch_identity(load_config(config), profile_override=profile, slang=slang)
+    cfg, active_profile, slang, profile_cycle = (
+        ident.cfg,
+        ident.profile,
+        ident.slang,
+        ident.profile_cycle,
+    )
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of
@@ -1524,7 +1528,11 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts, profile=active_profile)  # deps injected asynchronously below
-    reader.set_profile_cycle(profile_cycle)
+    from overlay.app.reader_deps import make_dict_scoper
+
+    reader.set_profile_cycle(
+        profile_cycle, make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
+    )
     provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
