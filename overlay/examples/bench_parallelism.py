@@ -75,7 +75,8 @@ def _rss_mb() -> float:
 def _subinterpreter_probe() -> str:
     """Try PEP 734 sub-interpreters; return why they're unusable here (PIL won't import)."""
     try:
-        from concurrent import interpreters
+        # PEP 734, 3.14+ only; mypy pinned to 3.13
+        from concurrent import interpreters  # type: ignore[attr-defined]
     except ImportError as e:
         return f"no stdlib concurrent.interpreters ({type(e).__name__})"
     interp = interpreters.create()
@@ -154,9 +155,9 @@ def main() -> int:
     from overlay.parallel import is_free_threaded, pick_executor
 
     choice = "ThreadPool (free-threaded)" if is_free_threaded() else "ProcessPool (GIL)"
-    with pick_executor(4, initializer=_proc_init) as ex:
-        list(ex.map(_render, toks[:4]))  # warm (a no-op for threads)
-        ms = timed(lambda ex=ex: list(ex.map(_render, toks)))
+    with pick_executor(4, initializer=_proc_init) as policy_ex:
+        list(policy_ex.map(_render, toks[:4]))  # warm (a no-op for threads)
+        ms = timed(lambda ex=policy_ex: list(ex.map(_render, toks)))
     print(f"\n  policy pick_executor(4) → {choice}: {ms:9.1f} ms   {serial / ms:.2f}x")
     print(f"  peak RSS (self+children): {_rss_mb():.0f} MB")
     return 0

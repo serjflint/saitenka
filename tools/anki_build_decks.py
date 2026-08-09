@@ -132,7 +132,7 @@ def main():
 
     plan = []  # {cardId, noteId, state, orig, target, tag}
     suspend_ids = []  # Backlog card ids
-    dist = Counter()
+    dist: Counter[str] = Counter()
     for cid, nid, did, ctype, queue, ivl, data in cur.execute(
         "SELECT id,nid,did,type,queue,ivl,data FROM cards"
     ):
@@ -216,12 +216,12 @@ def main():
         log(f"deck+preset ready: {deck} ({pname})")
 
     # 2) tag origin (reversible), then move — batched via `multi`
-    by_tag = {}
+    by_tag: dict[str, list[int]] = {}
     for p in plan:
         by_tag.setdefault(p["tag"], []).append(p["noteId"])
     for tag, nids in by_tag.items():
         anki("addTags", notes=sorted(set(nids)), tags=tag)
-    by_deck = {}
+    by_deck: dict[str, list[int]] = {}
     for p in plan:
         by_deck.setdefault(p["target"], []).append(p["cardId"])
     for deck, cids in by_deck.items():

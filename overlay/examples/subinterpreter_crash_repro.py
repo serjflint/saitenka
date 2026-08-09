@@ -45,7 +45,8 @@ def main() -> int:
         )
         return 0
 
-    from concurrent import interpreters
+    # PEP 734, 3.14+ only; mypy pinned to 3.13
+    from concurrent import interpreters  # type: ignore[attr-defined]
 
     print(
         f"Python {sys.version.split()[0]}  GIL={sys._is_gil_enabled()}  — reproducing the crash\n"

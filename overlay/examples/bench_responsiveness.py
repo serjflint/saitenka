@@ -26,6 +26,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from overlay.app.config import load_config
 from overlay.app.controller import Reader
@@ -33,6 +34,9 @@ from overlay.app.sub_index import SubCue, SubIndex
 from overlay.app.tokenize import Token, tokenize
 from overlay.mpvio.osd import to_bgra, to_bgra_array
 from overlay.panel import Definition, Entry, LazyPanel, panel_rows
+
+if TYPE_CHECKING:
+    from overlay.mpvio.ipc import MpvIPC
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
 OSD = (1920, 1080)
@@ -75,6 +79,13 @@ class FakeIPC:
 
     def drain_events(self):
         return []
+
+
+def _fake_ipc() -> MpvIPC:
+    """``FakeIPC`` duck-types the ``command``/``drain_events`` surface ``Reader`` calls on ``MpvIPC``
+    (no socket, headless bench) but isn't a subclass — cast documents that at the one boundary instead
+    of a per-call-site ``# type: ignore``."""
+    return cast("MpvIPC", FakeIPC())
 
 
 def _stats(samples: list[float]) -> dict:
@@ -224,7 +235,7 @@ def synth_corpus(n: int = 60) -> list[tuple[str, Entry]]:
 
 
 def _content_indices(reader) -> list[int]:
-    from overlay.app.controller import SKIP_POS
+    from overlay.app.tokenize import SKIP_POS
 
     return [
         i
@@ -309,7 +320,7 @@ def _cold_reader(ds, *, prefetch: bool = False):
     """A fresh Reader on a fake IPC, head-path forced (as a live run with workers would). With
     ``prefetch=True`` the real background workers run (``start_prefetch``), so scroll-ahead warms the
     next blocks off the main thread exactly as a live session does — the realistic scroll path."""
-    reader = Reader(FakeIPC(), dict_set=ds, prefetch=prefetch)
+    reader = Reader(_fake_ipc(), dict_set=ds, prefetch=prefetch)
     reader.osd = OSD
     if prefetch:
         reader.start_prefetch()
@@ -430,7 +441,7 @@ def run_render_cache(
     cache_dir = tempfile.mkdtemp(prefix="saitenka-bench-render-cache-")
     os.environ["SAITENKA_CACHE_DIR"] = cache_dir  # paths.cache_dir() reads this each call
     opts = ReaderOptions(tooltip=TooltipOptions(render_cache=True), prefetch=False)
-    reader = Reader(FakeIPC(), dict_set=ds, options=opts)
+    reader = Reader(_fake_ipc(), dict_set=ds, options=opts)
     reader.osd = OSD
     cap = reader._tip_cap()
     # The render cache is USE-WHEN-AVAILABLE (opens only if the file exists; prewarm is the builder), so
@@ -440,7 +451,8 @@ def run_render_cache(
     from overlay.app.render_cache import RenderCache
 
     _rc = RenderCache.open(
-        Path(cache_dir) / "render-cache.sqlite", max_bytes=reader._render_cache_max_bytes
+        Path(cache_dir) / "render-cache.sqlite",
+        max_bytes=reader.session.render_cache.cache_max_bytes,
     )
     if _rc is not None:
         _rc.close()
@@ -540,7 +552,7 @@ def _atlas_render_pass(reader, corpus, cap, *, count_rasters: bool):
         return orig(self, *a, **k)
 
     if count_rasters:
-        fonts.ImageFont.FreeTypeFont.getmask2 = counting
+        fonts.ImageFont.FreeTypeFont.getmask2 = counting  # type: ignore[method-assign]  # PIL instrumentation
     times: list[float] = []
     try:
         for _source, term, reading in corpus:
@@ -553,7 +565,7 @@ def _atlas_render_pass(reader, corpus, cap, *, count_rasters: bool):
             reader._panel_for(tok, term, min_h=cap, mined=False).precompose_head(cap)
             times.append((_time.perf_counter() - t0) * 1000)
     finally:
-        fonts.ImageFont.FreeTypeFont.getmask2 = orig
+        fonts.ImageFont.FreeTypeFont.getmask2 = orig  # type: ignore[method-assign]  # PIL instrumentation
     return n["r"], times
 
 
@@ -583,10 +595,12 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     atlas_path = _cd() / "mask-atlas.sqlite"
 
     # Phase A — COLD: render with atlas WRITE on (builds the atlas), counting getmask2 rasterisations.
-    reader_a = Reader(FakeIPC(), dict_set=ds, options=opts)
+    reader_a = Reader(_fake_ipc(), dict_set=ds, options=opts)
     reader_a.osd = OSD
     cap = reader_a._tip_cap()
     atlas = mask_atlas.MaskAtlas.open(atlas_path)
+    if atlas is None:
+        raise RuntimeError(f"failed to open mask atlas at {atlas_path}")
     fonts.set_mask_atlas(None, atlas)
     cold_rasters, cold_ms = _atlas_render_pass(reader_a, corpus, cap, count_rasters=True)
     atlas.checkpoint()
@@ -595,7 +609,7 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     mem: dict = {}
     n_masks = atlas.load_into(mem)
     fonts.set_mask_atlas(mem, None)
-    reader_b = Reader(FakeIPC(), dict_set=ds, options=opts)
+    reader_b = Reader(_fake_ipc(), dict_set=ds, options=opts)
     reader_b.osd = OSD
     warm_rasters, warm_ms = _atlas_render_pass(reader_b, corpus, cap, count_rasters=True)
     fonts.set_mask_atlas(None, None)
@@ -660,6 +674,7 @@ def run_stress(
     jank signal) + peak RSS + growth, and can gate on ``--max-frame-ms`` / ``--max-rss-mb``."""
     import tracemalloc
 
+    from overlay.app.dictionary import DictionarySet
     from overlay.app.subtitles import WordBox
 
     ds, tag = _load_dict_set()
@@ -671,7 +686,7 @@ def run_stress(
     # configured or what the user's own cap is. Scaling the corpus to chase a large live cap instead
     # blows up wall time / memory for reasons unrelated to what's being measured.
     reader.panel_cache_max = _STRESS_CACHE_CAP
-    if hasattr(ds, "dicts") and ds.dicts:
+    if isinstance(ds, DictionarySet) and ds.dicts:
         # A fixed corpus comfortably larger than the fixed cap — forces real eviction thrash without
         # depending on the live config.
         per_dict = max(3, _STRESS_CACHE_CAP // len(ds.dicts) + 2)
@@ -890,6 +905,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     the viewport reaches them — the real jank); a warm re-traverse of the now-cached blocks is the floor.
     A cold ≫ warm gap ⇒ the jank is cold-block render (getmask2), which idle prefetch hides in real use
     only when it rendered ahead (see --timeline)."""
+    from overlay.app.dictionary import DictionarySet
     from overlay.app.subtitles import WordBox
     from overlay.render.banded import _BAND_PX
 
@@ -897,7 +913,7 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     if ds is None:
         ds = _SyntheticDS()
     reader = _cold_reader(ds)
-    if hasattr(ds, "dicts") and ds.dicts:
+    if isinstance(ds, DictionarySet) and ds.dicts:
         corpus = [(t, r) for _s, t, r in _pathological_corpus(ds)]
     else:
         corpus = [(w, w) for w in ("かける", "する", "手", "気", "出る")]
@@ -1149,7 +1165,7 @@ def run_synth(
         loop_p99.append(_percentile(loop_ms, 0.99))
         all_ms.extend(loop_ms)
 
-    metrics = {
+    metrics: dict[str, Any] = {
         "runtime": rt,
         "entries": len(corpus),
         "reps": reps,
@@ -1343,7 +1359,7 @@ def run_timeline(
 
     scorer = _timeline_scorer(vocab_words) if head_prefetch > 0 else None
     reader = Reader(
-        FakeIPC(),
+        _fake_ipc(),
         dict_set=ds,
         scorer=scorer,
         prefetch=True,
@@ -1354,7 +1370,7 @@ def run_timeline(
     reader._sub_index = SubIndex(cues)
     reader.start_prefetch()
 
-    from overlay.app.controller import SKIP_POS
+    from overlay.app.tokenize import SKIP_POS
 
     def _content_lemmas(text: str) -> list[str]:
         return [
@@ -1601,7 +1617,7 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
     ds.entry_for = traced_entry_for
 
     reader = Reader(
-        FakeIPC(),
+        _fake_ipc(),
         dict_set=ds,
         scorer=scorer,
         prefetch=True,
@@ -2044,7 +2060,8 @@ def main() -> int:
     if ds is None:
         ds = _SyntheticDS()
 
-    reader = Reader(FakeIPC(), dict_set=ds, prefetch=False)
+    fake_ipc = FakeIPC()
+    reader = Reader(cast("MpvIPC", fake_ipc), dict_set=ds, prefetch=False)
     reader.osd = OSD
     reader.set_subtitle(LINE)
     idxs = _content_indices(reader)
@@ -2098,7 +2115,8 @@ def main() -> int:
 
     # 4) nested popup first paint: hover a word inside the tooltip
     show_warm(tall)
-    boxes = reader._tip_state.windowed.scan_boxes()
+    st = reader._tip_state
+    boxes = st.windowed.scan_boxes() if st else []
     if boxes:
         sb = boxes[len(boxes) // 3]  # a cell well inside the body
 
@@ -2114,8 +2132,9 @@ def main() -> int:
 
     # 5) per-tick hover hit-test: the poll-loop cost while the cursor sits on the tooltip body
     show_warm(tall)
+    assert reader._tip_rect is not None
     tx, ty, tw, th = reader._tip_rect
-    reader.ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 8}
+    fake_ipc.props["mouse-pos"] = {"hover": True, "x": tx + tw / 2, "y": ty + th - 8}
     reader.scan_delay = 1e9  # isolate the hit-test; don't actually open a nested popup
     rows.append(
         ("poll tick hover hit-test  (_update_hover)", measure(reader._update_hover, args.reps * 5))
@@ -2129,15 +2148,15 @@ def main() -> int:
     # 8) components, for diagnosis
     def comp_lookup():
         for i in idxs:
-            reader.dict_set.entry_for(reader.tokens[i], reader._inflected_surface(i))
+            ds.entry_for(reader.tokens[i], reader._inflected_surface(i))
 
     def comp_headrender():
         for i in idxs:
-            e = reader.dict_set.entry_for(reader.tokens[i], reader._inflected_surface(i))
+            e = ds.entry_for(reader.tokens[i], reader._inflected_surface(i))
             LazyPanel(panel_rows(e, reader.tip_width), reader.tip_width).render_to(cap)
 
     _tall_head = LazyPanel(
-        panel_rows(reader.dict_set.entry_for(reader.tokens[tall]), reader.tip_width),
+        panel_rows(ds.entry_for(reader.tokens[tall]), reader.tip_width),
         reader.tip_width,
     ).render_to(cap)  # pre-rendered once, outside the timer
 

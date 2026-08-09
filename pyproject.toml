@@ -249,11 +249,15 @@ max-complexity-allowed = 15
 [tool.mypy]
 python_version = "3.13"
 # LIBRARY code (#216): the Apache core + the GPL add-on — imported, shipped, contract-bearing, so the
-# heavy checker earns its keep (it already caught a real set/tuple mismatch in deinflect). The dev SCRIPTS
-# (tools/install/.agents) are standalone run-once utilities where forcing full annotations is the
-# "fanaticism" to avoid — ruff + complexipy still cover them repo-wide. taffylite/python is a thin binding
-# over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it's out of the type tier too.
-files = ["overlay/src/overlay", "deinflect/src"]
+# heavy checker earns its keep (it already caught a real set/tuple mismatch in deinflect). The dev
+# SCRIPTS (overlay/examples, tools, install, .agents) are now IN this tier too (2026-08): a stale
+# cross-module import there (SKIP_POS moving out of controller.py) was caught by NOTHING — ruff doesn't
+# resolve cross-module symbol existence, and the checkers were library-only. Coverage widened; strictness
+# did NOT — still non-strict (below), not `--strict`. `tests/` stays OUT for now (its pervasive
+# `Fake*`-as-real-type doubles are a separate, larger adaptation — see follow-up note). taffylite/python
+# is a thin binding over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it stays
+# out of the type tier.
+files = ["overlay/src/overlay", "deinflect/src", "overlay/examples", "tools", "install", ".agents"]
 # Source roots on the path so first-party + optional-ext imports resolve when mypy runs from the repo
 # root — incl. taffylite/python so `import taffylite` finds the committed .pyi stub (column) rather than
 # the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
@@ -273,9 +277,15 @@ ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 # basedpyright's extraPaths) so `saitenka_deinflect.engine` / `overlay.*` resolve from source.
 # `stubs/` holds local third-party stubs (fugashi).
 search-path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs"]
+# Library-only, deliberately NOT widened alongside mypy/basedpyright above: pyrefly's inference is far
+# stricter on the ad-hoc untyped dict-literal "records" idiom pervasive in tools/ (e.g. plan.append({...})
+# read back via p["key"]) — real findings there are inference-strictness noise, not import/attr rot (the
+# thing mypy+basedpyright now gate). The `poe types` task runs it over examples/tools/install/.agents too,
+# but advisory (`|| true`), same posture as `ty` below — visibility without blocking the gate on it.
 
 [tool.basedpyright]
-include = ["overlay/src/overlay", "deinflect/src"]
+# Same widened scope as mypy above — see [tool.mypy].files for the rationale.
+include = ["overlay/src/overlay", "deinflect/src", "overlay/examples", "tools", "install", ".agents"]
 # Run from the repo root, so the first-party source roots must be on the search path explicitly (else
 # `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
 extraPaths = ["overlay/src", "deinflect/src", "taffylite/python"]
