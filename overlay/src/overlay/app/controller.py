@@ -23,6 +23,7 @@ from overlay.app import (
     card_preview,
     help_overlay,
     hover_snapshot,
+    mined_store,
     miner_ui,
     nested_popup,
     popups,
@@ -213,6 +214,7 @@ class Reader:
     _mined = Delegated[set[str]]("session", "mined")
     _anki_cache = Delegated[tuple[float, bool]]("session", "anki_cache")
     _backlog_store = Delegated[backlog.BacklogStore | None]("session", "backlog_store")
+    _mined_store = Delegated[mined_store.MinedCardStore | None]("session", "mined_store")
     # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
     # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
     _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
@@ -1778,5 +1780,7 @@ class Reader:
             print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # requested close summary
         if self._backlog_store is not None:
             self._backlog_store.close()
+        if self._mined_store is not None:
+            self._mined_store.close()
         self.ov.close()
         shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir

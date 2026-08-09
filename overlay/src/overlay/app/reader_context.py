@@ -19,6 +19,7 @@ from overlay.app.languages import MAIN_LANG
 if TYPE_CHECKING:
     from overlay.app.backlog import BacklogStore
     from overlay.app.languages import Language
+    from overlay.app.mined_store import MinedCardStore
     from overlay.app.render_cache import RenderCache
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
@@ -139,3 +140,4 @@ class SessionContext:
         self.mined: set[str] = set()  # card expressions already in the deck → header ⊕ becomes ✓
         self.anki_cache: tuple[float, bool] = (0.0, False)  # (checked_at, reachable) — see _anki_ok
         self.backlog_store: BacklogStore | None = None  # lazy review-backlog DB handle
+        self.mined_store: MinedCardStore | None = None  # lazy mined-card DB handle (#253)
