@@ -25,8 +25,8 @@ from overlay.app.config import config_path, load_config
 from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
-from overlay.app.languages import MAIN_LANG
 from overlay.app.paths import cache_dir
+from overlay.app.profiles import resolve_profile
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -255,7 +255,7 @@ def _cached_subtitles(
 
 
 def _enabled_provider_names(
-    video: str | None, *, jimaku: bool, jimaku_cfg: dict, tsukihime_cfg: dict
+    video: str | None, *, jimaku: bool, jimaku_cfg: dict, tsukihime_cfg: dict, language: str
 ) -> tuple[str, ...]:
     if not video:
         return ()
@@ -263,7 +263,7 @@ def _enabled_provider_names(
         ("jimaku", jimaku or bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled"))),
         ("tsukihime", bool(tsukihime_cfg.get("enabled"))),
     )
-    return enabled_providers_for(MAIN_LANG, flags)
+    return enabled_providers_for(language, flags)
 
 
 def _configured_subtitles(
@@ -274,11 +274,12 @@ def _configured_subtitles(
     jimaku: bool,
     tsukihime: bool,
     resync: bool,
+    language: str,
 ) -> tuple[Path | None, tuple[str, ...]]:
     cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync)
     if cached is not None:
         return cached, ()
-    providers = enabled_providers_for(MAIN_LANG, (("jimaku", jimaku), ("tsukihime", tsukihime)))
+    providers = enabled_providers_for(language, (("jimaku", jimaku), ("tsukihime", tsukihime)))
     return None, providers
 
 
@@ -316,9 +317,14 @@ def _resolve_subtitles(
         subs.jimaku,
         bool(jimaku_cfg.get("fetch") or jimaku_cfg.get("enabled")),
     )
+    language = resolve_profile(cfg).langs.main  # active profile gates which providers are eligible
     sub_path = en_sub_path = None
     enabled_providers = _enabled_provider_names(
-        video, jimaku=subs.jimaku, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
+        video,
+        jimaku=subs.jimaku,
+        jimaku_cfg=jimaku_cfg,
+        tsukihime_cfg=tsukihime_cfg,
+        language=language,
     )
     fetch_in_background: tuple[str, ...] = ()
     if subs.sub_file:
@@ -337,6 +343,7 @@ def _resolve_subtitles(
             jimaku=jimaku_on,
             tsukihime=tsukihime_on,
             resync=subs.resync,
+            language=language,
         )
     elif not video:
         sub_path = tmp / "line.srt"
@@ -524,7 +531,11 @@ def _prefetch_sibling_subs(
     raw_tsukihime = cfg.get("tsukihime")
     tsukihime_cfg = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
     providers = _enabled_provider_names(
-        str(nxt), jimaku=False, jimaku_cfg=jimaku_cfg, tsukihime_cfg=tsukihime_cfg
+        str(nxt),
+        jimaku=False,
+        jimaku_cfg=jimaku_cfg,
+        tsukihime_cfg=tsukihime_cfg,
+        language=resolve_profile(cfg).langs.main,
     )
     if not providers:
         return
@@ -896,20 +907,31 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     hover_switch_delay: float,
     layout_engine: Literal["default", "taffy"] = "default",
     mpv_arg: list[str] | None = None,
+    profile: str | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
     from overlay.app.controller import Reader
     from overlay.app.reader_deps import begin_deps_build, warm_tokenizer
 
     cfg = load_config(config)
+    if profile:  # --profile overrides the config's active_profile selector for this launch
+        cfg = dict(cfg)
+        cfg["active_profile"] = profile
+    active_profile = resolve_profile(cfg)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
 
     # Fire this as early as possible — before mpv even launches — so fugashi's slow first-ever
     # tokenize() call (see warm_tokenizer's docstring) overlaps mpv's own launch/connect dead time
-    # instead of landing on the critical path later.
-    threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
+    # instead of landing on the critical path later. Pre-warm the ACTIVE profile's tokenizer (a no-op
+    # for a non-unidic strategy, whose warm cost isn't fugashi's).
+    threading.Thread(
+        target=warm_tokenizer,
+        args=(active_profile.tokenizer,),
+        name="saitenka-tokenizer-warm",
+        daemon=True,
+    ).start()
 
     # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
     # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka install`. Don't hand it to
@@ -1025,10 +1047,18 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     if demo_word or screenshot:
         scorer, anki, mine_conf, dict_set = _build_deps()
         reader = Reader(
-            ipc, scorer=scorer, anki=anki, mine_cfg=mine_conf, dict_set=dict_set, options=opts
+            ipc,
+            scorer=scorer,
+            anki=anki,
+            mine_cfg=mine_conf,
+            dict_set=dict_set,
+            options=opts,
+            profile=active_profile,
         )
     else:
-        reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+        reader = Reader(
+            ipc, options=opts, profile=active_profile
+        )  # deps injected asynchronously below
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)

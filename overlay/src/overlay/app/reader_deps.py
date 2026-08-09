@@ -381,7 +381,7 @@ def build_reader_deps(
     return scorer, anki, mine_conf, dict_set
 
 
-def warm_tokenizer() -> None:
+def warm_tokenizer(tokenizer: str = "unidic") -> None:
     """fugashi/unidic-lite's first-ever ``tokenize()`` call does one-time MeCab tagger/dictionary
     setup that hasn't declared free-threading safety. Measured: ~13ms alone, but ~600ms (46x) when
     it happens to run concurrently with :func:`build_reader_deps`'s background thread pool — real
@@ -394,7 +394,12 @@ def warm_tokenizer() -> None:
     on the critical path. This is a race, not a guarantee: if mpv comes up unusually fast, the real
     first subtitle line's own ``tokenize()`` call could still overlap this one. In every session
     observed so far mpv's own startup comfortably outlasts this call, so the race resolves in our
-    favor in practice."""
+    favor in practice.
+
+    ``tokenizer`` is the active profile's tokenizer name (#254). The warm cost being amortised here is
+    fugashi-specific, so a non-``unidic`` strategy is a no-op — nothing to prime ahead of mpv."""
+    if tokenizer != "unidic":
+        return
     with otel_metrics.traced("warm_tokenizer"):
         from overlay.app.tokenize import tokenize
 

@@ -168,6 +168,10 @@ def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual par
             help="auto-resync jimaku-sourced subtitles via alass/ffsubsync (default: on)",
         ),
     ] = True,
+    profile: Annotated[
+        str | None,
+        cyclopts.Parameter(help="active reading profile name ([profiles.<name>] in the config)"),
+    ] = None,
     episode: Annotated[
         int | None, cyclopts.Parameter(help="override the episode parsed from the filename")
     ] = None,
@@ -368,6 +372,7 @@ def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual par
         hover_switch_delay=hover_switch_delay,
         layout_engine=layout_engine,
         mpv_arg=mpv_arg,
+        profile=profile,
     )
 
 
@@ -1391,6 +1396,10 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     resync: Annotated[
         bool, cyclopts.Parameter(negative="--no-resync", help="resync jimaku subs (default: on)")
     ] = True,
+    profile: Annotated[
+        str | None,
+        cyclopts.Parameter(help="active reading profile name ([profiles.<name>] in the config)"),
+    ] = None,
 ) -> (
     int
 ):  # pragma: no cover — connects to a live mpv; the reader loop is covered by controller tests
@@ -1400,18 +1409,28 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
+    from overlay.app.profiles import resolve_profile
     from overlay.app.reader_deps import warm_tokenizer
+
+    cfg = load_config(config)
+    if profile:  # --profile overrides the config's active_profile selector for this launch
+        cfg = dict(cfg)
+        cfg["active_profile"] = profile
+    active_profile = resolve_profile(cfg)
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of
-    # landing on the critical path later.
-    threading.Thread(target=warm_tokenizer, name="saitenka-tokenizer-warm", daemon=True).start()
+    # landing on the critical path later. Warms the ACTIVE profile's tokenizer (no-op for non-unidic).
+    threading.Thread(
+        target=warm_tokenizer,
+        args=(active_profile.tokenizer,),
+        name="saitenka-tokenizer-warm",
+        daemon=True,
+    ).start()
 
+    from overlay.app.cli_run import setup_session_telemetry
     from overlay.app.controller import Reader
     from overlay.mpvio.ipc import MpvIPC, default_attach_ipc_path
-
-    cfg = load_config(config)
-    from overlay.app.cli_run import setup_session_telemetry
 
     setup_session_telemetry(cfg)  # capture is per reader session, not global (see cli.main note)
     sock = socket or cfg.get("mpv_socket") or default_attach_ipc_path()
@@ -1439,7 +1458,6 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
         return 2
 
-    from overlay.app.languages import MAIN_LANG
     from overlay.app.subselect import AttachSubtitleOptions, prepare_attach_startup
     from overlay.app.subtitle_providers import enabled_providers_for
 
@@ -1456,7 +1474,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     jimaku_key = jimaku_key or jm.get("key")
     resync = resync and bool(jm.get("resync", True))
     enabled_providers = enabled_providers_for(
-        MAIN_LANG, (("jimaku", jimaku), ("tsukihime", bool(th.get("enabled"))))
+        active_profile.langs.main, (("jimaku", jimaku), ("tsukihime", bool(th.get("enabled"))))
     )
 
     subtitle_startup = None
@@ -1474,6 +1492,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
                 tsukihime=bool(th.get("enabled", False)),
                 episode=episode,
                 resync=resync,
+                language=active_profile.langs.main,
             ),
         )
         log.info("attach subs: %s", status)  # plugin mode is detached — the log is the only sink
@@ -1492,7 +1511,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
-    reader = Reader(ipc, options=opts)  # deps injected asynchronously below
+    reader = Reader(ipc, options=opts, profile=active_profile)  # deps injected asynchronously below
     provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,

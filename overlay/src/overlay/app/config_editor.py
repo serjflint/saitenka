@@ -29,6 +29,7 @@ from overlay.app.config import (
     MiningOptions,
     PanelOptions,
     PerfOptions,
+    ProfileOptions,
     ReaderOptions,
     StatsOptions,
     TelemetryOptions,
@@ -149,6 +150,11 @@ _DC_SECTIONS: list[tuple[str, Any, str | None]] = [
     ("stats", StatsOptions, "stats"),
     ("dictdb", DictDbOptions, "dictdb"),
     ("telemetry", TelemetryOptions, "telemetry"),
+    (
+        "profile",
+        ProfileOptions,
+        "profile",
+    ),  # the default [profile] table (#254); named ones overlay
 ]
 
 
@@ -251,6 +257,15 @@ def _general_specs() -> list[OptionSpec]:
             "bool",
             ReaderOptions().resync,
             "Auto-resync jimaku-sourced subtitles via alass/ffsubsync.",
+        ),
+        OptionSpec(
+            "general",
+            "active_profile",
+            ("active_profile",),
+            "str",
+            None,
+            "Name of the [profiles.<name>] to activate (blank = the default [profile]).",
+            optional=True,
         ),
     ]
 
