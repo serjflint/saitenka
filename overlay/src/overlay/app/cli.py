@@ -1409,7 +1409,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
-    from overlay.app.profiles import resolve_profile
+    from overlay.app.profiles import resolve_profile, scope_config
     from overlay.app.reader_deps import warm_tokenizer
 
     cfg = load_config(config)
@@ -1417,6 +1417,10 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
+    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6) before the dep build reads them;
+    # attach has no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/
+    # model/field-map directly. Byte-identical for the default profile.
+    cfg = scope_config(cfg)
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of

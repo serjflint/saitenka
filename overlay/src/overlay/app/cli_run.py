@@ -26,7 +26,7 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import resolve_profile
+from overlay.app.profiles import resolve_profile, scope_config
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -155,6 +155,16 @@ def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str
     """Flag values win over the config file. Values are dictionary **titles** resolved against the
     consolidated DB (imported once) — not paths, so no ~/$VAR expansion is needed."""
     return list(flag_vals or []) or list(cfg.get(key) or [])
+
+
+def default_mine_target(mine: dict) -> tuple[str, str]:
+    """The ``(deck, model)`` a ``[mine]`` table implies with no explicit CLI flag. The ``run`` signature's
+    ``--mine-deck``/``--mine-model`` defaults AND the profile-scoped fallback (#254) share this, so a
+    profile's ``[mine]`` deck/model isn't silently clobbered by the top-level-seeded CLI default when the
+    user didn't pass the flag. Model mirrors ``_build_mining``'s preset→model derivation (both-seams trap)."""
+    deck = mine.get("deck", "Saitenka::Mining")
+    model = mine.get("model") or mine.get("preset") or "Lapis"
+    return deck, model
 
 
 def jimaku_should_fetch(
@@ -918,6 +928,19 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
+    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6). Capture the top-level [mine]
+    # deck/model default BEFORE scoping so a still-default --mine-deck/--mine-model flag yields to the
+    # profile's own deck/model instead of clobbering it.
+    _top_mine = cfg.get("mine") if isinstance(cfg.get("mine"), dict) else {}
+    top_deck, top_model = default_mine_target(_top_mine)
+    cfg = scope_config(cfg)
+    scoped_mine = cfg.get("mine") if isinstance(cfg.get("mine"), dict) else {}
+    if scoped_mine:
+        scoped_deck, scoped_model = default_mine_target(scoped_mine)
+        if mine_deck == top_deck:
+            mine_deck = scoped_deck
+        if mine_model == top_model:
+            mine_model = scoped_model
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured

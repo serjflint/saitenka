@@ -9,6 +9,7 @@ from overlay.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
     resolve_profile,
+    scope_config,
     validate_language_code,
 )
 from overlay.app.subtitle_providers import enabled_providers_for, register_provider
@@ -228,3 +229,126 @@ def test_profile_is_an_immutable_value_object():
     profile = Profile(name="fr", langs=ReaderLanguages("fr", "en"), tokenizer="latin")
     with pytest.raises((AttributeError, TypeError)):
         profile.name = "de"  # frozen — swappable by replacement, never mutation
+
+
+# --- #254 phase 4: dictionary + Anki mining config scoped per profile (D4/D6) ---------------------
+# scope_config overlays the active profile's dict/freq/pitch title lists + [mine] table onto the flat
+# cfg the dep builders read; the default profile is byte-identical, a non-JP profile selects its own.
+
+
+def test_default_profile_leaves_dicts_and_mine_byte_identical():
+    """No [profiles.*] scoping the dict lists or [mine] → scope_config returns the SAME object, so the
+    dep build reads exactly today's config (the byte-identical-default contract)."""
+    cfg = {"dicts": ["JMdict"], "freq": ["JPDB"], "mine": {"deck": "Saitenka::Mining"}}
+    assert scope_config(cfg) is cfg
+
+
+def test_named_profile_replaces_dict_freq_pitch_wholesale():
+    """A French profile consults ONLY its own dicts — the top-level JP list is replaced, not merged
+    (a JP dict must never leak into a French lookup)."""
+    cfg = {
+        "dicts": ["JMdict", "daijirin"],
+        "freq": ["JPDB"],
+        "pitch": ["NHK"],
+        "active_profile": "fr",
+        "profiles": {
+            "fr": {
+                "language": "fr",
+                "tokenizer": "latin",
+                "dicts": ["Le Grand Robert"],
+                "freq": ["French Freq"],
+            }
+        },
+    }
+    scoped = scope_config(cfg)
+    assert scoped["dicts"] == ["Le Grand Robert"]  # JP dicts gone, not appended
+    assert scoped["freq"] == ["French Freq"]
+    assert scoped["pitch"] == ["NHK"]  # profile omits pitch → top-level survives untouched
+    assert cfg["dicts"] == ["JMdict", "daijirin"]  # original cfg not mutated
+
+
+def test_profile_mine_merges_key_wise_over_top_level():
+    """[profiles.<x>.mine] overlays [mine]: the profile overrides just the deck; every other [mine] key
+    (model, fields, animated_*) is inherited from the top-level table."""
+    cfg = {
+        "mine": {"deck": "Saitenka::Mining", "model": "Lapis", "animated_screenshot": True},
+        "active_profile": "fr",
+        "profiles": {
+            "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
+        },
+    }
+    scoped = scope_config(cfg)
+    assert scoped["mine"] == {
+        "deck": "French::Mining",  # overridden by the profile
+        "model": "Lapis",  # inherited from [mine]
+        "animated_screenshot": True,  # inherited from [mine]
+    }
+    assert cfg["mine"]["deck"] == "Saitenka::Mining"  # top-level cfg untouched
+
+
+def test_profile_override_selects_scoping_like_resolve_profile():
+    """The ``--profile`` override wins over the config selector for dict/mine scoping too."""
+    cfg = {
+        "dicts": ["JMdict"],
+        "active_profile": "ja",
+        "profiles": {
+            "ja": {"language": "jp"},
+            "fr": {"language": "fr", "tokenizer": "latin", "dicts": ["Le Grand Robert"]},
+        },
+    }
+    assert scope_config(cfg, override="fr")["dicts"] == ["Le Grand Robert"]
+
+
+def test_scoped_dicts_are_what_the_run_path_resolves():
+    """Observable through the actual run-path seam: with no --dict flag, ``_resolve_names`` reads the
+    profile-scoped dict list (which dictionaries load)."""
+    from overlay.app.cli_run import _resolve_names
+
+    cfg = scope_config(
+        {
+            "dicts": ["JMdict"],
+            "active_profile": "fr",
+            "profiles": {
+                "fr": {"language": "fr", "tokenizer": "latin", "dicts": ["Le Grand Robert"]}
+            },
+        }
+    )
+    assert _resolve_names(None, cfg, "dicts") == ["Le Grand Robert"]  # profile dicts, not JP
+
+
+def test_profile_mine_targets_its_own_deck_model_and_fields_in_a_built_mineconfig():
+    """The end-to-end observable for D6: a MineConfig built from the profile-scoped [mine] targets the
+    profile's deck/model/field-map — the deck a mined note lands in, and the fields it writes."""
+    from overlay.app.reader_deps import _mine_config_from
+
+    cfg = scope_config(
+        {
+            "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
+            "active_profile": "fr",
+            "profiles": {
+                "fr": {
+                    "language": "fr",
+                    "tokenizer": "latin",
+                    "mine": {
+                        "deck": "French::Mining",
+                        "model": "FrenchNote",
+                        "fields": {"expression": "Mot", "sentence": "Phrase"},
+                    },
+                }
+            },
+        }
+    )
+    mine_conf = _mine_config_from(cfg["mine"])
+    assert mine_conf.deck == "French::Mining"
+    assert mine_conf.model == "FrenchNote"
+    assert mine_conf.fields == {"expression": "Mot", "sentence": "Phrase"}
+
+
+def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
+    """The (deck, model) a [mine] table implies with no CLI flag — the shared default the run signature
+    AND the profile-scoped fallback use so a profile's deck/model isn't clobbered by a still-default flag."""
+    from overlay.app.cli_run import default_mine_target
+
+    assert default_mine_target({}) == ("Saitenka::Mining", "Lapis")
+    assert default_mine_target({"preset": "Kiku"}) == ("Saitenka::Mining", "Kiku")
+    assert default_mine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")

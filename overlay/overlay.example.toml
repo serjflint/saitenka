@@ -193,6 +193,25 @@ preview_key = "p"
 # word_audio_field = "WordAudio"  # note field the resolved [sound:...] tag is written to (must exist
                               # on the note type — `saitenka doctor`/mining validation drops it if not)
 
+# ── Reading profiles (#254) — a non-Japanese main language, end to end ───────────────────────────
+# A profile bundles the reading IDENTITY: the main/second language codes, the tokenizer strategy, AND
+# (this phase) its own dictionaries + mining target. The default (no profile) is today's Japanese setup,
+# byte-identical. Select one for a launch with `active_profile = "<name>"` here or `--profile <name>`.
+#   • dicts/freq/pitch under a profile REPLACE the top-level lists wholesale (a French profile consults
+#     only French dicts — the JP set is never mixed in).
+#   • [profiles.<name>.mine] MERGES key-wise over the top-level [mine] (override just the deck; inherit
+#     model/fields/animated_*). Omit it to reuse [mine] as-is.
+# active_profile = "french"     # uncomment to make the profile below the active one
+# [profiles.french]
+# language = "fr"               # open code (BCP-47-ish); tokenizer is a SEPARATE field, not derived from it
+# tokenizer = "latin"           # a non-JP language MUST name its tokenizer (no silent unidic fallback)
+# second = "en"                 # secondary subtitle language (default English)
+# dicts = ["Le Grand Robert"]   # French-only definition dictionaries (TITLES in the consolidated DB)
+# freq  = ["French Freq"]
+# [profiles.french.mine]
+# deck  = "French::Mining"      # a distinct deck/model/field-map for French cards
+# model = "FrenchNote"
+
 # ── [anki] AnkiConnect endpoint — only if you changed its defaults (stock: 127.0.0.1:8765, no key) ──
 # [anki]
 # url = "http://127.0.0.1:8765"   # or set host/port separately: host = "127.0.0.1", port = 8765

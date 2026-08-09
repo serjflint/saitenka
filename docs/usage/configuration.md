@@ -223,6 +223,19 @@ Most in-player shortcuts are configurable — `translate_key`, `sub_next_key`, t
 more take any mpv key name. Rather than list them here, see the
 [Keyboard shortcuts](shortcuts.md) page, which has the full rebindable-key table with defaults.
 
+## Reading profiles (a non-Japanese main language)
+
+A **profile** bundles what's being read — the main/second language codes, the tokenizer strategy, and
+its own dictionaries and mining target — so a single config can hold a Japanese setup and, say, a French
+one side by side. With no profile, everything behaves exactly as before (Japanese, `unidic`).
+
+Define one as `[profiles.<name>]` and activate it with `active_profile = "<name>"` (or `--profile <name>`
+for one launch). A profile's `dicts`/`freq`/`pitch` **replace** the top-level lists (a French profile
+consults only French dictionaries), and a `[profiles.<name>.mine]` table **merges** over `[mine]` so a
+profile can override just the deck and inherit the rest. A non-Japanese language must name its
+`tokenizer` explicitly — there is no silent fallback. The commented `[profiles.french]` block in the
+example file is a complete template.
+
 ## The full reference
 
 !!! note "Everything is in the example file"
