@@ -3,7 +3,6 @@ playback, so no cue pays cold tokenization mid-episode (a track switch supersede
 
 from __future__ import annotations
 
-import overlay.app.controller as C
 from overlay.app import prefetch
 from overlay.app.controller import Reader
 from overlay.app.sub_index import SubIndex, parse_srt
@@ -44,7 +43,7 @@ def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
     prefetch._warm_episode_loop(reader, reader._sub_index)
 
     monkeypatch.setattr(
-        C,
+        reader.tokenizer,
         "tokenize",
         lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a warmed cue")),
     )

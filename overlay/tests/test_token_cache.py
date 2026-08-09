@@ -8,7 +8,6 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 
 from __future__ import annotations
 
-import overlay.app.controller as C
 from overlay.app.controller import Reader
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.subtitles import SubtitleRender
@@ -105,8 +104,8 @@ def test_upgrade_re_attempts_rather_than_serving_the_incomplete_result(monkeypat
     reader.set_subtitle("本を読む")
 
     calls: list[str] = []
-    real = C.tokenize
-    monkeypatch.setattr(C, "tokenize", lambda ln: calls.append(ln) or real(ln))
+    real = reader.tokenizer.tokenize
+    monkeypatch.setattr(reader.tokenizer, "tokenize", lambda ln: calls.append(ln) or real(ln))
 
     reader.dict_set = _ExistsDS()
     reader.set_subtitle("本を読む")
@@ -120,7 +119,7 @@ def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
     assert reader._sub_pending is None
 
     monkeypatch.setattr(
-        C,
+        reader.tokenizer,
         "tokenize",
         lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a cached line")),
     )
