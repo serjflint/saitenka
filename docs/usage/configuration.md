@@ -137,6 +137,20 @@ trade clip quality against file size. You don't have to turn it on globally: ++c
 mines the hovered word with a clip for that one card. If your AnkiConnect endpoint isn't the stock
 `127.0.0.1:8765`, override it in the separate `[anki]` table.
 
+**Word-pronunciation audio.** `word_audio_enabled = true` + `word_audio_pack_dir = "..."` attaches a
+clean word-pronunciation clip alongside the mined scene audio, resolved offline from a local
+yomichan/yomitan audio pack — a directory with an `index.json` mapping expression → reading → audio
+file(s). Lookup is keyed on the expression **and** the reading mining already resolved (homograph-safe),
+so a miss (pack doesn't have the word, or that reading) just leaves `word_audio_field` (default
+`WordAudio`) empty — never a bad guess. No online fallback (JPod101/TTS): not grounded/local-first, so
+not adopted (issue #93).
+
+```toml
+word_audio_enabled = true
+word_audio_pack_dir = "~/audio-packs/nhk16"
+word_audio_field = "WordAudio"   # must exist on the note type
+```
+
 !!! note "Anki starts itself"
     When mining (or Anki-backed coloring) is on, Saitenka launches Anki for you if it's closed.
 

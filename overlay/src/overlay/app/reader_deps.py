@@ -218,7 +218,11 @@ def _mine_config_from(mc: dict):
     ``deck``/``model``/``fields``/``card_kind``/``normalize_audio``/``animated_*`` keys override it.
     Pure — the same reader for both the ``attach`` and ``run`` seams (run reaches here via the raw
     ``[mine]`` table threaded through ``effective_cfg``)."""
+    import os
+    from pathlib import Path
+
     from overlay.app.anki import MineConfig
+    from overlay.app.config import WordAudioOptions
     from overlay.app.media import AnimatedClip
 
     preset = mc.get("preset")
@@ -227,6 +231,12 @@ def _mine_config_from(mc: dict):
     fields = dict(raw_fields) if isinstance(raw_fields, dict) and raw_fields else base.fields
     raw_format = mc.get("card_format")
     card_format = dict(raw_format) if isinstance(raw_format, dict) else {}
+    wa_defaults = WordAudioOptions()
+    word_audio_pack = None
+    if bool(mc.get("word_audio_enabled", wa_defaults.word_audio_enabled)):
+        raw_pack = mc.get("word_audio_pack_dir", wa_defaults.word_audio_pack_dir)
+        if raw_pack:
+            word_audio_pack = Path(os.path.expandvars(str(Path(str(raw_pack)).expanduser())))
     return MineConfig(
         deck=mc.get("deck", base.deck),
         model=mc.get("model", base.model),
@@ -242,6 +252,8 @@ def _mine_config_from(mc: dict):
         card_kind=str(mc.get("card_kind", base.card_kind)),
         fields=fields,
         card_format=card_format,
+        word_audio_pack=word_audio_pack,
+        word_audio_field=str(mc.get("word_audio_field", wa_defaults.word_audio_field)),
     )
 
 
@@ -272,6 +284,13 @@ def _validate_mine_fields(anki, mine_conf) -> None:
         )
         for logical in bad:
             mine_conf.fields.pop(logical, None)
+    if mine_conf.word_audio_pack and mine_conf.word_audio_field not in real:
+        log.warning(
+            "mining note type %r has no %r field — word-audio stays off",
+            mine_conf.model,
+            mine_conf.word_audio_field,
+        )
+        mine_conf.word_audio_pack = None
 
 
 def _build_mining(mc: dict, *, mine: bool):

@@ -245,6 +245,24 @@ class Miner:
             self.r._toast("audio clip failed — image only", "warn")
 
     # --- mining -------------------------------------------------------------------------------
+    def _attach_word_audio(self, note: dict, card) -> None:
+        """Populate the configured word-audio field from the local yomichan/yomitan pack (#93) —
+        ADDITIVE to the mined scene/sentence audio, never a replacement. Best-effort: an unconfigured
+        pack, a resolve miss, or a store failure leaves the field unset (never an empty ``[sound:]``)."""
+        r = self.r
+        if not r.mine_cfg.word_audio_pack:
+            return
+        from overlay.app.word_audio import resolve
+
+        try:
+            hit = resolve(r.mine_cfg.word_audio_pack, card.expression, card.reading)
+            if hit is None:
+                return
+            media_name = r.anki.store_media(hit.filename, hit.path)
+            note["fields"][r.mine_cfg.word_audio_field] = f"[sound:{media_name}]"
+        except (OSError, AnkiError, json.JSONDecodeError):
+            log.debug("word-audio attach failed", exc_info=True)
+
     def _persist_mined(self, note_id: int, card, video) -> None:
         """Record the mined note ↔ episode/cue link in the durable mined-card store (#253), so the
         sidebar Mine tab can list this episode's cards offline. Best-effort: a store failure (or a
@@ -332,6 +350,7 @@ class Miner:
             if not force and not r.anki.can_add(note):
                 r._toast(f"can't add {card.expression}", "err")
                 return
+            self._attach_word_audio(note, card)
             # --- mine-time add_note seam (shared by #253 note-id retention + #93 word-audio) -------
             note_id = r.anki.add_note(note)
             self._persist_mined(note_id, card, video)

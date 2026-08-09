@@ -185,6 +185,13 @@ preview_key = "p"
 # animated_fps = 12           # clip frame rate
 # animated_quality = 75       # WebP quality, 0–100 (ignored for GIF)
 # animated_max_secs = 4.0     # cap clip length so a long cue can't produce a huge file
+# word_audio_enabled = false  # attach word-pronunciation audio from a local yomichan/yomitan audio
+                              # pack (#93, offline/grounded) — ADDITIVE to the mined scene clip above,
+                              # keyed on the expression + reading mining already resolved. No network
+                              # fallback (JPod101/TTS) — not grounded, so not adopted.
+# word_audio_pack_dir = "~/audio-packs/nhk16"  # pack directory (has an index.json); blank = disabled
+# word_audio_field = "WordAudio"  # note field the resolved [sound:...] tag is written to (must exist
+                              # on the note type — `saitenka doctor`/mining validation drops it if not)
 
 # ── [anki] AnkiConnect endpoint — only if you changed its defaults (stock: 127.0.0.1:8765, no key) ──
 # [anki]
