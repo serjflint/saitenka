@@ -327,7 +327,7 @@ def redraw(reader: Reader) -> None:
             if not rows:
                 unavailable = "Backlog is empty"
     except (OSError, sqlite3.Error, ValueError) as exc:
-        rows, total, unavailable = [], 0, f"Backlog unavailable: {exc}"
+        rows, total, unavailable = [], 0, f"{reader.sidebar.view.title()} unavailable: {exc}"
     rendered = render_sidebar(
         rows,
         width=width,
