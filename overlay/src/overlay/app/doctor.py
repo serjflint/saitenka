@@ -319,18 +319,51 @@ def _profile_dict_misses(db, cfg: dict, override: str | None) -> list[str]:
     return misses
 
 
+def _check_one_profile(label: str, resolve_cfg: dict, override: str | None, db, cfg: dict) -> Check:
+    """One profile's health as a single :class:`Check`: resolution (language codes) → tokenizer
+    registered → its scoped dict titles imported. Split out of :func:`check_profiles` so the loop just
+    collects these (keeps each piece under the complexity watermark)."""
+    from overlay.app.profiles import resolve_profile
+    from overlay.app.tokenizer import get_tokenizer
+
+    try:
+        profile = resolve_profile(resolve_cfg, override=override)
+    except ValueError as e:
+        return Check("profile", "fail", f"{label}: {e}")
+    try:
+        get_tokenizer(profile.tokenizer)
+    except ValueError:
+        return Check("profile", "fail", f"{label}: tokenizer {profile.tokenizer!r} not registered")
+    ident = f"{profile.langs.main}→{profile.langs.second} [{profile.tokenizer}]"
+    misses = _profile_dict_misses(db, cfg, override) if db is not None else []
+    if misses:
+        return Check(
+            "profile", "warn", f"{label} ({ident}): dict title(s) not imported: {', '.join(misses)}"
+        )
+    return Check("profile", "ok", f"{label}: {ident}", info=True)
+
+
+def _open_dict_db_or_none():
+    """The dict DB for the title-resolution sub-check, or ``None`` when it can't open (then that
+    sub-check is skipped rather than failing the whole doctor run)."""
+    try:
+        from overlay.app.dictdb import DictionaryDb
+
+        return DictionaryDb.open()
+    except Exception:  # noqa: BLE001 — no DB just means we skip title resolution
+        return None
+
+
 def check_profiles() -> list[Check]:
     """Validate every configured reading profile (#254 W5): its tokenizer is registered, its language
     codes are well-formed, and its scoped dictionary titles are actually imported — plus a dangling
     ``active_profile`` selector. A single-profile (JP default) config yields one info line."""
-    from overlay.app.profiles import profile_names, resolve_profile
-    from overlay.app.tokenizer import get_tokenizer
+    from overlay.app.profiles import profile_names
 
     cfg = load_config()
     named = profile_names(cfg)
     active = cfg.get("active_profile") or ""
     checks: list[Check] = []
-
     if active and active not in named:
         checks.append(
             Check(
@@ -342,44 +375,11 @@ def check_profiles() -> list[Check]:
     if not named and not isinstance(cfg.get("profile"), dict):
         return [Check("profile", "ok", "single default profile (jp→en, unidic)", info=True)]
 
-    db = None
-    try:
-        from overlay.app.dictdb import DictionaryDb
-
-        db = DictionaryDb.open()
-    except Exception:  # noqa: BLE001 — no DB just means we skip the title-resolution sub-check
-        db = None
-
+    db = _open_dict_db_or_none()
     # The base default (resolved without active_profile) then each named overlay — the switcher's cycle.
     base_cfg = {k: v for k, v in cfg.items() if k != "active_profile"}
-    for label, resolve_cfg, override in [
-        ("default", base_cfg, None),
-        *((n, cfg, n) for n in named),
-    ]:
-        try:
-            profile = resolve_profile(resolve_cfg, override=override)
-        except ValueError as e:
-            checks.append(Check("profile", "fail", f"{label}: {e}"))
-            continue
-        try:
-            get_tokenizer(profile.tokenizer)
-        except ValueError:
-            checks.append(
-                Check("profile", "fail", f"{label}: tokenizer {profile.tokenizer!r} not registered")
-            )
-            continue
-        misses = _profile_dict_misses(db, cfg, override) if db is not None else []
-        ident = f"{profile.langs.main}→{profile.langs.second} [{profile.tokenizer}]"
-        if misses:
-            checks.append(
-                Check(
-                    "profile",
-                    "warn",
-                    f"{label} ({ident}): dict title(s) not imported: {', '.join(misses)}",
-                )
-            )
-        else:
-            checks.append(Check("profile", "ok", f"{label}: {ident}", info=True))
+    targets = [("default", base_cfg, None), *((n, cfg, n) for n in named)]
+    checks.extend(_check_one_profile(lbl, rcfg, ov, db, cfg) for lbl, rcfg, ov in targets)
     return checks
 
 
