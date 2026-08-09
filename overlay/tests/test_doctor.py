@@ -808,8 +808,8 @@ def test_recent_errors_collapses_traceback_to_one_line(tmp_path, monkeypatch):
 
 def test_run_checks_every_produced_status_is_valid_and_named(monkeypatch):
     """Exhaustive over the *produced* report (so a future check is covered free): every Check carries a
-    status from the closed set and a non-empty name. A check that returned a typo'd status ('warining')
-    would slip past the per-check unit tests but fail here — and it matters because ``exit_code`` keys
+    status from the closed set and a non-empty name. A check that returned a mistyped status (say a
+    stray 'warn ' or 'error') would slip past the per-check unit tests but fail here — it matters because ``exit_code`` keys
     off ``counts['fail']``, so an out-of-set status silently erodes the pass/fail signal."""
     monkeypatch.setattr(doc, "_anki_call", lambda *_a, **_k: [])  # keep it off the network
     report = doc.run_checks()
@@ -830,7 +830,7 @@ def test_out_of_set_status_fails_loud_rather_than_eroding_exit_code():
     """Negative control proving the closed set bites: a status outside VALID_STATUSES raises instead of
     silently landing in a phantom bucket (the old behaviour let a mistyped 'fail' read as healthy). The
     ``type: ignore`` is the point — only a bypass of the type gate can reach here at runtime."""
-    bogus = doc.Report([doc.Check("x", "faill", "typo")])  # type: ignore[arg-type]
+    bogus = doc.Report([doc.Check("x", "borked", "mistyped status")])  # type: ignore[arg-type]
     with pytest.raises(KeyError):
         _ = bogus.counts
 
