@@ -6,6 +6,7 @@ few that need the live writer thread start it and poll (no fixed sleeps)."""
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -152,6 +153,37 @@ def test_write_recreates_a_vanished_trace_directory(tmp_path):
     proc.force_flush()
 
     assert json.loads(path.read_text(encoding="utf-8"))["traceEvents"]  # recreated dir + file
+
+
+def test_repeated_recoverable_vanish_never_logs(tmp_path, caplog):
+    """The #245 regression was NOISE, not loss: a vanished trace file made the writer log 'CTF write
+    failed' on *every* tick (~579×/run). Recovery is now silent — a single-vanish is always recovered
+    by the recreate-and-retry, so a long run of vanish→flush cycles must emit ZERO failure lines while
+    still ending in a valid document. Guards the log-count, which the recovery tests above don't."""
+    path = tmp_path / "trace.json"
+    proc, _ = _on_gate(path=path)
+    with caplog.at_level(logging.DEBUG, logger="overlay.app.otel_export"):
+        for _ in range(50):
+            path.unlink(missing_ok=True)  # cache cleanup deletes it out from under the writer
+            proc.on_end(_make_span())
+            proc.force_flush()  # recreate + write, silently
+    assert "CTF write failed" not in caplog.text  # recovery is silent — no per-tick spam
+    assert json.loads(path.read_text(encoding="utf-8"))["traceEvents"]  # last batch still landed
+
+
+def test_genuinely_unwritable_target_logs_once_per_flush_not_per_tick(tmp_path, caplog):
+    """A target that CAN'T be recovered (its parent is a file, so mkdir keeps failing) is the only case
+    that logs — and at most ONCE per flush, never an inner-retry storm. K flushes → exactly K lines, so
+    the guard distinguishes 'genuinely broken' from the recoverable vanish above (which logs zero)."""
+    parent_is_a_file = tmp_path / "blocker"
+    parent_is_a_file.write_text("not a directory", encoding="utf-8")
+    proc, _ = _on_gate(path=parent_is_a_file / "trace.json")
+    with caplog.at_level(logging.DEBUG, logger="overlay.app.otel_export"):
+        for _ in range(5):
+            proc.on_end(_make_span())
+            proc.force_flush()  # never raises — the writer swallows the OSError
+    failures = [r for r in caplog.records if "CTF write failed" in r.message]
+    assert len(failures) == 5  # one per failed batch, not the ~579-per-run storm
 
 
 def test_second_flush_appends_without_rewriting_prior_events(tmp_path):
