@@ -161,13 +161,17 @@ jobs:
     permissions:
       id-token: write
     steps:
+      # Checkout FIRST (before download-artifact, so its clean pass doesn't wipe the downloads) — the
+      # normalize script lives in the repo, and a publish job otherwise has no source tree.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           path: dist-pypi
           merge-multiple: true
-      # maturin's Windows wheels carry trailing data past the ZIP central directory → Warehouse 400s
-      # them. Rewrite the container (content-preserving) so the archive validates. See the script header.
+      # Defense-in-depth: rewrite each wheel's ZIP container (content-preserving) so Warehouse's strict
+      # ZIP check (CVE-2025-54368) can't 400 it. The build-side fix (one interpreter per job → no
+      # duplicate filenames for merge to concatenate) is the real cure; this guards future regressions.
       - name: Normalize wheels (strip trailing ZIP data)
         run: python3 taffylite/tools/normalize_wheels.py dist-pypi
       - name: Publish to TestPyPI
@@ -188,13 +192,17 @@ jobs:
     permissions:
       id-token: write # mandatory for OIDC Trusted Publishing (no API token stored)
     steps:
+      # Checkout FIRST (before download-artifact, so its clean pass doesn't wipe the downloads) — the
+      # normalize script lives in the repo, and a publish job otherwise has no source tree.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           path: dist-pypi
           merge-multiple: true
-      # maturin's Windows wheels carry trailing data past the ZIP central directory → Warehouse 400s
-      # them. Rewrite the container (content-preserving) so the archive validates. See the script header.
+      # Defense-in-depth: rewrite each wheel's ZIP container (content-preserving) so Warehouse's strict
+      # ZIP check (CVE-2025-54368) can't 400 it. The build-side fix (one interpreter per job → no
+      # duplicate filenames for merge to concatenate) is the real cure; this guards future regressions.
       - name: Normalize wheels (strip trailing ZIP data)
         run: python3 taffylite/tools/normalize_wheels.py dist-pypi
       - name: Publish to PyPI
