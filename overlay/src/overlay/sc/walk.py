@@ -3,8 +3,9 @@
 Structured content is a recursive tree: a node is a string (text), a list of nodes, or an object
 ``{"tag": ..., "content": ..., "style": {...}}``. We support the subset the dictionary panel needs —
 text, ``span``/style, ``ruby``(``rb``/``rt``), ``br``, ``ul``/``ol``/``li``, ``a`` (link → styled
-text), ``img`` (→ opaque box). **Unknown tags never fail**: we recurse into their content and flatten
-to text, so a novel dictionary can't break rendering.
+text), ``img`` (→ opaque box), ``table`` (→ each row a line, cells ``│``-separated — a readable
+minimal grid, not column-aligned; true alignment is a layout-engine job). **Unknown tags never fail**:
+we recurse into their content and flatten to text, so a novel dictionary can't break rendering.
 
 Reference: Yomitan ``dictionary-term-bank-v3`` structured-content schema.
 """
@@ -51,6 +52,33 @@ _BOX_KEYS = frozenset(
 
 INLINE_TAGS = {"span", "a", "em", "strong", "b", "i", "u", "code", "ruby", "rt", "rb", "sub", "sup"}
 BLOCK_TAGS = {"div", "p", "ul", "ol", "li", "details", "summary", "table", "tr", "td", "th"}
+
+_TABLE_SEP: RGBA = (150, 150, 150, 255)  # muted vertical bar between cells — reads as a divider
+
+
+def _table_rows(node: dict) -> list[dict]:
+    """The ``tr`` rows of a ``table``, descending through ``thead``/``tbody``/``tfoot`` wrappers."""
+    rows: list[dict] = []
+    content = node.get("content")
+    for child in content if isinstance(content, list) else [content]:
+        if not isinstance(child, dict):
+            continue
+        tag = child.get("tag")
+        if tag == "tr":
+            rows.append(child)
+        elif tag in {"thead", "tbody", "tfoot"}:
+            rows.extend(_table_rows(child))
+    return rows
+
+
+def _table_cells(tr: dict) -> list[dict]:
+    content = tr.get("content")
+    return [
+        c
+        for c in (content if isinstance(content, list) else [content])
+        if isinstance(c, dict) and c.get("tag") in {"td", "th"}
+    ]
+
 
 _NAMED: dict[str, RGBA] = {
     "black": (0, 0, 0, 255),
@@ -302,6 +330,25 @@ class _Walker:
             # inline style-carrying / unknown tag → recurse
             self._emit_inline(node.get("content"), _apply_style(node, style))
 
+    def _emit_table(self, node: dict, style: Style) -> None:
+        # Minimal grid: each row on its own line, cells joined by a muted │. NOT column-aligned (a
+        # proportional font has no tab stops — true alignment needs the layout engine); but rows +
+        # cell dividers turn the old flattened blob into something readable. Header cells (th) bold.
+        self._flush()
+        rows = _table_rows(node)
+        sep_style = style.with_(color=_TABLE_SEP)
+        for ri, tr in enumerate(rows):
+            for ci, cell in enumerate(_table_cells(tr)):
+                if ci:
+                    self.cur.flow.append(Span(" │ ", sep_style))
+                cstyle = _apply_style(cell, style)
+                if cell.get("tag") == "th":
+                    cstyle = cstyle.with_(weight=700)
+                self._emit_inline(cell.get("content"), cstyle)
+            if ri < len(rows) - 1:
+                self.cur.flow.append(Span("\n", style))  # row break (flow force-breaks on \n)
+        self._flush()
+
     def _walk_list(self, node: dict, style: Style, indent: int) -> None:
         self._flush()
         list_type = node.get("tag")  # 'ul' | 'ol'
@@ -348,6 +395,9 @@ class _Walker:
             tag = node.get("tag")
             if tag in {"ul", "ol"}:
                 self._walk_list(node, style, indent)
+                return
+            if tag == "table":
+                self._emit_table(node, style)
                 return
             if tag in {"div", "p", "details", "summary"}:
                 self._flush()
