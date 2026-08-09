@@ -58,6 +58,17 @@ def test_build_note_maps_lapis_fields():
     assert "saitenka" in note["tags"]
 
 
+def test_build_note_writes_idseq_into_the_default_id_field():
+    """#255 coverage gap: the ``card.idseq → 'id' entity → 'ID' field`` chain was only covered in
+    halves. Under the default LAPIS map, a non-empty idseq must land in the real ``ID`` field the Kanji
+    Study ``kanjistudy://word?id={{ID}}`` deep-link reads — proven with a constructed idseq (not a live
+    jamdict lookup), so it runs regardless of the ``jmdict`` extra."""
+    from overlay.app.lookup import CardData
+
+    note = build_note(MineConfig(), CardData("読む", "よむ", "", idseq="1456360"))
+    assert note["fields"]["ID"] == "1456360"
+
+
 def test_build_note_writes_frequency_fields():
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     note = build_note(

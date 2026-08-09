@@ -873,6 +873,37 @@ def test_json_carries_info_lines_even_though_default_view_hides_them():
     assert j["checks"][0]["info"] is True  # bug reports keep the full set
 
 
+def test_deeplink_id_warns_when_id_mapped_but_no_jmdict(monkeypatch):
+    """#255: the default LAPIS map targets the ID field (Kanji Study deep-links), but the value only
+    comes from jamdict. With the extra absent, the ID writes empty silently — doctor must warn."""
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    monkeypatch.setattr(doc, "load_config", dict)  # unconfigured → default LAPIS map (id -> ID)
+    c = doc.check_deeplink_id()
+    assert c.status == "warn"
+    assert "ID" in c.detail and "jmdict" in c.detail
+
+
+def test_deeplink_id_ok_when_jmdict_present(monkeypatch):
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: True)
+    monkeypatch.setattr(doc, "load_config", dict)
+    c = doc.check_deeplink_id()
+    assert c.status == "ok" and c.info  # a working source → hidden info, not noise
+
+
+def test_deeplink_id_is_info_when_no_id_field_is_mapped(monkeypatch):
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    monkeypatch.setattr(doc, "load_config", lambda: {"mine": {"fields": {"expression": "Front"}}})
+    c = doc.check_deeplink_id()
+    assert c.status == "ok" and c.info and "no ID" in c.detail  # not mapped → nothing to warn about
+
+
+def test_deeplink_id_warns_on_ent_seq_marker_without_a_source(monkeypatch):
+    # card_format path: an {ent-seq} marker needs the same id source as the `id` entity.
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    monkeypatch.setattr(doc, "load_config", lambda: {"mine": {"card_format": {"ID": "{ent-seq}"}}})
+    assert doc.check_deeplink_id().status == "warn"
+
+
 # --- init wizard -----------------------------------------------------------------------------
 
 

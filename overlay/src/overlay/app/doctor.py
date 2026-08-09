@@ -703,6 +703,39 @@ def check_mine_mapping() -> Check:
     return Check("mine-fields", "ok", body, info=True)
 
 
+def _mining_targets_id(mc) -> bool:
+    """Whether the effective mining config writes the JMdict entry id — either the ``id`` logical entity
+    (default ``LAPIS_FIELDS`` maps ``id -> ID``) or an ``{ent-seq}`` marker in a ``[mine.card_format]``."""
+    from overlay.app.card_markers import markers_in
+
+    if mc.card_format:
+        return any("ent-seq" in markers_in(str(tmpl)) for tmpl in mc.card_format.values())
+    return "id" in mc.fields
+
+
+def check_deeplink_id() -> Check:
+    """The ``ID`` field carries the JMdict ``ent_seq`` that makes Kanji Study
+    ``kanjistudy://word?id={{ID}}`` deep-links work. It's mapped by default but its value comes only
+    from jamdict (the optional ``jmdict`` extra), so on a ``minimal``/default install it writes **empty**
+    with no feedback (#255). Warn when the id is mapped but no source is installed. (An imported
+    Yomitan-JMdict dict's ``seq`` will become a second source once persisted — extend this then.)"""
+    from overlay.app.reader_deps import _mine_config_from
+
+    mc = _mine_config_from(load_config().get("mine") or {})
+    if not _mining_targets_id(mc):
+        return Check("deeplink-id", "ok", "no ID / deep-link field mapped", info=True)
+    if _jmdict_available():
+        return Check(
+            "deeplink-id", "ok", "deep-link ID fills from JMdict (jamdict present)", info=True
+        )
+    return Check(
+        "deeplink-id",
+        "warn",
+        "mining maps the ID field (Kanji Study kanjistudy://word?id={{ID}} deep-links) but no JMdict id "
+        "source is installed → ID writes empty. Reinstall with the `jmdict` extra to fill it.",
+    )
+
+
 def check_subminer_conflict() -> Check:
     """SubMiner injects its own mpv overlay; running it alongside the saitenka plugin draws two
     overlays over one video (flicker / stuck "overlay loading"). Warn when it's live."""
@@ -1010,6 +1043,7 @@ def run_checks(deck: str | None = None, model: str | None = None) -> Report:
         check_deinflect(),
         check_anki(deck, model),
         check_mine_mapping(),
+        check_deeplink_id(),
         check_known(),
         check_mpv_ipc(),
         check_mpv_socket(),
