@@ -30,3 +30,30 @@ def test_japanese_default_does_not_deinflect_a_french_surface():
     # rule set, so a mis-scoped profile can't silently borrow the other language's grammar.
     ds = DictionarySet(dicts=[], language="jp")
     assert ds.entry_for(_token("parlons", "parler")).inflection_chain == []
+
+
+def test_second_language_lookup_folds_in_the_deinflected_dictionary_form():
+    # The Latin tokenizer has no lemmatizer, so its lemma is the inflected surface. The dictionary form
+    # to actually look up (parapluies → parapluie) MUST come from the deinflector, or an inflected word
+    # finds nothing but "plural of …" — the live bug on "parapluies".
+    ds = DictionarySet(dicts=[], language="fr")
+    assert "parapluie" in ds._deinflected_candidates("parapluies")
+    assert "chat" in ds._deinflected_candidates("chats")
+
+
+def test_japanese_lemma_is_never_deinflect_expanded():
+    # JP's MeCab lemma is already the dict form; expanding it would change the byte-identical JP path.
+    ds = DictionarySet(dicts=[], language="jp")
+    assert ds._deinflected_candidates("食べた") == ()
+
+
+def test_not_found_message_is_english_for_a_second_language_profile():
+    # A French learner must not see a Japanese "not found" sentence (live bug on "ça").
+    ds = DictionarySet(dicts=[], language="fr")
+    text = ds.entry_for(_token("zzqxq", "zzqxq")).defs[0].content[0]
+    assert "not found" in text.lower()
+
+
+def test_not_found_message_stays_japanese_for_the_default_profile():
+    ds = DictionarySet(dicts=[], language="jp")
+    assert "見つかり" in ds.entry_for(_token("食べた", "食べる")).defs[0].content[0]

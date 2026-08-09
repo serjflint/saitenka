@@ -27,12 +27,18 @@ import msgspec.json as msgspec_json
 from overlay import otel_metrics
 
 try:
-    # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the
-    # inflection chain (🧩 -て « -いる « -た); without it the chain is empty and nothing is drawn.
-    from saitenka_deinflect import inflection_chain  # noqa: TID251  # GPL chokepoint importer
+    # Optional GPL-3.0 add-on (derived from Yomitan). When installed, the panel shows the inflection
+    # chain (🧩 -て « -いる « -た) AND — for a second-language profile whose tokenizer has no lemma —
+    # supplies the dictionary form(s) to look up (parapluies → parapluie). Without it the chain is
+    # empty and second-language lookup falls back to the raw surface.
+    from saitenka_deinflect import deinflect as _deinflect  # noqa: TID251  # GPL chokepoint
+    from saitenka_deinflect import inflection_chain  # noqa: TID251  # GPL chokepoint
 except ImportError:  # pragma: no cover — exercised via the deinflect-absent path
 
     def inflection_chain(surface: str, *targets: str, language: str = "ja") -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)
+        return []
+
+    def _deinflect(text: str, *, language: str = "ja") -> list[Deinflection]:  # noqa: ARG001  # must match saitenka_deinflect.deinflect's signature (conditional-variant check)
         return []
 
 
@@ -60,6 +66,8 @@ def _emit_sql_span() -> bool:
 
 if TYPE_CHECKING:
     from collections.abc import Container, Sequence
+
+    from saitenka_deinflect import Deinflection  # noqa: TID251  # GPL chokepoint (type only)
 
     from overlay.app.dictdb import DictionaryDb, DictRow
     from overlay.app.tokenize import Token
@@ -96,6 +104,14 @@ def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
 
 FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
+
+# Cap on deinflected dictionary-form candidates folded into one lookup — the French suffix ruleset
+# over-generates, and a real word resolves within the first handful; the rest only miss.
+_DEINFLECT_FORM_CAP = 24
+
+# Japanese language codes — the MeCab lemma is already the dict form and the JP not-found message is
+# Japanese, so these keep every JP path byte-identical. `jp` is the overlay's internal code, `ja` ISO.
+_JP_LANGS = frozenset({"jp", "ja"})
 
 
 _JMDICT_LIKE = re.compile(r"jmdict|jitendex", re.IGNORECASE)
@@ -646,7 +662,7 @@ class DictionarySet:
         ``glossary_html``) so the caller can fall back to the JMdict/jamdict source. No JMdict sequence
         id — Yomitan terms carry none. ``extra_terms`` are longer phrases (数ある) that outrank the bare
         word, so a hovered phrase mines the phrase by default."""
-        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        forms, _ = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
         for d in self.dicts:
             hits = [h for h in d.lookup(*forms) if _glosses_of(h.glossary)]
@@ -664,9 +680,8 @@ class DictionarySet:
         so the caller falls back to the JMdict source. ``cards_for(token)[0] == card_for(token)`` for a
         single dictionary. ``extra_terms`` (longer phrases 数ある) are looked up too and, being longer,
         sort ahead of the bare word."""
-        forms = (*extra_terms, token.lemma, token.surface, token.reading)
+        forms, termforms = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
-        termforms = {f for f in (*extra_terms, token.lemma, token.surface) if f}
         batched = self._batch_exact(forms)  # one query for all dicts (no per-dict _fetch)
         by_key: dict[tuple[str, str], CardData] = {}
         for d in self.dicts:
@@ -872,6 +887,38 @@ class DictionarySet:
                     pitches.append(item)
         return pitches
 
+    def _deinflected_candidates(self, lemma: str) -> tuple[str, ...]:
+        """Candidate dictionary forms for a second-language surface. The Latin tokenizer has no
+        morphological analyzer, so its lemma is the inflected surface — the deinflector supplies the
+        actual dictionary form(s) to look up (parapluies → parapluie, chats → chat). Empty for JP,
+        whose MeCab lemma is already the dict form, so every JP lookup stays byte-identical. Bounded:
+        the French suffix ruleset over-generates (harmless — a spurious form just misses in the DB —
+        but it needn't bloat the IN-list)."""
+        if self.language in _JP_LANGS or not lemma:
+            return ()
+        out = [
+            d.text for d in _deinflect(lemma, language=self.language) if d.text and d.text != lemma
+        ]
+        return tuple(dict.fromkeys(out))[:_DEINFLECT_FORM_CAP]
+
+    def _forms(self, token: Token, extra_terms: Sequence[str]) -> tuple[tuple[str, ...], set[str]]:
+        """Lookup forms + the exact-term set, with second-language deinflected dict forms folded in.
+        Order: phrases, lemma, surface, deinflected candidates, then the reading LAST (a form to match,
+        never an exact *term*). For JP the deinflected list is empty, so this is the prior tuple."""
+        deinf = self._deinflected_candidates(token.lemma)
+        terms = (*extra_terms, token.lemma, token.surface, *deinf)
+        return (*terms, token.reading), {f for f in terms if f}
+
+    def _empty_def(self) -> Definition:
+        """The 'no dictionary hit' placeholder, in the profile's language — English for a second-
+        language profile (a French learner shouldn't see a Japanese sentence)."""
+        text = (
+            "（辞書に見つかりませんでした）"
+            if self.language in _JP_LANGS
+            else "(not found in dictionary)"
+        )
+        return Definition("—", [text])
+
     def entry_for(
         self, token: Token, inflected: str | None = None, *, extra_terms: Sequence[str] = ()
     ) -> Entry:
@@ -879,8 +926,7 @@ class DictionarySet:
         # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
         # `extra_terms` are longer multi-token phrases starting at this word (数ある over 数); being
         # longer they outrank the bare word and stack above it as their own entries.
-        forms = (*extra_terms, token.lemma, token.surface, token.reading)
-        termforms = {f for f in (*extra_terms, token.lemma, token.surface) if f}
+        forms, termforms = self._forms(token, extra_terms)
         defs, headword, reading = self._dict_defs(forms, termforms, token.reading)
         if headword is None:
             headword = token.lemma or token.surface
@@ -896,7 +942,7 @@ class DictionarySet:
             headword=header,
             tags=[],
             freqs=self._freq_pills(forms, reading),
-            defs=defs or [Definition("—", ["（辞書に見つかりませんでした）"])],
+            defs=defs or [self._empty_def()],
             inflection_chain=inflection_chain(
                 inflected or token.surface, token.lemma, headword, language=self.language
             ),
