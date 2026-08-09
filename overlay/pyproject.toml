@@ -125,7 +125,6 @@ dev = [
     "pyrefly>=1.2.0",
     "ty>=0.0.61",
     "basedpyright>=1.39",
-    "py-spy>=0.4.2",
     # memray has no Windows support (native build needs libbacktrace/pkg-config); its memory-regression
     # test (`poe stress-memory`) is a Linux/macOS dev+CI concern, so keep it off win32 — else `uv sync`
     # on the Windows E2E leg fails building it from sdist.
@@ -135,6 +134,10 @@ dev = [
     "complexipy>=6.2.0",
     "ruff>=0.16",
 ]
+# Lean group for the `/tmp/venv-py-spy` profiling venv (the `*-pyspy` poe tasks below) — just the one
+# binary, so that venv doesn't drag in mypy/pyrefly/memray/… via `dev`. Was previously (wrongly, per a
+# stale comment) assumed to ride along on `--extra full`; py-spy is dev tooling, not a runtime extra.
+profiling = ["py-spy>=0.4.2"]
 docs = [
     "mkdocs-include-markdown-plugin>=6.2",
     "mkdocs-material>=9.5",
@@ -292,16 +295,16 @@ stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist te
 # `sudo` needs a real controlling tty that poe's subprocess doesn't give it ("a terminal is required to
 # read the password" even run from an interactive shell), so this task only syncs the env and PRINTS
 # the profiling command — copy-paste and run the printed line yourself, NOT through poe. `uv sync`
-# (not a hand-rolled `uv venv`/`uv pip install`) manages `/tmp/venv-py-spy`; `py-spy` is already a
-# `full`-extra dependency (pyproject `[project.optional-dependencies]`), so the sync also installs it
-# INTO `/tmp/venv-py-spy` — no Homebrew/uvx py-spy needed, one fewer moving part.
-stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/stress-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --stress --reps 3\"" }
+# (not a hand-rolled `uv venv`/`uv pip install`) manages `/tmp/venv-py-spy`; `py-spy` lives in the
+# dedicated `profiling` dependency group (pyproject `[dependency-groups]`), so `--group profiling` on
+# the sync also installs it INTO `/tmp/venv-py-spy` — no Homebrew/uvx py-spy needed, one fewer moving part.
+stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/stress-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --stress --reps 3\"" }
 # Same 3.13 crutch, but profiling the VOCAB render benchmark (examples/vocab.json — real-episode words,
 # parser out of the loop) so the sampled hot frames are pure lookup/decode/SC-walk/document-layout: the
 # windowed render tail this is meant to dissect. Prints the sudo line to run yourself.
 # `--subprocesses` on all py-spy tasks: harmless single-process, but never silently miss a worker (the
 # GIL-fallback process pool that `--vocab --parallel` uses — see vocab-pyspy-mp).
-vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
+vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
 # END-STATE profile of the fixed + banded + PARALLEL render. py-spy CANNOT introspect the free-threaded
 # 3.14t build ("Failed to find a python interpreter in the .data section" — the interpreter state isn't
 # where py-spy scans on nogil; benfred/py-spy#460), so profile on GIL 3.13 where pick_executor falls back
@@ -309,21 +312,21 @@ vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --pytho
 # shipped threads, but the per-render hot-spots (getmask2/getlength, banded block layout) are identical —
 # which is what this profile is for. (For a true free-threaded sample py-spy is out; a nogil-aware
 # sampler would be needed.)
-vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --parallel --reps 3\"" }
+vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --parallel --reps 3\"" }
 # TIMELINE: a realistic idle-paced session — real-time dwell between cues, prefetch/lookahead warming
 # ahead of hovers. Dwell-paced → the process is mostly SLEEPING, so on-CPU samples are sparse; the
 # bench's OWN report (misses / worker lead time / warm-vs-cold) is the primary SCHEDULING signal — does
 # prefetch keep ahead? py-spy just shows where the prefetch+render CPU goes. --rate 500 to catch enough
 # active samples; add `--timeline-dwell-s 0.05` for a dense CPU profile at the cost of realism.
-timeline-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/timeline-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --timeline --timeline-cues 120 --timeline-head-prefetch 1 --timeline-lookahead 2\"" }
+timeline-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/timeline-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --timeline --timeline-cues 120 --timeline-head-prefetch 1 --timeline-lookahead 2\"" }
 # TRACE REPLAY: the truthful stress profile — replays a real diagnostics report's event cadence with
 # idle COMPRESSED (--idle-scale), so the sampled CPU is the actual hover/scroll/cue mix a session
 # produced, not a synthetic guess. Auto-picks the newest report; squeeze --idle-scale down to starve
 # prefetch. Same 3.14t→3.13 crutch as the others; --rate 500 since idle-compressed still sleeps some.
-trace-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/trace-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --trace \\\"\\$(ls -t ~/.local/share/saitenka/reports/*.zip | head -1)\\\" --idle-scale 0.05 --trace-loops 5\"" }
+trace-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/trace-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --trace \\\"\\$(ls -t ~/.local/share/saitenka/reports/*.zip | head -1)\\\" --idle-scale 0.05 --trace-loops 5\"" }
 # --scroll-jank CPU profile: WHERE the scroll-frame tail goes — getmask2 in the scrolled-into block, or
 # the viewport re-composite? Synchronous single-process render (prefetch=False) → CPU-dense, no --idle.
-scroll-jank-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/scroll-jank-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --scroll-jank --reps 3\"" }
+scroll-jank-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/scroll-jank-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --scroll-jank --reps 3\"" }
 # Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
 # controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the

@@ -1956,7 +1956,6 @@ dev = [
     { name = "mypy" },
     { name = "playwright" },
     { name = "poethepoet" },
-    { name = "py-spy" },
     { name = "pyfakefs" },
     { name = "pyrefly" },
     { name = "pytest" },
@@ -1974,6 +1973,9 @@ docs = [
 ]
 grow = [
     { name = "blanket" },
+]
+profiling = [
+    { name = "py-spy" },
 ]
 test = [
     { name = "dirty-equals" },
@@ -2032,7 +2034,6 @@ dev = [
     { name = "mypy", specifier = ">=2.3.0" },
     { name = "playwright", specifier = ">=1.61.0" },
     { name = "poethepoet", specifier = ">=0.48.0" },
-    { name = "py-spy", specifier = ">=0.4.2" },
     { name = "pyfakefs", specifier = ">=6.2.0" },
     { name = "pyrefly", specifier = ">=1.2.0" },
     { name = "pytest", specifier = ">=8.0" },
@@ -2049,6 +2050,7 @@ docs = [
     { name = "mkdocs-material", specifier = ">=9.5" },
 ]
 grow = [{ name = "blanket", specifier = ">=1.0" }]
+profiling = [{ name = "py-spy", specifier = ">=0.4.2" }]
 test = [
     { name = "dirty-equals", specifier = ">=0.11" },
     { name = "hypothesis", specifier = ">=6.157.2" },
