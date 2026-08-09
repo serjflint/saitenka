@@ -28,9 +28,26 @@ from overlay.app.languages import MAIN_LANG, ReaderLanguages
 # accepted while obvious garbage ("", "!!", "1") is rejected loudly at config-load time.
 _LANG_CODE = re.compile(r"^[A-Za-z]{2,}(?:-[A-Za-z0-9]+)*$")
 
-# Default tokenizer BY LANGUAGE (user-overridable via the profile's ``tokenizer`` field). Only ``unidic``
-# exists today; the map is the seam a future ``latin`` strategy slots into without touching callers.
-_JP_CODES = frozenset({"ja", "jp", "jpn", "japanese"})
+# Alias → the canonical internal code the rest of the app already keys on (``MAIN_LANG``/``SECOND_LANG``
+# and each provider's ``languages`` set — ``subtitle_providers.py``). Canonicalising ONCE at resolution
+# is the SSOT that keeps tokenizer selection and provider gating in agreement: without it a profile
+# written ``language = "ja"`` (valid ISO-639-1) tokenizes as unidic yet silently fails the provider gate,
+# since providers key on the exact literal ``"jp"``.
+_CANONICAL = {
+    "ja": "jp",
+    "jp": "jp",
+    "jpn": "jp",
+    "japanese": "jp",
+    "en": "en",
+    "eng": "en",
+    "english": "en",
+}
+
+
+def canonical_language(code: str) -> str:
+    """Fold a language alias onto the canonical internal code (``ja``/``jpn`` → ``jp``); pass any other
+    code through unchanged. Applied to both main and second so every downstream literal agrees."""
+    return _CANONICAL.get(code.lower(), code)
 
 
 @dataclass(frozen=True)
@@ -52,8 +69,16 @@ def validate_language_code(code: str) -> str:
 
 
 def default_tokenizer_for(language: str) -> str:
-    """The tokenizer name a profile gets when it omits ``tokenizer`` — by language, user-overridable."""
-    return "unidic" if language.lower() in _JP_CODES else ProfileOptions().tokenizer
+    """The tokenizer a profile gets when it omits ``tokenizer`` (``language`` already canonicalised).
+    Only Japanese has a built-in default (``unidic``); any other language must name its tokenizer
+    explicitly — there is no safe guess, and silently falling back to the JP tokenizer would mis-segment
+    a non-JP script with no signal. Fail fast instead."""
+    if language == "jp":
+        return "unidic"
+    raise ValueError(
+        f"no default tokenizer for language {language!r}; set a profile tokenizer explicitly "
+        f'(e.g. tokenizer = "latin")'
+    )
 
 
 def _table(cfg: dict, key: str) -> dict:
@@ -73,8 +98,8 @@ def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
         if isinstance(named, dict):
             raw.update(named)  # named overlay on top of the default table
     defaults = ProfileOptions()
-    language = validate_language_code(str(raw.get("language", MAIN_LANG)))
-    second = validate_language_code(str(raw.get("second", defaults.second)))
+    language = canonical_language(validate_language_code(str(raw.get("language", MAIN_LANG))))
+    second = canonical_language(validate_language_code(str(raw.get("second", defaults.second))))
     tokenizer = str(raw.get("tokenizer") or default_tokenizer_for(language))
     return Profile(
         name=str(name) if name else "default",

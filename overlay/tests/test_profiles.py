@@ -114,7 +114,10 @@ def test_named_profile_selects_language_tokenizer_and_second():
 
 
 def test_profile_second_language_is_configurable():
-    cfg = {"active_profile": "fr", "profiles": {"fr": {"language": "fr", "second": "de"}}}
+    cfg = {
+        "active_profile": "fr",
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin", "second": "de"}},
+    }
     assert resolve_profile(cfg).langs.second == "de"
 
 
@@ -150,6 +153,30 @@ def test_tokenizer_defaults_by_language_when_omitted():
     assert resolve_profile({"profile": {"language": "jp"}}).tokenizer == "unidic"
 
 
+def test_ja_alias_canonicalizes_so_it_keeps_jp_tokenizer_and_providers(monkeypatch):
+    """P1 regression: a profile written ``language = "ja"`` (canonical ISO-639-1) must resolve to the
+    SAME internal ``jp`` code the tokenizer default AND the provider gate key on — never a unidic
+    tokenizer paired with silently-dropped jp providers."""
+    _isolated_provider_registry(monkeypatch)
+    register_provider(_stub_provider("jimaku", frozenset({"jp"})))
+    register_provider(_stub_provider("tsukihime", frozenset({"jp"})))
+
+    profile = resolve_profile({"profile": {"language": "ja"}})
+    assert profile.langs.main == "jp"  # 'ja' folded onto the internal 'jp'
+    assert profile.tokenizer == "unidic"
+    assert enabled_providers_for(profile.langs.main, (("jimaku", True), ("tsukihime", True))) == (
+        "jimaku",
+        "tsukihime",
+    )
+
+
+def test_non_jp_language_without_a_tokenizer_fails_fast():
+    """P2 regression: no silent unidic fallback for a non-JP language — omitting ``tokenizer`` raises a
+    clear error instead of mis-segmenting a non-JP script as Japanese."""
+    with pytest.raises(ValueError, match="no default tokenizer"):
+        resolve_profile({"profile": {"language": "fr"}})
+
+
 # --- the reader keys tokenizer + language identity off the active profile -------------------------
 
 
@@ -170,8 +197,10 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages():
 
 @pytest.mark.parametrize("code", ["fr", "de-CH", "zh-Hant", "xyz"])
 def test_open_and_unknown_language_codes_are_accepted(code):
-    """Codes are shape-validated, never whitelisted — an unknown-but-well-formed code resolves fine."""
-    assert resolve_profile({"profile": {"language": code}}).langs.main == code
+    """Codes are shape-validated, never whitelisted — an unknown-but-well-formed code resolves fine
+    (a tokenizer is named so resolution doesn't fail-fast on the missing default)."""
+    profile = resolve_profile({"profile": {"language": code, "tokenizer": "latin"}})
+    assert profile.langs.main == code  # non-JP codes pass through canonicalisation unchanged
 
 
 @pytest.mark.parametrize("bad", ["", "!!", "1", "a b"])
@@ -188,7 +217,7 @@ def test_active_profile_language_gates_providers(monkeypatch):
     register_provider(_stub_provider("universal", frozenset()))  # language-agnostic
 
     ja = resolve_profile({}).langs.main
-    fr = resolve_profile({"profile": {"language": "fr"}}).langs.main
+    fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}}).langs.main
     flags = (("jimaku", True), ("universal", True))
 
     assert enabled_providers_for(ja, flags) == ("jimaku", "universal")  # JP unchanged
