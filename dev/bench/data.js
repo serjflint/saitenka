@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786308029327,
+  "lastUpdate": 1786315353920,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2663,6 +2663,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.823,
             "range": "±6.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e86d1525b0886ccf2c1a7e88feebd83e8819c911",
+          "message": "Merge pull request #286 from serjflint/feat/french-profile-engine\n\nfeat: second-language (French) profile engine",
+          "timestamp": "2026-08-10T01:41:41+03:00",
+          "tree_id": "c786e360ae9e1de3c988cabe4bd094ab4e447289",
+          "url": "https://github.com/serjflint/saitenka/commit/e86d1525b0886ccf2c1a7e88feebd83e8819c911"
+        },
+        "date": 1786315352786,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.304,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.616,
+            "range": "±1.9%",
             "unit": "ms"
           }
         ]
