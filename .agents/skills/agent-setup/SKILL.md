@@ -27,7 +27,7 @@ There is **no shared cross-agent MCP config format** (Claude uses `.mcp.json`, C
 
 | Artifact | Claude Code | Codex |
 |---|---|---|
-| **Guidance** (`AGENTS.md`) | bridged via `CLAUDE.md` → `@AGENTS.md` — nothing to do | read natively in-project |
+| **Guidance** (`AGENTS.md`) | keep a local `./CLAUDE.md` (`@AGENTS.md`, git-ignored — same convention as the `.claude/skills` symlink below) | read natively in-project |
 | **Skills** (`.agents/skills/`) | `ln -s ../.agents/skills .claude/skills` (local, git-ignored) | discovered directly — nothing to do |
 | **Rules** (`.agents/rules/`) | `ln -s ../.agents/rules .claude/rules` (local, git-ignored) — a no-`paths:` rule auto-loads globally; the `InstructionsLoaded` hook logs what loads | read directly (path-scoped) |
 | **MCP servers** | `uv run .agents/skills/agent-setup/scripts/render.py --agent claude` → writes `./.mcp.json` (git-ignored) → **approve** the project servers on next launch | `uv run …/render.py --agent codex --out ~/.codex/config.toml` → merges a `# BEGIN/END saitenka managed MCP` block (idempotent). ⚠️ Codex may not auto-load repo-local `.codex/config.toml` — prefer `~/.codex/config.toml` |
