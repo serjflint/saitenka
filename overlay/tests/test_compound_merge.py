@@ -10,7 +10,6 @@ imported dictionary at the bottom.
 from __future__ import annotations
 
 import dicthelp
-import overlay.app.controller as C
 from overlay.app.controller import Reader
 from overlay.app.scoring import Palette, Scorer
 from overlay.app.subtitle_render import NullRenderer
@@ -212,7 +211,7 @@ def test_controller_tokens_carry_the_merged_compound(monkeypatch):
     reader.osd = (1920, 1080)
     monkeypatch.setattr(reader, "renderer", NullRenderer())
     # decouple from the live unidic split: the cue tokenises to 応急 + 処置
-    monkeypatch.setattr(C, "tokenize", lambda _ln: [_at("応急", 0), _at("処置", 2)])
+    monkeypatch.setattr(reader.tokenizer, "tokenize", lambda _ln: [_at("応急", 0), _at("処置", 2)])
     reader.set_subtitle("応急処置")
     assert [t.surface for t in reader.tokens] == ["応急処置"]  # ONE hover/hit-test/mine unit
     assert reader.tokens[0].lemma == "応急処置"
@@ -222,7 +221,7 @@ def test_controller_leaves_fragments_when_dict_set_has_no_probe(monkeypatch):
     reader = Reader(FakeIPC(), dict_set=object())  # no terms_exist → merge is skipped
     reader.osd = (1920, 1080)
     monkeypatch.setattr(reader, "renderer", NullRenderer())
-    monkeypatch.setattr(C, "tokenize", lambda _ln: [_at("応急", 0), _at("処置", 2)])
+    monkeypatch.setattr(reader.tokenizer, "tokenize", lambda _ln: [_at("応急", 0), _at("処置", 2)])
     reader.set_subtitle("応急処置")
     assert [t.surface for t in reader.tokens] == ["応急", "処置"]
 
