@@ -219,12 +219,16 @@ def _play_cmd(path: str | Path) -> list[str]:
         return ["ffplay", "-autoexit", "-nodisp", "-loglevel", "quiet", str(path)]
 
 
-def play_audio(path: str | Path) -> None:
-    """Play a clip so the mined audio can be verified — non-blocking, no window."""
+def play_audio(path: str | Path) -> subprocess.Popen | None:
+    """Play a clip so the mined audio can be verified — non-blocking, no window. Returns the player
+    handle so a caller can stop it on preview dismiss (the clip outlives the panel otherwise); ``None``
+    if the player couldn't launch."""
     try:
-        subprocess.Popen(_play_cmd(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return subprocess.Popen(
+            _play_cmd(path), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     except OSError:
-        pass
+        return None
 
 
 def _speak_cmd(text: str, voice: str = "Kyoko") -> list[str]:
