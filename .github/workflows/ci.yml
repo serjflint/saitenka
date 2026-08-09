@@ -2,8 +2,10 @@
 # emulate per-OS behaviour in-process), so a Win/mac runner would re-run identical mocked paths for no
 # extra signal. Real per-OS execution lives in e2e.yml. Public repo ⇒ GitHub-hosted runners are free.
 #
-# Two jobs: `gate` runs the full 14-task gate once on the pinned interpreter (3.14t); `tests` re-runs
-# just the suite across the interpreter matrix (lint/types/arch are version-insensitive — no point ×5).
+# Core jobs: `gate` runs the full 14-task gate once on the pinned interpreter (3.14t); `tests` re-runs
+# just the suite across the interpreter matrix (lint/types/arch are version-insensitive — no point ×5),
+# with a GIL-ON control on the free-threaded (`…t`) legs; `tests-ft` runs the no-GIL free-threaded pass
+# for those same legs in parallel, instead of sequentially after `tests`, so wall-time is max() not sum().
 name: CI
 
 on:
@@ -166,14 +168,54 @@ jobs:
       # --ignore the memray memory test: it's slow (never runs here) but pytest still COLLECTS it, and
       # its `limit_memory` marker comes from pytest-memray, which the lean test group omits → strict
       # markers would error at collection. The gate (full dev) collects and runs it normally.
+      #
+      # PYTHON_GIL=1 makes this a genuine GIL-ON control on the free-threaded (`…t`) legs — a real
+      # baseline instead of a redundant no-GIL subset of the `tests-ft` job below. It's a no-op on the
+      # non-`t` legs (GIL is always on there), so setting it unconditionally is harmless.
       - name: Tests
         working-directory: overlay
+        env:
+          PYTHON_GIL: "1"
         run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or integration or requires_display or e2e)"
 
-      # test-ft (PYTHON_GIL=0) is only meaningful on a free-threaded build; on a GIL interpreter the
-      # env var is a no-op, so skip it there rather than run a misleadingly-labelled "FT" pass.
+  tests-ft:
+    name: tests free-threaded (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14t"]
+        include:
+          - python: "3.15t"
+            experimental: true
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install MeCab (fugashi build dep)
+        run: sudo apt-get update && sudo apt-get install -y libmecab-dev
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          working-directory: overlay
+          # Distinct suffix from the `tests` job's `${{ matrix.python }}` key: this job runs concurrently
+          # with `tests` for the same interpreter (e.g. both have a "3.14t" leg), so sharing a key would
+          # reintroduce the concurrent-matrix cache race the per-leg suffix was added to stop.
+          cache-suffix: ${{ matrix.python }}-ft
+
+      - name: Sync (test group only)
+        working-directory: overlay
+        run: |
+          uv python install
+          uv sync --locked --extra full --no-default-groups --group test
+
+      # The free-threaded (no-GIL) signal, run in parallel with the `tests` job's GIL-ON control instead
+      # of sequentially after it — same command as before the split, just its own job.
       - name: Tests (free-threaded)
-        if: endsWith(matrix.python, 't')
         working-directory: overlay
         env:
           PYTHON_GIL: "0"
