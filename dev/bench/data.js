@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786232789478,
+  "lastUpdate": 1786262939774,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1799,6 +1799,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.774,
             "range": "±4.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ee80b76085f987206db4c98176715368880f0c7c",
+          "message": "Merge pull request #256 from serjflint/test/hardening-observability-registry\n\ntest: observability + registry hardening (otel log-spam, session-mode, doctor status set, mine addability)",
+          "timestamp": "2026-08-09T11:08:24+03:00",
+          "tree_id": "57fe6b8c15d4859dad3ca1eff6952f3e708628ad",
+          "url": "https://github.com/serjflint/saitenka/commit/ee80b76085f987206db4c98176715368880f0c7c"
+        },
+        "date": 1786262938537,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.079,
+            "range": "±1.0%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.816,
+            "range": "±10.3%",
             "unit": "ms"
           }
         ]
