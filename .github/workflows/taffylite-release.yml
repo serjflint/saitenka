@@ -1,0 +1,193 @@
+# Publishes the OPTIONAL `taffylite` Rust extension (the pyo3/maturin binding behind the
+# `layout-engine` extra, #146/#231) to PyPI — independently of `release.yml`, which only ships the
+# pure-Python `saitenka`/`saitenka-deinflect` wheels. taffylite is a pyo3 extension built WITHOUT
+# abi3 (deliberate — real free-threaded cp314t/cp315t wheels that load with the GIL off, see
+# `taffylite/Cargo.toml`), so it needs a platform × interpreter wheel matrix instead of one pure wheel.
+#
+# Own tag namespace `taffylite-v*` (distinct from saitenka's `vX.Y.Z`) so the two packages version
+# independently. Same build-once-then-publish split and Trusted Publishing (OIDC, no tokens) posture
+# as `release.yml`; see that file's header for the general pattern this mirrors.
+#
+# ONE-TIME SETUP (cannot live in code, already done by the maintainer) — a *pending* Trusted Publisher
+# is registered for project `taffylite` on BOTH pypi.org (env `pypi`) and test.pypi.org (env
+# `testpypi`), pointing at repo `serjflint/saitenka`, workflow `taffylite-release.yml`. The publisher
+# is keyed to this exact filename — do not rename this workflow without re-registering both.
+#
+# Two publish paths: workflow_dispatch does a TestPyPI dry-run of the current commit; pushing a
+# `taffylite-vX.Y.Z` tag does the real PyPI publish. Neither creates a GitHub Release — taffylite is an
+# internal optional extra, not an end-user-facing product; PyPI is the only distribution channel.
+name: taffylite release
+
+on:
+  push:
+    tags: ["taffylite-v*"]
+  workflow_dispatch: # manual TestPyPI dry-run of the current commit
+
+permissions:
+  contents: read
+
+jobs:
+  # Linux: manylinux containers ship every CPython interpreter (incl. free-threaded builds) preinstalled
+  # under /opt/python, so one `--find-interpreter` maturin call per arch builds the whole cp313/cp314/
+  # cp314t set in a single job. cp315t is still prerelease (see ci.yml) — `--find-interpreter` simply
+  # skips interpreters it can't find, so this needs no special-casing: the wheel just isn't produced
+  # until the container ships 3.15.
+  linux:
+    name: wheels (linux ${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: taffylite
+          target: ${{ matrix.target }}
+          manylinux: 2_28
+          args: --release --locked --out dist --compatibility pypi --find-interpreter
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-linux-${{ matrix.arch }}
+          path: taffylite/dist
+
+  # macOS: not containerized, so interpreters come from `actions/setup-python` on the host (unlike
+  # Linux, no co-install issue here — only Windows needs one interpreter per job, see below).
+  macos:
+    name: wheels (macos ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14 # arm64
+            arch: arm64
+            target: aarch64-apple-darwin
+          - runner: macos-13 # x86_64 (macos-latest/14+ dropped Intel runners)
+            arch: x86_64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: |
+            3.13
+            3.14
+            3.14t
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: taffylite
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist --compatibility pypi --find-interpreter
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-macos-${{ matrix.arch }}
+          path: taffylite/dist
+
+  # Windows: co-installing the regular and free-threaded interpreter of the same minor version in one
+  # `setup-python` step can fail (python/cpython#127294, PyO3/maturin-action#313) — one interpreter per
+  # job sidesteps it, per maturin-action's own README guidance.
+  windows:
+    name: wheels (windows ${{ matrix.python-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14", "3.14t"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: taffylite
+          target: x86_64-pc-windows-msvc
+          args: --release --locked --out dist --compatibility pypi --find-interpreter
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-windows-${{ matrix.python-version }}
+          path: taffylite/dist
+
+  sdist:
+    name: sdist (Corresponding Source / fallback build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: taffylite
+          command: sdist
+          args: --out dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-sdist
+          path: taffylite/dist
+
+  testpypi:
+    name: Publish to TestPyPI (dry-run)
+    needs: [linux, macos, windows, sdist]
+    if: github.event_name == 'workflow_dispatch' # manual only
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/taffylite
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: wheels-*
+          path: dist-pypi
+          merge-multiple: true
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist-pypi/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    name: Publish to PyPI
+    needs: [linux, macos, windows, sdist]
+    if: startsWith(github.ref, 'refs/tags/taffylite-v') # tag only
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/taffylite
+    permissions:
+      id-token: write # mandatory for OIDC Trusted Publishing (no API token stored)
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: wheels-*
+          path: dist-pypi
+          merge-multiple: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist-pypi/
+          skip-existing: true
