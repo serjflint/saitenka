@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -245,6 +246,29 @@ class Miner:
             self.r._toast("audio clip failed — image only", "warn")
 
     # --- mining -------------------------------------------------------------------------------
+    def _persist_mined(self, note_id: int, card, video) -> None:
+        """Record the mined note ↔ episode/cue link in the durable mined-card store (#253), so the
+        sidebar Mine tab can list this episode's cards offline. Best-effort: a store failure (or a
+        non-int ``addNote`` result / no active cue) must never break the mine."""
+        r = self.r
+        if not isinstance(note_id, int) or not video:
+            return
+        start, end = r._get("sub-start"), r._get("sub-end")
+        try:
+            from overlay.app.mined_store import ensure_store
+
+            ensure_store(r).record(
+                note_id=note_id,
+                video_path=str(video),
+                cue_start=float(start) if start is not None else 0.0,
+                cue_end=float(end) if end is not None else 0.0,
+                expression=card.expression,
+                reading=card.reading,
+                deck=r.mine_cfg.deck,
+            )
+        except (OSError, sqlite3.Error, ValueError):
+            log.debug("mined-card store write failed", exc_info=True)
+
     def mine_current(self) -> None:
         r = self.r
         if not r.anki or not r.mine_cfg:
@@ -309,7 +333,9 @@ class Miner:
             if not force and not r.anki.can_add(note):
                 r._toast(f"can't add {card.expression}", "err")
                 return
-            r.anki.add_note(note)
+            # --- mine-time add_note seam (shared by #253 note-id retention + #93 word-audio) -------
+            note_id = r.anki.add_note(note)
+            self._persist_mined(note_id, card, video)
             if r._session_recorder is not None:
                 r._session_recorder.record_mined()
             r._mark_mined(card.expression)
