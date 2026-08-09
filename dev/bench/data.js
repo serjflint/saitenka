@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786315909949,
+  "lastUpdate": 1786317027681,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2735,6 +2735,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.653,
             "range": "±1.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1171d922b7f4fa465dfe5717961486849b97cdc5",
+          "message": "Merge pull request #289 from serjflint/release/2.4.0\n\nchore(overlay): release 2.4.0",
+          "timestamp": "2026-08-10T02:09:37+03:00",
+          "tree_id": "38a22b14cc5c6d51314b721f5d8258b0583100e4",
+          "url": "https://github.com/serjflint/saitenka/commit/1171d922b7f4fa465dfe5717961486849b97cdc5"
+        },
+        "date": 1786317027109,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.295,
+            "range": "±1.0%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.874,
+            "range": "±18.1%",
             "unit": "ms"
           }
         ]
