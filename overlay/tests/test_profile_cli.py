@@ -11,12 +11,20 @@ import pytest
 from overlay.app.profile_cli import (
     add_proposal,
     build_profile_table,
+    profile_app,
     profile_names,
     remove_paths,
     render_list,
     render_show,
     use_proposal,
 )
+
+
+def test_profile_app_reads_no_runtime_config():
+    # Regression: the profile sub-app must NOT inherit the root app's Toml config layer, or its
+    # --dicts/--freq/--pitch params get pre-filled from the top-level overlay.toml — the bug where a
+    # French profile silently borrowed the Japanese dicts / NHK pitch as param defaults.
+    assert profile_app.config == ()
 
 
 def test_build_table_always_scopes_all_lists_empty_when_unspecified():

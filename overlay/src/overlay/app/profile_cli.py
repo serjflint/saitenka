@@ -112,6 +112,11 @@ def render_show(cfg: dict, name: str | None = None) -> list[str]:
 profile_app = cyclopts.App(
     name="profile",
     help="Manage reading profiles (the [profile] default and named [profiles.<name>] overlays).",
+    # No config layer: this is a config EDITOR, so its --dicts/--freq/--pitch params must NOT be
+    # pre-filled from the runtime overlay.toml (the root app's Toml config does that for the reader
+    # commands). Without this, `profile add` inherits the top-level dicts/freq/pitch as param defaults —
+    # exactly the "a French profile silently borrows the Japanese dicts / NHK pitch" bug.
+    config=(),
 )
 
 _CSV = (
