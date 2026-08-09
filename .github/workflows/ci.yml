@@ -145,6 +145,13 @@ jobs:
         with:
           enable-cache: true
           working-directory: overlay
+          # Without a per-leg suffix all 5 matrix legs share one cache key (derived only from
+          # pyproject.toml/uv.lock) and race to save it on this concurrent matrix — whichever leg
+          # finishes first wins, so the expensive 3.15/3.15t numpy-from-sdist build (no prebuilt wheel
+          # yet for the prerelease interpreter) never persists and rebuilds on every run instead of once
+          # per lockfile change. setup-uv's default `prune-cache: true` already keeps such source-built
+          # wheels while dropping cheap-to-redownload prebuilt ones, so no extra prune step is needed.
+          cache-suffix: ${{ matrix.python }}
 
       # Only the lean `test` group — not the full dev toolchain — so a new-interpreter leg (3.15t) isn't
       # blocked building native dev tools it never runs (memray/py-spy/…). The gate job exercises the
