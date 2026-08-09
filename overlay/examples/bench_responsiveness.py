@@ -224,7 +224,7 @@ def synth_corpus(n: int = 60) -> list[tuple[str, Entry]]:
 
 
 def _content_indices(reader) -> list[int]:
-    from overlay.app.controller import SKIP_POS
+    from overlay.app.tokenize import SKIP_POS
 
     return [
         i
@@ -1354,7 +1354,7 @@ def run_timeline(
     reader._sub_index = SubIndex(cues)
     reader.start_prefetch()
 
-    from overlay.app.controller import SKIP_POS
+    from overlay.app.tokenize import SKIP_POS
 
     def _content_lemmas(text: str) -> list[str]:
         return [
