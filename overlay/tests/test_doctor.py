@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import tomllib
 
+import pytest
 from overlay.app import doctor as doc
 from overlay.app import init_wizard as wiz
 
@@ -803,6 +804,35 @@ def test_recent_errors_collapses_traceback_to_one_line(tmp_path, monkeypatch):
     assert c.status == "warn"
     assert "Traceback" not in c.detail
     assert "refresh failed — URLError: [Errno 61] Connection refused" in c.detail
+
+
+def test_run_checks_every_produced_status_is_valid_and_named(monkeypatch):
+    """Exhaustive over the *produced* report (so a future check is covered free): every Check carries a
+    status from the closed set and a non-empty name. A check that returned a mistyped status (say a
+    stray 'warn ' or 'error') would slip past the per-check unit tests but fail here — it matters because ``exit_code`` keys
+    off ``counts['fail']``, so an out-of-set status silently erodes the pass/fail signal."""
+    monkeypatch.setattr(doc, "_anki_call", lambda *_a, **_k: [])  # keep it off the network
+    report = doc.run_checks()
+    assert report.checks  # the driver actually produced a report, not an empty list
+    for c in report.checks:
+        assert c.status in doc.VALID_STATUSES, (c.name, c.status)
+        assert c.name  # every line is attributable in a bug report
+
+
+def test_report_counts_buckets_are_exactly_the_valid_statuses():
+    """Lockstep: the tally seeds from VALID_STATUSES, so the bucket set IS the closed status set. If a
+    fourth status is ever added, this fails until ``counts`` (and ``exit_code``) learn about it —
+    instead of the old ``.get(status, 0)`` that silently minted a phantom bucket."""
+    assert set(doc.Report([]).counts) == set(doc.VALID_STATUSES)
+
+
+def test_out_of_set_status_fails_loud_rather_than_eroding_exit_code():
+    """Negative control proving the closed set bites: a status outside VALID_STATUSES raises instead of
+    silently landing in a phantom bucket (the old behaviour let a mistyped 'fail' read as healthy). The
+    ``type: ignore`` is the point — only a bypass of the type gate can reach here at runtime."""
+    bogus = doc.Report([doc.Check("x", "borked", "mistyped status")])  # type: ignore[arg-type]
+    with pytest.raises(KeyError):
+        _ = bogus.counts
 
 
 def test_run_all_checks_and_json():

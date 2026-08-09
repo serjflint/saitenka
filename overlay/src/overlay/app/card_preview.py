@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from PIL import Image, ImageDraw
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
     from overlay.app.tokenize import Token
@@ -75,6 +76,7 @@ class PreviewState:
 
     last_jpg: Path | None = None  # the mpv still (mining fallback image); drives the preview
     last_audio: Path | str | None = None  # the mined cue clip, replayed by the ▶ button
+    audio_proc: subprocess.Popen | None = None  # the ▶ clip's live player, killed on every dismiss
     last_preview: PreviewData | None = None  # the currently-composed preview (None ⇒ hidden)
     zoom: bool = False  # the screenshot is enlarged (toggled by clicking it)
     dup_tok: Token | None = None  # token behind an "exists" preview, for "add anyway"
