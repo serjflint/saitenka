@@ -353,6 +353,7 @@ def build_reader_deps(
     known_words: str = "",
     on_anki_unreachable=None,
     on_known_words_error=None,
+    language: str | None = None,
 ):
     """Return ``(scorer, anki, mine_conf, dict_set)`` from ``cfg``. ``scorer`` + ``dict_set`` power
     coloring/underlines/pills/tooltips; ``anki`` + ``mine_conf`` power mining.
@@ -373,9 +374,11 @@ def build_reader_deps(
     dict_titles = list(cfg.get("dicts") or [])
     freq_titles = list(cfg.get("freq") or [])
     pitch_titles = list(cfg.get("pitch") or [])
-    language = resolve_profile(
-        cfg
-    ).langs.main  # routes the deinflection chain to the right rule set
+    # `language` is passed explicitly by the run path (its effective_cfg drops the profile table, so
+    # resolve_profile here would wrongly return the JP default); attach passes the full cfg and lets it
+    # resolve. Either way it routes the deinflection chain to the right rule set.
+    if language is None:
+        language = resolve_profile(cfg).langs.main
     known_cfg = cfg.get("known")
     fallback_words = [w for w in known_words.split(",") if w]
 

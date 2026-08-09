@@ -101,6 +101,10 @@ class RunDepsRequest:
     dict_titles: list[str]
     freq_titles: list[str]
     pitch_titles: list[str]
+    # Active profile's main language — the run path rebuilds a minimal effective_cfg without the profile
+    # table, so the language must be threaded explicitly or the dict set defaults to JP and the
+    # second-language deinflection lookup silently no-ops (#254).
+    language: str = "jp"
 
 
 @dataclass(frozen=True)
@@ -820,6 +824,7 @@ def _build_run_deps(req: RunDepsRequest):
         known_words=req.known,
         on_anki_unreachable=_on_anki_unreachable,
         on_known_words_error=_on_known_words_error,
+        language=req.language,
     )
 
     if not req.mine:
@@ -1037,6 +1042,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
                 dict_titles=dict_titles,
                 freq_titles=freq_titles,
                 pitch_titles=pitch_titles,
+                language=active_profile.langs.main,
             )
         )
 
