@@ -1,19 +1,24 @@
-# Tag-triggered release: build ONCE, then publish to two places from the same artifacts —
+# Tag-triggered release of the Apache-2.0 `saitenka` core: build ONCE, then publish to two places from
+# the same artifacts —
 #   1. a notes-only GitHub Release (changelog section for the tag; no binary assets — install is via PyPI)
-#   2. PyPI, the `saitenka` + GPL `saitenka-deinflect` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
+#   2. PyPI, the `saitenka` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
 # The build↔publish split is a supply-chain best practice: the publish jobs do nothing but upload the
 # already-built artifacts, so nothing can tamper with them in between.
+#
+# The GPL `saitenka-deinflect` add-on is published SEPARATELY by `deinflect-release.yml` (`deinflect-v*`
+# tag) so it versions on its own line (0.x) — `saitenka`'s dep `saitenka-deinflect>=X` resolves it from
+# PyPI. Publish a new deinflect BEFORE the saitenka release that bumps its floor.
 #
 # IMPORTANT — supersedes `poe release-publish`'s `gh release create`: pushing a v* tag is now the sole
 # release trigger. Flow: `poe release-prepare` (bump/changelog/gate/build/commit) → merge PR →
 # `git push origin vX.Y.Z`. Do NOT also run `release-publish --publish`, or the Release double-creates.
 #
 # ONE-TIME SETUP (cannot live in code) — Trusted Publishing needs NO token/password and is unaffected
-# by your account 2FA; register a publisher for BOTH projects on BOTH sites (same repo + workflow;
-# env `pypi` on pypi.org, env `testpypi` on test.pypi.org). Four registrations total:
-#   • project `saitenka`            → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
-#   • project `saitenka-deinflect`  → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
-# For the very first upload on each, create a "pending publisher" before the project exists.
+# by your account 2FA; register a publisher for project `saitenka` on BOTH sites (same repo + workflow;
+# env `pypi` on pypi.org, env `testpypi` on test.pypi.org):
+#   • project `saitenka`  → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
+# For the very first upload, create a "pending publisher" before the project exists. (deinflect's
+# publisher is registered against `deinflect-release.yml` — see that file's header.)
 #
 # Two publish paths: a manual run (workflow_dispatch) does a TestPyPI dry-run; pushing a v* tag does the
 # real GitHub Release + PyPI publish.
@@ -50,14 +55,10 @@ jobs:
           uv python install
           uv sync --locked --extra full
 
-      # PyPI dists: BOTH packages into one dir — the Apache-2.0 `saitenka` and the GPL-3.0
-      # `saitenka-deinflect` add-on (so `saitenka[deinflect]`/`[full]` resolve from PyPI). Each has its
-      # own trusted publisher (same repo/workflow/env), so one publish call authorizes both per-file.
-      # The GPL sdist is the Corresponding Source; the wheel is a pure-Python convenience alongside it.
+      # PyPI dists: the Apache-2.0 `saitenka` core only. The GPL `saitenka-deinflect` add-on ships from
+      # `deinflect-release.yml` on its own `deinflect-v*` tag (independent versioning).
       - name: Build PyPI dists
-        run: |
-          uv build overlay --out-dir dist-pypi
-          uv build deinflect --out-dir dist-pypi
+        run: uv build overlay --out-dir dist-pypi
 
       - name: Release notes (changelog section for this tag)
         run: |
@@ -115,8 +116,7 @@ jobs:
         with:
           packages-dir: dist-pypi/
           repository-url: https://test.pypi.org/legacy/
-          # deinflect changes rarely, so its version is often already uploaded — skip it instead of
-          # failing the whole publish when only `saitenka` bumped.
+          # Idempotent re-run guard: a re-triggered tag shouldn't 400 on an already-uploaded `saitenka`.
           skip-existing: true
 
   pypi:
@@ -137,6 +137,5 @@ jobs:
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           packages-dir: dist-pypi/
-          # deinflect changes rarely, so its version is often already uploaded — skip it instead of
-          # failing the whole publish when only `saitenka` bumped.
+          # Idempotent re-run guard: a re-triggered tag shouldn't 400 on an already-uploaded `saitenka`.
           skip-existing: true

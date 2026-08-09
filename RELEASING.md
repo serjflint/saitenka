@@ -88,12 +88,30 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
    Tag the **merged** commit by SHA (`gh pr view <n> --json mergeCommit`), so the tag points at the
    exact shipped commit and this works from a worktree (`main` is checked out elsewhere and can't be
    re-checked-out). `release.yml` then builds once and publishes the GitHub Release **and** PyPI (the
-   Apache-2.0 core + the GPL `deinflect` add-on as separate packages, Trusted Publishing / OIDC). No
-   `gh release create`, no `uv publish` — running either duplicates what CI already did.
+   Apache-2.0 `saitenka` core, Trusted Publishing / OIDC). No `gh release create`, no `uv publish` —
+   running either duplicates what CI already did. The GPL `deinflect` add-on ships separately (below).
 8. **Watch it go green:** `gh run watch --workflow=release.yml`. If it fails mid-way, fix forward and
    re-run the job (or, CI-down, fall back to `release.py publish` — the only time it's the right tool).
 9. **Post-release:** confirm the Release + both PyPI packages are live, `## [Unreleased]` is empty on
    top, the tag matches `pyproject.toml`, and `uv tool install "saitenka[full]"` pulls the new version.
+
+## deinflect (GPL add-on)
+
+`saitenka-deinflect` (the Yomitan-derived deinflection add-on behind the `deinflect`/`full` extras)
+versions and publishes **independently** via `.github/workflows/deinflect-release.yml`, so it can ship
+on its own 0.x line without cutting a `saitenka` release:
+
+- **Tag namespace:** `deinflect-vX.Y.Z` (own `deinflect/pyproject.toml` `version`, not saitenka's
+  `vX.Y.Z`). Bump the version, relock (`cd deinflect && uv lock`), merge, then tag the merged commit by
+  SHA and push — the sole trigger. Pure-Python, so one sdist + one `py3-none-any` wheel (no matrix).
+- **Ordering:** publish a new deinflect **before** the `saitenka` release that raises its
+  `saitenka-deinflect>=X` floor, so the core's dep resolves against it on PyPI.
+- **Publish:** Trusted Publishing (OIDC) to PyPI project `saitenka-deinflect`; `workflow_dispatch` does a
+  TestPyPI dry-run. No GitHub Release (add-on, PyPI-only — like taffylite).
+- **One-time PyPI setup:** register a Trusted Publisher for `saitenka-deinflect` on both pypi.org and
+  test.pypi.org, repo `serjflint/saitenka`, workflow **`deinflect-release.yml`** (the publisher is keyed
+  to the workflow filename — the old `release.yml` registration no longer applies now that release.yml
+  doesn't build deinflect).
 
 ## taffylite (optional Rust layout engine)
 
