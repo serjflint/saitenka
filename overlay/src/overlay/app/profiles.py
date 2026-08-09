@@ -68,13 +68,24 @@ def validate_language_code(code: str) -> str:
     return code
 
 
+# Latin-script language codes (ISO-639-1, region subtags folded off) that segment with the ``latin``
+# strategy — Yomitan's own European-language set. Membership is by *script*, not a promise the
+# deinflector has rules for every one (only fr ships transforms today); an unlisted language still must
+# name its tokenizer explicitly.
+_LATIN_SCRIPT = frozenset(
+    {"fr", "es", "de", "it", "pt", "nl", "ca", "ro", "sv", "da", "no", "nb", "nn", "fi", "pl"}
+)
+
+
 def default_tokenizer_for(language: str) -> str:
     """The tokenizer a profile gets when it omits ``tokenizer`` (``language`` already canonicalised).
-    Only Japanese has a built-in default (``unidic``); any other language must name its tokenizer
-    explicitly — there is no safe guess, and silently falling back to the JP tokenizer would mis-segment
-    a non-JP script with no signal. Fail fast instead."""
+    Japanese → ``unidic``; a known Latin-script language → ``latin`` (Yomitan's whitespace model). Any
+    other language must name its tokenizer explicitly — there is no safe guess, and silently falling back
+    would mis-segment an unknown script with no signal. Fail fast instead."""
     if language == "jp":
         return "unidic"
+    if language.split("-", 1)[0].lower() in _LATIN_SCRIPT:
+        return "latin"
     raise ValueError(
         f"no default tokenizer for language {language!r}; set a profile tokenizer explicitly "
         f'(e.g. tokenizer = "latin")'

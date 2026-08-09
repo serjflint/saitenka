@@ -98,3 +98,14 @@ def get_tokenizer(name: str = DEFAULT_TOKENIZER) -> Tokenizer:
     except KeyError:
         raise ValueError(f"unknown tokenizer {name!r}; registered: {sorted(_FACTORIES)}") from None
     return factory()
+
+
+def _register_builtin_latin() -> None:
+    """Register the Latin-script strategy (#254 W1) at import time. The ``tokenizer_latin`` import only
+    pulls in the ``Token`` dataclass (already loaded via ``_jp``), not fugashi — so this stays cheap."""
+    from overlay.app.tokenizer_latin import LatinTokenizer
+
+    _FACTORIES.setdefault(LatinTokenizer.name, LatinTokenizer)
+
+
+_register_builtin_latin()
