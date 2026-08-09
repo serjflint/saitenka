@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786297102166,
+  "lastUpdate": 1786308029327,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2627,6 +2627,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.869,
             "range": "±10.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3222e67e1fcf96405b033e6cfaec390134b32dd4",
+          "message": "Merge pull request #284 from serjflint/feat/two-engine-phase-a\n\nTwo-engine layout: harden the differential, extend the taffy seam to 2-D",
+          "timestamp": "2026-08-09T23:39:58+03:00",
+          "tree_id": "ecf2be0ddb99a49f3533bb1c16aec60a9c2a4f0d",
+          "url": "https://github.com/serjflint/saitenka/commit/3222e67e1fcf96405b033e6cfaec390134b32dd4"
+        },
+        "date": 1786308028310,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.285,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.823,
+            "range": "±6.9%",
             "unit": "ms"
           }
         ]
