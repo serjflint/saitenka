@@ -232,14 +232,17 @@ def covers(file: str, ch: str) -> bool:
 # vendored-only path.
 def _system_font_dirs() -> tuple[Path, ...]:
     home = Path.home()
-    if sys.platform == "darwin":
+    plat = str(
+        sys.platform
+    )  # via a local so the type-checker (pinned platform) keeps all branches live
+    if plat == "darwin":
         return (
             Path("/System/Library/Fonts"),
             Path("/System/Library/Fonts/Supplemental"),
             Path("/Library/Fonts"),
             home / "Library/Fonts",
         )
-    if sys.platform.startswith("win"):
+    if plat.startswith("win"):
         return (Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",)
     return (
         Path("/usr/share/fonts"),
