@@ -32,7 +32,7 @@ try:
     from saitenka_deinflect import inflection_chain  # noqa: TID251  # GPL chokepoint importer
 except ImportError:  # pragma: no cover — exercised via the deinflect-absent path
 
-    def inflection_chain(surface: str, *targets: str) -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)
+    def inflection_chain(surface: str, *targets: str, language: str = "ja") -> list[str]:  # noqa: ARG001  # must match saitenka_deinflect.inflection_chain's signature (structural compat check between the two try/except branches)
         return []
 
 
@@ -425,6 +425,9 @@ class DictionarySet:
     dicts: list[Dictionary]
     freqs: list[FreqSource] = field(default_factory=list)
     pitches: list[PitchSource] = field(default_factory=list)
+    # Active profile's main language (#254) — routes the deinflection chain to the right rule set.
+    # Yomitan's ``jp`` default keeps every existing JP path byte-identical.
+    language: str = "jp"
 
     @classmethod
     def from_rows(
@@ -433,12 +436,15 @@ class DictionarySet:
         dict_rows: Sequence[DictRow],
         freq_rows: Sequence[DictRow] = (),
         pitch_rows: Sequence[DictRow] = (),
+        *,
+        language: str = "jp",
     ) -> DictionarySet:
         """Build an ordered dictionary set from already-resolved :class:`DictRow`s of the given DB."""
         return cls(
             dicts=[Dictionary(db, r) for r in dict_rows],
             freqs=[FreqSource(db, r) for r in freq_rows],
             pitches=[PitchSource(db, r) for r in pitch_rows],
+            language=language,
         )
 
     @classmethod
@@ -450,6 +456,7 @@ class DictionarySet:
         pitch_titles: Sequence[str] = (),
         *,
         strict: bool = False,
+        language: str = "jp",
     ) -> DictionarySet:
         """Resolve config **titles** to imported dictionaries of ``db`` and build the set, preserving
         order. Missing titles are skipped; with ``strict`` a single missing title raises
@@ -465,7 +472,7 @@ class DictionarySet:
                 + ". "
                 + _MISSING_HINT
             )
-        return cls.from_rows(db, d_rows, f_rows, p_rows)
+        return cls.from_rows(db, d_rows, f_rows, p_rows, language=language)
 
     def has_term(self, *forms: str | None) -> bool:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""
@@ -890,7 +897,9 @@ class DictionarySet:
             tags=[],
             freqs=self._freq_pills(forms, reading),
             defs=defs or [Definition("—", ["（辞書に見つかりませんでした）"])],
-            inflection_chain=inflection_chain(inflected or token.surface, token.lemma, headword),
+            inflection_chain=inflection_chain(
+                inflected or token.surface, token.lemma, headword, language=self.language
+            ),
             reading=reading or token.reading,
             pitches=pitches,
             groups=groups,

@@ -2049,7 +2049,7 @@ requires-dist = [
     { name = "saitenka", extras = ["deinflect"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
-    { name = "saitenka-deinflect", marker = "extra == 'deinflect'", specifier = ">=0.1.0" },
+    { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "taffylite", marker = "extra == 'layout-engine'", editable = "../taffylite" },
@@ -2101,12 +2101,13 @@ test = [
 
 [[package]]
 name = "saitenka-deinflect"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a2/09/c875558e095c127d19ea476fbf09dc0dcb59d08bb0764b45d8819c4806e5/saitenka_deinflect-0.1.0.tar.gz", hash = "sha256:455f484a09056d62d3239a6dc6043012296373b4513a7763b7c14937ba553e87", size = 26056, upload-time = "2026-07-28T11:32:56.973Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/e0/2d91e377b36ac3a0ef9db039143496ce0ddbda9c08b815ecbe3258355977/saitenka_deinflect-0.1.0-py3-none-any.whl", hash = "sha256:7495a8ef7f571011b34d61c4e80e2bf66c326883a24f82ebef6220c9fb344232", size = 23315, upload-time = "2026-07-28T11:32:53.767Z" },
-]
+version = "0.2.0"
+source = { editable = "../deinflect" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "secretstorage"

@@ -90,7 +90,13 @@ def _spawn_anki_seed_watcher(reader: Reader) -> None:
     ).start()
 
 
-def _build_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_titles: list[str]):
+def _build_dict_set(
+    db,
+    dict_titles: list[str],
+    freq_titles: list[str],
+    pitch_titles: list[str],
+    language: str = "jp",
+):
     """Returns ``(dict_set, freq_rows)`` — ``freq_rows`` is reused by ``_load_freq_dict`` so it isn't
     re-resolved. A configured title with no imported dictionary is warned and skipped."""
     dict_set = None
@@ -117,7 +123,7 @@ def _build_dict_set(db, dict_titles: list[str], freq_titles: list[str], pitch_ti
                 log.warning(msg)
                 print(msg, file=sys.stderr, flush=True)
         if d_rows or freq_rows or p_rows:
-            dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows)
+            dict_set = DictionarySet.from_rows(db, d_rows, freq_rows, p_rows, language=language)
     return dict_set, freq_rows
 
 
@@ -337,9 +343,14 @@ def build_reader_deps(
     so logging is all it can do) — see :func:`_maybe_start_anki`/:func:`_load_known_words`. This one
     implementation backs both ``run`` and ``attach`` (`cli_run.py`'s own copy of this used to drift
     out of sync with it — see CHANGELOG)."""
+    from overlay.app.profiles import resolve_profile
+
     dict_titles = list(cfg.get("dicts") or [])
     freq_titles = list(cfg.get("freq") or [])
     pitch_titles = list(cfg.get("pitch") or [])
+    language = resolve_profile(
+        cfg
+    ).langs.main  # routes the deinflection chain to the right rule set
     known_cfg = cfg.get("known")
     fallback_words = [w for w in known_words.split(",") if w]
 
@@ -362,7 +373,9 @@ def build_reader_deps(
         anki_ready = ex.submit(
             _maybe_start_anki, mc, known_cfg, mine=mine, on_unreachable=on_anki_unreachable
         )
-        dictset_fut = ex.submit(_build_dict_set, db, dict_titles, freq_titles, pitch_titles)
+        dictset_fut = ex.submit(
+            _build_dict_set, db, dict_titles, freq_titles, pitch_titles, language
+        )
         jlpt_fut = ex.submit(_load_jlpt_dict, db) if want_scorer else None
         fsrs_fut = ex.submit(_load_fsrs_snapshot, cfg)
 

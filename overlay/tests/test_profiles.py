@@ -172,11 +172,19 @@ def test_ja_alias_canonicalizes_so_it_keeps_jp_tokenizer_and_providers(monkeypat
     )
 
 
-def test_non_jp_language_without_a_tokenizer_fails_fast():
-    """P2 regression: no silent unidic fallback for a non-JP language — omitting ``tokenizer`` raises a
-    clear error instead of mis-segmenting a non-JP script as Japanese."""
+def test_unknown_script_language_without_a_tokenizer_fails_fast():
+    """P2 regression: no silent unidic fallback for a language with no known script — omitting
+    ``tokenizer`` raises a clear error instead of mis-segmenting it as Japanese. A KNOWN Latin-script
+    code (fr/es/…) now defaults to ``latin`` (see below); only genuinely-unknown scripts fail fast."""
     with pytest.raises(ValueError, match="no default tokenizer"):
-        resolve_profile({"profile": {"language": "fr"}})
+        resolve_profile({"profile": {"language": "zh"}})
+
+
+def test_latin_script_language_defaults_to_the_latin_tokenizer():
+    """A Latin-script language resolves the ``latin`` strategy with no explicit ``tokenizer`` (#254 W1)."""
+    profile = resolve_profile({"profile": {"language": "fr"}})
+    assert profile.tokenizer == "latin"
+    assert profile.langs.main == "fr"
 
 
 # --- the reader keys tokenizer + language identity off the active profile -------------------------
