@@ -1228,6 +1228,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             analysis_key=cfg.get("analysis_key", ko.analysis_key),
             annotation_key=cfg.get("annotation_key", ko.annotation_key),
             help_key=cfg.get("help_key", ko.help_key),
+            profile_cycle_key=cfg.get("profile_cycle_key", ko.profile_cycle_key),
             subtitle_retry_key=cfg.get("subtitle_retry_key", ko.subtitle_retry_key),
             sub_prev_key=cfg.get("sub_prev_key", ko.sub_prev_key),
             sub_next_key=cfg.get("sub_next_key", ko.sub_next_key),
@@ -1409,7 +1410,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
-    from overlay.app.profiles import resolve_profile
+    from overlay.app.profiles import configured_profiles, resolve_profile
     from overlay.app.reader_deps import warm_tokenizer
 
     cfg = load_config(config)
@@ -1417,6 +1418,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
+    profile_cycle = configured_profiles(
+        cfg
+    )  # the [profiles.*] the live switcher (D8) rotates through
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of
@@ -1512,6 +1516,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts, profile=active_profile)  # deps injected asynchronously below
+    reader.set_profile_cycle(profile_cycle)
     provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,
