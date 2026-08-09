@@ -52,13 +52,24 @@ class LayoutResult:
 @runtime_checkable
 class LayoutBackend(Protocol):
     """Computes row-stack geometry. ``cumulative`` is the primitive the offset table is grown from;
-    ``solve`` is the full placement (rects + order) mirroring the raster-backend seam."""
+    ``solve`` is the full placement (rects + order) mirroring the raster-backend seam. ``solve_row`` is
+    the 2-D extension (#146 Phase B): flex row-wrap of fixed-size boxes, which the 1-D prefix sum can't
+    express — the primitive chip rows (and, later, multi-column defs) lay out through."""
 
     def cumulative(
         self, heights: Sequence[int], gaps: Sequence[int], top_pad: int
     ) -> tuple[tuple[int, ...], tuple[int, ...]]:
         """``(starts, ends)`` — ``start_i = top_pad + Σ_{j<i}(h_j + gap_j)``, ``end_i = start_i + h_i``.
         The gap after the last row is never added (``gaps[n-1]`` ignored)."""
+        ...
+
+    def solve_row(
+        self, sizes: Sequence[tuple[int, int]], *, gap: int, max_width: int
+    ) -> tuple[tuple[Rect, ...], int, int]:
+        """Place fixed-size ``(w, h)`` boxes left-to-right with a uniform ``gap``, wrapping to a new line
+        when the next box + gap would exceed ``max_width`` (CSS ``flex-flow: row wrap``; ``gap`` on both
+        axes; ``align-items``/``align-content: flex-start``). Returns ``(rects, used_width, height)`` in
+        content space. No shrink: a box wider than ``max_width`` overflows its line (chips never do)."""
         ...
 
     def solve(
@@ -93,6 +104,31 @@ def _cumulative(
     return tuple(starts), tuple(ends)
 
 
+def _solve_row(
+    sizes: Sequence[tuple[int, int]], gap: int, max_width: int
+) -> tuple[tuple[Rect, ...], int, int]:
+    """Pure-Python ``flex-flow: row wrap`` of fixed-size boxes — the humble reference for
+    :meth:`LayoutBackend.solve_row` (the taffy backend must reproduce it byte-for-byte). Uniform ``gap``
+    on both axes, ``align-*: flex-start``, no shrink (an over-wide box overflows its line)."""
+    rects: list[Rect] = []
+    x = line_top = line_h = used = 0
+    started = False
+    for w, h in sizes:
+        if started and x + gap + w > max_width:  # next box won't fit → wrap to a fresh line
+            used = max(used, x)
+            line_top += line_h + gap
+            x = line_h = 0
+            started = False
+        if started:
+            x += gap
+        rects.append(Rect(x, line_top, w, h))
+        x += w
+        line_h = max(line_h, h)
+        started = True
+    used = max(used, x)
+    return tuple(rects), used, line_top + line_h
+
+
 def _solve(
     backend: LayoutBackend,
     rows: Sequence[int],
@@ -114,12 +150,19 @@ def _solve(
 
 
 class DefaultLayoutBackend:
-    """The behaviour-identical default: the incremental cumulative sum every golden is pinned to."""
+    """The behaviour-identical default: the incremental cumulative sum every golden is pinned to, plus a
+    pure-Python ``flex-flow: row wrap`` (:func:`_solve_row`) — the always-available reference the taffy
+    backend is parity-gated against, so ``solve_row`` needs no wheel to ship."""
 
     def cumulative(
         self, heights: Sequence[int], gaps: Sequence[int], top_pad: int
     ) -> tuple[tuple[int, ...], tuple[int, ...]]:
         return _cumulative(heights, gaps, top_pad)
+
+    def solve_row(
+        self, sizes: Sequence[tuple[int, int]], *, gap: int, max_width: int
+    ) -> tuple[tuple[Rect, ...], int, int]:
+        return _solve_row(sizes, gap, max_width)
 
     def solve(
         self,
@@ -156,6 +199,11 @@ class FlexColumnBackend:
         starts = tuple(prefix[2 * i] for i in range(n))  # even cells are rows; odd cells are gaps
         ends = tuple(starts[i] + heights[i] for i in range(n))
         return starts, ends
+
+    def solve_row(
+        self, sizes: Sequence[tuple[int, int]], *, gap: int, max_width: int
+    ) -> tuple[tuple[Rect, ...], int, int]:
+        return _solve_row(sizes, gap, max_width)  # same pure-Python reference as the default
 
     def solve(
         self,
@@ -197,6 +245,27 @@ class TaffyLayoutBackend:
             [float(h) for h in heights], [float(g) for g in gaps], float(top_pad)
         )
         return tuple(starts), tuple(ends)
+
+    def solve_row(
+        self, sizes: Sequence[tuple[int, int]], *, gap: int, max_width: int
+    ) -> tuple[tuple[Rect, ...], int, int]:
+        import taffylite  # noqa: TID251  # layout-engine chokepoint (see class docstring)
+
+        tree = taffylite.Tree()
+        # Fixed main size = max_width (row won't shrink below it); auto height so wrapped lines pack
+        # tight with the cross gap (no align-content stretch), matching _solve_row byte-for-byte.
+        handles = [tree.add_leaf(float(w), float(h)) for w, h in sizes]
+        root = tree.add_flex(
+            handles, direction="row", gap=float(gap), width=float(max_width), wrap=True
+        )
+        tree.set_root(root)
+        placed = tree.compute()
+        rects = tuple(
+            Rect(round(placed[h][0]), round(placed[h][1]), round(placed[h][2]), round(placed[h][3]))
+            for h in handles
+        )
+        used = max((r.x + r.w for r in rects), default=0)
+        return rects, used, round(placed[root][3])
 
     def solve(
         self,

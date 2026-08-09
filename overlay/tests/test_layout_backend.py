@@ -9,6 +9,7 @@ the flex path Phase B depends on has a real oracle before any UI change leans on
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import json
 from pathlib import Path
 
@@ -453,3 +454,67 @@ def test_taffy_tree_agrees_with_reference_on_vendored_corpus():
         assert _taffy_rects(case["nodes"], case["root"]) == ref, case["name"]
         checked += 1
     assert checked >= 12
+
+
+# --- solve_row: 2-D flex row-wrap (Phase B1) --------------------------------------------------------
+# The primitive chip rows (and later multi-column defs) lay out through — a wrap the 1-D prefix sum
+# can't express. Default is pure Python (ships without the wheel); taffy is the parity-checked drop-in.
+
+
+@st.composite
+def _row_case(draw):
+    # Each box width ≤ max_width, so no box overflows its line — the no-shrink domain the pure-Python
+    # reference and taffy agree on exactly (a chip is always narrower than the tooltip).
+    max_width = draw(st.integers(8, 320))
+    gap = draw(st.integers(0, 16))
+    n = draw(st.integers(0, 8))
+    sizes = [(draw(st.integers(1, max_width)), draw(st.integers(1, 60))) for _ in range(n)]
+    return sizes, gap, max_width
+
+
+@given(case=_row_case())
+@settings(max_examples=400, deadline=None)
+def test_solve_row_default_and_flex_agree(case):
+    sizes, gap, mw = case
+    d = DefaultLayoutBackend().solve_row(sizes, gap=gap, max_width=mw)
+    f = FlexColumnBackend().solve_row(sizes, gap=gap, max_width=mw)
+    assert d == f  # both are the shared pure-Python reference
+
+
+@requires_taffy
+@given(case=_row_case())
+@example(case=([], 4, 100))  # empty row
+@example(case=([(30, 20)], 6, 30))  # single box exactly max_width (one line, no shrink)
+@example(case=([(30, 10), (30, 12), (30, 14)], 0, 60))  # zero gap, exact-fit wrap boundary
+@settings(max_examples=400, deadline=None)
+def test_solve_row_taffy_matches_the_reference(case):
+    # The differential: the Rust flex engine reproduces the pure-Python row-wrap byte-for-byte (rects +
+    # used width + height), so taffy is a true drop-in for the 2-D primitive too.
+    sizes, gap, mw = case
+    assert TaffyLayoutBackend().solve_row(
+        sizes, gap=gap, max_width=mw
+    ) == DefaultLayoutBackend().solve_row(sizes, gap=gap, max_width=mw)
+
+
+def test_solve_row_wraps_with_uniform_gap_and_no_overlap():
+    # The behavioural oracle (platform-independent, no pixels): boxes pack left-to-right with a UNIFORM
+    # gap, wrap to a fresh line when the next won't fit, and never overlap — the chip-row invariant.
+    sizes = [(60, 30), (70, 30), (50, 30), (90, 30)]
+    rects, used, height = DefaultLayoutBackend().solve_row(sizes, gap=8, max_width=200)
+    assert [r.y for r in rects] == [0, 0, 0, 38]  # first three share line 0; the fourth wraps
+    assert rects[1].x - (rects[0].x + rects[0].w) == 8  # uniform gap between same-line boxes
+    assert rects[2].x - (rects[1].x + rects[1].w) == 8
+    assert rects[3].x == 0  # a wrapped line restarts at the left
+    assert used == 196 and height == 68  # widest line + stacked line heights with the cross gap
+    for a, b in itertools.pairwise(rects):  # no two boxes overlap on a line
+        if a.y == b.y:
+            assert a.x + a.w <= b.x
+
+
+def test_solve_row_gap_is_not_vacuous():
+    # Negative control: the gap actually moves boxes — a different gap yields a different layout, so the
+    # exact-equality parity checks above can't pass on a solver that ignored the gap.
+    sizes = [(30, 10), (30, 10)]
+    tight = DefaultLayoutBackend().solve_row(sizes, gap=0, max_width=200)
+    loose = DefaultLayoutBackend().solve_row(sizes, gap=20, max_width=200)
+    assert tight != loose
