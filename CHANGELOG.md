@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-09
+
 ### Added
 
 - **`doctor` warns when the deep-link `ID` field can't be filled.** Mined cards carry a JMdict `ent_seq`
@@ -14,6 +16,22 @@ logs.
   comes from the optional `jmdict` extra, so on a default install it wrote empty with no feedback.
   `saitenka doctor` now flags this when the field map targets `id`/`ID` (or an `{ent-seq}` marker) and no
   id source is installed.
+- **Profiles / configurable main language (#254).** `[profiles.*]` config plus `--profile` at the CLI:
+  each profile bundles a language (any BCP-47 code, not just Japanese), a per-language tokenizer chosen
+  via a strategy seam (unidic for Japanese), a second language (defaults to English), its own dictionary
+  set, and its own Anki mine target. A live in-overlay profile switcher (++alt+shift+p++) swaps the whole
+  bundle mid-session, and subtitle providers are gated to the active language.
+- **Offline word-pronunciation audio (#93).** Mined cards can now pull word audio from a local
+  yomichan/yomitan audio pack — grounded and offline, no TTS or network call — via new
+  `[mine].word_audio_*` config.
+- **Offline deep-link IDs (#255).** The JMdict `ent_seq` behind the `ID` field can now be sourced from an
+  already-imported dictionary (`[dictdb] persist_seq`), so deep-links work without the `jmdict` extra.
+  `doctor` verifies the source has real data, not just that the setting is on, and a new
+  `tools/backfill_deeplink_id.py` backfills the `ID` field on cards mined before this was configured
+  (dry-run by default; `--deck`/`--field`/`--apply` to write).
+- **Sidebar "Mine" tab (#253).** Browse the current episode's mined cards from the sidebar; a durable
+  per-card store links each Anki note back to its episode and cue.
+- **`saitenka config` (#257).** An interactive TUI editor over the config, with per-option help.
 
 ### Fixed
 
@@ -25,6 +43,16 @@ logs.
   row was still the active cue at click time, so if playback advanced a cue between the sidebar redraw
   and your click, the click was dropped with no feedback (while ++alt+b++ on the same cue worked). The
   button now bookmarks unconditionally, matching the keybind.
+
+### Development
+
+- **taffylite ships to PyPI** via its own release workflow (#231), independent of saitenka's release.
+- **New ast-grep rule** flags call sites with 3+ positional args, nudging toward keyword args (#225).
+- **CI** now caches `uv` per interpreter and runs a parallel free-threaded test job alongside a GIL-on
+  control.
+- **Type-checking** widened to `examples/`, `tools/`, `install/`, and `.agents/`.
+- **The repo is agent-agnostic**: `CLAUDE.md` is untracked per-agent config; `AGENTS.md` is the one
+  canonical, committed source of agent guidance.
 
 ## [2.2.0] - 2026-08-09
 
