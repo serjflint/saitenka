@@ -775,8 +775,9 @@ def check_deeplink_id() -> Check:
     from overlay.app.reader_deps import _mine_config_from
 
     backfill_hint = (
-        "Pre-existing cards with an empty ID aren't touched retroactively — backfill them with "
-        "`uv run tools/anki_normalize_fields.py --apply` (dry-run by default)."
+        "Pre-existing cards with an empty ID aren't touched retroactively — backfill a whole deck with "
+        "`uv run --extra full python tools/backfill_deeplink_id.py --apply` (dry-run by default; reuses "
+        "this config's id resolution), or `tools/anki_normalize_fields.py` for a JMdict-zip-driven fill."
     )
     mc = _mine_config_from(load_config().get("mine") or {})
     if not _mining_targets_id(mc):

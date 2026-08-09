@@ -145,8 +145,10 @@ makes `kanjistudy://word?id={{ID}}` deep-link into Android's Kanji Study app fro
 one of two sources: the optional `jmdict` extra (jamdict), or an imported JMdict-derived dictionary
 (JMdict itself, Jitendex, …) with `[dictdb] persist_seq = true` — re-import the dict after enabling it so
 its `seq` gets persisted. `saitenka doctor` reports which source (if any) is active. Neither source
-touches cards mined before it existed; backfill those with `uv run tools/anki_normalize_fields.py
---apply` (dry-run by default — see the script's own `--help`/docstring for the JMdict zip it needs).
+touches cards mined before it existed; backfill an existing deck with
+`uv run --extra full python tools/backfill_deeplink_id.py --apply` (dry-run by default — it enumerates
+the `[mine] deck`, resolves each empty `ID` with the same source config uses, and never overwrites a
+filled field). `tools/anki_normalize_fields.py` is an alternative that fills from a JMdict Yomitan zip.
 
 ## Tooltip
 
