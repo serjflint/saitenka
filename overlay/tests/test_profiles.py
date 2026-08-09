@@ -9,6 +9,7 @@ from overlay.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
     configured_profiles,
+    resolve_launch_identity,
     resolve_profile,
     scope_config,
     validate_language_code,
@@ -401,11 +402,19 @@ def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
     assert default_mine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")
 
 
+def _scope_and_mine(cfg, mine_deck, mine_model):
+    """The run seam, post-dedup: the shared identity spine scopes the cfg, then _resolve_mine_target
+    resolves the effective deck/model off it. Mirrors run_impl's two lines."""
+    from overlay.app.cli_run import _resolve_mine_target
+
+    scoped = resolve_launch_identity(cfg, profile_override=None, slang="ja,jpn,jp").cfg
+    deck, model = _resolve_mine_target(scoped, mine_deck, mine_model)
+    return scoped, deck, model
+
+
 def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
     """The run seam: a not-passed --mine-deck/--mine-model (the None sentinel) resolves to the active
     profile's own deck/model — they'd otherwise fall back to the base [mine]."""
-    from overlay.app.cli_run import _scope_cfg_to_profile
-
     cfg = {
         "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
         "active_profile": "fr",
@@ -417,7 +426,7 @@ def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
             }
         },
     }
-    scoped, deck, model = _scope_cfg_to_profile(cfg, None, None)  # None = flag not passed
+    scoped, deck, model = _scope_and_mine(cfg, None, None)  # None = flag not passed
     assert (deck, model) == ("French::Mining", "FrenchNote")
     assert scoped["mine"]["deck"] == "French::Mining"
 
@@ -425,8 +434,6 @@ def test_run_path_scoping_applies_the_profile_deck_when_the_flag_is_unset():
 def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
     """An explicitly-passed --mine-deck (a non-None value) still wins over the profile — the flag is the
     user's deliberate override for this launch."""
-    from overlay.app.cli_run import _scope_cfg_to_profile
-
     cfg = {
         "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
         "active_profile": "fr",
@@ -434,7 +441,7 @@ def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
             "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
         },
     }
-    _scoped, deck, _model = _scope_cfg_to_profile(cfg, "CLI::Explicit", None)
+    _scoped, deck, _model = _scope_and_mine(cfg, "CLI::Explicit", None)
     assert deck == "CLI::Explicit"  # explicit flag beats the profile deck
 
 
@@ -443,8 +450,6 @@ def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default()
     import-time default config's deck, PLUS an active profile with its OWN deck. The profile's deck must
     win — never the --config top-level, never the import-time default. The old comparison-baseline guard
     misfired here (it compared against the import-time default, misreading an unset flag as explicit)."""
-    from overlay.app.cli_run import _scope_cfg_to_profile
-
     # This is what `load_config(--config other.toml)` yields at RUNTIME (deck ≠ the import-time default).
     runtime_cfg = {
         "mine": {"deck": "Other::TopLevel", "model": "Lapis"},
@@ -453,7 +458,7 @@ def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default()
             "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
         },
     }
-    _scoped, deck, model = _scope_cfg_to_profile(runtime_cfg, None, None)  # neither flag passed
+    _scoped, deck, model = _scope_and_mine(runtime_cfg, None, None)  # neither flag passed
     assert (
         deck == "French::Mining"
     )  # the profile deck — not "Other::TopLevel", not the import default
@@ -461,7 +466,7 @@ def test_run_path_scoping_honors_config_top_level_mine_over_the_import_default()
 
     # And with NO active profile, an unset flag resolves to the --config top-level [mine] (honors --config,
     # not the import-time default) — the second half of the same P1.
-    _s2, deck2, _m2 = _scope_cfg_to_profile({"mine": {"deck": "Other::TopLevel"}}, None, None)
+    _s2, deck2, _m2 = _scope_and_mine({"mine": {"deck": "Other::TopLevel"}}, None, None)
     assert deck2 == "Other::TopLevel"
 
 
@@ -525,3 +530,28 @@ def test_japanese_default_leaves_slang_unset_for_the_ambient_default():
     # None → run/attach keep the top-level slang (byte-identical JP path); no track-selection change.
     assert resolve_profile({}).slang is None
     assert DEFAULT_PROFILE.slang is None
+
+
+# --- resolve_launch_identity: the shared run/attach spine ------------------------------------------
+
+
+def test_launch_identity_resolves_scoped_cfg_slang_and_language_for_a_profile():
+    # The one seam run + attach both call: --profile override, active profile, scoped cfg, effective
+    # slang, language. Extracting it is what stops slang/language drifting between the two entrypoints.
+    cfg = {
+        "slang": "ja,jpn,jp",
+        "dicts": ["JP dict"],
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin", "dicts": ["FR dict"]}},
+    }
+    ident = resolve_launch_identity(cfg, profile_override="fr", slang="ja,jpn,jp")
+    assert ident.profile.name == "fr"
+    assert ident.language == "fr"
+    assert ident.slang == "fr"  # derived from the profile language, not the JP fallback
+    assert ident.cfg["dicts"] == ["FR dict"]  # scoped to the profile's dicts
+
+
+def test_launch_identity_default_profile_keeps_jp_and_the_passed_slang():
+    # No profile → JP language, slang stays whatever the CLI/config passed (byte-identical launch).
+    ident = resolve_launch_identity({"slang": "ja,jpn,jp"}, profile_override=None, slang="en")
+    assert ident.language == "jp"
+    assert ident.slang == "en"  # profile derives nothing → the passed fallback stands

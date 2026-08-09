@@ -195,4 +195,40 @@ def configured_profiles(cfg: dict) -> list[Profile]:
     return profiles
 
 
+@dataclass(frozen=True)
+class LaunchIdentity:
+    """The profile-derived identity a ``run``/``attach`` launch needs, resolved ONCE from raw cfg +
+    CLI flags by :func:`resolve_launch_identity`. Both entrypoints read off this instead of each
+    re-deriving the spine — the recurring run/attach drift (slang, then dict-set language) came from
+    duplicating these steps, so a new profile-aware field must be added here, not in two runners."""
+
+    cfg: dict  # profile-scoped (dicts/freq/pitch/mine/slang/jimaku overlaid)
+    profile: Profile  # the active profile
+    slang: str  # effective subtitle-track priority (profile's own, else the CLI/config fallback)
+    profile_cycle: list[Profile]  # the live switcher's cycle order
+
+    @property
+    def language(self) -> str:
+        """The active profile's main language — routes tokenizer + deinflection + provider gating."""
+        return self.profile.langs.main
+
+
+def resolve_launch_identity(
+    cfg: dict, *, profile_override: str | None, slang: str
+) -> LaunchIdentity:
+    """The shared run/attach spine: apply ``--profile``, resolve the active profile, scope the cfg, and
+    derive the effective slang + switcher cycle. The ONE place this happens, so a profile-aware field
+    can't drift between the two entrypoints. ``cfg`` is the raw loaded config; the returned ``cfg`` is
+    the scoped one the dep builders read."""
+    if profile_override:  # --profile beats the config's active_profile selector for this launch
+        cfg = {**cfg, "active_profile": profile_override}
+    active = resolve_profile(cfg)
+    return LaunchIdentity(
+        cfg=scope_config(cfg),
+        profile=active,
+        slang=effective_slang(active, slang),
+        profile_cycle=configured_profiles(cfg),
+    )
+
+
 DEFAULT_PROFILE = resolve_profile({})  # the JP default; construction default for a headless reader

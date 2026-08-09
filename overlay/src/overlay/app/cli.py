@@ -1420,27 +1420,19 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
-    from overlay.app.profiles import (
-        configured_profiles,
-        effective_slang,
-        resolve_profile,
-        scope_config,
-    )
+    from overlay.app.profiles import resolve_launch_identity
     from overlay.app.reader_deps import warm_tokenizer
 
-    cfg = load_config(config)
-    if profile:  # --profile overrides the config's active_profile selector for this launch
-        cfg = dict(cfg)
-        cfg["active_profile"] = profile
-    active_profile = resolve_profile(cfg)
-    slang = effective_slang(active_profile, slang)  # #254: non-JP profile selects its own track
-    profile_cycle = configured_profiles(
-        cfg
-    )  # the [profiles.*] the live switcher (D8) rotates through
-    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6) before the dep build reads them;
-    # attach has no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/
-    # model/field-map directly. Byte-identical for the default profile.
-    cfg = scope_config(cfg)
+    # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
+    # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
+    # no mining CLI flags, so `_mine_config_from(cfg["mine"])` picks up the profile's deck/model directly.
+    ident = resolve_launch_identity(load_config(config), profile_override=profile, slang=slang)
+    cfg, active_profile, slang, profile_cycle = (
+        ident.cfg,
+        ident.profile,
+        ident.slang,
+        ident.profile_cycle,
+    )
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of

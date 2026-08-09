@@ -26,12 +26,7 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import (
-    configured_profiles,
-    effective_slang,
-    resolve_profile,
-    scope_config,
-)
+from overlay.app.profiles import resolve_launch_identity, resolve_profile
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -189,22 +184,17 @@ def _mine_table(cfg: dict) -> dict:
     return mine if isinstance(mine, dict) else {}
 
 
-def _scope_cfg_to_profile(
+def _resolve_mine_target(
     cfg: dict, mine_deck: str | None, mine_model: str | None
-) -> tuple[dict, str, str]:
-    """Overlay the active profile's dict/freq/pitch + [mine] onto ``cfg`` (#254 D4/D6), returning the
-    scoped cfg plus the effective ``(mine_deck, mine_model)``. ``mine_deck``/``mine_model`` are ``None``
-    when their CLI flag wasn't passed — then the deck/model is resolved from the SCOPED [mine] (the active
-    profile's, or the runtime top-level [mine] honoring ``--config``). An explicit (non-``None``) flag
-    wins. Resolving off the scoped runtime cfg — never an import-time baked default — is what fixes the
-    ``--config other.toml`` + profile case where the old comparison-baseline misfired."""
-    cfg = scope_config(cfg)
+) -> tuple[str, str]:
+    """Effective ``(mine_deck, mine_model)`` for a run. ``cfg`` is ALREADY profile-scoped (by
+    :func:`~overlay.app.profiles.resolve_launch_identity`). ``mine_deck``/``mine_model`` are ``None`` when
+    their CLI flag wasn't passed — then the deck/model is resolved from the SCOPED [mine] (the active
+    profile's, or the runtime top-level [mine] honoring ``--config``); an explicit flag wins. Resolving
+    off the scoped runtime cfg — never an import-time baked default — is what fixes the ``--config
+    other.toml`` + profile case where the old comparison-baseline misfired."""
     deck, model = default_mine_target(_mine_table(cfg))
-    return (
-        cfg,
-        (deck if mine_deck is None else mine_deck),
-        (model if mine_model is None else mine_model),
-    )
+    return (deck if mine_deck is None else mine_deck, model if mine_model is None else mine_model)
 
 
 def jimaku_should_fetch(
@@ -969,18 +959,17 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     from overlay.app.controller import Reader
     from overlay.app.reader_deps import begin_deps_build, warm_tokenizer
 
-    cfg = load_config(config)
-    if profile:  # --profile overrides the config's active_profile selector for this launch
-        cfg = dict(cfg)
-        cfg["active_profile"] = profile
-    active_profile = resolve_profile(cfg)
-    profile_cycle = configured_profiles(
-        cfg
-    )  # the [profiles.*] the live switcher (D8) rotates through
-    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); a not-passed
-    # --mine-deck/--mine-model (None) yields to the profile's own deck/model (see _scope_cfg_to_profile).
-    cfg, mine_deck, mine_model = _scope_cfg_to_profile(cfg, mine_deck, mine_model)
-    slang = effective_slang(active_profile, slang)  # #254: non-JP profile selects its own track
+    # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
+    # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift.
+    ident = resolve_launch_identity(load_config(config), profile_override=profile, slang=slang)
+    cfg, active_profile, slang, profile_cycle = (
+        ident.cfg,
+        ident.profile,
+        ident.slang,
+        ident.profile_cycle,
+    )
+    # A not-passed --mine-deck/--mine-model (None) yields to the profile's own deck/model.
+    mine_deck, mine_model = _resolve_mine_target(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
