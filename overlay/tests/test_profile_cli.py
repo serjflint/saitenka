@@ -19,8 +19,16 @@ from overlay.app.profile_cli import (
 )
 
 
-def test_build_table_defaults_tokenizer_from_language():
-    assert build_profile_table(language="fr") == {"language": "fr", "tokenizer": "latin"}
+def test_build_table_always_scopes_all_lists_empty_when_unspecified():
+    # A profile never inherits the top-level dicts — unspecified dict/freq/pitch are written EMPTY so a
+    # French profile can't silently borrow the Japanese dictionaries / NHK pitch.
+    assert build_profile_table(language="fr") == {
+        "language": "fr",
+        "tokenizer": "latin",
+        "dicts": [],
+        "freq": [],
+        "pitch": [],
+    }
 
 
 def test_build_table_scopes_dicts_and_second_when_given():
@@ -33,7 +41,8 @@ def test_build_table_scopes_dicts_and_second_when_given():
         "second": "en",
         "dicts": ["FR-EN"],
         "freq": ["FR Freq"],
-    }  # empty pitch omitted so the profile inherits the top-level set
+        "pitch": [],  # explicit empty — scopes to nothing, never inherits the top-level pitch
+    }
 
 
 def test_build_table_unknown_script_without_tokenizer_raises():

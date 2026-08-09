@@ -42,17 +42,19 @@ def build_profile_table(
 ) -> dict:
     """The ``[profiles.<name>]`` table for one profile, validated. ``language`` is shape-checked;
     ``tokenizer`` defaults via :func:`default_tokenizer_for` (so ``--language fr`` alone yields
-    ``latin``, and an unknown-script language raises here, not silently at reader construction). Empty
-    dict/freq/pitch lists are omitted so the profile inherits the top-level set — pass an explicit list
-    to scope it."""
+    ``latin``, and an unknown-script language raises here, not silently at reader construction).
+
+    dicts/freq/pitch are ALWAYS written — an unspecified one as an empty list, NOT omitted. A profile is
+    a self-contained identity: a French profile must never inherit the top-level Japanese dictionaries
+    (``scope_config`` only replaces a list the profile actually defines), so scoping all three explicitly
+    is what keeps a JP dict / NHK pitch out of a French lookup. Add the titles later with a re-``add``."""
     validate_language_code(language)
     canon = canonical_language(language)
     table: dict = {"language": language, "tokenizer": tokenizer or default_tokenizer_for(canon)}
     if second is not None:
         table["second"] = validate_language_code(second)
     for key, values in (("dicts", dicts), ("freq", freq), ("pitch", pitch)):
-        if values:
-            table[key] = list(values)
+        table[key] = list(values)  # empty when unspecified → scopes to nothing, never inherits
     return table
 
 
