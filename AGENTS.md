@@ -67,6 +67,12 @@ scripts declare deps via PEP 723 inline metadata.
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
+- **Visual config stays visual.** Config that's purely look-and-feel (a display toggle) must never gate
+  behavior or identity (what gets looked up/cached, how a build is labeled) — thread real intent through
+  an explicit param/flag instead of inferring it from a display toggle.
+- **Perf claims:** measure with the instrument that isolates the change (py-spy/Scalene self-time on the
+  hot path), not a wall-clock proxy a dominant unrelated cost can swamp — and verify the premise before
+  implementing. Tooling + baselines → `overlay/BENCHMARKS.md`.
 - **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
   `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
   each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**
