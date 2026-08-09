@@ -304,6 +304,86 @@ def check_dict_db() -> list[Check]:
     return checks
 
 
+def _profile_dict_misses(db, cfg: dict, override: str | None) -> list[str]:
+    """Scoped dict/freq/pitch TITLES of a profile that aren't imported in ``db`` — the classic
+    "profile points at a dictionary I never imported" failure, invisible until a hover finds nothing."""
+    from overlay.app.profiles import scope_config
+
+    scoped = scope_config(cfg, override=override)
+    misses: list[str] = []
+    for kind in ("dicts", "freq", "pitch"):
+        titles = scoped.get(kind) or []
+        if titles:
+            _rows, miss = db.resolve(titles)
+            misses.extend(miss)
+    return misses
+
+
+def check_profiles() -> list[Check]:
+    """Validate every configured reading profile (#254 W5): its tokenizer is registered, its language
+    codes are well-formed, and its scoped dictionary titles are actually imported — plus a dangling
+    ``active_profile`` selector. A single-profile (JP default) config yields one info line."""
+    from overlay.app.profile_cli import profile_names
+    from overlay.app.profiles import resolve_profile
+    from overlay.app.tokenizer import get_tokenizer
+
+    cfg = load_config()
+    named = profile_names(cfg)
+    active = cfg.get("active_profile") or ""
+    checks: list[Check] = []
+
+    if active and active not in named:
+        checks.append(
+            Check(
+                "profile",
+                "warn",
+                f"active_profile={active!r} names no [profiles.*] — using default",
+            )
+        )
+    if not named and not isinstance(cfg.get("profile"), dict):
+        return [Check("profile", "ok", "single default profile (jp→en, unidic)", info=True)]
+
+    db = None
+    try:
+        from overlay.app.dictdb import DictionaryDb
+
+        db = DictionaryDb.open()
+    except Exception:  # noqa: BLE001 — no DB just means we skip the title-resolution sub-check
+        db = None
+
+    # The base default (resolved without active_profile) then each named overlay — the switcher's cycle.
+    base_cfg = {k: v for k, v in cfg.items() if k != "active_profile"}
+    for label, resolve_cfg, override in [
+        ("default", base_cfg, None),
+        *((n, cfg, n) for n in named),
+    ]:
+        try:
+            profile = resolve_profile(resolve_cfg, override=override)
+        except ValueError as e:
+            checks.append(Check("profile", "fail", f"{label}: {e}"))
+            continue
+        try:
+            get_tokenizer(profile.tokenizer)
+        except ValueError:
+            checks.append(
+                Check("profile", "fail", f"{label}: tokenizer {profile.tokenizer!r} not registered")
+            )
+            continue
+        misses = _profile_dict_misses(db, cfg, override) if db is not None else []
+        ident = f"{profile.langs.main}→{profile.langs.second} [{profile.tokenizer}]"
+        if misses:
+            checks.append(
+                Check(
+                    "profile",
+                    "warn",
+                    f"{label} ({ident}): dict title(s) not imported: {', '.join(misses)}",
+                )
+            )
+        else:
+            checks.append(Check("profile", "ok", f"{label}: {ident}", info=True))
+    return checks
+
+
 def _jmdict_available() -> bool:
     """True when the optional JMdict fallback (jamdict + its database) is importable."""
     import importlib.util
@@ -1115,6 +1195,7 @@ def run_checks(deck: str | None = None, model: str | None = None) -> Report:
         check_free_threading(),
         check_config(),
         *check_dict_db(),
+        *check_profiles(),
         check_legacy_files(),
         check_sub_auto(),
         check_fonts(),
