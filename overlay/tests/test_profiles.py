@@ -352,3 +352,41 @@ def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
     assert default_mine_target({}) == ("Saitenka::Mining", "Lapis")
     assert default_mine_target({"preset": "Kiku"}) == ("Saitenka::Mining", "Kiku")
     assert default_mine_target({"deck": "D", "model": "M", "preset": "Kiku"}) == ("D", "M")
+
+
+def test_run_path_scoping_prefers_profile_deck_over_a_still_default_flag():
+    """The run seam's guard: with the CLI --mine-deck/--mine-model still at the top-level [mine] default,
+    the active profile's own deck/model win (they'd otherwise be silently clobbered)."""
+    from overlay.app.cli_run import _scope_cfg_to_profile
+
+    cfg = {
+        "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
+        "active_profile": "fr",
+        "profiles": {
+            "fr": {
+                "language": "fr",
+                "tokenizer": "latin",
+                "mine": {"deck": "French::Mining", "model": "FrenchNote"},
+            }
+        },
+    }
+    # top-level defaults (what cyclopts seeds when the flag isn't passed) → profile values win
+    scoped, deck, model = _scope_cfg_to_profile(cfg, "Saitenka::Mining", "Lapis")
+    assert (deck, model) == ("French::Mining", "FrenchNote")
+    assert scoped["mine"]["deck"] == "French::Mining"
+
+
+def test_run_path_scoping_keeps_an_explicit_flag_over_the_profile():
+    """An explicitly-passed --mine-deck (differs from the top-level default) still wins over the profile
+    — the flag is the user's deliberate override for this launch."""
+    from overlay.app.cli_run import _scope_cfg_to_profile
+
+    cfg = {
+        "mine": {"deck": "Saitenka::Mining", "model": "Lapis"},
+        "active_profile": "fr",
+        "profiles": {
+            "fr": {"language": "fr", "tokenizer": "latin", "mine": {"deck": "French::Mining"}}
+        },
+    }
+    _scoped, deck, _model = _scope_cfg_to_profile(cfg, "CLI::Explicit", "Lapis")
+    assert deck == "CLI::Explicit"  # explicit flag beats the profile deck

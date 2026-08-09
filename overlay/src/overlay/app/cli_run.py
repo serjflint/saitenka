@@ -167,6 +167,28 @@ def default_mine_target(mine: dict) -> tuple[str, str]:
     return deck, model
 
 
+def _mine_table(cfg: dict) -> dict:
+    mine = cfg.get("mine")
+    return mine if isinstance(mine, dict) else {}
+
+
+def _scope_cfg_to_profile(cfg: dict, mine_deck: str, mine_model: str) -> tuple[dict, str, str]:
+    """Overlay the active profile's dict/freq/pitch + [mine] onto ``cfg`` (#254 D4/D6), returning the
+    scoped cfg plus the effective ``(mine_deck, mine_model)``. The top-level [mine] deck/model default is
+    captured BEFORE scoping so a still-default ``--mine-deck``/``--mine-model`` flag yields to the
+    profile's own deck/model instead of clobbering it; an explicitly-changed flag still wins."""
+    top_deck, top_model = default_mine_target(_mine_table(cfg))
+    cfg = scope_config(cfg)
+    scoped = _mine_table(cfg)
+    if scoped:
+        scoped_deck, scoped_model = default_mine_target(scoped)
+        if mine_deck == top_deck:
+            mine_deck = scoped_deck
+        if mine_model == top_model:
+            mine_model = scoped_model
+    return cfg, mine_deck, mine_model
+
+
 def jimaku_should_fetch(
     *,
     explicit_flag: bool,
@@ -928,19 +950,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
-    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6). Capture the top-level [mine]
-    # deck/model default BEFORE scoping so a still-default --mine-deck/--mine-model flag yields to the
-    # profile's own deck/model instead of clobbering it.
-    _top_mine = cfg.get("mine") if isinstance(cfg.get("mine"), dict) else {}
-    top_deck, top_model = default_mine_target(_top_mine)
-    cfg = scope_config(cfg)
-    scoped_mine = cfg.get("mine") if isinstance(cfg.get("mine"), dict) else {}
-    if scoped_mine:
-        scoped_deck, scoped_model = default_mine_target(scoped_mine)
-        if mine_deck == top_deck:
-            mine_deck = scoped_deck
-        if mine_model == top_model:
-            mine_model = scoped_model
+    # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); yields the profile's deck/model
+    # when the CLI flag is still at its top-level default (see _scope_cfg_to_profile).
+    cfg, mine_deck, mine_model = _scope_cfg_to_profile(cfg, mine_deck, mine_model)
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
