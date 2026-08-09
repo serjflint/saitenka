@@ -7,6 +7,13 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Card-preview audio no longer keeps playing after you close the preview.** The ▶ clip was a
+  fire-and-forget player whose handle was discarded, so dismissing the preview (✕, ++esc++, a new
+  subtitle cue, or ++p++) left the audio running. The player handle is now retained and stopped on
+  every dismiss path, and a second ++▶++ press replaces the clip instead of stacking a second one.
+
 ## [2.2.0] - 2026-08-09
 
 ### Added
