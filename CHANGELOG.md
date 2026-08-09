@@ -7,6 +7,14 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`doctor` warns when the deep-link `ID` field can't be filled.** Mined cards carry a JMdict `ent_seq`
+  in the `ID` field so Kanji Study `kanjistudy://word?id={{ID}}` deep-links work — but the value only
+  comes from the optional `jmdict` extra, so on a default install it wrote empty with no feedback.
+  `saitenka doctor` now flags this when the field map targets `id`/`ID` (or an `{ent-seq}` marker) and no
+  id source is installed.
+
 ## [2.2.0] - 2026-08-09
 
 ### Added
