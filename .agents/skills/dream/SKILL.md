@@ -9,8 +9,8 @@ description: >-
   memory against the canonical AGENTS.md / .agents/. Always inventories first, backs up before any edit
   (memory is NOT version-controlled), verifies every claim against git and file reads, and keeps the
   one-fact-per-file + frontmatter + wikilink shape. NOT for writing a single new memory (the normal memory
-  flow) and NOT for editing CLAUDE.md / AGENTS.md / .agents/ — those are canonical, committed, read-only
-  here.
+  flow) and NOT for editing AGENTS.md / .agents/ (canonical, committed, read-only here) or the local
+  CLAUDE.md shim.
 metadata:
   project: saitenka
 ---
@@ -23,9 +23,10 @@ in [`references/backup-and-classify.md`](references/backup-and-classify.md).
 
 ## The two layers (never mix them)
 
-- **Permanent / committed — read-only here.** `CLAUDE.md`, `AGENTS.md`, `.agents/rules/`,
-  `.agents/skills/`, other `.agents/` artifacts. In saitenka these are in **git**. Inspect them to verify
-  claims; do **not** edit them during a refactor.
+- **Permanent / committed — read-only here.** `AGENTS.md`, `.agents/rules/`, `.agents/skills/`, other
+  `.agents/` artifacts. In saitenka these are in **git** (the local, git-ignored `CLAUDE.md` shim just
+  imports `AGENTS.md` and carries no independent content). Inspect them to verify claims; do **not** edit
+  them during a refactor.
 - **Local / mutable / uncommitted — the edit target.** The project's memory dir under `~/.claude/`,
   holding one-fact-per-file `*.md` (frontmatter `description` + `[[wikilinks]]`) plus a `MEMORY.md` index.
 
@@ -53,7 +54,7 @@ it.
    not hardcode. Confirm the dir slug encodes *this* project's path; if you can't map it confidently,
    **stop and ask** — never touch another project's memory.
 2. Read every `*.md` in the memory dir; trace the `[[wikilink]]` graph and the `MEMORY.md` index.
-3. Read `CLAUDE.md`, `AGENTS.md`, and relevant `.agents/` artifacts as read-only references.
+3. Read `AGENTS.md` and relevant `.agents/` artifacts as read-only references.
 4. **Verify each factual claim against the current repo** (git + file reads) — flag anything stale,
    contradicted, or now cheaply rediscoverable. Cross-check depth against Basic Memory.
 5. Classify every entry (taxonomy in `references/backup-and-classify.md`): durable-keep,
@@ -84,7 +85,7 @@ manifest, and **verify before editing**. Full spec in `references/backup-and-cla
 ## Safety (hard rules)
 
 - Never run git (or any VCS command) against `~/.claude/` — it is outside any repo.
-- Never edit `CLAUDE.md`, `AGENTS.md`, or anything under `.agents/` during a refactor.
+- Never edit `AGENTS.md` or anything under `.agents/` during a refactor.
 - Never move temporary, speculative, machine-local, or secret content into `.agents/`.
 - Back up before modifying / renaming / deleting any memory file; keep backups out of the repo.
 

@@ -62,6 +62,10 @@ overlay/.vscode/
 # Claude Code: entirely local (settings + an optional .claude/skills -> ../.agents/skills symlink). Never committed.
 /.claude/
 
+# Claude-Code-local agent shim (`@AGENTS.md`) — the repo is agent-agnostic; AGENTS.md is canonical.
+# Kept locally by convention, same as .claude/ above (see the agent-setup skill).
+/CLAUDE.md
+
 # Codex: local machine config (for example the Repowise MCP adapter). Durable guidance lives in AGENTS.md/.agents.
 /.codex/config.toml
 

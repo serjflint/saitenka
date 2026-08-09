@@ -87,7 +87,7 @@ repowise doctor                     # db / FTS / vector store / coordinator in s
 
 `.repowise/config.yaml` pins `provider: openai`, `model: mlx-community/Qwen3.5-9B-MLX-4bit`, `embedder:
 openai` / `qwen3-embedding-4b`, and `editor_files: {claude_md: false, agents_md: false}` (repowise never
-overwrites our hand-owned CLAUDE.md/AGENTS.md). `.repowise/.env` sets `OPENAI_BASE_URL=http://127.0.0.1:11435/v1`,
+overwrites our hand-owned AGENTS.md or a local CLAUDE.md shim). `.repowise/.env` sets `OPENAI_BASE_URL=http://127.0.0.1:11435/v1`,
 `OPENAI_API_KEY=not-needed`, `REPOWISE_EMBEDDING_MODEL=qwen3-embedding-4b`, `REPOWISE_EMBEDDING_DIMS=2560`.
 Keep exactly one index at the repo root. Maintainer depth (manual page corrections, the operating
 sequence) lives in the vault note `notes/tooling/repowise-local-indexing`.

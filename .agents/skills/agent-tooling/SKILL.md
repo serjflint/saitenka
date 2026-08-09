@@ -26,7 +26,7 @@ far cheaper. All optional; the repo works without them.
   content-grounded), `search_codebase` (semantic/symbol/path), `get_context` (a file's map), `get_risk`
   before editing a hotspot, `get_why` for decision rationale, `get_overview` once in an unfamiliar area.
   Prefer these over re-reading files. Freshness: `repowise update` after big changes; it never edits
-  CLAUDE.md/AGENTS.md.
+  AGENTS.md.
 - **Basic Memory (MCP)** — the maintainer's Markdown knowledge base (Obsidian vault): design notes,
   decisions, tooling procedures (e.g. `notes/tooling/repowise-local-indexing`). `search_notes` /
   `read_note` / `recent_activity`. Personal + per-user (each dev brings their own vault); complements the
