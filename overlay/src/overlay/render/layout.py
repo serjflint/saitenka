@@ -81,6 +81,25 @@ def _font(file: str, style: Style):
     return fonts.load(fonts.FontSpec(file, style.size, style.weight))
 
 
+def _word_run(text: str, i: int, n: int) -> tuple[str, int]:
+    """The maximal single-font word run starting at ``i`` → ``(font_file, end_index)``. Kerning is a
+    no-op here (Pillow has no libraqm; layout is pure advance), so drawing a run is byte-identical to
+    per-glyph — BUT only if every glyph resolves to the SAME font. Picking the font by the first char
+    alone made a mixed-coverage word (Latin 'z' + an IPA 'ɛ' only the Latin Noto carries, in a
+    `/ma.ga.zɛ̃/` reading) render the non-first glyphs as tofu. So extend only while the fallback font
+    holds; a combining mark joins its base's run (same font) so a decomposed diacritic still positions
+    on it. The common all-one-font word stays whole, so the atlas still keys on real words."""
+    f = fonts.font_for_char(text[i])
+    j = i + 1
+    while (
+        j < n
+        and _is_word_char(text[j])
+        and (unicodedata.category(text[j])[0] == "M" or fonts.font_for_char(text[j]) == f)
+    ):
+        j += 1
+    return f, j
+
+
 def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Token]:
     tokens: list[Token] = []
     i, n = 0, len(text)
@@ -104,22 +123,7 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
             tokens.append(Token(ch, f, "cjk", fonts.text_width(_font(f, style), ch), style, href))
             i += 1
         elif _is_word_char(ch):
-            # A maximal LETTER run, split on font-fallback boundaries. Kerning is a no-op here (Pillow has
-            # no libraqm; layout is pure advance), so drawing a run is byte-identical to per-glyph — BUT
-            # only if every glyph resolves to the SAME font. Choosing the font by the first char alone made
-            # a mixed-coverage word (Latin 'z' + an IPA 'ɛ' that only the Latin Noto carries, in a
-            # `/ma.ga.zɛ̃/` reading) render the non-first glyphs as tofu. Extend only while the fallback
-            # font stays put; a combining mark joins its base's run (same font) so a decomposed diacritic
-            # still positions on it. The common all-one-font word stays whole, so the atlas still keys on
-            # real words.
-            f = fonts.font_for_char(ch)
-            j = i + 1
-            while (
-                j < n
-                and _is_word_char(text[j])
-                and (unicodedata.category(text[j])[0] == "M" or fonts.font_for_char(text[j]) == f)
-            ):
-                j += 1
+            f, j = _word_run(text, i, n)
             seg = text[i:j]
             tokens.append(
                 Token(seg, f, "word", fonts.text_width(_font(f, style), seg), style, href)
