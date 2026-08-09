@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786272006494,
+  "lastUpdate": 1786272369427,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2123,6 +2123,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.061,
             "range": "±4.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "454da6804363cf1966301a1b3cfb6637e4569ff1",
+          "message": "Merge pull request #268 from serjflint/feat/254-p1-provider-gating\n\nfeat(subtitles): data-driven provider capability registry by language (#254 p1)",
+          "timestamp": "2026-08-09T13:45:45+03:00",
+          "tree_id": "f61344f9450f104fd9554361acb16c26ca4ae861",
+          "url": "https://github.com/serjflint/saitenka/commit/454da6804363cf1966301a1b3cfb6637e4569ff1"
+        },
+        "date": 1786272368590,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.852,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.633,
+            "range": "±1.8%",
             "unit": "ms"
           }
         ]
