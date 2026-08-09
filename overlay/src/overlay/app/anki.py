@@ -242,11 +242,18 @@ _DEFAULT_CARD_KIND = "word-and-sentence"
 # Card-kind choices in offer order (the SSOT for every picker: setup wizard + `saitenka config`).
 CARD_KINDS = ("word-and-sentence", "sentence", "audio", "click", "none")
 
+# French mining preset (#254 W6): the Lapis field names minus the JP-only `reading` field. French has
+# no kana reading / pitch / furigana, and those markers ground to empty for a Latin-tokenized mine — so
+# a French note type simply doesn't carry a reading field. A user points [profiles.french.mine] at their
+# French note type; explicit `fields` overrides win over these defaults.
+FRENCH_FIELDS = {k: v for k, v in LAPIS_FIELDS.items() if k != "reading"}
+
 # Known-good note types: (field map, default card kind). A preset spares the user spelling the map
 # out; both Lapis and Kiku use the shared LAPIS_FIELDS names, differing only in card template.
 PRESETS: dict[str, tuple[dict, str]] = {
     "Lapis": (LAPIS_FIELDS, _DEFAULT_CARD_KIND),
     "Kiku": (LAPIS_FIELDS, _DEFAULT_CARD_KIND),
+    "French": (FRENCH_FIELDS, _DEFAULT_CARD_KIND),
 }
 
 
