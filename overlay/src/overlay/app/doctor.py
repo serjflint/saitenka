@@ -713,26 +713,67 @@ def _mining_targets_id(mc) -> bool:
     return "id" in mc.fields
 
 
+def _dictdb_seq_source_available() -> bool:
+    """True when an imported dictionary can supply the JMdict id via its persisted ``seq`` (#255): the
+    opt-in ``[dictdb] persist_seq`` is on, the consolidated DB exists, and at least one dict configured
+    AND imported looks JMdict-derived (title matches ``_looks_like_jmdict`` — JMdict itself, Jitendex,
+    …). A non-JMdict-derived dict's ``seq`` is never trusted as the Kanji Study id (see
+    ``Dictionary._card_from_hit``), so it doesn't count here either."""
+    from overlay.app.config import resolve_dictdb
+    from overlay.app.dictdb import DictionaryDb, db_path
+    from overlay.app.dictionary import _looks_like_jmdict
+
+    if not resolve_dictdb().persist_seq:
+        return False
+    db_file = db_path()
+    if not db_file.exists():
+        return False
+    configured = set(load_config().get("dicts") or [])
+    if not configured:
+        return False
+    db = DictionaryDb.open()
+    imported = {r.title for r in db.list_dictionaries()}
+    return any(_looks_like_jmdict(t) for t in configured & imported)
+
+
 def check_deeplink_id() -> Check:
     """The ``ID`` field carries the JMdict ``ent_seq`` that makes Kanji Study
-    ``kanjistudy://word?id={{ID}}`` deep-links work. It's mapped by default but its value comes only
-    from jamdict (the optional ``jmdict`` extra), so on a ``minimal``/default install it writes **empty**
-    with no feedback (#255). Warn when the id is mapped but no source is installed. (An imported
-    Yomitan-JMdict dict's ``seq`` will become a second source once persisted — extend this then.)"""
+    ``kanjistudy://word?id={{ID}}`` deep-links work. It's mapped by default, and its value can come
+    from either jamdict (the optional ``jmdict`` extra) or an imported JMdict-derived dict's persisted
+    ``seq`` (opt-in ``[dictdb] persist_seq`` — #255). With neither, a ``minimal``/default install writes
+    it **empty** with no feedback. Warn when the id is mapped but no source is available; either way,
+    point at the one-time backfill for cards mined before a source existed."""
     from overlay.app.reader_deps import _mine_config_from
 
+    backfill_hint = (
+        "Pre-existing cards with an empty ID aren't touched retroactively — backfill them with "
+        "`uv run tools/anki_normalize_fields.py --apply` (dry-run by default)."
+    )
     mc = _mine_config_from(load_config().get("mine") or {})
     if not _mining_targets_id(mc):
         return Check("deeplink-id", "ok", "no ID / deep-link field mapped", info=True)
     if _jmdict_available():
         return Check(
-            "deeplink-id", "ok", "deep-link ID fills from JMdict (jamdict present)", info=True
+            "deeplink-id",
+            "ok",
+            f"deep-link ID fills from JMdict (jamdict present). {backfill_hint}",
+            info=True,
+        )
+    if _dictdb_seq_source_available():
+        return Check(
+            "deeplink-id",
+            "ok",
+            "deep-link ID fills from the imported JMdict-derived dictionary's seq "
+            f"([dictdb] persist_seq). {backfill_hint}",
+            info=True,
         )
     return Check(
         "deeplink-id",
         "warn",
         "mining maps the ID field (Kanji Study kanjistudy://word?id={{ID}} deep-links) but no JMdict id "
-        "source is installed → ID writes empty. Reinstall with the `jmdict` extra to fill it.",
+        "source is available → ID writes empty. Reinstall with the `jmdict` extra, or set "
+        "`[dictdb] persist_seq = true` and import a JMdict-derived dict (e.g. Jitendex) — then "
+        f"re-import it to populate `seq` on existing entries. {backfill_hint}",
     )
 
 

@@ -904,6 +904,64 @@ def test_deeplink_id_warns_on_ent_seq_marker_without_a_source(monkeypatch):
     assert doc.check_deeplink_id().status == "warn"
 
 
+def test_deeplink_id_warn_mentions_the_backfill_tool(monkeypatch):
+    """#255: pre-existing cards are never touched retroactively — the warning must point at the
+    one-time backfill script, or a user with an old empty-ID card has no way to discover it."""
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    monkeypatch.setattr(doc, "load_config", dict)
+    c = doc.check_deeplink_id()
+    assert "anki_normalize_fields.py" in c.detail
+
+
+def test_dictdb_seq_source_unavailable_when_persist_seq_off(tmp_path, monkeypatch):
+    import dicthelp
+
+    z = dicthelp.term_zip(tmp_path / "j.zip", "Jitendex", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n')  # no [dictdb] persist_seq
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is False
+
+
+def test_dictdb_seq_source_unavailable_for_a_non_jmdict_dict(tmp_path, monkeypatch):
+    import dicthelp
+
+    z = dicthelp.term_zip(tmp_path / "d.zip", "MyOwnDict", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["MyOwnDict"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is False  # title doesn't look JMdict-derived
+
+
+def test_dictdb_seq_source_available_with_persist_seq_and_a_jmdict_dict(tmp_path, monkeypatch):
+    import dicthelp
+
+    z = dicthelp.term_zip(tmp_path / "j.zip", "Jitendex", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    assert doc._dictdb_seq_source_available() is True
+
+
+def test_deeplink_id_ok_via_dictdb_seq_source(tmp_path, monkeypatch):
+    """When jamdict is absent but an imported JMdict-derived dict + persist_seq can supply the id, the
+    check must report ok (a working source), not warn."""
+    import dicthelp
+
+    monkeypatch.setattr(doc, "_jmdict_available", lambda: False)
+    z = dicthelp.term_zip(tmp_path / "j.zip", "Jitendex", [["猫", "ねこ", ["cat"]]])
+    dicthelp.db().import_zip(z, imported_at=dicthelp.AT)
+    cfg = tmp_path / "overlay.toml"
+    cfg.write_text('dicts = ["Jitendex"]\n\n[dictdb]\npersist_seq = true\n')
+    monkeypatch.setenv("SAITENKA_CONFIG", str(cfg))
+    c = doc.check_deeplink_id()
+    assert c.status == "ok" and c.info
+    assert "persist_seq" in c.detail
+
+
 # --- init wizard -----------------------------------------------------------------------------
 
 
