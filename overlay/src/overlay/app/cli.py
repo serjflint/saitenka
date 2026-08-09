@@ -1530,7 +1530,11 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
     reader = Reader(ipc, options=opts, profile=active_profile)  # deps injected asynchronously below
-    reader.set_profile_cycle(profile_cycle)
+    from overlay.app.reader_deps import make_dict_scoper
+
+    reader.set_profile_cycle(
+        profile_cycle, make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
+    )
     provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,
         jimaku_key=jimaku_key,

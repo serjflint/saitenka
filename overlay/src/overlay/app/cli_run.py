@@ -35,6 +35,14 @@ log = logging.getLogger(__name__)
 DEMO_LINE = "門前の小僧習わぬ経を読む"
 
 
+def _dict_scoper_for(cfg: dict, profile_cycle):
+    """The live dict re-scoper (#254 W3) for the profile switcher — only when there's more than one
+    profile to cycle through (else a switch is inert, so no need to open a DB handle for it)."""
+    from overlay.app.reader_deps import make_dict_scoper
+
+    return make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
+
+
 @dataclass(frozen=True)
 class RunSubtitleOptions:
     """A ``run``'s subtitle-sourcing choices, resolved once from CLI + config and threaded through the
@@ -1095,12 +1103,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             options=opts,
             profile=active_profile,
         )
-        reader.set_profile_cycle(profile_cycle)
+        reader.set_profile_cycle(profile_cycle, _dict_scoper_for(cfg, profile_cycle))
     else:
         reader = Reader(
             ipc, options=opts, profile=active_profile
         )  # deps injected asynchronously below
-        reader.set_profile_cycle(profile_cycle)
+        reader.set_profile_cycle(profile_cycle, _dict_scoper_for(cfg, profile_cycle))
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)

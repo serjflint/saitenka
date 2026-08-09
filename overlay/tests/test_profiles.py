@@ -202,6 +202,44 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages():
     assert reader.profile is profile
 
 
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_profile_rescopes_the_dict_set_live():
+    """A live profile cycle (#254 W3) swaps not just the tokenizer/langs but the dictionary set — the
+    scoper the CLI installs is consulted and its result replaces reader.dict_set."""
+    register_tokenizer("latin", _FakeLatinTokenizer)
+    jp = resolve_profile({})  # default (jp/unidic)
+    fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
+    jp_dicts, fr_dicts = object(), object()  # sentinels — cycle must select by profile
+
+    reader = Reader(FakeIPC(), profile=jp)
+    reader.dict_set = jp_dicts
+    reader.set_profile_cycle([jp, fr], lambda p: fr_dicts if p.langs.main == "fr" else jp_dicts)
+
+    reader.cycle_profile()
+
+    assert reader.profile is fr
+    assert reader.langs.main == "fr"
+    assert reader.dict_set is fr_dicts  # rescoped, not left on the JP dict set
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_profile_without_a_scoper_keeps_the_dict_set():
+    """No scoper installed (the pre-W3 wiring / single-DB path) → a cycle leaves dict_set untouched,
+    so the switcher stays backward-compatible."""
+    register_tokenizer("latin", _FakeLatinTokenizer)
+    jp = resolve_profile({})
+    fr = resolve_profile({"profile": {"language": "fr", "tokenizer": "latin"}})
+    reader = Reader(FakeIPC(), profile=jp)
+    sentinel = object()
+    reader.dict_set = sentinel
+    reader.set_profile_cycle([jp, fr])  # no dict_scoper
+
+    reader.cycle_profile()
+
+    assert reader.profile is fr
+    assert reader.dict_set is sentinel  # unchanged
+
+
 # --- open language codes: accepted (not whitelisted), agnostic-provider fallback ------------------
 
 

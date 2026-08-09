@@ -406,6 +406,9 @@ class Reader:
         # path) makes cycle_profile a no-op. cli installs the real cycle via set_profile_cycle.
         self.profiles: tuple[Profile, ...] = (self.profile,)
         self._profile_idx = 0
+        # Optional dict re-scoper (#254 W3): profile → its scoped DictionarySet, installed by the CLI
+        # alongside the cycle so a live switch re-scopes dictionaries too, not just the tokenizer.
+        self._dict_scoper: Callable[[Profile], object] | None = None
         # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam, selected
         # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
         self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
@@ -747,10 +750,15 @@ class Reader:
         self.tokenizer = tokenizer
         self.token_cache.clear()
 
-    def set_profile_cycle(self, profiles: Sequence[Profile]) -> None:
+    def set_profile_cycle(
+        self, profiles: Sequence[Profile], dict_scoper: Callable[[Profile], object] | None = None
+    ) -> None:
         """Install the ordered profile cycle the live switcher rotates through (cli wiring, #254 D8). An
-        empty or single-entry cycle keeps the switcher inert; the cursor starts at the active profile."""
+        empty or single-entry cycle keeps the switcher inert; the cursor starts at the active profile.
+        ``dict_scoper`` (optional) maps a profile → its scoped ``DictionarySet`` so a live switch
+        re-scopes dictionaries too (#254 W3); ``None`` keeps the current dict set across a cycle."""
         self.profiles = tuple(profiles) or (self.profile,)
+        self._dict_scoper = dict_scoper
         self._profile_idx = next(
             (i for i, p in enumerate(self.profiles) if p.name == self.profile.name), 0
         )
@@ -766,17 +774,32 @@ class Reader:
             return  # nothing to switch to — inert on the default single-profile path
         idx = (self._profile_idx + 1) % len(self.profiles)
         new = self.profiles[idx]
+        # Resolve BOTH the tokenizer and the re-scoped dict set FULLY before mutating any live state, so
+        # an unresolvable profile (bad tokenizer / DB error) leaves the old one intact (atomic revert).
         try:
-            tok = get_tokenizer(new.tokenizer)  # resolve BEFORE any swap → atomic on a bad profile
+            tok = get_tokenizer(new.tokenizer)
         except ValueError:
             self._toast(f"profile {new.name!r}: unknown tokenizer {new.tokenizer!r}", "warn")
             return
+        rescope = self._dict_scoper is not None
+        new_dict_set = self.dict_set
+        if rescope:
+            try:
+                new_dict_set = self._dict_scoper(new)  # type: ignore[misc]  # guarded by `rescope`
+            except Exception:  # noqa: BLE001 — a rescope failure must not kill the switch; keep old dicts
+                self._toast(f"profile {new.name!r}: dictionary rescope failed", "warn")
+                return
         self._profile_idx = idx
         self.profile = new
         self.langs = new.langs  # provider gating + identity read live off this
         self.use_tokenizer(
             tok
         )  # swaps the strategy AND clears the token cache (bumps its generation)
+        if rescope:
+            self.dict_set = new_dict_set  # #254 W3 — the new profile's scoped dictionaries, live
+            # Force the memoised render-cache signature to recompute off the NEW dict set, else composed
+            # tooltips from the old profile's dicts would keep being served under the stale signature.
+            self.session.render_cache.config_sig = None
         self._warmed_index = None  # re-arm the episode warm under the new tokenizer/generation
         self._retokenize_current_cue()
         self.warm_episode_tokens()

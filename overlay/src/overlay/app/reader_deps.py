@@ -127,6 +127,31 @@ def _build_dict_set(
     return dict_set, freq_rows
 
 
+def make_dict_scoper(cfg: dict):
+    """A ``profile → DictionarySet | None`` callable the live switcher uses to re-scope dictionaries on
+    a profile cycle (#254 W3). Captures the raw ``cfg`` and one DB handle; each call resolves that
+    profile's scoped ``dicts``/``freq``/``pitch`` titles (``None`` when it scopes none, i.e. inherits the
+    top-level set — the reader then keeps its current dict set). Cheap: ``from_db`` resolves titles to
+    rows, it doesn't bulk-load (lookups stay lazy SQL)."""
+    from overlay.app.dictdb import DictionaryDb
+    from overlay.app.dictionary import DictionarySet
+    from overlay.app.profiles import scope_config
+
+    db = DictionaryDb.open()
+
+    def scope(profile):
+        override = None if profile.name == "default" else profile.name
+        scoped = scope_config(cfg, override=override)
+        dicts = scoped.get("dicts") or []
+        freq = scoped.get("freq") or []
+        pitch = scoped.get("pitch") or []
+        if not (dicts or freq or pitch):
+            return None
+        return DictionarySet.from_db(db, dicts, freq, pitch, language=profile.langs.main)
+
+    return scope
+
+
 def _spawn_known_refresh(db, known_cfg) -> None:
     """Background: reconcile the known-word cache against Anki (subset mod-time diff) so the NEXT launch
     reads a current set off disk. Fire-and-forget — a failure (Anki down) leaves the cache as-is; this
