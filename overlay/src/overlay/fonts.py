@@ -298,6 +298,36 @@ def font_for_char(ch: str) -> str:
     return _system_font_for_char(ch) or FONT_FILES[0]
 
 
+def _covers_all(file: str, text: str) -> bool:
+    cov = _coverage(file)
+    return all(ord(c) in cov for c in text)
+
+
+def _system_font_covering(text: str) -> str | None:
+    """First OS font whose cmap has EVERY char of ``text`` (a whole word run in an exotic script), or
+    ``None``. Not cached (word strings are unbounded) — only reached for a run no vendored font covers,
+    and ``_coverage`` per file is cached, so cost is bounded by the system-font count."""
+    for f in _system_font_files():
+        try:
+            if _covers_all(f, text):
+                return f
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
+def font_for_run(text: str) -> str:
+    """The single font for a whole word run: the first in the vendored chain covering EVERY char — so the
+    word renders in ONE consistent font and is byte-identical to the pre-split path when a vendored font
+    covers it all — then a best-effort system font covering the whole run, else the vendored primary.
+    Fixes the tofu where a word's FIRST char resolved to a font that lacks a LATER glyph (a Latin 'z' +
+    an IPA 'ɛ' the Latin Noto has but the JP one doesn't) WITHOUT fragmenting a coverable word."""
+    for f in FONT_FILES:
+        if _covers_all(f, text):
+            return f
+    return _system_font_covering(text) or FONT_FILES[0]
+
+
 @dataclass(frozen=True)
 class ShapedRun:
     """A maximal substring that renders from a single font file."""

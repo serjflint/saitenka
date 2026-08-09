@@ -82,22 +82,15 @@ def _font(file: str, style: Style):
 
 
 def _word_run(text: str, i: int, n: int) -> tuple[str, int]:
-    """The maximal single-font word run starting at ``i`` → ``(font_file, end_index)``. Kerning is a
-    no-op here (Pillow has no libraqm; layout is pure advance), so drawing a run is byte-identical to
-    per-glyph — BUT only if every glyph resolves to the SAME font. Picking the font by the first char
-    alone made a mixed-coverage word (Latin 'z' + an IPA 'ɛ' only the Latin Noto carries, in a
-    `/ma.ga.zɛ̃/` reading) render the non-first glyphs as tofu. So extend only while the fallback font
-    holds; a combining mark joins its base's run (same font) so a decomposed diacritic still positions
-    on it. The common all-one-font word stays whole, so the atlas still keys on real words."""
-    f = fonts.font_for_char(text[i])
-    j = i + 1
-    while (
-        j < n
-        and _is_word_char(text[j])
-        and (unicodedata.category(text[j])[0] == "M" or fonts.font_for_char(text[j]) == f)
-    ):
+    """The maximal letter run starting at ``i`` → ``(font_file, end_index)``. The whole word renders in
+    ONE font — the first covering EVERY char (:func:`fonts.font_for_run`) — so it stays consistent and
+    byte-identical to the pre-split path when a vendored font covers it all, while fixing the tofu where
+    the first char's font lacked a later glyph (a Latin 'z' + an IPA 'ɛ'). Kerning is a no-op (Pillow has
+    no libraqm; pure advance), so one-font runs draw exactly as per-glyph."""
+    j = i
+    while j < n and _is_word_char(text[j]):
         j += 1
-    return f, j
+    return fonts.font_for_run(text[i:j]), j
 
 
 def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Token]:

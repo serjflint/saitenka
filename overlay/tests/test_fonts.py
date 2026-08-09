@@ -137,10 +137,10 @@ def test_glyph_width_counters_record_miss_then_hit():
     assert sampled.get("glyph_width.hits", 0) >= 1
 
 
-def test_tokenize_splits_a_mixed_coverage_word_so_no_glyph_is_tofu():
-    """Regression (French IPA pronunciation `/ma.ɡa.zɛ̃/`): 'z' is in NotoSansJP but 'ɛ' + the combining
-    tilde are ONLY in the Latin NotoSans. A word run must split at the font boundary — inheriting the
-    first char's JP font rendered the IPA glyphs as tofu. Invariant: every glyph in a token is covered by
+def test_tokenize_picks_a_whole_run_font_that_covers_every_glyph():
+    """Regression (French IPA `/ma.ɡa.zɛ̃/`): 'z' is in NotoSansJP but 'ɛ' + the combining tilde are ONLY
+    in the Latin NotoSans. Choosing the word font by the first char rendered the IPA glyphs as tofu; the
+    whole run must use one font that covers EVERY char. Invariant: every glyph in a token is covered by
     that token's font."""
     from overlay.render.layout import _tokenize_span
 
@@ -150,8 +150,8 @@ def test_tokenize_splits_a_mixed_coverage_word_so_no_glyph_is_tofu():
             if ch.isspace() or ord(ch) < 0x20:
                 continue
             assert fonts.covers(t.file, ch), f"{ch!r} U+{ord(ch):04X} not covered by {t.file}"
-    # the IPA vowel+tilde specifically lands in the Latin font that has it, not the JP one
-    assert any(t.text == "ɛ̃" and t.file == "NotoSans.ttf" for t in toks)
+    # the whole mixed run 'zɛ̃' renders in the one Latin font that covers all of it, not the JP primary
+    assert any(t.text == "zɛ̃" and t.file == "NotoSans.ttf" for t in toks)
 
 
 def test_font_for_char_falls_back_to_a_system_font_when_vendored_lacks_it(monkeypatch):
