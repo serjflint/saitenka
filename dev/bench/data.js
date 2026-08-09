@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786292049206,
+  "lastUpdate": 1786297102166,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2591,6 +2591,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.644,
             "range": "±0.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5038058866a0e19ab74b4483452566bc2c6d33bf",
+          "message": "Merge pull request #281 from serjflint/ci/taffylite-drop-intel-macos\n\nfix(taffylite): make the PyPI release workflow publishable",
+          "timestamp": "2026-08-09T20:37:51+03:00",
+          "tree_id": "718be8a536788f2bcb2ca8cd8b50ec9036034c9d",
+          "url": "https://github.com/serjflint/saitenka/commit/5038058866a0e19ab74b4483452566bc2c6d33bf"
+        },
+        "date": 1786297101012,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.264,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.869,
+            "range": "±10.5%",
             "unit": "ms"
           }
         ]
