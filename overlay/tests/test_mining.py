@@ -555,6 +555,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     from overlay.app.miner import _select_bulk_targets
     from overlay.app.scoring import TokenStyle
     from overlay.app.tokenize import Token
+    from overlay.app.tokenizer import UnidicTokenizer
 
     def tok(surface, lemma, pos="名詞"):
         return Token(surface=surface, lemma=lemma, reading="", pos=pos, start=0, end=len(surface))
@@ -573,7 +574,7 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
         TokenStyle(color=(0, 0, 0, 255)),
         TokenStyle(color=(0, 0, 0, 255)),
     ]
-    r = SimpleNamespace(tokens=tokens, styles=styles, max_bulk=1)
+    r = SimpleNamespace(tokens=tokens, styles=styles, max_bulk=1, tokenizer=UnidicTokenizer())
     assert _select_bulk_targets(r) == [0]  # capped at 1 before reaching 鳥
 
     r.max_bulk = 10

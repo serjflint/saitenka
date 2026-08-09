@@ -17,12 +17,12 @@ from typing import TYPE_CHECKING
 
 from overlay import otel_metrics
 from overlay.app.perf import gil_disabled
-from overlay.app.tokenize import SKIP_POS, Token
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
     from overlay.app.popups import Panel
     from overlay.app.sub_index import SubIndex
+    from overlay.app.tokenize import Token
 
 log = logging.getLogger(__name__)
 
@@ -280,7 +280,7 @@ def _candidates(reader: Reader) -> list[tuple[int, int, Token]]:
     seen: set[str] = set()
     items: list[tuple[int, int, Token]] = []
     for i, t in enumerate(reader.tokens):
-        if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
+        if not reader.tokenizer.is_content(t) or t.lemma in seen:
             continue
         seen.add(t.lemma)
         np1 = bool(
@@ -328,7 +328,7 @@ def _enqueue_lookahead(reader: Reader, gen: int, seen: set[str]) -> None:
     for text in upcoming_cue_texts(reader, reader.prefetch_lookahead):
         toks = reader.tokenizer.tokenize(text)
         for i, t in enumerate(toks):
-            if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
+            if not reader.tokenizer.is_content(t) or t.lemma in seen:
                 continue
             seen.add(t.lemma)
             _enqueue(
@@ -388,7 +388,7 @@ def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
         toks = reader.tokenizer.tokenize(text)
         styles = reader.scorer.score_line(toks)
         for i, t in enumerate(toks):
-            if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
+            if not reader.tokenizer.is_content(t) or t.lemma in seen:
                 continue
             seen.add(t.lemma)
             candidate = _head_prefetch_candidate(reader, gen, toks, i, t, styles)

@@ -833,7 +833,9 @@ def _execute_reader_session(
         target = demo.demo_word or "読む"
         idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
         if idx is None:
-            idx = next((i for i, t in enumerate(reader.tokens) if t.is_content), 0)
+            idx = next(
+                (i for i, t in enumerate(reader.tokens) if reader.tokenizer.is_content(t)), 0
+            )
         print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
         reader.set_hover(idx)
         _run_demo_actions(reader, ipc, demo)

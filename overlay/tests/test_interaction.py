@@ -40,9 +40,7 @@ def _reader():
 
 
 def _content_word(r) -> int:
-    from overlay.app.controller import SKIP_POS
-
-    return next(i for i, t in enumerate(r.tokens) if t.is_content and t.pos not in SKIP_POS)
+    return next(i for i, t in enumerate(r.tokens) if r.tokenizer.is_content(t))
 
 
 class _RecSpan:

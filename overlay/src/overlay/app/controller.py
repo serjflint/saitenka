@@ -100,7 +100,7 @@ from overlay.app.sub_index import SubIndex
 from overlay.app.subtitle_render import NullRenderer, SubtitleRenderer
 from overlay.app.toast import render_toast
 from overlay.app.token_cache import TokenCache, TokenizedCue
-from overlay.app.tokenize import SKIP_POS, Token
+from overlay.app.tokenize import Token
 from overlay.app.tokenizer import Tokenizer, get_tokenizer
 from overlay.mpvio.osd import Overlay
 
@@ -741,7 +741,7 @@ class Reader:
         ox, oy = self.sub_origin
         for b in self.boxes:
             tok = self.tokens[b.index]
-            if tok.pos in SKIP_POS or not tok.surface.strip():
+            if self.tokenizer.is_skippable(tok):
                 continue
             if b.contains(mx - ox, my - oy):
                 return b.index
