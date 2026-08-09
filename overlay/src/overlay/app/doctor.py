@@ -714,26 +714,55 @@ def _mining_targets_id(mc) -> bool:
 
 
 def _dictdb_seq_source_available() -> bool:
-    """True when an imported dictionary can supply the JMdict id via its persisted ``seq`` (#255): the
-    opt-in ``[dictdb] persist_seq`` is on, the consolidated DB exists, and at least one dict configured
-    AND imported looks JMdict-derived (title matches ``_looks_like_jmdict`` — JMdict itself, Jitendex,
-    …). A non-JMdict-derived dict's ``seq`` is never trusted as the Kanji Study id (see
-    ``Dictionary._card_from_hit``), so it doesn't count here either."""
-    from overlay.app.config import resolve_dictdb
+    """True when an imported dictionary **actually** supplies the JMdict id via its persisted ``seq``
+    (#255): a dict that is configured, imported, JMdict-derived by title (``_looks_like_jmdict`` —
+    JMdict itself, Jitendex, …), AND has at least one non-NULL ``seq`` row. The data check is
+    load-bearing, not a formality: ``[dictdb] persist_seq`` can be flipped on **after** an import (the
+    "re-import to backfill" ordering the docs warn about), leaving every row's ``seq`` NULL — config
+    intent then lies about the data, and the ID field keeps writing empty. A non-JMdict-derived dict's
+    ``seq`` is never trusted as the Kanji Study id (see ``Dictionary._card_from_hit``), so it doesn't
+    count here either. (``persist_seq`` isn't re-checked: the populated-row test subsumes it — no rows
+    can be populated with it off.)"""
     from overlay.app.dictdb import DictionaryDb, db_path
     from overlay.app.dictionary import _looks_like_jmdict
 
-    if not resolve_dictdb().persist_seq:
-        return False
-    db_file = db_path()
-    if not db_file.exists():
+    if not db_path().exists():
         return False
     configured = set(load_config().get("dicts") or [])
     if not configured:
         return False
     db = DictionaryDb.open()
-    imported = {r.title for r in db.list_dictionaries()}
-    return any(_looks_like_jmdict(t) for t in configured & imported)
+    matched = [
+        r for r in db.list_dictionaries() if r.title in configured and _looks_like_jmdict(r.title)
+    ]
+    conn = db._conn()
+    return any(
+        conn.execute(
+            "SELECT 1 FROM entries WHERE dict_id=? AND seq IS NOT NULL LIMIT 1", (r.id,)
+        ).fetchone()
+        is not None
+        for r in matched
+    )
+
+
+def _dictdb_seq_configured_but_unpopulated() -> bool:
+    """True for the specific misconfig the docs warn about: ``[dictdb] persist_seq`` is on and a
+    JMdict-derived dict is configured + imported, but its ``entries.seq`` is still all-NULL — because
+    ``persist_seq`` was flipped on **after** the import and the dict was never re-imported. The intent
+    is there; only the re-import is missing, so the warning is a precise "re-import to backfill", not the
+    generic no-source message."""
+    from overlay.app.config import resolve_dictdb
+    from overlay.app.dictdb import DictionaryDb, db_path
+    from overlay.app.dictionary import _looks_like_jmdict
+
+    if not resolve_dictdb().persist_seq or not db_path().exists():
+        return False
+    configured = set(load_config().get("dicts") or [])
+    db = DictionaryDb.open()
+    matched = [
+        r for r in db.list_dictionaries() if r.title in configured and _looks_like_jmdict(r.title)
+    ]
+    return bool(matched) and not _dictdb_seq_source_available()
 
 
 def check_deeplink_id() -> Check:
@@ -766,6 +795,14 @@ def check_deeplink_id() -> Check:
             "deep-link ID fills from the imported JMdict-derived dictionary's seq "
             f"([dictdb] persist_seq). {backfill_hint}",
             info=True,
+        )
+    if _dictdb_seq_configured_but_unpopulated():
+        return Check(
+            "deeplink-id",
+            "warn",
+            "mining maps the ID field but the JMdict-derived dictionary's `seq` is empty: "
+            "`[dictdb] persist_seq` was enabled after import, so no `seq` was persisted → ID writes "
+            f"empty. Re-import that dictionary (`saitenka import <dir>`) to backfill it. {backfill_hint}",
         )
     return Check(
         "deeplink-id",
