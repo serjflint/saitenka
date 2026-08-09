@@ -4,7 +4,12 @@
 [files]
 # Vendored Unicode UAX #14 data (property table + conformance corpus) — verbatim upstream text whose
 # Line_Break class codes (BA, ID, Nd, …) trip the spell checker. Never hand-edit; regenerate from source.
-extend-exclude = ["overlay/tests/fixtures/uax14/"]
+# The deinflect transform data is generated verbatim from Yomitan descriptors — the French one is full of
+# Latin conjugation suffixes (siez, âtes, …) that read as English typos; never hand-edit, regenerate.
+extend-exclude = [
+    "overlay/tests/fixtures/uax14/",
+    "deinflect/src/saitenka_deinflect/data/",
+]
 
 [default.extend-words]
 unparseable = "unparseable"   # valid variant of "unparsable"; used in our error strings
