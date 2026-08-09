@@ -1420,7 +1420,12 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
-    from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
+    from overlay.app.profiles import (
+        configured_profiles,
+        effective_slang,
+        resolve_profile,
+        scope_config,
+    )
     from overlay.app.reader_deps import warm_tokenizer
 
     cfg = load_config(config)
@@ -1428,6 +1433,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         cfg = dict(cfg)
         cfg["active_profile"] = profile
     active_profile = resolve_profile(cfg)
+    slang = effective_slang(active_profile, slang)  # #254: non-JP profile selects its own track
     profile_cycle = configured_profiles(
         cfg
     )  # the [profiles.*] the live switcher (D8) rotates through

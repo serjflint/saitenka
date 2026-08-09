@@ -58,6 +58,10 @@ class Profile:
     name: str
     langs: ReaderLanguages
     tokenizer: str
+    # Subtitle-track language priority this profile selects (mpv --slang order). ``None`` = the ambient
+    # top-level default stands (byte-identical JP path). A non-JP profile derives it from its language so
+    # it picks that track, not the JP default; an explicit ``slang`` in the profile table wins.
+    slang: str | None = None
 
 
 def validate_language_code(code: str) -> str:
@@ -155,7 +159,28 @@ def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
         name=str(name) if name else "default",
         langs=ReaderLanguages(main=language, second=second),
         tokenizer=tokenizer,
+        slang=_profile_slang(raw, language),
     )
+
+
+def effective_slang(profile: Profile, fallback: str) -> str:
+    """The subtitle-language priority a launch uses: the active profile's own (a non-JP or slang-set
+    profile) if it has one, else the CLI/config ``fallback``. The one place ``run``/``attach`` resolve
+    it, so a non-JP profile stops selecting the JP track (#254)."""
+    return profile.slang or fallback
+
+
+def _profile_slang(raw: dict, language: str) -> str | None:
+    """The subtitle-track language priority a profile implies (see :attr:`Profile.slang`). Explicit
+    ``slang`` wins; else a non-JP profile derives it from its language's primary subtag (``de-CH`` →
+    ``de``) so it selects THAT track instead of the JP default; a JP profile returns ``None`` (the
+    ambient default stands, byte-identical)."""
+    explicit = raw.get("slang")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    if language != MAIN_LANG:
+        return language.split("-", 1)[0]
+    return None
 
 
 def configured_profiles(cfg: dict) -> list[Profile]:

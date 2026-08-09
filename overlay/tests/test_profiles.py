@@ -498,3 +498,30 @@ def test_configured_profiles_base_is_the_default_table_not_the_active_named_prof
     }
     base = configured_profiles(cfg)[0]
     assert base.name == "default" and base.langs.main == "jp" and base.langs.second == "de"
+
+
+def test_non_jp_profile_derives_slang_from_its_language():
+    # #254: a French profile selects the French subtitle track, not the JP default (which used to let a
+    # cached JP jimaku srt hijack the track). Derived from the language's primary subtag.
+    cfg = {"active_profile": "fr", "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}}}
+    assert resolve_profile(cfg).slang == "fr"
+
+
+def test_profile_region_subtag_is_folded_off_for_slang():
+    cfg = {"active_profile": "ch", "profiles": {"ch": {"language": "de-CH", "tokenizer": "latin"}}}
+    assert resolve_profile(cfg).slang == "de"
+
+
+def test_explicit_profile_slang_wins_over_the_derived_one():
+    # A profile can pin its own track priority (e.g. a release that tags French as the 3-letter "fra").
+    cfg = {
+        "active_profile": "fr",
+        "profiles": {"fr": {"language": "fr", "tokenizer": "latin", "slang": "fra,fr"}},
+    }
+    assert resolve_profile(cfg).slang == "fra,fr"
+
+
+def test_japanese_default_leaves_slang_unset_for_the_ambient_default():
+    # None → run/attach keep the top-level slang (byte-identical JP path); no track-selection change.
+    assert resolve_profile({}).slang is None
+    assert DEFAULT_PROFILE.slang is None

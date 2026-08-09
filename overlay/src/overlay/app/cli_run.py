@@ -26,7 +26,12 @@ from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track
 from overlay.app.jimaku import parse_filename
 from overlay.app.paths import cache_dir
-from overlay.app.profiles import configured_profiles, resolve_profile, scope_config
+from overlay.app.profiles import (
+    configured_profiles,
+    effective_slang,
+    resolve_profile,
+    scope_config,
+)
 from overlay.app.subtitle_providers import enabled_providers_for
 from overlay.mpvio.launch import MpvLaunchOptions
 
@@ -317,10 +322,14 @@ def _configured_subtitles(
     resync: bool,
     language: str,
 ) -> tuple[Path | None, tuple[str, ...]]:
-    cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync)
+    providers = enabled_providers_for(language, (("jimaku", jimaku), ("tsukihime", tsukihime)))
+    # Reuse a cached provider-sourced subtitle only when some provider actually serves this language —
+    # both jimaku and tsukihime are Japanese-only, so a JP srt cached from a prior run must not hijack a
+    # second-language profile's track (it would otherwise load as an external track over the French one).
+    serves = enabled_providers_for(language, (("jimaku", True), ("tsukihime", True)))
+    cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync) if serves else None
     if cached is not None:
         return cached, ()
-    providers = enabled_providers_for(language, (("jimaku", jimaku), ("tsukihime", tsukihime)))
     return None, providers
 
 
@@ -966,6 +975,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     # Scope dict/freq/pitch + [mine] to the active profile (#254 D4/D6); a not-passed
     # --mine-deck/--mine-model (None) yields to the profile's own deck/model (see _scope_cfg_to_profile).
     cfg, mine_deck, mine_model = _scope_cfg_to_profile(cfg, mine_deck, mine_model)
+    slang = effective_slang(active_profile, slang)  # #254: non-JP profile selects its own track
     setup_session_telemetry(
         cfg
     )  # BEFORE warm_tokenizer/begin_deps_build so their spans are captured
