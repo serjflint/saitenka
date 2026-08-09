@@ -1,7 +1,7 @@
 # Research prompt kit
 
-Reusable skeleton for the `research` skill. The **living, filled-in library** is
-`Saitenka-Vault/_source/research-prompts.md` plus the `*-research-prompt.md` / `*-r2.md` /
+Reusable skeleton for the `research` skill. The **living, filled-in library** is kept in the
+maintainer's private notes as `research-prompts.md` plus the `*-research-prompt.md` / `*-r2.md` /
 `*-research-findings.md` artifacts beside it — read the closest one and copy it. Two are worth reading
 for structure: `geometry-primitives-research-prompt-r2.md` (adversarial-verify a converged winner) and
 `gemini-sota-prompt.md` (a tailored SOTA survey). This file is the self-contained fallback.
@@ -66,6 +66,6 @@ could not see.
 
 ## What survives → findings
 
-`<topic>-research-findings.md` in the Vault `_source/`: only claims that passed the gate, each with its
+`<topic>-research-findings.md` in the maintainer's private notes: only claims that passed the gate, each with its
 citation and maintenance status; a "Missing / under-specified" section; and the GO items / issues to
 file. Round-1 consensus that failed verification is recorded as *rejected*, with why.
