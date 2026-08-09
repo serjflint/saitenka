@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786278500132,
+  "lastUpdate": 1786279594178,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2339,6 +2339,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 10.232,
             "range": "±6.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8e29b85680aea0045fe4437a1f9307cef78a530a",
+          "message": "Merge pull request #274 from serjflint/feat/254-p4-dict-anki-scoping\n\nfeat(profiles): per-profile dictionaries + Anki mining config (#254 p4)",
+          "timestamp": "2026-08-09T15:46:10+03:00",
+          "tree_id": "4eea4d67376ab13b85fe4cb14574dad402f2a541",
+          "url": "https://github.com/serjflint/saitenka/commit/8e29b85680aea0045fe4437a1f9307cef78a530a"
+        },
+        "date": 1786279593607,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.353,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.059,
+            "range": "±3.7%",
             "unit": "ms"
           }
         ]
