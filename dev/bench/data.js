@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786262939774,
+  "lastUpdate": 1786263114359,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1835,6 +1835,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.816,
             "range": "±10.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e459edb6de794a1eeb08bd9d4ad25e6a4f3cc8ca",
+          "message": "Merge pull request #260 from serjflint/feat/deeplink-id-doctor-255\n\nfeat(doctor): warn when the deep-link ID field has no id source (#255, slice 1)",
+          "timestamp": "2026-08-09T11:11:24+03:00",
+          "tree_id": "38638af1846c925654d817c9df4ef80b1ab31e98",
+          "url": "https://github.com/serjflint/saitenka/commit/e459edb6de794a1eeb08bd9d4ad25e6a4f3cc8ca"
+        },
+        "date": 1786263113524,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.273,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.051,
+            "range": "±4.3%",
             "unit": "ms"
           }
         ]
