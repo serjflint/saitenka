@@ -15,8 +15,10 @@ Two sources:
 Oracle (precise, not a flaky global exit code): doctor's `fonts` check must be `ok` — it proves the
 bundled font assets shipped in the wheel and load from the installed package. `--expect-tools NAME…`
 additionally asserts those doctor checks are `ok` (the Linux leg apt-installs mpv+ffmpeg, so it can
-demand mpv/ffmpeg green). doctor's own exit code is ignored on purpose: a clean box has no mpv, which
-doctor rightly flags `fail`.
+demand mpv/ffmpeg green). doctor's global exit code is ignored on purpose — a clean box legitimately
+fails `mpv`/`ffmpeg` (the `setup` wizard installs them) — BUT the failures must be a subset of that
+expected set (`ALLOWED_FAILS`), so a genuine packaging regression that produces a *new* fail is caught
+rather than silently tolerated.
 """
 
 from __future__ import annotations
@@ -30,6 +32,9 @@ from pathlib import Path
 
 OVERLAY = Path(__file__).resolve().parent.parent
 EXE_NAME = "saitenka.exe" if os.name == "nt" else "saitenka"
+# The only doctor checks allowed to `fail` on a clean box: external runtime tools a bare install lacks
+# (the `setup` wizard installs them). Any OTHER fail is a real regression, not an expected clean state.
+ALLOWED_FAILS = {"mpv", "ffmpeg"}
 
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
@@ -104,7 +109,16 @@ def _check_doctor(exe: Path, expect_ok: list[str]) -> None:
     for name in ["fonts", *expect_ok]:
         if status.get(name) != "ok":
             sys.exit(f"doctor `{name}` expected ok, got {status.get(name)!r}\nfull: {status}")
-    print(f"doctor ok — {summary}, asserted ok: {['fonts', *expect_ok]}")
+    failed = sorted({c["name"] for c in checks if c["status"] == "fail"})
+    unexpected = [n for n in failed if n not in ALLOWED_FAILS]
+    if unexpected:
+        sys.exit(
+            f"doctor has unexpected failure(s) beyond the clean-box mpv/ffmpeg: {unexpected}\nfull: {status}"
+        )
+    print(
+        f"doctor structural check PASSED — {summary}; asserted ok={['fonts', *expect_ok]}; "
+        f"expected clean-box fails={failed or 'none'}"
+    )
 
 
 def main() -> None:
