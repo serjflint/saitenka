@@ -112,10 +112,10 @@ def _draw_sidebar_header(
 
     draw.text((px(14), px(16)), "Subtitles", font=title_font, fill=WHITE, anchor="lm")
     hits: list[SidebarHitBox] = []
-    tab_x = width - px(178)
-    for label, tab_view in (("Track", "track"), ("Backlog", "backlog")):
+    tab_width = px(76)
+    tab_x = width - (tab_width * 3 + px(6) * 2 + px(8))
+    for label, tab_view in (("Track", "track"), ("Backlog", "backlog"), ("Mine", "mine")):
         selected = view == tab_view
-        tab_width = px(82)
         draw.rounded_rectangle(
             (tab_x, px(10), tab_x + tab_width, px(42)),
             radius=px(8),
@@ -217,7 +217,7 @@ def _draw_sidebar_row(
 
 def _sidebar_footer(total: int, first: int, visible: int) -> str:
     if not total:
-        return "\\ toggles  ·  click Track/Backlog"
+        return "\\ toggles  ·  click Track/Backlog/Mine"
     end = min(total, first + visible)
     return f"{first + 1}–{end} / {total}  ·  wheel to scroll"
 
