@@ -25,7 +25,6 @@ from overlay.app.nested_popup import TIP_GAP
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import timed
 from overlay.app.popups import Panel
-from overlay.app.tokenize import phrase_terms, query_token
 from overlay.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
 
 if TYPE_CHECKING:
@@ -200,7 +199,7 @@ def resolve_hover(reader: Reader, index: int) -> None:
         reader.dict_set, "has_term", None
     )  # phrase merge is an optional dict capability
     if has_term is not None:
-        got = phrase_terms(tokens=reader.tokens, index=index, has_term=has_term)
+        got = reader.tokenizer.phrase_terms(tokens=reader.tokens, index=index, has_term=has_term)
         if got is not None:
             term_list, start, end = got
             terms, span = tuple(term_list), (start, end)
@@ -1078,7 +1077,7 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
         entry = reader.dict_set.search(query)
         reading = ""
     else:
-        tok = query_token(
+        tok = reader.tokenizer.query_token(
             query
         )  # look up the WHOLE query as one term — never tokenize a link target
         if tok is None:

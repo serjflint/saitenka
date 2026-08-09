@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from overlay.app.scoring import Scorer, SentenceProfile, is_content, sentence_profiles
-from overlay.app.tokenize import Token, tokenize
 from overlay.app.wordlists import FreqDict
 
 if TYPE_CHECKING:
     from overlay.app.sub_index import SubCue, SubIndex
+    from overlay.app.tokenize import Token
+    from overlay.app.tokenizer import Tokenizer
 
 Distribution = tuple[tuple[str, int], ...]
 
@@ -56,9 +57,14 @@ class AnalysisKey:
     vocabulary: str
 
 
-def _tokens(text: str) -> list[Token]:
+def _tokens(text: str, tokenizer: Tokenizer) -> list[Token]:
     normalized = text.replace("\\N", "\n").replace("\r", "")
-    return [token for line in normalized.split("\n") if line.strip() for token in tokenize(line)]
+    return [
+        token
+        for line in normalized.split("\n")
+        if line.strip()
+        for token in tokenizer.tokenize(line)
+    ]
 
 
 def _kanji(text: str) -> frozenset[str]:
@@ -111,8 +117,10 @@ def _n_plus_counts(profiles: tuple[SentenceProfile, ...], min_words: int) -> tup
     )
 
 
-def _cue_analysis(index: int, cue: SubCue, scorer: Scorer | None) -> CueAnalysis:
-    tokens = _tokens(cue.text)
+def _cue_analysis(
+    index: int, cue: SubCue, scorer: Scorer | None, tokenizer: Tokenizer
+) -> CueAnalysis:
+    tokens = _tokens(cue.text, tokenizer)
     known = [scorer.is_known(token) if scorer else False for token in tokens]
     profiles = sentence_profiles(tokens, known)
     content_indices = [i for i, token in enumerate(tokens) if is_content(token)]
@@ -149,8 +157,10 @@ def _sum_distributions(cues: tuple[CueAnalysis, ...], attr: str) -> Distribution
     return tuple((label, sum(dict(dist)[label] for dist in available)) for label in labels)
 
 
-def analyze_cues(cues: list[SubCue], scorer: Scorer | None) -> EpisodeAnalysis:
-    per_cue = tuple(_cue_analysis(i, cue, scorer) for i, cue in enumerate(cues))
+def analyze_cues(
+    cues: list[SubCue], scorer: Scorer | None, tokenizer: Tokenizer
+) -> EpisodeAnalysis:
+    per_cue = tuple(_cue_analysis(i, cue, scorer, tokenizer) for i, cue in enumerate(cues))
     lemmas = frozenset().union(*(cue.unique_lemmas for cue in per_cue))
     known_lemmas = frozenset().union(*(cue.known_lemmas for cue in per_cue))
     unknown_lemmas = frozenset().union(*(cue.unknown_lemmas for cue in per_cue))
