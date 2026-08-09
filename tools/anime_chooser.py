@@ -66,7 +66,7 @@ RARE_RANK = 30000  # freq rank beyond which a word is "rare/hard" (rarity-based 
 
 def load_freq(zip_path):
     """Any Yomitan freq zip → {term: rank}. Difficulty = vocab rarity (rarer words → harder)."""
-    ranks = {}
+    ranks: dict[str, int] = {}
     with zipfile.ZipFile(zip_path) as z:
         for name in z.namelist():
             if not re.search(r"term_meta_bank_\d+\.json$", name):
@@ -158,13 +158,13 @@ def load_word_states(collection, tokmode=None, _mature_ivl=21, forgotten_r=0.85)
     con.text_factory = str
     con.create_collation("unicase", lambda a, b: (a > b) - (a < b))
     cur = con.cursor()
-    flds = {}
+    flds: dict[int, dict[str, int]] = {}
     for ntid, ord_, name in cur.execute("SELECT ntid,ord,name FROM fields"):
         flds.setdefault(ntid, {})[name.lower()] = ord_
     term_ord = {m: next((o[c] for c in TERM_FIELDS if c in o), None) for m, o in flds.items()}
     last = dict(cur.execute("SELECT cid, MAX(id) FROM revlog GROUP BY cid"))
     now = time.time() * 1000.0
-    note_state = {}
+    note_state: dict[int, str] = {}
     rank = {"known": 3, "forgotten": 2, "new": 1}
     for cid, nid, ctype, _ivl, data in cur.execute("SELECT id,nid,type,ivl,data FROM cards"):
         s = dc = None
@@ -248,7 +248,7 @@ def pick_episodes(files, n):
     """One sub file per distinct episode number (prefer .srt), up to n."""
     if isinstance(files, dict):  # some entries return {"files": [...]}
         files = files.get("files", [])
-    by_ep = {}
+    by_ep: dict[str, dict] = {}
     for f in files:
         if not isinstance(f, dict):
             continue

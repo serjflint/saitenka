@@ -49,6 +49,7 @@ import time
 import zipfile
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 FSRS_DEFAULT_DECAY = 0.1542  # FSRS-6 default w20 (py-fsrs scheduler.py)
 MAC_DEFAULT = "~/Library/Application Support/Anki2/User 1/collection.anki2"
@@ -105,7 +106,8 @@ def _varint(b, i):
 
 def _walk(b):
     """Return {field_number: [raw_bytes_or_int, ...]} for one protobuf message."""
-    out, i, n = {}, 0, len(b)
+    out: dict[int, list[bytes | int]] = {}
+    i, n = 0, len(b)
     try:
         while i < n:
             tag, i = _varint(b, i)
@@ -131,10 +133,11 @@ def config_fsrs_params(cfg_blob):
     """deck_config.config → fsrs_params_6 (field 6) or _5 (field 5) as float list."""
     f = _walk(cfg_blob)
     for field in (6, 5, 3):  # v6, v5, v4
-        if field in f and isinstance(f[field][-1], (bytes, bytearray)):
-            raw = f[field][-1]
-            if len(raw) % 4 == 0 and raw:
-                return [struct.unpack_from("<f", raw, k)[0] for k in range(0, len(raw), 4)]
+        if field not in f:
+            continue
+        raw = f[field][-1]
+        if isinstance(raw, (bytes, bytearray)) and len(raw) % 4 == 0 and raw:
+            return [struct.unpack_from("<f", raw, k)[0] for k in range(0, len(raw), 4)]
     return []
 
 
@@ -201,7 +204,7 @@ def knowledge_score(c):
 
 # ── frequency dicts (harmonic blend) ─────────────────────────────────────────
 def load_freq_dict(zip_path):
-    ranks = {}
+    ranks: dict[str, int] = {}
 
     def rank_of(d):
         if isinstance(d, (int, float)):
@@ -353,7 +356,7 @@ def main():
         f"{sorted({deckname[d].split('::')[0] for d in excluded_dids})}"
     )
 
-    fields = {}
+    fields: dict[int, dict[str, int]] = {}
     for ntid, ord_, name in cur.execute("SELECT ntid,ord,name FROM fields"):
         fields.setdefault(ntid, {})[name.lower()] = ord_
 
@@ -371,7 +374,8 @@ def main():
     now = time.time() * 1000.0
     ovr = -args.decay_override if args.decay_override else None
 
-    note_cards, decay_src = {}, Counter()
+    note_cards: dict[int, list[dict[str, Any]]] = {}
+    decay_src: Counter[str] = Counter()
     for cid, nid, did, ctype, queue, ivl, data in cur.execute(
         "SELECT id,nid,did,type,queue,ivl,data FROM cards"
     ):
@@ -393,7 +397,7 @@ def main():
             {"type": ctype, "ivl": ivl or 0, "s": s, "r": r, "suspended": queue == -1}
         )
 
-    words = {}
+    words: dict[str, dict[str, Any]] = {}
     for nid, mid, flds in cur.execute("SELECT id,mid,flds FROM notes"):
         if mid not in term_ord:
             continue

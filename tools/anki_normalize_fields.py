@@ -107,7 +107,8 @@ def anki(action, **params):
 
 def load_jmdict(zip_path):
     """(term, reading) -> ent_seq  and  term -> {seqs}  from a JMdict Yomitan zip."""
-    pair, byterm = {}, {}
+    pair: dict[tuple[str, str], int] = {}
+    byterm: dict[str, set[int]] = {}
     with zipfile.ZipFile(zip_path) as z:
         for n in z.namelist():
             if not re.search(r"term_bank_\d+\.json$", n):
@@ -145,7 +146,8 @@ def _varint(b, i):
 
 
 def _tmpl_fields(cfg):
-    out, i, n = {}, 0, len(cfg)
+    out: dict[int, bytes] = {}
+    i, n = 0, len(cfg)
     try:
         while i < n:
             tag, i = _varint(cfg, i)
@@ -240,7 +242,7 @@ def main():
     cur = con.cursor()
 
     ntname = dict(cur.execute("SELECT id,name FROM notetypes"))
-    flds = {}
+    flds: dict[int, dict[int, str]] = {}
     for ntid, ord_, name in cur.execute("SELECT ntid,ord,name FROM fields"):
         flds.setdefault(ntid, {})[ord_] = name
     dn = {i: n.replace("\x1f", "::") for i, n in cur.execute("SELECT id,name FROM decks")}
@@ -250,7 +252,7 @@ def main():
         targets = [i for i, n in ntname.items() if n in args.note_type]
     else:
         mining = [d for d, n in dn.items() if MINING_DECK_RE.search(n)]
-        used = Counter()
+        used: Counter[int] = Counter()
         for did in mining:
             for (mid,) in cur.execute(
                 "SELECT n.mid FROM cards c JOIN notes n ON n.id=c.nid WHERE c.did=?",

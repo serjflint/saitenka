@@ -195,7 +195,11 @@ DEP003 = ["saitenka_deinflect"]  # GPL add-on via the `deinflect` extra (PyPI) �
 # `cd .. && uv run --project overlay` keeps the overlay env (which has ruff/mypy/…) while ruff/mypy/
 # complexipy discover ../pyproject.toml and cover overlay + deinflect + taffylite + tools + install + .agents.
 lint = { shell = "cd .. && uv run --project overlay --extra full ruff check --fix . && uv run --project overlay --extra full ruff format ." }
-types = { shell = "cd .. && uv run --project overlay --extra full mypy && uv run --project overlay --extra full basedpyright && uv run --project overlay --extra full pyrefly check overlay/src/overlay deinflect/src && (uv run --project overlay --extra full ty check overlay/src/overlay deinflect/src || true)" }
+# mypy/basedpyright gate the widened scope (library + overlay/examples + tools + install + .agents —
+# see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
+# strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
+# scope for visibility, same posture as `ty` (never a hard gate here).
+types = { shell = "cd .. && uv run --project overlay --extra full mypy && uv run --project overlay --extra full basedpyright && uv run --project overlay --extra full pyrefly check overlay/src/overlay deinflect/src && (uv run --project overlay --extra full pyrefly check overlay/examples tools install .agents || true) && (uv run --project overlay --extra full ty check overlay/src/overlay deinflect/src overlay/examples tools install .agents || true)" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.

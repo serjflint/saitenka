@@ -137,7 +137,7 @@ def main() -> None:
     now_ms = time.time() * 1000.0
 
     plan = []  # {cardId, noteId, state, origDeck, targetDeck, tag}
-    dist = Counter()
+    dist: Counter[str] = Counter()
     for cid, nid, did, ctype, queue, ivl, data in cur.execute(
         "SELECT id,nid,did,type,queue,ivl,data FROM cards"
     ):

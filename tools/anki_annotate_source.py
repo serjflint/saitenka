@@ -106,7 +106,7 @@ def main():
     }
 
     # each note → the (first) matching deck it lives in
-    note_deck = {}
+    note_deck: dict[int, str] = {}
     for nid, did in cur.execute("SELECT nid,did FROM cards"):
         d = deck_name.get(did, "")
         if pat.search(d) and not excluded(d):
@@ -143,7 +143,7 @@ def main():
     except Exception as e:
         raise SystemExit(f"AnkiConnect unreachable ({e}). Open Anki first.")
     # ── group note ids by tag ──
-    by_tag = {}
+    by_tag: dict[str, list[int]] = {}
     for p in plan:
         by_tag.setdefault(p["tag"], []).append(p["nid"])
     for tag, nids in by_tag.items():
