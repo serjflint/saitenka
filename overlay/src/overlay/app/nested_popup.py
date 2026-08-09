@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel, PopupView
 from overlay.app.prefetch import cap_for
-from overlay.app.tokenize import SKIP_POS, phrase_terms, query_token, tokenize
+from overlay.app.tokenize import SKIP_POS
 from overlay.panel import panel_rows
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ def show_nested(reader: Reader, sb) -> None:
     """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
     Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
     popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
-    tokens = tokenize(sb.text)
+    tokens = reader.tokenizer.tokenize(sb.text)
     tok = tokens[0] if tokens else None
     if tok is None or tok.pos in SKIP_POS or not tok.surface.strip():
         hide_nested(reader)
@@ -112,7 +112,7 @@ def _phrase_extra_terms(reader: Reader, tokens) -> tuple[str, ...]:
     has_term = getattr(reader.dict_set, "has_term", None)
     if has_term is None:
         return ()
-    got = phrase_terms(tokens=tokens, index=0, has_term=has_term)
+    got = reader.tokenizer.phrase_terms(tokens=tokens, index=0, has_term=has_term)
     return tuple(got[0]) if got is not None else ()
 
 
@@ -171,7 +171,8 @@ def open_link(reader: Reader, lb, xy, scroll: int) -> None:
     if reader.dict_set is not None and any(c in q for c in "*?＊？"):
         open_search(reader, q, wx, wy, lb.h)
         return
-    tok = query_token(q)  # look up the WHOLE query as one term — never tokenize a link target
+    # look up the WHOLE query as one term — never tokenize a link target
+    tok = reader.tokenizer.query_token(q)
     if tok is None:
         return
     open_nested(reader, tok, tok.surface, wx, wy, lb.h, tail=None)
@@ -262,7 +263,7 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
     ch = sb.text[0]
     if not _is_ideograph(ch):
         return
-    toks = tokenize(sb.text)
+    toks = reader.tokenizer.tokenize(sb.text)
     tok = toks[0] if toks else None
     if (
         tok is not None

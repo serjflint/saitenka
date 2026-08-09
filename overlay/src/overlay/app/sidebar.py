@@ -13,7 +13,6 @@ from overlay.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
 from overlay.app.languages import SECOND_LANG
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.subtitles import SidebarAction, SidebarRow, render_sidebar
-from overlay.app.tokenize import tokenize
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
@@ -79,7 +78,7 @@ def _cue_parts(reader: Reader, cue_index: int, cue: SubCue) -> tuple[tuple[str, 
     cached = reader.sidebar.style_cache.get(key)
     if cached is not None:
         return cached
-    tokens = tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
+    tokens = reader.tokenizer.tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
     styles = reader.scorer.score_line(tokens)
     parts = tuple((token.surface, style.color) for token, style in zip(tokens, styles, strict=True))
     reader.sidebar.style_cache[key] = parts
@@ -328,7 +327,7 @@ def redraw(reader: Reader) -> None:
             if not rows:
                 unavailable = "Backlog is empty"
     except (OSError, sqlite3.Error, ValueError) as exc:
-        rows, total, unavailable = [], 0, f"Backlog unavailable: {exc}"
+        rows, total, unavailable = [], 0, f"{reader.sidebar.view.title()} unavailable: {exc}"
     rendered = render_sidebar(
         rows,
         width=width,

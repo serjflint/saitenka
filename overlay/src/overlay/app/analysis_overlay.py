@@ -91,10 +91,11 @@ def request(reader: Reader) -> None:
     _show(reader)
     cues = list(index.cues)
     scorer = reader.scorer
+    tokenizer = reader.tokenizer  # captured on the main thread; work() runs off it
 
     def work() -> None:
         try:
-            result = analyze_cues(cues, scorer)
+            result = analyze_cues(cues, scorer, tokenizer)
             reader.analysis.results.put((generation, key, result, None))
         except Exception as exc:  # fail-soft background feature
             log.warning("episode analysis failed", exc_info=True)

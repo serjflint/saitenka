@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from overlay import otel_metrics
 from overlay.app.perf import gil_disabled
-from overlay.app.tokenize import SKIP_POS, Token, inflected_in, tokenize
+from overlay.app.tokenize import SKIP_POS, Token
 
 if TYPE_CHECKING:
     from overlay.app.controller import Reader
@@ -133,7 +133,7 @@ def prefetch_worker_count(reader: Reader) -> int:
     for parallelism that never actually happens. Force the load now (its one-time cost lands at startup
     instead of on the first real subtitle line either way) so this reflects the GIL state that will
     actually hold for the session."""
-    tokenize("")
+    reader.tokenizer.tokenize("")
     if reader.prefetch_workers > 0:  # explicit [perf].prefetch_workers pins it on BOTH builds
         return reader.prefetch_workers
     return _AUTO_WORKERS_FREE_THREADED if gil_disabled() else _AUTO_WORKERS_GIL
@@ -326,12 +326,17 @@ def _enqueue_lookahead(reader: Reader, gen: int, seen: set[str]) -> None:
     main-thread jamdict/scorer work runs here. ``seen`` carries the current line's lemmas so a word
     already queued isn't warmed twice. No-op without an external sub index."""
     for text in upcoming_cue_texts(reader, reader.prefetch_lookahead):
-        toks = tokenize(text)
+        toks = reader.tokenizer.tokenize(text)
         for i, t in enumerate(toks):
             if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:
                 continue
             seen.add(t.lemma)
-            _enqueue(reader, PrefetchItem(gen, t, inflected_in(toks, i), mined=False, full=False))
+            _enqueue(
+                reader,
+                PrefetchItem(
+                    gen, t, reader.tokenizer.inflected_in(toks, i), mined=False, full=False
+                ),
+            )
 
 
 def _head_priority(tag: str) -> int | None:
@@ -364,10 +369,11 @@ def _head_prefetch_candidate(
         return None
     if reader._is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
         return None
-    key = reader._panel_key(t, inflected_in(toks, i), mined=False)
+    inflected = reader.tokenizer.inflected_in(toks, i)
+    key = reader._panel_key(t, inflected, mined=False)
     if key in reader._panel_cache:
         return None  # already warm (hovered earlier, or a prior speculative render)
-    return priority, HeadPrefetchItem(gen, t, inflected_in(toks, i), mined=False)
+    return priority, HeadPrefetchItem(gen, t, inflected, mined=False)
 
 
 def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
@@ -379,7 +385,7 @@ def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
     if reader.scorer is None:
         return
     for text in upcoming_cue_texts(reader, reader.head_prefetch_lookahead):
-        toks = tokenize(text)
+        toks = reader.tokenizer.tokenize(text)
         styles = reader.scorer.score_line(toks)
         for i, t in enumerate(toks):
             if t.pos in SKIP_POS or not t.is_content or t.lemma in seen:

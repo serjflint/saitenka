@@ -61,24 +61,22 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     from types import SimpleNamespace
 
     from overlay.app import prefetch
+    from overlay.app.tokenizer import UnidicTokenizer
+
+    def fake_reader(prefetch_workers: int) -> SimpleNamespace:
+        return SimpleNamespace(prefetch_workers=prefetch_workers, tokenizer=UnidicTokenizer())
 
     # explicit override wins regardless of build
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert prefetch.prefetch_worker_count(SimpleNamespace(prefetch_workers=3)) == 3
+    assert prefetch.prefetch_worker_count(fake_reader(3)) == 3
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: False)
-    assert prefetch.prefetch_worker_count(SimpleNamespace(prefetch_workers=3)) == 3
+    assert prefetch.prefetch_worker_count(fake_reader(3)) == 3
 
     # auto (0): GIL build stays at the low default
-    assert (
-        prefetch.prefetch_worker_count(SimpleNamespace(prefetch_workers=0))
-        == prefetch._AUTO_WORKERS_GIL
-    )
+    assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_GIL
     # auto (0): free-threaded uses the flat free-threaded default (no cpu-count arithmetic)
     monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert (
-        prefetch.prefetch_worker_count(SimpleNamespace(prefetch_workers=0))
-        == prefetch._AUTO_WORKERS_FREE_THREADED
-    )
+    assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
 def test_startup_hint_clears_when_overlay_live_not_on_first_cue():
