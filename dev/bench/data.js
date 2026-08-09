@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786268447288,
+  "lastUpdate": 1786268819120,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -1907,6 +1907,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.57,
             "range": "±1.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "48f0d855b5709096f372366cd07e8359ebe6b5bd",
+          "message": "Merge pull request #263 from serjflint/feat/253-mine-tab\n\nfeat(sidebar): per-episode mined-card store + Mine tab (#253)",
+          "timestamp": "2026-08-09T12:46:23+03:00",
+          "tree_id": "c0744a9e39047b94c90844aea02690946e3c5174",
+          "url": "https://github.com/serjflint/saitenka/commit/48f0d855b5709096f372366cd07e8359ebe6b5bd"
+        },
+        "date": 1786268817943,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.266,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.804,
+            "range": "±2.7%",
             "unit": "ms"
           }
         ]
