@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786271515677,
+  "lastUpdate": 1786272006494,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2087,6 +2087,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.849,
             "range": "±0.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "24f9480a59d98fac23d8266f561254962ef883f6",
+          "message": "Merge pull request #267 from serjflint/feat/254-t3-decouple-pos\n\nrefactor(tokenize): move content/skippable classification onto the Tokenizer (#254 3a.3)",
+          "timestamp": "2026-08-09T13:39:35+03:00",
+          "tree_id": "1728f2bfb11f92ce8d552ff0cea806fdb33e0067",
+          "url": "https://github.com/serjflint/saitenka/commit/24f9480a59d98fac23d8266f561254962ef883f6"
+        },
+        "date": 1786272005371,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.232,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.061,
+            "range": "±4.1%",
             "unit": "ms"
           }
         ]
