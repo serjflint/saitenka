@@ -110,3 +110,29 @@ def test_resolve_empty_term_or_reading_is_a_clean_miss(tmp_path):
     pack = _write_pack(tmp_path, {"index": {"読む": {"よむ": ["yomu.opus"]}}}, files=("yomu.opus",))
     assert resolve(pack, "", "よむ") is None
     assert resolve(pack, "読む", "") is None
+
+
+def test_resolve_rejects_parent_traversal_entry(tmp_path):
+    """A poisoned pack index mapping a reading to a `../` path must NOT resolve — arbitrary local-file
+    read + upload into Anki via store_media otherwise."""
+    (tmp_path / "secret.txt").write_bytes(b"top-secret")
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "index.json").write_text(
+        json.dumps({"index": {"読む": {"よむ": ["../secret.txt"]}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert resolve(pack, "読む", "よむ") is None
+
+
+def test_resolve_rejects_absolute_path_entry(tmp_path):
+    """An ABSOLUTE-path entry (`pack / "/abs"` discards the base in pathlib) must be rejected too."""
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"outside-the-pack")
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "index.json").write_text(
+        json.dumps({"index": {"読む": {"よむ": [str(outside)]}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert resolve(pack, "読む", "よむ") is None

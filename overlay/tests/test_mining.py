@@ -771,6 +771,40 @@ def test_mine_token_leaves_word_audio_field_unset_on_a_pack_miss(monkeypatch, tm
     assert anki.stored == []  # never stores media for a miss
 
 
+def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(monkeypatch, tmp_path):
+    """P1 containment through the mine path: a poisoned index entry escaping the pack dir (`../` or an
+    absolute path) resolves to a miss — the word-audio field stays unset and store_media is NEVER called,
+    so a shared/downloaded pack can't read+upload an arbitrary local file into Anki."""
+    import json
+
+    from overlay.app.controller import Reader
+    from util import FakeIPC
+
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"top-secret")
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "index.json").write_text(
+        json.dumps(
+            {"index": {"読む": {"よむ": ["../secret.txt", str(secret)]}}}, ensure_ascii=False
+        ),
+        encoding="utf-8",
+    )
+    ipc = FakeIPC()
+    anki = _FakeAnki()
+    r = Reader(
+        ipc, anki=anki, mine_cfg=MineConfig(word_audio_pack=pack, word_audio_field="WordAudio")
+    )
+    r.set_subtitle("本を読む")
+    monkeypatch.setattr(r._miner, "capture_media", lambda _base, _video, **_k: ("p.jpg", "a.mp3"))
+    monkeypatch.setattr(r, "_preview_mined", lambda *_a, **_k: None)
+    tok = next(t for t in r.tokens if t.surface == "読む")
+    r._mine_token(tok)
+    assert len(anki.added) == 1
+    assert "WordAudio" not in anki.added[0]["fields"]  # out-of-pack entry → field unset
+    assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
+
+
 def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch):
     """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
     from overlay.app.controller import Reader

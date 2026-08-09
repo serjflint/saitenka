@@ -112,8 +112,17 @@ def resolve(pack_dir: Path, term: str, reading: str) -> AudioHit | None:
     readings = load_index(pack_dir).get(term)
     if not readings:
         return None
+    root = pack_dir.resolve()
     for fname in readings.get(reading, ()):
-        candidate = pack_dir / fname
+        candidate = (pack_dir / fname).resolve()
+        # Containment gate: a shared/downloaded pack's index.json is untrusted input. Reject any entry
+        # that escapes the pack dir — `../…` traversal OR an absolute path (pathlib's `/` discards the
+        # base for an absolute rhs) — else store_media would read+upload an arbitrary local file into Anki.
+        if not candidate.is_relative_to(root):
+            log.warning(
+                "word-audio pack %s: entry %r escapes the pack dir — skipped", pack_dir, fname
+            )
+            continue
         if candidate.is_file():
             return AudioHit(path=candidate, filename=candidate.name)
     return None
