@@ -28,6 +28,7 @@ from overlay.app.subtitle_modes import (
 from overlay.app.subtitle_providers import (
     ProviderContext,
     SubtitleProvider,
+    enabled_providers_for,
     fetch_first,
     get_provider,
     register_provider,
@@ -629,10 +630,14 @@ def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
             status = f"selected English fallback sid={startup.tracks.en_sid}"
         else:
             status = "no Japanese or English subtitle track found"
-    providers: list[str] = []
+    # Same registry/language gate as the retry+picker enablement (cli.py) — one source of truth for
+    # "which providers are on", so a non-jp profile can't leave this initial fetch chasing jimaku while
+    # the picker excludes it. ``jimaku_force`` already fetched ahead in ensure_jp_subs, so it's excluded
+    # from the deferred list here.
+    providers: tuple[str, ...] = ()
     if startup.tracks.jp_sid is None:
-        if opts.jimaku and not opts.jimaku_force:
-            providers.append("jimaku")
-        if opts.tsukihime:
-            providers.append("tsukihime")
-    return startup, status, tuple(providers)
+        providers = enabled_providers_for(
+            MAIN_LANG,
+            (("jimaku", opts.jimaku and not opts.jimaku_force), ("tsukihime", opts.tsukihime)),
+        )
+    return startup, status, providers

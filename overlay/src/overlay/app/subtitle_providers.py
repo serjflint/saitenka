@@ -3,6 +3,10 @@
 Each provider declares the language(s) it serves; callers ask "which providers are available for
 language L" instead of branching on provider identity (``if provider == "jimaku"``). A provider with
 an empty ``languages`` set is language-agnostic and always available.
+
+Leaf module (no ``subselect`` import — the registry direction is one-way, ``subselect`` → here, to keep
+``overlay.app`` acyclic). The built-in jimaku/tsukihime providers self-register at ``subselect`` import;
+every consumer (``cli``/``cli_run``) imports ``subselect`` so the registry is populated before use.
 """
 
 from __future__ import annotations
@@ -49,6 +53,10 @@ _REGISTRY: dict[str, SubtitleProvider] = {}
 
 
 def register_provider(provider: SubtitleProvider) -> None:
+    if (
+        provider.name in _REGISTRY
+    ):  # loud-on-mistake: a silent overwrite hides a double-register bug
+        raise ValueError(f"subtitle provider {provider.name!r} already registered")
     _REGISTRY[provider.name] = provider
 
 

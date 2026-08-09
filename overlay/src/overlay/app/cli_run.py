@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Literal
 
 from overlay.app import session_stats
+from overlay.app import subselect as _subselect  # noqa: F401  # import registers built-in providers
 from overlay.app.config import config_path, load_config
 from overlay.app.continuity import resolve_sibling
 from overlay.app.embedded_subs import build_sub_index_for_current_track

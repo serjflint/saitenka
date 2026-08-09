@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import overlay.app.subselect  # noqa: F401  # import registers the built-in providers before any patch
 from overlay.app.subtitle_providers import (
     ProviderContext,
     SubtitleProvider,
@@ -106,6 +107,15 @@ def test_enabled_providers_for_combines_config_flag_and_language_capability(monk
 def test_get_provider_returns_none_for_unregistered_name(monkeypatch):
     _isolated_registry(monkeypatch)
     assert get_provider("jimaku") is None
+
+
+def test_register_provider_rejects_a_duplicate_name(monkeypatch):
+    import pytest
+
+    _isolated_registry(monkeypatch)
+    register_provider(_stub_provider("jimaku", frozenset({"jp"})))
+    with pytest.raises(ValueError, match="already registered"):
+        register_provider(_stub_provider("jimaku", frozenset({"fr"})))
 
 
 def test_real_registry_offers_jimaku_and_tsukihime_for_japanese():
