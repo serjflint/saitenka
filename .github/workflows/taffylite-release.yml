@@ -60,47 +60,50 @@ jobs:
           name: wheels-linux-${{ matrix.arch }}
           path: taffylite/dist
 
-  # macOS: not containerized, so interpreters come from `actions/setup-python` on the host (unlike
-  # Linux, no co-install issue here — only Windows needs one interpreter per job, see below).
+  # macOS: arm64 only (macos-14). The Intel (`macos-13`/x86_64) leg is dropped — GitHub is retiring the
+  # Intel runner pool (chronically queue-starved) and taffylite is an OPTIONAL extra with a byte-identical
+  # pure-Python fallback (DefaultLayoutBackend), so an Intel-Mac user with no wheel degrades gracefully
+  # (or builds from the sdist with a Rust toolchain); `full` doesn't even pull `layout-engine`. Revisit
+  # via arm64→x86_64 cross-compile only if Intel demand appears.
+  #
+  # One interpreter per job (like Windows), NOT one job with `--find-interpreter` over a multi-version
+  # `setup-python`: that combination silently skipped cp314-GIL (built only cp313 + cp314t), leaving a
+  # hole in the matrix. `--interpreter python` builds exactly the job's setup-python interpreter, so each
+  # of 3.13 / 3.14 / 3.14t is produced deterministically and there are no duplicate filenames to merge.
   macos:
-    name: wheels (macos ${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    name: wheels (macos ${{ matrix.python-version }})
+    runs-on: macos-14
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-14 # arm64
-            arch: arm64
-            target: aarch64-apple-darwin
-          - runner: macos-13 # x86_64 (macos-latest/14+ dropped Intel runners)
-            arch: x86_64
-            target: x86_64-apple-darwin
+        python-version: ["3.13", "3.14", "3.14t"]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: |
-            3.13
-            3.14
-            3.14t
+          python-version: ${{ matrix.python-version }}
 
-      - name: Build wheels
+      - name: Build wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           maturin-version: v1.14.1
           working-directory: taffylite
-          target: ${{ matrix.target }}
-          args: --release --locked --out dist --compatibility pypi --find-interpreter
+          target: aarch64-apple-darwin
+          args: --release --locked --out dist --interpreter python
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: wheels-macos-${{ matrix.arch }}
+          name: wheels-macos-${{ matrix.python-version }}
           path: taffylite/dist
 
   # Windows: co-installing the regular and free-threaded interpreter of the same minor version in one
   # `setup-python` step can fail (python/cpython#127294, PyO3/maturin-action#313) — one interpreter per
-  # job sidesteps it, per maturin-action's own README guidance.
+  # job sidesteps it, per maturin-action's own README guidance. Build ONLY that one interpreter
+  # (`--interpreter python`, NOT `--find-interpreter`): the runner ships other Pythons preinstalled, so
+  # `--find-interpreter` would rebuild the same `cp3XX-win_amd64.whl` in every job — and the publish
+  # step's `download-artifact merge-multiple` CONCATENATES same-named files, yielding a wheel with a
+  # second archive appended that Warehouse rejects (CVE-2025-54368 strict ZIP check).
   windows:
     name: wheels (windows ${{ matrix.python-version }})
     runs-on: windows-latest
@@ -121,7 +124,7 @@ jobs:
           maturin-version: v1.14.1
           working-directory: taffylite
           target: x86_64-pc-windows-msvc
-          args: --release --locked --out dist --compatibility pypi --find-interpreter
+          args: --release --locked --out dist --interpreter python
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -158,11 +161,19 @@ jobs:
     permissions:
       id-token: write
     steps:
+      # Checkout FIRST (before download-artifact, so its clean pass doesn't wipe the downloads) — the
+      # normalize script lives in the repo, and a publish job otherwise has no source tree.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           path: dist-pypi
           merge-multiple: true
+      # Defense-in-depth: rewrite each wheel's ZIP container (content-preserving) so Warehouse's strict
+      # ZIP check (CVE-2025-54368) can't 400 it. The build-side fix (one interpreter per job → no
+      # duplicate filenames for merge to concatenate) is the real cure; this guards future regressions.
+      - name: Normalize wheels (strip trailing ZIP data)
+        run: python3 taffylite/tools/normalize_wheels.py dist-pypi
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
@@ -181,11 +192,19 @@ jobs:
     permissions:
       id-token: write # mandatory for OIDC Trusted Publishing (no API token stored)
     steps:
+      # Checkout FIRST (before download-artifact, so its clean pass doesn't wipe the downloads) — the
+      # normalize script lives in the repo, and a publish job otherwise has no source tree.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           path: dist-pypi
           merge-multiple: true
+      # Defense-in-depth: rewrite each wheel's ZIP container (content-preserving) so Warehouse's strict
+      # ZIP check (CVE-2025-54368) can't 400 it. The build-side fix (one interpreter per job → no
+      # duplicate filenames for merge to concatenate) is the real cure; this guards future regressions.
+      - name: Normalize wheels (strip trailing ZIP data)
+        run: python3 taffylite/tools/normalize_wheels.py dist-pypi
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
