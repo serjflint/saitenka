@@ -35,6 +35,7 @@ from overlay.app.config import (
     TelemetryOptions,
     TooltipOptions,
     TranslationOptions,
+    WordAudioOptions,
     load_config,
 )
 
@@ -155,6 +156,11 @@ _DC_SECTIONS: list[tuple[str, Any, str | None]] = [
         ProfileOptions,
         "profile",
     ),  # the default [profile] table (#254); named ones overlay
+    (
+        "word_audio",
+        WordAudioOptions,
+        "mine",
+    ),  # word-pronunciation audio pack (#93), [mine] table keys
 ]
 
 

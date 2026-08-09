@@ -281,6 +281,12 @@ class MineConfig:
     card_format: dict = field(default_factory=dict)
     # non-empty flag fields that pick a card template; derived from card_kind unless set explicitly
     flags: dict = field(default_factory=dict)
+    # Opt-in word-pronunciation audio from a local yomichan/yomitan audio pack (#93, offline/grounded) —
+    # ADDITIVE to the mined sentence/scene clip above, never a replacement. `word_audio_pack` is the pack
+    # dir (None = feature off, resolved by reader_deps._mine_config_from from [mine].word_audio_*);
+    # `word_audio_field` is the note field it's written to. See word_audio.resolve.
+    word_audio_pack: Path | None = None
+    word_audio_field: str = "WordAudio"
 
     def __post_init__(self) -> None:
         if not self.flags:

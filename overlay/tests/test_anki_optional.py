@@ -58,6 +58,31 @@ def test_validate_mine_fields_keeps_the_traceback_for_an_unexpected_fault(caplog
     assert rec.exc_info  # unexpected → traceback preserved for debugging
 
 
+def test_validate_mine_fields_drops_word_audio_pack_when_field_missing_on_model(caplog, tmp_path):
+    """#93: a configured word-audio pack whose target field doesn't exist on the note type must not
+    silently write to nowhere — validation clears `word_audio_pack` so the miner skips it cleanly."""
+
+    class _Model:
+        def model_field_names(self, _model):
+            return ["Expression"]  # no "WordAudio" field
+
+    cfg = MineConfig(word_audio_pack=tmp_path, word_audio_field="WordAudio")
+    with caplog.at_level(logging.WARNING):
+        reader_deps._validate_mine_fields(_Model(), cfg)
+    assert cfg.word_audio_pack is None
+    assert "WordAudio" in caplog.text
+
+
+def test_validate_mine_fields_keeps_word_audio_pack_when_field_present(tmp_path):
+    class _Model:
+        def model_field_names(self, _model):
+            return ["Expression", "WordAudio"]
+
+    cfg = MineConfig(word_audio_pack=tmp_path, word_audio_field="WordAudio")
+    reader_deps._validate_mine_fields(_Model(), cfg)
+    assert cfg.word_audio_pack == tmp_path
+
+
 def test_run_warns_in_the_terminal_when_anki_cannot_be_started(monkeypatch):
     # launch_anki() returns False when Anki isn't found / won't launch → the user gets a distinct
     # console warning (not the softer 'launching…' note) and a log line.
