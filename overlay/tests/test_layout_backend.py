@@ -1,5 +1,10 @@
 """LayoutBackend seam (#113): the default arithmetic and the independent flex-column solver agree, both
-satisfy the vendored column-layout fixtures, and a real panel renders pixel-identically under either."""
+satisfy the vendored column-layout fixtures, and a real panel renders pixel-identically under either.
+
+Plus the 2-D flex-tree contract (Phase A2): ``taffylite.Tree`` — the flexbox surface Phase B will build
+richer layouts on, unused by the 1-D column seam today — is differentially checked against an independent
+pure-Python reference (``flex_reference``) that is itself pinned to the vendored Chrome-derived rects, so
+the flex path Phase B depends on has a real oracle before any UI change leans on it."""
 
 from __future__ import annotations
 
@@ -9,6 +14,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from flex_reference import OverflowUnsupported
+from flex_reference import solve as flex_reference_solve
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from overlay.panel import panel_rows, render_panel
@@ -274,3 +281,175 @@ def test_taffy_renders_identically_through_the_config_seam(n_defs, width):
         assert np.array_equal(a, b), (
             f"taffy≠default at width={width} n_defs={n_defs} scroll={scroll}"
         )
+
+
+# --- 2-D flex-tree contract (Phase A2) --------------------------------------------------------------
+# taffylite.Tree — the flexbox surface Phase B builds richer tooltip layouts on — is unused by the 1-D
+# column seam, so nothing in overlay's gate exercised it. These promote the vendored Chrome-derived flex
+# corpus (taffylite/tests/fixtures) into overlay's own contract and add an INDEPENDENT reference solver
+# (tests/flex_reference.py) as a differential oracle: proven faithful against the browser rects here (in
+# pure Python, no wheel needed), then trusted to check the real engine on Hypothesis-generated trees.
+
+_FLEX_FIXTURE_DIR = Path(__file__).resolve().parents[2] / "taffylite" / "tests" / "fixtures"
+_FLEX_CASES = [
+    case
+    for name in ("flex_cases.json", "taffy_gentest_flex.json")
+    for case in json.loads((_FLEX_FIXTURE_DIR / name).read_text(encoding="utf-8"))["cases"]
+]
+
+
+def _flex_rects(case: dict) -> list[tuple[int, ...]]:
+    return [tuple(r) for r in case["rects"]]
+
+
+def _reference_rects(nodes: list[dict], root: int, n: int) -> list[tuple[int, ...]]:
+    ref = flex_reference_solve(nodes, root)
+    return [tuple(ref[i]) for i in range(n)]
+
+
+def _build_flex_tree(nodes: list[dict]):
+    import taffylite  # noqa: TID251  # test-only: the flex-tree parity oracle needs the real engine
+
+    tree = taffylite.Tree()
+    handles: list[int] = []
+    for node in nodes:
+        if "leaf" in node:
+            spec = node["leaf"]
+            margin = tuple(spec[2]) if len(spec) > 2 else (0.0, 0.0, 0.0, 0.0)
+            handles.append(tree.add_leaf(spec[0], spec[1], margin))
+        else:
+            f = node["flex"]
+            handles.append(
+                tree.add_flex(
+                    [handles[i] for i in f["children"]],
+                    direction=f.get("direction", "column"),
+                    gap=f.get("gap", 0.0),
+                    padding=tuple(f.get("padding", (0.0, 0.0, 0.0, 0.0))),
+                    margin=tuple(f.get("margin", (0.0, 0.0, 0.0, 0.0))),
+                    width=f.get("width"),
+                    height=f.get("height"),
+                    wrap=f.get("wrap", False),
+                )
+            )
+    return tree, handles
+
+
+def _taffy_rects(nodes: list[dict], root: int) -> list[tuple[int, ...]]:
+    tree, handles = _build_flex_tree(nodes)
+    tree.set_root(handles[root])
+    return [tuple(round(v) for v in r) for r in tree.compute()]
+
+
+def test_flex_reference_matches_vendored_chrome_rects():
+    # The reference solver reproduces taffy's own Chrome-derived expected rects on every fixture in its
+    # no-shrink domain — this is what earns it the right to be an oracle for random trees below. Pure
+    # Python: runs in the default `poe` env, no taffylite wheel needed. The 2 flex-shrink cases are out
+    # of domain (taffy's proportional shrink is deliberately unmodelled) and covered by the recorded-rect
+    # oracle; pinning the split flags a re-vendor that changes the shrink census.
+    matched = skipped = 0
+    for case in _FLEX_CASES:
+        try:
+            got = _reference_rects(case["nodes"], case["root"], len(case["rects"]))
+        except OverflowUnsupported:
+            skipped += 1
+            continue
+        assert got == _flex_rects(case), case["name"]
+        matched += 1
+    assert matched >= 12, f"reference matched only {matched} in-domain fixtures"
+    assert skipped == 2, f"expected 2 flex-shrink (out-of-domain) fixtures, saw {skipped}"
+
+
+def test_flex_reference_faithfulness_is_non_vacuous():
+    # Negative control for the equality above: a reference that shifts every node down 1px must NOT
+    # reproduce the vendored rects — proving that `==` can fail, so a real reference bug can't slip past.
+    case = next(c for c in _FLEX_CASES if c["name"] == "row-gap")
+    ref = flex_reference_solve(case["nodes"], case["root"])
+    shifted = [(x, y + 1, w, h) for x, y, w, h in (ref[i] for i in range(len(case["rects"])))]
+    assert shifted != _flex_rects(case)
+
+
+@st.composite
+def _flat_container(draw):
+    """A single flex container of fixed-size leaves, kept inside the reference's no-shrink domain by
+    construction (a definite main size is always ≥ what its children need): the chip-row / column-stack
+    geometry Phase B leans on, spanning direction × gap × padding × per-child margin × wrap × fixed/auto
+    box size. Integers throughout, and a wrapping container keeps an auto cross size, so every coordinate
+    is exact (no fractional align-content distribution) and the taffy↔reference `==` is byte-exact."""
+    n = draw(st.integers(1, 4))
+    leaves = [
+        (
+            draw(st.integers(1, 50)),
+            draw(st.integers(1, 50)),
+            tuple(draw(st.integers(0, 6)) for _ in range(4)),
+        )
+        for _ in range(n)
+    ]
+    row = draw(st.booleans())
+    gap = draw(st.integers(0, 10))
+    padding = tuple(draw(st.integers(0, 8)) for _ in range(4))
+    wrap = draw(st.booleans())
+
+    def main_cross(e):
+        left, top, right, bottom = e
+        return (left, right, top, bottom) if row else (top, bottom, left, right)
+
+    outer_main = []
+    outer_cross = []
+    for w, h, mg in leaves:
+        ml, mt, cl, ct = main_cross(mg)
+        outer_main.append(ml + (w if row else h) + mt)
+        outer_cross.append(cl + (h if row else w) + ct)
+    pml, pmt, pcl, pct = main_cross(padding)
+    content_main = sum(outer_main) + gap * (n - 1)
+    # Definite main ≥ content (no wrap) or ≥ the widest child (wrap) → never a single-child overflow.
+    lo = max(outer_main) if wrap else content_main
+    def_main = (
+        draw(st.integers(lo, content_main + 20)) + (pml + pmt) if draw(st.booleans()) else None
+    )
+    # A wrapping container hugs its cross (auto) to keep line placement integer-exact; a single-line one
+    # may fix its cross (exercising align-content stretch of the one line — still integer).
+    def_cross = (
+        draw(st.integers(0, max(outer_cross) + 20)) + (pcl + pct)
+        if not wrap and draw(st.booleans())
+        else None
+    )
+    flex: dict = {
+        "children": list(range(n)),
+        "direction": "row" if row else "column",
+        "gap": gap,
+        "padding": list(padding),
+        "wrap": wrap,
+    }
+    width, height = (def_main, def_cross) if row else (def_cross, def_main)
+    if width is not None:
+        flex["width"] = width
+    if height is not None:
+        flex["height"] = height
+    nodes = [{"leaf": [w, h, list(mg)]} for w, h, mg in leaves]
+    nodes.append({"flex": flex})
+    return nodes, n
+
+
+@requires_taffy
+@given(spec=_flat_container())
+@settings(max_examples=400, deadline=None)
+def test_taffy_tree_matches_reference_on_flat_containers(spec):
+    # The differential the fixtures can't give: the real Rust flexbox and the independent Python
+    # reference must place every node identically across the generated in-domain space.
+    nodes, root = spec
+    assert _taffy_rects(nodes, root) == _reference_rects(nodes, root, len(nodes))
+
+
+@requires_taffy
+def test_taffy_tree_agrees_with_reference_on_vendored_corpus():
+    # Tri-oracle in overlay's own contract: the engine Phase B depends on == the independent reference ==
+    # (transitively, via the test above) the browser rects, on every in-domain vendored/authored case.
+    checked = 0
+    for case in _FLEX_CASES:
+        try:
+            ref = _reference_rects(case["nodes"], case["root"], len(case["rects"]))
+        except OverflowUnsupported:
+            continue
+        assert _taffy_rects(case["nodes"], case["root"]) == ref, case["name"]
+        checked += 1
+    assert checked >= 12
