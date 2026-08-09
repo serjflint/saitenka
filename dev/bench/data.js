@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786276981284,
+  "lastUpdate": 1786277425998,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2267,6 +2267,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.147,
             "range": "±2.2%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "902c7628ce8464e9dfe55d5548fcfd4c4b9b151e",
+          "message": "Merge pull request #272 from serjflint/feat/254-p5-live-switcher\n\nfeat(profiles): live in-overlay profile switcher + cache-swap race guard (#254 p5)",
+          "timestamp": "2026-08-09T15:09:57+03:00",
+          "tree_id": "c5b98574ad87dd4819ae7e3a97649224166929a2",
+          "url": "https://github.com/serjflint/saitenka/commit/902c7628ce8464e9dfe55d5548fcfd4c4b9b151e"
+        },
+        "date": 1786277424708,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.822,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.099,
+            "range": "±7.2%",
             "unit": "ms"
           }
         ]
