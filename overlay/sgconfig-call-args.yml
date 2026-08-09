@@ -1,0 +1,10 @@
+# ast-grep call-site convention check (`poe call-args`) — flags a call passing 3+ unnamed positional
+# args (the repo convention: name them). SEPARATE from sgconfig.yml/`poe invariants` on purpose: a
+# first repo-wide pass surfaces ~900 existing call sites (dataclass/Qt-ish constructors, `Check(...)`,
+# etc.), so this stays `severity: warning`, scoped to src/, and DELIBERATELY NOT in `poe all` — same
+# advisory posture as sgconfig-tests.yml's Conformance instrument, until triage narrows the noise or a
+# rule graduates to a zero-violation gate.
+ruleDirs:
+  - sgconfig/call-arg-rules
+testConfigs:
+  - testDir: sgconfig/call-arg-rule-tests

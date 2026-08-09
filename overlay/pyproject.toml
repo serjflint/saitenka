@@ -216,6 +216,12 @@ test-lint-json = { shell = "ast-grep scan -c sgconfig-tests.yml --json=compact t
 # rule can't rot into a no-op. Rust binary, no build/FT exposure — same posture as `invariants`.
 test-lint-gate = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests-gate.yml tests" }
 test-lint-gate-test = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests" }
+# Call-site arg-naming convention (ast-grep, config: sgconfig-call-args.yml, #225) — flags a call
+# passing 3+ unnamed positional args (ruff PLR0913/PLR0917 only bound the definition side). A first
+# repo-wide pass surfaces ~900 existing call sites, so this stays `severity: warning` and DELIBERATELY
+# NOT in `poe all` — same advisory posture as `test-lint`, until triage narrows the noise.
+call-args = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-call-args.yml src" }
+call-args-test = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snapshot-tests" }
 # OPT-IN taint tier (not in `all`): semgrep dataflow for what ast-grep can't — model output reaching a
 # reading/pitch field via intermediate vars. Pinned to 3.13 (prebuilt clib wheel; semgrep never imports
 # our code, so its interpreter is unrelated to the 3.14t runtime). For 3.14t use the clib-drop crutch:

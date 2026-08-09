@@ -1,0 +1,25 @@
+id: name-args-3plus
+valid:
+  # under 3 positional args
+  - f(a, b)
+  # named — the convention this rule enforces
+  - f(a, b, c=3)
+  - f(x=1, y=2, z=3)
+  # keyword-only-style call with one positional
+  - f(a, key=b, other=c)
+  # variadic forwarding isn't a fixed positional run
+  - f(a, *args, b)
+  - f(a, b, **kwargs)
+  # exempt CPython positional-only builtins
+  - range(0, 10, 2)
+  - slice(1, 2, 3)
+  - getattr(obj, "name", default)
+  - setattr(obj, "name", value)
+  # %-style interpolation slots, not independently named values
+  - 'log.info("runtime: %s, %d prefetch worker(s)", mode, count)'
+  - 'logger.warning("failed %s: %s (%d)", op, err, code)'
+invalid:
+  - f(a, b, c)
+  - f(a, b, c, d)
+  - self.method(x, y, z)
+  - Check(id, level, message)
