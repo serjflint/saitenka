@@ -30,7 +30,7 @@ prompting.** An unverified research brief is a hypothesis, never a result.
    already-solved**: name the differentiators worth researching and the peripheral bits already
    handled (e.g. audio/screenshot via ffmpeg/mpv), or the run burns a thread chasing a
    non-differentiator. Under-specified context is the top cause of wasted research. Canonical living
-   library + context: `Saitenka-Vault/_source/research-prompts.md`; a reusable skeleton + the output
+   library + context: kept in the maintainer's private notes; a reusable skeleton + the output
    contract + the fact-check pattern are in [`references/prompt-kit.md`](references/prompt-kit.md).
 2. **Author + sharpen.** One self-contained prompt per gap, structured as a `<role>` + XML-tagged
    sections (`<context>` / `<known_tools>` / `<task>` / `<verification_rules>` / `<output_format>`)
@@ -43,7 +43,7 @@ prompting.** An unverified research brief is a hypothesis, never a result.
    (+ `gh api repos/<o>/<r>` for maintenance). It cannot fabricate, and catches what an LLM prompt
    anchored on a known list misses (this sweep found the direct competitor `Memento` that way after
    the prose sweep missed it).
-3. **Handoff.** Write each prompt to the Vault `_source/` and **open it in VS Code** (`code <path>`),
+3. **Handoff.** Write each prompt to the maintainer's private notes and **open it in VS Code** (`code <path>`),
    then hand it to the user to run across their web-search systems (backend-agnostic — run the same
    prompt in several and compare). Ingest the pasted reports; do not fabricate the external step.
 4. **Verify — the gate.** For every named tool/claim: WebFetch the *actual* source (repo / release /
@@ -79,7 +79,7 @@ prompting.** An unverified research brief is a hypothesis, never a result.
    **Carry failures forward** (Reflexion, Shinn 2023): the findings note is episodic memory — the next
    prompt lists what was already checked / fabricated / 404'd as *don't re-suggest*, never a silent re-run.
    Stop when a round adds no new verified peer and no new gap.
-6. **Aggregate.** A findings note (`<topic>-research-findings.md` in the Vault `_source/`) + GO
+6. **Aggregate.** A findings note (`<topic>-research-findings.md` in the maintainer's private notes) + GO
    items / issues — delta-only, **every surviving claim cited**. Separate evidence from folklore.
    Filed-issue text goes through `pr-ticket-describe`; a claim that survived becomes a GO item with its
    citation attached.
