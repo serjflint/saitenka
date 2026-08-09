@@ -2,13 +2,16 @@
 
 Yomitan's own model for European languages: there is no morphological analyzer (no MeCab equivalent).
 Text is scanned into word runs on Unicode letter boundaries, and inflection is handled downstream by a
-dictionary-form lookup with a transform-based deinflector (the GPL ``deinflect`` add-on's French rules),
-not by a per-token lemma from the segmenter. So this tokenizer's job is only **segmentation + content
-classification + offsets** — ``lemma`` is the surface (the lookup layer lowercases and deinflects).
+dictionary-form lookup with a transform-based deinflector (the GPL ``deinflect`` add-on's French rules).
+So this tokenizer's job is **segmentation + content classification + offsets**, plus one lookup nicety
+the deinflector can't do: ``lemma`` is the surface **lower-cased** (sentence-initial ``Le``/``Ça`` →
+``le``/``ça`` so they resolve to the article/pronoun, not a capitalised proper-noun homograph — Yomitan's
+``decapitalize`` text-processor). ``surface`` keeps the original case for display/mining.
 
-Elision (``l'homme``, ``d'accord``, ``qu'il``) is split on the apostrophe: the clitic and the content
-word become separate tokens. That mis-splits the rare fused word (``aujourd'hui``); accepted for v1 —
-the alternative is a dictionary-driven scan (Yomitan's approach) that this token model doesn't do yet.
+Elision (``l'homme``, ``qu'il``) keeps the apostrophe WITH the clitic (one ``n'`` token, not a bare
+``n`` + a stray ``'``) and resolves it to its full form (``n'`` → ``ne``, ``qu'`` → ``que``) so the
+clitic itself is lookup-able; the following content word is its own token. A non-clitic word before an
+apostrophe (``aujourd'hui``) still splits — accepted for v1 (Yomitan's dictionary-driven scan handles it).
 """
 
 from __future__ import annotations
@@ -27,6 +30,21 @@ SPACE = "SPACE"
 
 # Apostrophe variants that mark French elision — both the straight and the typographic form.
 _APOSTROPHES = frozenset("'’")
+
+# Elision clitics: a short function word that elides its vowel before a following vowel. The apostrophe
+# stays WITH the clitic and the lemma is the full word, so ``n'`` resolves to ``ne`` in the dictionary
+# instead of leaving a bare, meaningless ``n``. ``qu'`` is the one two-letter clitic.
+_ELISION = {
+    "l": "le",
+    "d": "de",
+    "j": "je",
+    "m": "me",
+    "t": "te",
+    "s": "se",
+    "c": "ce",
+    "n": "ne",
+    "qu": "que",
+}
 
 
 def _is_word_char(ch: str) -> bool:
@@ -62,9 +80,15 @@ class LatinTokenizer:
             while j < n and _classify(line[j]) == kind and line[j] not in _APOSTROPHES:
                 j += 1
             surface = line[i:j]
-            tokens.append(
-                Token(surface=surface, lemma=surface, reading="", pos=kind, start=i, end=j)
-            )
+            lemma = surface
+            if kind == WORD:
+                elided = _ELISION.get(surface.lower())
+                if elided is not None and j < n and line[j] in _APOSTROPHES:
+                    j += 1  # swallow the apostrophe into the clitic: "n'" not bare "n"
+                    surface, lemma = line[i:j], elided
+                else:
+                    lemma = surface.lower()  # decapitalize for lookup; surface keeps its case
+            tokens.append(Token(surface=surface, lemma=lemma, reading="", pos=kind, start=i, end=j))
             i = j
         return tokens
 

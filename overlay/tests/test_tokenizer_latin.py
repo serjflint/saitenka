@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from overlay.app.profiles import default_tokenizer_for
 from overlay.app.tokenizer import get_tokenizer
-from overlay.app.tokenizer_latin import PUNCT, WORD, LatinTokenizer
+from overlay.app.tokenizer_latin import WORD, LatinTokenizer
 
 
 def _surfaces(line: str) -> list[str]:
@@ -19,18 +19,36 @@ def test_splits_words_on_whitespace_and_punctuation():
     assert _surfaces("Le chat noir.") == ["Le", " ", "chat", " ", "noir", "."]
 
 
-def test_elision_splits_on_apostrophe():
-    # l'homme → clitic + content word + the apostrophe as its own PUNCT token between them.
+def test_elision_clitic_keeps_its_apostrophe_and_resolves_to_the_full_word():
+    # l'homme → the clitic "l'" (one token, apostrophe swallowed, lemma "le") + the content word.
+    # No bare "l" and no stray "'" — hovering the clitic looks up "le", not a meaningless letter.
     toks = LatinTokenizer().tokenize("l'homme")
-    assert [(t.surface, t.pos) for t in toks] == [
-        ("l", WORD),
-        ("'", PUNCT),
-        ("homme", WORD),
+    assert [(t.surface, t.lemma, t.pos) for t in toks] == [
+        ("l'", "le", WORD),
+        ("homme", "homme", WORD),
     ]
 
 
-def test_typographic_apostrophe_also_splits():
-    assert _surfaces("qu’il") == ["qu", "’", "il"]
+def test_negation_clitic_resolves_so_the_content_word_is_its_own_token():
+    # Regression: "n'avait" used to tokenize to a bare "n" + "'" + "avait"; hovering showed just "n".
+    toks = [t for t in LatinTokenizer().tokenize("n'avait") if t.pos == WORD]
+    assert [(t.surface, t.lemma) for t in toks] == [("n'", "ne"), ("avait", "avait")]
+
+
+def test_typographic_apostrophe_also_elides():
+    toks = [t for t in LatinTokenizer().tokenize("qu’il") if t.pos == WORD]
+    assert [(t.surface, t.lemma) for t in toks] == [("qu’", "que"), ("il", "il")]
+
+
+def test_sentence_initial_capital_lowercases_the_lemma_for_lookup():
+    # "Le magasin" / "Ça va" — the surface keeps its case (display/mining) but the lemma decapitalizes
+    # so the article/pronoun resolves instead of a capitalised proper-noun homograph (Yomitan's
+    # decapitalize text-processor).
+    le, _sp, magasin = LatinTokenizer().tokenize("Le magasin")
+    assert (le.surface, le.lemma) == ("Le", "le")
+    assert (magasin.surface, magasin.lemma) == ("magasin", "magasin")
+    (ca,) = [t for t in LatinTokenizer().tokenize("Ça") if t.pos == WORD]
+    assert (ca.surface, ca.lemma) == ("Ça", "ça")
 
 
 def test_offsets_index_into_the_line():
@@ -64,9 +82,10 @@ def test_query_token_is_the_whole_query():
     assert tok.query_token("   ") is None
 
 
-def test_lemma_is_the_surface_lookup_layer_deinflects():
-    # The tokenizer does not lemmatize — an inflected "mangé" keeps its surface as the lemma; the
-    # deinflector resolves it downstream. Guards against a future "helpful" stemming here.
+def test_lemma_is_the_lowercased_surface_lookup_layer_deinflects():
+    # The tokenizer does not lemmatize — an inflected "mangé" keeps its surface as the lemma (only
+    # decapitalized); the deinflector resolves the inflection downstream. Guards against future
+    # "helpful" stemming here.
     (tok,) = [t for t in LatinTokenizer().tokenize("mangé") if t.pos == WORD]
     assert tok.lemma == "mangé"
 
