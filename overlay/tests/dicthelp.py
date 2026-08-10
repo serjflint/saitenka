@@ -17,12 +17,15 @@ from overlay.app.wordlists import FreqDict, FreqSource, JlptDict, PitchSource
 AT = "2026-07-23T00:00:00"  # fixed imported_at — the store never stamps time itself
 
 
-def term_zip(path, title, entries):
-    """Write a minimal Yomitan v3 term-bank zip. ``entries``: [term, reading, glossary]."""
+def term_zip(path, title, entries, *, media=None):
+    """Write a minimal Yomitan v3 term-bank zip. ``entries``: [term, reading, glossary]. ``media``, if
+    given, is a ``{zip path: bytes}`` map of inline-image files packed alongside the bank (#283)."""
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
         bank = [[t, r, "", "", 0, g, i + 1, ""] for i, (t, r, g) in enumerate(entries)]
         zf.writestr("term_bank_1.json", json.dumps(bank, ensure_ascii=False))
+        for name, data in (media or {}).items():
+            zf.writestr(name, data)
     return str(path)
 
 

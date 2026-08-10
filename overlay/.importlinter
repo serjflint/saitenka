@@ -101,3 +101,13 @@ forbidden_modules =
 ignore_imports =
     overlay.render.layout_backend -> taffylite
 
+[importlinter:contract:svg-images-chokepoint]
+name = only app.dictdb may import the optional resvglite SVG rasterizer
+type = forbidden
+source_modules =
+    overlay
+forbidden_modules =
+    resvglite
+ignore_imports =
+    overlay.app.dictdb -> resvglite
+

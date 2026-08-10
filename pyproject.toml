@@ -239,6 +239,7 @@ max-args = 8
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "saitenka_deinflect".msg = "GPL-3.0 add-on — only overlay/app/dictionary.py and overlay/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
 "taffylite".msg = "Optional layout engine — only overlay/render/layout_backend.py (TaffyLayoutBackend) may import it (see .importlinter's layout-engine-chokepoint contract)."
+"resvglite".msg = "Optional SVG rasterizer — only overlay/app/dictdb.py (_load_media) may import it: gaiji are rasterized once at import, never on the render thread (see .importlinter's svg-images-chokepoint contract)."
 
 [tool.complexipy]
 # Cognitive-complexity gate (uv run poe complexity, folded into poe all), now repo-wide (#216).
@@ -246,7 +247,7 @@ max-args = 8
 # regenerate after a deliberate refactor): the pre-existing high-complexity functions are grandfathered,
 # so the gate only fails on NEW complexity growth, not on adoption. max-complexity-allowed=15 is
 # complexipy's own default — set explicitly so it's visible.
-paths = ["overlay/src/overlay", "deinflect/src", "taffylite/python", "tools", "install", ".agents"]
+paths = ["overlay/src/overlay", "deinflect/src", "taffylite/python", "resvglite/python", "tools", "install", ".agents"]
 max-complexity-allowed = 15
 
 [tool.mypy]
@@ -266,7 +267,7 @@ files = ["overlay/src/overlay", "deinflect/src", "overlay/examples", "tools", "i
 # the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
 # absent, e.g. the CI gate env — the layout-engine extra is deliberately not installed there). `stubs/`
 # holds our local third-party stubs (fugashi — Cython, no py.typed).
-mypy_path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs", ".agents/hooks"]
+mypy_path = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # Stage 8b tooling: good additional checks, NOT --strict (plan decision).
 check_untyped_defs = true
 no_implicit_optional = true
@@ -279,7 +280,7 @@ ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 # Run from the repo root → the first-party source roots must be on the search path (same reason as
 # basedpyright's extraPaths) so `saitenka_deinflect.engine` / `overlay.*` resolve from source.
 # `stubs/` holds local third-party stubs (fugashi).
-search-path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs", ".agents/hooks"]
+search-path = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # Library-only, deliberately NOT widened alongside mypy/basedpyright above: pyrefly's inference is far
 # stricter on the ad-hoc untyped dict-literal "records" idiom pervasive in tools/ (e.g. plan.append({...})
 # read back via p["key"]) — real findings there are inference-strictness noise, not import/attr rot (the
@@ -291,7 +292,7 @@ search-path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs", ".ag
 include = ["overlay/src/overlay", "deinflect/src", "overlay/examples", "tools", "install", ".agents"]
 # Run from the repo root, so the first-party source roots must be on the search path explicitly (else
 # `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
-extraPaths = ["overlay/src", "deinflect/src", "taffylite/python", ".agents/hooks"]
+extraPaths = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/python", ".agents/hooks"]
 stubPath = "stubs"   # local third-party stubs (fugashi — Cython, no py.typed)
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity

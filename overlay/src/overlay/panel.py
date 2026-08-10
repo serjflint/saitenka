@@ -67,6 +67,9 @@ class Definition:
     dict_name: str
     content: SCNode  # structured-content node
     tags: list[str] = field(default_factory=list)  # defTags: ★, priority form, …
+    # {img path: image bytes}, preloaded from the DB at Entry-build so the render thread never queries
+    # SQLite (#283). Empty on a default install → inline img renders as ▢.
+    media: dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass
@@ -285,6 +288,7 @@ def _emit_def_rows(
             gap_px=theme.px(3),
             indent_px=theme.px(INDENT_PX),
             gutter_px=theme.px(GUTTER_PX),
+            media=d.media,
         )
 
         def _def_body(args: BodyRenderArgs):  # explicit param — no loop-variable closure (B023)

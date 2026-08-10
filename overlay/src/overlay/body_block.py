@@ -11,7 +11,7 @@ and re-exports from here so ``from overlay.panel import BodyRenderArgs`` keeps w
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from overlay.render.document import DocLayout, DocStyle, layout_document, render_document
@@ -42,6 +42,9 @@ class BodyRenderArgs:
     gap_px: int
     indent_px: int
     gutter_px: int
+    # {img path: image bytes} preloaded at Entry-build (#283); raw bytes so it pickles across the
+    # process-pool boundary. Empty on a default install → inline img renders as ▢.
+    media: dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +73,7 @@ def layout_body_block(args: BodyRenderArgs) -> LaidOutBody:
     """Walk + lay out one def-body block WITHOUT drawing — cheap enough to run ahead of the viewport so
     a row's first band never pays the walk synchronously (see the PR3 crux)."""
     doc = layout_document(
-        walk(args.content, args.body_style),
+        walk(args.content, args.body_style, media=args.media),
         width=args.body_w,
         base=args.body_style,
         padding=0,
@@ -120,7 +123,7 @@ def render_body_block(
     links: list[LinkBox] = []
     clipped: list = []
     img = render_document(
-        walk(args.content, args.body_style),
+        walk(args.content, args.body_style, media=args.media),
         width=args.body_w,
         style=DocStyle(
             base=args.body_style,

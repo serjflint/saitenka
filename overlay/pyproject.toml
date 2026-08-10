@@ -44,6 +44,12 @@ deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language
 # fallback; this is additive and parity-gated. `saitenka[layout-engine]` resolves taffylite from PyPI. (For
 # hacking on the in-repo Rust crate, add a `[tool.uv.sources]` editable path override or `uv run --with-editable ../taffylite`.)
 layout-engine = ["taffylite>=0.1.0"]
+# Optional SVG rasterizer: the resvg PyO3 binding that turns Yomitan inline `img` gaiji (SVG labels /
+# reference glyphs) into PNGs at import, so the panel draws the real glyph instead of a ▢ (#283). A Rust
+# extension vendoring resvg (MPL-2.0, contained to this separately-published optional wheel — see
+# ../LICENSING.md), kept OUT of `full` so the default install stays Apache-clean and pure-Python. Without
+# it, import stores no media and the renderer falls back to ▢ — fully additive.
+images = ["resvglite>=0.1.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
 # default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
@@ -84,6 +90,9 @@ saitenka = "overlay.app.cli:main"
 # install still pulls the published saitenka-deinflect wheel. (taffylite is no longer sourced editable —
 # the `layout-engine` extra resolves the published wheel from PyPI, #231/#282.)
 saitenka-deinflect = { path = "../deinflect", editable = true }
+# resvglite is not on PyPI yet — the `images` extra resolves the in-repo crate editable until the first
+# `resvglite-v*` tag publishes (same bootstrap taffylite used pre-#282). Flip to the published wheel then.
+resvglite = { path = "../resvglite", editable = true }
 
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
