@@ -9,6 +9,11 @@ consume it); do not hand-maintain cell-by-cell.
 Cells: **✔** have · **gap** missing & worth it · **n/a** kind doesn't apply · **partial** discipline
 under-applied (see gap-type i) · **unbuilt** a kind researched but realized nowhere (gap-type ii).
 
+**Active twin.** The subsystem → applicable-kind mapping has a machine-readable form in
+`.agents/hooks/test_kinds.py`; the `test-kinds-advisory.py` commit hook reads it to nudge which non-unit
+kinds a diff warrants (AGENTS.md Testing, "test-kind is a decision"). This table is the human rationale,
+that map is what fires — keep them in sync.
+
 | Subsystem | metamorphic | golden | property | stateful | stolen-corpus | differential | assembly | perf-gate | humble-obj |
 |---|---|---|---|---|---|---|---|---|---|
 | tokenize (JP unidic) | ✔ input-equiv | ✔ | ✔ | n/a | ✔ (UAX#14) | **gap** | ✔ (pipeline) | n/a | n/a |
