@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786377137104,
+  "lastUpdate": 1786377708561,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3059,6 +3059,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.762,
             "range": "±7.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8f71b4bd0d0fbf19651519a5bf1de4b20c89170b",
+          "message": "Merge pull request #300 from serjflint/feat/headword-kanji-links\n\nfeat(tooltip): make each headword kanji a click-to-open link (Yomitan parity)",
+          "timestamp": "2026-08-10T19:01:15+03:00",
+          "tree_id": "c37adb88ef5c6f5b6546ffa7cbd85f0e7f8cfd94",
+          "url": "https://github.com/serjflint/saitenka/commit/8f71b4bd0d0fbf19651519a5bf1de4b20c89170b"
+        },
+        "date": 1786377706279,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.935,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.455,
+            "range": "±8.5%",
             "unit": "ms"
           }
         ]
