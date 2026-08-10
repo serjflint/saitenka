@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786379901067,
+  "lastUpdate": 1786380321145,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3131,6 +3131,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.915,
             "range": "±4.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e49babd0a8d780a2ef75144179db1c5a4d2824c9",
+          "message": "Merge pull request #282 from serjflint/chore/taffylite-use-pypi\n\nchore(taffylite): resolve layout-engine extra from PyPI",
+          "timestamp": "2026-08-10T19:44:23+03:00",
+          "tree_id": "b727e92287f6eb86d9a9cd73497da34f52442d44",
+          "url": "https://github.com/serjflint/saitenka/commit/e49babd0a8d780a2ef75144179db1c5a4d2824c9"
+        },
+        "date": 1786380320090,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.358,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.242,
+            "range": "±2.3%",
             "unit": "ms"
           }
         ]
