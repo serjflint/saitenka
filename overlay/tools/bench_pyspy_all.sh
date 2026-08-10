@@ -54,6 +54,7 @@ BENCHES=(
   "vocab-mp|200|--vocab --parallel --reps 3"
   "timeline|500|--timeline --timeline-cues 120 --timeline-head-prefetch 1 --timeline-lookahead 2"
   "scroll-jank|200|--scroll-jank --reps 3"
+  "clicks|500|--clicks --reps 200"  # sidebar_click / backlog_write / mined_store_write spans
   "trace|500|__TRACE__"  # args resolved at runtime from the newest saitenka report bundle
 )
 

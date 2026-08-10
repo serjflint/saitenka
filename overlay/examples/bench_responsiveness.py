@@ -66,7 +66,7 @@ class FakeIPC:
     """Minimal mpv stand-in: fixed osd, no socket. overlay-add just writes a temp file (as mpv wants)."""
 
     def __init__(self):
-        self.props = {
+        self.props: dict[str, object] = {
             "osd-dimensions": {"w": OSD[0], "h": OSD[1]},
             "pause": False,
             "mouse-pos": {"hover": False, "x": -1, "y": -1},
@@ -1064,6 +1064,103 @@ def run_scroll_jank(reps: int, rt: dict, require_ft: bool, json_path: str | None
     return gil_rc
 
 
+def run_clicks(reps: int, rt: dict, require_ft: bool, json_path: str | None = None) -> int:
+    """Click-surface latency — the per-click main-thread work #293 left uncovered: a sidebar action +
+    full redraw, a bookmark toggle (SQLite), and the #253 mined-card link write (SQLite). These are
+    per-click, not per-frame, so they never appeared in the hover/scroll benches. Driving them here gives
+    ``sidebar_click`` / ``backlog_write`` / ``mined_store_write`` real percentiles (and, under
+    ``bench_pyspy_all``'s telemetry+py-spy wrapper, their spans + CPU) next to the hover/scroll numbers.
+
+    No Anki / mpv: the isolated cost is the durable STORE writes. A full mine's AnkiConnect + screenshot
+    cost is its own ``anki_mine`` span, dominated by I/O — not what a click-stutter check measures."""
+    import tempfile
+    from types import SimpleNamespace
+
+    from overlay.app import backlog, mined_store, sidebar
+    from overlay.app.miner import Miner
+    from overlay.app.sub_index import SubCue, SubIndex
+
+    tmp = Path(tempfile.mkdtemp(prefix="saitenka-clicks-"))
+    ipc = FakeIPC()
+    ipc.props.update(  # capture_current / _persist_mined read these via _get
+        {
+            "path": "/x/Nippon Sangoku - 01.mkv",
+            "sub-start": 0.0,
+            "sub-end": 1.8,
+            "track-list": [],
+            "time-pos": 1.0,
+        }
+    )
+    reader = Reader(cast("MpvIPC", ipc))
+    reader.osd = OSD
+    cues = [SubCue(i * 2.0, i * 2.0 + 1.8, f"これは{i}番目の字幕です") for i in range(60)]
+    reader._sub_index = SubIndex(cues)
+    reader.sub_text = cues[0].text
+    reader._backlog_store = backlog.BacklogStore(tmp / "backlog.sqlite")
+    reader._mined_store = mined_store.MinedCardStore(tmp / "mined.sqlite")
+    reader.mine_cfg = SimpleNamespace(deck="Mining")
+    miner = Miner(reader)
+
+    # Open + render the sidebar so on_click has real hitboxes; click a view-tab so the measured cost is
+    # the click dispatch + full redraw ALONE (a bookmark/mine hit would fold a store write into it — we
+    # measure those separately below).
+    sidebar.toggle(reader)
+    sidebar.redraw(reader)
+    hits = reader.sidebar.hits
+    tab = next((h for h in hits if h.kind.startswith("view:")), hits[0] if hits else None)
+    note_id = {"n": 0}
+
+    def click_sidebar() -> None:
+        if tab is None or reader.sidebar.rect is None:
+            return
+        sidebar.on_click(
+            reader, reader.sidebar.rect[0] + tab.x + 1, reader.sidebar.rect[1] + tab.y + 1
+        )
+
+    def bookmark() -> None:
+        backlog.capture_current(reader)  # toggles create/delete each call — both are writes
+
+    def persist_mine() -> None:
+        note_id["n"] += 1
+        miner._persist_mined(
+            note_id["n"], SimpleNamespace(expression="猫", reading="ねこ"), reader._get("path")
+        )
+
+    sc, bk, mn = (
+        measure(click_sidebar, reps),
+        measure(bookmark, reps),
+        measure(persist_mine, reps),
+    )
+    gil_rc = finalize_runtime(rt, require_ft)
+    print(f"\nSaitenka overlay — CLICKS: per-click main-thread cost × {reps} reps")
+    print(format_runtime(rt))
+    print(f"\n{'op':<22}{'p50':>8}{'p95':>8}{'p99':>8}{'max':>8}  (ms)")
+    print("-" * 62)
+    for label, s in (
+        ("sidebar_click", sc),
+        ("backlog_write (bookmark)", bk),
+        ("mined_store_write", mn),
+    ):
+        print(f"{label:<22}{s['p50']:>8.2f}{s['p95']:>8.2f}{s['p99']:>8.2f}{s['max']:>8.2f}")
+    print(
+        "\nper-click surfaces (not per-frame): main-thread SQLite / a sidebar redraw. A p50 well under the "
+        "16ms frame budget = a click can't stutter; a p99 near/over it is the trigger to move that work "
+        "off-thread (plan Gap 4) — note WHICH op: a store write vs the sidebar REDRAW (a tab switch also "
+        "queries the store to fill the view), which are different fixes. Under bench_pyspy_all these emit "
+        "sidebar_click / backlog_write / mined_store_write spans (span_percentiles) + py-spy CPU."
+    )
+    if json_path:
+        Path(json_path).write_text(
+            json.dumps(
+                {"runtime": rt, "sidebar_click": sc, "backlog_write": bk, "mined_store_write": mn},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"\nwrote clicks baseline → {json_path}")
+    return gil_rc
+
+
 # Module-level worker state for the --vocab --parallel path (ProcessPool workers each rebuild the DB in
 # the initializer; threads share the copy run_vocab sets). Top-level so ProcessPool can pickle by name.
 _VOCAB_DS = None
@@ -1905,6 +2002,13 @@ def main() -> int:
         "isolation — the scroll-only jank tail (cold tail-block render vs warm cached re-composite)",
     )
     ap.add_argument(
+        "--clicks",
+        action="store_true",
+        help="per-click main-thread cost (not per-frame): a sidebar action + redraw, a bookmark toggle, "
+        "and the #253 mined-card link write — the click surfaces #293 left uncovered. Emits "
+        "sidebar_click / backlog_write / mined_store_write spans under the telemetry+py-spy wrapper",
+    )
+    ap.add_argument(
         "--max-frame-ms",
         type=float,
         help="stress: fail if any single op exceeds this frame budget (ms)",
@@ -2066,6 +2170,8 @@ def main() -> int:
         )
     if args.scroll_jank:
         return run_scroll_jank(args.reps, rt, args.require_ft, args.json)
+    if args.clicks:
+        return run_clicks(args.reps, rt, args.require_ft, args.json)
     if args.synth:
         return run_synth(
             args.reps,

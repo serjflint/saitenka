@@ -73,3 +73,30 @@ def test_to_bench_json_drops_a_zero_cv_band():
     mod = _bench_module()
     out = mod.to_bench_json({"synth_median_ms": 2.0, "synth_median_cv": 0.0})
     assert "range" not in out[0]
+
+
+def test_clicks_bench_emits_the_three_click_spans(monkeypatch, capsys):
+    # Rot guard: --clicks must actually drive the surfaces so sidebar_click / backlog_write /
+    # mined_store_write reach a trace — record the spans via the sanctioned traced seam, run a tiny sweep.
+    import contextlib
+
+    from overlay import otel_metrics
+
+    names: list[str] = []
+
+    @contextlib.contextmanager
+    def _rec(name, **_attrs):
+        names.append(name)
+
+        class _S:
+            def set(self, *_a):
+                pass
+
+        yield _S()
+
+    monkeypatch.setattr(otel_metrics, "traced", _rec)
+    mod = _bench_module()
+    rc = mod.run_clicks(reps=2, rt=mod.runtime_info(), require_ft=False)
+    capsys.readouterr()  # swallow the bench's report
+    assert rc == 0
+    assert {"sidebar_click", "backlog_write", "mined_store_write"} <= set(names)
