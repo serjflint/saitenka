@@ -1,0 +1,13 @@
+resvglite
+Copyright 2026 Sergei Iakhnitskii and saitenka contributors
+
+This product is licensed under either of Apache License, Version 2.0 or the MIT
+license, at your option.
+
+It is a binding of, and vendors at build time, the following third-party crates:
+
+- resvg / usvg / tiny-skia (https://github.com/linebender/resvg) — MPL-2.0 license.
+  The pure-Rust SVG parser + rasterizer. resvglite is a thin wrapper over its public
+  API; the MPL-2.0 covers only the vendored resvg source files, not this wrapper.
+- pyo3 (https://github.com/PyO3/pyo3) — Apache-2.0 OR MIT license.
+  The Rust ↔ Python binding layer.

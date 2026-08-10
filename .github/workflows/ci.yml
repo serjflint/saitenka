@@ -97,6 +97,27 @@ jobs:
           PYTHON_GIL: "0"
         run: uv run --no-sync pytest -q tests/test_layout_backend.py
 
+  svg-images:
+    name: resvglite wheel (Linux, 3.14t)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+
+      # Proves the DoD (#283): the optional resvg binding's cp314t wheel builds on the free-threaded
+      # interpreter (cargo ships on the runner; maturin is pulled per resvglite's build-system) and its
+      # own SVG→PNG smoke tests pass. The `images` extra is DELIBERATELY absent from `poe all`, so this
+      # job is where the Rust rasterizer path is exercised.
+      - name: Build + smoke-test resvglite (3.14t)
+        working-directory: resvglite
+        run: |
+          uv python install 3.14t
+          uv run --python 3.14t --with-editable . --with pytest --with pillow pytest -q tests
+
   deinflect:
     name: deinflect add-on (GPL)
     runs-on: ubuntu-latest

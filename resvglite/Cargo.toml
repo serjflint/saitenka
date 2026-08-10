@@ -1,0 +1,22 @@
+[package]
+name = "resvglite"
+version = "0.1.0"
+edition = "2021"
+description = "Thin PyO3 binding of resvg — the optional SVG rasterizer for saitenka's inline dictionary glyphs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/serjflint/saitenka"
+
+[lib]
+name = "resvglite"
+crate-type = ["cdylib"]
+
+# pyo3 0.25, NO abi3 -> a real free-threaded cp314t wheel that loads without re-enabling the GIL.
+# resvg is pure Rust (usvg parser + tiny-skia raster), no system libraries — matches the taffylite
+# self-contained-wheel bar. text-svg feature OFF: dictionary gaiji are vector paths, not <text>, so we
+# skip the fontdb dependency entirely.
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+resvg = { version = "0.45", default-features = false }
+
+[profile.release]
+strip = true

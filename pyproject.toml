@@ -193,9 +193,11 @@ max-args = 8
 # themselves (and their own tests) import themselves legitimately — exempt them.
 "deinflect/**" = ["banned-api"]
 "taffylite/**" = ["banned-api"]
-# taffylite re-exports its compiled Rust ext via `from .taffylite import *` — the star is unavoidable
-# for a native module with no static names ruff can see.
+"resvglite/**" = ["banned-api"]
+# taffylite/resvglite re-export their compiled Rust ext via `from .<pkg> import *` — the star is
+# unavoidable for a native module with no static names ruff can see.
 "taffylite/python/taffylite/__init__.py" = ["undefined-local-with-import-star", "undefined-local-with-import-star-usage"]
+"resvglite/python/resvglite/__init__.py" = ["undefined-local-with-import-star", "undefined-local-with-import-star-usage"]
 # Tests legitimately reach into private members and take shortcuts a library shouldn't:
 "**/tests/**" = [
     "private-member-access",  # white-box access to _private state is how the internals get tested
