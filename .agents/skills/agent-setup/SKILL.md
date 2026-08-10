@@ -33,7 +33,7 @@ There is **no shared cross-agent MCP config format** (Claude uses `.mcp.json`, C
 | **MCP servers** | `uv run .agents/skills/agent-setup/scripts/render.py --agent claude` → writes `./.mcp.json` (git-ignored) → **approve** the project servers on next launch | `uv run …/render.py --agent codex --out ~/.codex/config.toml` → merges a `# BEGIN/END saitenka managed MCP` block (idempotent). ⚠️ Codex may not auto-load repo-local `.codex/config.toml` — prefer `~/.codex/config.toml` |
 | **Python LSP** (pyrefly) | the `pyrefly-lsp` skill's `.lsp.json` registers `pyrefly lsp` for the built-in `LSP` tool (needs a Claude restart to bind) | `pyrefly` CLI — allow-list `Bash(pyrefly:*)` |
 | **repowise hooks** | `~/.claude/settings.json` `SessionStart`/`PostToolUse` → `repowise-augment` | `~/.codex/hooks.json` `PreToolUse` → `repowise-rewrite --agent codex` |
-| **Repo hooks** (`.agents/hooks/`, committed & agent-agnostic) | `.claude/settings.json`: `PreToolUse[Bash]` → `block-shell-search.py` + `block-bare-python.py` + `comment-review.py`; `SessionStart` → `repowise-refresh.py` | Codex `hooks.json`: the same scripts on the equivalent events (PreToolUse for the guards; a session-start event for the refresh) |
+| **Repo hooks** (`.agents/hooks/`, committed & agent-agnostic) | `.claude/settings.json`: `PreToolUse[Bash]` → `block-shell-search.py` + `block-bare-python.py` + `comment-review.py` + `test-kinds-advisory.py`; `SessionStart` → `repowise-refresh.py` | Codex `hooks.json`: the same scripts on the equivalent events (PreToolUse for the guards; a session-start event for the refresh) |
 
 ## Prerequisites (per user, not committed)
 
