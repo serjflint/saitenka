@@ -131,6 +131,26 @@ def _parse_size(v, base: int) -> int:
         return base
 
 
+_SUB_SUP_EM = 0.72  # sub/sup annotations render at ~0.72em of the parent size
+_SUPER_VALS = {"super", "superscript", "text-top", "top"}
+_SUB_VALS = {"sub", "subscript", "text-bottom", "bottom"}
+
+
+def _valign(tag: str | None, vertical_align) -> int:
+    """+1 (raise) for sup, −1 (lower) for sub — from the tag OR ``style.verticalAlign``. 0 otherwise."""
+    if tag == "sup":
+        return 1
+    if tag == "sub":
+        return -1
+    if isinstance(vertical_align, str):
+        v = vertical_align.strip().lower()
+        if v in _SUPER_VALS:
+            return 1
+        if v in _SUB_VALS:
+            return -1
+    return 0
+
+
 def _apply_style(node: dict, style: Style) -> Style:
     tag = node.get("tag")
     st = node.get("style") or {}
@@ -148,10 +168,16 @@ def _apply_style(node: dict, style: Style) -> Style:
     deco = st.get("textDecorationLine")
     if tag in {"a", "u"} or deco == "underline" or (isinstance(deco, list) and "underline" in deco):
         kw["underline"] = True
+    if deco == "line-through" or (isinstance(deco, list) and "line-through" in deco):
+        kw["strike"] = True
     if tag == "a":
         kw.setdefault("color", _NAMED["blue"])
     kw["size"] = _parse_size(st.get("fontSize"), style.size)
     kw["color"] = _parse_color(st.get("color"), kw.get("color", style.color))
+    valign = _valign(tag, st.get("verticalAlign"))
+    if valign:
+        kw["valign"] = valign
+        kw["size"] = max(1, round(kw["size"] * _SUB_SUP_EM))  # small raised/lowered annotation
     return style.with_(**kw)
 
 

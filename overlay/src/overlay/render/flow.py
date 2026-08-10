@@ -215,7 +215,8 @@ class Item:
             return self.chip.ascent, self.chip.descent, self.chip.ascent
         if self.tok is not None:
             a, d = _font(self.tok.file, self.tok.style).getmetrics()
-            return a, d, self.tok.style.size
+            shift = self.tok.baseline_shift  # super raises the top, sub lowers the bottom
+            return a + max(0, round(shift)), d + max(0, round(-shift)), self.tok.style.size
         return 0, 0, 0
 
 

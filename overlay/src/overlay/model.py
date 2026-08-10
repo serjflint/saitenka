@@ -61,6 +61,8 @@ class Style:
     italic: bool = False
     underline: bool = False
     color: RGBA = BLACK
+    strike: bool = False  # textDecorationLine: line-through
+    valign: int = 0  # 0 = baseline, +1 = superscript (raised), −1 = subscript (lowered)
 
     def with_(self, **kw) -> Style:
         return replace(self, **kw)

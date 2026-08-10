@@ -97,3 +97,35 @@ def test_italic_and_underline_and_weight_flags():
     assert _span({"fontStyle": "italic"}).style.italic is True
     assert _span({"textDecorationLine": "underline"}).style.underline is True
     assert _span({"fontWeight": 700}).style.weight == 700
+
+
+def test_line_through_sets_strike():
+    assert _span({"textDecorationLine": "line-through"}).style.strike is True
+    assert _span({"textDecorationLine": ["underline", "line-through"]}).style.strike is True
+    assert _span({}).style.strike is False
+
+
+# --- sub/sup superscript reading annotations (#285) -----------------------------------------------
+
+
+def _tagged(tag: str):
+    return inline_flow({"tag": tag, "content": "あ"}, BASE)[0]
+
+
+def test_sup_tag_raises_and_shrinks():
+    span = _tagged("sup")
+    assert span.style.valign == 1  # raised
+    assert span.style.size == round(BASE.size * 0.72)  # small annotation
+
+
+def test_sub_tag_lowers_and_shrinks():
+    span = _tagged("sub")
+    assert span.style.valign == -1  # lowered
+    assert span.style.size == round(BASE.size * 0.72)
+
+
+def test_vertical_align_style_without_a_sub_sup_tag():
+    # A plain span carrying style.verticalAlign is treated as sub/sup too (新明解 uses this form).
+    assert _span({"verticalAlign": "super"}).style.valign == 1
+    assert _span({"verticalAlign": "sub"}).style.valign == -1
+    assert _span({"verticalAlign": "baseline"}).style.valign == 0

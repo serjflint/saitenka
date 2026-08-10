@@ -68,6 +68,10 @@ def _is_word_char(ch: str) -> bool:
     return ch.isalpha() or unicodedata.category(ch)[0] == "M"
 
 
+#: super/sub baseline shift as a fraction of the (already-shrunk) annotation size — super up, sub down.
+_VALIGN_SHIFT = 0.34
+
+
 @dataclass
 class Token:
     text: str
@@ -76,6 +80,14 @@ class Token:
     width: float
     style: Style
     href: str | None = None  # internal dict link target term, inherited from its Span
+    baseline_shift: float = (
+        0.0  # reference px above the baseline (+up super, −down sub); 0 = inline
+    )
+
+
+def _baseline_shift(style: Style) -> float:
+    """Reference-px baseline offset for a super/sub run (+up, −down), proportional to its own size."""
+    return style.valign * style.size * _VALIGN_SHIFT if style.valign else 0.0
 
 
 def _font(file: str, style: Style):
@@ -96,6 +108,7 @@ def _word_run(text: str, i: int, n: int) -> tuple[str, int]:
 
 def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Token]:
     tokens: list[Token] = []
+    shift = _baseline_shift(style)
     i, n = 0, len(text)
     while i < n:
         ch = text[i]
@@ -130,6 +143,9 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
             f = fonts.font_for_char(ch)
             tokens.append(Token(ch, f, "word", fonts.text_width(_font(f, style), ch), style, href))
             i += 1
+    if shift:
+        for t in tokens:
+            t.baseline_shift = shift
     return tokens
 
 
@@ -157,7 +173,9 @@ def line_metrics(line: list[Token]) -> tuple[int, int]:
     ascent = descent = 0
     for tok in line or []:
         a, d = _font(tok.file, tok.style).getmetrics()
-        ascent, descent = max(ascent, a), max(descent, d)
+        shift = tok.baseline_shift  # super raises the top, sub lowers the bottom → grow the box
+        ascent = max(ascent, a + max(0, round(shift)))
+        descent = max(descent, d + max(0, round(-shift)))
     if ascent == 0:  # empty line: fall back to default style metrics
         a, d = _font(fonts.FONT_FILES[0], Style()).getmetrics()
         ascent, descent = a, d
@@ -182,10 +200,14 @@ def draw_token(
         tok.style if scale == 1.0 else tok.style.with_(size=max(1, round(tok.style.size * scale)))
     )
     font = _font(tok.file, style)
-    px, pbaseline, width = x * scale, baseline * scale, tok.width * scale
+    px, width = x * scale, tok.width * scale
+    pbaseline = (baseline - tok.baseline_shift) * scale  # super/sub raise/lower; 0 for inline runs
     if style.underline and tok.kind != "space":
         uy = round(pbaseline + max(1, style.size * 0.08))
         draw.line([(px, uy), (px + width, uy)], fill=style.color, width=max(1, style.size // 18))
+    if style.strike and tok.kind != "space":
+        sy = round(pbaseline - style.size * 0.30)  # ~mid x-height line-through
+        draw.line([(px, sy), (px + width, sy)], fill=style.color, width=max(1, style.size // 18))
     if not style.italic:
         # Split draw.text's upright path: cache the getmask2 alpha (the FreeType cost) via
         # fonts.glyph_mask, then blit through PIL's own draw_bitmap — a verbatim replay of
