@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786365365418,
+  "lastUpdate": 1786366366429,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2951,6 +2951,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.783,
             "range": "±2.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "107981f865e6659f7b90df610e725ccea7ac9b33",
+          "message": "Merge pull request #295 from serjflint/perf/clicks-bench\n\nfeat(bench): --clicks mode for the sidebar/bookmark/mine click surfaces",
+          "timestamp": "2026-08-10T15:52:15+03:00",
+          "tree_id": "0b942f000f2294e2674a5b9883d36b4994e75d03",
+          "url": "https://github.com/serjflint/saitenka/commit/107981f865e6659f7b90df610e725ccea7ac9b33"
+        },
+        "date": 1786366365250,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.513,
+            "range": "±0.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.224,
+            "range": "±1.7%",
             "unit": "ms"
           }
         ]
