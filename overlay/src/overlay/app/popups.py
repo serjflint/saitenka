@@ -1,9 +1,11 @@
 """Popup view state: the cached tooltip panel + the per-popup view.
 
 ``Panel`` is a cached, windowed-rendered tooltip panel — a :class:`WindowedPanel` over the entry's
-rows plus its reading. ``PopupView`` is the per-popup VIEW state — anchor, viewport, scroll, screen
-rect, linger timer, dirty flag. The nested scan popup uses it fully; the base tooltip keeps its own
-exploded ``_tip_*`` attributes (so the hover FSM and its tests stay untouched).
+rows plus its reading. ``PopupView`` is the per-popup VIEW state — overlay id, anchor, viewport,
+scroll, screen rect, linger timer, and its own soft→crisp flags. BOTH the base tooltip (``TooltipState.
+view``) and the nested scan popup (``TooltipState.nest``) are a ``PopupView`` now, so they share one
+blit/scroll/crisp path; the base's historical ``_tip_*`` names resolve onto ``tip.view.*`` through the
+Reader's ``Delegated`` shims (the hover FSM and its tests stay untouched).
 """
 
 from __future__ import annotations
@@ -11,12 +13,13 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
+from overlay.app.overlay_ids import OverlayId
+
 if TYPE_CHECKING:
     import numpy as np
 
     from overlay.app.render_cache import RenderCache
     from overlay.app.tokenize import Token
-    from overlay.app.tooltip import PanelKey
     from overlay.model import Theme
     from overlay.render.banded import WindowedPanel
     from overlay.render.layout_backend import LayoutBackend
@@ -211,10 +214,14 @@ class Panel:
 
 
 class PopupView:
-    """State for one popup view — today the nested scan popup (a tooltip opened by hovering a word
-    *inside* another tooltip). Kept in one object so the base tooltip's own state stays untouched."""
+    """View state for ONE popup — the base tooltip *or* the nested scan popup. Holds everything the
+    shared blit/scroll/crisp machinery needs (``state`` panel, viewport, scroll, screen rect, and its
+    own soft→crisp upgrade flags), keyed by ``oid`` so each popup composites to its own overlay. Kept in
+    one object so the base tooltip and the nested popup run the same code path (crisp-poll, render-ahead)
+    while their state stays independent — a nested soft paint no longer flips the base's crisp flag."""
 
-    def __init__(self):
+    def __init__(self, oid: int = OverlayId.TIP):
+        self.oid = oid  # which overlay this view composites to (TIP / NESTED)
         self.state: Panel | None = None  # Panel of the shown word
         self.key: tuple | None = None  # its panel-cache key
         self.token: Token | None = None  # the inner Token (for mining via the popup's ⊕)
@@ -225,6 +232,10 @@ class PopupView:
         self.scroll = 0
         self.rect: tuple[int, int, int, int] | None = None  # screen rect, for hit-testing
         self.hide_at = 0.0
+        self.crisp_miss = ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
+        self.crisp_pending = (
+            False  # a soft first paint is up; poll upgrades to crisp once bands warm
+        )
 
 
 class TooltipState:
@@ -237,16 +248,16 @@ class TooltipState:
 
     def __init__(self) -> None:
         self.paused_by_tip = False  # mpv was auto-paused by a tooltip show (resume on hide)
-        self.tip_rect: tuple | None = None  # (x, y, w, h) of the visible tooltip, for keep-alive
         self.hide_at = 0.0  # monotonic time to hide the tooltip (0 = not scheduled)
-        self.tip_scroll = 0
-        self.tip_view_h = 0
-        self.tip_xy: tuple[int, int] = (0, 0)
-        self.tip_state: Panel | None = None  # Panel currently shown
-        self.tip_key: PanelKey | None = None  # its cache key
+        # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
+        # PopupView type + blit machinery as the nested popup. The historical flat names (_tip_state,
+        # _tip_scroll, …) keep resolving here through the Reader's Delegated("tip.view", …) shims.
+        self.view = PopupView(OverlayId.TIP)
         # Yomitan-style in-place link nav: a clicked cross-reference pushes the prior view here; Esc pops.
         self.tip_nav: list = []
-        self.nest = PopupView()  # nested scan popup (hover a word inside the tooltip → its entry)
+        self.nest = PopupView(
+            OverlayId.NESTED
+        )  # nested scan popup (hover a word inside the tooltip)
         self.scan_target: str | None = None  # scan-cell tail the cursor is settling on (dwell)
         self.scan_since = 0.0  # when it became the target (dwell start)
         self.word_target: int | None = (
@@ -265,10 +276,6 @@ class TooltipState:
         self.tip_inflected: str | None = (
             None  # its inflected surface (re-rendered on show AND scroll)
         )
-        self.crisp_miss = ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry
-        self.crisp_pending = (
-            False  # a soft first paint is up; poll upgrades to crisp once bands warm
-        )
         self.tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
         # LRU cache (OrderedDict keyed by PanelKey), bounded at panel_cache_max; each Panel keeps only its
         # windowed blocks (compressed) so the whole cache stays small. Evict LRU on overflow, not clear.
@@ -278,4 +285,4 @@ class TooltipState:
     def open(self) -> bool:
         """Shown iff a tooltip rect is placed — the uniform ``SurfaceState`` predicate the surface
         registry (app/surfaces.py) reads for mouse-capture/routing."""
-        return self.tip_rect is not None
+        return self.view.rect is not None

@@ -455,16 +455,14 @@ def drain_nav_results(reader: Reader):
             return
 
 
-def request_render_ahead(reader: Reader, direction: int) -> None:
-    """Record a scroll-ahead warm for the current tooltip in ``direction`` (newest wins). Main-thread
-    and cheap: just stores the request; a worker does the render. No-op when prefetch is off or no
-    tooltip is up."""
-    st = reader._tip_state
+def request_render_ahead(reader: Reader, view, direction: int) -> None:
+    """Record a scroll-ahead warm for ``view`` (the base tooltip or the nested popup) in ``direction``
+    (newest wins — only the popup being scrolled matters). Main-thread and cheap: just stores the
+    request; a worker does the render. No-op when prefetch is off or the view has no panel."""
+    st = view.state
     if st is None or not reader.prefetch:
         return
-    req = RenderAheadReq(
-        reader._prefetch_gen, st, reader._tip_scroll, reader._tip_view_h, direction
-    )
+    req = RenderAheadReq(reader._prefetch_gen, st, view.scroll, view.view_h, direction)
     with reader._render_ahead_lock:
         reader._render_ahead_req = req
 

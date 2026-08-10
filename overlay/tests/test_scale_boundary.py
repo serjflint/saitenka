@@ -63,7 +63,7 @@ def test_cold_paint_is_soft_then_upgrades_to_crisp_when_bands_warm(scale, monkey
     vh = min(r._tip_view_h, st.full_height)
     y0 = max(0, min(r._tip_scroll, max(0, st.full_height - vh)))
     st.viewport(y0, vh, scale=r._raster_scale)  # simulate the worker warming the native viewport
-    tooltip.apply_pending_crisp(r)  # the poll-loop upgrade
+    tooltip.apply_pending_crisp(r, r._tip_view)  # the poll-loop upgrade
 
     assert r._crisp_miss == "" and not r._crisp_pending  # now composited crisp
     assert r._tip_rect is not None

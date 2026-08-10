@@ -86,7 +86,8 @@ def test_reader_delegates_tooltip_fields_to_tip_state():
     assert r._nest is r.tip.nest and isinstance(r._nest, PopupView)
     r._tip_scroll = 4
     r._hover_reading = "よむ"
-    assert r.tip.tip_scroll == 4 and r.tip.hover_reading == "よむ"
+    # base view-state fields live on the shared PopupView (tip.view); FSM fields stay flat on TooltipState
+    assert r.tip.view.scroll == 4 and r.tip.hover_reading == "よむ"
 
 
 def test_rebinding_tip_resets_the_whole_hover_stack():
