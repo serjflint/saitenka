@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786380376214,
+  "lastUpdate": 1786387627336,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3203,6 +3203,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.525,
             "range": "±6.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4e4be783aab1cff2e157d33c10862ce186e1297b",
+          "message": "feat(sc): render sub/sup as small raised/lowered annotations, honor line-through (#303)\n\nSuperscript reading annotations (新明解 91%, 大辞林 76%, 三省堂 43% of entries) were\nrendering full-size inline. Carry a signed baseline-shift on the shaped token, shrink\nsub/sup to ~0.72em, and grow the line box by the shift so the raised/lowered glyph is\nnever clipped. Trigger on the sub/sup tag OR style.verticalAlign. Fold in\ntextDecorationLine: line-through on the same styling seam.",
+          "timestamp": "2026-08-10T21:46:37+03:00",
+          "tree_id": "44528ce26851c123034ac8d46f7b1b62caa239ef",
+          "url": "https://github.com/serjflint/saitenka/commit/4e4be783aab1cff2e157d33c10862ce186e1297b"
+        },
+        "date": 1786387626507,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.428,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.454,
+            "range": "±13.7%",
             "unit": "ms"
           }
         ]
