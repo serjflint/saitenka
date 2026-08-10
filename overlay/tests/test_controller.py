@@ -1360,6 +1360,9 @@ class _LinkDS:
         body = ["同義語は", {"tag": "a", "href": "?query=見る", "content": "見る"}, "。"]
         return Entry(headword=tok.surface, reading="みる", defs=[Definition("MonoA", body)])
 
+    def kanji_for(self, _ch):
+        return None  # this fixture has no kanji bank — a header-kanji click is a graceful no-op
+
 
 def _link_reader(ipc):
     from overlay.app.subtitles import WordBox
@@ -1374,7 +1377,8 @@ def _link_reader(ipc):
 
 
 def _point_at_link(r, ipc):
-    lb = r._tip_state.windowed.link_boxes()[0]
+    # the body cross-reference link (skip the header's per-kanji `kanji:` links, which now sit first)
+    lb = next(b for b in r._tip_state.windowed.link_boxes() if not b.query.startswith("kanji:"))
     sx, sy = r._tip_xy
     ipc.props["mouse-pos"] = {
         "hover": True,
@@ -1435,7 +1439,8 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    lb = r._tip_state.windowed.link_boxes()[0]
+    # the wildcard cross-ref in the body (skip the header's per-kanji `kanji:` links)
+    lb = next(b for b in r._tip_state.windowed.link_boxes() if not b.query.startswith("kanji:"))
     assert "*" in lb.query  # the cross-ref is a wildcard pattern
     sx, sy = r._tip_xy
     ipc.props["mouse-pos"] = {
@@ -1447,8 +1452,9 @@ def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch):
     # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
     assert r.hover_view().nested.state is None
     assert len(r._tip_nav) == 1
+    results = [b for b in r._tip_state.windowed.link_boxes() if not b.query.startswith("kanji:")]
     assert (
-        r._tip_state.windowed.link_boxes()[0].query == "食べる"
+        results[0].query == "食べる"
     )  # the base now shows results, each drilling into an exact term
 
 
@@ -1476,9 +1482,12 @@ def test_external_link_is_not_a_clickable_region(monkeypatch):
     r.boxes = [WordBox(0, 100, 300, 40, 40)]
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
-    assert (
-        r.hover_view().tip.state.windowed.link_boxes() == []
-    )  # external link → no clickable region
+    body_links = [
+        b
+        for b in r.hover_view().tip.state.windowed.link_boxes()
+        if not b.query.startswith("kanji:")
+    ]
+    assert body_links == []  # external link → no clickable body region (header kanji links aside)
 
 
 class _RubyLinkDS:

@@ -315,8 +315,8 @@ def test_link_boxes_capture_cross_references():
     e = Entry(headword=["観る"], defs=[Definition("MonoA", body)])
     lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
     img = lp.finish()
-    assert lp.link_boxes
-    lb = lp.link_boxes[0]
+    # the body cross-ref link (the header also emits per-kanji `kanji:` links, tested separately)
+    lb = next(b for b in lp.link_boxes if not b.query.startswith("kanji:"))
     assert lb.query == "見る"
     assert lb.x >= 0 and lb.x + lb.w <= img.width  # sits inside the panel
     assert lb.y >= 0 and lb.y + lb.h <= img.height
@@ -327,7 +327,8 @@ def test_link_boxes_absent_without_links():
     e = Entry(headword=["本命"], defs=[Definition("JMdict", ["favourite; front runner"])])
     lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
     lp.finish()
-    assert lp.link_boxes == []
+    # no cross-reference links when the body has none (the header's own kanji links are orthogonal)
+    assert [b for b in lp.link_boxes if not b.query.startswith("kanji:")] == []
 
 
 def test_header_speaker_rect_lands_on_the_drawn_speaker():
@@ -413,9 +414,10 @@ def test_stacked_groups_emit_per_entry_mine_boxes_and_reading_sections():
     rows = panel_rows(entry, WIDTH, add_button=True, group_mined=(True, False))
     lazy = LazyPanel(rows, WIDTH)
     lazy.finish()
-    assert [lb.query for lb in lazy.link_boxes] == ["mine:0", "mine:1"]
+    mine = [lb for lb in lazy.link_boxes if lb.query.startswith("mine:")]  # skip header kanji links
+    assert [lb.query for lb in mine] == ["mine:0", "mine:1"]
     # each ⊕ sits at the right edge, in reading (top-to-bottom) order
-    assert [lb.query for lb in sorted(lazy.link_boxes, key=lambda b: b.y)] == ["mine:0", "mine:1"]
+    assert [lb.query for lb in sorted(mine, key=lambda b: b.y)] == ["mine:0", "mine:1"]
     assert [sec for sec, _ in lazy.section_offsets()] == ["のく", "しりぞく"]
 
 

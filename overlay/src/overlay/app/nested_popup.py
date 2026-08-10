@@ -16,6 +16,7 @@ from overlay.app import prefetch
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel, PopupView
 from overlay.app.prefetch import cap_for
+from overlay.model import is_ideograph
 from overlay.panel import panel_rows
 
 if TYPE_CHECKING:
@@ -32,11 +33,6 @@ class Anchor:
     wx: float
     wy: float
     wh: float
-
-
-def _is_ideograph(ch: str) -> bool:
-    o = ord(ch)
-    return 0x3400 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF
 
 
 def nested_view_h(reader: Reader, full_h: int, wy: float) -> int:
@@ -200,7 +196,7 @@ def kanji_current(reader: Reader) -> None:
     the word's kanji."""
     if reader.dict_set is None or not (0 <= reader.hover < len(reader.tokens)):
         return
-    chars = [c for c in reader.tokens[reader.hover].surface if _is_ideograph(c)]
+    chars = [c for c in reader.tokens[reader.hover].surface if is_ideograph(c)]
     if not chars:
         reader._toast("no kanji in this word", "warn", 1.2)
         return
@@ -250,7 +246,7 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
     if sb is None or not sb.text:
         return
     ch = sb.text[0]
-    if not _is_ideograph(ch):
+    if not is_ideograph(ch):
         return
     toks = reader.tokenizer.tokenize(sb.text)
     tok = toks[0] if toks else None
