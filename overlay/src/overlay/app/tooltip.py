@@ -1017,6 +1017,27 @@ def apply_engaged_results(reader: Reader) -> None:
             _apply_engaged_base(reader, key)
     for gen, origin, st in prefetch.drain_nav_results(reader):
         _apply_engaged_nav(reader, gen, origin, st)
+    for gen, source, query, anchor, origin in prefetch.drain_open_results(reader):
+        _apply_engaged_open(reader, gen, source, query, anchor, origin)
+
+
+def _apply_engaged_open(
+    reader: Reader, gen: int, source: str, query: str, anchor, origin: int
+) -> None:
+    """Place a worker-warmed clicked/keyed nested open, iff still valid: same generation, and the base
+    tip is still up and is the SAME one that was showing at click time (``origin``). REPLACES any current
+    nested popup (an explicit open/`k`-cycle wins over a hover-scan popup — newest-wins on the slot keeps
+    only the latest intent). Re-selects the (now-warm) cached panel via the shared builder and
+    ``place_nested``s it at the carried anchor — a cache hit whose bands the worker rastered, no getmask2."""
+    if gen != reader._prefetch_gen or reader._tip_state is None:
+        return
+    if id(reader._tip_state) != origin:
+        return  # the base tooltip switched under us — don't open onto the new word
+    built = nested_popup._engaged_open_panel(reader, source, query)  # main thread → recompute mined
+    if built is None:
+        return
+    st, key, token, word, _mined = built
+    nested_popup.place_nested(reader, st, key, token, word, nested_popup.Anchor(*anchor))
 
 
 def _apply_engaged_nav(reader: Reader, gen: int, origin: int, st: Panel | None) -> None:

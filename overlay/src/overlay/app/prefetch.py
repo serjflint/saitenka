@@ -129,6 +129,29 @@ class EngagedNavReq:
     origin: int
 
 
+@dataclass(frozen=True, slots=True)
+class EngagedOpenReq:
+    """A clicked/keyed nested OPEN (a headword/body kanji, a search-results popup, a cross-reference
+    link) whose panel the main thread built + cached but did NOT raster. The worker warms its bands off
+    the click/key tick — the getmask2 raster the hover path already moved off-thread (#293/#294) — then
+    the tick ``place_nested``s it warm. Unlike the scan-hover defer, the anchor is NOT re-derivable from a
+    scan cell (a click landed on a link/kanji, not a hovered word), so it is CARRIED here as ``anchor``
+    = ``(wx, wy, wh)``. ``origin`` = ``id(reader._tip_state)`` at request time, so the tick drops the open
+    if the base tooltip switched under it. Newest-wins single slot: one open intent at a time.
+
+    ``source`` ∈ {``kanji``, ``search``, ``link``} + ``query`` re-select the (cached, warm) panel via the
+    shared ``_engaged_open_panel`` builder on both the worker and the tick — no Token/Panel crosses here.
+    ``mined`` is resolved on the MAIN thread (a ``link``'s ⊕/✓ needs ``card_for`` → jamdict, which is not
+    worker-safe) and passed to the worker so it never touches jamdict; the tick recomputes it (main-safe)."""
+
+    gen: int
+    source: str
+    query: str
+    anchor: tuple[float, float, float]
+    origin: int
+    mined: bool = False
+
+
 class PrefetchState:
     """Runtime state of the background prefetch subsystem: the decode-warm and speculative-head work
     queues, the persistent worker threads, the generation counter whose bump drops every in-flight job
@@ -158,6 +181,11 @@ class PrefetchState:
         self.nav_req: EngagedNavReq | None = None
         self.nav_lock = threading.Lock()
         self.nav_results: queue.Queue = queue.Queue()
+        # Clicked/keyed nested OPEN (kanji / search / cross-ref link): its own newest-wins slot + results,
+        # anchor-carried (not scan-re-derivable), separate from the hover cold-miss + nav slots.
+        self.open_req: EngagedOpenReq | None = None
+        self.open_lock = threading.Lock()
+        self.open_results: queue.Queue = queue.Queue()
         self.threads: list[threading.Thread] = []  # persistent workers (session-lifetime)
 
     def cancel(self) -> int:
@@ -169,6 +197,8 @@ class PrefetchState:
             self.engaged_req = None
         with self.nav_lock:  # drop a pending cross-ref navigation too
             self.nav_req = None
+        with self.open_lock:  # …and a pending clicked/keyed nested open
+            self.open_req = None
         return self.gen
 
 
@@ -282,6 +312,8 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
 
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
+        if _try_engaged_open(reader):  # a clicked/keyed nested open — top intent, like nav/hover
+            continue
         if _try_engaged_nav(reader):  # a clicked cross-ref — top intent, like a hover cold-miss
             continue
         if _try_engaged_hover(reader):  # the word hovered NOW that missed everything — top priority
@@ -451,6 +483,66 @@ def drain_nav_results(reader: Reader):
     while True:
         try:
             yield reader._nav_results.get_nowait()
+        except queue.Empty:
+            return
+
+
+def request_engaged_open(reader: Reader, source: str, query: str, anchor, *, mined: bool) -> None:
+    """Enqueue a clicked/keyed nested OPEN (the main thread already built + cached the panel; this warms
+    its bands off-thread so the getmask2 raster stays off the click/key tick). ``anchor`` is the on-screen
+    ``Anchor`` the popup hangs off — carried because it is NOT scan-re-derivable. ``origin`` pins the base
+    tooltip that was up at click time; ``mined`` is the main-thread mine state (so the worker skips
+    jamdict). Newest-wins. No-op when prefetch is off."""
+    if not reader.prefetch:
+        return
+    req = EngagedOpenReq(
+        reader._prefetch_gen,
+        source,
+        query,
+        (anchor.wx, anchor.wy, anchor.wh),
+        id(reader._tip_state),
+        mined,
+    )
+    with reader._open_lock:
+        reader._open_req = req
+
+
+def _try_engaged_open(reader: Reader) -> bool:
+    """Drain the open slot: re-select the (cached) panel via the shared builder and WARM its nested-cap
+    first-viewport bands off the main thread (native + raw), then hand ``(gen, source, query, anchor,
+    origin)`` back so the tick ``place_nested``s it with no raster. ``True`` when handled."""
+    with reader._open_lock:
+        req = reader._open_req
+        reader._open_req = None
+    if req is None:
+        return False
+    if reader._stop.is_set() or req.gen != reader._prefetch_gen:
+        return True  # stale (line change / seek / closing) — handled, keep looping
+    try:
+        with otel_metrics.traced("prefetch_decode", kind="engaged_open"):
+            built = reader._engaged_open_panel(
+                req.source, req.query, mined=req.mined
+            )  # carried mine state → the worker never touches jamdict
+            if built is not None:
+                st = built[0]
+                vh = min(st.full_height, reader._cap_for(reader.nested_max_frac))
+                if vh > 0:
+                    scale = reader._raster_scale
+                    if scale > 1.0:
+                        st.viewport(0, vh, overscan=vh, scale=scale)  # native bands (crisp)
+                    st.viewport(0, vh, overscan=vh)  # raw bands (soft/assemble path)
+        reader._open_results.put((req.gen, req.source, req.query, req.anchor, req.origin))
+    except Exception:
+        log.debug("engaged open render failed for %r", req.query, exc_info=True)
+    return True
+
+
+def drain_open_results(reader: Reader):
+    """Yield ``(gen, source, query, anchor, origin)`` for each worker-warmed clicked/keyed open. The
+    guarded ``place_nested`` lives in ``tooltip.apply_engaged_results``."""
+    while True:
+        try:
+            yield reader._open_results.get_nowait()
         except queue.Empty:
             return
 

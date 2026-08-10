@@ -70,18 +70,17 @@ def test_link_query_is_looked_up_whole_not_tokenized():
 
 
 def test_open_link_navigates_the_whole_query(monkeypatch):
-    reader = Reader(FakeIPC(), dict_set=_RecordingDS())
-    captured: dict = {}
-    monkeypatch.setattr(
-        nested_popup,
-        "open_nested",
-        lambda _r, tok, inflected, *_a, **_k: captured.update(
-            surface=tok.surface, inflected=inflected
-        ),
-    )
+    from overlay.app.subtitle_render import NullRenderer
+
+    ds = _RecordingDS()
+    reader = Reader(FakeIPC(), dict_set=ds)
+    reader.osd = (1920, 1080)
+    reader.sub_origin = (0, 0)
+    monkeypatch.setattr(reader, "renderer", NullRenderer())
     lb = LinkBox("それにつけても", 0, 0, 10, 10)
-    nested_popup.open_link(reader, lb, (0, 0), 0)
-    assert captured == {"surface": "それにつけても", "inflected": "それにつけても"}
+    nested_popup.open_link(reader, lb, (0, 0), 0)  # no worker → synchronous open
+    assert ds.seen == ["それにつけても"]  # the WHOLE query reached the lookup, not それ
+    assert reader._nest.word == "それにつけても"  # …and it's the shown nested word
 
 
 def test_phrase_extra_terms_is_empty_off_a_known_phrase():

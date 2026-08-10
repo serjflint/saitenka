@@ -146,35 +146,16 @@ def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0
     return state.windowed.link_hit(int((mx - sx) / scale), int((my - sy) / scale + scroll))
 
 
-def open_link(reader: Reader, lb, xy, scroll: int) -> None:
-    """A cross-reference link was clicked → open its target in the nested popup (navigating it if
-    the click came from a nested popup). A wildcard target (``*``/``?``) opens a search-results
-    popup whose rows are themselves clickable links back into exact terms."""
-    q = lb.query
-    sx, sy = xy
-    wx, wy = sx + lb.x, sy + (lb.y - scroll)
-    if reader.dict_set is not None and any(c in q for c in "*?＊？"):
-        open_search(reader, q, wx, wy, lb.h)
-        return
-    # look up the WHOLE query as one term — never tokenize a link target
-    tok = reader.tokenizer.query_token(q)
-    if tok is None:
-        return
-    open_nested(reader, tok, tok.surface, Anchor(wx, wy, lb.h), tail=None)
-
-
-def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -> None:
-    """Open a wildcard/prefix search-results popup for ``pattern``."""
-    if reader.dict_set is None:
-        return
-    key = ("search", pattern, reader.tip_width)
+def _cached_rows_panel(reader: Reader, key, entry, reading: str) -> Panel:
+    """Fetch-or-build (and LRU-touch) the ``_panel_cache`` entry for a non-token popup (kanji / search),
+    measuring its head. Idempotent — the main-thread build, the worker warm, and the tick re-show all
+    land on the same cached Panel."""
     st = reader._panel_cache.get(key)
     if st is None:
-        entry = reader.dict_set.search(pattern)
         st = Panel.from_rows(
             panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok),
             reader.tip_width,
-            "",
+            reading,
             band_cache_max=reader.band_cache_max,
             raw_band_ceiling=reader.raw_band_ceiling,
             layout_backend=reader.layout_backend,
@@ -188,7 +169,69 @@ def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -
             except KeyError:
                 pass
     st.render_head(reader._tip_cap())
-    place_nested(reader, st, key, None, pattern, Anchor(wx, wy, wh))
+    return st
+
+
+def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool | None = None):
+    """Build (or fetch cached) + measure the panel for a clicked/keyed nested open, WITHOUT placing it.
+    Shared by the main-thread open (existence check + defer decision), the worker (warm the bands
+    off-thread), and the tick (warm cache-hit re-show). Returns ``(panel, key, token, word, mined)`` or
+    ``None`` (no entry — the caller toasts). ``source`` ∈ {``kanji``, ``search``, ``link``}. ``mined`` is
+    forced by the worker (which must NOT touch jamdict via ``_is_mined``); ``None`` = compute it here
+    (main thread only — the tick recomputes for the freshest ⊕/✓)."""
+    ds = reader.dict_set
+    if ds is None:
+        return None
+    key: tuple  # a ("kanji"/"search", …) tuple or a PanelKey (a NamedTuple) — both are tuples
+    if source == "kanji":
+        entry = ds.kanji_for(query)
+        if entry is None:
+            return None
+        key = ("kanji", query, reader.tip_width)
+        return _cached_rows_panel(reader, key, entry, entry.reading), key, None, query, False
+    if source == "search":
+        key = ("search", query, reader.tip_width)
+        return _cached_rows_panel(reader, key, ds.search(query), ""), key, None, query, False
+    # link → the WHOLE query as one exact term (never tokenize a link target); minable inner word
+    tok = reader.tokenizer.query_token(query)
+    if tok is None:
+        return None
+    if mined is None:  # main-thread only — jamdict (card_for) is not worker-safe
+        mined = reader._is_mined(tok)
+    key = reader._panel_key(tok, tok.surface, mined=mined)
+    st = reader._panel_for(tok, tok.surface, min_h=reader._tip_cap(), mined=mined, nested=True)
+    return st, key, tok, tok.surface, mined
+
+
+def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> None:
+    """Open a clicked/keyed nested popup, deferring the getmask2 raster off the main thread when a worker
+    is available (like the scan-hover tier-3, but anchor-CARRIED since a clicked link/kanji isn't
+    scan-re-derivable). Existence-checked first, so a 'no entry' toast still fires on the click tick."""
+    built = _engaged_open_panel(reader, source, query)
+    if built is None:
+        if source == "kanji":
+            reader._toast(f"no kanji entry for {query}", "warn", 1.2)
+        return
+    st, key, token, word, mined = built
+    if prefetch.workers_running(reader):  # worker warms the bands → the tick places it warm
+        prefetch.request_engaged_open(reader, source, query, anchor, mined=mined)
+        return
+    place_nested(reader, st, key, token, word, anchor)
+
+
+def open_link(reader: Reader, lb, xy, scroll: int) -> None:
+    """A cross-reference link was clicked → open its target in the nested popup. A wildcard target
+    (``*``/``?``) opens a search-results popup whose rows are themselves clickable links back into exact
+    terms; else the whole query is looked up as one exact term."""
+    q = lb.query
+    sx, sy = xy
+    source = "search" if any(c in q for c in "*?＊？") else "link"
+    _open_engaged(reader, source, q, Anchor(sx + lb.x, sy + (lb.y - scroll), lb.h))
+
+
+def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -> None:
+    """Open a wildcard/prefix search-results popup for ``pattern``."""
+    _open_engaged(reader, "search", pattern, Anchor(wx, wy, wh))
 
 
 def kanji_current(reader: Reader) -> None:
@@ -208,33 +251,9 @@ def kanji_current(reader: Reader) -> None:
 
 
 def open_kanji(reader: Reader, ch: str, wx: float, wy: float, wh: float) -> None:
-    """Open the kanji entry for ``ch`` in the nested popup (normal panel path, no raster code)."""
-    assert reader.dict_set is not None
-    entry = reader.dict_set.kanji_for(ch)
-    if entry is None:
-        reader._toast(f"no kanji entry for {ch}", "warn", 1.2)
-        return
-    key = ("kanji", ch, reader.tip_width)
-    st = reader._panel_cache.get(key)
-    if st is None:
-        st = Panel.from_rows(
-            panel_rows(entry, reader.tip_width, speak_button=reader._tts_ok),
-            reader.tip_width,
-            entry.reading,
-            band_cache_max=reader.band_cache_max,
-            raw_band_ceiling=reader.raw_band_ceiling,
-            layout_backend=reader.layout_backend,
-        )
-        with reader._cache_lock:
-            st = reader._panel_cache_setdefault(key, st)
-    else:
-        with reader._cache_lock:
-            try:
-                reader._panel_cache.move_to_end(key)
-            except KeyError:
-                pass
-    st.render_head(reader._tip_cap())
-    place_nested(reader, st, key, None, ch, Anchor(wx, wy, wh))
+    """Open the kanji entry for ``ch`` in the nested popup — deferred off the click/key tick when a
+    worker is available (the getmask2 raster #294 moved off the hover path), else built synchronously."""
+    _open_engaged(reader, "kanji", ch, Anchor(wx, wy, wh))
 
 
 def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
