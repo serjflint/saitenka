@@ -1874,6 +1874,11 @@ wheels = [
 ]
 
 [[package]]
+name = "resvglite"
+version = "0.1.0"
+source = { editable = "../resvglite" }
+
+[[package]]
 name = "rich"
 version = "15.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1961,6 +1966,9 @@ full = [
     { name = "opentelemetry-sdk" },
     { name = "saitenka-deinflect" },
 ]
+images = [
+    { name = "resvglite" },
+]
 jmdict = [
     { name = "jamdict" },
     { name = "jamdict-data", marker = "sys_platform != 'win32'" },
@@ -2045,6 +2053,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "questionary", specifier = ">=2.1.1" },
+    { name = "resvglite", marker = "extra == 'images'", editable = "../resvglite" },
     { name = "rich", specifier = ">=14.0" },
     { name = "saitenka", extras = ["deinflect"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
@@ -2056,7 +2065,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect", "layout-engine", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
+provides-extras = ["deinflect", "layout-engine", "images", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
 [package.metadata.requires-dev]
 codemod = [{ name = "libcst", specifier = ">=1.8.6" }]

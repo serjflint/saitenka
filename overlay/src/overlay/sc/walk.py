@@ -18,7 +18,7 @@ import urllib.parse
 from dataclasses import replace
 
 from overlay.model import RGBA, Span, Style
-from overlay.render.flow import ChipBox, ImgBox, ruby
+from overlay.render.flow import ChipBox, img_box, ruby
 from overlay.render.ruby import RubyBox
 from overlay.sc.model import Block
 
@@ -244,8 +244,11 @@ def _flatten(node) -> str:
 
 
 class _Walker:
-    def __init__(self, base: Style):
+    def __init__(self, base: Style, media: dict[str, bytes] | None = None):
         self.base = base
+        # {img path: image bytes}, preloaded at Entry-build so the walk (render/prefetch thread) never
+        # touches SQLite. Empty on a default install → every img falls back to ▢.
+        self.media = media or {}
         self.blocks: list[Block] = []
         self.cur = Block()
 
@@ -258,9 +261,14 @@ class _Walker:
         base, reading = _ruby_parts(node)
         self.cur.flow.append(ruby(base, reading, _apply_style(node, style)))
 
-    def _emit_img(self, style: Style) -> None:
-        h = max(12, style.size)
-        self.cur.flow.append(ImgBox(width=round(h * 1.6), height=h, label="▢"))
+    def _emit_img(self, node: dict, style: Style) -> None:
+        # Only appearance:"monochrome" recolours to the text colour (a black gaiji reads like a glyph);
+        # the Yomitan default "auto" keeps the image's own colours — tinting it would flatten a coloured
+        # diagram/label into a solid block. PIL decode/tint lives in render.flow.img_box, so this module
+        # stays PIL-agnostic.
+        png = self.media.get(str(node.get("path") or ""))
+        tint = style.color if node.get("appearance") == "monochrome" else None
+        self.cur.flow.append(img_box(png, max(12, style.size), tint))
 
     def _emit_link(self, node: dict, style: Style) -> None:
         # Visually distinguish the two link kinds: an INTERNAL cross-ref keeps the blue +
@@ -344,7 +352,7 @@ class _Walker:
                 self._emit_ruby(node, style)
                 return
             if tag == "img":
-                self._emit_img(style)
+                self._emit_img(node, style)
                 return
             if tag == "a":
                 self._emit_link(node, style)
@@ -437,21 +445,44 @@ class _Walker:
         self._emit_inline(node, style)
 
 
-def walk(node, base: Style | None = None) -> list[Block]:
-    """Turn a structured-content node into a list of layout blocks."""
+def walk(node, base: Style | None = None, media: dict[str, bytes] | None = None) -> list[Block]:
+    """Turn a structured-content node into a list of layout blocks. ``media`` maps an img node's ``path``
+    to preloaded image bytes (SVG gaiji rasterized at import, #283); empty → img renders as ▢."""
     prev = getattr(
         _tls, "memo", None
     )  # save/restore so a nested walk() can't clobber an outer memo
     _tls.memo = {}
     try:
-        return _Walker(base or Style()).walk(node)
+        return _Walker(base or Style(), media).walk(node)
     finally:
         _tls.memo = prev
 
 
-def inline_flow(node, base: Style | None = None) -> list:
+def collect_img_paths(node) -> list[str]:
+    """Every img-node ``path`` in a structured-content tree, in document order (deduped downstream).
+
+    Used at Entry-build to preload exactly the media a definition references — so the DB is queried on
+    the lookup thread, never during the walk on the render/prefetch thread (#283)."""
+    out: list[str] = []
+    _collect_img_paths(node, out)
+    return out
+
+
+def _collect_img_paths(node, out: list[str]) -> None:
+    if isinstance(node, list):
+        for n in node:
+            _collect_img_paths(n, out)
+    elif isinstance(node, dict):
+        if node.get("tag") == "img":
+            path = node.get("path")
+            if isinstance(path, str) and path:
+                out.append(path)
+        _collect_img_paths(node.get("content"), out)
+
+
+def inline_flow(node, base: Style | None = None, media: dict[str, bytes] | None = None) -> list:
     """Flatten a structured-content node to a single inline flow (for headword / label rows)."""
     flow: list = []
-    for b in walk(node, base):
+    for b in walk(node, base, media):
         flow.extend(b.flow)
     return flow

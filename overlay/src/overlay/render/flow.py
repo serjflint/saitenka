@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from overlay import fonts
-from overlay.model import LinkBox, ScanBox, Span, Style
+from overlay.model import RGBA, LinkBox, ScanBox, Span, Style
 from overlay.render.layout import (
     Block,
     Sinks,
@@ -95,6 +95,35 @@ class ImgBox:
                 fill=self.border,
                 anchor="mm",
             )
+
+
+def img_box(png: bytes | None, height: int, tint: RGBA | None) -> ImgBox:
+    """Build an inline image box for a structured-content ``img`` (#283): the decoded sprite scaled to
+    ``height`` (a monochrome gaiji recoloured to ``tint``), or the ▢ placeholder when there is no
+    decodable image. All PIL lives here, so ``sc.walk`` stays PIL-agnostic (the sc/-layering contract)."""
+    sprite = _decode_sprite(png, tint) if png is not None else None
+    if sprite is None:
+        return ImgBox(width=round(height * 1.6), height=height, label="▢")
+    sw, sh = sprite.size
+    width = max(1, round(sw * height / sh)) if sh else round(height * 1.6)
+    return ImgBox(width=width, height=height, sprite=sprite)
+
+
+def _decode_sprite(png: bytes, tint: RGBA | None) -> Image.Image | None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        img = Image.open(BytesIO(png)).convert("RGBA")
+    except (OSError, ValueError):
+        return None  # malformed image bytes → ▢ fallback
+    if tint is None:
+        return img  # appearance:"auto" (e.g. a red 表記 fill) keeps the SVG's own colours
+    r, g, b, _a = tint
+    solid = Image.new("RGBA", img.size, (r, g, b, 0))
+    solid.putalpha(img.getchannel("A"))  # recolour the ink, preserve the glyph's alpha shape
+    return solid
 
 
 @dataclass

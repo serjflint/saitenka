@@ -37,6 +37,12 @@ log = logging.getLogger(__name__)
 
 DB_SCHEMA = 1  # bump to force a from-scratch re-import (the DB is dropped and rebuilt)
 
+# Inline structured-content media (#283). Extensions Yomitan img nodes reference; SVG is rasterized to
+# PNG at this base height (gaiji are tiny, so 64px is crisp at any tooltip scale — matches resvglite's
+# smoke default), everything else is stored as-is.
+_MEDIA_EXTS = frozenset({"svg", "png", "jpg", "jpeg", "gif", "webp"})
+_MEDIA_PX = 64
+
 # Overridable default DB path — tests point this at a tmp file (mirrors the old CACHE_DIR override).
 _DB_PATH_OVERRIDE: Path | None = None
 
@@ -65,6 +71,10 @@ CREATE TABLE IF NOT EXISTS kanji(
 CREATE TABLE IF NOT EXISTS term_meta(
   dict_id INTEGER, term TEXT, mode TEXT, reading TEXT, rank INTEGER, disp TEXT, positions TEXT);
 CREATE TABLE IF NOT EXISTS tags(dict_id INTEGER, code TEXT, name TEXT, ord INTEGER);
+-- Inline structured-content images (Yomitan `img` nodes: SVG gaiji / labels), rasterized to PNG at
+-- import via the optional resvglite extra (#283). Additive — no DB_SCHEMA bump, so it stays empty for
+-- existing DBs until the next re-import; the renderer falls back to ▢ when a path isn't present.
+CREATE TABLE IF NOT EXISTS media(dict_id INTEGER, path TEXT, png BLOB, PRIMARY KEY(dict_id, path));
 -- Persistent cache of the Anki known-word set (startup perf): one row per note, `words` = a JSON list
 -- of the extracted forms, `mod` = the note's Anki modification time for the background subset-diff
 -- refresh. Independent of dictionary imports (survives everything but a DB_SCHEMA rebuild → then a
@@ -296,6 +306,7 @@ class DictionaryDb:
         self.path = Path(path)
         self._local = threading.local()
         self._opts = db_opts if db_opts is not None else resolve_dictdb()
+        self._media_present: bool | None = None  # cached once: is the media table non-empty? (#283)
 
     # --- lifecycle ----------------------------------------------------------------------------
 
@@ -451,6 +462,7 @@ class DictionaryDb:
                 # definition+frequency dict no longer loses its 448k definitions to the frequency mode.
                 if "dict" in roles:
                     self._load_dict_banks(conn, zf, did, on_bank)
+                    self._load_media(conn, zf, did)
                 if has_meta:
                     occ = _is_occurrence_based(zf)
                     self._load_meta_banks(conn, zf, did, on_bank, occurrence_based=occ)
@@ -543,6 +555,64 @@ class DictionaryDb:
             [(did, code, name, order) for code, name, order in _extract_tags(zf)],
         )
 
+    def _load_media(self, conn: sqlite3.Connection, zf: zipfile.ZipFile, did: int) -> None:
+        """Extract inline-image media referenced by structured content, keyed by zip path (#283).
+
+        Runs ONLY when the optional ``resvglite`` extra is installed — so a default (no-extra) import is
+        byte-identical to before, and the renderer just keeps drawing ▢. SVG gaiji are rasterized to PNG
+        once here (cold cost paid at import, not per hover); raster formats are stored as-is (PIL opens
+        them directly). A malformed SVG is skipped, leaving its ▢ fallback.
+        """
+        try:
+            import resvglite  # noqa: TID251  # SVG-images chokepoint: this is the one sanctioned importer
+        except ImportError:
+            return
+        rows: list[tuple[int, str, bytes]] = []
+        for name in zf.namelist():
+            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+            if ext not in _MEDIA_EXTS:
+                continue
+            data = zf.read(name)
+            if ext == "svg":
+                try:
+                    png, _w, _h = resvglite.render_svg(data, _MEDIA_PX)
+                except Exception:  # noqa: BLE001  # incl. a pyo3 panic — one bad glyph must not abort the whole dict import
+                    log.debug("resvglite failed on %s; leaving ▢ fallback", name)
+                    continue
+                rows.append((did, name, png))
+            else:
+                rows.append((did, name, data))
+        if rows:
+            conn.executemany("INSERT OR REPLACE INTO media VALUES(?,?,?)", rows)
+            self._media_present = (
+                True  # invalidate the cached emptiness so a same-instance lookup sees it
+            )
+
+    def media_for(self, dict_id: int, paths: Iterable[str]) -> dict[str, bytes]:
+        """Preloaded ``{path: image_bytes}`` for the given img paths — called at Entry-build (lookup
+        thread) so the render/prefetch thread never touches SQLite. Empty when the extra never populated
+        the table (default install) or none of the paths resolved → renderer falls back to ▢.
+
+        Reuses the per-thread read-only ``_conn()`` (no per-call connect), and on a default install the
+        cached emptiness check makes this a no-op after the first lookup — so the no-extra path stays free."""
+        wanted = list(dict.fromkeys(paths))
+        if not wanted or not self._has_media():
+            return {}
+        qs = ",".join("?" * len(wanted))
+        cur = self._conn().execute(
+            f"SELECT path, png FROM media WHERE dict_id=? AND path IN ({qs})",  # noqa: S608  # qs is only ? placeholders; paths are parameterized
+            (dict_id, *wanted),
+        )
+        return dict(cur.fetchall())
+
+    def _has_media(self) -> bool:
+        """Whether the media table holds any row — cached for the session. On a default install it stays
+        empty, so this short-circuits ``media_for`` to zero per-lookup queries."""
+        if self._media_present is None:
+            row = self._conn().execute("SELECT EXISTS(SELECT 1 FROM media)").fetchone()
+            self._media_present = bool(row[0])
+        return self._media_present
+
     def _load_meta_banks(
         self,
         conn: sqlite3.Connection,
@@ -571,7 +641,7 @@ class DictionaryDb:
         if row is None:
             return
         did = row[0]
-        for table in ("entries", "keys", "kanji", "term_meta", "tags"):
+        for table in ("entries", "keys", "kanji", "term_meta", "tags", "media"):
             conn.execute(
                 f"DELETE FROM {table} WHERE dict_id=?",  # noqa: S608  # table name is an internal constant; the value is parameterized with ?
                 (did,),

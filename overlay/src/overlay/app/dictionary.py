@@ -45,6 +45,7 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
 from overlay.panel import Definition, Entry, EntryGroup, Freq
+from overlay.sc.walk import collect_img_paths
 
 if TYPE_CHECKING:
     from overlay.model import PitchAccent  # annotation-only (positions come typed from PitchSource)
@@ -831,7 +832,10 @@ class DictionarySet:
                     continue
                 seen_gloss.add(gkey)
                 nodes.extend(_glossary_to_nodes(h.glossary))
-            defs.append(Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags)))
+            media = d.db.media_for(d.dict_id, collect_img_paths(nodes))
+            defs.append(
+                Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags), media=media)
+            )
         return defs, headword, reading
 
     @staticmethod

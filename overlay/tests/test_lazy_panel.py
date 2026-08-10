@@ -112,9 +112,9 @@ def test_panel_rows_defers_walk_to_render(monkeypatch):
     calls = [0]
     orig = BB.walk
 
-    def counting(node, base=None):
+    def counting(node, base=None, media=None):
         calls[0] += 1
-        return orig(node, base)
+        return orig(node, base, media)
 
     monkeypatch.setattr(BB, "walk", counting)
     rows = P.panel_rows(_tall_entry(6), WIDTH)

@@ -73,7 +73,10 @@ def test_one_layout_serves_many_band_rasters_walking_once(monkeypatch):
     monkeypatch.setattr(
         BB,
         "walk",
-        lambda node, base=None: (calls.__setitem__(0, calls[0] + 1), orig(node, base))[1],
+        lambda node, base=None, media=None: (
+            calls.__setitem__(0, calls[0] + 1),
+            orig(node, base, media),
+        )[1],
     )
     args = _args()
     laid = layout_body_block(args)
