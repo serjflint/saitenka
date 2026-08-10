@@ -217,6 +217,9 @@ class Reader:
     _nav_req = Delegated[prefetch.EngagedNavReq | None]("prefetch_state", "nav_req")
     _nav_lock = Delegated[threading.Lock]("prefetch_state", "nav_lock")
     _nav_results = Delegated[queue.Queue]("prefetch_state", "nav_results")
+    _open_req = Delegated[prefetch.EngagedOpenReq | None]("prefetch_state", "open_req")
+    _open_lock = Delegated[threading.Lock]("prefetch_state", "open_lock")
+    _open_results = Delegated[queue.Queue]("prefetch_state", "open_results")
     _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
     # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
     # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
@@ -1320,6 +1323,12 @@ class Reader:
 
     def _open_search(self, pattern: str, wx: float, wy: float, wh: float) -> None:
         nested_popup.open_search(self, pattern, wx, wy, wh)
+
+    def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
+        """The (cached) panel for a clicked/keyed nested open — the shared builder the prefetch worker +
+        tick reach via the Reader seam (no prefetch→nested_popup import, which would cycle). The worker
+        passes ``mined`` (jamdict isn't worker-safe); the main thread lets it recompute."""
+        return nested_popup._engaged_open_panel(self, source, query, mined=mined)
 
     # --- kanji lookup mode ------------------------------------------------------------------------
     def kanji_current(self) -> None:
