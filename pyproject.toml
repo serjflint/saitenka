@@ -264,7 +264,7 @@ files = ["overlay/src/overlay", "deinflect/src", "overlay/examples", "tools", "i
 # the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
 # absent, e.g. the CI gate env — the layout-engine extra is deliberately not installed there). `stubs/`
 # holds our local third-party stubs (fugashi — Cython, no py.typed).
-mypy_path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs"]
+mypy_path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs", ".agents/hooks"]
 # Stage 8b tooling: good additional checks, NOT --strict (plan decision).
 check_untyped_defs = true
 no_implicit_optional = true
@@ -277,7 +277,7 @@ ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 # Run from the repo root → the first-party source roots must be on the search path (same reason as
 # basedpyright's extraPaths) so `saitenka_deinflect.engine` / `overlay.*` resolve from source.
 # `stubs/` holds local third-party stubs (fugashi).
-search-path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs"]
+search-path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs", ".agents/hooks"]
 # Library-only, deliberately NOT widened alongside mypy/basedpyright above: pyrefly's inference is far
 # stricter on the ad-hoc untyped dict-literal "records" idiom pervasive in tools/ (e.g. plan.append({...})
 # read back via p["key"]) — real findings there are inference-strictness noise, not import/attr rot (the
@@ -289,7 +289,7 @@ search-path = ["overlay/src", "deinflect/src", "taffylite/python", "stubs"]
 include = ["overlay/src/overlay", "deinflect/src", "overlay/examples", "tools", "install", ".agents"]
 # Run from the repo root, so the first-party source roots must be on the search path explicitly (else
 # `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
-extraPaths = ["overlay/src", "deinflect/src", "taffylite/python"]
+extraPaths = ["overlay/src", "deinflect/src", "taffylite/python", ".agents/hooks"]
 stubPath = "stubs"   # local third-party stubs (fugashi — Cython, no py.typed)
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
