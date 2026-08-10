@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786380321145,
+  "lastUpdate": 1786380376214,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3167,6 +3167,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.242,
             "range": "±2.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "788e7b61f9aef9a0b24c57e5bbd3b5f2c52c393d",
+          "message": "Merge pull request #302 from serjflint/perf/bench-engaged-open\n\nperf(bench): pump deferred nav/open + nested scroll in --timeline; report engaged_open",
+          "timestamp": "2026-08-10T19:45:45+03:00",
+          "tree_id": "a6f9851d2cceb9ced549aecea67599f7575472e8",
+          "url": "https://github.com/serjflint/saitenka/commit/788e7b61f9aef9a0b24c57e5bbd3b5f2c52c393d"
+        },
+        "date": 1786380375570,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.471,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.525,
+            "range": "±6.8%",
             "unit": "ms"
           }
         ]
