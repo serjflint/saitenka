@@ -89,11 +89,29 @@ class RenderAheadReq:
     direction: int
 
 
+@dataclass(frozen=True, slots=True)
+class EngagedHoverReq:
+    """A TOP-priority head render for the word the user is hovering RIGHT NOW that missed both the
+    in-memory tier-2 and the on-disk cache (a far-seek / worker-hasn't-caught-up cold miss). The worker
+    composes it, populates tier-2 + disk, and hands the composed first viewport back on
+    ``engaged_results`` so the tick can upgrade the (still-soft) tooltip in place — IFF the user is still
+    on the same word (``gen`` + ``key`` guard). Newest-wins single slot: you can only look at one word."""
+
+    gen: int
+    token: Token
+    inflected: str
+    mined: bool
+    key: tuple
+    cap: int
+    phrase: tuple = ()  # stacked-phrase terms — the worker MUST build under the same _panel_cache key
+    #  the main thread will re-look-up, or the deferred re-show stays cold and re-defers in a loop
+
+
 class PrefetchState:
     """Runtime state of the background prefetch subsystem: the decode-warm and speculative-head work
     queues, the persistent worker threads, the generation counter whose bump drops every in-flight job
-    on a line change / resume / seek, and the single-slot scroll-ahead request. Grouped so the Reader
-    owns prefetch as one unit and a #100 re-slot can invalidate it in one call (``cancel()``)."""
+    on a line change / resume / seek, and the single-slot scroll-ahead + engaged-hover requests. Grouped
+    so the Reader owns prefetch as one unit and a #100 re-slot can invalidate it in one call (``cancel()``)."""
 
     def __init__(self, head_queue_max: int) -> None:
         self.q: queue.Queue = queue.Queue()  # decode-warm + engaged-head jobs (FIFO)
@@ -108,6 +126,11 @@ class PrefetchState:
         # Scroll-ahead: a single slot (newest scroll wins) the worker drains; guarded by its own lock.
         self.render_ahead_req: RenderAheadReq | None = None
         self.render_ahead_lock = threading.Lock()
+        # Engaged-hover (tier-3 cold-miss deferred render): a newest-wins slot the worker drains at TOP
+        # priority + a results queue it hands the composed head back on for the tick to apply.
+        self.engaged_req: EngagedHoverReq | None = None
+        self.engaged_lock = threading.Lock()
+        self.engaged_results: queue.Queue = queue.Queue()
         self.threads: list[threading.Thread] = []  # persistent workers (session-lifetime)
 
     def cancel(self) -> int:
@@ -115,6 +138,8 @@ class PrefetchState:
         worker drops any item whose ``gen`` no longer matches. Returns the new generation for the
         items about to be enqueued."""
         self.gen += 1
+        with self.engaged_lock:  # drop a pending cold-miss render for the abandoned word
+            self.engaged_req = None
         return self.gen
 
 
@@ -165,9 +190,14 @@ def _run_item(reader: Reader, item: PrefetchItem) -> None:
             # from a worker (jamdict is not thread-safe on free-threaded builds).
             cap = reader._tip_cap()
             st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-            # composite the first viewport now → warm hover = copy + upload; also persists a cost-gated
-            # head to the render cache (#149) when it's on, for a later session's cold hover.
-            reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
+            # Seed from disk FIRST (inflate on the worker, ~10× cheaper than a raster) into the panel +
+            # tier-2 RAM; only compose+persist on a genuine miss — so a prewarmed head is a cheap inflate
+            # here, and a fresh raster still write-backs to disk (#149) and mirrors into tier-2.
+            if not reader._worker_seed_head(
+                st, item.token, item.inflected, mined=item.mined, cap=cap
+            ):
+                reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
+                reader._mem_fill(item.token, item.inflected, mined=item.mined)
         elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
             reader.dict_set.entry_for(item.token, item.inflected)
 
@@ -207,9 +237,12 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
         with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
             cap = reader._tip_cap()
             st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-            # first viewport composited in idle → warm hover = copy + upload; persists a cost-gated head
-            # to the render cache (#149) when on.
-            reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
+            # Disk-seed first (cheap inflate → panel + tier-2 RAM); compose+persist only on a miss.
+            if not reader._worker_seed_head(
+                st, item.token, item.inflected, mined=item.mined, cap=cap
+            ):
+                reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
+                reader._mem_fill(item.token, item.inflected, mined=item.mined)
         reader._head_built += 1
     except Exception:
         log.debug(
@@ -220,11 +253,75 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
 
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
-        if _try_render_ahead(reader):  # on-screen scroll warm first — highest priority
+        if _try_engaged_hover(reader):  # the word hovered NOW that missed everything — top priority
+            continue
+        if _try_render_ahead(reader):  # on-screen scroll warm next
             continue
         if _try_head_prefetch_item(reader):
             continue
         _try_prefetch_item(reader)
+
+
+def workers_running(reader: Reader) -> bool:
+    """True when at least one prefetch worker thread has been started to service background work (the
+    engaged cold-miss compose). False → prefetch off / not started, so a cold hover must build
+    synchronously rather than defer to a worker that will never drain the queue."""
+    return bool(reader._prefetch_threads)
+
+
+def request_engaged_render(
+    reader: Reader, token, inflected, key, cap: int, *, mined: bool, phrase: tuple = ()
+) -> None:
+    """Enqueue a TOP-priority head render for a word the user is hovering that missed tier-2 + disk
+    (tier-3 cold miss). Newest-wins (only the current word matters). Main-thread + cheap: stores the
+    request; a worker composes it (nothing is shown until it lands). No-op when prefetch is off."""
+    if not reader.prefetch:
+        return
+    req = EngagedHoverReq(
+        reader._prefetch_gen, token, inflected, mined, tuple(key), cap, tuple(phrase)
+    )
+    with reader._engaged_lock:
+        reader._engaged_req = req
+
+
+def _try_engaged_hover(reader: Reader) -> bool:
+    """Drain the engaged-hover slot: compose the cold-missed head off the main thread (seeding the panel
+    cache + tier-2 + disk via the same seed/compose path a prefetch uses), then signal ``(gen, key)`` on
+    ``engaged_results`` so the tick SHOWS the now-warm tooltip. Builds under the SAME ``extra_terms`` the
+    main-thread lookup uses, so the re-show is a panel-cache hit (never a re-defer). ``True`` when
+    handled (so the worker re-checks it before the cheaper queues)."""
+    with reader._engaged_lock:
+        req = reader._engaged_req
+        reader._engaged_req = None
+    if req is None:
+        return False
+    if reader._stop.is_set() or req.gen != reader._prefetch_gen:
+        return True  # stale (word changed / seek / closing) — handled, keep looping
+    try:
+        with otel_metrics.traced("prefetch_decode", kind="engaged"):
+            st = reader._panel_for(
+                req.token, req.inflected, min_h=req.cap, mined=req.mined, extra_terms=req.phrase
+            )
+            if not reader._worker_seed_head(
+                st, req.token, req.inflected, mined=req.mined, cap=req.cap
+            ):
+                reader._precompose_head(st, req.token, req.inflected, mined=req.mined, cap=req.cap)
+                reader._mem_fill(req.token, req.inflected, mined=req.mined)
+        reader._engaged_results.put((req.gen, req.key))
+    except Exception:
+        log.debug("engaged hover render failed for %r", req.token.surface, exc_info=True)
+    return True
+
+
+def drain_engaged_results(reader: Reader):
+    """Yield ``(gen, key)`` for each composed engaged-hover head the worker handed back this tick. The
+    show logic (generation + key guard, then the warm re-show) lives in ``tooltip.apply_engaged_results``
+    — it needs panel_key/is_mined/show_tooltip."""
+    while True:
+        try:
+            yield reader._engaged_results.get_nowait()
+        except queue.Empty:
+            return
 
 
 def request_render_ahead(reader: Reader, direction: int) -> None:

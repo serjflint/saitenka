@@ -211,6 +211,9 @@ class Reader:
         "prefetch_state", "render_ahead_req"
     )
     _render_ahead_lock = Delegated[threading.Lock]("prefetch_state", "render_ahead_lock")
+    _engaged_req = Delegated[prefetch.EngagedHoverReq | None]("prefetch_state", "engaged_req")
+    _engaged_lock = Delegated[threading.Lock]("prefetch_state", "engaged_lock")
+    _engaged_results = Delegated[queue.Queue]("prefetch_state", "engaged_results")
     _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
     # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
     # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
@@ -1021,25 +1024,81 @@ class Reader:
         pathological tail whose cold build+raster blows the budget — are persisted."""
         return self.session.render_cache.cache_min_height_px
 
+    def _mem_cache(self):
+        """The in-memory tier-2 compressed-head cache (RAM), or ``None`` when the render cache is off.
+        The MAIN thread reads ONLY this — never SQLite — so a cold hover inflates from RAM; the prefetch
+        worker hydrates it from disk (see :meth:`_worker_seed_head` / :meth:`_mem_fill`)."""
+        rc = self.session.render_cache
+        return rc.mem if rc.cache_on else None
+
     def _peek_render_cache(self, key):
-        """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None``. Lets a
-        cold pathological show paint the cached pixels + place by ``full_h`` BEFORE building the panel."""
-        cache = self._render_cache()
-        if cache is None:
-            return None
+        """The stored first viewport + ``full_h`` for ``key`` (direct-paint path), or ``None`` — read
+        from the in-memory tier-2 (inflate from RAM), NEVER from SQLite: the main thread must not open the
+        DB on the hover path. A miss falls through to a build (and the tier-3 deferred render)."""
+        mem = self._mem_cache()
+        if mem is None or len(mem) == 0:
+            return None  # empty tier-2 → miss without computing the sig (nothing a worker has seeded yet)
         from overlay.app.render_cache import content_key
 
-        return cache.peek(self._render_cache_sig(), content_key(key))
+        cv = mem.get((self._render_cache_sig(), content_key(key)))
+        if cv is None:
+            return None
+        try:
+            return cv.inflate()
+        except ValueError:  # a garbled blob won't reshape → safe miss, build instead
+            return None
 
     def _seed_precomposed(self, st: Panel, key, cap: int) -> bool:
-        """Seed ``st``'s first viewport from the persistent cache (cold-show fast path). ``False`` when
-        the cache is off or misses. Main thread — one indexed SELECT + inflate on a hit."""
+        """Seed ``st``'s first viewport from the in-memory tier-2 (cold-show fast path). ``False`` when
+        the cache is off or misses, or the stored geometry doesn't match this show's ``view_h``. Main
+        thread — an in-RAM inflate on a hit, no disk."""
+        loaded = self._peek_render_cache(key)
+        if loaded is None:
+            return False
+        view_h = min(st.full_height, cap)
+        if view_h <= 0 or loaded.view_h != view_h or loaded.overscan != view_h:
+            return False  # geometry moved (content/height changed) — safe miss, live-render
+        st.windowed.install_first_view(loaded.view_h, loaded.overscan, loaded.array)
+        return True
+
+    def _worker_seed_head(self, st: Panel, tok, inflected, *, mined: bool, cap: int) -> bool:
+        """WORKER-side: seed ``st``'s first viewport from the on-disk cache (inflate off the main thread)
+        and mirror the compressed blob into the in-memory tier-2, so the next hover paints from RAM. Far
+        cheaper than a raster on a hit — the lookahead worth doing before falling back to a full compose.
+        ``False`` on cache-off / miss / geometry mismatch (caller then rasters)."""
         cache = self._render_cache()
-        if cache is None:
+        mem = self._mem_cache()
+        if cache is None or mem is None:
             return False
         from overlay.app.render_cache import content_key
 
-        return st.load_precomposed_head(cap, cache, self._render_cache_sig(), content_key(key))
+        sig = self._render_cache_sig()
+        ck = content_key(self._panel_key(tok, inflected, mined=mined))
+        cv = cache.peek_compressed(sig, ck)
+        if cv is None:
+            return False
+        view_h = min(st.full_height, cap)
+        if view_h <= 0 or cv.view_h != view_h or cv.overscan != view_h:
+            return False
+        st.windowed.install_first_view(cv.view_h, cv.overscan, cv.inflate().array)
+        mem.put((sig, ck), cv)
+        return True
+
+    def _mem_fill(self, tok, inflected, *, mined: bool) -> None:
+        """WORKER-side: mirror a just-composed+persisted head into the in-memory tier-2 (compressed), so a
+        later hover — or an evicted-then-rebuilt panel — re-seeds from RAM without touching SQLite. No-op
+        if the head wasn't stored (cost gate) or the cache is off; reuses the on-disk blob (no re-compress)."""
+        cache = self._render_cache()
+        mem = self._mem_cache()
+        if cache is None or mem is None:
+            return
+        from overlay.app.render_cache import content_key
+
+        sig = self._render_cache_sig()
+        ck = content_key(self._panel_key(tok, inflected, mined=mined))
+        cv = cache.peek_compressed(sig, ck)
+        if cv is not None:
+            mem.put((sig, ck), cv)
 
     def _precompose_head(
         self, st: Panel, tok, inflected, *, mined: bool, cap: int, protected: bool = False
@@ -1659,6 +1718,7 @@ class Reader:
             self._maybe_clear_startup_hint()  # hand off from mpv's OSD breadcrumb once we can draw
             self._apply_pending_deps_or_spinner()
             self._apply_pending_anki_seed()
+            tooltip.apply_engaged_results(self)  # a cold-miss head composed → show it now (warm)
             tooltip.apply_pending_crisp(self)  # upgrade a soft first paint to crisp once bands warm
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)

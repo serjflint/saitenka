@@ -16,11 +16,16 @@ from typing import TYPE_CHECKING, overload
 
 from overlay.app.languages import MAIN_LANG
 
+# In-RAM ceiling for the tier-2 compressed-head cache. Independent of the disk ceiling
+# (``render_cache_max_mb``, which can be GBs): compressed heads are ~10× smaller than the BGRA arrays,
+# so 64 MB still covers hundreds of pathological heads — the working set a session actually hovers.
+_MEM_TIER_MAX_BYTES = 64 * 1024 * 1024
+
 if TYPE_CHECKING:
     from overlay.app.backlog import BacklogStore
     from overlay.app.languages import Language
     from overlay.app.mined_store import MinedCardStore
-    from overlay.app.render_cache import RenderCache
+    from overlay.app.render_cache import CompressedHeadCache, RenderCache
     from overlay.app.session_stats import SessionRecorder
     from overlay.app.sub_index import SubIndex
     from overlay.app.subtitle_modes import ProviderFetchFactory
@@ -118,6 +123,14 @@ class RenderCacheState:
         self.cache_max_bytes = cache_max_bytes
         self.cache_min_height_px = cache_min_height_px  # cost gate (px): only tall heads persist
         self.obj: RenderCache | None = None
+        # Tier-2: an in-memory store of COMPRESSED first-view heads the prefetch worker hydrates from
+        # disk, so a cold hover inflates from RAM and never opens SQLite on the main thread. Capped well
+        # below the disk ceiling (compressed heads are ~10× smaller, so this still covers a wide set).
+        self.mem: CompressedHeadCache | None = None
+        if cache_on:
+            from overlay.app.render_cache import CompressedHeadCache
+
+            self.mem = CompressedHeadCache(max_bytes=min(cache_max_bytes, _MEM_TIER_MAX_BYTES))
         self.built = False  # the lazy open ran once (obj stays None if no prebuilt cache exists)
         self.config_sig: str | None = None  # format+width+cap+dict-set signature, memoised…
         self.sig_key: tuple[int, int] | None = (
