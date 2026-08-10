@@ -36,6 +36,9 @@ CRITICAL = [
     "cue_redraw",
     "dict_sql",  # dictionary lookup
     "prefetch_decode",  # scroll-ahead warm
+    "sidebar_click",  # sidebar action → redraw (may touch SQLite)
+    "mined_store_write",  # main-thread mined-card store write on a mine
+    "backlog_write",  # main-thread backlog store write on a bookmark/mine
 ]
 _ORDER = {name: i for i, name in enumerate(CRITICAL)}
 
