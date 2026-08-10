@@ -485,7 +485,113 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     from overlay.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r._engaged_results.put((r._prefetch_gen, ("some", "other", "key")))
+    r._engaged_results.put((r._prefetch_gen, ("some", "other", "key"), False, ""))
     r.hover, r._tip_state = -1, None  # not hovering that word anymore
     tooltip.apply_engaged_results(r)
     assert r._tip_state is None  # nothing shown
+
+
+# --- nested scan popup: the same tier-3 off-thread treatment (PR A) ------------------------------
+
+
+def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
+    # A cold inner word (scan-hover) with a worker running defers: the getmask2 raster goes off the main
+    # thread, no nested popup is shown yet, and a NESTED engaged request is queued.
+    import threading
+
+    from overlay.app import nested_popup
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    _i, tok, inflected, _mined = _first_content(r)
+    r._tip_xy, r._tip_scroll = (0, 0), 0
+    r._panel_cache.clear()
+    nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
+    assert r._nest.state is None  # nothing shown — deferred
+    assert r._engaged_req is not None and r._engaged_req.nested is True
+
+
+def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
+    # defer=True but no worker to service it → the nested popup builds synchronously (never a dead defer
+    # that shows nothing forever).
+    from overlay.app import nested_popup
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = False
+    r._prefetch_threads = []
+    _i, tok, inflected, _mined = _first_content(r)
+    r._tip_xy, r._tip_scroll = (0, 0), 0
+    r._panel_cache.clear()
+    nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
+    assert r._nest.state is not None  # shown synchronously
+    assert r._engaged_req is None
+
+
+def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch):
+    # The nested worker compose WARMS the nested-cap viewport bands (so the re-show has no synchronous
+    # raster) but does NOT persist to disk — the nested viewport is nested-cap-shaped, not the base head
+    # the render-cache keys share, so a write would collide.
+    import threading
+
+    from overlay.app import prefetch, tooltip
+
+    r, cache = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    _i, tok, inflected, mined = _first_content(r)
+    key = tooltip.panel_key(r, tok, inflected, mined=mined)
+
+    r._panel_cache.clear()
+    prefetch.request_engaged_render(
+        r, tok, inflected, key, mined=mined, nested=True, tail=tok.surface
+    )
+    assert prefetch._try_engaged_hover(r) is True
+    assert cache.stats()[0] == 0  # nested never persisted to disk
+    st = r._panel_cache[key]  # panel warmed into the cache
+    vh = min(st.full_height, r._cap_for(r.nested_max_frac))
+    st.viewport(0, vh, overscan=vh)
+    assert (
+        st.last_frame_rasters == 0
+    )  # bands were rastered off the main thread — the re-show is warm
+    gen, _k, nested, tail = r._engaged_results.get_nowait()
+    assert gen == r._prefetch_gen and nested is True and tail == tok.surface
+
+
+def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
+    # End-to-end: a cold scan-hover defers → the worker composes → the tick re-derives the anchor from the
+    # scan cell and re-opens the now-warm nested popup (a cache hit, no cold raster).
+    import threading
+    from types import SimpleNamespace
+
+    from overlay.app import nested_popup, prefetch, tooltip
+
+    r, cache = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    _i, tok, _inflected, _mined = _first_content(r)
+    r._tip_xy, r._tip_scroll = (0, 0), 0
+    sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20)
+    monkeypatch.setattr(
+        tooltip, "scan_hit", lambda _reader, _mx, _my: sb
+    )  # re-derive lands on the cell
+
+    r._panel_cache.clear()
+    nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)
+    assert r._nest.state is None and r._engaged_req is not None and r._engaged_req.nested is True
+    assert prefetch._try_engaged_hover(r) is True
+    tooltip.apply_engaged_results(r)  # drain → scan_hit → show_nested warm
+    assert r._nest.state is not None  # nested popup now shown
+    assert cache.stats()[0] == 0  # still never persisted
+
+
+def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
+    # A composed nested head whose inner word the cursor has left is dropped — no stale nested flash. With
+    # no base tooltip up, scan_hit finds nothing, so the guard drops it cleanly.
+    from overlay.app import tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r._tip_state, r._tip_rect = None, None
+    r._engaged_results.put((r._prefetch_gen, ("k",), True, "本"))
+    tooltip.apply_engaged_results(r)
+    assert r._nest.state is None

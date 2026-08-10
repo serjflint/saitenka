@@ -91,11 +91,17 @@ class RenderAheadReq:
 
 @dataclass(frozen=True, slots=True)
 class EngagedHoverReq:
-    """A TOP-priority head render for the word the user is hovering RIGHT NOW that missed both the
-    in-memory tier-2 and the on-disk cache (a far-seek / worker-hasn't-caught-up cold miss). The worker
-    composes it, populates tier-2 + disk, and hands the composed first viewport back on
-    ``engaged_results`` so the tick can upgrade the (still-soft) tooltip in place — IFF the user is still
-    on the same word (``gen`` + ``key`` guard). Newest-wins single slot: you can only look at one word."""
+    """A TOP-priority head render for the word the user is engaging RIGHT NOW that missed the panel cache
+    (a far-seek / worker-hasn't-caught-up cold miss). The worker composes it off the main thread, then
+    hands ``(gen, key, nested, tail)`` back on ``engaged_results`` so the tick can SHOW the now-warm
+    tooltip — IFF the user is still on the same target (``gen`` + ``key`` guard). Newest-wins single slot:
+    you can only look at one word.
+
+    ``nested`` targets the popup: the base tooltip (``False``) — the worker seeds tier-2 + disk and the
+    re-show is a warm cache hit — or the nested scan popup (``True``), where the worker instead warms the
+    nested-cap viewport BANDS (the getmask2 raster #293 moved off the base hover) but does NOT persist to
+    disk: the nested viewport is nested-cap-shaped, not the base-cap head the render cache keys share, so a
+    write would collide. ``tail`` (nested only) is the scan-cell text the tick re-derives the anchor from."""
 
     gen: int
     token: Token
@@ -105,6 +111,8 @@ class EngagedHoverReq:
     cap: int
     phrase: tuple = ()  # stacked-phrase terms — the worker MUST build under the same _panel_cache key
     #  the main thread will re-look-up, or the deferred re-show stays cold and re-defers in a loop
+    nested: bool = False  # target overlay: base tooltip (False) or the nested scan popup (True)
+    tail: str = ""  # nested only: the scan-cell tail the tick re-derives the fresh anchor from
 
 
 class PrefetchState:
@@ -270,26 +278,43 @@ def workers_running(reader: Reader) -> bool:
 
 
 def request_engaged_render(
-    reader: Reader, token, inflected, key, cap: int, *, mined: bool, phrase: tuple = ()
+    reader: Reader,
+    token,
+    inflected,
+    key,
+    *,
+    mined: bool,
+    phrase: tuple = (),
+    nested: bool = False,
+    tail: str = "",
 ) -> None:
-    """Enqueue a TOP-priority head render for a word the user is hovering that missed tier-2 + disk
-    (tier-3 cold miss). Newest-wins (only the current word matters). Main-thread + cheap: stores the
-    request; a worker composes it (nothing is shown until it lands). No-op when prefetch is off."""
+    """Enqueue a TOP-priority head render for a word the user is engaging that missed the panel cache
+    (tier-3 cold miss). ``nested`` targets the scan popup instead of the base tooltip; ``tail`` is its
+    scan-cell text (the tick re-derives the anchor from it). Newest-wins (only the current target
+    matters). Main-thread + cheap: stores the request; a worker composes it (nothing is shown until it
+    lands). No-op when prefetch is off."""
     if not reader.prefetch:
         return
     req = EngagedHoverReq(
-        reader._prefetch_gen, token, inflected, mined, tuple(key), cap, tuple(phrase)
+        reader._prefetch_gen,
+        token,
+        inflected,
+        mined,
+        tuple(key),
+        reader._tip_cap(),
+        tuple(phrase),
+        nested,
+        tail,
     )
     with reader._engaged_lock:
         reader._engaged_req = req
 
 
 def _try_engaged_hover(reader: Reader) -> bool:
-    """Drain the engaged-hover slot: compose the cold-missed head off the main thread (seeding the panel
-    cache + tier-2 + disk via the same seed/compose path a prefetch uses), then signal ``(gen, key)`` on
-    ``engaged_results`` so the tick SHOWS the now-warm tooltip. Builds under the SAME ``extra_terms`` the
-    main-thread lookup uses, so the re-show is a panel-cache hit (never a re-defer). ``True`` when
-    handled (so the worker re-checks it before the cheaper queues)."""
+    """Drain the engaged-hover slot: compose the cold-missed head off the main thread, then signal
+    ``(gen, key, nested, tail)`` on ``engaged_results`` so the tick SHOWS the now-warm popup. Builds under
+    the SAME ``extra_terms`` the main-thread lookup uses, so the re-show is a panel-cache hit (never a
+    re-defer). ``True`` when handled (so the worker re-checks it before the cheaper queues)."""
     with reader._engaged_lock:
         req = reader._engaged_req
         reader._engaged_req = None
@@ -298,25 +323,59 @@ def _try_engaged_hover(reader: Reader) -> bool:
     if reader._stop.is_set() or req.gen != reader._prefetch_gen:
         return True  # stale (word changed / seek / closing) — handled, keep looping
     try:
-        with otel_metrics.traced("prefetch_decode", kind="engaged"):
-            st = reader._panel_for(
-                req.token, req.inflected, min_h=req.cap, mined=req.mined, extra_terms=req.phrase
+        with otel_metrics.traced(
+            "prefetch_decode", kind="engaged_nested" if req.nested else "engaged"
+        ):
+            _compose_engaged_nested(reader, req) if req.nested else _compose_engaged_base(
+                reader, req
             )
-            if not reader._worker_seed_head(
-                st, req.token, req.inflected, mined=req.mined, cap=req.cap
-            ):
-                reader._precompose_head(st, req.token, req.inflected, mined=req.mined, cap=req.cap)
-                reader._mem_fill(req.token, req.inflected, mined=req.mined)
-        reader._engaged_results.put((req.gen, req.key))
+        reader._engaged_results.put((req.gen, req.key, req.nested, req.tail))
     except Exception:
         log.debug("engaged hover render failed for %r", req.token.surface, exc_info=True)
     return True
 
 
+def _compose_engaged_base(reader: Reader, req: EngagedHoverReq) -> None:
+    """Base tooltip cold miss: build the head (seeding panel cache + tier-2 + disk via the same
+    seed/compose path a prefetch uses), so the tick's re-show is a warm cache hit that re-blits soft then
+    upgrades to crisp via the poll loop (``apply_pending_crisp``)."""
+    st = reader._panel_for(
+        req.token, req.inflected, min_h=req.cap, mined=req.mined, extra_terms=req.phrase
+    )
+    if not reader._worker_seed_head(st, req.token, req.inflected, mined=req.mined, cap=req.cap):
+        reader._precompose_head(st, req.token, req.inflected, mined=req.mined, cap=req.cap)
+        reader._mem_fill(req.token, req.inflected, mined=req.mined)
+
+
+def _compose_engaged_nested(reader: Reader, req: EngagedHoverReq) -> None:
+    """Nested scan popup cold miss: build the panel then WARM the nested-cap viewport bands off the main
+    thread — the getmask2 raster #293 removed from the base hover — so the tick's re-show composites from
+    warm bands with no synchronous raster. Warms native (crisp) AND raw (soft) so the re-show is crisp at
+    hi-dpi with no soft-then-poll flicker. NO disk persist: the nested viewport is nested-cap-shaped, not
+    the base-cap head the render cache keys share, so a write would collide with the base head."""
+    st = reader._panel_for(
+        req.token,
+        req.inflected,
+        min_h=req.cap,
+        mined=req.mined,
+        nested=True,
+        extra_terms=req.phrase,
+    )
+    vh = min(st.full_height, reader._cap_for(reader.nested_max_frac))
+    if vh <= 0:
+        return
+    scale = reader._raster_scale
+    if scale > 1.0:
+        st.viewport(0, vh, overscan=vh, scale=scale)  # native bands → crisp compose on the re-show
+    st.viewport(
+        0, vh, overscan=vh
+    )  # raw bands → the soft/assemble path (1080p, or a crisp fallback)
+
+
 def drain_engaged_results(reader: Reader):
-    """Yield ``(gen, key)`` for each composed engaged-hover head the worker handed back this tick. The
-    show logic (generation + key guard, then the warm re-show) lives in ``tooltip.apply_engaged_results``
-    — it needs panel_key/is_mined/show_tooltip."""
+    """Yield ``(gen, key, nested, tail)`` for each composed engaged head the worker handed back this tick.
+    The show logic (generation + key guard, then the warm re-show — base tooltip or nested scan popup)
+    lives in ``tooltip.apply_engaged_results`` — it needs panel_key/is_mined/show_tooltip/show_nested."""
     while True:
         try:
             yield reader._engaged_results.get_nowait()

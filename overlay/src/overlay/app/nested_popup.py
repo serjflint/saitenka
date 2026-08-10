@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from overlay.app import prefetch
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel, PopupView
 from overlay.app.prefetch import cap_for
@@ -100,9 +101,10 @@ def show_nested(reader: Reader, sb) -> None:
     # hovered cue word, so an inner katakana/compound word opens whole instead of as its first morpheme.
     extra = _phrase_extra_terms(reader, tokens)
     sx, sy = reader._tip_xy  # anchor to the inner word's screen cell
-    wx = sx + sb.x
-    wy = sy + (sb.y - reader._tip_scroll)
-    open_nested(reader, tok, tok.surface, wx, wy, sb.h, tail=sb.text, extra_terms=extra)
+    anchor = Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
+    # defer=True: a cold inner word's head+bands raster off the main thread (tier-3), re-derived from the
+    # scan cell when it lands — the hover-scan path, unlike a clicked link, is re-derivable via scan_hit.
+    open_nested(reader, tok, tok.surface, anchor, tail=sb.text, extra_terms=extra, defer=True)
 
 
 def _phrase_extra_terms(reader: Reader, tokens) -> tuple[str, ...]:
@@ -119,21 +121,38 @@ def open_nested(
     reader: Reader,
     tok,
     inflected,
-    wx: float,
-    wy: float,
-    wh: float,
+    anchor: Anchor,
     tail=None,
     extra_terms: tuple[str, ...] = (),
+    *,
+    defer: bool = False,
 ) -> None:
-    """Build the nested popup for ``tok`` and anchor it above/below an on-screen box (wx, wy, wh).
-    Shared by scan-hover and a clicked cross-reference link. ``extra_terms`` are the longest-match
-    phrases stacked above the bare word (empty for a clicked link, whose query is already exact)."""
+    """Build the nested popup for ``tok`` and anchor it above/below the on-screen box ``anchor``. Shared
+    by scan-hover and a clicked cross-reference link. ``extra_terms`` are the longest-match phrases
+    stacked above the bare word (empty for a clicked link, whose query is already exact).
+
+    ``defer`` (the scan-hover path only): on a cold inner word with a prefetch worker running, enqueue a
+    top-priority off-thread compose and show NOTHING — the tick (``apply_engaged_results``) re-derives the
+    anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
+    clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
     mined = reader._is_mined(tok)
     key = reader._panel_key(tok, inflected, mined=mined, phrase=extra_terms)
+    if defer and key not in reader._panel_cache and prefetch.workers_running(reader):
+        prefetch.request_engaged_render(
+            reader,
+            tok,
+            inflected,
+            key,
+            mined=mined,
+            phrase=extra_terms,
+            nested=True,
+            tail=tail or tok.surface,
+        )
+        return
     st = reader._panel_for(
         tok, inflected, min_h=reader._tip_cap(), mined=mined, nested=True, extra_terms=extra_terms
     )
-    place_nested(reader, st, key, tok, tok.surface, Anchor(wx, wy, wh), tail)
+    place_nested(reader, st, key, tok, tok.surface, anchor, tail)
 
 
 def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
@@ -174,7 +193,7 @@ def open_link(reader: Reader, lb, xy, scroll: int) -> None:
     tok = reader.tokenizer.query_token(q)
     if tok is None:
         return
-    open_nested(reader, tok, tok.surface, wx, wy, lb.h, tail=None)
+    open_nested(reader, tok, tok.surface, Anchor(wx, wy, lb.h), tail=None)
 
 
 def open_search(reader: Reader, pattern: str, wx: float, wy: float, wh: float) -> None:

@@ -18,7 +18,7 @@ import time
 from typing import TYPE_CHECKING, NamedTuple
 
 from overlay import otel_metrics
-from overlay.app import prefetch
+from overlay.app import nested_popup, prefetch
 from overlay.app.lookup import card_for, entry_for
 from overlay.app.media import copy_clipboard, speak
 from overlay.app.nested_popup import TIP_GAP
@@ -791,9 +791,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     # prefetch worker is actually running to service it — otherwise (prefetch off / no workers) there is
     # nothing to compose it, so fall through to a synchronous build.
     if reader._tip_show_cold and not painted and prefetch.workers_running(reader):
-        prefetch.request_engaged_render(
-            reader, tok, inflected, key, cap, mined=mined, phrase=phrase
-        )
+        prefetch.request_engaged_render(reader, tok, inflected, key, mined=mined, phrase=phrase)
         return
 
     st = panel_for(reader, tok, inflected, min_h=cap, mined=mined, extra_terms=phrase)
@@ -979,29 +977,50 @@ def render_tip_view(reader: Reader) -> None:
 
 
 def apply_engaged_results(reader: Reader) -> None:
-    """Tick drain (tier-3): show the tooltips whose cold-miss head a worker just composed. For each
-    handed-back ``(gen, key)``: skip if stale (seek / line change), if a tooltip is already up (a warm
-    hover raced ahead), or if the user has moved to a different word — recompute the CURRENT hover's key
-    and compare (the analysis-overlay guard, so a stale word can never flash). A match SHOWS the now-warm
-    tooltip, which is a panel-cache hit → no main-thread raster."""
-    for gen, key in prefetch.drain_engaged_results(reader):
-        if gen != reader._prefetch_gen or reader._tip_state is not None:
-            continue  # stale, or a tooltip already showing
-        i = reader.hover
-        if not (0 <= i < len(reader.tokens)):
-            continue  # not hovering a word anymore
-        tok = reader.tokens[i]
-        cur = panel_key(
-            reader,
-            tok,
-            reader._inflected_surface(i),
-            mined=is_mined(reader, tok),
-            phrase=reader._hover_terms,
-        )
-        if tuple(cur) == tuple(key):
-            show_tooltip(
-                reader, i
-            )  # warm now (worker cached the panel) → shows without a cold raster
+    """Tick drain (tier-3): show the popups whose cold-miss head a worker just composed. For each
+    handed-back ``(gen, key, nested, tail)``: skip if stale (seek / line change), then dispatch to the
+    base tooltip or the nested scan popup. Each re-derives the CURRENT target and compares keys (the
+    analysis-overlay guard, so a stale word can never flash) before the now-warm show."""
+    for gen, key, nested, tail in prefetch.drain_engaged_results(reader):
+        if gen != reader._prefetch_gen:
+            continue  # stale (seek / line change)
+        if nested:
+            _apply_engaged_nested(reader, tail)
+        else:
+            _apply_engaged_base(reader, key)
+
+
+def _apply_engaged_base(reader: Reader, key: tuple) -> None:
+    """Show the base tooltip for a composed cold-miss head, iff the user is still on that word (gen guard
+    already passed; recompute the hover's key and compare). A panel-cache hit → no main-thread raster."""
+    if reader._tip_state is not None:
+        return  # a warm hover raced ahead — a tooltip is already up
+    i = reader.hover
+    if not (0 <= i < len(reader.tokens)):
+        return  # not hovering a word anymore
+    tok = reader.tokens[i]
+    cur = panel_key(
+        reader,
+        tok,
+        reader._inflected_surface(i),
+        mined=is_mined(reader, tok),
+        phrase=reader._hover_terms,
+    )
+    if tuple(cur) == tuple(key):
+        show_tooltip(reader, i)  # warm now (worker cached the panel) → shows without a cold raster
+
+
+def _apply_engaged_nested(reader: Reader, tail: str) -> None:
+    """Show the nested scan popup for a composed cold-miss head, iff the cursor still rests on the same
+    inner word — re-run the scan hit-test at the current mouse and match its tail. This re-derives a fresh
+    anchor (the inner cell may have scrolled) and re-opens through the (now-warm, worker-composed) panel:
+    a cache hit whose bands the worker already rastered, so no getmask2 lands on this tick."""
+    if reader._nest.state is not None:
+        return  # a nested popup already showing
+    sb = scan_hit(reader, *reader._last_mouse)
+    if sb is None or sb.text != tail:
+        return  # cursor left the inner word — never flash a stale nested popup
+    nested_popup.show_nested(reader, sb)
 
 
 def apply_pending_crisp(reader: Reader) -> None:
