@@ -1406,12 +1406,14 @@ def run_vocab(
 
 
 def _timeline_interact(reader) -> None:
-    """Exercise the nested scan popup + a clicked cross-reference off the CURRENT base tooltip, so a
-    --timeline run has realistic ``prefetch_decode``/``tip_compose``/``render`` kind=nested|clicked
-    latency — not only base hovers. The nested open defers to the worker (tier-3): open cold (enqueue an
-    off-thread compose), let it land, then re-open warm — the same two-phase path a real scan-hover takes.
-    Then navigate one cross-reference in place (``kind="clicked"``). Best-effort: a word with no scan
-    cells / no term simply skips."""
+    """Exercise the nested scan popup + a clicked kanji open + a clicked cross-reference off the CURRENT
+    base tooltip, so a --timeline run has realistic ``prefetch_decode``/``tip_compose``/``render``
+    kind=nested|clicked|engaged_open latency — not only base hovers. Each deferred interaction (tier-3) is
+    PUMPED: enqueue the off-thread compose, sleep so the worker lands it, then drain
+    ``apply_engaged_results`` so the WARM swap runs — otherwise the cheap warm compose reads as *absent*,
+    not *cheap*, and under-reports the win. Best-effort: a word with no scan cells / no kanji simply skips."""
+    from overlay.app import tooltip as _tt
+
     st = reader._tip_state
     if st is None:
         return
@@ -1423,9 +1425,22 @@ def _timeline_interact(reader) -> None:
         )  # cold inner word → off-thread compose (kind=engaged_nested / nested)
         time.sleep(0.02)  # let the worker compose the nested head
         reader._show_nested(sb)  # warm → synchronous nested show (tip_compose kind="nested")
+        # scroll the nested popup so its render-ahead + crisp-poll are exercised (the base already is)
+        reader._scroll_nested(round(reader.osd[1] * 0.1))
         reader._hide_nested()
+    # a clicked/keyed kanji open (deferred, tier-3): warms off-thread → prefetch_decode[engaged_open]
+    reader.kanji_current()
+    time.sleep(0.02)
+    _tt.apply_engaged_results(
+        reader
+    )  # pump the deferred open's warm place (cheap tip_compose[nested])
+    reader._hide_nested()
     if 0 <= reader.hover < len(reader.tokens):
         reader._navigate_tip(reader.tokens[reader.hover].surface)  # in-place nav → kind="clicked"
+        time.sleep(0.02)
+        _tt.apply_engaged_results(
+            reader
+        )  # pump the deferred nav swap → tip_compose[clicked] reads cheap
 
 
 def run_timeline(
