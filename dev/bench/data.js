@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786387968961,
+  "lastUpdate": 1786390850220,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3383,6 +3383,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.933,
             "range": "±3.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b54d29c6b33ab3aabdee89498c0ad863b65c31d4",
+          "message": "feat(images): render inline SVG gaiji via resvglite, ▢ fallback (closes #283) (#308)\n\nYomitan structured-content img nodes (SVG gaiji: 参照/表記 labels, reference\nglyphs) drew as a ▢ box because Pillow can't rasterize SVG. The optional\nresvglite extra now rasterizes them once at import into a new additive\nmedia(dict_id, path, png) table; the renderer composites the real glyph.\n\nThreading keeps SQLite off the render thread: media is preloaded onto each\nDefinition at Entry-build (lookup thread) via DictionaryDb.media_for, carried\nthrough BodyRenderArgs (raw bytes, picklable for the process pool) into walk.\nMonochrome gaiji are tinted to the text colour; appearance:\"auto\" keeps the\nSVG's own colours. All PIL decode/tint lives in render.flow.img_box, so sc.walk\nstays PIL-agnostic (the sc/-layering contract).\n\nFully additive: without the extra, _load_media no-ops, the table stays empty,\nand every img falls back to ▢ — the default install is byte-identical. Import\nis gated to app.dictdb (TID251 ban + import-linter svg-images-chokepoint).",
+          "timestamp": "2026-08-10T22:39:57+03:00",
+          "tree_id": "cb5488f1dea288eceff068db96cef3d6822802bf",
+          "url": "https://github.com/serjflint/saitenka/commit/b54d29c6b33ab3aabdee89498c0ad863b65c31d4"
+        },
+        "date": 1786390849129,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.948,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.842,
+            "range": "±0.5%",
             "unit": "ms"
           }
         ]
