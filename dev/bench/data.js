@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786366366429,
+  "lastUpdate": 1786368218100,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2987,6 +2987,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.224,
             "range": "±1.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "afa83fd92639e1b34455856d3984d815b1e9b4bb",
+          "message": "Merge pull request #296 from serjflint/perf/clicked-nav-offthread\n\nperf(tooltip): defer clicked cross-ref navigation off the main thread",
+          "timestamp": "2026-08-10T16:22:47+03:00",
+          "tree_id": "5ca327bbb0c77ac4329ed5041c5f78335c19a001",
+          "url": "https://github.com/serjflint/saitenka/commit/afa83fd92639e1b34455856d3984d815b1e9b4bb"
+        },
+        "date": 1786368217209,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.273,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.592,
+            "range": "±1.9%",
             "unit": "ms"
           }
         ]
