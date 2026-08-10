@@ -371,6 +371,18 @@ def _mine_link(reader: Reader, lb, tok) -> bool:
     return True
 
 
+def _kanji_link(reader: Reader, lb, xy, scroll: int) -> bool:
+    """A headword kanji arrives as a ``LinkBox('kanji:<ch>')`` (it rides the normal link hit-test, like
+    ``mine:``). Open that kanji's entry in the nested popup, anchored to the clicked glyph — keeps the
+    base entry visible (more idiomatic here than Yomitan's in-place nav). Not a kanji link → False."""
+    q = getattr(lb, "query", None)
+    if not isinstance(q, str) or not q.startswith("kanji:"):
+        return False
+    sx, sy = xy
+    reader._open_kanji(q[len("kanji:") :], sx + lb.x, sy + (lb.y - scroll), lb.h)
+    return True
+
+
 def _click_nested(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the nested popup. Returns True if it did (regardless of what, if
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
@@ -400,7 +412,11 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     lb = reader._tip_link_hit(x, y)
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
-        if not _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
+        if _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
+            pass
+        elif _kanji_link(reader, lb, reader._tip_xy, reader._tip_scroll):
+            pass  # headword kanji → open its entry in the nested popup (Yomitan parity)
+        else:
             reader._navigate_tip(lb.query)  # cross-ref → replace base content in place (Yomitan)
     else:
         reader._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry

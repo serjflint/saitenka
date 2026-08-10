@@ -57,6 +57,7 @@ def _is_cjk(ch: str) -> bool:
         or 0x4E00 <= o <= 0x9FFF  # CJK unified
         or 0xF900 <= o <= 0xFAFF  # CJK compatibility ideographs
         or 0xFF00 <= o <= 0xFFEF  # fullwidth / halfwidth forms
+        or 0x20000 <= o <= 0x3FFFF  # supplementary ideographic planes (Ext B–H) — astral-safe (#99)
     )
 
 

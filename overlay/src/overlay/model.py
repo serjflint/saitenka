@@ -103,6 +103,18 @@ class LinkBox:
     h: int
 
 
+def is_ideograph(ch: str) -> bool:
+    """True for a CJK ideograph (kanji) — astral-SAFE, unlike the scattered BMP-only range checks that
+    miss CJK Extension B+ (#99, e.g. 𠮟 U+20B9F). Covers Unified + Ext A, the Compatibility Ideographs,
+    and the whole supplementary ideographic planes (Ext B–H + compat supplement, U+20000–U+3FFFF)."""
+    o = ord(ch)
+    return (
+        0x3400 <= o <= 0x9FFF  # CJK Unified + Ext A
+        or 0xF900 <= o <= 0xFAFF  # CJK Compatibility Ideographs
+        or 0x20000 <= o <= 0x3FFFF  # supplementary ideographic planes (Ext B–H + compat supplement)
+    )
+
+
 RichText = list[Span]
 
 

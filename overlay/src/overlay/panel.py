@@ -26,7 +26,7 @@ from overlay.body_block import (
     render_body_block,
 )
 from overlay.draw.icon_source import Icon, render_icon
-from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme
+from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme, is_ideograph
 from overlay.parallel import shared_executor
 from overlay.render.chip import ChipStyle
 from overlay.render.document import GUTTER_PX, INDENT_PX
@@ -124,14 +124,31 @@ def load_entry(path: str | Path) -> Entry:
     )
 
 
+def _headword_kanji_links(scan: list[ScanBox]) -> list[LinkBox]:
+    """One ``LinkBox('kanji:<ch>')`` per headword ideograph at its glyph rect, so clicking a kanji in
+    the headword opens its kanji entry (Yomitan parity). Astral-safe (#99): 𠮟 U+20B9F counts."""
+    return [
+        LinkBox(f"kanji:{sb.text[0]}", sb.x, sb.y, sb.w, sb.h)
+        for sb in scan
+        if sb.text and is_ideograph(sb.text[0])
+    ]
+
+
 def _flow_row(
-    flow, content_w: int, scale: float = 1.35, *, render_scale: float = 1.0
+    flow,
+    content_w: int,
+    scale: float = 1.35,
+    *,
+    render_scale: float = 1.0,
+    scan_out: list[ScanBox] | None = None,
 ) -> Image.Image:
     # ``scale`` is the LINE-HEIGHT scale (a layout knob); ``render_scale`` > 1 is the display factor
-    # that rasters the row NATIVELY (crisp non-body rows for the scale-boundary arch).
+    # that rasters the row NATIVELY (crisp non-body rows for the scale-boundary arch). ``scan_out``
+    # collects per-CJK-char hitboxes (1× coords, scale-independent) — the header uses them for kanji links.
     return render_flow(
         flow,
         FlowBlock(width=content_w, padding=0, line_height_scale=scale, background=(0, 0, 0, 0)),
+        scan_out=scan_out,
         scale=render_scale,
     )
 
@@ -369,7 +386,13 @@ def panel_rows(
             Span(" ", Style(size=theme.px(46))),
         ]
         hw += inline_flow(entry.headword, Style(size=theme.px(46), weight=700, color=theme.text))
-        hdr = _flow_row(hw, content_w, render_scale=scale)  # native big ruby word at scale
+        # Collect per-CJK-char hitboxes (1× coords) so each headword kanji becomes a click-to-open link
+        # (Yomitan parity): clicking 勉 in 勉強 opens its kanji entry, which the header couldn't do before.
+        scan: list[ScanBox] = []
+        hdr = _flow_row(
+            hw, content_w, render_scale=scale, scan_out=scan
+        )  # native big ruby at scale
+        kanji_links = _headword_kanji_links(scan)
         right = content_w
         top = theme.px(_ICON_TOP)
         if speak_button:  # icons render at native size, composited at scaled positions
@@ -383,7 +406,7 @@ def panel_rows(
             hdr.alpha_composite(
                 btn, (round((right - add) * scale), round((top + theme.px(2)) * scale))
             )
-        return hdr, [], []
+        return hdr, [], kanji_links
 
     rows.append(Row(m, _header))
 
