@@ -214,6 +214,9 @@ class Reader:
     _engaged_req = Delegated[prefetch.EngagedHoverReq | None]("prefetch_state", "engaged_req")
     _engaged_lock = Delegated[threading.Lock]("prefetch_state", "engaged_lock")
     _engaged_results = Delegated[queue.Queue]("prefetch_state", "engaged_results")
+    _nav_req = Delegated[prefetch.EngagedNavReq | None]("prefetch_state", "nav_req")
+    _nav_lock = Delegated[threading.Lock]("prefetch_state", "nav_lock")
+    _nav_results = Delegated[queue.Queue]("prefetch_state", "nav_results")
     _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
     # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
     # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
@@ -1306,6 +1309,11 @@ class Reader:
         """Yomitan-style: a cross-reference clicked in the BASE tooltip replaces its content in place
         and pushes the previous view onto the back-stack (Esc/back returns)."""
         tooltip.navigate_tip(self, query)
+
+    def _navigated_panel(self, query: str):
+        """The read-only reference Panel for a nav target — built off the main thread by the prefetch
+        worker (tier-3 clicked nav), so the seam lives on the Reader (no prefetch→tooltip import)."""
+        return tooltip._navigated_panel(self, query)
 
     def _tip_close_or_back(self) -> None:
         """Esc while link-navigated steps back one entry; at the root (or a plain hovered word) it

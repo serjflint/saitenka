@@ -115,6 +115,20 @@ class EngagedHoverReq:
     tail: str = ""  # nested only: the scan-cell tail the tick re-derives the fresh anchor from
 
 
+@dataclass(frozen=True, slots=True)
+class EngagedNavReq:
+    """A clicked cross-reference: replace the base tooltip's content with ``query`` IN PLACE. Building +
+    rastering the navigated panel's first viewport on the click tick is a synchronous getmask2 raster
+    (``tip_compose[clicked]``); this defers it — the worker builds and warms the bands, the tick swaps
+    from warm bands (a cheap assemble, no raster). ``origin`` is ``id(reader._tip_state)`` at click time,
+    so the tick skips the swap if the tooltip changed under it (a word switch) rather than hijacking the
+    new one. Newest-wins single slot: one navigation intent at a time."""
+
+    gen: int
+    query: str
+    origin: int
+
+
 class PrefetchState:
     """Runtime state of the background prefetch subsystem: the decode-warm and speculative-head work
     queues, the persistent worker threads, the generation counter whose bump drops every in-flight job
@@ -139,6 +153,11 @@ class PrefetchState:
         self.engaged_req: EngagedHoverReq | None = None
         self.engaged_lock = threading.Lock()
         self.engaged_results: queue.Queue = queue.Queue()
+        # Clicked cross-ref navigation (tier-3 for the in-place nav): its own newest-wins slot + results,
+        # so a nav intent and a hover cold-miss don't clobber each other's slot.
+        self.nav_req: EngagedNavReq | None = None
+        self.nav_lock = threading.Lock()
+        self.nav_results: queue.Queue = queue.Queue()
         self.threads: list[threading.Thread] = []  # persistent workers (session-lifetime)
 
     def cancel(self) -> int:
@@ -148,6 +167,8 @@ class PrefetchState:
         self.gen += 1
         with self.engaged_lock:  # drop a pending cold-miss render for the abandoned word
             self.engaged_req = None
+        with self.nav_lock:  # drop a pending cross-ref navigation too
+            self.nav_req = None
         return self.gen
 
 
@@ -261,6 +282,8 @@ def _try_head_prefetch_item(reader: Reader) -> bool:
 
 def prefetch_worker(reader: Reader) -> None:
     while not reader._stop.is_set():
+        if _try_engaged_nav(reader):  # a clicked cross-ref — top intent, like a hover cold-miss
+            continue
         if _try_engaged_hover(reader):  # the word hovered NOW that missed everything — top priority
             continue
         if _try_render_ahead(reader):  # on-screen scroll warm next
@@ -379,6 +402,55 @@ def drain_engaged_results(reader: Reader):
     while True:
         try:
             yield reader._engaged_results.get_nowait()
+        except queue.Empty:
+            return
+
+
+def request_engaged_nav(reader: Reader, query: str) -> None:
+    """Enqueue a clicked cross-reference navigation (tier-3): the worker builds + warms the navigated
+    panel off the main thread, the tick swaps it in from warm bands. ``origin`` pins the tooltip that was
+    showing at click time so a word switch can't be hijacked. Newest-wins. No-op when prefetch is off."""
+    if not reader.prefetch:
+        return
+    req = EngagedNavReq(reader._prefetch_gen, query, id(reader._tip_state))
+    with reader._nav_lock:
+        reader._nav_req = req
+
+
+def _try_engaged_nav(reader: Reader) -> bool:
+    """Drain the nav slot: build the navigated panel and WARM its first-viewport bands off the main thread
+    (native + raw), then hand ``(gen, origin, panel)`` back so the tick swaps it in with no raster. ``True``
+    when handled (so the worker re-checks it before the cheaper queues)."""
+    with reader._nav_lock:
+        req = reader._nav_req
+        reader._nav_req = None
+    if req is None:
+        return False
+    if reader._stop.is_set() or req.gen != reader._prefetch_gen:
+        return True  # stale (line change / seek / closing) — handled, keep looping
+    try:
+        with otel_metrics.traced("prefetch_decode", kind="engaged_nav"):
+            st = reader._navigated_panel(req.query)
+            if st is not None:
+                st.render_head(reader._tip_cap())
+                vh = min(st.full_height, reader._tip_cap())
+                if vh > 0:
+                    scale = reader._raster_scale
+                    if scale > 1.0:
+                        st.viewport(0, vh, overscan=vh, scale=scale)  # native bands (crisp swap)
+                    st.viewport(0, vh, overscan=vh)  # raw bands (soft/assemble path)
+                reader._nav_results.put((req.gen, req.origin, st))
+    except Exception:
+        log.debug("engaged nav render failed for %r", req.query, exc_info=True)
+    return True
+
+
+def drain_nav_results(reader: Reader):
+    """Yield ``(gen, origin, panel)`` for each worker-built navigated panel. The swap (nav-stack push +
+    state set + blit) lives in ``tooltip.apply_engaged_results`` — it needs the tip-view capture."""
+    while True:
+        try:
+            yield reader._nav_results.get_nowait()
         except queue.Empty:
             return
 

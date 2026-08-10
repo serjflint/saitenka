@@ -595,3 +595,80 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
     r._engaged_results.put((r._prefetch_gen, ("k",), True, "本"))
     tooltip.apply_engaged_results(r)
     assert r._nest.state is None
+
+
+# --- clicked cross-reference navigation: off the main thread too (tier-3) ------------------------
+
+
+def _base_tip_up(r):
+    _i, tok, inflected, mined = _first_content(r)
+    r._tip_state = r._panel_for(tok, inflected, min_h=r._tip_cap(), mined=mined)
+    return tok
+
+
+def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
+    # A clicked cross-ref with a worker running enqueues an off-thread nav (build+raster off the click
+    # tick) and does NOT swap synchronously — no getmask2 on the tick.
+    import threading
+
+    from overlay.app import tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    tok = _base_tip_up(r)
+    tooltip.navigate_tip(r, tok.surface)
+    assert r._nav_req is not None and r._nav_req.query == tok.surface
+    assert r._tip_nav == []  # nothing pushed / swapped yet
+
+
+def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
+    from overlay.app import tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = False
+    r._prefetch_threads = []
+    tok = _base_tip_up(r)
+    tooltip.navigate_tip(r, tok.surface)
+    assert r._nav_req is None
+    assert len(r._tip_nav) == 1  # synchronous swap pushed the previous view
+
+
+def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
+    import threading
+
+    from overlay.app import prefetch, tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    tok = _base_tip_up(r)
+    old = r._tip_state
+    tooltip.navigate_tip(r, tok.surface)  # defer
+    assert prefetch._try_engaged_nav(r) is True  # worker builds + warms
+    tooltip.apply_engaged_results(r)  # tick swaps
+    assert r._tip_state is not None and r._tip_state is not old  # navigated panel installed
+    assert len(r._tip_nav) == 1  # previous view pushed for Esc/back
+    assert r._tip_key is None  # a navigated view is keyless
+
+
+def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
+    # origin guard: if the base tooltip changed (a word switch) in the defer window, the composed nav is
+    # dropped — never hijacks the new tooltip into the clicked target.
+    import threading
+
+    from overlay.app import prefetch, tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    tok = _base_tip_up(r)
+    tooltip.navigate_tip(r, tok.surface)
+    assert prefetch._try_engaged_nav(r) is True
+    # A word switch in the defer window → a genuinely different panel object under _tip_state.
+    j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
+    r._tip_state = r._panel_for(
+        r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
+    )
+    tooltip.apply_engaged_results(r)
+    assert r._tip_nav == []  # not swapped — origin mismatch

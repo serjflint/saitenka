@@ -988,6 +988,20 @@ def apply_engaged_results(reader: Reader) -> None:
             _apply_engaged_nested(reader, tail)
         else:
             _apply_engaged_base(reader, key)
+    for gen, origin, st in prefetch.drain_nav_results(reader):
+        _apply_engaged_nav(reader, gen, origin, st)
+
+
+def _apply_engaged_nav(reader: Reader, gen: int, origin: int, st: Panel | None) -> None:
+    """Swap in a worker-built navigated panel (clicked cross-ref), iff still valid: same generation, a
+    tooltip is still up, and it's the SAME tooltip that was showing at click time (``origin`` = its
+    ``id``) — a word switch in the defer window must not be hijacked into the clicked target. The bands
+    are worker-warmed, so the swap's blit is a cheap assemble, not a raster."""
+    if st is None or gen != reader._prefetch_gen or reader._tip_state is None:
+        return
+    if id(reader._tip_state) != origin:
+        return  # the tooltip changed under us — don't hijack the new one
+    _install_navigated(reader, st)
 
 
 def _apply_engaged_base(reader: Reader, key: tuple) -> None:
@@ -1155,13 +1169,27 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
 def navigate_tip(reader: Reader, query: str) -> None:
     """Replace the base tooltip's content with the entry for ``query`` (a clicked cross-reference),
     pushing the current view onto the back-stack (Esc/back returns). The popup stays put — same anchor,
-    same TIP slot — so this reads as an in-place navigation, not a new floating popup."""
+    same TIP slot — so this reads as an in-place navigation, not a new floating popup.
+
+    Deferred off the main thread (tier-3): building + rastering the navigated panel's first viewport on
+    the click tick is a synchronous getmask2 raster (the ``tip_compose[clicked]`` tail). With a worker
+    running, enqueue it — the worker builds + warms the bands, the tick swaps from warm bands (a cheap
+    assemble, no raster). No worker → the synchronous path (unchanged)."""
     if reader.dict_set is None:
+        return
+    if prefetch.workers_running(reader) and reader._tip_state is not None:
+        prefetch.request_engaged_nav(reader, query)
         return
     st = _navigated_panel(reader, query)
     if st is None:
         return
     st.render_head(reader._tip_cap())  # warm the head so full_height sizes the viewport correctly
+    _install_navigated(reader, st)
+
+
+def _install_navigated(reader: Reader, st: Panel) -> None:
+    """Swap ``st`` in as the base tooltip's content: hide the stale scan popup, push the current view
+    onto the back-stack, and blit. Shared by the synchronous nav and the deferred (worker-built) swap."""
     reader._hide_nested()  # the old content's scan popup is stale
     reader._tip_nav.append(_capture_tip_view(reader))
     reader._tip_state = st
