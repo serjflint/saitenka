@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786390850220,
+  "lastUpdate": 1786393704331,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3419,6 +3419,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.842,
             "range": "±0.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "759fb38f1f6d0734ed0d80a497555db11c6bf0be",
+          "message": "Merge pull request #309 from serjflint/fix/import-nested-profiles\n\nfix(import): serialise nested [profiles.*] tables; relock crates from PyPI",
+          "timestamp": "2026-08-10T23:26:57+03:00",
+          "tree_id": "8eea2ab411666655a98ac25a1a74154d76b1d81b",
+          "url": "https://github.com/serjflint/saitenka/commit/759fb38f1f6d0734ed0d80a497555db11c6bf0be"
+        },
+        "date": 1786393703326,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.36,
+            "range": "±5.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.537,
+            "range": "±9.6%",
             "unit": "ms"
           }
         ]
