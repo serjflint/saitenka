@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786387761941,
+  "lastUpdate": 1786387865682,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3311,6 +3311,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 10.221,
             "range": "±14.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a77017f43d70c83b88cae4c65b8607218ecd05b9",
+          "message": "feat(taffylite): pyo3 0.29 abi3+abi3t wheel matrix (PEP 803), bump 0.2.0 (#307)\n\n* feat(taffylite): pyo3 0.29 abi3+abi3t wheels (PEP 803), bump 0.2.0\n\nOne Cargo config, three wheels per platform via three build interpreters:\nabi3 (GIL 3.13+), version-specific cp314t (free-threaded 3.14), abi3t\n(FT+GIL 3.15+). Replaces the per-version cp313/cp314/cp314t set — the abi3\nwheel now covers every GIL build, so 3.15+ users get a forward-compatible\nwheel instead of building from sdist. All three verified loading and\ncomputing on 3.13/3.14/3.14t/3.15t locally; taffylite's 16 tests pass on\nboth the abi3 and cp314t wheels. overlay's >=0.1.0 floor already accepts\n0.2.0 — a relock after publish adopts the abi3t wheels.\n\n* ci(taffylite): 3-build abi3t release matrix, de-scar the header\n\nCollapse the per-version wheel matrix to the three abi3/abi3t builds; the\n3.15t leg is non-fatal until the interpreter is installable. Trim the\nheader essay to what the diff can't show: the one-interpreter-per-job rule\n(unique filenames dodge the merge-concat / CVE-2025-54368 strict-ZIP 400).",
+          "timestamp": "2026-08-10T21:50:14+03:00",
+          "tree_id": "ec008b5cb07b6228e3ea3e3000c1141e132eff4b",
+          "url": "https://github.com/serjflint/saitenka/commit/a77017f43d70c83b88cae4c65b8607218ecd05b9"
+        },
+        "date": 1786387864766,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.18,
+            "range": "±1.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.615,
+            "range": "±3.8%",
             "unit": "ms"
           }
         ]
