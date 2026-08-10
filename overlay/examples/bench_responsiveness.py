@@ -1308,6 +1308,29 @@ def run_vocab(
     return gil_rc
 
 
+def _timeline_interact(reader) -> None:
+    """Exercise the nested scan popup + a clicked cross-reference off the CURRENT base tooltip, so a
+    --timeline run has realistic ``prefetch_decode``/``tip_compose``/``render`` kind=nested|clicked
+    latency — not only base hovers. The nested open defers to the worker (tier-3): open cold (enqueue an
+    off-thread compose), let it land, then re-open warm — the same two-phase path a real scan-hover takes.
+    Then navigate one cross-reference in place (``kind="clicked"``). Best-effort: a word with no scan
+    cells / no term simply skips."""
+    st = reader._tip_state
+    if st is None:
+        return
+    boxes = st.windowed.scan_boxes()
+    if boxes:
+        sb = boxes[len(boxes) // 2]  # a cell well inside the body
+        reader._show_nested(
+            sb
+        )  # cold inner word → off-thread compose (kind=engaged_nested / nested)
+        time.sleep(0.02)  # let the worker compose the nested head
+        reader._show_nested(sb)  # warm → synchronous nested show (tip_compose kind="nested")
+        reader._hide_nested()
+    if 0 <= reader.hover < len(reader.tokens):
+        reader._navigate_tip(reader.tokens[reader.hover].surface)  # in-place nav → kind="clicked"
+
+
 def run_timeline(
     rt: dict,
     require_ft: bool = False,
@@ -1318,6 +1341,7 @@ def run_timeline(
     hover_every: int = 4,
     lookahead: int = 3,
     head_prefetch: int = 0,
+    interact: bool = True,
 ) -> int:
     """The idle-dominated ground truth (``vibe/hot-path-idle-spreading-plan.md`` Stage 1). Real usage
     is neither continuous churn (``--stress``) nor raw render throughput (``--vocab``) — it's mostly
@@ -1432,6 +1456,10 @@ def run_timeline(
                 lead_ms.append((warmed_at[lemma] - enq) * 1000.0)
             elif not was_warm and enq is not None:
                 misses += 1  # the worker had idle time to warm it but hadn't finished yet
+            if interact:
+                _timeline_interact(
+                    reader
+                )  # nested + clicked, off this base tooltip (realistic kinds)
             reader.set_hover(-1)
     finally:
         reader._stop.set()
@@ -1932,6 +1960,13 @@ def main() -> int:
         "behavior); splits hover latency by PANEL warmth (not just decode) and reports RSS growth",
     )
     ap.add_argument(
+        "--timeline-no-interact",
+        action="store_false",
+        dest="timeline_interact",
+        help="--timeline: skip the per-hover nested-popup + cross-reference exercise (on by default so "
+        "the trace carries realistic kind=nested|clicked latency, not just base hovers)",
+    )
+    ap.add_argument(
         "--trace",
         metavar="REPORT.zip",
         help="replay a diagnostics report's REAL event cadence (hover/scroll/cue mix + ordering from "
@@ -2023,6 +2058,7 @@ def main() -> int:
             hover_every=args.timeline_hover_every,
             lookahead=args.timeline_lookahead,
             head_prefetch=args.timeline_head_prefetch,
+            interact=args.timeline_interact,
         )
     if args.stress:
         return run_stress(
