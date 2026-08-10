@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786346313608,
+  "lastUpdate": 1786347324169,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2771,6 +2771,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.874,
             "range": "±18.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1fca115e107195d7253ecef4130360077ba08f32",
+          "message": "Merge pull request #290 from serjflint/test/pipeline-oracle\n\ntest(pipeline): (cue, hover position) → Entry oracle on the real build assembly",
+          "timestamp": "2026-08-10T10:34:56+03:00",
+          "tree_id": "797f2194b9d8406d3c06b44a2f84c443e6a538b4",
+          "url": "https://github.com/serjflint/saitenka/commit/1fca115e107195d7253ecef4130360077ba08f32"
+        },
+        "date": 1786347323623,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.367,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.073,
+            "range": "±16.0%",
             "unit": "ms"
           }
         ]
