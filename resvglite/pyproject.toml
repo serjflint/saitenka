@@ -1,0 +1,20 @@
+[project]
+name = "resvglite"
+version = "0.1.0"
+description = "Thin PyO3 binding of resvg — the optional SVG rasterizer behind saitenka's inline dictionary glyphs"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = []
+
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+# Mixed layout: the compiled crate lands as the inner `resvglite.resvglite` submodule; the thin
+# `python/resvglite/` package re-exports it and ships the hand-written `__init__.pyi` stub + `py.typed`
+# so type checkers resolve `render_svg` without the Rust source.
+module-name = "resvglite.resvglite"
+python-source = "python"

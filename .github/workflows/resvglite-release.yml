@@ -1,0 +1,168 @@
+# Publishes the optional `resvglite` Rust extension (resvg binding, images extra, #283) to PyPI on a
+# `resvglite-v*` tag; workflow_dispatch does a TestPyPI dry-run. Trusted Publishing (OIDC, no tokens),
+# keyed to this filename — renaming needs the publisher re-registered on PyPI + TestPyPI (register it
+# before the first tag). Vendors resvg (MPL-2.0), so the copyleft stays contained to this optional wheel.
+#
+# Three wheels per platform (pyo3 abi3 + abi3t, PEP 803): abi3 via 3.13 (covers GIL 3.13+), cp314t via
+# 3.14t (free-threaded 3.14, predates abi3t), abi3t via 3.15t (covers FT *and* GIL 3.15+). One
+# interpreter per job (never --find-interpreter): each job emits one wheel with a unique filename, so
+# download-artifact's merge can't concatenate same-named wheels into a ZIP Warehouse rejects
+# (CVE-2025-54368). 3.15t is still prerelease → its leg is non-fatal until the interpreter is installable.
+name: resvglite release
+
+on:
+  push:
+    tags: ["resvglite-v*"]
+  workflow_dispatch: # manual TestPyPI dry-run of the current commit
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: wheel (linux ${{ matrix.arch }} ${{ matrix.py }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.py == '3.15t' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        py: ["3.13", "3.14t", "3.15t"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: resvglite
+          target: ${{ matrix.arch }}-unknown-linux-gnu
+          manylinux: 2_28
+          args: --release --locked --out dist --compatibility pypi -i python${{ matrix.py }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-linux-${{ matrix.arch }}-${{ matrix.py }}
+          path: resvglite/dist
+
+  macos:
+    name: wheel (macos ${{ matrix.py }}) # arm64 only; Intel dropped (retired runner pool, ▢ fallback)
+    runs-on: macos-14
+    continue-on-error: ${{ matrix.py == '3.15t' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.13", "3.14t", "3.15t"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.py }}
+          allow-prereleases: true
+      - name: Build wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: resvglite
+          target: aarch64-apple-darwin
+          args: --release --locked --out dist -i python
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-macos-${{ matrix.py }}
+          path: resvglite/dist
+
+  windows:
+    name: wheel (windows ${{ matrix.py }})
+    runs-on: windows-latest
+    continue-on-error: ${{ matrix.py == '3.15t' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["3.13", "3.14t", "3.15t"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.py }}
+          allow-prereleases: true
+      - name: Build wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: resvglite
+          target: x86_64-pc-windows-msvc
+          args: --release --locked --out dist -i python
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-windows-${{ matrix.py }}
+          path: resvglite/dist
+
+  sdist:
+    name: sdist (Corresponding Source / fallback build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build sdist
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.14.1
+          working-directory: resvglite
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-sdist
+          path: resvglite/dist
+
+  testpypi:
+    name: Publish to TestPyPI (dry-run)
+    needs: [linux, macos, windows, sdist]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/resvglite
+    permissions:
+      id-token: write
+    steps:
+      # Checkout before download-artifact (its clean pass would wipe the downloads); the normalize
+      # script lives in the repo.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: wheels-*
+          path: dist-pypi
+          merge-multiple: true
+      # Defense-in-depth against CVE-2025-54368 strict-ZIP 400s (the one-interpreter-per-job build is the
+      # real cure; this guards regressions).
+      - name: Normalize wheels (strip trailing ZIP data)
+        run: python3 resvglite/tools/normalize_wheels.py dist-pypi
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist-pypi/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    name: Publish to PyPI
+    needs: [linux, macos, windows, sdist]
+    if: startsWith(github.ref, 'refs/tags/resvglite-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/resvglite
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: wheels-*
+          path: dist-pypi
+          merge-multiple: true
+      - name: Normalize wheels (strip trailing ZIP data)
+        run: python3 resvglite/tools/normalize_wheels.py dist-pypi
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist-pypi/
+          skip-existing: true
