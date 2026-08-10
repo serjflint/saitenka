@@ -191,6 +191,14 @@ Consult it when adding or rewriting a test.
   that proves it can fail. Family menu, canonical examples, the config matrix, and the `poe test-live`
   liveness check — the **write-test skill's
   [`references/oracle-catalog.md`](.agents/skills/write-test/references/oracle-catalog.md)** owns them.
+- **Test-kind is a decision, not a default — unit-only is a smell.** The reflex is a unit test, so the
+  other kinds (integration / assembly / invariant / differential / stateful / concurrency …) only land
+  when they're consciously chosen. For a change to a cache / config knob / cross-module wiring / parser /
+  pure algorithmic core / interacting UI state, map the subsystem you touched to the
+  [coverage matrix](.agents/skills/write-test/references/coverage-matrix.md) and pick the kind(s) it
+  warrants. A commit-time advisory (`.agents/hooks/test-kinds-advisory.py`, the active form of that
+  matrix via `.agents/hooks/test_kinds.py`) surfaces the applicable kinds once per subsystem — a nudge,
+  not a gate (adequacy stays the Grow/Sharpen/mutation loops' job).
 - **A stolen conformance corpus has a locked denominator.** A vendored upstream suite used as an oracle
   (UAX #14, deinflect, subtitle) must not silently shrink: `poe corpus-lock` (`tools/corpus_check.py`, in
   `all`) binds each corpus's case census (count + key-set hash) to a committed manifest, so a re-vendor /

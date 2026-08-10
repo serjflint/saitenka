@@ -23,50 +23,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+from _hooklib import is_git_commit, run_git  # agent-agnostic commit detection + git shell-out
 
 # thresholds — a block is "long" (worth a review) if ANY holds; tune via env if noisy.
 _MIN_LINES = 5  # consecutive added comment lines
 _MAX_BLOCK_CHARS = 300  # total chars across the block
 _MAX_LINE_CHARS = 200  # a single dense one-liner
-
-_WRAPPERS = {"sudo", "env", "time", "nice", "nohup", "command", "stdbuf"}
-
-
-def _base(tok: str) -> str:
-    return tok.rsplit("/", 1)[-1].strip("'\"`")
-
-
-def _strip_noise(cmd: str) -> str:
-    cmd = re.sub(r"<<-?\s*(['\"]?)(\w+)\1.*?\n\2", " ", cmd, flags=re.DOTALL)  # heredocs
-    cmd = re.sub(r"'[^']*'", " ", cmd)
-    return re.sub(r'"[^"]*"', " ", cmd)
-
-
-def is_git_commit(cmd: str) -> bool:
-    """True if the command runs `git commit` at a command position (not inside a string / `log`)."""
-    for seg in re.split(r"\$\(|`|&&|\|\||[|;\n&()]", _strip_noise(cmd)):
-        toks = seg.split()
-        while toks and (_base(toks[0]) in _WRAPPERS or "=" in toks[0]):
-            toks = toks[1:]
-        if not toks or _base(toks[0]) != "git":
-            continue
-        i = 1  # find git's subcommand: first bare token, skipping global flags + their values
-        while i < len(toks):
-            t = toks[i]
-            if t in {"-C", "-c", "--git-dir", "--work-tree"}:  # these take a value
-                i += 2
-                continue
-            if t.startswith("-"):
-                i += 1
-                continue
-            if t == "commit":  # this segment is a commit; else keep scanning later segments
-                return True
-            break
-    return False
-
 
 _ADD_FILE = re.compile(r"^\+\+\+ b/(.*)$")
 
@@ -112,14 +77,6 @@ def signature(flagged: list[tuple[str, str]]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _git(args: list[str]) -> str:
-    try:
-        r = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
-    except OSError:
-        return ""
-    return r.stdout
-
-
 def _deny(reason: str) -> None:
     print(
         json.dumps(
@@ -163,11 +120,11 @@ def main() -> None:
     cmd = (data.get("tool_input") or {}).get("command", "") or ""
     if not is_git_commit(cmd):
         return
-    flagged = flagged_comments(_git(["diff", "--cached"]))
+    flagged = flagged_comments(run_git(["diff", "--cached"]))
     if not flagged:
         return
     sig = signature(flagged)
-    ack = Path(_git(["rev-parse", "--git-dir"]).strip() or ".git") / "comment-review-ack"
+    ack = Path(run_git(["rev-parse", "--git-dir"]).strip() or ".git") / "comment-review-ack"
     if ack.is_file() and ack.read_text().strip() == sig:
         return  # already reviewed this exact set → let the retry through
     try:

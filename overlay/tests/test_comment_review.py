@@ -11,10 +11,15 @@ import importlib.util
 import sys
 from pathlib import Path
 
-_HOOK = Path(__file__).resolve().parents[2] / ".agents" / "hooks" / "comment-review.py"
+_HOOKS = Path(__file__).resolve().parents[2] / ".agents" / "hooks"
+_HOOK = _HOOKS / "comment-review.py"
 
 
 def _mod():
+    if str(_HOOKS) not in sys.path:
+        sys.path.insert(
+            0, str(_HOOKS)
+        )  # so the hook's `_hooklib` sibling import resolves at runtime
     spec = importlib.util.spec_from_file_location("_comment_review", _HOOK)
     assert spec and spec.loader
     m = importlib.util.module_from_spec(spec)
