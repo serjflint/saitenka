@@ -5,10 +5,13 @@
 # Vendored Unicode UAX #14 data (property table + conformance corpus) — verbatim upstream text whose
 # Line_Break class codes (BA, ID, Nd, …) trip the spell checker. Never hand-edit; regenerate from source.
 # The deinflect transform data is generated verbatim from Yomitan descriptors — the French one is full of
-# Latin conjugation suffixes (siez, âtes, …) that read as English typos; never hand-edit, regenerate.
+# Latin conjugation suffixes (siez, âtes, …) that read as English typos; never hand-edit, regenerate. The
+# French differential corpus + its seed word-list are likewise French vocabulary (vas, vai, …), not typos.
 extend-exclude = [
     "overlay/tests/fixtures/uax14/",
     "deinflect/src/saitenka_deinflect/data/",
+    "deinflect/tests/fixtures/french_transforms_cases.json",
+    "deinflect/tools/differential_seeds/",
 ]
 
 [default.extend-words]

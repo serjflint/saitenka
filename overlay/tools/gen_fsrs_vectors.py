@@ -23,16 +23,22 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from pathlib import Path
 
 from fsrs import Card, Scheduler, State  # provided by the PEP-723 dep above
 
+# `$CORPUS_OUT` redirects the write (the drift guard regenerates into a temp file to diff, never clobber).
 OUT = (
-    Path(__file__).resolve().parent.parent
-    / "tests"
-    / "fixtures"
-    / "fsrs"
-    / "py_fsrs_retrievability.json"
+    Path(os.environ["CORPUS_OUT"])
+    if os.environ.get("CORPUS_OUT")
+    else (
+        Path(__file__).resolve().parent.parent
+        / "tests"
+        / "fixtures"
+        / "fsrs"
+        / "py_fsrs_retrievability.json"
+    )
 )
 
 # w20 is FSRS-6's decay parameter (Anki stores it positive; runtime decay = -w20). 0.1542 is py-fsrs's

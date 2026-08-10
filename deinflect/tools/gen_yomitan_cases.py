@@ -25,6 +25,7 @@ the pin (keep it in sync with the `japanese_transforms.json` dump's Yomitan vers
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -35,8 +36,16 @@ YOMITAN_COMMIT = "3af775bda1df"
 
 _CHECKOUT = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/yomitan-src")
 SRC = _CHECKOUT / "test" / "language" / "japanese-transforms.test.js"
+# `$CORPUS_OUT` redirects the write (the drift guard regenerates into a temp file to diff, never clobber).
 OUT = (
-    Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "japanese_transforms_cases.json"
+    Path(os.environ["CORPUS_OUT"])
+    if os.environ.get("CORPUS_OUT")
+    else (
+        Path(__file__).resolve().parent.parent
+        / "tests"
+        / "fixtures"
+        / "japanese_transforms_cases.json"
+    )
 )
 
 # One category object: `{ category: '..', valid: true|false, tests: [ {term..}, .. ] }`. The lookahead

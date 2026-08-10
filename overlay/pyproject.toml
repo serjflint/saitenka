@@ -426,6 +426,11 @@ docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" 
 # re-blessed (`python tools/corpus_check.py show`). Same drift-guard idiom docs-consts applies to constants,
 # here applied to stolen conformance suites. Zero-LLM, stdlib. Planted +/- controls: tests/test_corpus_check.py.
 corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check" }
+# NOT in `all` (needs Node + a pinned Yomitan checkout; fetches py-fsrs) — the regenerate-and-diff sibling
+# of corpus-lock for GENERATED corpora (fsrs vectors, JP/FR transform differentials). corpus-lock guards
+# *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
+# pin. Yomitan-backed corpora skip (not fail) when no checkout at the pin is found. See tools/corpus_drift.py.
+corpus-drift = { shell = "uv run --extra full python tools/corpus_drift.py" }
 # Docs site (Material for MkDocs → Read the Docs). Source lives at the repo root (../mkdocs.yml, ../docs),
 # but the build runs here because this env has the `saitenka` package + `docs` group. `--strict` fails on
 # broken links/nav, so a docs regression is caught locally, not on RTD. NOT in `all` (docs deps are an

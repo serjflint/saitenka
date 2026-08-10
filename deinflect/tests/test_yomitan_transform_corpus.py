@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 import pytest
-from saitenka_deinflect import condition_flags, conditions_match, deinflect
+from _corpus_oracle import has_term_reasons
 
 _CASES = json.loads(
     (Path(__file__).parent / "fixtures" / "japanese_transforms_cases.json").read_text(
@@ -22,25 +22,11 @@ _CASES = json.loads(
 )["cases"]
 
 
-def _has_term_reasons(source: str, term: str, rule: str | None, reasons: list[str]) -> bool:
-    """Port of Yomitan's fixture ``hasTermReasons``: does any deinflection of ``source`` reach
-    ``term`` with matching POS conditions and the exact transform chain?"""
-    rule_flags = None if rule is None else condition_flags(rule)
-    for d in deinflect(source):
-        if d.text != term:
-            continue
-        if rule_flags is not None and not conditions_match(d.conditions, rule_flags):
-            continue
-        if list(d.chain) == reasons:
-            return True
-    return False
-
-
 @pytest.mark.parametrize(
     "case",
     _CASES,
     ids=[f"{c['category']}:{c['source']}->{c['term']}" for c in _CASES],
 )
 def test_matches_yomitan_transform_corpus(case):
-    got = _has_term_reasons(case["source"], case["term"], case["rule"], case["reasons"])
+    got = has_term_reasons(case["source"], case["term"], case["rule"], case["reasons"])
     assert got is case["valid"]
