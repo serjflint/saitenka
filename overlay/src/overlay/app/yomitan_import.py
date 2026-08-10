@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING
 
 from overlay.app import prompt
 from overlay.app.bankreader import zip_roles
+from overlay.app.config import load_config
+from overlay.app.init_wizard import dumps_toml, write_config
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -228,12 +230,31 @@ def _match_and_report(enabled: list[str], scan_dirs: list[str]) -> dict[str, str
     return matches
 
 
+def finalize_import(cfg: dict, *, confirm, echo=print) -> Path | None:
+    """Shared tail of every importer (``import`` / ``import-dictionaries`` / ``import-settings``):
+    overlay the freshly-imported dict/freq/pitch titles onto the existing config, show the proposal,
+    and write it (timestamped backup first, via the comment-preserving tomlkit sink). Returns the
+    backup path, if any.
+
+    Extracted so this merge→serialise→write path is unit-tested ONCE and the commands stay thin
+    wrappers over it — inlined per command it went uncovered, and a nested ``[profiles.*]`` table (a
+    named reading profile, #254) in the existing config crashed the proposal serialiser unseen."""
+    for kind in ("dicts", "freq", "pitch"):
+        if cfg.get(kind):
+            echo(f"  {kind}: {cfg[kind]}")
+    merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
+    echo("\nProposed config:")
+    echo(dumps_toml(merged))
+    backup = write_config(merged, confirm=confirm)
+    if backup:
+        echo(f"backed up existing config → {backup}")
+    return backup
+
+
 def run_import(
     settings_path: str | None, scan_dirs: list[str] | None, confirm
 ) -> int:  # pragma: no cover — interactive glue; the pieces above are unit-tested
     """CLI entry: parse → match → propose → write via the shared confirm+backup sink."""
-    from overlay.app.init_wizard import write_config
-
     settings_path = _resolve_settings_path(settings_path)
     if not settings_path:
         return 1
@@ -257,15 +278,5 @@ def run_import(
 
     ordered = [matches[name] for name in enabled if name in matches]
     cfg = import_zips(ordered, imported_at=datetime.now(UTC).isoformat())
-
-    from overlay.app.config import load_config
-    from overlay.app.init_wizard import dumps_toml
-
-    existing = load_config()
-    merged = {**existing, **cfg}  # overlay the imported dict/freq/pitch titles onto the config
-    print("\nProposed config:")
-    print(dumps_toml(merged))
-    backup = write_config(merged, confirm=confirm)
-    if backup:
-        print(f"backed up existing config → {backup}")
+    finalize_import(cfg, confirm=confirm)
     return 0

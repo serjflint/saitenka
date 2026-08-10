@@ -731,9 +731,8 @@ def import_dicts(
     from datetime import datetime
 
     from overlay.app import prompt
-    from overlay.app.init_wizard import dumps_toml, write_config
     from overlay.app.progress import BuildBar
-    from overlay.app.yomitan_import import gather_yomitan_zips, import_zips
+    from overlay.app.yomitan_import import finalize_import, gather_yomitan_zips, import_zips
 
     zips = gather_yomitan_zips(list(paths))
     if not zips:
@@ -748,15 +747,7 @@ def import_dicts(
         cfg = import_zips(zips, imported_at=datetime.now(UTC).isoformat(), progress=bar.update)
     finally:
         bar.close()
-    for kind in ("dicts", "freq", "pitch"):
-        if cfg.get(kind):
-            print(f"  {kind}: {cfg[kind]}")
-    merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
-    print("\nProposed config:")
-    print(dumps_toml(merged))
-    backup = write_config(merged, confirm=(lambda _p: True) if yes else prompt.confirm)
-    if backup:
-        print(f"backed up existing config → {backup}")
+    finalize_import(cfg, confirm=(lambda _p: True) if yes else prompt.confirm)
     _print_legacy_note()
     return 0
 
@@ -916,10 +907,9 @@ def import_dictionaries(
     from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
     from overlay.app import prompt
-    from overlay.app.init_wizard import dumps_toml, write_config
     from overlay.app.progress import BuildBar
     from overlay.app.yomitan_db_import import YomitanDbImportError, import_database, read_header
-    from overlay.app.yomitan_import import import_zips
+    from overlay.app.yomitan_import import finalize_import, import_zips
 
     try:
         _, total = read_header(export)
@@ -967,15 +957,7 @@ def import_dictionaries(
         finally:
             bar.close()
 
-    for kind in ("dicts", "freq", "pitch"):
-        if cfg.get(kind):
-            print(f"  {kind}: {cfg[kind]}")
-    merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
-    print("\nProposed config:")
-    print(dumps_toml(merged))
-    backup = write_config(merged, confirm=(lambda _p: True) if yes else prompt.confirm)
-    if backup:
-        print(f"backed up existing config → {backup}")
+    finalize_import(cfg, confirm=(lambda _p: True) if yes else prompt.confirm)
     return 0
 
 

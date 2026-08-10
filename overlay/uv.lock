@@ -1876,7 +1876,22 @@ wheels = [
 [[package]]
 name = "resvglite"
 version = "0.1.0"
-source = { editable = "../resvglite" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/c2/c9dd2ae19ca243ee19ae4ead6c4a86021d35c8032eac5c873731f3164765/resvglite-0.1.0.tar.gz", hash = "sha256:4dd6c1d81a1e91bc60a42f47bae4f559b8df9b02d87de35131e9a461765757c1", size = 9269, upload-time = "2026-08-10T19:54:27.214Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/85/b4d3ce6f12fe8b41b7addd01fdf2e24a410c8bf696568d317b05cde4ec19/resvglite-0.1.0-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:343dce2ddf9c9bc34f3366944baa78d8400118e825c10bf5f19f7173f84e65bc", size = 676212, upload-time = "2026-08-10T19:54:09.226Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/c6/d6d70e3afd786b30bddd2088433045ae355b1d0649f117cd8246f1f40a18/resvglite-0.1.0-cp313-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:278dfc7eef911a77501484ca3d4b258d86241e263eb98ddd5764612fdd3ebe08", size = 720106, upload-time = "2026-08-10T19:54:11.08Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/90/536a227f55cc4b9be3ba979619563f3c4d074ef600580bb33b44d493773d/resvglite-0.1.0-cp313-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:606ed7970c23d017890dec8d8cab2e16be33fcbe393878ba3519021aa8d48cea", size = 764003, upload-time = "2026-08-10T19:54:12.654Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/61/5f30da07e697a00d6558b3a942b2940c4169925694c332c7097d90937158/resvglite-0.1.0-cp313-abi3-win_amd64.whl", hash = "sha256:53e1be760122bd6fd19e076f69d28ec1564fd3a24a70c9e6f19e088dfdfc7309", size = 666246, upload-time = "2026-08-10T19:54:14.231Z" },
+    { url = "https://files.pythonhosted.org/packages/76/e9/7d617a7893b9b08962414e7d5795f2bdffd1fd8359938bb11e32cde98c80/resvglite-0.1.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:cd6e1d069d5d3d3ea6901717b8550cb4c7179b87ff09911fa33f1bdec0d54465", size = 676803, upload-time = "2026-08-10T19:54:15.784Z" },
+    { url = "https://files.pythonhosted.org/packages/93/84/1c8d80b25bc800cda1b79134b772b22fc5b3c067b5ed33318a938c255566/resvglite-0.1.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:03991803b0b778e6d4624e13b08d3b567d312aa8db74f45171360214b7945181", size = 720460, upload-time = "2026-08-10T19:54:17.232Z" },
+    { url = "https://files.pythonhosted.org/packages/56/de/90a72414de748b0b0f606749b3c7814412bb1b69cdefbd0a4204a7712ea9/resvglite-0.1.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:fe6fc00df9afeb0be356ca85565f6e9934cac1eed5dba9df7d4e330ec15a86c9", size = 764009, upload-time = "2026-08-10T19:54:18.545Z" },
+    { url = "https://files.pythonhosted.org/packages/95/3c/84ded21f7277926292a2ac399526c652c4e6c1d740e7688fc69de8b64aa2/resvglite-0.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:7ec55bdada768280e7236155953f9428b711ea6ef8fb06dcf38b44c1588eff1a", size = 666655, upload-time = "2026-08-10T19:54:19.925Z" },
+    { url = "https://files.pythonhosted.org/packages/75/b5/dae3be775d2bf5cce43c9b310a2476e5f88025a6d51ffd0d5738f2ae61d6/resvglite-0.1.0-cp315-abi3.abi3t-macosx_11_0_arm64.whl", hash = "sha256:a25a92d5d885d6c4a0a1d28542b78d24422ebd2b0c7068d9acbc3183d8978649", size = 676040, upload-time = "2026-08-10T19:54:21.465Z" },
+    { url = "https://files.pythonhosted.org/packages/df/3b/8dfe6d2d24fab9571ea406c3c3c47e881d93ed07b93b4daa92f87e2caf05/resvglite-0.1.0-cp315-abi3.abi3t-manylinux_2_28_aarch64.whl", hash = "sha256:112f8c2aedc265f26720a9ada4350404730623e6ecc1a2c6e5bce84254b36e8c", size = 720179, upload-time = "2026-08-10T19:54:22.834Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/e5/d8ab82b4483bbeb0f7f545c29bcf1a161cb5bbe57695204e1d97116b8f55/resvglite-0.1.0-cp315-abi3.abi3t-manylinux_2_28_x86_64.whl", hash = "sha256:523ff57df3133d6411101424e8a257f19cdcb358ee02edf9cc1aa980749e5e37", size = 764364, upload-time = "2026-08-10T19:54:24.198Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/db/b1577f59111f8e2fddd5c95a0d6783db38722dd34104f9483c91ff336bca/resvglite-0.1.0-cp315-abi3.abi3t-win_amd64.whl", hash = "sha256:ccbeb030a94718d7fb33f19d70ba01d89774fbf3c24b372258ca314225148c61", size = 666070, upload-time = "2026-08-10T19:54:25.993Z" },
+]
 
 [[package]]
 name = "rich"
@@ -2053,7 +2068,7 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "questionary", specifier = ">=2.1.1" },
-    { name = "resvglite", marker = "extra == 'images'", editable = "../resvglite" },
+    { name = "resvglite", marker = "extra == 'images'", specifier = ">=0.1.0" },
     { name = "rich", specifier = ">=14.0" },
     { name = "saitenka", extras = ["deinflect"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
@@ -2181,22 +2196,22 @@ wheels = [
 
 [[package]]
 name = "taffylite"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5d/30/511fe4dc22c14e221570bc198655565667ae64b63b83cb7b78d354aea6ce/taffylite-0.1.0.tar.gz", hash = "sha256:45c151ce7024bd856e1b7b71b41228c651eef72da50c81b6bd36110bcb9835af", size = 16670, upload-time = "2026-08-09T17:45:01.629Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/59/f0552da0aa81118f91ac21ff47cb840fd25d5946f61096bb98a870421c69/taffylite-0.2.0.tar.gz", hash = "sha256:d472daeeee7a7f74451b498d41853d7f8febc89690096ce68378011c89191c8d", size = 16550, upload-time = "2026-08-10T19:54:46.144Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/5d/fd10ce86a1b0fb4fabd5525900a45e13140b5a8cfc1ad54837e9f14afcef/taffylite-0.1.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ae0a506dc53524fc4987e4f8d4fe6e50b2834b14997b579951ef7a97c6df0c04", size = 314468, upload-time = "2026-08-09T17:44:44.909Z" },
-    { url = "https://files.pythonhosted.org/packages/b6/19/28589ebb8cd25ce8bd88e5d1c7b18512bbfc3e21cefa3a605a78f3585a9c/taffylite-0.1.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:7fa5978effe2d45e67ccf944dcb8daee79bdea94e55e613edf8791c82e6d81d4", size = 326303, upload-time = "2026-08-09T17:44:46.433Z" },
-    { url = "https://files.pythonhosted.org/packages/b9/be/bab90e2dd9ab62d6c985b95508a67b7a4e5655e30a9a25e49e9701cdc612/taffylite-0.1.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:403d9d8d58ad32704c29f243a894a0f16bf82ad840bca8e9e9c17852e87f94f6", size = 357777, upload-time = "2026-08-09T17:44:47.739Z" },
-    { url = "https://files.pythonhosted.org/packages/0d/08/ae3c9be970bd2deb1c95cf58de8c6ec6b4e945f21268f6be5f253be5b213/taffylite-0.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:69c5deb84014d03425c731cc415a2004334fd5390fc0ef7fd0d7076db42d9bed", size = 255272, upload-time = "2026-08-09T17:44:49.143Z" },
-    { url = "https://files.pythonhosted.org/packages/bc/ce/242c49e415c023de5f69065f3320e3fb13972536db9f3de7a6b578da40a8/taffylite-0.1.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:0a6afd52995cf67cb7072951c5341161ed6543325b95aa83b0d85029c67d14e1", size = 315029, upload-time = "2026-08-09T17:44:50.438Z" },
-    { url = "https://files.pythonhosted.org/packages/5e/9b/1429c11060c4309fa7235697ab09680ac82ca14fff19c74dc103ff13f6ed/taffylite-0.1.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:0bb03b6685769de320466f5f062ec43ae94be80c619219589061ac2147510179", size = 326351, upload-time = "2026-08-09T17:44:51.692Z" },
-    { url = "https://files.pythonhosted.org/packages/03/12/5d271e69b8c8e65f28f070f7f0c38394c14530a5998ad204d80948de1f3f/taffylite-0.1.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:02d04a1ceb27605151b7de274cf5a774116b7dec60f4722f5c43e749ce4d1b2e", size = 357325, upload-time = "2026-08-09T17:44:53.27Z" },
-    { url = "https://files.pythonhosted.org/packages/7d/dd/330fe4c0222d2d0ba947b4807e5317d9263c403cbe4345fa3738b9e79d88/taffylite-0.1.0-cp314-cp314-win_amd64.whl", hash = "sha256:9dee2f6e7a3dff3556a50d312bca6bb183ac5603fc13076f0d6e94f1e9fe0c51", size = 255265, upload-time = "2026-08-09T17:44:54.802Z" },
-    { url = "https://files.pythonhosted.org/packages/d9/15/2e00b552f1c5ce8a03fc6c4f0f67e4aa7bd2b8233c1c95db70d8800a0650/taffylite-0.1.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:c3aeef97b3c4c1500279fa7307e154f2a58b3b556f1a4d56c1524a6a7e75ae40", size = 313985, upload-time = "2026-08-09T17:44:56.099Z" },
-    { url = "https://files.pythonhosted.org/packages/68/a3/77eea9665174555617305dc22f44bbdb45360c9fc9febbde95e541eb6069/taffylite-0.1.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:5525b63c9bdddd726cd5a9835866742727ec371d781040668e20b7eeef29053c", size = 325768, upload-time = "2026-08-09T17:44:57.603Z" },
-    { url = "https://files.pythonhosted.org/packages/73/a6/11283de7ad9ecd52f3fae61ce5611164c96222a65f26d886782f79c43f9a/taffylite-0.1.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:3ebd1822851dce4c9a5eea2824ccb3f4cee69a18d7eefaa97f189f05a2784807", size = 356756, upload-time = "2026-08-09T17:44:59.132Z" },
-    { url = "https://files.pythonhosted.org/packages/66/0a/6e4568f1fced14a471602a0341d480740c7ce511a03e940ba0e092e9e8a6/taffylite-0.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:9cab132790f1c6322c06f30ba2fe3d5ce7e701883580b9c82287c24cecea8681", size = 254029, upload-time = "2026-08-09T17:45:00.423Z" },
+    { url = "https://files.pythonhosted.org/packages/27/36/ea50f31ca590c649e9fae76bbcf5faf255da3762d4f61398866f3b35792b/taffylite-0.2.0-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:150a2d4a68a64c18205fe5b7171aec0d45b1620a48ca5d4e405f0d0b0f8864e9", size = 312672, upload-time = "2026-08-10T19:54:31.128Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/ba/d5d1272b20b6b95aa20d80c37d923cf40ce45e6612ca835380eb3b500355/taffylite-0.2.0-cp313-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:a4d4b831f1fa6df4c9774771fbb2c6df75ed48beb89ac50b88f11dbed9a2aa6d", size = 323769, upload-time = "2026-08-10T19:54:32.4Z" },
+    { url = "https://files.pythonhosted.org/packages/57/cb/49bd66cca1c42953d7b282dc16e54f52b49c24cb9dd8e88f4aef702018e6/taffylite-0.2.0-cp313-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:62fad359565a8e1d5d7fc03dd4afaab5c275fc2e0747415a442bd5119a68b5af", size = 356229, upload-time = "2026-08-10T19:54:33.516Z" },
+    { url = "https://files.pythonhosted.org/packages/46/6a/bc6aa73e35ce37b4bd5adcdd41eda3f2c899a279197457af35b58ae0925c/taffylite-0.2.0-cp313-abi3-win_amd64.whl", hash = "sha256:3b4328db8fa818af5e734d27f16200c4d968cad98a66c015d6627db2abec289d", size = 250167, upload-time = "2026-08-10T19:54:34.782Z" },
+    { url = "https://files.pythonhosted.org/packages/94/6e/edc4ab39066ce4b6360de9233fdaf094bb3771531c6e7c585121142630ec/taffylite-0.2.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:4857a6a50d551cd45e961e742b7c54d165485647c6abd0bec13361df7c461e04", size = 312516, upload-time = "2026-08-10T19:54:35.994Z" },
+    { url = "https://files.pythonhosted.org/packages/56/2e/81361245ed6b1889befc67d4b27e0a0ffce198a2e99591c17bbd7c18a236/taffylite-0.2.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:69ba41ae39b90ead5e65020eb13dd4f6b7b00ec11a12c07426b2b9fce5ff5c29", size = 323590, upload-time = "2026-08-10T19:54:37.3Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/a1/a3f6044c0ffda71a4eb056fafdfe405c5b1b91fee96ea1e78ff83b3bc48c/taffylite-0.2.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:f0f5f20b69a1665e8a55bea53f9cdd845cc6c1d2beebefb60fc08df476ebb659", size = 356168, upload-time = "2026-08-10T19:54:38.697Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/e0/ab055d52db91eb716356a6a9dc2d383850b9710ebb0d652b5039d83f6362/taffylite-0.2.0-cp314-cp314t-win_amd64.whl", hash = "sha256:c5e58790a3bd765def7a2ebbefd980de2b997026255e91fc1251741fac42169a", size = 250553, upload-time = "2026-08-10T19:54:39.839Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/48/6b4c8f5db4bf52b287441887913316c6867ca9147c22721889b8b3165a26/taffylite-0.2.0-cp315-abi3.abi3t-macosx_11_0_arm64.whl", hash = "sha256:3c7bee082aba6626b8ff8d518b8542bd55dc14e2898ff9ecb3dfe8c78fa41c2d", size = 314927, upload-time = "2026-08-10T19:54:40.928Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/9b/8fe39f0d4159508dc8e7f505b7e90a1cce2b60e8def71cbb69f53b30b941/taffylite-0.2.0-cp315-abi3.abi3t-manylinux_2_28_aarch64.whl", hash = "sha256:5b4d951174d7fdf13b58531226d27355411e95500f7abed7082e6e08c5668bf6", size = 325008, upload-time = "2026-08-10T19:54:42.037Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/ef/5c7ee33d0ff22f63f34e4ee6eb9fdde9e9e3661355ffa4faed4f7c2ffb40/taffylite-0.2.0-cp315-abi3.abi3t-manylinux_2_28_x86_64.whl", hash = "sha256:606ce942d1a2986d610eca1ed3bee4828b20e83253b8c780a5978e52cb584862", size = 357733, upload-time = "2026-08-10T19:54:43.308Z" },
+    { url = "https://files.pythonhosted.org/packages/98/10/73b00311ca7414a5d51ae94b5be0d88f90913dacdb617e178f6e7e39bb34/taffylite-0.2.0-cp315-abi3.abi3t-win_amd64.whl", hash = "sha256:b871594304767da4ac22718c8d1527d35cf5667967522a90c3ed40a8c8d27301", size = 252020, upload-time = "2026-08-10T19:54:44.795Z" },
 ]
 
 [[package]]

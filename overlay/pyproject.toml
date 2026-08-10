@@ -87,12 +87,9 @@ saitenka = "overlay.app.cli:main"
 [tool.uv.sources]
 # Dev editable resolution of the GPL add-on so overlay changes see local deinflect edits (e.g. the
 # French rule set / language= API). Stripped from published metadata — a PyPI `saitenka[deinflect]`
-# install still pulls the published saitenka-deinflect wheel. (taffylite is no longer sourced editable —
-# the `layout-engine` extra resolves the published wheel from PyPI, #231/#282.)
+# install still pulls the published saitenka-deinflect wheel. (taffylite/resvglite are no longer sourced
+# editable — the `layout-engine`/`images` extras resolve the published wheels from PyPI, #282/#308.)
 saitenka-deinflect = { path = "../deinflect", editable = true }
-# resvglite is not on PyPI yet — the `images` extra resolves the in-repo crate editable until the first
-# `resvglite-v*` tag publishes (same bootstrap taffylite used pre-#282). Flip to the published wheel then.
-resvglite = { path = "../resvglite", editable = true }
 
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
