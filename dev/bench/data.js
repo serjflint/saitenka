@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786387865682,
+  "lastUpdate": 1786387968961,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3346,6 +3346,42 @@ window.BENCHMARK_DATA = {
           {
             "name": "synth p99 render",
             "value": 8.615,
+            "range": "±3.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f612dde808b1504c84fb2c5c5e8adcaa8acb1efb",
+          "message": "feat(resvglite): pure-Rust resvg PyO3 binding for inline SVG glyphs (part 1 of #283) (#306)\n\n* feat(resvglite): vendor a pure-Rust resvg PyO3 binding for inline SVG glyphs\n\nNew optional maturin crate (mirrors taffylite) that rasterizes SVG → PNG at a base\nresolution — the self-contained, system-library-free rasterizer #283 needs so Yomitan\ninline gaiji (参照 / 表記 / 一, 91% of 三省堂 entries) can render instead of ▢. pyo3\nwithout abi3 → real free-threaded cp314t wheels (gil_used=false); resvg is pure Rust\n(usvg + tiny-skia), no system deps.\n\nShips the crate + smoke tests, a CI wheel-build job (Linux 3.14t), and a\nresvglite-release.yml wheel matrix (cp313/314/314t × Linux/macOS-arm64/Windows) with\nTrusted Publishing under its own resvglite-v* tag. resvg is MPL-2.0 (file-level\ncopyleft): contained to this separately-published optional wheel — the core saitenka\ngraph stays permissive. DB media table + import extraction + render compositing land in\na follow-up PR.\n\n* feat(resvglite): pyo3 0.29 abi3+abi3t wheels (PEP 803)\n\nSame three-wheels-per-platform matrix as taffylite: abi3 (GIL 3.13+),\ncp314t (free-threaded 3.14), abi3t (FT+GIL 3.15+). Crate API unchanged; the\n5 smoke tests pass on both the abi3 and cp314t wheels, and the abi3t wheel\nrasterizes on 3.15t free-threaded. Release YAML gets the 3-build matrix and\nloses the header essay (kept: one-interpreter-per-job → CVE-2025-54368).",
+          "timestamp": "2026-08-10T21:52:17+03:00",
+          "tree_id": "44ca98971bfaccbc4e8c25d33d414f8501625af0",
+          "url": "https://github.com/serjflint/saitenka/commit/f612dde808b1504c84fb2c5c5e8adcaa8acb1efb"
+        },
+        "date": 1786387967833,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.374,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.933,
             "range": "±3.8%",
             "unit": "ms"
           }
