@@ -784,9 +784,21 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     # pixels are identical), off this paint's critical path — the reaction-latency window covers it.
     painted = _paint_from_cache(reader, key, cap, wx, wy, b.h) if reader._tip_show_cold else False
 
+    # Cold miss (nothing in the panel cache AND tier-2 direct-paint missed): do NOT build/raster on the
+    # main thread — that synchronous build is what balloons tooltip_show p95+. Enqueue a TOP-priority
+    # worker compose and show NOTHING; the tick (apply_engaged_results) re-invokes this once the panel is
+    # warm, when it becomes an ordinary cache-hit show. (tier-3 deferred render.) Only defer when a
+    # prefetch worker is actually running to service it — otherwise (prefetch off / no workers) there is
+    # nothing to compose it, so fall through to a synchronous build.
+    if reader._tip_show_cold and not painted and prefetch.workers_running(reader):
+        prefetch.request_engaged_render(
+            reader, tok, inflected, key, cap, mined=mined, phrase=phrase
+        )
+        return
+
     st = panel_for(reader, tok, inflected, min_h=cap, mined=mined, extra_terms=phrase)
-    # Seed the real panel's first viewport from disk too, so scrolling back to 0 later re-blits warm.
-    # (Also the fallback fast path when direct-paint was skipped — cache miss on this key's geometry.)
+    # Direct-paint hit built a fresh interactive panel — seed its first viewport from tier-2 (RAM inflate,
+    # no disk on the main thread) so scrolling back to 0 later re-blits warm.
     if reader._tip_show_cold and st.windowed.first_view is None:
         reader._seed_precomposed(st, key, cap)
     reader._tip_state, reader._tip_key = st, key
@@ -964,6 +976,32 @@ def render_tip_view(reader: Reader) -> None:
         reader._tip_xy,
         OverlayId.TIP,
     )
+
+
+def apply_engaged_results(reader: Reader) -> None:
+    """Tick drain (tier-3): show the tooltips whose cold-miss head a worker just composed. For each
+    handed-back ``(gen, key)``: skip if stale (seek / line change), if a tooltip is already up (a warm
+    hover raced ahead), or if the user has moved to a different word — recompute the CURRENT hover's key
+    and compare (the analysis-overlay guard, so a stale word can never flash). A match SHOWS the now-warm
+    tooltip, which is a panel-cache hit → no main-thread raster."""
+    for gen, key in prefetch.drain_engaged_results(reader):
+        if gen != reader._prefetch_gen or reader._tip_state is not None:
+            continue  # stale, or a tooltip already showing
+        i = reader.hover
+        if not (0 <= i < len(reader.tokens)):
+            continue  # not hovering a word anymore
+        tok = reader.tokens[i]
+        cur = panel_key(
+            reader,
+            tok,
+            reader._inflected_surface(i),
+            mined=is_mined(reader, tok),
+            phrase=reader._hover_terms,
+        )
+        if tuple(cur) == tuple(key):
+            show_tooltip(
+                reader, i
+            )  # warm now (worker cached the panel) → shows without a cold raster
 
 
 def apply_pending_crisp(reader: Reader) -> None:

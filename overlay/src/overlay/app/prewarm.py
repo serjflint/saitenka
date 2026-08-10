@@ -407,6 +407,7 @@ def _finalize_caches(cache, atlas) -> tuple[int, int]:
     if atlas is not None:
         atlas.checkpoint()
     if cache is not None:
+        cache.enforce_limits()  # the live put path no longer trims — bound to max_bytes offline, here
         rows, nbytes = cache.stats()
     elif atlas is not None:
         rows, nbytes = atlas.count(), atlas.disk_bytes()

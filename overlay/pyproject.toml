@@ -342,6 +342,15 @@ trace-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --pytho
 # --scroll-jank CPU profile: WHERE the scroll-frame tail goes — getmask2 in the scrolled-into block, or
 # the viewport re-composite? Synchronous single-process render (prefetch=False) → CPU-dense, no --idle.
 scroll-jank-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/scroll-jank-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --scroll-jank --reps 3\"" }
+# Drives ALL the *-pyspy profiles in one unattended pass (one password, kept warm) and adds a per-span
+# latency-percentile report (tooltip open / scroll frame / sub-seek …) the individual tasks can't — it
+# wraps each bench in a telemetry bootstrap so the CTF span trace exists to compute percentiles from.
+# The script elevates only py-spy; if poe won't hand its `sudo -v` a tty (same caveat as the print-only
+# tasks above — "a terminal is required"), invoke it as root up front instead: `sudo tools/bench_
+# pyspy_all.sh` (the script drops back to $SUDO_USER for the venv/cache/HOME so nothing lands root-
+# owned). To subset, call the script with bench names (poe doesn't forward args): `tools/bench_pyspy_
+# all.sh scroll-jank`.
+bench-pyspy-all = { shell = "bash tools/bench_pyspy_all.sh" }
 # Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
 # controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
 # out-of-process on the standard interpreter (a separate Go binary), never imported into the

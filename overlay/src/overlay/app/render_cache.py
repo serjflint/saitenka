@@ -15,14 +15,19 @@ copy+upload fast path, cold. It is:
 - **cost-gated** (only entries whose composited head clears ``min_height`` px are stored) so the on-disk
   size stays bounded to the jank tail, not the whole ~32k population (a full-population pixel cache is
   ~1.15 GiB — the wrong shape, per #149);
-- **bounded** (LRU-evicted to ``max_bytes``);
+- **byte-capped, enforced OFFLINE** — ``enforce_limits`` (``saitenka prewarm``) evicts to ``max_bytes``.
+  The live path deliberately does NOT trim: a ``put`` no longer scans/evicts, so the prefetch worker
+  never pays the per-write ``SUM(nbytes)`` scan that once dominated its self-time. The population is
+  finite and slow-growing (~MB/episode), so an un-prewarmed session's cache simply grows to its natural
+  ceiling until the next prewarm reclaims it;
 - **safe on any miss / error** — a mismatch or a corrupt/locked DB degrades to a live render, never a
   wrong pixel: the ``config_sig`` folds in width, cap, theme-format version and the dictionary-set
   identity, so a resolution / dict change simply misses and rebuilds (the rare-event contract in #149).
 
-Writes happen off the main thread (the prefetch worker's precompose, or the offline builder); reads are
-one indexed ``SELECT`` + ``zlib`` inflate on the cold-show path. WAL mode lets the worker write while the
-main thread reads. Connections are per-thread (free-threading-safe), mirroring ``dictdb``.
+Disk IO stays off the main thread: the prefetch worker writes (precompose) and hydrates the in-memory
+tier-2 head cache from disk (``peek_compressed``); the main thread reads only that in-memory tier, so a
+cold hover inflates from RAM, never opens the DB. Reads are pure (no LRU write-back). WAL mode lets the
+worker write while readers read. Connections are per-thread (free-threading-safe), mirroring ``dictdb``.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ import logging
 import sqlite3
 import threading
 import zlib
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,7 +44,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Hashable, Sequence
 
     from overlay.app.dictionary import DictionarySet
 
@@ -80,6 +86,29 @@ class LoadedView:
     overscan: int
     full_h: int
     array: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class CompressedView:
+    """A stored first viewport still zlib-compressed — geometry + the raw blob. The in-memory tier-2
+    head cache holds these (compressed is ~10× smaller than the BGRA array, so far more fit in RAM);
+    :meth:`inflate` decompresses to the paint-ready premul-BGRA on the main thread — the same one-inflate
+    a scrolled band already pays, and never a disk read."""
+
+    view_h: int
+    overscan: int
+    full_h: int
+    h: int
+    w: int
+    blob: bytes
+
+    @property
+    def nbytes(self) -> int:
+        return len(self.blob)
+
+    def inflate(self) -> LoadedView:
+        arr = np.frombuffer(zlib.decompress(self.blob), dtype=np.uint8).reshape(self.h, self.w, 4)
+        return LoadedView(self.view_h, self.overscan, self.full_h, arr)
 
 
 def dict_set_signature(ds: DictionarySet) -> str:
@@ -174,7 +203,7 @@ class RenderCache:
     ) -> LoadedView | None:
         """The stored first-viewport for ``(config_sig, content_key)`` **iff** its ``view_h``/``overscan``
         match the show about to happen (a differing full-height → differing view_h simply misses). For
-        seeding a BUILT panel's ``_first_view``. Bumps LRU recency on a hit. ``None`` on miss / any error."""
+        seeding a BUILT panel's ``_first_view``. Pure read (no write). ``None`` on miss / any error."""
         loaded = self.peek(config_sig, content_key)
         if loaded is None or loaded.view_h != view_h or loaded.overscan != overscan:
             return None  # geometry moved (content/height changed) — safe miss, live-render instead
@@ -183,27 +212,38 @@ class RenderCache:
     def peek(self, config_sig: str, content_key: str) -> LoadedView | None:
         """The stored first-viewport for ``(config_sig, content_key)`` regardless of geometry — the
         direct-paint path, which paints the pixels + places by ``full_h`` WITHOUT building a panel first,
-        then reconciles against the panel it builds afterward (same content → same geometry). Bumps LRU
-        recency. ``None`` on miss / any error."""
+        then reconciles against the panel it builds afterward (same content → same geometry). Pure read
+        (no write — recency is not tracked; eviction is offline, insertion-ordered). ``None`` on miss /
+        any error."""
+        cv = self.peek_compressed(config_sig, content_key)
+        if cv is None:
+            return None
         try:
-            conn = self._conn()
-            row = conn.execute(
-                "SELECT view_h, overscan, full_h, h, w, blob FROM heads "
-                "WHERE config_sig=? AND content_key=?",
-                (config_sig, content_key),
-            ).fetchone()
+            return cv.inflate()
+        except ValueError:  # a truncated/garbled blob won't reshape → safe miss, live-render
+            log.debug("render cache peek inflate failed", exc_info=True)
+            return None
+
+    def peek_compressed(self, config_sig: str, content_key: str) -> CompressedView | None:
+        """The stored first viewport as its RAW zlib blob + geometry, WITHOUT inflating — for the
+        in-memory tier-2 head cache a worker hydrates, so the main thread inflates from RAM (not disk).
+        Pure read. ``None`` on miss / any error."""
+        try:
+            row = (
+                self._conn()
+                .execute(
+                    "SELECT view_h, overscan, full_h, h, w, blob FROM heads "
+                    "WHERE config_sig=? AND content_key=?",
+                    (config_sig, content_key),
+                )
+                .fetchone()
+            )
             if row is None:
                 return None
             view_h, overscan, full_h, h, w, blob = row
-            arr = np.frombuffer(zlib.decompress(blob), dtype=np.uint8).reshape(h, w, 4)
-            conn.execute(
-                "UPDATE heads SET used_seq=? WHERE config_sig=? AND content_key=?",
-                (self._next_seq(), config_sig, content_key),
-            )
-            conn.commit()
-            return LoadedView(view_h, overscan, full_h, arr)
-        except (sqlite3.Error, ValueError):  # ValueError: a truncated/garbled blob won't reshape
-            log.debug("render cache peek failed", exc_info=True)
+            return CompressedView(view_h, overscan, full_h, h, w, blob)
+        except sqlite3.Error:
+            log.debug("render cache peek_compressed failed", exc_info=True)
             return None
 
     def has(self, config_sig: str, content_key: str) -> bool:
@@ -235,10 +275,11 @@ class RenderCache:
         protected: bool = False,
     ) -> None:
         """Store ``array`` (a premul-BGRA first viewport) + its ``full_h`` for ``(config_sig,
-        content_key)``, then trim to ``max_bytes``. ``protected`` (the offline ``prewarm``'s popular set)
-        is evicted LAST — a live write-back (``protected=False``) of a rarer hovered word can only evict
-        another unprotected entry, never a prewarmed popular one, so the capped cache never thrashes its
-        stable core. Best-effort: any error is swallowed. Idempotent (``INSERT OR REPLACE``)."""
+        content_key)``. Does NOT trim — the byte cap is enforced offline by :meth:`enforce_limits`
+        (``saitenka prewarm``), so this live write (on the prefetch worker) never pays a ``SUM(nbytes)``
+        scan. ``used_seq`` records insertion order for that later eviction; ``protected`` (the offline
+        prewarm's popular set) is evicted LAST. Best-effort: any error is swallowed. Idempotent
+        (``INSERT OR REPLACE``)."""
         try:
             arr = np.ascontiguousarray(array, dtype=np.uint8)
             h, w = arr.shape[0], arr.shape[1]
@@ -262,13 +303,22 @@ class RenderCache:
                 ),
             )
             conn.commit()
-            self._trim(conn)
         except sqlite3.Error:
             log.debug("render cache put failed", exc_info=True)
 
+    def enforce_limits(self) -> None:
+        """Bound the on-disk store to ``max_bytes`` — evict UNPROTECTED, oldest-INSERTED first. Called
+        OFFLINE (``saitenka prewarm``), NOT on the live write path, so a live ``put`` never scans/evicts
+        and the prefetch worker never pays the per-write ``SUM(nbytes)`` scan. Best-effort."""
+        try:
+            self._trim(self._conn())
+        except sqlite3.Error:
+            log.debug("render cache enforce_limits failed", exc_info=True)
+
     def _trim(self, conn: sqlite3.Connection) -> None:
-        """Evict until within ``max_bytes``, UNPROTECTED-and-oldest first (protected prewarm rows go
-        last) — so live write-back fills headroom + churns only itself, never the prewarmed popular set."""
+        """Evict until within ``max_bytes``, UNPROTECTED-and-oldest-inserted first (protected prewarm rows
+        go last). ``used_seq`` is insertion order (reads no longer bump it), so this is FIFO among the
+        unprotected — the churnable live write-backs age out before the prewarmed popular set."""
         total = conn.execute("SELECT COALESCE(SUM(nbytes), 0) FROM heads").fetchone()[0]
         if total <= self.max_bytes:
             return
@@ -314,6 +364,52 @@ class RenderCache:
         if c is not None:
             c.close()
             self._local.conn = None
+
+
+class CompressedHeadCache:
+    """In-memory tier-2 of the render cache: ``key -> CompressedView`` (the first viewport's zlib blob),
+    LRU-bounded by COMPRESSED bytes. The prefetch worker fills it (a disk :meth:`RenderCache.peek_compressed`
+    hit, or a freshly composed head); the MAIN thread reads it on a cold hover and inflates from RAM — so
+    the hover path never opens the SQLite store. Compressed entries are ~10× smaller than the BGRA arrays,
+    so a modest byte budget covers a large working set. Thread-safe: workers write, the main thread reads,
+    under one lock (short critical sections — dict ops only, never IO)."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max_bytes
+        self._lock = threading.Lock()
+        self._store: OrderedDict[Hashable, CompressedView] = OrderedDict()
+        self._bytes = 0
+
+    def get(self, key: Hashable) -> CompressedView | None:
+        with self._lock:
+            cv = self._store.get(key)
+            if cv is not None:
+                self._store.move_to_end(key)  # LRU recency — an in-RAM move, no IO
+            return cv
+
+    def put(self, key: Hashable, view: CompressedView) -> None:
+        with self._lock:
+            old = self._store.pop(key, None)
+            if old is not None:
+                self._bytes -= old.nbytes
+            self._store[key] = view
+            self._bytes += view.nbytes
+            while self._bytes > self.max_bytes and len(self._store) > 1:
+                _k, evicted = self._store.popitem(last=False)  # oldest out
+                self._bytes -= evicted.nbytes
+
+    def __contains__(self, key: Hashable) -> bool:
+        with self._lock:
+            return key in self._store
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._store)
+
+    @property
+    def nbytes(self) -> int:
+        with self._lock:
+            return self._bytes
 
 
 def content_key(key: Sequence[object]) -> str:
