@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786350028200,
+  "lastUpdate": 1786359710025,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2879,6 +2879,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.93,
             "range": "±2.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "20be0a078bdc62449cef95acff85b1aa9d96cdbe",
+          "message": "Merge pull request #293 from serjflint/perf/render-cache-offthread-reads\n\nperf(render-cache): move cache IO off the main thread + defer cold-miss render",
+          "timestamp": "2026-08-10T14:00:57+03:00",
+          "tree_id": "66e4277bc859bc80470fffa9f4399bcf6ba5609d",
+          "url": "https://github.com/serjflint/saitenka/commit/20be0a078bdc62449cef95acff85b1aa9d96cdbe"
+        },
+        "date": 1786359709413,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.227,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.628,
+            "range": "±6.1%",
             "unit": "ms"
           }
         ]
