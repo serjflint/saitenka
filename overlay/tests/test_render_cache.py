@@ -386,6 +386,51 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     assert req is not None and req.panel is nest  # the request targets the nested panel
 
 
+def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
+    """Drive a flick + one worker render-ahead pass, recording every ``scale`` the panel's render_ahead
+    was warmed at — the observable of #297's fix (raw bands warmed ahead, not only native)."""
+    seen: list[float] = []
+    st = view.state
+    assert st is not None
+    real = st.render_ahead
+
+    def spy(*a, **k):
+        seen.append(k.get("scale", 1.0))
+        return real(*a, **k)
+
+    monkeypatch.setattr(st, "render_ahead", spy)
+    tooltip.scroll_view(r, view, view.view_h)  # flick → records a render-ahead
+    prefetch._try_render_ahead(r)
+    return seen
+
+
+def test_render_ahead_warms_raw_bands_ahead_on_hidpi(monkeypatch):
+    # #297: on a hi-dpi display the soft-first blit rasters RAW 1× bands for a region beyond the soft
+    # overscan — synchronously on the flick tick. The worker must now warm the raw (scale=1.0) bands ahead
+    # in ADDITION to the native ones, so a fast flick finds them cached instead of rastering on-thread.
+    r = _nested_reader()
+    r.hover = 0
+    monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
+    r._show_tooltip(0)
+    scales = _render_ahead_scales(r, r._tip_view, monkeypatch)
+    assert r._raster_scale > 1.0  # the fixture is 4K → native scale
+    assert r._raster_scale in scales  # native bands warmed ahead (unchanged)
+    assert 1.0 in scales  # …and the raw bands the soft flick path reads (the fix)
+
+
+def test_render_ahead_warms_raw_once_on_lodpi(monkeypatch):
+    # Negative control: at scale 1.0 the native path IS the raw path, so render-ahead warms raw exactly
+    # once — the fix must not add a redundant second 1.0 warm when there are no separate native bands.
+    r = _nested_reader()
+    r.osd = (1920, 1080)  # lo-dpi → _raster_scale 1.0
+    r.hover = 0
+    monkeypatch.setattr(r.ov, "show_bgra", lambda *_a, **_k: None)
+    r._show_tooltip(0)
+    scales = _render_ahead_scales(r, r._tip_view, monkeypatch)
+    assert r._raster_scale == 1.0
+    assert scales == [1.0]  # exactly one raw warm, no duplicate
+
+
 def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
     # Regression (the bug Phase A closes): _blit_native wrote a SINGLE shared crisp flag, so a nested
     # soft paint flipped the BASE's crisp_pending — apply_pending_crisp then re-blit the base and cleared
