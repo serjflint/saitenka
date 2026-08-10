@@ -177,20 +177,38 @@ def _parse_freq_entry(
     return reading, rank, disp
 
 
+def _mora_indices(v) -> list[int]:
+    """NHK/Kanjium per-mora annotation (``devoice`` / ``nasal``) → a list of 1-based mora indices.
+    Yomitan encodes it as an int (one mora) or an array of ints; anything else → empty."""
+    if isinstance(v, bool):  # a bare True/False flag carries no index
+        return []
+    if isinstance(v, int):
+        return [v]
+    if isinstance(v, list):
+        return [i for i in v if isinstance(i, int) and not isinstance(i, bool)]
+    return []
+
+
 def _parse_pitch_entry(term: str, data) -> tuple[str, str] | None:
     """``(reading, positions_json)`` from a pitch term_meta value (``{"reading", "pitches":
-    [{"position": n}]}``), or ``None`` when there's no usable pitch position."""
+    [{"position": n, "devoice": [...], "nasal": [...]}]}``), or ``None`` when there's no usable pitch.
+
+    Back-compat storage: a plain accent dict (no devoice/nasal on any pitch) stores the bare
+    ``[int, …]`` list it always did — byte-identical DB. Only when NHK/Kanjium annotations are present
+    does a pitch become the richer ``{"p": n, "d": [...], "n": [...]}`` object, so richer data survives
+    import while plain dicts don't grow."""
     if not isinstance(data, dict):
         return None
     reading = data.get("reading") or term
-    positions = [
-        pos
-        for p in data.get("pitches", [])
-        if isinstance(p, dict) and isinstance(pos := p.get("position"), int)
-    ]
-    if not positions:
+    accents: list[int | dict] = []
+    for p in data.get("pitches", []):
+        if not (isinstance(p, dict) and isinstance(pos := p.get("position"), int)):
+            continue
+        devoice, nasal = _mora_indices(p.get("devoice")), _mora_indices(p.get("nasal"))
+        accents.append({"p": pos, "d": devoice, "n": nasal} if (devoice or nasal) else pos)
+    if not accents:
         return None
-    return reading, json.dumps(positions)
+    return reading, json.dumps(accents)
 
 
 def _read_term_meta(

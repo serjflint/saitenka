@@ -26,6 +26,7 @@ from itertools import starmap
 from typing import TYPE_CHECKING
 
 from overlay.app.tokenize import _has_kanji, kata_to_hira
+from overlay.model import PitchAccent
 from overlay.resources import asset
 
 if TYPE_CHECKING:
@@ -210,6 +211,14 @@ class FreqSource:
         return None
 
 
+def _to_accent(a) -> PitchAccent:
+    """Normalise one stored accent — a bare ``int`` (plain dict) or a ``{"p","d","n"}`` object (NHK/
+    Kanjium, with devoice/nasal) — into a :class:`PitchAccent`."""
+    if isinstance(a, dict):
+        return PitchAccent(a["p"], tuple(a.get("d", ())), tuple(a.get("n", ())))
+    return PitchAccent(a)
+
+
 class PitchSource:
     """A pitch-accent dictionary → the ``reading [positions]`` label the tooltip shows, from the DB."""
 
@@ -218,9 +227,11 @@ class PitchSource:
         self.dict_id = row.id
         self.title = row.title
 
-    def accents(self, forms, _reading: str | None = None) -> tuple[str, list[int]] | None:
-        """Raw (reading, positions) for the first matching form — the pitch-graph input. Matches by
-        term OR reading (a pitch dict is keyed by both)."""
+    def accents(self, forms, _reading: str | None = None) -> tuple[str, list[PitchAccent]] | None:
+        """Raw (reading, accents) for the first matching form — the pitch-graph input. Matches by term
+        OR reading (a pitch dict is keyed by both). Each accent is a :class:`PitchAccent` carrying the
+        downstep position plus any NHK/Kanjium devoice/nasal mora indices; a plain accent dict stores
+        bare ints, normalised here to ``PitchAccent(n)``."""
         conn = self.db._conn()
         for f in forms:
             if not f:
@@ -231,15 +242,15 @@ class PitchSource:
                 (self.dict_id, f, f),
             ).fetchone()
             if row is not None:
-                return (row[0], json.loads(row[1]))
+                return (row[0], [_to_accent(a) for a in json.loads(row[1])])
         return None
 
     def display(self, forms, reading: str | None = None) -> str | None:
         got = self.accents(forms, reading)
         if got is None:
             return None
-        r, positions = got
-        return f"{r} [{','.join(str(p) for p in positions)}]"
+        r, accents = got
+        return f"{r} [{','.join(str(a.position) for a in accents)}]"
 
 
 _HTML_TAG = re.compile(r"<[^>]+>")
