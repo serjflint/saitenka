@@ -79,7 +79,8 @@ for (const {category, source} of readSeeds(seedFile)) {
     }
 }
 
-const OUT = path.resolve(here, '..', 'tests', 'fixtures', `${spec.fixture}_transforms_cases.json`);
+// `$CORPUS_OUT` redirects the write (the drift guard regenerates into a temp file to diff, never clobber).
+const OUT = process.env.CORPUS_OUT || path.resolve(here, '..', 'tests', 'fixtures', `${spec.fixture}_transforms_cases.json`);
 const header = (
     `Differential vectors: Yomitan's LanguageTransformer (${spec.descriptor}, ` +
     `github.com/yomidevs/yomitan @ ${YOMITAN_COMMIT}, GPL-3.0) run over deinflect/tools/` +
