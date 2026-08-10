@@ -45,25 +45,40 @@ def _toml_key(k: str) -> str:
     return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else _toml_value(k)
 
 
+def _toml_assign(k: str, v) -> str:
+    """One ``key = value`` line, splitting a >1-element list across lines for readability."""
+    if isinstance(v, (list, tuple)) and len(v) > 1:
+        body = ",\n  ".join(_toml_value(x) for x in v)
+        return f"{_toml_key(k)} = [\n  {body},\n]"
+    return f"{_toml_key(k)} = {_toml_value(v)}"
+
+
+def _emit_table(lines: list[str], prefix: str, table: dict) -> None:
+    """Emit ``[prefix]`` then its scalar keys, recursing into nested dicts as ``[prefix.child]`` —
+    a dict value is a subtable, not a scalar. Scalars go BEFORE any subtable header, because a
+    ``[prefix.child]`` line closes ``prefix`` and any bare key after it would land in the child."""
+    lines.append("")
+    lines.append(f"[{prefix}]")
+    subtables = [(k, v) for k, v in table.items() if isinstance(v, dict)]
+    for k, v in table.items():
+        if not isinstance(v, dict):
+            lines.append(_toml_assign(k, v))
+    for k, v in subtables:
+        _emit_table(lines, f"{prefix}.{_toml_key(k)}", v)
+
+
 def dumps_toml(proposal: dict) -> str:
-    """A minimal deterministic TOML writer. Scalars/lists first, then nested ``dict`` values as
-    ``[table]`` sections — so merging onto a config with ``[mine]``/``[jimaku]``/``[known]`` tables
-    round-trips instead of raising ``TypeError`` (or silently dropping the tables)."""
+    """A minimal deterministic TOML writer. Top-level scalars/lists first, then nested ``dict`` values
+    as ``[table]`` sections (recursively — a dict inside a table becomes ``[table.child]``, e.g.
+    ``[profiles.french]``), so merging onto a config with ``[mine]``/``[jimaku]``/``[profiles.*]``
+    tables round-trips instead of raising ``TypeError`` (or silently dropping the tables)."""
     lines = ["# Saitenka overlay settings — written by `saitenka init`.", ""]
-    tables: list[tuple[str, dict]] = []
+    tables = [(k, v) for k, v in proposal.items() if isinstance(v, dict)]
     for k, v in proposal.items():
-        if isinstance(v, dict):
-            tables.append((k, v))
-        elif isinstance(v, (list, tuple)) and len(v) > 1:
-            body = ",\n  ".join(_toml_value(x) for x in v)
-            lines.append(f"{k} = [\n  {body},\n]")
-        else:
-            lines.append(f"{k} = {_toml_value(v)}")
+        if not isinstance(v, dict):
+            lines.append(_toml_assign(k, v))
     for name, table in tables:
-        lines.append("")
-        lines.append(f"[{_toml_key(name)}]")
-        for k, v in table.items():
-            lines.append(f"{_toml_key(k)} = {_toml_value(v)}")
+        _emit_table(lines, _toml_key(name), table)
     return "\n".join(lines) + "\n"
 
 

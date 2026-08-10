@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import tomllib
 
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 from overlay.app import paths, report
 from overlay.app.init_wizard import dumps_toml
@@ -65,11 +65,45 @@ _scalar = st.one_of(
 )
 
 
-@given(st.dictionaries(_key, _scalar, max_size=4), st.dictionaries(_key, _scalar, max_size=3))
-def test_dumps_toml_round_trips_scalars_and_a_table(top, table):
-    assume("mine" not in top)  # the table name we graft on
-    cfg = {**top, "mine": table}
+# A nested table: a dict whose values are themselves scalar tables — the shape of `[profiles.<name>]`
+# (#254). The single-level strategy below never produced this, so the two-level writer path went
+# untested and shipped a `TypeError: can't serialise dict to TOML` on any config with a named profile.
+_subtables = st.dictionaries(_key, st.dictionaries(_key, _scalar, max_size=3), max_size=2)
+
+
+@example(
+    top={}, table={}, profiles={"french": {"nlang": "fr", "tip_height": 0.4}}
+)  # the #254 crash
+@given(
+    st.dictionaries(_key, _scalar, max_size=4),
+    st.dictionaries(_key, _scalar, max_size=3),
+    _subtables,
+)
+def test_dumps_toml_round_trips_scalars_and_nested_tables(top, table, profiles):
+    assume("mine" not in top and "profiles" not in top)  # the table names we graft on
+    cfg = {**top, "mine": table, "profiles": profiles}
     parsed = tomllib.loads(dumps_toml(cfg))  # writer output must parse back to the same values
     for k, v in top.items():
         assert parsed[k] == v
     assert parsed.get("mine", {}) == table
+    assert parsed.get("profiles", {}) == profiles  # the two-level `[profiles.<name>]` round-trips
+
+
+def test_dumps_toml_load_dump_load_is_stable():
+    """A realistic config (top-level scalars + a flat ``[mine]`` table + a nested ``[profiles.french]``)
+    survives a load→dump→load cycle unchanged, and a second dump is byte-identical — the writer is
+    idempotent, so re-writing an existing config never churns it."""
+    src = (
+        'slang = "ja,jpn,jp"\n'
+        "tip_height = 0.4\n\n"
+        "[mine]\n"
+        'deck = "Saitenka::Known"\n\n'
+        "[profiles.french]\n"
+        'language = "fr"\n'
+        'dicts = ["A", "B"]\n'
+    )
+    once = tomllib.loads(src)
+    dumped = dumps_toml(once)
+    twice = tomllib.loads(dumped)
+    assert twice == once  # load → dump → load preserves every value, nested table included
+    assert dumps_toml(twice) == dumped  # and re-dumping the reloaded config is byte-stable

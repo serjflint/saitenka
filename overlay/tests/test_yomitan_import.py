@@ -198,6 +198,34 @@ def test_parse_rejects_oversized_file(tmp_path, monkeypatch):
         yi.parse_settings(p)
 
 
+def test_finalize_import_preserves_nested_profile_table(capsys):
+    """The shared command seam every importer (`import`/`import-dictionaries`/`import-settings`) is now
+    a thin wrapper over: merging imported titles onto an existing config that carries a nested
+    ``[profiles.french]`` table (a named reading profile, #254) must SHOW the proposal and WRITE it —
+    a full load→dump→write→load cycle. Regression: the proposal serialiser raised
+    ``TypeError: can't serialise dict to TOML`` on the two-level table, aborting the command (before its
+    safe tomlkit write) for any user with a profile — unseen because the glue was inlined + uncovered."""
+    from overlay.app.config import config_path, load_config
+
+    config_path().write_text(
+        '[profiles.french]\nlanguage = "fr"\ntokenizer = "latin"\n', encoding="utf-8"
+    )
+    yi.finalize_import({"dicts": ["MonoA"], "freq": ["FreqA"]}, confirm=lambda _p: True)
+
+    assert "[profiles.french]" in capsys.readouterr().out  # proposal serialised, didn't raise
+    reloaded = load_config()
+    assert reloaded["profiles"]["french"] == {"language": "fr", "tokenizer": "latin"}  # untouched
+    assert reloaded["dicts"] == ["MonoA"] and reloaded["freq"] == ["FreqA"]  # titles registered
+
+
+def test_finalize_import_declined_writes_nothing():
+    """confirm=False is the honoured no-op: nothing is written, so no config file appears."""
+    from overlay.app.config import config_path
+
+    assert yi.finalize_import({"dicts": ["MonoA"]}, confirm=lambda _p: False) is None
+    assert not config_path().exists()
+
+
 def test_real_export_parses_if_present():
     """Smoke: if a real export is on disk, it must parse without error (not a hard dep)."""
     from pathlib import Path
