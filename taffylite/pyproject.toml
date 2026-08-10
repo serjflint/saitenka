@@ -1,6 +1,6 @@
 [project]
 name = "taffylite"
-version = "0.1.0"
+version = "0.2.0"
 description = "Thin fixed-size PyO3 binding of taffy — the optional layout engine behind saitenka's LayoutBackend seam"
 readme = "README.md"
 requires-python = ">=3.13"

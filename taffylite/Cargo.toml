@@ -1,6 +1,6 @@
 [package]
 name = "taffylite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Thin fixed-size PyO3 binding of taffy for saitenka's tooltip geometry"
 license = "MIT OR Apache-2.0"
@@ -10,10 +10,11 @@ repository = "https://github.com/serjflint/saitenka"
 name = "taffylite"
 crate-type = ["cdylib"]
 
-# pyo3 0.25, NO abi3 -> a real free-threaded cp314t wheel that loads without re-enabling the GIL.
-# taffy 0.7 is the flexbox solver.
+# abi3 + abi3t (PEP 803): one Cargo config, three wheels via three interpreters — abi3-py313 (GIL 3.13+),
+# version-specific cp314t (free-threaded 3.14, predates abi3t), abi3t-py315 (FT *and* GIL 3.15+). maturin
+# picks the family from the build interpreter. taffy 0.7 is the flexbox solver.
 [dependencies]
-pyo3 = { version = "0.25", features = ["extension-module"] }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py313", "abi3t-py315"] }
 taffy = "0.7"
 
 [profile.release]

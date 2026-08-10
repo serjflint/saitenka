@@ -14,11 +14,12 @@ dominated by Pillow raster), so it is **opt-in and parity-gated**, never the def
 
 `DefaultLayoutBackend` (pure Python, zero-dependency) is always available and byte-identical. taffylite
 is additive: it needs a per-platform prebuilt wheel or a Rust toolchain to build from source. It builds
-and loads cleanly on free-threaded CPython (`pyo3 0.25`, no abi3, `gil_used = false`) — that is *not* a
-blocker, just packaging friction the pure-Python core avoids.
+and loads cleanly on free-threaded CPython (`pyo3 0.29`, `gil_used = false`) — that is *not* a blocker,
+just packaging friction the pure-Python core avoids.
 
-Published on PyPI with prebuilt cp313/cp314/cp314t wheels (incl. free-threaded) for Linux, macOS-arm64,
-and Windows — pull it via saitenka's extra, `uv tool install 'saitenka[layout-engine]'`, or directly:
+Published on PyPI as three wheels per platform (pyo3 abi3 + abi3t, PEP 803): abi3 (GIL 3.13+), cp314t
+(free-threaded 3.14), abi3t (FT *and* GIL 3.15+), for Linux, macOS-arm64, and Windows — pull it via
+saitenka's extra, `uv tool install 'saitenka[layout-engine]'`, or directly:
 
 ```
 uv add taffylite     # or: pip install taffylite
