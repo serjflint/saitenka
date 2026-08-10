@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786387627336,
+  "lastUpdate": 1786387701664,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3239,6 +3239,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.454,
             "range": "±13.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cc1b460f14d886282cba63a594aca1f53ad0ce86",
+          "message": "perf(tooltip): warm raw 1× bands ahead on a hi-dpi flick (#304)\n\nOn a hi-dpi display the scroll-ahead worker warmed only NATIVE bands; a flick that\noutran them left the soft-first blit to raster the RAW 1× bands it reads\n(warm_only=False) synchronously on the scroll tick — invisible on top-tier hardware,\nreal jank on slower boxes. Warm the raw bands ahead too when scale>1 (at scale==1 the\nnative path already IS the raw path, so no redundant second warm).",
+          "timestamp": "2026-08-10T21:47:44+03:00",
+          "tree_id": "91fe3178e127a8df237428014765310519920219",
+          "url": "https://github.com/serjflint/saitenka/commit/cc1b460f14d886282cba63a594aca1f53ad0ce86"
+        },
+        "date": 1786387700488,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.344,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.482,
+            "range": "±10.5%",
             "unit": "ms"
           }
         ]
