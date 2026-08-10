@@ -44,8 +44,11 @@ file's style — read a sibling test first.
    existing **golden** for large structured output. For a **rendering / cache / config /
    interaction** behaviour, assert a metamorphic **oracle** (agreement round-trip, warm==cold,
    scale-invariance, feature-toggle consistency), never raw pixels — they're platform-dependent;
-   when the gap is a *family* not a point, a Hypothesis `@given` property beats N examples. Menu +
-   canonical examples: [`references/oracle-catalog.md`](references/oracle-catalog.md).
+   when the gap is a *family* not a point, a Hypothesis `@given` property beats N examples. Porting
+   an algorithm, copying a formula, or wiring components? — the catalog's **external-oracle families**
+   (stolen conformance corpus / differential / assembly integration) own those, so you route to an
+   existing mechanism instead of reinventing one. Full menu + canonical examples:
+   [`references/oracle-catalog.md`](references/oracle-catalog.md).
 6. **One act, scenario name.** One trigger + one assertion chain; split multi-act tests.
 7. **Extend or add?** Prefer appending a `PROFILES` row (`tests/util.py`), a `parametrize` case, or
    an `@example` to an existing test over a near-duplicate new file — one row, every property inherits
