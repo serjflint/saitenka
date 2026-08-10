@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786368218100,
+  "lastUpdate": 1786377137104,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3023,6 +3023,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.592,
             "range": "±1.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9ef3461c5f112d9ad6664969dfdb60a0ed151a19",
+          "message": "Merge pull request #299 from serjflint/perf/unify-popup-view\n\nrefactor(tooltip): unify base+nested popup view; per-view crisp flags; nested render-ahead",
+          "timestamp": "2026-08-10T18:51:40+03:00",
+          "tree_id": "39d9cfcd784a17fc8add77c6d079a2b7173fcaaf",
+          "url": "https://github.com/serjflint/saitenka/commit/9ef3461c5f112d9ad6664969dfdb60a0ed151a19"
+        },
+        "date": 1786377136451,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.293,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.762,
+            "range": "±7.6%",
             "unit": "ms"
           }
         ]
