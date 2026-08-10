@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786387701664,
+  "lastUpdate": 1786387761941,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3275,6 +3275,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.482,
             "range": "±10.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1ee8cb5516ea481cac5f17bf4a60c19864709b9d",
+          "message": "feat(pitch): render devoiced (○) / nasal (゜) mora markers from NHK/Kanjium data (#305)\n\nIngest dropped every per-mora annotation, keeping only downstep positions, so the\ngraph could never show devoiced/nasalised morae Yomitan draws. Carry devoice/nasal\nthrough import → query → render as a PitchAccent(position, devoice, nasal): a devoiced\nmora's dot is drawn hollow (○), a nasalised mora gains a ゜ ring above it. Grounded —\nstraight from the pitch dictionary, per the \"readings/pitch from dictionaries\" rule.\n\nA plain accent dict (no annotations) stores the bare [int] list it always did and its\ngraph is byte-identical (no golden re-bless); only NHK/Kanjium data with the markers\ngrows the payload and the graph.",
+          "timestamp": "2026-08-10T21:48:42+03:00",
+          "tree_id": "d4f45a07c5c0b72fd0e62c49180b4c383aea910b",
+          "url": "https://github.com/serjflint/saitenka/commit/1ee8cb5516ea481cac5f17bf4a60c19864709b9d"
+        },
+        "date": 1786387760824,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.352,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 10.221,
+            "range": "±14.3%",
             "unit": "ms"
           }
         ]
