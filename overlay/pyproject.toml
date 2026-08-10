@@ -39,10 +39,10 @@ Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
 deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language= API (#254)
 # Optional layout engine: the taffy (CSS flexbox) row-stack solver behind the LayoutBackend seam
 # (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0), published to PyPI (0.1.0, #231) with
-# prebuilt cp313/cp314/cp314t wheels incl. free-threaded — kept OUT of `full` so a default install stays
-# pure-Python. The pure-Python DefaultLayoutBackend is the always-available, byte-identical fallback; this
-# is additive and parity-gated. `saitenka[layout-engine]` resolves taffylite from PyPI. (For hacking on the
-# in-repo Rust crate, add a `[tool.uv.sources]` editable path override or `uv run --with-editable ../taffylite`.)
+# prebuilt abi3 (GIL 3.13+) + cp314t + abi3t (FT+GIL 3.15+) wheels — kept OUT of `full` so a default
+# install stays pure-Python. The pure-Python DefaultLayoutBackend is the always-available, byte-identical
+# fallback; this is additive and parity-gated. `saitenka[layout-engine]` resolves taffylite from PyPI. (For
+# hacking on the in-repo Rust crate, add a `[tool.uv.sources]` editable path override or `uv run --with-editable ../taffylite`.)
 layout-engine = ["taffylite>=0.1.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
