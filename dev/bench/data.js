@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786347382711,
+  "lastUpdate": 1786350028200,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2843,6 +2843,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.733,
             "range": "±1.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e93f3ba314d63af1beb7936fb797f8bb0e65ef72",
+          "message": "Merge pull request #292 from serjflint/feat/test-kinds-advisory\n\nfeat(hooks): commit-time test-kinds advisory + \"test-kind is a decision\" discipline",
+          "timestamp": "2026-08-10T11:19:44+03:00",
+          "tree_id": "7289373284cec822ee816462c0dbaee658d239cb",
+          "url": "https://github.com/serjflint/saitenka/commit/e93f3ba314d63af1beb7936fb797f8bb0e65ef72"
+        },
+        "date": 1786350026950,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.893,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.93,
+            "range": "±2.1%",
             "unit": "ms"
           }
         ]
