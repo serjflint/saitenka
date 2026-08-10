@@ -51,39 +51,6 @@ def nested_view_h(reader: Reader, full_h: int, wy: float) -> int:
     return view_h
 
 
-def render_nested_view(reader: Reader) -> None:
-    # The nested popup is a compact depth-1 quick look, scrolled with the wheel — composited crisp from
-    # its cached native panel (built by the crisp worker, or ahead of time by the lookahead) when hi-dpi,
-    # else the soft reference upscale. Same SSOT blit path as the base tooltip, keyed on _nest.key.
-    # Reached via the Reader seam (not a direct tooltip import — tooltip already imports this module for
-    # TIP_GAP, so the reverse edge would cycle).
-    st = reader._nest.state
-    if st is None:
-        return
-    reader._nest.rect = reader._blit_crisp_or_soft(
-        st,
-        reader._nest.key,
-        reader._nest.scroll,
-        reader._nest.view_h,
-        reader._nest.xy,
-        OverlayId.NESTED,
-    )
-
-
-def scroll_nested(reader: Reader, delta: int) -> None:
-    st = reader._nest.state
-    if st is None:
-        return
-    maxs = max(
-        0, st.full_height - reader._nest.view_h
-    )  # windowed estimate, converging as it renders
-    ns = min(maxs, max(0, reader._nest.scroll + delta))
-    if ns != reader._nest.scroll:
-        reader._nest.scroll = ns
-        reader._nest.hide_at = 0.0
-        render_nested_view(reader)
-
-
 def show_nested(reader: Reader, sb) -> None:
     """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
     Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
@@ -166,7 +133,11 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
     reader._nest.xy = reader._place_panel(
         st.width, anchor.wx, anchor.wy, anchor.wh, reader._nest.view_h
     )
-    render_nested_view(reader)
+    # Blit through the shared SSOT path via the Reader seam (a direct tooltip import would cycle —
+    # tooltip already imports this module for TIP_GAP); also kick a render-ahead so a first wheel notch
+    # on the nested popup composites crisp off warm bands, like the base tooltip.
+    reader._render_nested_view()
+    prefetch.request_render_ahead(reader, reader._nest, 1)
 
 
 def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):
@@ -295,4 +266,4 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
 def hide_nested(reader: Reader) -> None:
     if reader._nest.state is not None or reader._nest.rect is not None:
         reader.ov.hide(OverlayId.NESTED)
-    reader._nest = PopupView()
+    reader._nest = PopupView(OverlayId.NESTED)

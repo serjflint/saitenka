@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import numpy as np
+from overlay.app import prefetch, tooltip
+from overlay.app.overlay_ids import OverlayId
 from overlay.app.popups import Panel
 from overlay.app.render_cache import (
     RenderCache,
@@ -273,6 +275,146 @@ def test_cold_show_paints_directly_from_cache_before_building(tmp_path, monkeypa
     from overlay.app.popups import Panel
 
     assert isinstance(r._tip_state, Panel)  # …and the real interactive panel was still built after
+
+
+# --- the reusable raster-accounting oracle + the unified popup view (Phase A) --------------------
+
+
+class _ScrollTallDS:
+    """Inner-word / hovered-word lookup returns a VERY tall entry (full_height ≫ one screen of
+    overscan), so a scroll reaches genuinely cold 1× bands — the negative control needs a real raster to
+    catch. Every word gets its own headword, so distinct tokens build distinct panels."""
+
+    dicts: ClassVar[list] = []
+    freqs: ClassVar[list] = []
+    pitches: ClassVar[list] = []
+
+    def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
+        para = "とても長い定義の本文がここに縦へ縦へと伸びていく段落" * 6
+        return Entry(
+            headword=[tok.surface],
+            reading=getattr(tok, "reading", "") or tok.surface,
+            defs=[Definition(f"辞書{i}", [para]) for i in range(16)],
+        )
+
+    def has_term(self, *forms):  # noqa: ARG002  # protocol shape
+        return False
+
+
+def _nested_reader(*, two_words: bool = False):
+    """A 4K (hi-dpi → the crisp native compose path) scan reader whose inner-word lookup returns a TALL,
+    scrollable entry — the fixture the nested-popup blit/scroll/crisp tests drive. Prefetch is on so
+    scroll records render-ahead; the tests decide when to drain it (the 'worker'). ``two_words`` gives
+    the base and the nested view DISTINCT words → distinct panels, so warming one can't warm the other."""
+    from overlay.app.config import ReaderOptions
+    from overlay.app.controller import Reader
+    from overlay.app.subtitle_render import NullRenderer
+    from overlay.app.subtitles import WordBox
+    from overlay.app.tokenize import Token
+    from util import FakeIPC
+
+    r = Reader(
+        FakeIPC(), dict_set=_ScrollTallDS(), options=ReaderOptions(prefetch=True), scan_delay=0.0
+    )
+    r.osd = (3840, 2160)  # 4K → _raster_scale 2.0, so _blit_native takes the crisp path
+    r.sub_origin = (0, 0)
+    r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
+    r.boxes = [WordBox(0, 100, 300, 40, 40)]
+    if two_words:
+        r.tokens.append(Token("読書", "読書", "どくしょ", "名詞", 2, 4))
+        r.boxes.append(WordBox(1, 420, 300, 40, 40))
+    r.renderer = NullRenderer()
+    return r
+
+
+def assert_no_interactive_raster(view, act) -> int:
+    """The raster-accounting invariant that makes 'no tooltip raster on the interactive thread'
+    enforceable, not aspirational: drive ``act`` — an interactive-thread action on popup ``view`` — and
+    return how many glyph bands it rasterised SYNCHRONOUSLY on the calling thread (the ``_sync_rasters``
+    delta — the crisp warm_only compose reads cached bands and rasters none). The contract is 0 on a
+    warm view; a cold view is the negative control (returns > 0), proving the oracle can fire. Reused by
+    every phase that moves a raster off the interactive thread."""
+    st = view.state
+    assert st is not None, "the view must have a panel to account for its rasters"
+    before = st.windowed._sync_rasters
+    act()
+    return st.windowed._sync_rasters - before
+
+
+def test_cold_nested_scroll_rasters_on_the_interactive_thread():
+    # Negative control for the oracle: a nested popup scrolled into its COLD tail (never warmed, since we
+    # don't drain the render-ahead) rasters glyph bands on the calling thread — proving the oracle can
+    # actually fire (else a 0 in the positive test is meaningless).
+    r = _nested_reader()
+    tok = r.tokens[0]
+    r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)
+
+    def scroll_to_the_cold_tail() -> None:
+        for _ in range(
+            6
+        ):  # each notch grows the height estimate and moves past the warmed overscan
+            tooltip.scroll_view(r, r._nest, r._nest.view_h)
+
+    assert assert_no_interactive_raster(r._nest, scroll_to_the_cold_tail) > 0
+
+
+def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
+    # Phase A: the nested popup finally gets render-ahead + crisp-poll. After a scroll records a warm and
+    # the worker drains it, the poll tick assembles the crisp viewport from warm native bands with ZERO
+    # synchronous raster on the interactive thread — the guarantee the base tooltip already had.
+    r = _nested_reader()
+    tok = r.tokens[0]
+    r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)  # soft first paint
+    tooltip.scroll_view(r, r._nest, r._nest.view_h // 2)  # soft-first + records a render-ahead
+    assert r._nest.crisp_pending
+    prefetch._try_render_ahead(r)  # the worker warms the nested NATIVE viewport at the new scroll
+
+    rasters = assert_no_interactive_raster(r._nest, lambda: tooltip.apply_pending_crisp(r, r._nest))
+    assert rasters == 0
+    assert r._nest.crisp_miss == "" and not r._nest.crisp_pending  # upgraded soft → crisp
+
+
+def test_nested_scroll_requests_render_ahead_for_the_nested_view():
+    # The wiring behind the guarantee above: scrolling the nested popup records a render-ahead request
+    # for the NESTED panel (not the base) so a worker can warm its next bands.
+    r = _nested_reader()
+    tok = r.tokens[0]
+    r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)
+    nest = r._nest.state
+    tooltip.scroll_view(r, r._nest, max(1, r._nest.view_h // 3))
+    req = r._render_ahead_req
+    assert req is not None and req.panel is nest  # the request targets the nested panel
+
+
+def test_soft_nested_paint_upgrades_the_nested_view_not_the_base(monkeypatch):
+    # Regression (the bug Phase A closes): _blit_native wrote a SINGLE shared crisp flag, so a nested
+    # soft paint flipped the BASE's crisp_pending — apply_pending_crisp then re-blit the base and cleared
+    # it, and the nested popup NEVER upgraded to crisp. Per-view flags fix it: each popup owns its own.
+    r = _nested_reader(two_words=True)  # distinct base/nested words → distinct panels
+    r.hover = 0
+    r._show_tooltip(0)  # base tooltip up, cold → its own crisp_pending
+    assert r._tip_view.crisp_pending
+    tok = r.tokens[1]  # nested on a DIFFERENT word, so warming it can't warm the base
+    r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)  # nested soft paint
+    assert r._nest.crisp_pending  # nested has its OWN pending flag…
+    assert r._tip_view.crisp_pending  # …and did NOT clobber the base's
+
+    nest = r._nest.state
+    assert nest is not None
+    vh = min(r._nest.view_h, nest.full_height)
+    y0 = max(0, min(r._nest.scroll, max(0, nest.full_height - vh)))
+    nest.viewport(y0, vh, overscan=vh, scale=r._raster_scale)  # worker warms ONLY the nested native
+
+    uploads: list = []
+    monkeypatch.setattr(r.ov, "show_bgra", lambda _v, *_a, oid=None, **_k: uploads.append(oid))
+    tooltip.apply_pending_crisp(r, r._tip_view)  # base native still cold → no-op, base not re-blit
+    tooltip.apply_pending_crisp(r, r._nest)  # nested native warm → upgrades the NESTED to crisp
+
+    assert not r._nest.crisp_pending and r._nest.crisp_miss == ""  # nested is crisp now
+    assert r._tip_view.crisp_pending  # base still pending (untouched by the nested upgrade)
+    assert uploads == [
+        OverlayId.NESTED
+    ]  # ONLY the nested re-blit; the base was not spuriously redrawn
 
 
 def test_popular_terms_ranks_by_frequency_dedupes_and_caps():

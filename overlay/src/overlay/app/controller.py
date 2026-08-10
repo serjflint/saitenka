@@ -227,13 +227,16 @@ class Reader:
     # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
     # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
     _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
-    _tip_rect = Delegated[tuple | None]("tip", "tip_rect")
     _hide_at = Delegated[float]("tip", "hide_at")
-    _tip_scroll = Delegated[int]("tip", "tip_scroll")
-    _tip_view_h = Delegated[int]("tip", "tip_view_h")
-    _tip_xy = Delegated[tuple[int, int]]("tip", "tip_xy")
-    _tip_state = Delegated[Panel | None]("tip", "tip_state")
-    _tip_key = Delegated[tooltip.PanelKey | None]("tip", "tip_key")
+    # The base tooltip's PopupView + its fields, delegated through the dotted "tip.view" path so the
+    # historical flat names keep resolving while base and nested share one view type + blit machinery.
+    _tip_view = Delegated[PopupView]("tip", "view")
+    _tip_rect = Delegated[tuple | None]("tip.view", "rect")
+    _tip_scroll = Delegated[int]("tip.view", "scroll")
+    _tip_view_h = Delegated[int]("tip.view", "view_h")
+    _tip_xy = Delegated[tuple[int, int]]("tip.view", "xy")
+    _tip_state = Delegated[Panel | None]("tip.view", "state")
+    _tip_key = Delegated[tooltip.PanelKey | None]("tip.view", "key")
     _tip_nav = Delegated[list]("tip", "tip_nav")
     _nest = Delegated[PopupView]("tip", "nest")
     _scan_target = Delegated[str | None]("tip", "scan_target")
@@ -250,8 +253,8 @@ class Reader:
     _tip_keys_bound = Delegated[bool]("tip", "tip_keys_bound")
     _tip_tok = Delegated[Token | None]("tip", "tip_tok")
     _tip_inflected = Delegated[str | None]("tip", "tip_inflected")
-    _crisp_miss = Delegated[str]("tip", "crisp_miss")
-    _crisp_pending = Delegated[bool]("tip", "crisp_pending")
+    _crisp_miss = Delegated[str]("tip.view", "crisp_miss")
+    _crisp_pending = Delegated[bool]("tip.view", "crisp_pending")
     _tip_show_cold = Delegated[bool]("tip", "tip_show_cold")
     _panel_cache = Delegated[OrderedDict]("tip", "panel_cache")
 
@@ -1170,12 +1173,6 @@ class Reader:
     def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
         return tooltip.blit_panel(self, panel, scroll, view_h, xy, oid)
 
-    def _blit_crisp_or_soft(self, panel, key, scroll: int, view_h: int, xy, oid: int):
-        # Crisp-from-native-cache-when-built, else soft upscale (the SSOT both popups blit through).
-        # Delegated here so nested_popup reaches it via the Reader seam, not a nested_popup→tooltip
-        # import (which would cycle — tooltip already imports nested_popup for TIP_GAP).
-        return tooltip._blit_crisp_or_soft(self, panel, key, scroll, view_h, xy, oid)
-
     def _bind_tip_keys(self) -> None:
         """Register the tooltip-scoped keys (idempotent — word switches must not re-bind)."""
         if self._tip_keys_bound:
@@ -1247,7 +1244,7 @@ class Reader:
         tooltip.render_tip_view(self)
 
     def _render_nested_view(self) -> None:
-        nested_popup.render_nested_view(self)
+        tooltip.render_view(self, self._nest)
 
     def _scroll_tip(self, delta: int) -> None:
         # event → redraw-finished latency for one scroll tick: nests the downstream "render"
@@ -1274,7 +1271,7 @@ class Reader:
                 span.set("crisp_miss", self._crisp_miss or "n/a")
 
     def _scroll_nested(self, delta: int) -> None:
-        nested_popup.scroll_nested(self, delta)
+        tooltip.scroll_view(self, self._nest, delta)
 
     # --- nested scanning: hover a word INSIDE the tooltip → its own popup -----------------------
     def _scan_hit(self, mx: float, my: float):
@@ -1727,7 +1724,9 @@ class Reader:
             self._apply_pending_deps_or_spinner()
             self._apply_pending_anki_seed()
             tooltip.apply_engaged_results(self)  # a cold-miss head composed → show it now (warm)
-            tooltip.apply_pending_crisp(self)  # upgrade a soft first paint to crisp once bands warm
+            # upgrade a soft first paint to crisp once bands warm — per view (base AND nested)
+            tooltip.apply_pending_crisp(self, self._tip_view)
+            tooltip.apply_pending_crisp(self, self._nest)
             subtitle_modes.apply_fetch_results(self)
             analysis_overlay.apply_results(self)
             sub_picker.update(self)

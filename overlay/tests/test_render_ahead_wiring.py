@@ -58,9 +58,9 @@ def _tall_panel() -> Panel:
 def test_scroll_records_the_newest_request_only():
     r = _reader()
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
-    prefetch.request_render_ahead(r, 1)
+    prefetch.request_render_ahead(r, r._tip_view, 1)
     r._tip_scroll = 999
-    prefetch.request_render_ahead(r, -1)
+    prefetch.request_render_ahead(r, r._tip_view, -1)
     req = r._render_ahead_req
     assert req is not None
     assert (req.scroll, req.view_h, req.direction) == (999, 300, -1)  # newest scroll won
@@ -69,12 +69,12 @@ def test_scroll_records_the_newest_request_only():
 def test_no_request_without_a_tooltip_or_when_prefetch_off():
     r = _reader()
     r._tip_state = None
-    prefetch.request_render_ahead(r, 1)
+    prefetch.request_render_ahead(r, r._tip_view, 1)
     assert r._render_ahead_req is None
 
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]
     r.prefetch = False
-    prefetch.request_render_ahead(r, 1)
+    prefetch.request_render_ahead(r, r._tip_view, 1)
     assert r._render_ahead_req is None
 
 
@@ -82,7 +82,7 @@ def test_worker_drains_the_slot_and_warms_off_thread():
     r = _reader()
     panel = _RecordingPanel()
     r._tip_state = panel  # type: ignore[assignment]
-    prefetch.request_render_ahead(r, 1)
+    prefetch.request_render_ahead(r, r._tip_view, 1)
 
     handled = prefetch._try_render_ahead(r)
 
@@ -100,7 +100,7 @@ def test_stale_request_from_a_word_switch_is_dropped():
     r = _reader()
     panel = _RecordingPanel()
     r._tip_state = panel  # type: ignore[assignment]
-    prefetch.request_render_ahead(r, 1)
+    prefetch.request_render_ahead(r, r._tip_view, 1)
     r._prefetch_gen += 1  # a line change / seek invalidates the in-flight request
 
     handled = prefetch._try_render_ahead(r)
@@ -123,7 +123,7 @@ def test_worker_actually_warms_a_real_panel():
     r = _reader()
     r._tip_scroll = 0
     r._tip_state = _tall_panel()
-    prefetch.request_render_ahead(r, 1)
+    prefetch.request_render_ahead(r, r._tip_view, 1)
 
     prefetch._try_render_ahead(r)
 
