@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786359710025,
+  "lastUpdate": 1786365365418,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2915,6 +2915,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.628,
             "range": "±6.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6d88751fe754a8a5461c4fee3d4d6a7775464433",
+          "message": "Merge pull request #294 from serjflint/perf/nested-offthread-render\n\nperf: nested popup off-thread + bench/click telemetry (follow-up to #293)",
+          "timestamp": "2026-08-10T15:35:33+03:00",
+          "tree_id": "d98c566cceae4256ef307eba9f4913c7e1533d44",
+          "url": "https://github.com/serjflint/saitenka/commit/6d88751fe754a8a5461c4fee3d4d6a7775464433"
+        },
+        "date": 1786365364191,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.28,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.783,
+            "range": "±2.5%",
             "unit": "ms"
           }
         ]
