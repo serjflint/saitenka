@@ -581,6 +581,14 @@ def _try_render_ahead(reader: Reader) -> bool:
         req.panel.render_ahead(
             req.scroll, req.view_h, direction=req.direction, should_cancel=cancel, scale=scale
         )
+        if scale > 1.0:
+            # A flick that outruns the native render-ahead reveals a region the soft-first blit rasters
+            # from RAW 1× bands (blit_panel warm_only=False) — synchronously on the scroll tick (#297).
+            # Warm those raw bands ahead too, so the soft path finds them cached instead of rastering on
+            # the interactive thread. (scale==1 already warmed raw above — this covers the native case.)
+            req.panel.render_ahead(
+                req.scroll, req.view_h, direction=req.direction, should_cancel=cancel, scale=1.0
+            )
     except Exception:
         log.debug("render-ahead failed", exc_info=True)  # a bad block must never kill the worker
     return True
