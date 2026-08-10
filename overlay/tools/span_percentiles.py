@@ -6,9 +6,10 @@ Reads one ``trace-*.json`` (Chrome Trace Format: ``{"traceEvents":[...]}``) emit
 critical-path spans (tooltip open, scroll frame, sub-seek, …) first so the delays that matter read at
 a glance. Stdlib only, so it runs under the py-spy profiling venv without extra deps.
 
-Spans that carry a ``kind`` attribute (``render``/``tip_compose``/``prefetch_decode`` —
-base vs nested vs clicked vs engaged) are reported per kind (``tip_compose[nested]``), so a nested/clicked
-paint's latency doesn't hide inside the base aggregate.
+Spans that carry a ``kind`` attribute (``render``/``tip_compose``/``prefetch_decode`` — base vs nested
+vs clicked vs the off-thread engaged composes ``engaged``/``engaged_nested``/``engaged_nav``/
+``engaged_open``) are reported per kind (``tip_compose[nested]``, ``prefetch_decode[engaged_open]``), so a
+nested/clicked paint's latency doesn't hide inside the base aggregate.
 
     python tools/span_percentiles.py <trace.json> [--label NAME]
 """

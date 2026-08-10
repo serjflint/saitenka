@@ -46,6 +46,17 @@ def test_kind_split_span_groups_per_kind() -> None:
     assert by["render[base]"] == [1.0]
 
 
+def test_engaged_open_reports_as_its_own_prefetch_decode_kind() -> None:
+    # Phase C/D: the off-thread clicked/keyed open warms bands under prefetch_decode[engaged_open], so it
+    # must report separately from the base scroll-ahead warm (prefetch_decode[warm]) — else the win hides.
+    sp = _mod()
+    by = sp._durations_by_span(
+        [_span("prefetch_decode", 4000, "engaged_open"), _span("prefetch_decode", 2000, "warm")]
+    )
+    assert by["prefetch_decode[engaged_open]"] == [4.0]
+    assert by["prefetch_decode[warm]"] == [2.0]
+
+
 def test_non_split_span_ignores_kind() -> None:
     # A span NOT in the kind-split set aggregates by name even if it happens to carry a kind attr.
     sp = _mod()
