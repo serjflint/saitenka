@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from overlay import otel_metrics
 from overlay.app import paths
 from overlay.app.jimaku import parse_filename
 from overlay.app.languages import MAIN_LANG
@@ -493,7 +494,8 @@ def capture_current(reader) -> BacklogEntry | None:
         store = reader._backlog_store
         if store is None:
             store = reader._backlog_store = BacklogStore()
-        entry, created = store.toggle_capture_result(capture)
+        with otel_metrics.traced("backlog_write", op="toggle"):  # main-thread SQLite on a bookmark
+            entry, created = store.toggle_capture_result(capture)
     except (OSError, sqlite3.Error, ValueError) as exc:
         reader._toast(f"bookmark failed: {exc}", "err")
         return None

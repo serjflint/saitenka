@@ -1281,7 +1281,7 @@ class Reader:
         nested_popup.show_nested(self, sb)
 
     def _open_nested(self, tok, inflected, wx: float, wy: float, wh: float, tail=None) -> None:
-        nested_popup.open_nested(self, tok, inflected, wx, wy, wh, tail)
+        nested_popup.open_nested(self, tok, inflected, nested_popup.Anchor(wx, wy, wh), tail)
 
     def _place_nested(
         self, st, key, token, word: str, wx: float, wy: float, wh: float, tail=None

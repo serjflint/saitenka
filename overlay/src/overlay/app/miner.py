@@ -15,6 +15,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from overlay import otel_metrics
 from overlay.app.anki import AnkiError, CardContent, bold_word, build_note, dedupe
 from overlay.app.lookup import card_for
 from overlay.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
@@ -274,15 +275,18 @@ class Miner:
         try:
             from overlay.app.mined_store import ensure_store
 
-            ensure_store(r).record(
-                note_id=note_id,
-                video_path=str(video),
-                cue_start=float(start) if start is not None else 0.0,
-                cue_end=float(end) if end is not None else 0.0,
-                expression=card.expression,
-                reading=card.reading,
-                deck=r.mine_cfg.deck,
-            )
+            with otel_metrics.traced(
+                "mined_store_write"
+            ):  # main-thread SQLite on a mine (#253 link)
+                ensure_store(r).record(
+                    note_id=note_id,
+                    video_path=str(video),
+                    cue_start=float(start) if start is not None else 0.0,
+                    cue_end=float(end) if end is not None else 0.0,
+                    expression=card.expression,
+                    reading=card.reading,
+                    deck=r.mine_cfg.deck,
+                )
         except (OSError, sqlite3.Error, ValueError):
             log.debug("mined-card store write failed", exc_info=True)
 

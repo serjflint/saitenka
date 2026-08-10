@@ -8,6 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from overlay import otel_metrics
 from overlay.app import analysis_overlay, mined_store
 from overlay.app.backlog import BacklogEntry, BacklogStore, MediaRecord, db_path
 from overlay.app.languages import SECOND_LANG
@@ -460,8 +461,11 @@ def on_click(reader: Reader, x: float, y: float) -> bool:
     hit = next((box for box in reader.sidebar.hits if box.contains(local_x, local_y)), None)
     if hit is None:
         return True
-    _activate_hit(reader, hit)
-    redraw(reader)
+    # Was blind: a sidebar click can mine / bookmark / relink (main-thread SQLite) + a full redraw. Span
+    # it (kind = the action) so a report shows whether a click stutters — the surface #293 left uncovered.
+    with otel_metrics.traced("sidebar_click", kind=hit.kind):
+        _activate_hit(reader, hit)
+        redraw(reader)
     return True
 
 
@@ -476,9 +480,10 @@ def mark_active_mined(reader: Reader) -> None:
     cue = index.cues[active]
     try:
         store = _ensure_store(reader)
-        for entry in store.entries_for_path(video):
-            if abs(entry.cue_start - cue.start) < 0.05 and abs(entry.cue_end - cue.end) < 0.05:
-                store.set_status(entry.id, "mined")
+        with otel_metrics.traced("backlog_write", op="set_status"):  # main-thread SQLite on a mine
+            for entry in store.entries_for_path(video):
+                if abs(entry.cue_start - cue.start) < 0.05 and abs(entry.cue_end - cue.end) < 0.05:
+                    store.set_status(entry.id, "mined")
     except (OSError, sqlite3.Error, ValueError, KeyError):
         return
     redraw(reader)
