@@ -46,6 +46,9 @@ from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
 from overlay.panel import Definition, Entry, EntryGroup, Freq
 
+if TYPE_CHECKING:
+    from overlay.model import PitchAccent  # annotation-only (positions come typed from PitchSource)
+
 # dict_sql step-resolution is kept on the interactive path but SAMPLED in the background prefetch
 # workers, where a per-word SQL span floods the trace (~1000/session) and the enclosing prefetch_decode
 # span already covers the phase. The histogram (percentiles) still records every call, sampled or not.
@@ -584,9 +587,11 @@ class DictionarySet:
         accents = self._pitch_accents(forms, token.reading)
         if not accents:
             return "", ""
-        items = "".join(f"<li>{r}: {', '.join(f'[{p}]' for p in ps)}</li>" for r, ps in accents)
+        items = "".join(
+            f"<li>{r}: {', '.join(f'[{a.position}]' for a in ps)}</li>" for r, ps in accents
+        )
         html = f'<ul style="text-align:left;margin:0;padding-left:1.1em;">{items}</ul>'
-        positions = ", ".join(str(p) for _r, ps in accents for p in ps)
+        positions = ", ".join(str(a.position) for _r, ps in accents for a in ps)
         return html, positions
 
     def _freq_rank(self, term: str, reading: str) -> int | None:
@@ -893,8 +898,8 @@ class DictionarySet:
 
     def _pitch_accents(
         self, forms: tuple[str, ...], reading: str
-    ) -> list[tuple[str, tuple[int, ...]]]:
-        pitches: list[tuple[str, tuple[int, ...]]] = []
+    ) -> list[tuple[str, tuple[PitchAccent, ...]]]:
+        pitches: list[tuple[str, tuple[PitchAccent, ...]]] = []
         for ps in self.pitches:
             got = ps.accents(forms, reading)
             if got is not None:

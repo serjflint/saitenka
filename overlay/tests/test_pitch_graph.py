@@ -84,10 +84,11 @@ def _pitch_zip(path):
 
 def test_pitch_source_exposes_raw_positions(tmp_path):
     import dicthelp
+    from overlay.model import PitchAccent
 
     ps = dicthelp.load_pitchsource(_pitch_zip(tmp_path / "p.zip"))
     got = ps.accents(("本命", "ほんめい"), "ほんめい")
-    assert got == ("ほんめい", [0])
+    assert got == ("ほんめい", [PitchAccent(0)])
     assert ps.accents(("犬",), "いぬ") is None
 
 
@@ -96,6 +97,7 @@ def test_entry_carries_pitch_accents(tmp_path):
 
     import dicthelp
     from overlay.app.tokenize import Token
+    from overlay.model import PitchAccent
 
     dz = tmp_path / "d.zip"
     with _zf.ZipFile(dz, "w") as zf:
@@ -106,19 +108,71 @@ def test_entry_carries_pitch_accents(tmp_path):
     ds = dicthelp.load_set([str(dz)], pitch_zips=[_pitch_zip(tmp_path / "p.zip")])
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     e = ds.entry_for(tok)
-    assert e.pitches == [("ほんめい", (0,))]
+    assert e.pitches == [("ほんめい", (PitchAccent(0),))]
     # …and the purple pill fallback in the freq row is still there
     assert any(f.value == "ほんめい [0]" for f in e.freqs)
+
+
+def _alpha_sum(img) -> int:
+    return sum(img.getchannel("A").tobytes())
+
+
+def test_devoiced_mora_dot_is_hollow(tmp_path):  # noqa: ARG001
+    # #298: a devoiced mora is drawn as a hollow ○ (ring) instead of a filled dot, so it carries LESS
+    # ink than the same graph with the mora filled. Negative control: two plain graphs are identical.
+    from overlay.draw.pitch import render_pitch_graph
+    from overlay.model import PitchAccent
+
+    plain = render_pitch_graph("うし", 1)
+    devoiced = render_pitch_graph("うし", PitchAccent(1, devoice=(1,)))
+    assert _alpha_sum(devoiced) < _alpha_sum(plain)  # ring < disc
+    assert _alpha_sum(render_pitch_graph("うし", 1)) == _alpha_sum(plain)  # deterministic control
+
+
+def test_nasal_mora_adds_a_mark_above_the_row():
+    # #298: a nasalised mora carries a ゜ ring above its dot, so the graph reserves headroom (taller) and
+    # has ink higher up than the plain graph. Plain graphs keep the old geometry (no re-bless).
+    from overlay.draw.pitch import render_pitch_graph
+    from overlay.model import PitchAccent
+
+    plain = render_pitch_graph("うし", 0)
+    nasal = render_pitch_graph("うし", PitchAccent(0, nasal=(1,)))
+    assert nasal.height > plain.height  # headroom added only when a ゜ is present
+    assert _alpha_sum(nasal) > _alpha_sum(plain)  # the extra ゜ ring adds ink
+
+
+def test_pitch_source_round_trips_devoice_nasal(tmp_path):
+    import dicthelp
+    from overlay.model import PitchAccent
+
+    path = tmp_path / "p.zip"
+    entries = [
+        [
+            "牛",
+            "pitch",
+            {"reading": "うし", "pitches": [{"position": 0, "devoice": [1], "nasal": 2}]},
+        ]
+    ]
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("index.json", json.dumps({"title": "PitchNHK", "format": 3}))
+        zf.writestr("term_meta_bank_1.json", json.dumps(entries, ensure_ascii=False))
+    ps = dicthelp.load_pitchsource(str(path))
+    got = ps.accents(("牛", "うし"), "うし")
+    assert got == ("うし", [PitchAccent(0, (1,), (2,))])  # devoice + nasal survived import→query
+    assert ps.display(("牛", "うし"), "うし") == "うし [0]"  # pill still shows only the position
 
 
 def test_panel_renders_pitch_graph_row():
     """An entry WITH pitches renders taller than the same entry without (the graph row), and the
     no-pitch panel is unchanged — existing goldens stay byte-identical."""
+    from overlay.model import PitchAccent
     from overlay.panel import Definition, Entry, render_panel
 
     base = Entry(headword=["本命"], defs=[Definition("D", ["favourite"])])
     with_pitch = Entry(
-        headword=["本命"], defs=[Definition("D", ["favourite"])], pitches=[("ほんめい", (0,))]
+        headword=["本命"],
+        defs=[Definition("D", ["favourite"])],
+        pitches=[("ほんめい", (PitchAccent(0),))],
     )
     a = render_panel(base, width=384)
     b = render_panel(with_pitch, width=384)

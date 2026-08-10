@@ -26,7 +26,17 @@ from overlay.body_block import (
     render_body_block,
 )
 from overlay.draw.icon_source import Icon, render_icon
-from overlay.model import _DEFAULT_THEME, RGBA, LinkBox, ScanBox, Span, Style, Theme, is_ideograph
+from overlay.model import (
+    _DEFAULT_THEME,
+    RGBA,
+    LinkBox,
+    PitchAccent,
+    ScanBox,
+    Span,
+    Style,
+    Theme,
+    is_ideograph,
+)
 from overlay.parallel import shared_executor
 from overlay.render.chip import ChipStyle
 from overlay.render.document import GUTTER_PX, INDENT_PX
@@ -80,9 +90,9 @@ class Entry:
     defs: list[Definition] = field(default_factory=list)
     inflection_chain: list[str] = field(default_factory=list)  # 🧩 -て « -いる « -た
     reading: str = ""  # dictionary-form kana reading (for TTS: 習う → ならう, not ならわ)
-    # Distinct pitch accents as (reading, positions) — drawn as compact graphs in a header-area row;
+    # Distinct pitch accents as (reading, PitchAccents) — drawn as compact graphs in a header-area row;
     # the purple text pill in the freq row stays as the compact fallback.
-    pitches: list[tuple[str, tuple[int, ...]]] = field(default_factory=list)
+    pitches: list[tuple[str, tuple[PitchAccent, ...]]] = field(default_factory=list)
     # Yomitan-style stacked entries: when a headword has ≥2 distinct readings (退く = のく / しりぞく),
     # one EntryGroup per reading, each rendered as its own block with its own ⊕. Empty for the common
     # single-entry case — the fused header path above is unchanged (goldens preserved).
@@ -418,9 +428,9 @@ def panel_rows(
             from overlay.draw.pitch import render_pitch_graph
 
             flow: list = []
-            for reading, positions in pitches:
-                for pos in positions:
-                    g = render_pitch_graph(reading, pos, scale=theme.scale)
+            for reading, accents in pitches:
+                for pa in accents:
+                    g = render_pitch_graph(reading, pa, scale=theme.scale)
                     if flow:
                         flow.append(Span("  ", Style(size=theme.px(20))))
                     flow.append(

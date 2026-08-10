@@ -7,11 +7,23 @@ content unit the layout consumes; the structured-content walker produces it.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 RGBA = tuple[int, int, int, int]
 
 BLACK: RGBA = (0, 0, 0, 255)
+
+
+class PitchAccent(NamedTuple):
+    """One pitch-accent pattern: the ``position`` downstep (0 = heiban, 1 = atamadaka, n = drop after
+    mora n) plus optional per-mora annotations from NHK/Kanjium-style data — ``devoice`` (voiceless
+    morae, ○) and ``nasal`` (nasalised morae, ゜), both 1-based mora indices. Position-only consumers
+    (freq pill, mined ``{pitch-accent-positions}``) read ``.position``; the graph renderer draws the
+    marks. An ``int`` still coerces via ``PitchAccent(n)`` so a plain accent dict is unchanged."""
+
+    position: int
+    devoice: tuple[int, ...] = ()
+    nasal: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

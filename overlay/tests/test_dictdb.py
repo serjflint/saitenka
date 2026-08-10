@@ -107,6 +107,34 @@ def test_import_freq_and_pitch_go_to_term_meta(tmp_path):
     assert pitch[0] == "pitch" and json.loads(pitch[2]) == [0]
 
 
+def test_import_pitch_carries_devoice_and_nasal(tmp_path):
+    # #298: an NHK/Kanjium pitch entry encodes per-mora devoice/nasal; import must keep them (a plain
+    # accent with neither stays the bare [int] list — byte-identical DB — so only richer data grows).
+    pz = _meta_zip(
+        tmp_path / "p.zip",
+        "PitchNHK",
+        "pitch",
+        [
+            [
+                "牛",
+                {"reading": "うし", "pitches": [{"position": 0, "devoice": [1], "nasal": 2}]},
+            ],
+            ["犬", {"reading": "いぬ", "pitches": [{"position": 1}]}],  # plain → bare list
+        ],
+    )
+    db = DictionaryDb.open(tmp_path / "db.sqlite")
+    pr = db.import_zip(pz, imported_at=AT)
+    rows = dict(
+        db._conn()
+        .execute("SELECT reading, positions FROM term_meta WHERE dict_id=?", (pr.id,))
+        .fetchall()
+    )
+    assert json.loads(rows["うし"]) == [
+        {"p": 0, "d": [1], "n": [2]}
+    ]  # richer object, devoice+nasal
+    assert json.loads(rows["いぬ"]) == [1]  # plain accent unchanged
+
+
 def test_import_kanji_and_tags(tmp_path):
     z = _term_zip(
         tmp_path / "k.zip",
