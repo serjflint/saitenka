@@ -23,9 +23,10 @@ returning `(png, w, h)`. Raises `ValueError` on invalid or zero-size SVG.
 ## Why a vendored binding
 
 resvg is **pure Rust** (usvg parser + tiny-skia raster) — no system libraries (unlike cairosvg/pyvips),
-so it ships prebuilt wheels for every supported interpreter including free-threaded **cp314t**
-(`gil_used = false`), the same self-contained-wheel bar as [taffylite](../taffylite). It is an
-**optional** add-on: without it, saitenka falls back to the `▢`/label placeholder.
+so it ships prebuilt wheels: three per platform (pyo3 abi3 + abi3t, PEP 803) — abi3 (GIL 3.13+), cp314t
+(free-threaded 3.14), abi3t (FT *and* GIL 3.15+, `gil_used = false`), the same self-contained-wheel bar
+as [taffylite](../taffylite). It is an **optional** add-on: without it, saitenka falls back to the
+`▢`/label placeholder.
 
 ## Licensing
 
