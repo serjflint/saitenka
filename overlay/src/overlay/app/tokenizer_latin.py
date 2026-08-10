@@ -5,8 +5,16 @@ Text is scanned into word runs on Unicode letter boundaries, and inflection is h
 dictionary-form lookup with a transform-based deinflector (the GPL ``deinflect`` add-on's French rules).
 So this tokenizer's job is **segmentation + content classification + offsets**, plus one lookup nicety
 the deinflector can't do: ``lemma`` is the surface **lower-cased** (sentence-initial ``Le``/``Ça`` →
-``le``/``ça`` so they resolve to the article/pronoun, not a capitalised proper-noun homograph — Yomitan's
-``decapitalize`` text-processor). ``surface`` keeps the original case for display/mining.
+``le``/``ça`` so they resolve to the article/pronoun, not a capitalised proper-noun homograph). ``surface``
+keeps the original case for display/mining.
+
+**Provenance.** Yomitan registers exactly ``{decapitalize, capitalizeFirstLetter, apostropheVariants}`` as
+French text-preprocessors (`language-descriptors.js` @ c0c3702963c2). Two of ours are grounded there:
+lower-casing mirrors ``decapitalize`` (`text-processors.js`: ``str → str.toLowerCase()``), and treating
+``'``/``’`` alike mirrors ``apostropheVariants`` (`fr/french-text-preprocessors.js`). Elision is **not** —
+Yomitan has no elision preprocessor OR transform; upstream defers ``l'homme`` to its dictionary/selection.
+Ours is a deliberate saitenka extension because we segment *before* lookup (see ``_ELISION``). Don't hunt
+for an upstream elision source — there isn't one; the pipeline oracle pins the ``Le→le`` / ``n'→ne`` behaviour.
 
 Elision (``l'homme``, ``qu'il``) keeps the apostrophe WITH the clitic (one ``n'`` token, not a bare
 ``n`` + a stray ``'``) and resolves it to its full form (``n'`` → ``ne``, ``qu'`` → ``que``) so the
@@ -28,12 +36,13 @@ WORD = "WORD"
 PUNCT = "PUNCT"
 SPACE = "SPACE"
 
-# Apostrophe variants that mark French elision — both the straight and the typographic form.
+# Apostrophe variants — straight + typographic. Grounds Yomitan's `apostropheVariants` (see Provenance).
 _APOSTROPHES = frozenset("'’")
 
 # Elision clitics: a short function word that elides its vowel before a following vowel. The apostrophe
 # stays WITH the clitic and the lemma is the full word, so ``n'`` resolves to ``ne`` in the dictionary
-# instead of leaving a bare, meaningless ``n``. ``qu'`` is the one two-letter clitic.
+# instead of leaving a bare, meaningless ``n``. ``qu'`` is the one two-letter clitic. NB a saitenka
+# extension — Yomitan has no French elision (see Provenance); keep it in sync with the pipeline oracle.
 _ELISION = {
     "l": "le",
     "d": "de",
