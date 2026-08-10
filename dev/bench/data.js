@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786347324169,
+  "lastUpdate": 1786347382711,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -2807,6 +2807,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.073,
             "range": "±16.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d63f89fb5d0057963cd2db59d2456df51bcf5dcb",
+          "message": "Merge pull request #291 from serjflint/test/transform-differential\n\ntest(conformance): French transform differential + external-oracle catalog + drift guard",
+          "timestamp": "2026-08-10T10:35:39+03:00",
+          "tree_id": "7ebe833a39484f0b8605ae25ee1729b50ddf1b33",
+          "url": "https://github.com/serjflint/saitenka/commit/d63f89fb5d0057963cd2db59d2456df51bcf5dcb"
+        },
+        "date": 1786347381838,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.807,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.733,
+            "range": "±1.7%",
             "unit": "ms"
           }
         ]
