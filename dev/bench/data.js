@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786487272945,
+  "lastUpdate": 1786491253759,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3995,6 +3995,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.161,
             "range": "±0.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f99cd019e7c6f9053acea118d81cdd66b0042975",
+          "message": "fix: harden grow and sharpen audit tooling (#326)",
+          "timestamp": "2026-08-12T02:33:35+03:00",
+          "tree_id": "8fdbcf6889da368f43cdaa5ee78c081b66581895",
+          "url": "https://github.com/serjflint/saitenka/commit/f99cd019e7c6f9053acea118d81cdd66b0042975"
+        },
+        "date": 1786491252559,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.368,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.829,
+            "range": "±4.9%",
             "unit": "ms"
           }
         ]
