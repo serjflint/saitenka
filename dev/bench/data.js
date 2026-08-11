@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786409823727,
+  "lastUpdate": 1786435308433,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3491,6 +3491,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.373,
             "range": "±15.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8677805805aded25eb57ff25ecedac82bc76684a",
+          "message": "Merge pull request #311 from serjflint/feat/kanji-panel-sectioned-stats\n\nfeat(kanji): label + section the kanji panel's stats like Yomitan",
+          "timestamp": "2026-08-11T11:01:23+03:00",
+          "tree_id": "f08cd7da7da02653ab4b6263e3d49d0dc0552a9c",
+          "url": "https://github.com/serjflint/saitenka/commit/8677805805aded25eb57ff25ecedac82bc76684a"
+        },
+        "date": 1786435307798,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.323,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.836,
+            "range": "±5.4%",
             "unit": "ms"
           }
         ]
