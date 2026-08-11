@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786451580875,
+  "lastUpdate": 1786476929081,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3887,6 +3887,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.327,
             "range": "±2.7%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3045772bbeead653860ee80308ce26a8eadda3c5",
+          "message": "Merge pull request #323 from serjflint/fix/grow-sharpen-dogfood\n\nfix: harden Grow and Sharpen dogfood loops",
+          "timestamp": "2026-08-11T22:34:35+03:00",
+          "tree_id": "78ece1b6d5c65cf013a7d5df8853a5b3ecd0939c",
+          "url": "https://github.com/serjflint/saitenka/commit/3045772bbeead653860ee80308ce26a8eadda3c5"
+        },
+        "date": 1786476927800,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.494,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.145,
+            "range": "±7.8%",
             "unit": "ms"
           }
         ]
