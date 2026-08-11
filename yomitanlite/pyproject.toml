@@ -1,0 +1,23 @@
+[project]
+name = "yomitanlite"
+version = "0.1.0"
+description = "Headless Yomitan-compatible dictionary lookup core"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.scripts]
+yomitanlite-parity = "yomitanlite.parity:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-timeout>=2.4"]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: crosses the headless Yomitan subprocess boundary"]
