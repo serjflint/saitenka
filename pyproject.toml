@@ -1,7 +1,6 @@
-# Repo-root task runner. This is NOT a package (`package = false`) — it ships nothing. Its only job is
-# to let `uv run poe <task>` work from the repo root by delegating into `overlay/`, where the real poe
-# tasks (lint, types, tests, bench, …) live. The dev gate itself is unchanged; this just removes the
-# "cd overlay first" papercut. Everything stays in poe — no second task runner.
+# Repo-root task runner. NOT a package (`package = false`) — it ships nothing. Repo-wide tasks are
+# defined here; anything needing overlay's env is defined there and forwarded. Either file resolves
+# every name, so `uv run poe <task>` works from either directory.
 #
 #   uv run poe all          # full dev gate (lint + types + tests + free-threaded + coverage)
 #   uv run poe test         # tests only
@@ -18,7 +17,9 @@ package = false
 preview-features = ["centralized-project-envs"]
 
 [dependency-groups]
-dev = ["poethepoet>=0.30"]
+# Checkers that resolve no first-party imports: ruff parses, complexipy walks the AST. `types` is
+# absent because mypy/basedpyright must import overlay's runtime deps to say anything useful.
+dev = ["poethepoet>=0.30", "ruff>=0.15", "complexipy>=5"]
 
 # ── Repo-wide tool config (SSOT) ──────────────────────────────────────────────────────────────────
 # Ruff / complexipy / the type-checkers live HERE, at the workspace root, so ONE config governs ALL
@@ -318,7 +319,6 @@ extra-paths = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/py
 
 [tool.poe.tasks]
 all = { cmd = "uv run poe all", cwd = "overlay" }
-lint = { cmd = "uv run poe lint", cwd = "overlay" }
 types = { cmd = "uv run poe types", cwd = "overlay" }
 arch = { cmd = "uv run poe arch", cwd = "overlay" }
 arch-report = { cmd = "uv run poe arch-report", cwd = "overlay" }
@@ -328,8 +328,6 @@ invariants-taint = { cmd = "uv run poe invariants-taint", cwd = "overlay" }
 mutate = { cmd = "uv run poe mutate", cwd = "overlay" }
 fuzz = { cmd = "uv run poe fuzz", cwd = "overlay" }
 crosshair = { cmd = "uv run poe crosshair", cwd = "overlay" }
-complexity = { cmd = "uv run poe complexity", cwd = "overlay" }
-complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
 loop-tools-test = { cmd = "uv run poe loop-tools-test", cwd = "overlay" }
 test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
@@ -337,24 +335,67 @@ affected = { cmd = "uv run poe affected", cwd = "overlay" }
 cov = { cmd = "uv run poe cov", cwd = "overlay" }
 bench = { cmd = "uv run poe bench", cwd = "overlay" }
 smoke-live = { cmd = "uv run poe smoke-live", cwd = "overlay" }
-changelog = { cmd = "uv run poe changelog", cwd = "overlay" }
 docs = { cmd = "uv run poe docs", cwd = "overlay" }
 docs-serve = { cmd = "uv run poe docs-serve", cwd = "overlay" }
 docs-cli = { cmd = "uv run poe docs-cli", cwd = "overlay" }
-pages = { cmd = "uv run poe pages", cwd = "overlay" }
-release-prepare = { cmd = "uv run poe release-prepare", cwd = "overlay" }
-release-publish = { cmd = "uv run poe release-publish", cwd = "overlay" }
 # Supply-chain & hygiene (real tasks + rationale live in overlay/pyproject.toml).
 audit = { cmd = "uv run poe audit", cwd = "overlay" }
 pip-audit = { cmd = "uv run poe pip-audit", cwd = "overlay" }
-spell = { cmd = "uv run poe spell", cwd = "overlay" }
-links = { cmd = "uv run poe links", cwd = "overlay" }
-links-net = { cmd = "uv run poe links-net", cwd = "overlay" }
 deps = { cmd = "uv run poe deps", cwd = "overlay" }
 licenses = { cmd = "uv run poe licenses", cwd = "overlay" }
 deadcode = { cmd = "uv run poe deadcode", cwd = "overlay" }
 dup = { cmd = "uv run poe dup", cwd = "overlay" }
-perf-risk = { cmd = "uv run poe perf-risk", cwd = "overlay" }
-shell = { cmd = "uv run poe shell", cwd = "overlay" }
-ps1 = { cmd = "uv run poe ps1", cwd = "overlay" }
+bench-pyspy-all = { cmd = "uv run poe bench-pyspy-all", cwd = "overlay" }
+call-args = { cmd = "uv run poe call-args", cwd = "overlay" }
+call-args-test = { cmd = "uv run poe call-args-test", cwd = "overlay" }
+corpus-drift = { cmd = "uv run poe corpus-drift", cwd = "overlay" }
+corpus-lock = { cmd = "uv run poe corpus-lock", cwd = "overlay" }
+docs-consts = { cmd = "uv run poe docs-consts", cwd = "overlay" }
+docs-markers = { cmd = "uv run poe docs-markers", cwd = "overlay" }
+docs-refs = { cmd = "uv run poe docs-refs", cwd = "overlay" }
+install-smoke = { cmd = "uv run poe install-smoke", cwd = "overlay" }
+jank-live = { cmd = "uv run poe jank-live", cwd = "overlay" }
+perf-bless = { cmd = "uv run poe perf-bless", cwd = "overlay" }
+perf-check = { cmd = "uv run poe perf-check", cwd = "overlay" }
+pre-release = { cmd = "uv run poe pre-release", cwd = "overlay" }
+scroll-jank-pyspy = { cmd = "uv run poe scroll-jank-pyspy", cwd = "overlay" }
+stress-memory = { cmd = "uv run poe stress-memory", cwd = "overlay" }
+stress-pyspy = { cmd = "uv run poe stress-pyspy", cwd = "overlay" }
+synth-bench = { cmd = "uv run poe synth-bench", cwd = "overlay" }
+test-lint = { cmd = "uv run poe test-lint", cwd = "overlay" }
+test-lint-gate = { cmd = "uv run poe test-lint-gate", cwd = "overlay" }
+test-lint-gate-test = { cmd = "uv run poe test-lint-gate-test", cwd = "overlay" }
+test-lint-json = { cmd = "uv run poe test-lint-json", cwd = "overlay" }
+test-lint-test = { cmd = "uv run poe test-lint-test", cwd = "overlay" }
+test-live = { cmd = "uv run poe test-live", cwd = "overlay" }
+timeline-bench = { cmd = "uv run poe timeline-bench", cwd = "overlay" }
+timeline-bench-banded = { cmd = "uv run poe timeline-bench-banded", cwd = "overlay" }
+timeline-pyspy = { cmd = "uv run poe timeline-pyspy", cwd = "overlay" }
+trace-pyspy = { cmd = "uv run poe trace-pyspy", cwd = "overlay" }
+vocab-pyspy = { cmd = "uv run poe vocab-pyspy", cwd = "overlay" }
+vocab-pyspy-mp = { cmd = "uv run poe vocab-pyspy-mp", cwd = "overlay" }
+
+# ── Defined here, not forwarded ───────────────────────────────────────────────────────────────────
+# Everything above needs overlay's env; everything below needs only this one or a standalone binary.
+# Which side a task lives on is a question about its environment, not its scope.
+lint = { shell = "uv run ruff check --fix . && uv run ruff format ." }
+complexity = { cmd = "uv run complexipy" }
+complexity-baseline = { cmd = "uv run complexipy --snapshot-create" }
+changelog = { cmd = "uvx git-cliff@2.13.1 --unreleased" }
+spell = { cmd = "uvx typos" }
+links = { shell = "lychee --offline --no-progress $(git ls-files '*.md')" }
+links-net = { shell = "lychee --cache --max-cache-age 14d --no-progress $(git ls-files '*.md')" }
+pages = { cmd = "bash install/publish-pages.sh" }
+perf-risk = { cmd = "repowise health --module overlay/src/overlay" }
+shell = { shell = "shellcheck install/*.sh" }
+ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost -EnableExit\"" }
+release-prepare = { shell = "uv run install/release.py prepare $POE_EXTRA_ARGS" }
+release-publish = { shell = "uv run install/release.py publish $POE_EXTRA_ARGS" }
+
+# Guards and rationale: tools/repowise_ops.py.
+repowise-preflight = { cmd = "uv run python tools/repowise_ops.py preflight" }
+repowise-reindex = { cmd = "uv run python tools/repowise_ops.py reindex" }
+repowise-watch = { cmd = "uv run python tools/repowise_ops.py watch" }
+repowise-backup = { cmd = "uv run python tools/repowise_ops.py backup" }
+repowise-corrections = { cmd = "uv run python tools/repowise_ops.py corrections" }
 hygiene = { cmd = "uv run poe hygiene", cwd = "overlay" }

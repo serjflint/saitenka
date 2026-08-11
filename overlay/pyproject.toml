@@ -200,7 +200,7 @@ DEP003 = ["saitenka_deinflect"]  # GPL add-on via the `deinflect` extra (PyPI) �
 # lint / types / complexity run REPO-WIDE from the workspace root (config is the root SSOT, #216):
 # `cd .. && uv run --project overlay` keeps the overlay env (which has ruff/mypy/…) while ruff/mypy/
 # complexipy discover ../pyproject.toml and cover overlay + deinflect + taffylite + tools + install + .agents.
-lint = { shell = "cd .. && uv run --project overlay --extra full ruff check --fix . && uv run --project overlay --extra full ruff format ." }
+lint = { cmd = "uv run poe lint", cwd = ".." }
 # mypy/basedpyright gate the widened scope (library + overlay/examples + tools + install + .agents —
 # see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
 # strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
@@ -243,10 +243,10 @@ call-args-test = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snaps
 invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semgrep/rules.yml src" }
 # Cognitive-complexity gate, ratcheted against ../complexipy-snapshot.json (config: root [tool.complexipy]).
 # Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
-complexity = { shell = "cd .. && uv run --project overlay --extra full complexipy" }
+complexity = { cmd = "uv run poe complexity", cwd = ".." }
 # Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,
 # review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
-complexity-baseline = { shell = "cd .. && uv run --project overlay --extra full complexipy --snapshot-create" }
+complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = ".." }
 # Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
 # Inner-loop task only — NOT in `all`: `cov` runs a superset marker set with `-n auto`, so it is the
 # gate's functional run too (no point running the suite a third time without coverage).
@@ -392,15 +392,15 @@ crosshair = { shell = "uv run --no-project --python 3.13 --with-editable '.[full
 test-live = { cmd = "uv run --extra full python tools/grow_gate.py liveness" }
 # Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
 # CHANGELOG.md — generated output is raw material, not the finished changelog.
-changelog = { shell = "cd .. && uvx git-cliff@2.13.1 --unreleased" }
+changelog = { cmd = "uv run poe changelog", cwd = ".." }
 # RELEASING.md steps 1-5, automated: bump version, insert the curated RELEASE_NOTES.md entry (write
 # that first — the changelog is never auto-generated unattended), gate, build+smoke-test the wheel,
 # commit. Never pushes or opens a PR on its own. $POE_EXTRA_ARGS forwards flags, e.g.
 # `poe release-prepare --dry-run` or `--bump minor` — see `release.py`'s docstring for the full set.
-release-prepare = { shell = "cd .. && uv run install/release.py prepare $POE_EXTRA_ARGS" }
+release-prepare = { cmd = "uv run poe release-prepare", cwd = ".." }
 # RELEASING.md steps 7-8, automated: tag, rebuild+smoke-test the wheel from the merged commit, draft the
 # (notes-only) GitHub Release. Draft unless `--publish`; `uv publish` to PyPI stays a separate manual step.
-release-publish = { shell = "cd .. && uv run install/release.py publish $POE_EXTRA_ARGS" }
+release-publish = { cmd = "uv run poe release-publish", cwd = ".." }
 
 # --- Supply-chain & hygiene (test-driven & wired 2026-07-25; see vibe/quality-growth-plan.md) --------
 # Winners chosen by running each candidate on THIS repo, not by reputation. Design: only fast,
@@ -418,14 +418,14 @@ audit = { shell = "uv audit --preview-features audit-command" }
 pip-audit = { shell = "uv export --frozen --no-emit-project --no-hashes --all-extras | uvx pip-audit --no-deps -r /dev/stdin" }
 # GATE (in `all`) — spelling across code + docs. typos (Rust via uvx), gitignore-aware; allowlist in
 # [tool.typos]. Ran from repo root so it covers the top-level docs and the deinflect add-on too.
-spell = { shell = "cd .. && uvx typos" }
+spell = { cmd = "uv run poe spell", cwd = ".." }
 # GATE (in `all`) — local link integrity (relative/anchor links resolve). `--offline` checks only
 # on-disk targets → deterministic and network-free; the full external-URL crawl is the advisory
 # `links-net` below (network → flaky → not in `all`). lychee = Rust binary (brew install lychee).
 # `git ls-files` scopes it to TRACKED markdown — an explicit `**/*.md` glob bypasses .gitignore and would
 # drag in git-ignored `vibe/` scratch (Yandex-wiki root-relative links that can't resolve on disk).
-links = { shell = "cd .. && lychee --offline --no-progress $(git ls-files '*.md')" }
-links-net = { shell = "cd .. && lychee --cache --max-cache-age 14d --no-progress $(git ls-files '*.md')" }
+links = { cmd = "uv run poe links", cwd = ".." }
+links-net = { cmd = "uv run poe links-net", cwd = ".." }
 # GATE (in `all`) — deterministic doc↔code binding (lychee checks link *targets*; these check the
 # claims INSIDE the prose). `docs-refs`: every `poe <task>` / `.agents/<path>` / module|tool file an
 # agent-facing doc (AGENTS.md, ARCHITECTURE.md, each SKILL.md) names must resolve. `docs-consts`: each
@@ -458,7 +458,7 @@ docs-markers = { shell = "uv run python -m overlay.app.gen_card_format_markers >
 # Publish the install scripts to the gh-pages branch (https://serjflint.github.io/saitenka/). Keeps the
 # served install.sh/install.ps1 in sync with install/overlay-install.{sh,ps1}; re-run after editing them
 # and at each release. Not in `all` (touches the remote).
-pages = { shell = "cd .. && bash install/publish-pages.sh" }
+pages = { cmd = "uv run poe pages", cwd = ".." }
 
 # SAST (flake8-bandit `S`) is now folded into the ruff `select` above, so it runs inside `lint` (in
 # `all`) — no separate `sec` task. The 2026-07-25 triage put reasoned per-line `# noqa: S…` at each
@@ -483,24 +483,15 @@ dup = { shell = "npx --yes jscpd@latest src --min-tokens 50 --threshold 3 --repo
 # `--generate-code` LLM flag is opt-in and NOT used here). Metric-that-informs, not a contract that
 # enforces (Goodhart), so it stays out of the gate. Prereq: `uv tool install repowise` + a built index
 # (.repowise/). `--format json` for agent triage. See vibe/quality-growth-plan.md (repowise finding).
-perf-risk = { shell = "cd .. && repowise health --module overlay/src/overlay" }
-# ADVISORY (NOT in `all`) — local-MLX backend for repowise's LLM doc generation (`repowise init`/
-# `update`, distinct from the no-LLM `perf-risk` above). `.repowise/` (the generated wiki) is
-# deliberately NOT committed — same treatment as `.mypy_cache`, a regeneratable local index the tool
-# re-derives, not source. These tasks persist the WORKING setup instead, so it doesn't need
-# re-deriving: `repowise-mlx-install` once, `repowise-mlx-serve` in one terminal, `repowise-doc-gen`/
-# `-update` in another. Qwen2.5-Coder-7B-Instruct-4bit over a bigger model: a full source-verified
-# audit (all pages, not a sample) found 90.7% doc accuracy, and upgrading the worst pages to
-# 14B+speculative-decoding did NOT fix the remaining hallucinations (a prompt-grounding gap in
-# repowise itself, not a capability ceiling this machine can buy its way out of) while nearly OOMing
-# it via unbounded KV-cache growth. `--embedder mock` avoids repowise silently 404ing every embedding
-# call against `/v1/embeddings` (unimplemented by `mlx_lm.server`) — swap to `--embedder ollama` (see
-# repowise's own `--help`) for real semantic search instead of FTS-only. Findings + the diagnosed
-# root cause: `vibe/repowise-local-mlx-investigation.md`.
-repowise-mlx-install = { shell = "uv tool install mlx-lm --python 3.12" }  # 3.14t default breaks mlx
-repowise-mlx-serve = { shell = "mlx_lm.server --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --port 8080 --decode-concurrency 1 --prompt-concurrency 1" }
-repowise-doc-gen = { shell = "cd .. && OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_API_KEY=not-needed repowise init --provider openai --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --embedder mock --concurrency 1 -y overlay" }
-repowise-doc-update = { shell = "cd .. && OPENAI_BASE_URL=http://localhost:8080/v1 OPENAI_API_KEY=not-needed repowise update --provider openai --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --embedder mock --concurrency 1 overlay" }
+perf-risk = { cmd = "uv run poe perf-risk", cwd = ".." }
+# The one group defined at the repo root instead of here — they need no overlay tooling and their
+# subject is the whole repository (../pyproject.toml carries the rationale and the guards). Mirrored
+# back so a task name resolves from either directory, the same property every other task has.
+repowise-preflight = { cmd = "uv run poe repowise-preflight", cwd = ".." }
+repowise-reindex = { cmd = "uv run poe repowise-reindex", cwd = ".." }
+repowise-watch = { cmd = "uv run poe repowise-watch", cwd = ".." }
+repowise-backup = { cmd = "uv run poe repowise-backup", cwd = ".." }
+repowise-corrections = { cmd = "uv run poe repowise-corrections", cwd = ".." }
 # GATE (in `all`) — dependency license boundary. The ONLY copyleft in our graph must be our own
 # deliberate GPL-3.0 add-on (saitenka-deinflect); ANY other GPL/AGPL/LGPL is a transitive leak
 # into the Apache-2.0-clean core and fails. Complements the import-linter GPL chokepoint (code boundary)
@@ -511,13 +502,13 @@ licenses = { shell = "uv run --extra full --with pip-licenses pip-licenses --par
 # GATE (in `all`) — shell installer static analysis (shellcheck, standalone binary: brew install
 # shellcheck). The install/*.sh scripts run on users' machines, so correctness matters. Clean at
 # default severity after the 2026-07-25 nit sweep (SC2043/SC2012 fixed, SC2016/SC2329 reasoned-disabled).
-shell = { shell = "cd .. && shellcheck install/*.sh" }
+shell = { cmd = "uv run poe shell", cwd = ".." }
 # ADVISORY — PowerShell installer static analysis (PSScriptAnalyzer). Prereqs: `brew install --cask
 # powershell` + `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`. Kept OUT of `hygiene`
 # because pwsh is a heavy, mac-uncommon prereq and the .ps1 files only matter for Windows packaging.
 # Excludes PSAvoidUsingWriteHost (installers legitimately colour output) + PSUseBOMForUnicodeEncodedFile
 # (bad advice cross-platform); leaves the real ones (empty catch, Invoke-Expression). -EnableExit → rc=findings.
-ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost,PSUseBOMForUnicodeEncodedFile -EnableExit\"" }
+ps1 = { cmd = "uv run poe ps1", cwd = ".." }
 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]

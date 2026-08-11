@@ -76,11 +76,15 @@ scripts declare deps via PEP 723 inline metadata.
 - **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
   `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
   each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**
-  (`.agents/skills/dev-gate/`). The repo-root `pyproject.toml` is a poe shim, so `uv run poe <task>` works
-  from the root or `overlay/`. Ruff / complexipy / the type-checkers are configured ONCE at the
+  (`.agents/skills/dev-gate/`). Every task name resolves from either directory; which file *defines*
+  it is a question about its environment, not its scope — `overlay/pyproject.toml` when it needs
+  overlay's env (pytest, the overlay runtime), the repo root when it needs only ruff/complexipy or a
+  standalone binary. Each file aliases the other's group, so a repo-wide task never round-trips through
+  overlay to come back. Ruff / complexipy / the type-checkers are configured ONCE at the
   repo-root `pyproject.toml` (SSOT) and run repo-wide (overlay + deinflect + taffylite + tools + install
-  + .agents); overlay/`pyproject.toml` keeps the poe tasks + the overlay-scoped contracts (deptry,
-  import-linter). Standing constraints while editing (don't relitigate): `lint` is an
+  + .agents); overlay/`pyproject.toml` keeps the overlay-scoped contracts (deptry, import-linter) and
+  `types`, which must import overlay's runtime deps to check anything.
+  Standing constraints while editing (don't relitigate): `lint` is an
   **explicit** ruff select (never `ALL`, bandit `S` folded in) — justify each `# noqa`/`ignore`;
   `complexity` is ratcheted against `complexipy-snapshot.json` (never regenerate to silence a
   regression); the only copyleft in the graph is our own GPL `deinflect`; new advisory tools are
