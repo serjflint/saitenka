@@ -64,8 +64,14 @@ Apache-2.0 — see [LICENSING.md](https://github.com/serjflint/saitenka/blob/mai
 | *(none)* / `minimal` | the bare overlay — bring your own Yomitan dictionaries | Apache-2.0 |
 | `jmdict` | JMdict English fallback (hover + mined-card glosses when a word isn't in your dicts) | Apache-2.0 |
 | `deinflect` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
+| `images` | inline dictionary images, incl. SVG gaiji (resvglite) | Apache-2.0 |
+| `layout-engine` | optional Rust flexbox tooltip layout backend (taffylite) | Apache-2.0 |
+| `telemetry` | OpenTelemetry spans/metrics for performance observability | Apache-2.0 |
 | `linux-keyring` | Linux Secret Service storage for the jimaku key on Python 3.15+ | Apache-2.0 |
-| `full` | all portable features above (`linux-keyring` stays explicit) | **GPL-3.0** |
+| `full` | `deinflect` + `jmdict` + `telemetry` | **GPL-3.0** |
+
+`images`, `layout-engine`, and `linux-keyring` stay explicit — add them alongside `full`, e.g.
+`uv tool install "saitenka[full,images]"`.
 
 Mining prefers *your* dictionaries, so `jmdict` is only a fallback. On Linux, Python 3.13/3.14 install
 Secret Service support by default; Python 3.15+ uses `JIMAKU_API_KEY` or an owner-only

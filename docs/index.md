@@ -16,7 +16,9 @@ subtitles colored by what your Anki/FSRS memory already knows, a hover → multi
 pitch and frequency, and **one-key sentence mining** into Anki — without ever leaving the player.
 
 It's **local-first**: readings and pitch always come from *your* dictionaries, never from a language
-model. It runs on Python 3.13+, including the free-threaded (no-GIL) build.
+model. It runs on Python 3.13+, including the free-threaded (no-GIL) build. Japanese is the default,
+but the reading engine is language-agnostic — **profiles** let you switch the target language (a
+French profile ships today) with its own tokenizer, dictionaries, and mining deck.
 
 ![Hover tooltip over a colored subtitle](screenshot-hover.jpg){ loading=lazy }
 
