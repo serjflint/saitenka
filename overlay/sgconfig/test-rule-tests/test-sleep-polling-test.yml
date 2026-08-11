@@ -1,0 +1,16 @@
+id: test-sleep-polling
+valid:
+  - |
+    @pytest.mark.integration
+    def test_waits_for_external_process():
+        time.sleep(0.5)
+  - |
+    def test_waits_on_owned_state():
+        assert ready.wait(0.5)
+  - |
+    def helper():
+        time.sleep(0.5)
+invalid:
+  - |
+    def test_polls_worker():
+        time.sleep(0.01)

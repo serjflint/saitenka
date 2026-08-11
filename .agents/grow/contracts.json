@@ -1,9 +1,9 @@
 {
-  "version": 6,
+  "version": 7,
   "gap": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["found", "module", "target_symbol", "dimension", "kind", "status", "reason"],
+    "required": ["found", "module", "target_symbol", "dimension", "kind", "source", "tests", "status", "pr_exclusion_checked", "reason"],
     "properties": {
       "found": {"type": "boolean", "description": "false when triage/scenario-map yields no live orphan gap"},
       "module": {"type": "string", "description": "module key relative to src/overlay, e.g. app/tooltip.py"},
@@ -41,7 +41,7 @@
       "cut_file": {"type": "string", "description": "CUT path relative to repo (src/overlay/...) — for context/growth-adhoc"},
       "target_func": {"type": "string", "description": "the production symbol the grown test exercises (scopes arm-1 replay)"},
       "test_name": {"type": "string", "description": "the grown test function name (arm-2 liveness / --deselect node)"},
-      "red_on_pristine": {"type": "boolean", "description": "the grown test FAILS on unmutated code → outcome-class-2 latent bug, not a coverage grow"},
+      "red_on_pristine": {"type": "boolean", "description": "author suspicion only; root pristine execution is authoritative"},
       "mutant_find": {"type": ["string", "null"], "description": "arm-1 (scenario): exact CUT snippet to mutate (occurs once); the grown test must KILL it, the old suite SURVIVE it"},
       "mutant_replace": {"type": ["string", "null"], "description": "arm-1 (scenario): the scenario-violating replacement"},
       "regression_node": {"type": ["string", "null"], "description": "arm-4 (concurrency): regression test node id"},
@@ -69,9 +69,9 @@
   "gate": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["pass", "restoration_verified", "arms_run", "report"],
+    "required": ["pass", "additive_only", "liveness_pass", "context_pass", "growth_pass", "concurrency_pass", "restoration_verified", "arms_run", "report"],
     "properties": {
-      "pass": {"type": "boolean", "description": "every applicable arm clean AND additive-only"},
+      "pass": {"type": "boolean", "description": "executor report; adapter recomputes from individual arms"},
       "additive_only": {"type": "boolean", "description": "anticheat_diff reports only added assert-nodes (Grow scope)"},
       "liveness_pass": {"type": ["boolean", "null"]},
       "context_pass": {"type": ["boolean", "null"]},
@@ -80,6 +80,24 @@
       "restoration_verified": {"type": "boolean", "description": "every temporary source/test edit was restored byte-for-byte"},
       "arms_run": {"type": "array", "items": {"type": "string"}, "description": "which arms actually ran (the rest are n/a for this gap kind)"},
       "report": {"type": "string", "description": "the exact PASS/BOUNCE lines, verbatim from grow_gate"}
+    }
+  },
+  "pristine": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["status", "report"],
+    "properties": {
+      "status": {"type": "string", "enum": ["pass", "test-failure", "infra-failure"]},
+      "report": {"type": "string"}
+    }
+  },
+  "bug_verdict": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["verdict", "grounds"],
+    "properties": {
+      "verdict": {"type": "string", "enum": ["UPHELD", "REFUTED"]},
+      "grounds": {"type": "array", "items": {"type": "string"}}
     }
   },
   "ship_gate": {
@@ -127,15 +145,31 @@
   "record": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["state", "ledger_appended", "filing_blocker"],
+    "required": ["state", "outcome", "ledger_appended", "recorded_source", "recorded_target_symbol", "recorded_dimension", "recorded_gap_id", "recorded_target_sha", "recorded_toolset_version", "recorded_contract_version", "filing_blocker"],
     "properties": {
       "state": {"type": "string", "enum": ["closed", "open", "unclosable", "filed", "dry-run"]},
       "outcome": {"type": ["string", "null"], "enum": ["coverage-only", "bug", "robustness", "design", null]},
       "ledger_appended": {"type": "boolean"},
+      "recorded_source": {"type": "string"},
+      "recorded_target_symbol": {"type": "string"},
+      "recorded_dimension": {"type": "string"},
+      "recorded_gap_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+      "recorded_target_sha": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+      "recorded_toolset_version": {"type": "integer", "minimum": 1},
+      "recorded_contract_version": {"type": "integer"},
       "pr_url": {"type": ["string", "null"]},
       "filed_issues": {"type": "array", "items": {"type": "string"}},
       "filing_blocker": {"type": ["string", "null"], "description": "why a red-on-pristine bug was not filed in a dry run"},
       "note": {"type": "string"}
+    }
+  },
+  "outward": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["pr_url", "filed_issues"],
+    "properties": {
+      "pr_url": {"type": ["string", "null"]},
+      "filed_issues": {"type": "array", "items": {"type": "string"}}
     }
   },
   "reflection": {

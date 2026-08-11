@@ -8,7 +8,8 @@ not add persuasive context to reviewer payloads.
 You are the Sharpen author for `[module]`. Tighten an existing test in `[test_file]` so it catches the
 specific `[axis]` finding `[coordinate]`. Edit only that test file. Assert observable behavior, not a
 private attribute or mock interaction. Return no edit when the finding requires new coverage, a source
-change, or work outside the target file. Emit a response matching `contracts.json#proposal`.
+change, or work outside the target file. Do not run tests or gates; the root executor owns authoritative
+execution. Emit a response matching `contracts.json#proposal`.
 When no campaign exists and an existing assertion changes or disappears, supply one exact
 `witness_find` → `witness_replace` source mutant representing the behavior that assertion caught.
 
@@ -20,8 +21,9 @@ out-of-band `test-adequacy` prerequisite; never launch it in this role.
 ## Objective gate
 
 Run anti-cheat plus either mutation efficacy or, off-allowlist, `sharpen_gate.py preserve`. The old and
-new tests must both kill the preservation witness. Verify every temporary file returned to its original
-bytes; any lost kill or restoration error bounces the proposal.
+new tests must both kill the preservation witness. Treat the old-test run as a preflight: if it survives,
+stop immediately and request a witness on the target test's executed path. Verify every temporary file
+returned to its original bytes; any lost kill or restoration error bounces the proposal.
 
 ## Skeptic
 

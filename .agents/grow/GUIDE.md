@@ -66,8 +66,10 @@ regression for a cache eviction race, with a negative control that fails against
 
 ## Background — the four arms, for the pytest-only reader
 
-A grown test must clear every *applicable* arm of the deterministic gate (`overlay/tools/grow_gate.py`).
-Each arm is a pure function over an injected primitive, so the gate logic is unit-tested without a real
+A grown scenario test must clear liveness plus at least one genuine-growth proof: property-mutant OR
+context-delta. Run both proofs when they honestly apply; a covered branch can bounce line-level context
+while its scenario mutant still proves growth. Concurrency uses its own pair plus control liveness. Each
+arm is a pure function over an injected primitive, so the gate logic is unit-tested without a real
 subprocess (`tools/test_grow_gate.py`).
 
 - **Arm 1 — property-mutant (load-bearing + genuine growth).** We plant a small mutation that *encodes the
@@ -79,9 +81,9 @@ subprocess (`tools/test_grow_gate.py`).
   time, and re-run it: a live assert flips the test red. An assert that stays green when negated is
   swallowed (a `try/except` ate it), unreachable (after an early return), or a tautology (`assert x == x`)
   — it asserts nothing. A static count of `assert` statements can't see this; running the negation can.
-- **Arm 3 — context-delta (newly-exercised).** The grown test must light a `coverage.py` line the existing
-  suite never ran — the dead-configuration detector. Necessary but not sufficient alone: reaching a line
-  isn't checking it (that's arms 1–2).
+- **Arm 3 — context-delta (newly-exercised).** The grown test lights a `coverage.py` line the existing
+  suite never ran — the dead-configuration detector. It is an alternative genuine-growth proof to arm 1,
+  and is insufficient without arm-2 liveness: reaching a line is not checking it.
 - **Arm 4 — concurrency (race reproduces unguarded, prevented guarded).** A race has no coverage-delta and
   no ordinary mutant. Instead the grown test ships as a *pair of passing tests*: a regression (the guard
   prevents the bug under a forced schedule) and a self-certifying negative control that unguards a throwaway

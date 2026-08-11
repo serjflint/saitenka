@@ -41,16 +41,15 @@ gaps are only **seed + ROI evidence + a held-out backtest corpus**, never the ta
 ## The deterministic teeth-gate — four arms (`overlay/tools/grow_gate.py`)
 
 The mirror of Sharpen's anti-lobotomization gate, reversed: it proves an ADDITION adds power. A green new
-test proves nothing — so a grown test clears every **applicable** arm (no LLM in the gate). Arms 1–3 apply
-to an ordinary scenario/config gap; arm 4 replaces them for a concurrency gap (which has no coverage-line
-delta or cosmic-ray property mutant). Each arm is a pure function over an injected primitive, unit-tested
-in `tools/test_grow_gate.py`.
+test proves nothing. An ordinary scenario/config gap clears arm 2 plus either arm 1 or arm 3; arm 4
+replaces that composition for a concurrency gap. No LLM decides the disposition. Each arm is a pure
+function over an injected primitive, unit-tested in `tools/test_grow_gate.py`.
 
 | # | Arm | Proves | Mechanism |
 |---|-----|--------|-----------|
 | 1 | **property-mutant** | load-bearing + genuine growth | a scenario-encoding mutant must be KILLED by the grown test AND have SURVIVED the existing suite (survives-old ⇒ not redundant). `growth_gate` uses `sharpen_gate` cosmic-ray replay (the 4 `poe mutate` targets); `growth_adhoc_gate` generalises it to ANY module via an author-supplied one-line text mutation — so arm-1 runs off the allowlist. **The STRONG growth proof for a `scenario` gap** (arm-1 OR arm-3 — see the honest-scope note). |
 | 2 | **oracle-liveness** | falsifiable, not vacuous | negate the grown test's OWN asserts one at a time → each must flip it red; a static trivial-check rejects `assert True` / `x == x`. A `pytest.raises`/`warns` block counts as a live oracle (not `no_asserts`). Catches swallowed / unreachable / tautological asserts a static count can't. |
-| 3 | **context-delta** | newly-exercised | the grown test lights a `coverage.py` line the existing suite never ran (the dead-config detector). The OLD baseline MUST `--deselect` the grown test, or an extend-before-add edit collapses the delta to ∅ (false bounce). Necessary, insufficient alone (reached ≠ checked). |
+| 3 | **context-delta** | newly-exercised | the grown test lights a `coverage.py` line the existing suite never ran (the dead-config detector). The OLD baseline MUST `--deselect` the grown test, or an extend-before-add edit collapses the delta to ∅ (false bounce). Alternative to arm 1 and insufficient without arm 2 (reached ≠ checked). |
 | 4 | **concurrency** | race reproduces unguarded, prevented guarded | a PAIR of PASSING tests: a regression (the guard prevents the bug under the forced schedule) + a self-certifying negative control that unguards a throwaway instance and asserts the bug REPRODUCES (`blanket` scripts the interleaving; GIL-agnostic). Both pass; the teeth are the control's own falsifiable assertion, confirmed by running arm-2 liveness on the control. |
 
 **Genuine-growth proof = arm-1 OR arm-3 (they are ALTERNATIVES, not both-required).** The reframe is
@@ -102,18 +101,20 @@ module's scenario map is enumerated, not at module triage. repowise steers SELEC
    context**: the target symbol + the orphan scenario + the relevant invariant family + the existing test
    file (to extend, not duplicate) — never a whole-module/repo dump. Prefer emitting a Hypothesis property /
    `deal` contract over a bare example when the gap is a family, not a point.
-3. **Objective gate** (deterministic, no agent) — run the applicable `grow_gate` arms. Bounce a test that
-   is vacuous (arm 2), redundant / not-load-bearing (arm 1), reaches no new line (arm 3), or whose race has
-   no teeth (arm 4). A test **red on pristine code** is not a bounce — it is outcome-class 2 (latent bug):
-   route it to *Product-bug branch*, do not massage it green. Temporary mutants restore captured bytes
-   and verify equality; Git-index access is never part of a gate.
+3. **Objective gate** (deterministic executor) — first prove the edit is additive and run its proposed
+   node on pristine production. Then run the applicable `grow_gate` arms. Scenario growth needs liveness
+   plus either an old-survives/new-kills mutant (arm 1) **or** a newly-lit line (arm 3); at least one is
+   required, but neither is mandatory. Concurrency needs the bound regression/control pair (arm 4). A pristine failure reaches
+   the product-bug branch only after two isolated oracle reviews uphold it. Temporary mutants restore
+   captured bytes and verify equality; Git-index access is never part of a gate.
 4. **Subjective gate** (see *Review architecture*) — is the added power real and plainly explainable, or
    redundant / over-fit / a change-detector in disguise?
-5. **Product-bug branch** (see *Product bugs*) if the grown test went red on a real defect.
-6. **PR** — only if the grown test clears a **"worth a human's attention" bar** (a real scenario newly
-   pinned, a bug caught, a robustness/observability gap surfaced). One gap, evidence-carrying body (see
-   *PR body*). Human merges.
-7. **Record** the outcome in the ledger, including *what was deliberately left unclosable and why*.
+5. **Product-bug branch** (see *Product bugs*) if the executor and both reviewers prove a real defect.
+6. **Record, act, finalize** — append an `open` receipt before any authorized PR/issue action. Only after
+   validating that receipt may the adapter act outward. Persist a non-empty PR result as `open` until its
+   merge is verified; persist a created issue as `filed`. Failed/no-op outward action leaves the gap `open`.
+   Dry runs and unclosable gaps record directly. A shippable change must still clear the **"worth a human's
+   attention" bar**. Human merges.
 8. **Reflect** on the LOOP (every run — see *Self-reflection*): an isolated agent introspects the run
    trace, files loop-improvement proposals, and escalates recurring ones. Advisory; never self-modifies.
 
@@ -195,8 +196,9 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
   "target_symbol": "app/dictionary.py::Dictionary._entry_from_row",
   "dimension": "warm==cold@entry_cache",           // the under-specified axis
   "target_sha": "<hash of the TARGET SYMBOL's AST source, not the whole module>",
-  "toolset_version": 1,
-  "state": "open | closed | unclosable",
+  "toolset_version": 3,
+  "contract_version": 7,
+  "state": "open | closed | unclosable | filed | dry-run",
   "test": "tests/test_cache_race.py::test_...",
   "outcome": "coverage-only | bug | robustness | design",
   "review": { "author": "<id>", "skeptic": "<id>", "judge": "<id>",
@@ -208,8 +210,9 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
 Status (`grow_ledger.status`): **unseen** / **open** / **closed-current** (a test landed, target unchanged
 → SKIP) / **stale-target** (the target symbol's AST changed → reopen) / **stale-toolset** (whole ledger
 re-examines) / **unclosable** (recorded infeasible → SKIP). A closed gap stays closed under unrelated churn
-and reopens ONLY when its own target symbol changes. Any shippable state additionally requires a valid
-`review` block (see *Fidelity* in `ADAPTERS.md`); without one the run is a `dry-run`.
+and reopens ONLY when its own target symbol changes. `filed` records a confirmed product issue; `dry-run`
+records a run with no outward action. Any shippable state additionally requires a valid `review` block
+(see *Fidelity* in `ADAPTERS.md`); without one the run is a `dry-run`.
 
 ## Self-reflection — every run introspects the LOOP (`overlay/tools/grow_reflect.py`)
 

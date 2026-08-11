@@ -43,6 +43,9 @@ Read `.agents/grow/GUIDE.md` only to explain the design or resolve ambiguity.
    gap coordinate, scope guard, and prior bounce to a fresh isolated author.
 4. Permit additive test edits only. Any changed/removed existing assertion routes to Sharpen.
 5. Run every applicable deterministic Grow arm and verify temporary mutations restore exact bytes.
+   For a scenario, liveness is mandatory and growth-adhoc/context-delta are alternative growth proofs;
+   a context bounce does not override a passing scenario mutant. Recompute disposition from the
+   individual results instead of trusting an agent-supplied aggregate.
 6. Invoke skeptic and then judge in separate fresh contexts. Give each factual WHAT plus DIFF, never
    author rationale or the other review. Two UPHOLDs are required.
 7. Prefer a different model family for reviewers when the host roster offers one. Isolation is

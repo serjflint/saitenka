@@ -13,7 +13,7 @@ the Grow-specific deltas are spelled out here.
 | `exec(command, cwd)` | Run a deterministic command and return exit code plus complete output. |
 | `invoke(role, prompt, schema, isolation)` | Start a fresh agent context, validate its result against `contracts.json`, return result + host invocation id. |
 | `phase(name, detail)` | Report progress without changing repository state. |
-| `record(record)` | Append one JSONL object using `grow_ledger.py` hashing (the semantic `gap_id` + `target_sha`) and the ledger manifest version. |
+| `record(record)` | Append one JSONL object through `grow_ledger.py append`; the CLI owns semantic `gap_id`, `target_sha`, and manifest version. |
 | `open_pr(body)` | Optional; available only after explicit `openPr=true` and every ship guard passes. Never merge. |
 
 The adapter, not an agent response, assigns invocation identity. If the host exposes no id, a unique
@@ -22,7 +22,8 @@ context; otherwise fidelity is unproven and the run is `dry-run`.
 
 ## Agent roles
 
-- **Author:** generation-capable; may edit the single target test file (ADDITIVE only — see below).
+- **Author:** generation-capable; may edit the single target test file (ADDITIVE only — see below), but
+  does not run tests or gates; the root executor owns the authoritative environment.
 - **Skeptic:** independent adversarial verifier; read-only except inspection commands.
 - **Judge:** second independent adversarial verifier; verification-capable, may use a cheaper model.
 - **Reflector:** independent introspector of the LOOP (not the test), runs at every terminal exit. Gets only
@@ -66,17 +67,19 @@ copy `skeptic_verdict` into `verdict` without applying the judge result.
 
 Unlike Sharpen's fixed two arms, Grow runs the arms **applicable to the gap's kind** (`grow_gate`
 subcommands):
-- **scenario/config gap** → `liveness` (always) + `context` with `--deselect <grown-test-node>` (so an
+- **scenario/config gap** → `liveness` (always) +, when expressible, `context` with `--deselect <grown-test-node>` (so an
   extend-before-add edit's grown test is excluded from the OLD baseline, else the delta collapses to ∅) +
   `growth-adhoc` (an author-supplied one-line CUT mutant the test must kill / old suite must survive) —
-  **arm-1 is non-optional for a scenario gap**: without it the gate proves only dead-config, not growth
-  over covered code (review C2). `growth` (cosmic-ray) is used instead when the module is a `poe mutate`
-  target.
+  run both proofs when they honestly apply, but disposition requires **arm-1 OR arm-3**, not both. A
+  branch on an already-covered line can legitimately bounce context while the mutant proves growth.
+  `growth` (cosmic-ray) is used instead when the module is a `poe mutate` target.
 - **concurrency gap** → `concurrency` INSTEAD of 1–3: a pair of PASSING tests (regression + a
   self-certifying negative control), plus arm-2 `liveness` run on the CONTROL to confirm its oracle is
-  live (that is what gives the passing control teeth — review C6).
+  live (that is what gives the passing control teeth — review C6). Both `liveness_pass` and
+  `concurrency_pass` must be true.
 
-The harness selects arms from the gap kind and records which arms ran and which were `n/a` in
+The harness selects arms from the gap kind, recomputes disposition from the individual results instead
+of trusting an executor's aggregate `pass`, and records which arms ran and which were `n/a` in
 `axes_not_applied` (the guard against a silent no-run).
 
 Before authoring, the root orchestrator applies the `write-test` decision tree and injects only its
@@ -90,8 +93,9 @@ an index lock, failed restore, or byte mismatch is a hard bounce.
 ## Failure semantics
 
 - No green baseline / target won't build: append `state: dry-run`, list quarantined nodes, stop.
-- Grown test RED on pristine code: this is **outcome-class 2 (latent bug)**, not a gate failure — file the
-  product issue when authorized or record a dry-run filing blocker; do NOT massage it green.
+- Root-executor run proves the grown test RED on pristine code: this is **outcome-class 2 (latent bug)**,
+  not a gate failure — file the product issue when authorized or record a dry-run filing blocker; do NOT
+  trust author classification or massage it green.
 - No orphan scenario / nothing to grow: record the gap `left-unclosable` (or skip); never ask the author to
   fabricate a vacuous test.
 - Objective gate bounced (vacuous / redundant / no new line / raceless): revert the edit; retry ≤ the cap

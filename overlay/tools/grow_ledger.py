@@ -17,14 +17,13 @@ symbol changes. See `.agents/grow/SPEC.md` → *Ledger*.
 
 from __future__ import annotations
 
+import argparse
 import ast
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path  # annotation-only here — grow_ledger never constructs a Path
+from pathlib import Path
 
 SRC = "src/overlay"  # module keys are relative to here (matching the sharpen ledger)
 
@@ -142,3 +141,85 @@ class Ledger:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         self.lines.append(record)
+
+
+def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
+    """Fill the semantic identity fields a loop record must not hand-calculate."""
+    source = record.get("source")
+    target_symbol = record.get("target_symbol")
+    dimension = record.get("dimension")
+    if not all(isinstance(value, str) and value for value in (source, target_symbol, dimension)):
+        raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    module_key, separator, symbol = target_symbol.partition("::")
+    if not separator or not module_key or not symbol:
+        raise ValueError("target_symbol must be module_key::dotted.symbol")
+    source_root = (root / SRC).resolve()
+    module_path = (source_root / module_key).resolve()
+    try:
+        module_path.relative_to(source_root)
+    except ValueError as exc:
+        raise ValueError("target module must stay under src/overlay") from exc
+    module_src = module_path.read_text(encoding="utf-8")
+    prepared = dict(record)
+    prepared["gap_id"] = gap_id(source, target_symbol, dimension)
+    prepared["target_sha"] = target_sha(module_src, symbol)
+    prepared["toolset_version"] = ledger.toolset_version
+    return prepared
+
+
+def _main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument("--ledger", type=Path, default=Path("../.ledger.grow.jsonl"))
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    identity = sub.add_parser("identity", help="print semantic gap_id and target_sha")
+    identity.add_argument("--source", required=True)
+    identity.add_argument("--target-symbol", required=True)
+    identity.add_argument("--dimension", required=True)
+
+    append = sub.add_parser("append", help="fill identity fields and append one JSON record")
+    records = append.add_mutually_exclusive_group(required=True)
+    records.add_argument("--record-json", help="record as one JSON object")
+    records.add_argument("--record-file", type=Path, help="path containing one JSON object")
+
+    args = parser.parse_args()
+    root = args.repo.resolve()
+    ledger_path = args.ledger if args.ledger.is_absolute() else root / args.ledger
+    ledger = Ledger.load(ledger_path.resolve())
+    if args.command == "identity":
+        record = {
+            "source": args.source,
+            "target_symbol": args.target_symbol,
+            "dimension": args.dimension,
+        }
+        prepared = prepare_record(record, root, ledger)
+        print(
+            json.dumps({key: prepared[key] for key in ("gap_id", "target_sha", "toolset_version")})
+        )
+        return 0
+
+    raw = (
+        args.record_file.read_text(encoding="utf-8")
+        if args.record_file is not None
+        else args.record_json
+    )
+    record = json.loads(raw)
+    if not isinstance(record, dict):
+        raise TypeError("record must be a JSON object")
+    prepared = prepare_record(record, root, ledger)
+    ledger.append(prepared)
+    print(json.dumps(prepared, ensure_ascii=False))
+    return 0
+
+
+def main() -> int:
+    try:
+        return _main()
+    except (OSError, ValueError, TypeError, SyntaxError, KeyError) as exc:
+        print(f"grow-ledger: error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

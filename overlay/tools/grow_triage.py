@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import grow_contexts as gc
 import sharpen_ledger as sl
 import sharpen_triage as st
 from tool_json import InstrumentError, run_json
@@ -141,8 +142,7 @@ def rank(
     cands: list[Candidate] = []
     for module, tests in sorted(universe.items()):
         c = Candidate(module=module, tests=tests, untested=not tests)
-        total, actionable = conf.get(module, (0, 0))
-        c.priv_seam = total - actionable  # metric-rule hits = private-attr / private-monkeypatch
+        _total, _actionable, c.priv_seam = conf.get(module, (0, 0, 0))
         c.fan_in = fan.get(module, 0)
         c.churn, _age = st.churn_and_age(root, module, tests)
         c.survivors = None if survivors is None else survivors.get(module, 0)
@@ -183,15 +183,16 @@ def _load_contexts(
     data = json.loads((root / path).read_text(encoding="utf-8"))
     if (
         not isinstance(data, dict)
-        or data.get("version") != 2
+        or data.get("version") not in {2, 3}
         or not isinstance(data.get("modules"), dict)
     ):
-        raise InstrumentError("contexts JSON is not v2; regenerate it with grow_contexts.py")
+        raise InstrumentError("contexts JSON is not v2/v3; regenerate it with grow_contexts.py")
     counts: dict[str, int] = {}
     tests: dict[str, list[str]] = {}
     for module, row in data["modules"].items():
         if not isinstance(module, str) or not isinstance(row, dict):
             raise InstrumentError("contexts JSON contains an invalid module row")
+        row = gc.validate_row(row, module, data["version"])
         under_spec = row.get("under_spec")
         nodeids = row.get("test_nodeids")
         if (
@@ -212,7 +213,7 @@ def main() -> None:
     ap.add_argument(
         "--survivors-json", help="optional {module_key: survivor_count} from a mutate campaign"
     )
-    ap.add_argument("--contexts-json", help="optional v2 module evidence from grow_contexts.py")
+    ap.add_argument("--contexts-json", help="optional v2/v3 module evidence from grow_contexts.py")
     args = ap.parse_args()
     root = Path.cwd()
     if args.no_network:

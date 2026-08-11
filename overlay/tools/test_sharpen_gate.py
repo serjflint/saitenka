@@ -206,3 +206,22 @@ def test_preservation_adhoc_bounces_a_lost_preexisting_kill(tmp_path):
     assert not rep.ok
     assert module.read_text(encoding="utf-8") == "def enabled():\n    return True\n"
     assert test_file.read_text(encoding="utf-8").endswith("is not None\n")
+
+
+def test_preservation_stops_when_old_test_does_not_kill_witness(tmp_path):
+    module, test_file = _adhoc_files(tmp_path)
+    calls = []
+
+    rep = sg.preservation_adhoc_gate(
+        module.relative_to(tmp_path),
+        "return True",
+        "return False",
+        test_file.relative_to(tmp_path),
+        "def test_enabled():\n    assert enabled() is True\n",
+        ["TEST"],
+        cwd=tmp_path,
+        run=lambda cmd: calls.append(cmd) or 0,
+    )
+
+    assert rep.applied and not rep.killed_before and not rep.killed_after
+    assert calls == [["TEST"]]

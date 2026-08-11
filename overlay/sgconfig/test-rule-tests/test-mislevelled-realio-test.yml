@@ -29,10 +29,6 @@ invalid:
   - |
     def test_opens_socket():
         s = socket.socket()
-  # default-tier test blocking on the wall clock
-  - |
-    def test_waits():
-        time.sleep(0.5)
   # a non-tier marker (parametrize) does not excuse real I/O
   - |
     @pytest.mark.parametrize("n", [1, 2])

@@ -11,7 +11,8 @@ verbatim — never work around it by touching another file.
 > Run the Grow triage and pick the most under-tested valuable module, then enumerate its orphan scenarios.
 > From `overlay/` run `uv run python tools/grow_triage.py --top 1`. Set `pr_exclusion_checked=true` ONLY
 > if it ran with the open-PR exclusion active (gh authenticated, no `--no-network`). The `→ pick:` line
-> names the module; map it to its test files. For that module, build a scenario map — its intents, edge
+> names the module; map it to its test files. When a context artifact is available, inspect only that row
+> with `grow_contexts.py --inspect {artifact} --module {module} --show lines`. Build a scenario map — its intents, edge
 > conditions, and the invariant families it must uphold (agreement, cache-equivalence, back-restores-state,
 > config-matrix corners) — and subtract what the coverage baseline already exercises and what the grow
 > ledger already records `closed-current`/`unclosable`. Return the single highest-value ORPHAN gap:
@@ -32,18 +33,19 @@ verbatim — never work around it by touching another file.
 > (that is Sharpen's job; a mutative edit will be bounced). Prefer EXTENDING the existing test
 > (`{tests}`): append a `PROFILES`/`ENTRY_FACTORIES` row, a `parametrize` case, or an `@example` before
 > adding a new file; add a new test only when there is no home. If the gap is a family not a point, emit a
-> Hypothesis property / `deal` contract, not a bare example.
+> Hypothesis property / `deal` contract, not a bare example. Do not run tests or gates; the root executor
+> owns authoritative execution.
 >
 > Minimum decisive context: the target symbol, the orphan scenario, the relevant invariant family, and the
 > existing target test file. Assert OBSERVABLE behaviour (return value / emitted IPC / written note / a
-> metamorphic oracle), never a private attr or mock call-count, never pixels. The test MUST be GREEN on
-> pristine code — if it goes red, you have found a real defect: set `red_on_pristine=true`, describe it,
-> and STOP (do not massage it green; the harness routes it to a product issue).
+> metamorphic oracle), never a private attr or mock call-count, never pixels. Do not run it or massage a
+> suspected failure green: the root executor runs the proposed node on pristine production code and alone
+> classifies a behavioral failure as a latent defect.
 >
-> For a SCENARIO gap you MUST also supply a one-line scenario-encoding mutation of the CUT
+> For a SCENARIO gap, supply a one-line scenario-encoding mutation of the CUT when one honestly exists
 > (`mutant_find` → `mutant_replace`, `mutant_find` occurring exactly once) that your test KILLS and the
-> existing suite SURVIVES — this is arm-1, non-optional (without it the gate proves only dead-config, not
-> growth over covered code). For a CONCURRENCY gap, ship the PASSING pair and set `regression_node`,
+> existing suite SURVIVES. Otherwise return null mutant fields and rely on context-delta. The objective
+> gate requires arm-1 OR arm-3. For a CONCURRENCY gap, ship the PASSING pair and set `regression_node`,
 > `control_node`, `control_test`.
 >
 > Return the additive diff, `test_name`, `target_func` (the production symbol it exercises), `cut_module`
@@ -61,17 +63,19 @@ invitation for the isolated author to call another skill.
 > report ONLY added asserts (any altered/removed ⇒ mutative ⇒ Sharpen scope ⇒ bounce). Do NOT use
 > `sharpen_gate anticheat` — it misses same-tier value changes (review C4).
 > Then the applicable arms of `tools/grow_gate.py`:
-> - `scenario` gap (all three): `liveness {test_file} --test {test_name} --repo .` (≥1 live assert or a
+> - `scenario` gap: `liveness {test_file} --test {test_name} --repo .` (≥1 live assert or a
 >   `pytest.raises` block, no trivial/dead) AND `context --cut {cut_file} --old {existing tests} --new
 >   {existing tests} {test_file} --deselect {test_file}::{test_name} --repo .` (a newly-lit line; --deselect
 >   keeps the grown test OUT of the old baseline) AND `growth-adhoc --cut {cut_file} --find {mutant_find}
 >   --replace {mutant_replace} --old {existing tests} --new {existing tests} {test_file} --repo .`
->   (old SURVIVES, grown test KILLS) — **arm-1 is non-optional; a scenario grow with no mutant BOUNCES.**
+>   (old SURVIVES, grown test KILLS). Run both proofs when expressible; the result passes when liveness
+>   passes and **growth-adhoc OR context** passes.
 > - `concurrency` gap: `liveness` on the CONTROL test first (its oracle must be live), then `concurrency
 >   --regression {reg node} --control {control node} --control-file {control file} --control-test {name}
->   --repo .` (both PASS, control oracle live).
-> Verify temporary files returned to their pre-gate bytes. `pass` = additive-only AND restoration verified
-> AND every applicable arm clean; quote every BOUNCE line.
+>   --repo .` (both PASS, control oracle live). Record both results; each must pass.
+> Verify temporary files returned to their pre-gate bytes. The adapter recomputes `pass`: additive-only
+> AND restoration verified AND either scenario liveness + (growth-adhoc OR context), or concurrency
+> control-liveness + concurrency. `arms_run` must exactly match the selected commands; quote every BOUNCE line.
 
 ## Skeptic (isolated adversarial verifier)
 
@@ -101,15 +105,11 @@ invitation for the isolated author to call another skill.
 Before Record on `openPr=true`, run `uv run poe all` as a deterministic Ship gate. Exit 0 is required;
 failure reverts the test, records a dry-run, and opens no PR.
 
-> Append one Grow ledger record via `tools/grow_ledger.py` (compute `gap_id` from
-> `{source, target_symbol, dimension}` and `target_sha` from the target symbol's AST source; stamp
-> `examined` from `date -u`; `toolset_version` from the manifest). Set `state` and `outcome` per the
-> disposition (coverage-only→`closed`; bug→`filed`; robustness/design→`open`+`filed`). Include the review
-> block; list `axes_not_applied` (every arm that was n/a for this gap kind — the silent-no-run guard). Open
-> a ready PR only when `openPr=true` AND a valid review block exists AND the open-PR exclusion was verified
-> AND the Ship gate passed; body
-> per SPEC "PR body" (the scenario now pinned, why it matters, the gate evidence, the outcome class). Never
-> merge.
+> Append through `tools/grow_ledger.py`: the CLI computes identity fields. A dry-run/unclosable result may
+> record its terminal state directly. An authorized PR/issue first records `open`; only a validated receipt
+> permits the outward action. Persist a non-empty PR result as `open` until merge verification; persist a
+> created issue as `filed`. Otherwise the ledger stays `open`. Include the review and `axes_not_applied`. A ready PR additionally
+> requires verified open-PR exclusion and a green Ship gate. Never merge.
 
 ## Reflect (self-reflection on the LOOP — every run)
 

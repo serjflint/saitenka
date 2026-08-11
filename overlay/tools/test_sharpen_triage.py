@@ -40,8 +40,45 @@ def test_actionable_hit_is_attributed_to_its_test_function_not_the_whole_file(
 
     result = st.conformance_by_module(root, sl.map_tests_to_modules(root))
 
-    assert result["app/controller.py"] == (1, 1)
-    assert result["app/config.py"] == (0, 0)
+    assert result["app/controller.py"] == (1, 1, 0)
+    assert result["app/config.py"] == (0, 0, 0)
+
+
+def test_sleep_polling_is_counted_but_not_actionable(monkeypatch, tmp_path):
+    root = _repo(tmp_path)
+    hit = {
+        "file": "tests/test_shared.py",
+        "ruleId": "test-sleep-polling",
+        "range": {"start": {"line": 7}},
+        "metaVariables": {"multi": {"secondary": []}},
+    }
+    monkeypatch.setattr(st, "run_json", lambda *_args, **_kwargs: [hit])
+
+    result = st.conformance_by_module(root, sl.map_tests_to_modules(root))
+
+    assert result["app/controller.py"] == (1, 0, 0)
+
+
+def test_private_seam_metric_excludes_advisory_and_actionable_hits(monkeypatch, tmp_path):
+    root = _repo(tmp_path)
+    hits = [
+        {
+            "file": "tests/test_shared.py",
+            "ruleId": rule,
+            "range": {"start": {"line": 7}},
+            "metaVariables": {"multi": {"secondary": [{"text": "_state"}]}},
+        }
+        for rule in (
+            "test-assert-private-attr",
+            "test-sleep-polling",
+            "test-compound-private-assert",
+        )
+    ]
+    monkeypatch.setattr(st, "run_json", lambda *_args, **_kwargs: hits)
+
+    result = st.conformance_by_module(root, sl.map_tests_to_modules(root))
+
+    assert result["app/controller.py"] == (3, 1, 1)
 
 
 def _campaign(root: Path, module: str, outcomes: list[str | None]) -> None:

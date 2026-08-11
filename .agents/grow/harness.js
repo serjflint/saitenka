@@ -26,7 +26,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 6 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 7 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -45,13 +45,14 @@ const REL = 'Run from the `' + CWD + '/` directory relative to your current work
 const GUARD = 'SCOPE: edit ONLY the one target test file named below, and ADDITIVELY (append asserts / a ' +
   'parametrize case / a PROFILES row / a new test — never alter or remove an existing assertion; that is ' +
   'Sharpen\'s job). Never edit any source/tool/config file, never install anything. If something blocks ' +
-  'you, STOP and return the blocker verbatim — do not work around it by touching another file.'
+  'you, STOP and return the blocker verbatim — do not work around it by touching another file. The author ' +
+  'does not run tests or gates; the root executor owns authoritative execution.'
 
 // --- schemas (mirror contracts.json) ---------------------------------------------------------------
 
 const GAP = {
   type: 'object', additionalProperties: false,
-  required: ['found', 'module', 'target_symbol', 'dimension', 'kind', 'status', 'reason'],
+  required: ['found', 'module', 'target_symbol', 'dimension', 'kind', 'source', 'tests', 'status', 'pr_exclusion_checked', 'reason'],
   properties: {
     found: { type: 'boolean' },
     module: { type: 'string', description: 'module key relative to src/overlay, e.g. app/tooltip.py' },
@@ -89,9 +90,9 @@ const PROPOSAL = {
     cut_file: { type: 'string', description: 'CUT path relative to repo (e.g. src/overlay/app/config.py) — for context/growth-adhoc' },
     target_func: { type: 'string', description: 'production symbol the grown test exercises (scopes arm-1)' },
     test_name: { type: 'string', description: 'the grown test function name (arm-2 liveness / --deselect node)' },
-    red_on_pristine: { type: 'boolean', description: 'grown test FAILS on unmutated code → outcome-class-2 latent bug' },
+    red_on_pristine: { type: 'boolean', description: 'author suspicion only; root pristine execution is authoritative' },
     // arm-1 (scenario gaps): a one-line scenario-encoding mutation of the CUT the grown test must KILL and
-    // the existing suite must SURVIVE. Non-optional for kind=scenario — it certifies growth over covered code.
+    // the existing suite must SURVIVE. Preferred when expressible; context-delta is the alternative proof.
     mutant_find: { type: ['string', 'null'], description: 'exact CUT snippet to mutate (must occur once)' },
     mutant_replace: { type: ['string', 'null'], description: 'the scenario-violating replacement' },
     // arm-4 (concurrency gaps): the two test node ids of the shipped pair.
@@ -117,9 +118,9 @@ const PROPOSAL = {
 
 const GATE = {
   type: 'object', additionalProperties: false,
-  required: ['pass', 'restoration_verified', 'arms_run', 'report'],
+  required: ['pass', 'additive_only', 'liveness_pass', 'context_pass', 'growth_pass', 'concurrency_pass', 'restoration_verified', 'arms_run', 'report'],
   properties: {
-    pass: { type: 'boolean', description: 'additive-only AND every applicable arm clean' },
+    pass: { type: 'boolean', description: 'executor-reported disposition; the harness recomputes it' },
     additive_only: { type: 'boolean' },
     liveness_pass: { type: ['boolean', 'null'] },
     context_pass: { type: ['boolean', 'null'] },
@@ -129,6 +130,62 @@ const GATE = {
     arms_run: { type: 'array', items: { type: 'string' } },
     report: { type: 'string', description: 'the exact PASS/BOUNCE lines, verbatim' },
   },
+}
+
+function exactArms(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.size) return false
+  const arms = new Set(actual)
+  return arms.size === expected.size && [...expected].every((arm) => arms.has(arm))
+}
+
+function validModuleKey(module) {
+  if (typeof module !== 'string' || !module.endsWith('.py')) return false
+  const parts = module.slice(0, -3).split('/')
+  return parts.length > 0 && parts.every((part) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part))
+}
+
+function proposalTargetsGap(gap, proposal) {
+  const expectedCutModule = `overlay.${gap.module.replace(/\.py$/, '').replaceAll('/', '.')}`
+  const expectedTarget = gap.target_symbol.split('::')[1]
+  const testFile = proposal?.test_file?.replace(/^overlay\//, '')
+  return validModuleKey(gap.module) && gap.target_symbol.startsWith(`${gap.module}::`) &&
+    proposal?.cut_file === `src/overlay/${gap.module}` && proposal?.cut_module === expectedCutModule &&
+    proposal?.target_func === expectedTarget && typeof testFile === 'string' &&
+    testFile.startsWith('tests/') && !testFile.split('/').includes('..')
+}
+
+function objectiveGatePass(gap, gate, proposal) {
+  if (!gate || !gate.additive_only || !gate.restoration_verified || !proposalTargetsGap(gap, proposal)) return false
+  const testFile = proposal.test_file.replace(/^overlay\//, '')
+  if (gap.kind === 'concurrency') {
+    const regressionNode = proposal?.regression_node
+    const controlNode = proposal?.control_node
+    const controlTest = proposal?.control_test
+    const proposalFile = testFile
+    const regressionParts = regressionNode?.split('::') ?? []
+    const controlParts = controlNode?.split('::') ?? []
+    const boundPair = [regressionNode, controlNode, controlTest].every(
+      (value) => typeof value === 'string' && value.length > 0,
+    ) && regressionNode !== controlNode && regressionParts[0] === proposalFile &&
+      controlParts[0] === proposalFile && regressionParts[1]?.split('[', 1)[0] === proposal.test_name &&
+      controlParts[1]?.split('[', 1)[0] === controlTest
+    return exactArms(gate.arms_run, new Set(['additive', 'liveness', 'concurrency'])) &&
+      boundPair &&
+      gate.liveness_pass === true && gate.context_pass === null && gate.growth_pass === null &&
+      gate.concurrency_pass === true
+  }
+  const hasFind = typeof proposal?.mutant_find === 'string' && proposal.mutant_find.length > 0
+  const hasReplace = typeof proposal?.mutant_replace === 'string' && proposal.mutant_replace.length > 0
+  if (hasFind !== hasReplace) return false
+  if (hasFind && proposal.mutant_find === proposal.mutant_replace) return false
+  const hasMutant = hasFind && hasReplace
+  const expected = new Set(['additive', 'liveness', 'context-delta'])
+  if (hasMutant) expected.add('growth-adhoc')
+  if (!exactArms(gate.arms_run, expected)) return false
+  if (gate.liveness_pass !== true || typeof gate.context_pass !== 'boolean') return false
+  if (hasMutant !== (typeof gate.growth_pass === 'boolean')) return false
+  if (gate.concurrency_pass !== null) return false
+  return gate.growth_pass === true || gate.context_pass === true
 }
 
 const REVIEW = {
@@ -159,17 +216,51 @@ const SHIP_GATE = {
   },
 }
 
+const PRISTINE = {
+  type: 'object', additionalProperties: false,
+  required: ['status', 'report'],
+  properties: {
+    status: { type: 'string', enum: ['pass', 'test-failure', 'infra-failure'] },
+    report: { type: 'string' },
+  },
+}
+
+const BUG_VERDICT = {
+  type: 'object', additionalProperties: false,
+  required: ['verdict', 'grounds'],
+  properties: {
+    verdict: { type: 'string', enum: ['UPHELD', 'REFUTED'] },
+    grounds: { type: 'array', items: { type: 'string' } },
+  },
+}
+
 const RECORD = {
   type: 'object', additionalProperties: false,
-  required: ['state', 'ledger_appended', 'filing_blocker'],
+  required: ['state', 'outcome', 'ledger_appended', 'recorded_source', 'recorded_target_symbol', 'recorded_dimension', 'recorded_gap_id', 'recorded_target_sha', 'recorded_toolset_version', 'recorded_contract_version', 'filing_blocker'],
   properties: {
     state: { type: 'string', enum: ['closed', 'open', 'unclosable', 'filed', 'dry-run'] },
     outcome: { type: ['string', 'null'], enum: ['coverage-only', 'bug', 'robustness', 'design', null] },
     ledger_appended: { type: 'boolean' },
+    recorded_source: { type: 'string' },
+    recorded_target_symbol: { type: 'string' },
+    recorded_dimension: { type: 'string' },
+    recorded_gap_id: { type: 'string', pattern: '^[0-9a-f]{16}$' },
+    recorded_target_sha: { type: 'string', pattern: '^[0-9a-f]{16}$' },
+    recorded_toolset_version: { type: 'integer', minimum: 1 },
+    recorded_contract_version: { type: 'integer' },
     pr_url: { type: ['string', 'null'] },
     filed_issues: { type: 'array', items: { type: 'string' } },
     filing_blocker: { type: ['string', 'null'] },
     note: { type: 'string' },
+  },
+}
+
+const OUTWARD = {
+  type: 'object', additionalProperties: false,
+  required: ['pr_url', 'filed_issues'],
+  properties: {
+    pr_url: { type: ['string', 'null'] },
+    filed_issues: { type: 'array', items: { type: 'string' } },
   },
 }
 
@@ -224,7 +315,7 @@ trace.gap = { target_symbol: gap.target_symbol, kind: gap.kind, dimension: gap.d
 
 // Fail-closed: only open a PR if the open-PR exclusion actually ran (SPEC → never grow a module with an
 // open feature branch). If triage couldn't check it, force a dry-run.
-const canOpenPr = OPEN_PR && gap.pr_exclusion_checked !== false
+const canOpenPr = OPEN_PR && gap.pr_exclusion_checked === true
 if (OPEN_PR && !canOpenPr) {
   log(`open-PR exclusion unverified (gh unauth / --no-network) — forcing dry-run for ${gap.module}`)
 }
@@ -253,10 +344,10 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `You are the Grow AUTHOR. Write ONE test that closes the gap {${gap.target_symbol} · "${gap.dimension}"} for module ${gap.module} (kind=${gap.kind}). ${REL} ${GUARD}\n` +
     `TEST DESIGN (selected before this isolated call): tier=${testDesign.tier}; boundary_seam=${testDesign.boundary_seam}; extension_point=${testDesign.extension_point}; oracle_family=${testDesign.oracle_family}. Follow it unless the code proves it impossible; then return the blocker.\n` +
     `EXTEND the existing test(s) (${testHint}) before adding a new file — append a PROFILES/ENTRY_FACTORIES row, a parametrize case, or an @example; a new file only when there is no home. If the gap is a family, emit a Hypothesis property / deal contract, not a bare example.\n` +
-    `Assert OBSERVABLE behaviour (return value / emitted IPC / written note / a metamorphic oracle) — never a private attr, mock call-count, or pixels. The test MUST be GREEN on pristine code; if it goes red you found a real defect: set red_on_pristine=true, describe it, STOP (do not massage it green).\n` +
+    `Assert OBSERVABLE behaviour (return value / emitted IPC / written note / a metamorphic oracle) — never a private attr, mock call-count, or pixels. The root executor, not the author, classifies whether the test is green on pristine code; do not massage a suspected failure green.\n` +
     (gap.kind === 'concurrency'
       ? `This is a CONCURRENCY gap: ship a PAIR of PASSING tests as in tests/test_cache_race.py, driven by \`blanket\` (opt-in \`grow\` group) — a regression (guard present → no error) AND a self-certifying negative control that unguards a throwaway instance and ASSERTS the bug reproduces. Set regression_node, control_node, control_test.\n`
-      : `This is a SCENARIO gap: the test must exercise a configuration/combination the existing suite never does. You MUST also supply a one-line scenario-encoding mutation of the CUT (mutant_find → mutant_replace, mutant_find occurring exactly once) that your test KILLS and the existing suite SURVIVES — this is arm-1, non-optional; without it the gate can only prove dead-config, not growth over covered code.\n`) +
+      : `This is a SCENARIO gap: the test must exercise a configuration/combination the existing suite never does. Supply a one-line scenario-encoding mutation of the CUT (mutant_find → mutant_replace, mutant_find occurring exactly once) when one cleanly represents the scenario; the grown test must KILL it and the existing suite must SURVIVE. If no honest mutant exists, set both mutant fields null and rely on a newly-lit context line. At least one of those proofs is required.\n`) +
     `Return the additive diff, test_name, target_func (the production symbol exercised), cut_module (dotted path) and cut_file (repo-relative path, e.g. src/overlay/${gap.module}). If nothing is worth growing, return applied=false with the reason — never fabricate a vacuous test.\n` +
     (carry ? `\nPRIOR ATTEMPT BOUNCED — do not repeat it. Gate report:\n${carry}\n` : ''),
     { phase: 'Author', schema: PROPOSAL, label: `author#${attempt}` },
@@ -264,39 +355,98 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   if (!proposal || !proposal.applied) { carry = 'author did not apply an edit'; continue }
   authorInvocation = `author#${attempt}`
 
-  // Outcome-class 2: a red-on-pristine test is a latent BUG, not a gate failure. Route to a filed issue.
-  if (proposal.red_on_pristine) {
+  const tf = proposal.test_file.replace('overlay/', '')
+  if (!proposalTargetsGap(gap, proposal)) {
+    carry = 'proposal CUT/test path does not match the selected gap'
+    await revert(proposal)
+    proposal = null
+    continue
+  }
+  const additive = await agent(
+    `Run the additive preflight from ${CWD}/: \`uv run python tools/grow_gate.py additive ${tf} --repo .\`. ${REL} ` +
+    `Edit nothing. pass=true only when it reports exclusively added assertion nodes; return output verbatim.`,
+    { phase: 'Objective gate', schema: SHIP_GATE, label: `additive#${attempt}`, effort: 'low' },
+  )
+  if (!additive?.pass) {
+    carry = `additive preflight bounced: ${additive?.report ?? 'no report'}`
+    await revert(proposal)
+    proposal = null
+    continue
+  }
+  const pristineCommand = gap.kind === 'concurrency'
+    ? `uv run --group grow pytest -q ${proposal.regression_node} ${proposal.control_node}`
+    : `uv run pytest -q ${tf}::${proposal.test_name}`
+  const pristine = await agent(
+    `Run the proposed test on pristine production code from ${CWD}/: \`${pristineCommand}\`. ${REL} ` +
+    `Edit nothing. Classify status=test-failure only when pytest collected the requested node(s) and their ` +
+    `behavioral assertion failed or production code raised unexpectedly; dependency, collection, permission, ` +
+    `or command failures are infra-failure. ` +
+    `Return the relevant output verbatim.`,
+    { phase: 'Objective gate', schema: PRISTINE, label: `pristine#${attempt}`, effort: 'low' },
+  )
+  if (proposal.red_on_pristine !== (pristine?.status === 'test-failure')) {
+    trace.notes.push(`author pristine classification ignored; root executor reported ${pristine?.status ?? 'missing'}`)
+  }
+  if (pristine?.status === 'infra-failure' || !pristine) {
+    carry = `pristine execution unavailable: ${pristine?.report ?? 'no report'}`
+    await revert(proposal)
+    proposal = null
+    continue
+  }
+
+  // Outcome-class 2: an executor-proved red-on-pristine test is a latent BUG, not a gate failure.
+  if (pristine.status === 'test-failure') {
+    const bugArtifact = `GAP: ${gap.target_symbol} · ${gap.dimension}\nDIFF:\n${proposal.diff}\nFAILURE:\n${pristine.report}`
+    const bugPrompt = `Adversarially verify whether this ADDITIVE proposed test has a valid observable oracle and its pristine failure demonstrates a production defect. Read the selected CUT ${gap.target_symbol} and edited test from ${CWD}/. Refute assert-false, mistaken expected values, implementation-detail oracles, unrelated crashes, and redundant scenarios. Reason only from this artifact and live code; default REFUTED on doubt.\n\n${bugArtifact}`
+    const bugSkeptic = await agent(bugPrompt, { phase: 'Skeptic', schema: BUG_VERDICT, label: 'bug-skeptic' })
+    const bugJudge = await agent(bugPrompt, { phase: 'Judge', schema: BUG_VERDICT, label: 'bug-judge' })
+    if (bugSkeptic?.verdict !== 'UPHELD' || bugJudge?.verdict !== 'UPHELD') {
+      await revert(proposal)
+      trace.notes.push('red-on-pristine oracle refuted; no product bug filed')
+      const rec = await recordOutcome('dry-run', null, null, null,
+        `Pristine failure was not independently upheld. Reviews: ${JSON.stringify([bugSkeptic, bugJudge])}`)
+      trace.outcome = rec?.state ?? 'dry-run'
+      return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? 'dry-run', outcome: null, openPr: OPEN_PR })
+    }
     log(`grown test is RED on pristine code → latent bug (outcome class 2): ${proposal.reason ?? 'see proposal'}`)
     await revert(proposal)
     const bugState = canOpenPr ? 'filed' : 'dry-run'
     trace.notes.push(`red-on-pristine → ${canOpenPr ? 'file product bug' : 'record explicit filing blocker'}`)
-    const rec = await recordOutcome(bugState, null, null, 'bug',
-      `Grown test for "${gap.dimension}" went red on pristine code — a real defect. Author note: ${proposal.reason ?? '(see diff)'}. ${canOpenPr ? 'File a product issue with the failing repro.' : 'Filing blocker: dry-run has no outward-action authorization.'}`)
+    const bugReview = { skeptic: bugSkeptic, judge: bugJudge, verdict: 'UPHELD' }
+    const rec = await recordOutcome(bugState, null, bugReview, 'bug',
+      `${bugArtifact}\nREVIEWS: ${JSON.stringify(bugReview)}\n${canOpenPr ? 'File a product issue with this failing repro.' : 'Filing blocker: dry-run has no outward-action authorization.'}`)
     trace.outcome = rec?.state ?? bugState
     return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? bugState, outcome: 'bug', openPr: OPEN_PR })
   }
 
   phase('Objective gate')
   // Deterministic: the real adds-only diff + the applicable grow_gate arms for this gap kind.
-  const tf = proposal.test_file.replace('overlay/', '')
   const oldTests = (gap.tests || []).map((t) => t.replace('overlay/', '')).join(' ')
+  const mutationArm = proposal.mutant_find && proposal.mutant_replace
+    ? `Arm 1 (growth-adhoc, the STRONG growth proof): \`uv run python tools/grow_gate.py growth-adhoc --cut ${proposal.cut_file} --find ${JSON.stringify(proposal.mutant_find)} --replace ${JSON.stringify(proposal.mutant_replace)} --old ${oldTests} --new ${oldTests} ${tf} --deselect ${tf}::${proposal.test_name} --repo .\` (old SURVIVES the mutant, grown test KILLS it). `
+    : `Arm 1 (growth-adhoc): N/A — no honest scenario mutant supplied; set growth_pass=null. `
   const armsSpec = gap.kind === 'concurrency'
     ? `Arm 4 (concurrency), both PASS + control-oracle-live: first run arm-2 liveness on the CONTROL — ` +
       `\`uv run python tools/grow_gate.py liveness ${proposal.control_node ? proposal.control_node.split('::')[0] : tf} --test ${proposal.control_test} --repo .\` — then ` +
       `\`uv run --group grow python tools/grow_gate.py concurrency --regression ${proposal.regression_node} --control ${proposal.control_node} --control-file ${proposal.control_node ? proposal.control_node.split('::')[0] : tf} --control-test ${proposal.control_test} --repo .\` ` +
-      `(regression PASSES, control PASSES, control oracle LIVE). Set concurrency_pass; liveness/context/growth = null.`
+      `(regression PASSES, control PASSES, control oracle LIVE). Set liveness_pass from the control liveness result and concurrency_pass from the concurrency gate; context/growth = null.`
     : `Arm 2 (liveness): \`uv run python tools/grow_gate.py liveness ${tf} --test ${proposal.test_name} --repo .\` (>=1 live assert or a pytest.raises block, no trivial/dead). ` +
-      `Arm 1 (growth-adhoc, the STRONG growth proof): \`uv run python tools/grow_gate.py growth-adhoc --cut ${proposal.cut_file} --find ${JSON.stringify(proposal.mutant_find)} --replace ${JSON.stringify(proposal.mutant_replace)} --old ${oldTests} --new ${oldTests} ${tf} --deselect ${tf}::${proposal.test_name} --repo .\` (old SURVIVES the mutant, grown test KILLS it). ` +
+      mutationArm +
       `Arm 3 (context-delta, the ALTERNATIVE growth proof for a dead-config gap with no clean mutant): \`uv run python tools/grow_gate.py context --cut ${proposal.cut_file} --old ${oldTests} --new ${oldTests} ${tf} --deselect ${tf}::${proposal.test_name} --repo .\` (a newly-lit line). NOTE arm-3 is LINE-level: a covered-but-under-specified BRANCH of an already-covered line lights no new line and BOUNCES here — that's expected; arm-1 carries it. Set liveness_pass/context_pass/growth_pass; concurrency_pass=null.`
   gate = await agent(
     `Run the deterministic Grow objective gate on the author's edit. ${REL} Report tool output VERBATIM. (Read-only tools; edit nothing.)\n` +
     `1. ADDITIVE check (Grow↔Sharpen boundary): \`uv run python tools/grow_gate.py additive ${tf} --repo .\` — it must report ONLY added asserts. Any altered/removed assert ⇒ mutative ⇒ Sharpen scope ⇒ additive_only=false ⇒ BOUNCE. (Do NOT use sharpen_gate anticheat here — it misses same-tier value changes.)\n` +
     `2. ${armsSpec}\n` +
-    `Verify every temporary source/test file equals its pre-gate bytes after the commands and set restoration_verified. pass (scenario) = additive_only AND restoration_verified AND liveness_pass AND (growth_pass OR context_pass) — arm-1 and arm-3 are ALTERNATIVE proofs of genuine growth. A scenario gap with NEITHER arm-1 nor arm-3 → BOUNCE. pass (concurrency) = additive_only AND restoration_verified AND concurrency_pass. arms_run lists the arms actually executed. Quote every BOUNCE line.`,
+    `Verify every temporary source/test file equals its pre-gate bytes after the commands and set restoration_verified. pass (scenario) = additive_only AND restoration_verified AND liveness_pass AND (growth_pass OR context_pass) — arm-1 and arm-3 are ALTERNATIVE proofs of genuine growth. A scenario gap with NEITHER arm-1 nor arm-3 → BOUNCE. pass (concurrency) = additive_only AND restoration_verified AND liveness_pass AND concurrency_pass. arms_run must exactly list the selected commands. Quote every BOUNCE line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
   trace.retries = attempt
-  if (gate && gate.pass) { trace.gate = gate; break }
+  const computedPass = objectiveGatePass(gap, gate, proposal)
+  if (gate && gate.pass !== computedPass) {
+    trace.notes.push(`executor gate disposition ${gate.pass} overridden by harness disposition ${computedPass}`)
+    gate.pass = computedPass
+  }
+  if (computedPass) { trace.gate = gate; break }
   trace.gate = gate
   carry = gate ? gate.report : 'gate execution failed'
   log(`attempt ${attempt} bounced: ${carry.split('\n')[0]}`)
@@ -319,7 +469,7 @@ const whatOnly = JSON.stringify(proposal.proposals.map((p) => ({ target_test: p.
 const skeptic = await agent(
   `You are an adversarial reviewer. A NEW test for ${gap.module} claims to close a real scenario gap the suite currently misses. Try to REFUTE it. Reason ONLY from the artifact below and the code — you are NOT given the author's reasoning.\n\n` +
   `WHAT: ${whatOnly}\n\nDIFF:\n${proposal.diff}\n\n` +
-  `${REL} Read the target symbol \`${proposal.target_func || '(scenario edit)'}\` and the edited test. Refute if the test is REDUNDANT (an existing test already pins this scenario — name it in redundant_with), VACUOUS / a change-detector (a tautology, an implementation detail, or a value read from the code under test), OVER-PRODUCED (a near-duplicate where one parametrize/@given is clearer), or SHOULD-HAVE-EXTENDED (a new file where appending a PROFILES row would inherit the corner). If the gap is real but this is the wrong intervention, return the smallest evidence-backed better_fix and its scope; a better fix never rescues this candidate. Cite scenarios/mutants/lines — never authority. Default REFUTED on genuine doubt.`,
+  `${REL} Read the selected target symbol \`${gap.target_symbol}\` and the edited test. Refute if the test is REDUNDANT (an existing test already pins this scenario — name it in redundant_with), VACUOUS / a change-detector (a tautology, an implementation detail, or a value read from the code under test), OVER-PRODUCED (a near-duplicate where one parametrize/@given is clearer), or SHOULD-HAVE-EXTENDED (a new file where appending a PROFILES row would inherit the corner). If the gap is real but this is the wrong intervention, return the smallest evidence-backed better_fix and its scope; a better fix never rescues this candidate. Cite scenarios/mutants/lines — never authority. Default REFUTED on genuine doubt.`,
   { phase: 'Skeptic', schema: REVIEW, label: 'skeptic' },
 )
 const skepticInvocation = 'skeptic'
@@ -334,7 +484,7 @@ if (skeptic?.verdict === 'UPHELD') {
   judge = await agent(
     `You are a SECOND, independent adversarial reviewer (the first reviewer is not shown to you). A NEW test for ${gap.module} claims to close a real scenario gap the suite currently misses. Try to REFUTE it, reasoning ONLY from the artifact and the code.\n\n` +
     `WHAT: ${whatOnly}\n\nDIFF:\n${proposal.diff}\n\n` +
-    `${REL} Read the target symbol \`${proposal.target_func || '(scenario edit)'}\` and the edited test. Refute if REDUNDANT (name it in redundant_with), VACUOUS / a change-detector, OVER-PRODUCED, or SHOULD-HAVE-EXTENDED. If the gap is real but this is the wrong intervention, return the smallest better_fix + scope; it never rescues this candidate. Cite scenarios/mutants/lines, never authority. Default REFUTED on genuine doubt.`,
+    `${REL} Read the selected target symbol \`${gap.target_symbol}\` and the edited test. Refute if REDUNDANT (name it in redundant_with), VACUOUS / a change-detector, OVER-PRODUCED, or SHOULD-HAVE-EXTENDED. If the gap is real but this is the wrong intervention, return the smallest better_fix + scope; it never rescues this candidate. Cite scenarios/mutants/lines, never authority. Default REFUTED on genuine doubt.`,
     { phase: 'Judge', schema: REVIEW, label: 'judge' },
   )
   judgeInvocation = 'judge'
@@ -445,19 +595,77 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
   const reviewBlock = reviewResult ? JSON.stringify(reviewResult) : 'null (terminal outcome, no review reached)'
   const wantPr = canOpenPr && state === 'closed' && prop
   const wantIssue = canOpenPr && state === 'filed' && outcome === 'bug'
-  return agent(
-    `Append one Grow ledger record and ${wantPr ? 'open the PR' : wantIssue ? 'file the product issue' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.grow.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, when authorized below, git/gh).\n` +
-    `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Compute gap_id + target_sha with tools/grow_ledger.py, stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, toolset_version from the manifest.\n` +
-    `state: "${state}"${outcome ? `, outcome: "${outcome}"` : ''}. review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}.\n` +
+  const ledgerState = wantPr || wantIssue ? 'open' : state
+  const recorded = await agent(
+    `Append one Grow ledger record. ${REL} The ledger \`.ledger.grow.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger; do not run git/gh or take any outward action.\n` +
+    `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Build the record without gap_id, target_sha, or toolset_version, then MUST invoke \`uv run python tools/grow_ledger.py --ledger ../.ledger.grow.jsonl append --record-json '<record-json>'\`; that CLI owns those fields. Do not hash or append manually. Stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`.\n` +
+    `state: "${ledgerState}", outcome: ${JSON.stringify(outcome ?? null)}. review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}. A pending outward action MUST remain open until finalized.\n` +
     (prop ? `test: ${JSON.stringify(prop.test_name)}. decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. Captured diff: ${JSON.stringify(prop.diff)}.\n` : '') +
     `axes_not_applied: list every gate arm that was n/a for this ${gap.kind} gap and WHY (the silent-no-run guard — SPEC/ADAPTERS).\n` +
-    `Set filing_blocker to null when no bug filing is required or an issue was filed; for a dry-run latent bug set it to the explicit outward-authorization blocker.\n` +
+    `Return the CLI-emitted source, target_symbol, dimension, gap_id, target_sha, toolset_version, and contract_version as the corresponding recorded_* fields. Set filing_blocker to null unless this is a dry-run latent bug, where it must name the outward-authorization blocker. Return pr_url=null and filed_issues=[]; outward action is structurally withheld until this receipt is validated.\n` +
     (extraNote ? `note: ${extraNote}\n` : '') +
-    (wantPr
-      ? `Then open a PR on a fresh branch off main (feat/grow-<symbol-stem>): body per SPEC "PR body" — the scenario now pinned, why a human should care, the gate evidence (arms run), the outcome class ${JSON.stringify(outcome)}, and gate report ${JSON.stringify(gate.report)}. Return its url. Do NOT merge.\n`
-      : wantIssue
-        ? `File one product issue containing the failing pristine repro, user impact, and target symbol. Return its reference in filed_issues; do not open a PR from the red test.\n`
-      : `Do NOT open a PR, push, or file any issue. Leave the ledger append as the only change; print the PR body that WOULD be opened so the maintainer can review before enabling openPr.\n`),
+    `Leave the ledger append as the only change.\n`,
     { phase: 'Record', schema: RECORD, label: 'record' },
   )
+  const expectedSource = gap.source ?? 'invariant'
+  const validReceipt = (candidate, expectedState, expectedOutward = null) => candidate?.ledger_appended === true &&
+    candidate.state === expectedState && (candidate.outcome ?? null) === (outcome ?? null) &&
+    candidate.recorded_source === expectedSource &&
+    candidate.recorded_target_symbol === gap.target_symbol &&
+    candidate.recorded_dimension === gap.dimension &&
+    /^[0-9a-f]{16}$/.test(candidate.recorded_gap_id) &&
+    /^[0-9a-f]{16}$/.test(candidate.recorded_target_sha) &&
+    Number.isInteger(candidate.recorded_toolset_version) && candidate.recorded_toolset_version >= 1 &&
+    candidate.recorded_contract_version === CONTRACT_VERSION &&
+    (expectedOutward?.pr_url
+      ? candidate.pr_url === expectedOutward.pr_url
+      : candidate.pr_url === null) &&
+    (expectedOutward?.filed_issues?.length
+      ? JSON.stringify(candidate.filed_issues) === JSON.stringify(expectedOutward.filed_issues)
+      : Array.isArray(candidate.filed_issues) && candidate.filed_issues.length === 0) &&
+    (expectedState === 'dry-run' && outcome === 'bug'
+      ? typeof candidate.filing_blocker === 'string' && candidate.filing_blocker.length > 0
+      : candidate.filing_blocker === null)
+  const hasReceipt = validReceipt(recorded, ledgerState)
+  if (hasReceipt && (wantPr || wantIssue)) {
+    const outward = await agent(
+      wantPr
+        ? `The Grow ledger receipt for ${gap.target_symbol} is validated. Now open a PR on a fresh branch off main (feat/grow-<symbol-stem>): body per SPEC "PR body" — the scenario now pinned, why a human should care, the gate evidence (arms run), outcome ${JSON.stringify(outcome)}, and gate report ${JSON.stringify(gate.report)}. Return its URL. Do not merge.`
+        : `The Grow ledger receipt for ${gap.target_symbol} is validated. File one product issue containing this executor-proved pristine failure and review evidence, its user impact, and target symbol:\n${extraNote}\nReturn its reference; do not open a PR from the red test.`,
+      { phase: 'Record', schema: OUTWARD, label: 'outward' },
+    )
+    const actionSucceeded = wantPr
+      ? typeof outward?.pr_url === 'string' && outward.pr_url.length > 0
+      : Array.isArray(outward?.filed_issues) && outward.filed_issues.length > 0
+    if (!actionSucceeded) {
+      trace.notes.push('outward action returned no evidence; ledger remains open')
+      return { ...recorded, state: 'open', pr_url: null, filed_issues: [] }
+    }
+    const finalState = wantPr ? 'open' : state
+    const finalized = await agent(
+      `The outward action for ${gap.target_symbol} succeeded with evidence ${JSON.stringify(outward)}. Append a FINAL Grow ledger record through tools/grow_ledger.py with the same source/target_symbol/dimension, outcome ${JSON.stringify(outcome ?? null)}, contract_version ${CONTRACT_VERSION}, and state "${finalState}". Persist a PR URL as pr_url, or issue references under the ledger key filed; copy the review/test/gate context from the preceding open record. Take no further outward action. Return the exact CLI receipt fields, mapping persisted filed to filed_issues.`,
+      { phase: 'Record', schema: RECORD, label: 'finalize' },
+    )
+    const sameIdentity = finalized?.recorded_gap_id === recorded.recorded_gap_id &&
+      finalized?.recorded_target_sha === recorded.recorded_target_sha &&
+      finalized?.recorded_toolset_version === recorded.recorded_toolset_version
+    if (!validReceipt(finalized, finalState, outward) || !sameIdentity) {
+      trace.notes.push('outward evidence finalization failed; attempting an open recovery record')
+      const recovered = await agent(
+        `Append a recovery Grow ledger record through tools/grow_ledger.py for the same source/target_symbol/dimension and identity, state "open", outcome ${JSON.stringify(outcome ?? null)}, contract_version ${CONTRACT_VERSION}, and persist this already-created outward evidence: ${JSON.stringify(outward)}. Take no outward action. Return the exact receipt, mapping filed to filed_issues.`,
+        { phase: 'Record', schema: RECORD, label: 'recover' },
+      )
+      const recoveredIdentity = recovered?.recorded_gap_id === recorded.recorded_gap_id &&
+        recovered?.recorded_target_sha === recorded.recorded_target_sha &&
+        recovered?.recorded_toolset_version === recorded.recorded_toolset_version
+      if (!validReceipt(recovered, 'open', outward) || !recoveredIdentity) {
+        trace.notes.push('outward evidence recovery receipt invalid; manual ledger reconciliation required')
+      }
+      return { ...(validReceipt(recovered, 'open', outward) ? recovered : recorded), state: 'open', ...outward }
+    }
+    return { ...finalized, ...outward }
+  }
+  if (hasReceipt) return recorded
+  trace.notes.push('ledger append receipt missing or invalid; outward result downgraded to dry-run')
+  return { ...recorded, state: 'dry-run', ledger_appended: false, pr_url: null }
 }

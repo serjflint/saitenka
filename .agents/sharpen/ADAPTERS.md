@@ -23,7 +23,8 @@ run is `dry-run`.
 
 ## Agent roles
 
-- **Author:** generation-capable; may edit the single target test file.
+- **Author:** generation-capable; may edit the single target test file, but does not run tests or gates;
+  the root executor owns the authoritative environment.
 - **Skeptic:** independent adversarial verifier; read-only except for inspection commands.
 - **Judge:** second independent adversarial verifier; verification-capable and may use a cheaper model.
 

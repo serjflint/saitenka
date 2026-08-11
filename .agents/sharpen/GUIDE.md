@@ -201,10 +201,10 @@ gate; together they stop the lobotomies a green run hides.
 
 ### Axis 2 — `poe test-lint` (ast-grep rules under `sgconfig/test-rules/`)
 
-Eight hand-written [ast-grep](https://github.com/ast-grep/ast-grep) rules scan `tests/` for smells:
+Nine hand-written [ast-grep](https://github.com/ast-grep/ast-grep) rules scan `tests/` for smells:
 private-attribute asserts (and the compound-assert variant), mock-interaction asserts, private-symbol
-`monkeypatch`, mis-levelled real I/O (a real subprocess/socket/`time.sleep` in an unmarked default-tier
-test), ambient non-determinism, `os.environ` mutation, and session-scoped mutable fixtures. Each rule
+`monkeypatch`, mis-levelled real I/O (a real subprocess/socket in an unmarked default-tier test), advisory
+sleep polling, ambient non-determinism, `os.environ` mutation, and session-scoped mutable fixtures. Each rule
 ships with planted `valid`/`invalid` examples (`poe test-lint-test`) so it can't silently rot into a
 no-op. (A control-flow/cohesion rule is specced but deliberately not built — advisory-only, noisy on a
 classicist suite.)
@@ -213,8 +213,9 @@ A key distinction the loop makes: a rule is either a **metric** or **actionable*
 `test-assert-private-attr` is a *metric* — on white-box code it fires heavily *by design* (the real
 output, e.g. rendered pixels, has no cheap public handle), so a high count is an **architecture signal**
 (a missing public seam → Grow/refactor), not a list of 100 test-by-test fixes. `test-mislevelled-realio`
-is *actionable* — each hit is a concrete "add the `integration` marker or use a fake." The triage ranks
-on the actionable count and treats the metric count as a separate signal.
+is *actionable* — each hit is a concrete "add the `integration` marker or use a fake."
+`test-sleep-polling` is advisory: it remains visible in conformance totals but cannot make a module
+Sharpen-ready. The triage ranks on the actionable count and treats the rest as separate signals.
 
 ### Triage — `tools/sharpen_triage.py`
 

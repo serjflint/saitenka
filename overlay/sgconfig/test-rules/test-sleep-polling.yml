@@ -1,0 +1,28 @@
+id: test-sleep-polling
+language: python
+severity: warning
+message: >-
+  time.sleep in a DEFAULT-tier test is an advisory synchronization smell. Prefer waiting on test-owned
+  state or output when that removes polling without coupling the test to a production call route.
+note: >-
+  Axis 2 advisory only: sleep can be legitimate bounded polling in thread-lifecycle tests, so this rule
+  contributes to the conformance count but never makes a module actionable for Sharpen.
+files:
+  - "tests/**/*.py"
+rule:
+  all:
+    - pattern: time.sleep($$$)
+    - inside:
+        kind: function_definition
+        stopBy: end
+        has:
+          field: name
+          regex: "^test_"
+    - not:
+        inside:
+          kind: decorated_definition
+          stopBy: end
+          has:
+            kind: decorator
+            stopBy: end
+            regex: "integration|live|e2e|requires_display|slow|windows_sim"

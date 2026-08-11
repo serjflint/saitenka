@@ -181,3 +181,92 @@ def test_append_round_trips_a_record(tmp_path):
     rec = _rec(state="closed")
     ledger.append(rec)
     assert gl.Ledger.load(root / ".ledger.grow.jsonl").latest(rec["gap_id"])["state"] == "closed"
+
+
+def test_prepare_record_owns_identity_and_manifest_version(tmp_path):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
+
+    prepared = gl.prepare_record(
+        {
+            "source": "invariant",
+            "target_symbol": "app/x.py::crisp",
+            "dimension": "scale=2.0",
+            "state": "dry-run",
+        },
+        root,
+        ledger,
+    )
+
+    assert prepared["gap_id"] == gl.gap_id("invariant", "app/x.py::crisp", "scale=2.0")
+    assert prepared["target_sha"] == gl.target_sha(MODULE_V1, "crisp")
+    assert prepared["toolset_version"] == 7
+
+
+def test_append_cli_fills_identity_fields(monkeypatch, tmp_path, capsys):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "source": "invariant",
+        "target_symbol": "app/x.py::crisp",
+        "dimension": "scale=2.0",
+        "state": "dry-run",
+    }
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "grow_ledger.py",
+            "--repo",
+            str(root),
+            "--ledger",
+            str(ledger.path),
+            "append",
+            "--record-json",
+            json.dumps(record),
+        ],
+    )
+
+    assert gl._main() == 0
+
+    written = json.loads(capsys.readouterr().out)
+    assert gl.Ledger.load(ledger.path).latest(written["gap_id"])["state"] == "dry-run"
+
+
+def test_prepare_record_rejects_a_target_outside_source_root(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="stay under"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "../../../tools/x.py::_main",
+                "dimension": "escape",
+            },
+            root,
+            ledger,
+        )
+
+
+def test_cli_reports_invalid_json_without_a_traceback(monkeypatch, tmp_path, capsys):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "grow_ledger.py",
+            "--repo",
+            str(root),
+            "--ledger",
+            str(ledger.path),
+            "append",
+            "--record-json",
+            "[",
+        ],
+    )
+
+    assert gl.main() == 2
+    assert capsys.readouterr().err.startswith("grow-ledger: error:")
