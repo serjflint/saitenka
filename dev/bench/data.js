@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786442770960,
+  "lastUpdate": 1786443731403,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3707,6 +3707,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.784,
             "range": "±1.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6ecae9b5c33c384d5c382ec744570157aeae026e",
+          "message": "Merge pull request #318 from serjflint/fix/session-wip-2026-08-11\n\nfix: land session WIP — import merge-append, shutdown watchdog, type config, span marks",
+          "timestamp": "2026-08-11T13:21:19+03:00",
+          "tree_id": "667801d5f8c766344d9a36af1fe50316bb23d6b1",
+          "url": "https://github.com/serjflint/saitenka/commit/6ecae9b5c33c384d5c382ec744570157aeae026e"
+        },
+        "date": 1786443730342,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.471,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.966,
+            "range": "±3.1%",
             "unit": "ms"
           }
         ]
