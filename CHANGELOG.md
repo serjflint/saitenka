@@ -12,6 +12,14 @@ logs.
 - **Episode re-slotting now distinguishes identical filenames in different folders.** Moving between
   seasons that both contain `Episode.mkv` no longer leaves the overlay attached to the previous file.
 
+### Development
+
+- Extracted renderer-neutral Yomitan dictionary semantics into the independently testable
+  `yomitanlite` package and AnkiConnect transport/protocol handling into `ankiconnect-client`.
+  Saitenka now has a swappable lookup-source adapter, a dictionary-independent known-word cache, and a
+  batched headless-Yomitan differential report covering all term modes, metadata, structured content,
+  and kanji.
+
 ## [3.1.0] - 2026-08-11
 
 ### Added

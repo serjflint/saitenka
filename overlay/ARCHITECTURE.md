@@ -44,6 +44,14 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
   (subtitle fetching); `cli.py`/`cli_run.py` (the entry point — thin parser + real orchestration).
+- **`../yomitanlite/`** — the renderer-neutral dictionary boundary: archive validation/import,
+  SQLite lookup, semantic term/kanji models, all five Yomitan result modes, and the reusable headless
+  Yomitan differential client. `app/source_adapter.py` presents any `LookupSource` through the stable
+  Saitenka tooltip/card facade; the legacy facade remains the default during migration.
+- **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
+  `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
+- **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
+  and schema rebuilds no longer own Anki-derived state.
 
 ## Data flow (the hover → lookup → render → mine chain)
 
@@ -51,13 +59,13 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 2. Each subtitle line is tokenized (the profile's tokenizer strategy — fugashi + unidic-lite for
    Japanese, the Latin strategy for French/…) into `Token`s with per-word hitboxes, drawn as an OSD
    overlay.
-3. On hover, hit-testing maps screen coordinates to a token; the word's lemma is looked up against
-   the consolidated dictionary DB, producing an `Entry` (one `Definition` per configured
-   dictionary).
+3. On hover, hit-testing maps screen coordinates to a token. A `LookupSource` produces semantic term
+   or kanji results; `DictionarySourceAdapter` maps them to the stable `Entry` render input. The
+   current consolidated-DB facade remains selectable while callers migrate.
 4. The panel code (`panel.py`) walks the `Definition`s' structured content into a rendered tooltip
    image via `render/` → `draw/`, composited over the mpv frame.
-5. Optionally, mining the hovered word builds an Anki note via AnkiConnect (`anki.py`, `miner.py`):
-   sentence, screenshot, audio clip, provenance.
+5. Optionally, mining builds a note through `ankiconnect-client`; `anki.py`/`miner.py` own sentence,
+   screenshot, audio, provenance, launch behavior, and telemetry.
 
 ## Tooltip render pipeline (end-to-end)
 
@@ -273,6 +281,11 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
   what makes this airspace-safe on Windows fullscreen.
 - **Dictionaries are imported once** into a consolidated SQLite DB (the Yomitan model); play-time
   only opens it — nothing rebuilds during playback, RAM stays low.
+- **Dictionary semantics and rendering are separate contracts.** `yomitanlite.LookupSource` is the
+  swappable information seam; Saitenka's `Entry`/panel backends are the swappable presentation seam.
+  The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
+- **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
+  sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`
   may import it (enforced by import-linter + ruff `TID251` + the license gate) — keeps the core
   Apache-2.0-clean.

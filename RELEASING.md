@@ -21,8 +21,9 @@ and merging the PR — still happen exactly where they're described here.
 breaking change) is a minor bump — `0.2.0 → 0.3.0`. Don't reach for `1.0.0` until the CLI/config is
 being frozen.
 
-Single source of truth: **`overlay/pyproject.toml` `version`** (read at runtime via
-`importlib.metadata`). Nothing else hardcodes the version.
+Saitenka's version source is **`overlay/pyproject.toml`**. `yomitanlite` and `ankiconnect-client` keep
+independent versions in their own `pyproject.toml` and publish only from their namespaced tags. A
+Saitenka release consumes already-published dependency versions; it never republishes them.
 
 ## Automated
 
@@ -62,8 +63,8 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
-3. **Build the wheel:** `cd overlay && uv build --wheel` → `overlay/dist/saitenka-X.Y.Z-py3-none-any.whl`
-   (a local packaging check; `release.yml` rebuilds the published artifact from the tag).
+3. **Build the wheels:** build `yomitanlite/`, `ankiconnect-client/`, then `overlay/` into one local
+   dist directory so the Saitenka artifact is tested with the exact dependency artifacts under review.
 4. **Smoke-test the artifact, not the tree** — install the *built wheel* in an isolated env:
    ```sh
    uvx --from overlay/dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
@@ -92,8 +93,12 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
    running either duplicates what CI already did. The GPL `deinflect` add-on ships separately (below).
 8. **Watch it go green:** `gh run watch --workflow=release.yml`. If it fails mid-way, fix forward and
    re-run the job (or, CI-down, fall back to `release.py publish` — the only time it's the right tool).
-9. **Post-release:** confirm the Release + both PyPI packages are live, `## [Unreleased]` is empty on
+9. **Post-release:** confirm the Release + PyPI distributions are live, `## [Unreleased]` is empty on
    top, the tag matches `pyproject.toml`, and `uv tool install "saitenka[full]"` pulls the new version.
+
+Register `extracted-package-release.yml` as the trusted publisher for `yomitanlite` and
+`ankiconnect-client`. Bump and publish a changed dependency first, using
+`yomitanlite-vX.Y.Z` or `ankiconnect-client-vX.Y.Z`; then update Saitenka's dependency floor and lock.
 
 ## deinflect (GPL add-on)
 
