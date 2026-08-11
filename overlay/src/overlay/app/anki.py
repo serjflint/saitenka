@@ -17,12 +17,11 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import stamina
+from ankiconnect_client import AnkiConnectClient, AnkiConnectError, AnkiConnectUnavailable
 
 from overlay.app.media import AnimatedClip
 
@@ -182,11 +181,11 @@ def ensure_anki_running(host: str | None = None, wait: float = 20.0) -> bool:
     return False
 
 
-class AnkiError(RuntimeError):
-    pass
+class AnkiError(AnkiConnectError):
+    """Saitenka compatibility name for an AnkiConnect application error."""
 
 
-class _AnkiRetryable(AnkiError):
+class _AnkiRetryable(AnkiConnectUnavailable, AnkiError):
     """A transient AnkiConnect failure (connection refused / timeout while Anki is briefly busy).
     ``stamina`` retries these ONCE, quickly — Anki being *not running* is a common steady state, so we
     keep the added latency tiny (a down call adds ~0.3s, not seconds). App errors (deck not found, …)
@@ -198,7 +197,7 @@ def is_unreachable(exc: BaseException) -> bool:
     :class:`Anki` client (``_AnkiRetryable``) or a raw ``urllib`` call (``OSError``/``URLError``).
     Anki can vanish at any moment; that's an expected steady state, so callers log it compactly
     (no traceback) and carry on."""
-    return isinstance(exc, (_AnkiRetryable, OSError))
+    return isinstance(exc, (AnkiConnectUnavailable, OSError))
 
 
 # SSOT: the exceptions a single AnkiConnect interaction can raise. Any caller for whom Anki is
@@ -334,48 +333,23 @@ class Anki:
         rh, rk = resolve_anki()
         self.host = host or rh
         self.api_key = api_key if api_key is not None else rk
-
-    def _urlopen_json(self, req, action: str, *, timeout: float, trace: bool) -> Any:
-        """POST + parse one AnkiConnect response. ``trace`` splits the IO and CPU spans
-        (``anki_http_call`` / ``anki_json_parse``) for the known-word coloring path's latency budget."""
-        if not trace:
-            with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
-                return json.loads(r.read())
-        from overlay import otel_metrics
-
-        with (
-            otel_metrics.traced("anki_http_call", action=action),
-            urllib.request.urlopen(req, timeout=timeout) as r,  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
-        ):
-            raw = r.read()
-        with otel_metrics.traced("anki_json_parse", action=action):
-            return json.loads(raw)
+        self._client = AnkiConnectClient(self.host, self.api_key)
 
     def _call(
         self, action: str, *, timeout: float = 20, attempts: int = 2, trace: bool = False, **params
     ):
-        """The single AnkiConnect JSON-RPC entry point (SSOT). ``timeout``/``attempts`` tune fast-fail
-        (doctor probe, coloring) vs retry-once (mining); ``trace`` adds otel spans. Raises
-        ``_AnkiRetryable`` when Anki is down (see :func:`is_unreachable`), ``AnkiError`` on an app error."""
-        payload: dict = {"action": action, "version": 6, "params": params}
-        if self.api_key:
-            payload["key"] = self.api_key  # AnkiConnect apiKey → request body
-        body = json.dumps(payload).encode()
-        req = urllib.request.Request(  # noqa: S310  # AnkiConnect on 127.0.0.1 - fixed localhost scheme
-            self.host, body, {"Content-Type": "application/json"}
-        )
-        for attempt in stamina.retry_context(
-            on=_AnkiRetryable, attempts=attempts, wait_initial=0.3, wait_max=1.0
-        ):
-            with attempt:
-                try:
-                    res = self._urlopen_json(req, action, timeout=timeout, trace=trace)
-                except OSError as e:  # connection refused / timeout — transient, retry once
-                    raise _AnkiRetryable(f"AnkiConnect unreachable at {self.host}: {e}") from e
-                if res.get("error"):
-                    raise AnkiError(res["error"])  # app error (deck/model not found) — do NOT retry
-                return res.get("result")
-        raise AnkiError(f"AnkiConnect call {action!r} failed after retries")  # unreachable
+        """Compatibility seam over the extracted AnkiConnect client."""
+        try:
+            if not trace:
+                return self._client.call(action, timeout=timeout, attempts=attempts, **params)
+            from overlay import otel_metrics
+
+            with otel_metrics.traced("anki_http_call", action=action):
+                return self._client.call(action, timeout=timeout, attempts=attempts, **params)
+        except AnkiConnectUnavailable as exc:
+            raise _AnkiRetryable(str(exc)) from exc
+        except AnkiConnectError as exc:
+            raise AnkiError(str(exc)) from exc
 
     def store_media(self, filename: str, path: str | Path) -> str:
         return self._call("storeMediaFile", filename=filename, path=str(Path(path).resolve()))

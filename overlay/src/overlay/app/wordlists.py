@@ -25,6 +25,7 @@ from datetime import UTC
 from itertools import starmap
 from typing import TYPE_CHECKING
 
+from overlay.app.known_cache import KnownCacheUpdate, known_cache_for
 from overlay.app.tokenize import _has_kanji, kata_to_hira
 from overlay.model import PitchAccent
 from overlay.resources import asset
@@ -422,16 +423,17 @@ class KnownWords:
         return cls(by_surface, readings)
 
     @classmethod
-    def from_cache(cls, db: DictionaryDb, decks: dict[str, list[str]]) -> KnownWords | None:
+    def from_cache(cls, store: object, decks: dict[str, list[str]]) -> KnownWords | None:
         """Build the known set from the persistent SQLite cache for an instant startup (~1 ms vs the
         ~190 ms AnkiConnect load). Returns ``None`` on a miss — an empty cache or a config signature
         that no longer matches (fields or payload format changed) — so the caller falls back to a full
         load."""
-        if db.meta_get(_KNOWN_SIG_KEY) != _known_signature(decks):
+        cache = known_cache_for(store)
+        if cache.metadata(_KNOWN_SIG_KEY) != _known_signature(decks):
             return None
         forms: list[KnownForm] = []
         seen_row = False
-        for per_deck in db.known_cache_read(list(decks)).values():
+        for per_deck in cache.read(list(decks)).values():
             for _mod, note_rows in per_deck.values():
                 seen_row = True
                 forms.extend(starmap(KnownForm, note_rows))
@@ -483,12 +485,13 @@ def _fetch_forms(
 
 
 def _refresh_deck(
-    db: DictionaryDb, deck: str, fields, host: str, reading_fields, *, force_full: bool
+    store: object, deck: str, fields, host: str, reading_fields, *, force_full: bool
 ) -> list[KnownForm]:
     """Reconcile one deck's cache against Anki by note mod-time, re-fetching only changed notes, and
     return its :class:`KnownForm`s. ``force_full`` (empty/stale cache) treats every note as changed, so
     no old-format cached payload is ever read back."""
-    cached = db.known_cache_read([deck])[deck]  # {note_id: (mod, [[surface, reading]])}
+    cache = known_cache_for(store)
+    cached = cache.read([deck])[deck]  # {note_id: (mod, [[surface, reading]])}
     ids = _ankiconnect(host, "findNotes", query=f'deck:"{deck}"') or []
     mods = {n["noteId"]: n["mod"] for n in (_ankiconnect(host, "notesModTime", notes=ids) or [])}
     changed = (
@@ -496,10 +499,12 @@ def _refresh_deck(
     )
     deleted = [i for i in cached if i not in mods]
     fetched = _fetch_forms(host, deck, changed, fields, reading_fields) if changed else {}
-    db.known_cache_write(
-        deck,
-        [(i, mods.get(i, 0), [f.as_row() for f in forms]) for i, forms in fetched.items()],
-        deleted,
+    cache.write(
+        KnownCacheUpdate(
+            deck,
+            tuple((i, mods.get(i, 0), [f.as_row() for f in forms]) for i, forms in fetched.items()),
+            tuple(deleted),
+        )
     )
     return _merge_forms(ids, fetched, cached)
 
@@ -517,7 +522,7 @@ def _merge_forms(ids, fetched, cached) -> list[KnownForm]:
 
 
 def refresh_known_cache(
-    db: DictionaryDb,
+    store: object,
     decks: dict[str, list[str]],
     host: str = "http://127.0.0.1:8765",
     reading_fields=_READING_FIELDS,
@@ -526,9 +531,12 @@ def refresh_known_cache(
     the changed subset (a full fetch when the cache is empty or the config signature changed), update the
     cache, and return the fresh set. Its own RW connection makes it safe to run on a background thread."""
     sig = _known_signature(decks)
-    force_full = db.meta_get(_KNOWN_SIG_KEY) != sig
+    cache = known_cache_for(store)
+    force_full = cache.metadata(_KNOWN_SIG_KEY) != sig
     forms: list[KnownForm] = []
     for deck, fields in decks.items():
-        forms.extend(_refresh_deck(db, deck, fields, host, reading_fields, force_full=force_full))
-    db.meta_set(_KNOWN_SIG_KEY, sig)
+        forms.extend(
+            _refresh_deck(cache, deck, fields, host, reading_fields, force_full=force_full)
+        )
+    cache.set_metadata(_KNOWN_SIG_KEY, sig)
     return KnownWords.from_forms(forms)

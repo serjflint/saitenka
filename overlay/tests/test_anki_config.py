@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import ankiconnect_client.transport as anki_transport
 from overlay.app import anki
 
 
@@ -43,7 +44,7 @@ def test_anki_client_reads_config_and_injects_key(monkeypatch, tmp_path):
         sent["body"] = json.loads(req.data.decode())
         return _Resp()
 
-    monkeypatch.setattr(anki.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(anki_transport.urllib.request, "urlopen", _fake_urlopen)
     client = anki.Anki()
     assert client.host == "http://127.0.0.1:9001"
     client._call("version")
