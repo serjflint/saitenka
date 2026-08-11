@@ -49,7 +49,7 @@ layout-engine = ["taffylite>=0.1.0"]
 # extension vendoring resvg (MPL-2.0, contained to this separately-published optional wheel — see
 # ../LICENSING.md), kept OUT of `full` so the default install stays Apache-clean and pure-Python. Without
 # it, import stores no media and the renderer falls back to ▢ — fully additive.
-images = ["resvglite>=0.1.0"]
+images = ["resvglite>=0.2.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
 # default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
