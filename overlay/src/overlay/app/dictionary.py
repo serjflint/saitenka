@@ -109,6 +109,16 @@ def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
 FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
 PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
 
+# Kanji-panel stat sections, ordered as Yomitan shows them; keyed by the tag_bank `category` field
+# (KANJIDIC: misc/class/code/index — the `frequent` category is the jōyō/jinmeiyō membership pill, not a
+# stats row). Un-tagged codes fall through to a trailing untitled table.
+_KANJI_STAT_SECTIONS = (
+    ("misc", "Statistics"),
+    ("class", "Classifications"),
+    ("code", "Codepoints"),
+    ("index", "Dictionary Indices"),
+)
+
 # Cap on deinflected dictionary-form candidates folded into one lookup — the French suffix ruleset
 # over-generates, and a real word resolves within the first handful; the rest only miss.
 _DEINFLECT_FORM_CAP = 24
@@ -259,7 +269,7 @@ class Dictionary:
         self.db = db
         self.dict_id = row.id
         self.title = row.title
-        self._tags: dict | None = None  # defTag code -> [display_name, order]; loaded lazily
+        self._tags: dict | None = None  # tag code -> [display_name, order, category, notes]; lazy
         # LRU cache of decoded entries (entries.id -> DictEntry), below the panel-cache layer so a
         # re-lookup of the same word survives panel-cache eviction without re-decoding its glossary —
         # decoding a large monolingual entry's JSON was the single biggest cost in a --stress profile
@@ -275,9 +285,11 @@ class Dictionary:
     def tags(self) -> dict:
         if self._tags is None:
             rows = self.db._conn().execute(
-                "SELECT code, name, ord FROM tags WHERE dict_id=?", (self.dict_id,)
+                "SELECT code, name, ord, category, notes FROM tags WHERE dict_id=?", (self.dict_id,)
             )
-            self._tags = {code: [name, order] for code, name, order in rows}
+            self._tags = {
+                code: [name, order, category, notes] for code, name, order, category, notes in rows
+            }
         return self._tags
 
     def kanji_lookup(self, char: str) -> dict | None:
@@ -546,14 +558,49 @@ class DictionarySet:
         return sum(len(d._entry_cache) for d in self.dicts)
 
     @staticmethod
-    def _kanji_freqs(stats: dict) -> list[Freq]:
-        stats = dict(stats)
-        freqs: list[Freq] = []
-        strokes = stats.pop("strokes", None)
-        if strokes:
-            freqs.append(Freq("画数", str(strokes), (96, 125, 175, 255)))
-        freqs.extend(Freq(name, str(val), FREQ_COLOR) for name, val in sorted(stats.items())[:6])
-        return freqs
+    def _kanji_stat_nodes(stats: dict, tagmap: dict) -> list:
+        """KANJIDIC ``stats`` → Yomitan-style labeled, sectioned rows (Statistics / Classifications /
+        Codepoints / Dictionary Indices), the label + section taken from the dict's own tag_bank
+        (``tagmap`` code → [name, order, category, notes]). Un-tagged codes (a pre-#310 DB with NULL
+        columns) fall back to a single untitled table keyed by the bare code — still every stat, labeled
+        as best we can, instead of the old truncated 6-pill dump."""
+        by_cat: dict[str, list[tuple[int, str, str]]] = {}
+        for code, val in stats.items():
+            info = tagmap.get(code)
+            label = (info[3] or code) if info else code
+            category = (info[2] if info else "") or ""
+            order = info[1] if info else 999
+            by_cat.setdefault(category, []).append((order, label, str(val)))
+
+        def _section(title: str, rows: list[tuple[int, str, str]]) -> list:
+            out: list = []
+            if title:
+                out.append({"tag": "div", "style": {"fontWeight": "bold"}, "content": title})
+            out.append(
+                {
+                    "tag": "table",
+                    "content": [
+                        {
+                            "tag": "tr",
+                            "content": [
+                                {"tag": "td", "content": label},
+                                {"tag": "td", "content": value},
+                            ],
+                        }
+                        for _, label, value in sorted(rows)
+                    ],
+                }
+            )
+            return out
+
+        nodes: list = []
+        for category, title in _KANJI_STAT_SECTIONS:
+            rows = by_cat.pop(category, None)
+            if rows:
+                nodes += _section(title, rows)
+        for category in sorted(by_cat):  # any un-tagged / unknown-category codes, flat + untitled
+            nodes += _section("", by_cat[category])
+        return nodes
 
     @staticmethod
     def _kanji_nodes(k: dict) -> list:
@@ -576,13 +623,12 @@ class DictionarySet:
             k = d.kanji_lookup(char)
             if k is None:
                 continue
-            freqs = self._kanji_freqs(k["stats"])
-            nodes = self._kanji_nodes(k)
+            nodes = self._kanji_nodes(k) + self._kanji_stat_nodes(k["stats"], d.tags)
             kun = (k["kunyomi"].split() or [""])[0].split(".")[0]
             return Entry(
                 headword=[char],
                 tags=[t for t in (k["tags"] or "").split() if t][:3],
-                freqs=freqs,
+                freqs=[],
                 defs=[Definition(d.title, nodes or ["（データなし）"])],
                 reading=kun or (k["onyomi"].split() or [""])[0],
             )

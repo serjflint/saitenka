@@ -83,7 +83,11 @@ CREATE TABLE IF NOT EXISTS kanji(
   PRIMARY KEY(dict_id, chr));
 CREATE TABLE IF NOT EXISTS term_meta(
   dict_id INTEGER, term TEXT, mode TEXT, reading TEXT, rank INTEGER, disp TEXT, positions TEXT);
-CREATE TABLE IF NOT EXISTS tags(dict_id INTEGER, code TEXT, name TEXT, ord INTEGER);
+-- `category`/`notes` come from Yomitan's tag_bank ([name, category, order, notes, score]); they label
+-- and section the kanji panel's stats (misc→Statistics, class→Classifications, …). Additive columns —
+-- a pre-#310 DB gets them via ALTER in _ensure_schema (NULL until re-import), so labels fall back to code.
+CREATE TABLE IF NOT EXISTS tags(
+  dict_id INTEGER, code TEXT, name TEXT, ord INTEGER, category TEXT, notes TEXT);
 -- Inline structured-content images (Yomitan `img` nodes: SVG gaiji / labels), rasterized to PNG at
 -- import via the optional resvglite extra (#283). Additive — no DB_SCHEMA bump, so it stays empty for
 -- existing DBs until the next re-import; the renderer falls back to ▢ when a path isn't present.
@@ -291,9 +295,12 @@ def _apply_occurrence_ranks(
     return out
 
 
-def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int]]:
-    """Yomitan ``tag_bank_*.json`` → [(code, display_name, order)] for defTag pills (★ / priority form)."""
-    out: list[tuple[str, str, int]] = []
+def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int, str, str]]:
+    """Yomitan ``tag_bank_*.json`` → [(code, name, order, category, notes)].
+
+    ``name`` stays the code (defTag pills — ★ / priority form — render it unchanged); ``category``/``notes``
+    are the extra Yomitan fields ([name, category, order, notes, score]) that label + section kanji stats."""
+    out: list[tuple[str, str, int, str, str]] = []
     for name in sorted(zf.namelist()):
         if name.startswith("tag_bank") and name.endswith(".json"):
             out.extend(
@@ -301,7 +308,9 @@ def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int]]:
                     t[0],
                     t[0],
                     int(t[2]) if len(t) > 2 else 0,
-                )  # [name, category, order, notes, score]
+                    str(t[1]) if len(t) > 1 else "",
+                    str(t[3]) if len(t) > 3 else "",
+                )
                 for t in read_json_bank(zf, name) or []
                 if t and isinstance(t[0], str)
             )
@@ -344,6 +353,13 @@ class DictionaryDb:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(entries)")}
             if "seq" not in cols:
                 conn.execute("ALTER TABLE entries ADD COLUMN seq INTEGER")
+            # Same additive pattern for the kanji-stat label/section columns (#310 follow-up): a pre-existing
+            # DB predates them, so add them NULL — kanji labels fall back to the code until a re-import.
+            tag_cols = {r[1] for r in conn.execute("PRAGMA table_info(tags)")}
+            if "category" not in tag_cols:
+                conn.execute("ALTER TABLE tags ADD COLUMN category TEXT")
+            if "notes" not in tag_cols:
+                conn.execute("ALTER TABLE tags ADD COLUMN notes TEXT")
             row = conn.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
             if row is None:
                 conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(DB_SCHEMA),))
@@ -564,8 +580,11 @@ class DictionaryDb:
             if on_bank:
                 on_bank(done, total)
         conn.executemany(
-            "INSERT INTO tags VALUES(?,?,?,?)",
-            [(did, code, name, order) for code, name, order in _extract_tags(zf)],
+            "INSERT INTO tags VALUES(?,?,?,?,?,?)",
+            [
+                (did, code, name, order, category, notes)
+                for code, name, order, category, notes in _extract_tags(zf)
+            ],
         )
 
     def _load_media(self, conn: sqlite3.Connection, zf: zipfile.ZipFile, did: int) -> None:
