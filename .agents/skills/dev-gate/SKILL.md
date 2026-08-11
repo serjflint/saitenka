@@ -35,6 +35,8 @@ what each runs; `uv run poe --dry-run <gate>` prints the exact chain. Run either
 - `test-ft` — a C-ext re-enabled the GIL, or a genuine no-GIL race.
 - `licenses` — a copyleft dep leaked in (only our own GPL `deinflect` is allowed): drop it.
 - `bench` — a **crash** is API rot; the printed numbers are informational, not pass/fail.
+- `loop-tools-test` — deterministic Grow/Sharpen tool tests; adapter smokes, live audits, and adequacy
+  campaigns remain explicit.
 - `smoke-live` — overlay↔mpv breakage the fakes can't catch.
 - `hygiene` / `perf-risk` — advisory: triage via the repowise navigator, don't fix blind.
 

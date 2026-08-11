@@ -25,6 +25,11 @@ prompting.** An unverified research brief is a hypothesis, never a result.
 
 ## Loop
 
+Grow/Sharpen call this only from **outer reflection** when repeated frozen-baseline evidence suggests a
+new axis, instrument, or external prior-art question. It is never a per-candidate stage, and research
+cannot override a deterministic A/B gate. Verify a proposed tool externally, test-drive it on this repo,
+then hand a bounded tooling proposal to `contribute`.
+
 1. **Assemble context.** Prepend the shared project-context block (who / daily flow / constraints /
    priorities) so a run is tailored to *this* flow, not generic — and **demarcate core vs
    already-solved**: name the differentiators worth researching and the peripheral bits already

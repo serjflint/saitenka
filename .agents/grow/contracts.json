@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 6,
   "gap": {
     "type": "object",
     "additionalProperties": false,
@@ -16,6 +16,18 @@
       "score": {"type": "number"},
       "pr_exclusion_checked": {"type": "boolean", "description": "true ONLY if triage ran the open-PR exclusion (gh authed, no --no-network); else the harness refuses to open a PR"},
       "reason": {"type": "string", "description": "why this gap (the scenario + the value×under-spec components) or why none"}
+    }
+  },
+  "test_design": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["tier", "boundary_seam", "extension_point", "oracle_family", "rationale"],
+    "properties": {
+      "tier": {"type": "string", "enum": ["default", "integration", "live"]},
+      "boundary_seam": {"type": "string"},
+      "extension_point": {"type": "string"},
+      "oracle_family": {"type": "string"},
+      "rationale": {"type": "string"}
     }
   },
   "proposal": {
@@ -68,6 +80,15 @@
       "restoration_verified": {"type": "boolean", "description": "every temporary source/test edit was restored byte-for-byte"},
       "arms_run": {"type": "array", "items": {"type": "string"}, "description": "which arms actually ran (the rest are n/a for this gap kind)"},
       "report": {"type": "string", "description": "the exact PASS/BOUNCE lines, verbatim from grow_gate"}
+    }
+  },
+  "ship_gate": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["pass", "report"],
+    "properties": {
+      "pass": {"type": "boolean"},
+      "report": {"type": "string"}
     }
   },
   "review": {

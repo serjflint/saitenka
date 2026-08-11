@@ -2,8 +2,8 @@
 
 > New here? Read [`GUIDE.md`](GUIDE.md) first — a self-contained explainer (scenario/specification
 > adequacy, the four-arm gate, worked example, references) for a reader who knows only plain `pytest`.
-> This file is the terse process spec the loop executes against. The design SSOT it is distilled from is
-> `vibe/grow-loop-plan.md`; do not re-describe specifics that live there or in the code.
+> This file is the terse process spec and durable design record the loop executes against; do not
+> re-describe specifics that live in the deterministic tools or their tests.
 
 A deliberate, idle-time loop that **writes the missing tests** — reasons over *covered* code to close
 under-specified scenarios, combinations, configurations, and invariants, and files a product issue when
@@ -186,7 +186,7 @@ gap until the issue closes or the target symbol changes.
 
 Durable across cron runs. The gap key is **semantic**, not positional, or line-drift from unrelated edits
 would spuriously reopen a closed gap and the loop would never terminate (proven in
-`vibe/proto_grow_ledger.py`, locked by `tools/test_grow_ledger.py`):
+`tools/grow_ledger.py`, locked by `tools/test_grow_ledger.py`):
 
 ```jsonc
 { "gap_id": "<hash(source, target_symbol, dimension)>",
@@ -243,7 +243,8 @@ no-candidate included, those are the richest lessons — is a **`Reflect`** step
 
 Background cron / idle time only — **one gap per run**, bounded. Never runs against a module under active
 feature work. `poe all` stays the fast local gate for the coding loop; the loop's own tools live outside it
-(`tools/` is not in `poe all`; the grown tests it lands ARE — a grown test is an ordinary suite member).
+Deterministic loop-tool tests run in `poe all` via `loop-tools-test`; adapter/harness smokes and slow live
+loop or adequacy executions remain explicit. A grown test is an ordinary suite member.
 
 ## Human gate
 

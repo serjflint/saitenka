@@ -35,7 +35,7 @@ const proposal = {
 
 const gate = { pass: true, anticheat_clean: true, efficacy_pass: true, report: 'clean' }
 
-async function scenario(responses) {
+async function scenario(responses, args = {}) {
   const calls = []
   const phases = []
   const agent = async (prompt, options = {}) => {
@@ -44,8 +44,45 @@ async function scenario(responses) {
     assert.ok(label in responses, `unexpected agent call: ${label}`)
     return responses[label]
   }
-  const result = await runHarness({}, (name) => phases.push(name), agent, () => {})
+  const result = await runHarness(args, (name) => phases.push(name), agent, () => {})
   return { calls, phases, result }
+}
+
+{
+  const result = await scenario({
+    triage: pick,
+    baseline: green,
+    'author#1': proposal,
+    'gate#1': gate,
+    skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    'ship-gate': { pass: true, report: 'poe all: green' },
+    record: { state: 'in-progress', ledger_appended: true, pr_url: 'https://example.invalid/pr/1' },
+  }, { openPr: true })
+  const labels = result.calls.map(({ label }) => label)
+  assert.ok(labels.indexOf('judge') < labels.indexOf('ship-gate'))
+  assert.ok(labels.indexOf('ship-gate') < labels.indexOf('record'))
+  assert.match(result.calls.find(({ label }) => label === 'ship-gate').prompt, /uv run poe all/)
+  assert.equal(result.result.pr, 'https://example.invalid/pr/1')
+}
+
+{
+  const result = await scenario({
+    triage: pick,
+    baseline: green,
+    'author#1': proposal,
+    'gate#1': gate,
+    skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    'ship-gate': { pass: false, report: 'docs-refs failed' },
+    'revert-ship-gate': undefined,
+    record: { state: 'dry-run', ledger_appended: true },
+  }, { openPr: true })
+  const labels = result.calls.map(({ label }) => label)
+  assert.ok(labels.includes('revert-ship-gate'))
+  assert.ok(!result.calls.at(-1).prompt.includes('open a PR on a fresh branch'))
+  assert.match(result.calls.at(-1).prompt, /Post-review ship gate failed; no PR opened/)
+  assert.equal(result.result.state, 'dry-run')
 }
 
 {

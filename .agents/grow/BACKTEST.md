@@ -1,6 +1,6 @@
 # Grow loop — backtest against the held-out gap corpus
 
-Stage 6 of `vibe/grow-loop-plan.md`: run the loop (dry-run) against the regressions that motivated it and
+Durable backtest contract: run the loop (dry-run) against the regressions that motivated it and
 ask, per gap, *would Grow surface it, which gate arm proves the fix, and what outcome class?* **Recorded,
 not tuned-to-pass** — a gap the loop would miss is written down as a miss, not engineered green.
 

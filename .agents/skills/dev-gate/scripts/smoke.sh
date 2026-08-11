@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Smoke: every poe task the SKILL.md documents must exist, and the `all` sequence must match.
+# Structural rot-guard; overlay/pyproject.toml remains the sole task-list authority.
 set -euo pipefail
+
 skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+repo_dir="$(CDPATH='' cd -- "$skill_dir/../../.." && pwd)"
+
+test -f "$skill_dir/SKILL.md"
 test -f "$skill_dir/agents/openai.yaml"
-cd "$skill_dir/../../.."
-PT="overlay/pyproject.toml"
-fail=0
 
-# The 14 tasks named in the gate table + advisory tier
-for t in lint types arch invariants complexity test test-ft cov audit deps licenses spell \
-         links shell hygiene deadcode dup perf-risk complexity-baseline; do
-  grep -qE "^$t = |^\[tool\.poe\.tasks\.$t\]" "$PT" || { echo "MISSING poe task: $t"; fail=1; }
-done
+uv run python - "$repo_dir/overlay/pyproject.toml" <<'PY'
+import sys
+import tomllib
 
-# The documented `all` sequence must still contain the 14 gate tasks in order-ish (membership check)
-allline=$(grep -E "^all = \[" "$PT")
-for t in lint types arch invariants complexity test test-ft cov audit deps licenses spell links shell; do
-  echo "$allline" | grep -q "\"$t\"" || { echo "poe all no longer includes: $t"; fail=1; }
-done
+with open(sys.argv[1], "rb") as stream:
+    tasks = tomllib.load(stream)["tool"]["poe"]["tasks"]
 
-if [ "$fail" -eq 0 ]; then echo "dev-gate smoke OK"; else echo "dev-gate smoke FAILED"; exit 1; fi
+assert isinstance(tasks["all"], list), "poe all must remain a task sequence"
+assert "loop-tools-test" in tasks["all"], "poe all lost deterministic loop-tool rot-guards"
+assert "pre-release" in tasks, "pre-release gate missing"
+PY
+
+echo "dev-gate smoke OK"

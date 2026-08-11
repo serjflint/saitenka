@@ -10,21 +10,21 @@ root="$(cd "$here/../.." && pwd)"
 fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 
 # 1. All six artifacts + this script exist.
-for f in SPEC.md GUIDE.md ADAPTERS.md contracts.json PROMPTS.md harness.js BACKTEST.md scripts/smoke.sh; do
+for f in SPEC.md GUIDE.md ADAPTERS.md contracts.json PROMPTS.md harness.js test_harness.mjs BACKTEST.md scripts/smoke.sh; do
   [ -f "$here/$f" ] || fail "missing $f"
 done
 
 # 2. contracts.json parses and carries the expected top-level schema keys.
-python3 - "$here/contracts.json" <<'PY'
+uv run python - "$here/contracts.json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-need = {"version", "gap", "proposal", "gate", "review", "review_provenance", "record"}
+need = {"version", "gap", "test_design", "proposal", "gate", "ship_gate", "review", "review_provenance", "record"}
 missing = need - set(data)
 assert not missing, f"contracts.json missing keys: {missing}"
 PY
 
 # 3. harness.js is syntactically valid (if node is available) and its CONTRACT_VERSION matches contracts.json.
-python3 - "$here/harness.js" "$here/contracts.json" <<'PY'
+uv run python - "$here/harness.js" "$here/contracts.json" <<'PY'
 import json, re, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 ver = json.load(open(sys.argv[2], encoding="utf-8"))["version"]
@@ -33,11 +33,12 @@ assert m, "harness.js has no CONTRACT_VERSION"
 assert int(m.group(1)) == ver, f"harness CONTRACT_VERSION {m.group(1)} != contracts.json version {ver}"
 for tok in ("grow_triage", "grow_gate", "grow_ledger", "grow_reflect"):
     assert tok in src, f"harness.js never invokes {tok}"
-for phase in ("Select", "Author", "Objective gate", "Skeptic", "Judge", "Record", "Reflect"):
+for phase in ("Select", "Test design", "Author", "Objective gate", "Skeptic", "Judge", "Ship gate", "Record", "Reflect"):
     assert phase in src, f"harness.js missing phase {phase!r}"
 PY
 if command -v node >/dev/null 2>&1; then
   node --check "$here/harness.js" || fail "harness.js failed node --check"
+  node "$here/test_harness.mjs" || fail "Grow harness behavior smoke failed"
 fi
 
 # 4. The deterministic tools the harness orchestrates exist and their unit tests are present.
@@ -46,7 +47,7 @@ for t in grow_gate.py grow_ledger.py grow_triage.py grow_contexts.py grow_reflec
 done
 
 # 5. SPEC and GUIDE cross-reference each other (the reader's-guide handshake).
-python3 - "$here/SPEC.md" "$here/GUIDE.md" <<'PY'
+uv run python - "$here/SPEC.md" "$here/GUIDE.md" <<'PY'
 import sys
 spec = open(sys.argv[1], encoding="utf-8").read()
 guide = open(sys.argv[2], encoding="utf-8").read()

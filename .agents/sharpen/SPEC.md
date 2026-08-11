@@ -45,8 +45,8 @@ Conformance lint rules (`poe test-lint`, initial set — grows as smells surface
   Assertion-Roulette and Eager-Test are deliberately **not** gated — empirically noisy on a classicist
   suite (pytest's assertion rewriting already localises multi-assert failures).
 
-None of the four is a `poe all` gate. They are the loop's instruments. (A clean subset of the
-Conformance lint *may* graduate to the gate later — a separate decision.)
+The four analyses are opt-in loop instruments, not `poe all` gates. Their deterministic tool tests run in
+`poe all` via `loop-tools-test`; adapter/harness smokes and slow mutation/brittleness/live executions do not.
 
 ### Reading the Conformance lint — metric vs bug list
 
@@ -226,8 +226,9 @@ hard rule, structurally enforced, not a discipline:
 - **Cross-family the judge, where the roster allows.** Isolation strips the author's *rationale*, but a
   same-**family** reviewer still shares its training blind spots — self-preference lets it uphold an edit
   it would refute from the outside (rubric-SPB, arXiv:2604.06996: up to **20×** on objective rubrics). So
-  pick a **different-family** model for at least the second (judge) vote; the deterministic Objective gate
-  is family-immune and always runs first. Record the model family per role in the `review` block. Every iteration records a `review` provenance block in the ledger: distinct
+  prefer a **different-family** model for at least the second (judge) vote when the roster allows; the
+  deterministic Objective gate is family-immune and always runs first. Cross-family routing is a
+  recommendation, not a review-validity condition. Every iteration records a `review` provenance block in the ledger: distinct
   author, skeptic, and judge invocation ids; both reviewer verdicts; and the final verdict. The host
   adapter owns identity and decision composition (see `ADAPTERS.md`). No block, duplicate identities,
   or missing judge on an UPHELD path means the review didn't happen.
@@ -348,27 +349,21 @@ a *reading*, not an investigation.
 Deferred for a stated reason, not forgotten; a later run or the outer reflection picks them up. Build
 order follows yield-on-this-suite. Detailed step plans go to `vibe/` when a build actually starts.
 
-1. **Conformance: private-monkeypatch-target** (ast-grep, ~½ day). Flag `monkeypatch.setattr` whose
-   target is a **private** production symbol — the 2-arg string form (`"pkg.mod._priv"`) and the 3-arg
-   form (`(obj, "_priv", …)`). This is the real coupling signal hiding among the ~666 *legitimate*
-   monkeypatch seams (raw count is fine; a private target is the smell). Needs string-arg regex + the
-   3-arg shape + planted rule-tests. **Highest-yield next rule.**
-2. **Conformance: mis-levelled test** (ast-grep, ~½ day). Flag a real socket / subprocess /
-   uncontrolled-fs / wall-clock call in a test carrying **no** `integration`/`live`/`e2e` marker.
-   Deferred because it needs careful marker-absence matching (decorator-aware `not inside`) — a naive
-   rule flags legitimately-marked tests. Scope by **marker**, not a `tests/unit/` dir (this suite has none).
-3. **Brittleness probe** (Axis 3, ~1 week — the R1-deep recipe in the research note). Build with the
+The private-monkeypatch and mis-levelled-test rules described above have shipped with planted rule tests;
+they are no longer deferred. Remaining candidates:
+
+1. **Brittleness probe** (Axis 3, ~1 week — the R1-deep recipe in the research note). Build with the
    **`rename-private-attribute`** operator, **not** `rename-local` (verified ~0 yield here — this suite
    has no `locals`/frame observation; its coupling is in private *attributes*). LibCST transformer in a
    pinned-3.13 env; TBE → Hypothesis-diff → CrossHair oracle; pytest full-failure capture; N×-seed
    flimsiness intersection; classifier → the R2 cause ids. **Build trigger:** the loop hits a Conformance
    finding it can't adjudicate by inspection (i.e. *hidden* coupling) — not the explicit private-attr
    coupling the lint already nails (the audit showed the probe is redundant there).
-4. **Redundancy** (Axis 4, ~1 day, advisory only). cosmic-ray records no kill-matrix, so approximate with
+2. **Redundancy** (Axis 4, ~1 day, advisory only). cosmic-ray records no kill-matrix, so approximate with
    a **coverage-overlap** pass (`coverage.py` per-test line sets → identical/subset clusters) as a
    *flag-only* candidate list — **never auto-prune** (equivalent-mutant blind spots; tests double as
    regression / documentation guards).
-5. **Conformance: expected-value-from-code-under-test** (ast-grep). Flag a test literal equal to a
+3. **Conformance: expected-value-from-code-under-test** (ast-grep). Flag a test literal equal to a
    constant read from the module under test — asserting the code against itself, a change-detector in
    disguise. Pairs with the Objective-gate anti-cheat bounce of the same name.
 

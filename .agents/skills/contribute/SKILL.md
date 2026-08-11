@@ -4,11 +4,11 @@ description: >-
   Drive a change big enough to warrant its own PR — from diagnosis to a review-ready pull
   request — the house way: the ordered loop this repo and its upstream forks (repowise) use:
   restore context, diagnose to root cause offline, PoC to prove tractability, fresh
-  adversarial review as a gate, then issue-first plus a lean draft PR. Use for a multi-step
+  adversarial review as a gate, then a lean ready PR by default. Use for a multi-step
   change: fix a bug, implement or prototype a feature, open a PR, contribute upstream, file
   an issue and PR, or "do a proper PR/review loop". Sequences what the gate and packaging
-  skills don't: ordering, offline-verify-the-pure-function, issue-first-with-PoC,
-  adversarial-review-in-a-subagent, and which gate applies (this repo vs external). Defers to
+  skills don't: offline proof, optional issue handoff, isolated adversarial review, and which
+  gate applies (this repo vs external). Defers to
   CONTRIBUTING.md for the pass/fail gate and pr-ticket-describe for the issue/PR text. NOT for
   a one-line edit or a read-only what/why question (just answer, or use repowise/LSP); NOT for
   writing one test (use write-test), running the gate (dev-gate / poe all), or sharpening
@@ -54,15 +54,16 @@ PoC feeds the review, a review finding sends you back to the design.
    rationale**. Have it verify independently and classify P0–P3. Fix every P0/P1; resolve or
    explicitly accept each P2; **any code change invalidates the pass** → re-review on the new
    diff. Full criteria and the pattern tables are in the applicable gate (§5 + the adversarial
-   tables). **Cross-family, not merely fresh:** the reviewer must be a *different model family*
-   than the author — a same-family judge is up to **20× more likely** to pass a check it would
-   fail itself (rubric-SPB, arXiv 2604.06996). Prefer a deterministic, family-immune gate where
-   one exists (`poe all` and its enforcers already are); for the LLM pass use a different-vendor
-   CLI (e.g. `ai-jury`) or pin a cross-family judge, and have it reason **before** its verdict.
-5. **Package: issue-first, then a lean draft PR.** File the issue **self-contained** — a
-   runnable minimal reproduction anyone can paste, the root cause, delta-only prose, no repo
-   internals assumed. Open the PR as a **draft that points to the issue and does not restate
-   it**: carry only why / design / trade / test-plan. Text mechanics → `pr-ticket-describe`.
+   tables). **Prefer cross-family when available:** route the reviewer to a different model family
+   when the host roster supports it, because correlated blind spots are less useful than independent
+   disagreement. Do not pretend this is always available or make it a validity condition: record the
+   limitation and retain two genuinely isolated reviews. Deterministic gates such as `poe all` remain
+   mandatory and family-immune. The canonical policy is `CONTRIBUTING.md` §4.
+5. **Package a lean, ready PR by default.** In this single-maintainer repo, a clean gated change is
+   ready to merge; draft status adds no value by itself. Use a draft only for genuine WIP, early CI,
+   active collaboration, or an explicit request. File a separate issue only when the problem needs
+   durable tracking beyond this PR; when used, make it self-contained and let the PR point to it rather
+   than restating it. Carry only why / design / trade / test-plan. Text mechanics → `pr-ticket-describe`.
    **Humans talk; agents build** — the human posts the issue/PR discussion and makes the
    hold-vs-post and design calls; you produce the artifacts and the review, not the voice.
 
@@ -72,7 +73,8 @@ PoC feeds the review, a review finding sends you back to the design.
 - "Verifying" a pure-function change by eyeballing output instead of asserting its invariants
   and measuring churn.
 - Letting the reviewer see your rationale — it must judge the artifact, not your story.
-- A PR body that re-describes the issue, or an issue that needs the reader to know the repo
+- A permanent draft used as a generic safety ritual after the change is already review-ready.
+- A PR body that re-describes an issue, or an issue that needs the reader to know the repo
   internals.
 - Posting the issue/PR discussion yourself, or auto-deciding a maintainer's design call.
 

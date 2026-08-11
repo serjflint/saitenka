@@ -32,6 +32,8 @@ files must not name a provider-specific model.
 
 Run the roles sequentially in one dedicated worktree. Author, skeptic, and judge must be distinct
 invocations. A reviewer must not inherit the orchestrator conversation or another role's context.
+Cross-family routing is recommended when the host roster offers it, per `CONTRIBUTING.md` §4; it is not
+a replacement for isolation and its unavailability does not invalidate an otherwise faithful review.
 
 ## Review payload and decision
 
@@ -75,6 +77,16 @@ Never copy `skeptic_verdict` into `verdict` without applying the judge result.
   route `outside-sharpen` work for separate maintainer authorization.
 - Missing isolation or identity: append `state: dry-run`; never open a PR.
 - Unverified open-PR exclusion: force `openPr=false` for the run.
+- On `openPr=true`, run `uv run poe all` after both reviews and before opening the ready PR. Failure
+  forces `dry-run` and no PR.
+
+## Skill handoffs
+
+Missing mutation data is an out-of-band `test-adequacy` prerequisite; never launch a campaign inside a
+Sharpen run. Complete survivors enter as coordinates. Source/tool/config/dependency changes route to
+`contribute` as a separate PR, while ordinary test-only Sharpen work stays here. Repeated reflection
+findings that need external prior art route to `research`. Optional host LSP navigation may locate exact
+symbols/callers; never invoke or depend on the infrastructure-only `pyrefly-lsp` skill.
 
 ## Adapters
 
