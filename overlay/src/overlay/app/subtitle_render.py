@@ -32,8 +32,16 @@ class SubtitleRenderer:
             # Draw plain for the known/translation track, OR a cue still awaiting a complete
             # tokenization (dictionaries loading): the cue shows at cue time and reader_deps
             # re-renders it annotated once deps land.
+            background = (
+                0,
+                0,
+                0,
+                reader.sub_bg_opacity,
+            )  # configurable box alpha (0 = fully transparent)
             if reader.subtitle_language == SECOND_LANG or reader._sub_pending is not None:
-                sr = render_plain_subtitle(reader.sub_text, reader.osd[0], size=reader.sub_size)
+                sr = render_plain_subtitle(
+                    reader.sub_text, reader.osd[0], size=reader.sub_size, background=background
+                )
             else:
                 annotated = reader.annotation_mode == "full" or reader._annotation_hover
                 # A phrase span highlights [start, end) — start can precede the hovered token (a leading
@@ -48,6 +56,7 @@ class SubtitleRenderer:
                     else (reader.hover if annotated and reader.hover >= 0 else None),
                     hover_end=span[1] if span else None,
                     styles=reader.styles if annotated else None,
+                    background=background,
                 )
         reader.boxes = sr.boxes
         ox = (reader.osd[0] - sr.image.width) // 2

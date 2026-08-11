@@ -1513,7 +1513,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     from overlay.app.reader_deps import make_dict_scoper
 
     reader.set_profile_cycle(
-        profile_cycle, make_dict_scoper(cfg) if len(profile_cycle) > 1 else None
+        profile_cycle,
+        make_dict_scoper(cfg) if len(profile_cycle) > 1 else None,
+        base_slang=ident.base_slang,
     )
     provider_cfg = ProviderConfig(
         enabled_providers=enabled_providers,

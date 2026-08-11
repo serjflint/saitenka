@@ -329,13 +329,15 @@ def render_picker(
     return SidebarRender(image, tuple(hits), capacity)
 
 
-def render_plain_subtitle(text: str, width: int, *, size: int) -> SubtitleRender:
+def render_plain_subtitle(
+    text: str, width: int, *, size: int, background: tuple[int, int, int, int] = BOX
+) -> SubtitleRender:
     """Render a non-Japanese primary track without tokenization or interactive hitboxes."""
     normalized = text.replace("\\N", " ").replace("\n", " ").strip()
     style = Style(size=size, color=WHITE)
     image = render_flow(
         [Span(normalized, style)],
-        Block(width=max(1, round(width * 0.86)), padding=14, background=BOX),
+        Block(width=max(1, round(width * 0.86)), padding=14, background=background),
     )
     return SubtitleRender(image, [])
 
@@ -444,6 +446,7 @@ def _draw_visual_lines(
     styles: list | None,
     hover: int | None,
     hover_end: int | None = None,
+    background: tuple[int, int, int, int] = BOX,
 ) -> list[WordBox]:
     hi_end = hover_end if hover_end is not None else (hover + 1 if hover is not None else 0)
     draw = ImageDraw.Draw(img)
@@ -451,7 +454,9 @@ def _draw_visual_lines(
     y = 0
     for vl, lw in zip(visual_lines, line_widths, strict=True):
         left = (st.img_w - lw) // 2  # centre each line
-        draw.rounded_rectangle([left, y, left + lw - 1, y + st.row_h - 1], radius=10, fill=BOX)
+        draw.rounded_rectangle(
+            [left, y, left + lw - 1, y + st.row_h - 1], radius=10, fill=background
+        )
         x = float(left + st.pad_x)
         baseline = y + st.pad_y + st.ascent
         for gi, tok, w in vl:
@@ -484,6 +489,7 @@ def render_subtitle(
     styles: list | None = None,
     *,
     spacing: SubtitleSpacing | None = None,
+    background: tuple[int, int, int, int] = BOX,
 ) -> SubtitleRender:
     """`lines` is a list of source lines (each a token list); global token index is row-major.
 
@@ -525,6 +531,13 @@ def render_subtitle(
         img_w=img_w,
     )
     boxes = _draw_visual_lines(
-        img, visual_lines, line_widths, st, styles=styles, hover=hover, hover_end=hover_end
+        img,
+        visual_lines,
+        line_widths,
+        st,
+        styles=styles,
+        hover=hover,
+        hover_end=hover_end,
+        background=background,
     )
     return SubtitleRender(img, boxes)

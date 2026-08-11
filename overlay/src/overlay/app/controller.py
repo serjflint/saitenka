@@ -90,7 +90,7 @@ from overlay.app.miner import Miner, tag_slug
 from overlay.app.overlay_ids import OverlayId
 from overlay.app.perf import gil_disabled
 from overlay.app.popups import Panel, PopupView
-from overlay.app.profiles import DEFAULT_PROFILE, Profile
+from overlay.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
 from overlay.app.reader_context import (
     Delegated,
     EpisodeContext,
@@ -291,6 +291,8 @@ class Reader:
         self.renderer = renderer or SubtitleRenderer()  # subtitle raster; NullRenderer() = headless
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
+        # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).
+        self.sub_bg_opacity = max(0, min(255, o.tooltip.sub_background_opacity))
         self.scorer = scorer  # app.scoring.Scorer | None — per-word coloring
         self.styles: list | None = None
         self.anki = anki  # app.anki.Anki | None — enables one-key mining
@@ -424,6 +426,9 @@ class Reader:
         # path) makes cycle_profile a no-op. cli installs the real cycle via set_profile_cycle.
         self.profiles: tuple[Profile, ...] = (self.profile,)
         self._profile_idx = 0
+        # The raw CLI/config slang the switcher falls back to for a profile with no slang of its own
+        # (the JP default), so cycling back to it re-selects the original track. Set by set_profile_cycle.
+        self._profile_base_slang = "ja,jpn,jp"
         # Optional dict re-scoper (#254 W3): profile → its scoped DictionarySet, installed by the CLI
         # alongside the cycle so a live switch re-scopes dictionaries too, not just the tokenizer.
         self._dict_scoper: Callable[[Profile], DictionarySet | None] | None = None
@@ -772,13 +777,18 @@ class Reader:
         self,
         profiles: Sequence[Profile],
         dict_scoper: Callable[[Profile], DictionarySet | None] | None = None,
+        *,
+        base_slang: str = "ja,jpn,jp",
     ) -> None:
         """Install the ordered profile cycle the live switcher rotates through (cli wiring, #254 D8). An
         empty or single-entry cycle keeps the switcher inert; the cursor starts at the active profile.
         ``dict_scoper`` (optional) maps a profile → its scoped ``DictionarySet`` so a live switch
-        re-scopes dictionaries too (#254 W3); ``None`` keeps the current dict set across a cycle."""
+        re-scopes dictionaries too (#254 W3); ``None`` keeps the current dict set across a cycle.
+        ``base_slang`` is the raw CLI/config slang a slang-less profile (the JP default) falls back to,
+        so a cycle re-selects that profile's own subtitle track."""
         self.profiles = tuple(profiles) or (self.profile,)
         self._dict_scoper = dict_scoper
+        self._profile_base_slang = base_slang
         self._profile_idx = next(
             (i for i, p in enumerate(self.profiles) if p.name == self.profile.name), 0
         )
@@ -798,7 +808,10 @@ class Reader:
         before touching any live state, so an unresolvable profile leaves the old one intact (atomic
         revert). On success re-resolves the reader's identity — tokenizer, ``langs`` (which gates
         providers), ``profile`` — clears+re-arms the token warm (the cache-clear-vs-warm race is closed
-        by the cache generation gate), re-tokenizes the on-screen cue, and flashes the new profile."""
+        by the cache generation gate), re-selects the subtitle track for the new profile's language, and
+        flashes the new profile. Re-selecting the track is what makes the cycle a FULL switch: the new
+        language's track lands in the target slot (colored + scanned), instead of the engine reading the
+        old language's track — or the profile-blind role machine filing a manual pick as the secondary."""
         if len(self.profiles) <= 1:
             return  # nothing to switch to — inert on the default single-profile path
         idx = (self._profile_idx + 1) % len(self.profiles)
@@ -831,9 +844,32 @@ class Reader:
             # tooltips from the old profile's dicts would keep being served under the stale signature.
             self.session.render_cache.config_sig = None
         self._warmed_index = None  # re-arm the episode warm under the new tokenizer/generation
-        self._retokenize_current_cue()
+        if not self._switch_subtitle_track(effective_slang(new, self._profile_base_slang)):
+            # Same track (or none for this language) — refresh the on-screen cue under the new tokenizer.
+            # When the track DID switch, the new track's own sub-text event repaints, so re-tokenizing the
+            # stale old-language cue under the new tokenizer would only flash garbage.
+            self._retokenize_current_cue()
         self.warm_episode_tokens()
         self._toast(f"profile: {new.name} ({new.langs.main})")
+
+    def _switch_subtitle_track(self, new_slang: str) -> bool:
+        """Re-select the mpv subtitle track for the new profile's language via the SAME path launch uses
+        (select_initial → configure_subtitle_mode → rebuild the cue index), so the target-language track
+        lands in the target slot — colored, scanned, and nav/prefetch-indexed. Returns ``True`` when a
+        track was switched. A missing target track keeps the current one and toasts (the file just has no
+        track for that language); an unchanged slang is a no-op so the engine swap alone stands."""
+        if new_slang == self.subtitle_slang:
+            return False
+        if not subtitle_modes.has_track_for_slang(self.ipc, new_slang):
+            self._toast(f"profile {self.profile.name!r}: no {new_slang!r} subtitle track", "warn")
+            return False
+        startup = subtitle_modes.select_initial(self.ipc, new_slang)
+        self.configure_subtitle_mode(startup, slang=new_slang)
+        from overlay.app.embedded_subs import build_sub_index_for_current_track
+
+        self._sub_index = None  # the old track's index is wrong for the new one; rebuild from disk
+        build_sub_index_for_current_track(self)
+        return True
 
     def _retokenize_current_cue(self) -> None:
         """Re-render the on-screen cue under the freshly-swapped tokenizer — set_subtitle's tokenize

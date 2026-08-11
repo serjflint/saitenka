@@ -223,6 +223,7 @@ class LaunchIdentity:
     cfg: dict  # profile-scoped (dicts/freq/pitch/mine/slang/jimaku overlaid)
     profile: Profile  # the active profile
     slang: str  # effective subtitle-track priority (profile's own, else the CLI/config fallback)
+    base_slang: str  # the raw CLI/config fallback, so the live switcher can re-derive per-profile
     profile_cycle: list[Profile]  # the live switcher's cycle order
 
     @property
@@ -245,6 +246,7 @@ def resolve_launch_identity(
         cfg=scope_config(cfg),
         profile=active,
         slang=effective_slang(active, slang),
+        base_slang=slang,
         profile_cycle=configured_profiles(cfg),
     )
 

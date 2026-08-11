@@ -1108,12 +1108,16 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             options=opts,
             profile=active_profile,
         )
-        reader.set_profile_cycle(profile_cycle, _dict_scoper_for(cfg, profile_cycle))
+        reader.set_profile_cycle(
+            profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
+        )
     else:
         reader = Reader(
             ipc, options=opts, profile=active_profile
         )  # deps injected asynchronously below
-        reader.set_profile_cycle(profile_cycle, _dict_scoper_for(cfg, profile_cycle))
+        reader.set_profile_cycle(
+            profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
+        )
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
         build_sub_index_for_current_track(reader)

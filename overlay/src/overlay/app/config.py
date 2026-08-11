@@ -130,6 +130,10 @@ class TooltipOptions:
         metadata={"help": "Crisp-render reference→display factor (0 = auto by resolution)."},
     )
     bottom_margin_frac: float = 0.06
+    sub_background_opacity: int = field(
+        default=150,
+        metadata={"help": "Opacity (0–255) of the box behind subtitles; 0 = fully transparent."},
+    )
     tip_max_frac: float = 0.4  # BASE tooltip viewport ≤ this fraction of the video height
     nested_max_frac: float = field(
         default=0.6, metadata={"help": "Nested (scan) popup height as a fraction of the video."}

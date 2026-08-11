@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from overlay.app import prefetch
 from overlay.app.controller import Reader
-from overlay.app.languages import ReaderLanguages
+from overlay.app.languages import MAIN_LANG, ReaderLanguages
 from overlay.app.profiles import DEFAULT_PROFILE, Profile
 from overlay.app.sub_index import SubIndex, parse_srt
 from overlay.app.subtitle_providers import enabled_providers_for, register_provider
@@ -22,7 +22,14 @@ from overlay.app.tokenizer import register_tokenizer
 from util import FakeIPC, keybind_registry, press
 
 _FR = Profile(name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin")
+# A real French profile carries its own slang (resolve_profile derives "fr" from the language) — that is
+# what makes a live cycle re-select the fr subtitle track. The bare _FR above (slang=None) keeps the
+# ambient track, so the identity-focused tests above stay track-agnostic.
+_FR_SUBS = Profile(
+    name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin", slang="fr"
+)
 _BROKEN = Profile(name="de", langs=ReaderLanguages(main="de", second="en"), tokenizer="nonexistent")
+_JA_FR_TRACKS = [{"type": "sub", "id": 1, "lang": "jpn"}, {"type": "sub", "id": 6, "lang": "fr"}]
 
 
 class _MinimalTokenizer:
@@ -147,6 +154,79 @@ def test_cycle_clears_the_token_cache_so_stale_segmentation_cannot_leak():
     reader.cycle_profile()
 
     assert len(reader.token_cache) == 0
+
+
+# --- the track re-selection that makes the cycle a FULL switch (the reported gap) ------------------
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_selects_the_new_profiles_language_track():
+    """The reported bug: cycling to French swapped the engine but left mpv on the JP track, so lookups
+    missed. A profile with its own slang now re-selects THAT language's track (into the target slot, so
+    it colors + scans) exactly as a ``--profile french`` launch does."""
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
+    reader.ipc.props["track-list"] = _JA_FR_TRACKS
+
+    reader.cycle_profile()  # → fr
+
+    assert ("set_property", "sid", 6) in reader.ipc.commands  # the fr track is now primary
+    assert reader.subtitle_slang == "fr"
+    assert (
+        reader.subtitle_language == MAIN_LANG
+    )  # target role → colored + scanned, not the secondary
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_the_engine():
+    """No tagged track for the new language → keep the current track (don't grab an unrelated one via the
+    untagged fallback) and warn, while the reading engine still switches. select_initial is never reached,
+    so no ``sid`` is set."""
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
+    reader.ipc.props["track-list"] = [{"type": "sub", "id": 1, "lang": "jpn"}]
+
+    reader.cycle_profile()  # → fr, but the file has no fr track
+
+    assert reader.langs.main == "fr"  # the engine switched
+    assert reader.subtitle_slang == "ja,jpn,jp"  # ...the track was left untouched
+    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.ipc.commands)
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_back_to_the_default_reselects_its_track_via_base_slang():
+    """Wrapping back to the slang-less JP default re-selects ITS track using the base slang the launcher
+    threaded through set_profile_cycle — proving the fallback isn't hard-coded to the default string."""
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = Reader(FakeIPC(), profile=DEFAULT_PROFILE, renderer=NullRenderer())
+    reader.set_profile_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
+    reader.osd = (1280, 720)
+    reader.ipc.props["track-list"] = _JA_FR_TRACKS
+
+    reader.cycle_profile()  # → fr (sid 6)
+    assert reader.subtitle_slang == "fr"
+
+    reader.cycle_profile()  # wraps → JP default; effective slang = base_slang "jpn" → the jpn track
+
+    assert reader.subtitle_slang == "jpn"
+    assert ("set_property", "sid", 1) in reader.ipc.commands
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror():
+    """A live cycle re-runs configure(), which resets mpv's secondary-sid. The reader's mirror must be
+    nulled with it, else the EN translation reveal stays stuck off — setup_secondary's ``mirror == sid``
+    guard would skip re-issuing secondary-sid, so the reveal never comes back (P2 from review)."""
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
+    reader.ipc.props["track-list"] = _JA_FR_TRACKS
+    reader.ipc.props["secondary-sid"] = 6  # the EN translation is currently revealed
+    reader._translation_secondary_sid = 6
+
+    reader.cycle_profile()  # → fr, re-selects the track (configure runs mid-session)
+
+    assert reader._translation_secondary_sid is None  # mirror cleared → reveal can re-establish
+    assert ("set_property", "secondary-sid", "no") in reader.ipc.commands
 
 
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------

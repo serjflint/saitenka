@@ -7,6 +7,26 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`[tooltip] sub_background_opacity`** (0–255, default 150) sets the alpha of the box behind the
+  subtitle text; `0` makes it fully transparent.
+
+### Changed
+
+- **Any subtitle mpv renders itself is now center-aligned** (`--sub-align-x`/`--sub-justify`/
+  `--sub-ass-justify` at launch), so a fallback/native track — one the overlay doesn't take over — is
+  never left-aligned.
+
+### Fixed
+
+- **Live profile cycle (++alt+shift+p++) is now a full switch.** Cycling to a second-language profile
+  mid-playback used to swap only the reading engine, leaving mpv on the original (e.g. Japanese) subtitle
+  track — so lookups ran the new language against the old track's text and missed, and a manual track
+  pick was classified as the plain, unscannable "known-language" secondary. The cycle now re-selects that
+  profile's own subtitle track (the same path a `--profile` launch uses), so it colors and scans at once;
+  a language the file has no track for keeps the current track and warns.
+
 ## [3.0.0] - 2026-08-11
 
 ### Added

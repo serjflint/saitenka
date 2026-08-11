@@ -83,6 +83,15 @@ class SubtitleFetchResult:
     )
 
 
+def has_track_for_slang(ipc, slang: str) -> bool:
+    """Whether a subtitle track is TAGGED with one of ``slang``'s languages — no untagged fallback
+    (unlike :func:`discover_tracks`, which grabs the first track when nothing matches). The live profile
+    switcher gates on this: cycling to a language the file has no track for keeps the current track and
+    warns, instead of silently grabbing an unrelated one."""
+    wants = [part.strip().lower() for part in slang.split(",") if part.strip()]
+    return _matching_track(sub_tracks(ipc), wants) is not None
+
+
 def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
     tracks = sub_tracks(ipc)
     wants = [part.strip().lower() for part in slang.split(",") if part.strip()]
@@ -117,6 +126,10 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.subtitle_slang = slang
     if reader._get("secondary-sid") not in {None, False, "no"}:
         reader.ipc.command("set_property", "secondary-sid", "no")
+    # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),
+    # where a stale _translation_secondary_sid would leave the EN reveal stuck off — setup_secondary's
+    # `mirror == sid` guard would skip re-issuing secondary-sid. At launch the mirror is already None.
+    reader._translation_secondary_sid = None
     from overlay.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)
