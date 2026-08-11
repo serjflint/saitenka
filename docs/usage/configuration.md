@@ -10,8 +10,8 @@ file.
 ## Where the config lives
 
 `overlay.toml` sits in your platform config directory (`~/.config/saitenka/` on Linux,
-`~/Library/Application Support/saitenka/` on macOS, `%APPDATA%\saitenka\` on Windows). You never have
-to guess the exact path:
+`~/Library/Application Support/saitenka/` on macOS, `%LOCALAPPDATA%\saitenka\` on Windows). You never
+have to guess the exact path:
 
 ```console
 $ saitenka doctor
@@ -178,6 +178,8 @@ The ones worth touching:
   long entries.
 - `pause_on_tooltip` (default `true`) — freeze the frame while a tooltip is open (the mining default);
   set `false` if you'd rather keep playing.
+- `kanji_stroke_order` (default `true`) — draw the kanji panel's big headword in a numbered
+  stroke-order font; set `false` for a plain glyph.
 
 ```toml
 dicts = ["Bilingual Dict", "Monolingual Dict A"]
@@ -219,9 +221,10 @@ $ saitenka set-jimaku-key <your-key>
 
 ## Rebinding keys
 
-Most in-player shortcuts are configurable — `translate_key`, `sub_next_key`, the `[mine]` keys, and
-more take any mpv key name. Rather than list them here, see the
-[Keyboard shortcuts](shortcuts.md) page, which has the full rebindable-key table with defaults.
+Most in-player shortcuts are configurable — every key lives under the `[keys]` table (`mine_key`,
+`translate_key`, `sub_next_key`, `profile_cycle_key`, and more), each taking any mpv key name. Rather
+than list them here, see the [Keyboard shortcuts](shortcuts.md) page, which has the full
+rebindable-key table with defaults.
 
 ## Reading profiles (a non-Japanese main language)
 
@@ -242,6 +245,11 @@ example file is a complete template.
     Every recognized key, at its default, with an inline comment, is in the commented
     [`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay/overlay.example.toml).
     Uncomment a line only to change it. This page covers the common cases; that file is the source of
-    truth for prefetch tuning, mpv coexistence, telemetry, stats, `[dictdb]`, and the rest.
+    truth for prefetch tuning, mpv coexistence, telemetry, stats, `[dictdb]`, the `[tsukihime]`
+    subtitle fallback, `[watch]` playback continuity, and the rest.
+
+!!! tip "Edit it interactively"
+    `saitenka config` opens an in-terminal editor over `overlay.toml` with per-option help — it
+    preserves your comments and formatting, so you don't have to hand-edit the file.
 
 For getting the file in place at all, see [Install](../start/install.md).

@@ -49,7 +49,8 @@ dictionary entry.
   instantly at play time. Each dictionary shows as its own section with a name pill and rich
   structured content (ruby examples, notes, cross-refs).
 - **Pitch accent and frequency pills** sit under the headword — one green pill per frequency
-  dictionary, plus a purple pitch pill (e.g. `ほんめい [0]`).
+  dictionary, plus a purple pitch pill (e.g. `ほんめい [0]`) that marks devoiced (○) and nasal
+  (゜) mora from NHK/Kanjium data.
 - **Longest-match on hover.** A phrase the tokenizer over-splits still resolves as one entry:
   hovering 数 in *数ある* looks up the whole 数ある and stacks it **above** the bare 数
   (longest match first, like Yomitan), with the underline spanning the matched phrase. A leading
@@ -68,9 +69,18 @@ saitenka run episode.mkv --color \
   --dict "Bilingual Dict" --dict "Monolingual Dict A" --dict "Monolingual Dict B"
 ```
 
+- **Kanji panel.** With a tooltip open, press ++k++ (or click a headword kanji) for a
+  Yomitan-parity kanji entry: meanings, on/kun readings, and sectioned KANJIDIC stats
+  (Statistics / Classifications / Codepoints / Dictionary Indices). The big headword glyph is
+  drawn in a numbered **stroke-order** font (on by default; `[tooltip] kanji_stroke_order`).
+- **Inline dictionary images.** Structured-content images — including `<text>`-based SVG gaiji
+  (rare/embedded glyphs) — render inline when the optional `images` extra is installed; an
+  unresolved glyph falls back to a ▢ box rather than vanishing.
+
 !!! note "Not selectable text"
     The tooltip is drawn, not a text widget, so you can't select it. Press ++c++ to copy
-    the hovered word + reading, or ++a++ / left-click to hear it (Japanese TTS).
+    the hovered word + reading (++shift+c++ copies the whole cue), right-click to copy the
+    word under the pointer, or ++a++ to hear it (Japanese TTS).
 
 ## Official-translation reveal
 
@@ -91,12 +101,17 @@ without leaving the video. Mining needs **Anki open** with the **AnkiConnect** a
   **Sentence** (mined word bolded) / **Glossary** / **Picture** (clean frame) /
   **SentenceAudio** (the subtitle's audio span as mp3) / provenance / JMdict ID. Dedup
   checks the deck first, so there are no silent duplicates.
+- ++ctrl+shift+m++ mines the hovered word with an **animated (motion) clip** instead of a still
+  frame — a short GIF/WebP of the moment, for cards that read better in motion.
 - ++shift+m++ **bulk-mines** every unknown content word in the current cue, all sharing one
   screenshot and audio clip; a toast reports `mined N · M dup`.
 - **Post-mine preview:** a fixed-layout panel shows the card (status, headword + reading, the
   sentence, meaning, the *actual captured frame*, and `▶ Ns` audio that auto-plays) so you
   can verify it without alt-tabbing. Mining an existing word previews the card already in
   Anki. ++p++ replays the last preview.
+- **Word-pronunciation audio (optional).** With a local yomichan/yomitan audio pack configured
+  (`[mine] word_audio_enabled`, `word_audio_pack_dir`), mined cards also get a `WordAudio` clip
+  resolved offline from the expression + reading — grounded from the pack, never synthesized.
 
 ```console
 saitenka run episode.mkv --color --mine \
@@ -108,6 +123,23 @@ saitenka run episode.mkv --color --mine \
 !!! warning "Mining writes real cards"
     Mined cards go to `Saitenka::Mining` tagged `saitenka` and are kept by default. Review
     or remove them in Anki via **Browse → `tag:saitenka`**.
+
+## Reading profiles & second languages
+
+Saitenka reads through a **reading profile** — the target language, the tokenizer strategy, and the
+"known"/translation second language. The default profile is Japanese (`unidic` tokenizer, English
+second), but the engine is language-agnostic: a **French** profile ships today (Latin tokenizer +
+French de-inflection), and the tokenizer is a separate, user-set field so one strategy can serve a
+family of languages.
+
+- Manage profiles from the CLI: `saitenka profile list` / `show` / `add` / `use <name>` / `remove`,
+  or select one for a single run with `saitenka run … --profile <name>`.
+- A non-Japanese profile **picks its own subtitle track and font** automatically, and swaps in that
+  language's dictionaries (a profile's `dicts` replace the base set; its `[mine]` overrides merge).
+- ++alt+shift+p++ cycles the active profile live inside the player (a no-op with a single profile).
+
+Profiles live under `[profiles.<name>]` in your config with a top-level `active_profile`; see
+[configuration](configuration.md).
 
 ## Subtitle sidebar & analysis
 
@@ -140,6 +172,8 @@ saitenka run show.mkv --jimaku --color
 
 - ++ctrl+shift+t++ retries the enabled provider chain (jimaku, then opt-in TsukiHime) for the
   current media without switching tracks.
+- ++ctrl+j++ opens the **jimaku download picker** — browse and choose which subtitle file to
+  pull for the current media, rather than taking the automatic best match.
 - Store the key once with `saitenka set-jimaku-key`; `saitenka jimaku-check` diagnoses it
   without launching a video.
 
@@ -148,8 +182,11 @@ saitenka run show.mkv --jimaku --color
 Mistimed subtitles are auto-aligned (alass) so the redrawn line matches the audio without
 manual nudging. When automatic alignment isn't enough, tune it live:
 
-- ++z++ / ++shift+z++ nudge sub-delay by ∓0.1 s.
-- ++x++ resets sub-delay to 0.
+- ++ctrl+z++ **anchors** the subtitles to the current playhead — re-syncs the track from here.
+- ++ctrl+shift+t++ re-times the subtitles from the current position (and fetches a track if the
+  file has none).
+- mpv's own ++z++ / ++shift+z++ / ++x++ still nudge and reset sub-delay by ∓0.1 s (passed
+  straight through, not intercepted).
 
 ## mpv coexistence
 

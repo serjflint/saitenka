@@ -14,8 +14,8 @@ engineering rules live upstream:
 ```bash
 git clone https://github.com/serjflint/saitenka.git
 cd saitenka/overlay
-uv sync            # pillow, fugashi+unidic-lite, jamdict, numpy…
-uv run pytest -q   # sanity: prints "X passed"
+uv sync                        # core + dev group: pillow, fugashi+unidic-lite, numpy…
+uv run --extra full pytest -q  # sanity: prints "X passed" (full pulls jmdict/deinflect/telemetry)
 ```
 
 !!! note "Python is `uv`-only"

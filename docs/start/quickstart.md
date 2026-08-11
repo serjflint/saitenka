@@ -4,8 +4,8 @@ This tutorial walks you from a fresh install to your first mined Anki card. It a
 already installed — if not, start with [Installation](install.md).
 
 !!! info "Prerequisites"
-    **mpv** and **ffmpeg** on your `PATH`. For mining (Step 5), **Anki must be open** with the
-    **AnkiConnect** add-on running.
+    **mpv** and **ffmpeg** installed (`saitenka setup` handles this, and mpv need not be on `PATH`).
+    For mining (Step 5), **Anki must be open** with the **AnkiConnect** add-on running.
 
 ## Step 1 — Set up (once)
 

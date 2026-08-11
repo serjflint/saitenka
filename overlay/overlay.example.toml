@@ -23,7 +23,8 @@
 #                            # renders crisp native glyph masks at 1.5× on any display — a cosmetic
 #                            # preference). Match `saitenka prewarm --atlas-scale` to preload the masks
 # nested_max_frac = 0.6      # nested (scan) popup max height fraction — deliberately roomier
-# show_dict_tabs = false     # sticky per-dictionary tab strip on the base tooltip
+# kanji_stroke_order = true  # draw the kanji panel's big headword in a numbered stroke-order font
+# crisp_upscale = true       # composite at native resolution on hi-dpi displays (cosmetic)
 # hide_delay = 0.6           # seconds the tooltip lingers after the cursor leaves the word
 # flash_secs = 0.22          # duration of the "copied" highlight pulse on a popup
 # hover_switch_delay = 0.15  # dwell before the tooltip switches to a NEW word

@@ -73,11 +73,14 @@ Full design → **[`overlay/README.md`](overlay/README.md)** and the
 ## Features
 
 FSRS-aware subtitle **word coloring** (JLPT underlines, N+1 targeting) · hover **multi-dictionary tooltip**
-(ordered definitions, ruby, pitch-accent, frequency pills, clickable cross-refs, wildcard search) ·
-**one-key + bulk mining** to Anki (Lapis-style cards, dedup, post-mine preview) · JP/EN reveal controls ·
-whole-episode **subtitle panel** + playback-neutral analysis + opt-in session history · background subtitle
-fetch (**jimaku.cc**, opt-in TsukiHime) · automatic **resync** (alass) · **Yomitan** dictionary import
-(streamed) · `doctor`/`setup`. Watch-party-safe: study actions never pause or seek a Syncplay room.
+(ordered definitions, ruby, pitch-accent with devoiced/nasal markers, frequency pills, inline images incl.
+SVG gaiji, clickable cross-refs, wildcard search) · a **kanji panel** (Yomitan-parity KANJIDIC sections +
+stroke-order headword) · **one-key + bulk mining** to Anki (Lapis-style cards, still or motion clip,
+optional word audio, dedup, post-mine preview) · **second-language reading profiles** (a French profile
+ships today) · JP/EN reveal controls · whole-episode **subtitle panel** + playback-neutral analysis +
+opt-in session history · background subtitle fetch (**jimaku.cc**, opt-in TsukiHime) · automatic **resync**
+(alass) · **Yomitan** dictionary import (streamed) · `doctor`/`setup`/`config`. Watch-party-safe: study
+actions never pause or seek a Syncplay room.
 
 📖 **Full tour with keys and screenshots → [Features](https://saitenka.readthedocs.io/en/latest/usage/features/)**
 · [keyboard shortcuts](https://saitenka.readthedocs.io/en/latest/usage/shortcuts/).
@@ -143,16 +146,20 @@ saitenka setup                  # re-run the setup wizard (mpv/ffmpeg, config, p
 saitenka install-plugin         # (re)install just the auto-start mpv plugin
 ```
 
-**Feature extras.** `[full]` installs everything below; `update` keeps whatever you have. To change the
-set, `uv tool install --reinstall "saitenka[<extra>]"`:
+**Feature extras.** `[full]` bundles `deinflect` + `jmdict` + `telemetry`; `images`, `layout-engine`, and
+`linux-keyring` stay explicit (add them alongside, e.g. `saitenka[full,images]`). `update` keeps whatever
+you have. To change the set, `uv tool install --reinstall "saitenka[<extra>]"`:
 
 | Extra | Adds | License |
 |------|------|--------|
 | *(none)* / `[minimal]` | the bare overlay — bring your own Yomitan dictionaries | Apache-2.0 |
 | `[jmdict]` | the JMdict English fallback (hover + mined-card glosses when a word isn't in your dicts) | Apache-2.0 |
 | `[deinflect]` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
+| `[images]` | inline dictionary images, incl. SVG gaiji (resvglite) | Apache-2.0 |
+| `[layout-engine]` | optional Rust flexbox tooltip layout backend (taffylite) | Apache-2.0 |
+| `[telemetry]` | OpenTelemetry spans/metrics for performance observability | Apache-2.0 |
 | `[linux-keyring]` | Linux Secret Service storage for the jimaku key on Python 3.15+ | Apache-2.0 |
-| `[full]` | all portable features above (`linux-keyring` remains explicit) | **GPL-3.0** |
+| `[full]` | `[deinflect]` + `[jmdict]` + `[telemetry]` | **GPL-3.0** |
 
 Mining prefers *your* dictionaries, so `[jmdict]` is only a fallback. `[deinflect]`/`[full]` pull the
 GPL-3.0 add-on — a `[full]` install is therefore GPL-3.0 (see [LICENSING.md](LICENSING.md)). On Linux,
