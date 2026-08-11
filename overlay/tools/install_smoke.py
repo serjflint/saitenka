@@ -47,9 +47,10 @@ def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
 
 def _build_wheel() -> Path:
     dist = OVERLAY / "dist"
-    out = _run(["uv", "build", "--wheel", "--out-dir", str(dist)], cwd=OVERLAY)
-    if out.returncode != 0:
-        sys.exit(f"uv build failed:\n{out.stdout}\n{out.stderr}")
+    for project in (OVERLAY.parent / "yomitanlite", OVERLAY.parent / "ankiconnect-client", OVERLAY):
+        out = _run(["uv", "build", "--wheel", "--out-dir", str(dist)], cwd=project)
+        if out.returncode != 0:
+            sys.exit(f"uv build failed for {project.name}:\n{out.stdout}\n{out.stderr}")
     wheels = sorted(dist.glob("saitenka-*.whl"))
     if not wheels:
         sys.exit("uv build produced no saitenka wheel")
@@ -64,7 +65,10 @@ def _install(source: str) -> None:
         # PEP 508 direct reference: install the LOCAL wheel with the [full] extras (deinflect / jmdict /
         # telemetry resolve from the index as normal deps). `as_uri()` yields a valid file URL on Windows too.
         spec = f"saitenka[full] @ {wheel.as_uri()}"
-    out = _run(["uv", "tool", "install", "--reinstall", spec])
+    command = ["uv", "tool", "install", "--reinstall"]
+    if source == "wheel":
+        command.extend(("--find-links", str(wheel.parent)))
+    out = _run([*command, spec])
     if out.returncode != 0:
         sys.exit(f"uv tool install failed:\n{out.stdout}\n{out.stderr}")
 

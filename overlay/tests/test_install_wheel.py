@@ -36,14 +36,19 @@ def test_wheel_installs_and_assets_load():
     try:
         # 1. build the wheel into an isolated dir
         dist = work / "dist"
-        subprocess.run(
-            ["uv", "build", "--wheel", "--out-dir", str(dist)],
-            cwd=PROJECT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        wheels = list(dist.glob("*.whl"))
+        for project in (
+            PROJECT.parent / "yomitanlite",
+            PROJECT.parent / "ankiconnect-client",
+            PROJECT,
+        ):
+            subprocess.run(
+                ["uv", "build", "--wheel", "--out-dir", str(dist)],
+                cwd=project,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        wheels = list(dist.glob("saitenka-*.whl"))
         assert wheels, "uv build produced no wheel"
         wheel = wheels[0]
 
@@ -52,7 +57,16 @@ def test_wheel_installs_and_assets_load():
         subprocess.run(["uv", "venv", str(venv)], check=True, capture_output=True, text=True)
         py = venv / ("Scripts" if sys.platform == "win32" else "bin") / "python"
         subprocess.run(
-            ["uv", "pip", "install", "--python", str(py), str(wheel)],
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(py),
+                "--find-links",
+                str(dist),
+                str(wheel),
+            ],
             check=True,
             capture_output=True,
             text=True,
@@ -68,10 +82,17 @@ def test_wheel_installs_and_assets_load():
 
         # 4. assets load from the INSTALLED package (importlib.resources), not the source tree
         smoke = (
+            "import json;"
+            "from importlib.resources import files;"
             "from overlay.resources import asset;"
+            "from yomitanlite.parity import _assert_pinned_revision;"
             "assert asset('fonts','NotoSansJP.ttf').exists();"
             "assert asset('wordlists','jlpt.zip').exists();"
             "assert asset('saitenka.lua').exists();"
+            "pkg=files('yomitanlite');"
+            "assert pkg.joinpath('yomitan_oracle.mjs').is_file();"
+            "lock=json.loads(pkg.joinpath('upstream-lock.json').read_text(encoding='utf-8'));"
+            "_assert_pinned_revision(lock['yomitan']);"
             "print('assets-ok')"
         )
         out2 = subprocess.run(

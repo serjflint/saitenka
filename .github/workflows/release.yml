@@ -1,7 +1,7 @@
 # Tag-triggered release of the Apache-2.0 `saitenka` core: build ONCE, then publish to two places from
 # the same artifacts —
 #   1. a notes-only GitHub Release (changelog section for the tag; no binary assets — install is via PyPI)
-#   2. PyPI, the `saitenka` wheel+sdist, via Trusted Publishing (OIDC, no tokens)
+#   2. PyPI, the Apache Python distributions, via Trusted Publishing (OIDC, no tokens)
 # The build↔publish split is a supply-chain best practice: the publish jobs do nothing but upload the
 # already-built artifacts, so nothing can tamper with them in between.
 #
@@ -16,7 +16,7 @@
 # ONE-TIME SETUP (cannot live in code) — Trusted Publishing needs NO token/password and is unaffected
 # by your account 2FA; register a publisher for project `saitenka` on BOTH sites (same repo + workflow;
 # env `pypi` on pypi.org, env `testpypi` on test.pypi.org):
-#   • project `saitenka`  → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
+#   • project `saitenka` → repo `serjflint/saitenka`, workflow `release.yml`, env pypi/testpypi
 # For the very first upload, create a "pending publisher" before the project exists. (deinflect's
 # publisher is registered against `deinflect-release.yml` — see that file's header.)
 #
@@ -55,9 +55,7 @@ jobs:
           uv python install
           uv sync --locked --extra full
 
-      # PyPI dists: the Apache-2.0 `saitenka` core only. The GPL `saitenka-deinflect` add-on ships from
-      # `deinflect-release.yml` on its own `deinflect-v*` tag (independent versioning).
-      - name: Build PyPI dists
+      - name: Build PyPI dist
         run: uv build overlay --out-dir dist-pypi
 
       - name: Release notes (changelog section for this tag)
@@ -116,8 +114,7 @@ jobs:
         with:
           packages-dir: dist-pypi/
           repository-url: https://test.pypi.org/legacy/
-          # Idempotent re-run guard: a re-triggered tag shouldn't 400 on an already-uploaded `saitenka`.
-          skip-existing: true
+          skip-existing: true # TestPyPI is an explicitly repeatable dry-run surface.
 
   pypi:
     name: Publish to PyPI
@@ -137,5 +134,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist-pypi/
-          # Idempotent re-run guard: a re-triggered tag shouldn't 400 on an already-uploaded `saitenka`.
-          skip-existing: true

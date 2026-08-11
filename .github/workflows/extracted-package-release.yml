@@ -1,0 +1,45 @@
+name: Extracted package release
+
+on:
+  push:
+    tags:
+      - "yomitanlite-v*"
+      - "ankiconnect-client-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Select package and verify immutable version
+        id: package
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            yomitanlite-v*) package=yomitanlite ;;
+            ankiconnect-client-v*) package=ankiconnect-client ;;
+            *) exit 2 ;;
+          esac
+          tagged_version="${GITHUB_REF_NAME#*-v}"
+          package_version="$(uv version --project "$package" --short)"
+          test "$tagged_version" = "$package_version"
+          echo "directory=$package" >> "$GITHUB_OUTPUT"
+      - name: Test
+        working-directory: ${{ steps.package.outputs.directory }}
+        run: uv run pytest -q
+      - name: Build
+        run: uv build "${{ steps.package.outputs.directory }}" --out-dir dist-pypi
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist-pypi/
