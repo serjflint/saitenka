@@ -371,18 +371,6 @@ def _mine_link(reader: Reader, lb, tok) -> bool:
     return True
 
 
-def _kanji_link(reader: Reader, lb, xy, scroll: int) -> bool:
-    """A headword kanji arrives as a ``LinkBox('kanji:<ch>')`` (it rides the normal link hit-test, like
-    ``mine:``). Open that kanji's entry in the nested popup, anchored to the clicked glyph — keeps the
-    base entry visible (more idiomatic here than Yomitan's in-place nav). Not a kanji link → False."""
-    q = getattr(lb, "query", None)
-    if not isinstance(q, str) or not q.startswith("kanji:"):
-        return False
-    sx, sy = xy
-    reader._open_kanji(q[len("kanji:") :], sx + lb.x, sy + (lb.y - scroll), lb.h)
-    return True
-
-
 def _click_nested(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the nested popup. Returns True if it did (regardless of what, if
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
@@ -413,13 +401,18 @@ def _click_tip(reader: Reader, x: float, y: float) -> bool:
     if lb is not None:
         tok = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
         if _mine_link(reader, lb, tok):  # stacked entry ⊕ → mine that entry
-            pass
-        elif _kanji_link(reader, lb, reader._tip_xy, reader._tip_scroll):
-            pass  # headword kanji → open its entry in the nested popup (Yomitan parity)
+            log.debug("tip click → mine link %r", lb.query)
         else:
-            reader._navigate_tip(lb.query)  # cross-ref → replace base content in place (Yomitan)
+            # A headword kanji (``kanji:<ch>``) and a cross-reference both navigate the base tooltip IN
+            # PLACE (Yomitan; Esc/back returns). A click must NEVER spawn a nested popup — that popup is
+            # hover-governed, so it dismisses itself unless the cursor chases it into it.
+            log.debug("tip click → navigate %r", lb.query)
+            reader._navigate_tip(lb.query)
     else:
-        reader._click_kanji_fallback(x, y)  # single-ideograph cell → kanji entry
+        # No link under the cursor: a single-ideograph scan cell opens its kanji entry. If this fires on
+        # a headword kanji click, the headword's kanji LinkBox was MISSED by _tip_link_hit (geometry).
+        log.debug("tip click → no link at (%.0f,%.0f); kanji fallback", x, y)
+        reader._click_kanji_fallback(x, y)
     return True
 
 
@@ -1193,7 +1186,12 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
     panel; the one-panel blit composites it natively at the display scale."""
     if reader.dict_set is None:
         return None
-    if any(c in query for c in "*?＊？"):
+    if query.startswith("kanji:"):  # a headword kanji click → the kanji entry, navigated in place
+        entry = reader.dict_set.kanji_for(query[len("kanji:") :])
+        if entry is None:
+            return None
+        reading = getattr(entry, "reading", "") or ""
+    elif any(c in query for c in "*?＊？"):
         entry = reader.dict_set.search(query)
         reading = ""
     else:
