@@ -49,6 +49,14 @@ def test_native_subs_are_always_center_aligned():
     assert "--sub-ass-justify=yes" in argv
 
 
+def test_centering_never_touches_vertical_position():
+    # Centering is HORIZONTAL only. We must never emit a vertical-position flag (--sub-align-y defaults to
+    # bottom, --sub-pos to 100=bottom), so subs stay pinned at the bottom and a user's mpv.conf wins.
+    joined = " ".join(_argv())
+    assert "--sub-align-y" not in joined
+    assert "--sub-pos" not in joined
+
+
 def test_screenshot_pauses_on_the_first_frame():
     argv = _argv(screenshot=True)
     assert "--pause" in argv and "--loop-file=inf" not in argv
