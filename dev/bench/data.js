@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786450622451,
+  "lastUpdate": 1786450856371,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4109,6 +4109,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/serjflint/saitenka/commit/e07dbfa0b9e1e148aa7eab62edce771f764d4395"
         },
         "date": 1786439672595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "unit": "frames"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8047cf0ebac27a6a4afb33d619613ca996cd0512",
+          "message": "Merge pull request #321 from serjflint/release/3.1.0\n\nchore(overlay): release 3.1.0",
+          "timestamp": "2026-08-11T15:16:10+03:00",
+          "tree_id": "d763e81fa334fb573a307756b6be283f96953167",
+          "url": "https://github.com/serjflint/saitenka/commit/8047cf0ebac27a6a4afb33d619613ca996cd0512"
+        },
+        "date": 1786450855585,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
