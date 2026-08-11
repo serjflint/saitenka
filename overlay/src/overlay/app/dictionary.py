@@ -440,6 +440,26 @@ class Dictionary:
             return cursor.fetchall()
 
 
+def _def_with_media(d: Dictionary, nodes: list, tags: list[str]) -> Definition:
+    """Build a :class:`Definition` and preload its inline-img media in ONE place, so neither the fused
+    (:meth:`DictionarySet._dict_defs`) nor the stacked (:meth:`DictionarySet._group_dict_defs`) path can
+    forget it — the drift that made every gaiji in a multi-reading word render as ▢ (#283). Also emits the
+    per-dict media-match telemetry (which imgs resolved vs fell back to ▢)."""
+    img_paths = list(dict.fromkeys(collect_img_paths(nodes)))
+    media = d.db.media_for(d.dict_id, img_paths)
+    if img_paths:
+        misses = [p for p in img_paths if p not in media]
+        log.debug(
+            "media match: %s dict_id=%d %d/%d imgs resolved%s",
+            d.title,
+            d.dict_id,
+            len(media),
+            len(img_paths),
+            f" MISS={misses[:5]}" if misses else "",
+        )
+    return Definition(d.title, nodes, tags=tags, media=media)
+
+
 @dataclass
 class DictionarySet:
     dicts: list[Dictionary]
@@ -832,10 +852,7 @@ class DictionarySet:
                     continue
                 seen_gloss.add(gkey)
                 nodes.extend(_glossary_to_nodes(h.glossary))
-            media = d.db.media_for(d.dict_id, collect_img_paths(nodes))
-            defs.append(
-                Definition(d.title, nodes, tags=d.resolve_deftags(hits[0].tags), media=media)
-            )
+            defs.append(_def_with_media(d, nodes, d.resolve_deftags(hits[0].tags)))
         return defs, headword, reading
 
     @staticmethod
@@ -858,7 +875,7 @@ class DictionarySet:
             nodes_by_key.setdefault(key, []).extend(_glossary_to_nodes(h.glossary))
             tags_by_key.setdefault(key, h.tags)
         return {
-            key: Definition(d.title, nodes, tags=d.resolve_deftags(tags_by_key[key]))
+            key: _def_with_media(d, nodes, d.resolve_deftags(tags_by_key[key]))
             for key, nodes in nodes_by_key.items()
         }
 

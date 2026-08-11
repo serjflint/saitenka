@@ -1,7 +1,8 @@
 """Phase B: every headword kanji is a click-to-open link (Yomitan parity). Clicking 読 in the headword
-読む opens 読's kanji entry in the nested popup — the header produced no hit cells at all before, so
-clicking a headword kanji was dead. Golden-free: the links are a pure out-list (ScanBox/LinkBox), never
-touching pixels, so an existing header golden is byte-identical (guarded by the render golden suite)."""
+読む navigates the base tooltip IN PLACE to 読's kanji entry (Esc/back returns) — a click must never spawn
+a nested popup, which is hover-governed and dismisses itself unless the cursor chases it. The header
+produced no hit cells at all before, so clicking a headword kanji was dead. Golden-free: the links are a
+pure out-list (ScanBox/LinkBox), never touching pixels, so an existing header golden is byte-identical."""
 
 from __future__ import annotations
 
@@ -77,8 +78,20 @@ def test_clicking_a_headword_kanji_opens_its_kanji_entry(monkeypatch, tmp_path):
         "x": sx + lb.x + lb.w / 2,
         "y": sy + (lb.y - r._tip_scroll) + lb.h / 2,
     }
+    base = r._tip_state
     r.on_click()
 
-    assert r.hover_view().nested.state is not None
-    assert r.hover_view().nested.word == "読"  # the kanji entry, via the nested-popup route
-    assert r.hover_view().nested.token is None  # a kanji panel has no minable token
+    # A click must NEVER spawn a nested popup (hover-governed → self-dismisses unless the cursor chases
+    # it); a headword kanji navigates the base tooltip IN PLACE, Yomitan-style.
+    assert r.hover_view().nested.state is None
+    # Content swapped to 読's kanji entry, previous view pushed for back. len==1 is only reached when
+    # kanji_for('読') resolved and installed — a dead/missing kanji would leave the stack empty.
+    assert r._tip_state is not None and r._tip_state is not base
+    assert len(r._tip_nav) == 1
+    # A navigated view is keyless — not a subtitle token, so scroll won't rebuild it from a token.
+    assert r._tip_key is None and r._tip_tok is None
+    # Reversible: back restores the base 読む tooltip.
+    from overlay.app import tooltip
+
+    assert tooltip.tip_back(r) is True
+    assert r._tip_state is base
