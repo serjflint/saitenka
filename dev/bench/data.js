@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786450856371,
+  "lastUpdate": 1786451580875,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3851,6 +3851,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.311,
             "range": "±1.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "725a6c4bc41c9f3f76284d92a1928cc3e8ff8e64",
+          "message": "Merge pull request #322 from serjflint/chore/setup-uv-node24\n\nci: bump setup-uv to Node 24 (v8.3.2) — last Node 20 action",
+          "timestamp": "2026-08-11T15:32:02+03:00",
+          "tree_id": "03eeb23e9bf48fa8b2b3131ddd832efa788d4203",
+          "url": "https://github.com/serjflint/saitenka/commit/725a6c4bc41c9f3f76284d92a1928cc3e8ff8e64"
+        },
+        "date": 1786451579716,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.532,
+            "range": "±1.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.327,
+            "range": "±2.7%",
             "unit": "ms"
           }
         ]
