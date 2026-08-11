@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-11
+
 ### Added
 
 - **`[tooltip] sub_background_opacity`** (0–255, default 150) sets the alpha of the box behind the
@@ -16,7 +18,7 @@ logs.
 
 - **Any subtitle mpv renders itself is now center-aligned** (`--sub-align-x`/`--sub-justify`/
   `--sub-ass-justify` at launch), so a fallback/native track — one the overlay doesn't take over — is
-  never left-aligned.
+  never left-aligned. This is horizontal only; the vertical position is unchanged.
 
 ### Fixed
 
