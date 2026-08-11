@@ -1175,4 +1175,21 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             kill_process_tree(proc)  # mpv didn't quit → kill it + any children (no orphans)
         else:
             _log_mpv_exit(proc.returncode)  # only meaningful for a self-exit, not our force-kill
+    # Teardown is done + every store flushed above; a lingering native thread (pyo3 taffylite/resvglite)
+    # can still keep the free-threaded interpreter from actually exiting, hanging the quit intermittently.
+    # Arm a daemon watchdog that force-exits if we don't terminate promptly on our own.
+    _arm_exit_watchdog(3.0)
     return 0
+
+
+def _arm_exit_watchdog(delay: float) -> None:
+    """Force process exit ``delay`` s from now if a stray/native thread stalls interpreter shutdown after a
+    clean teardown. Daemon, so it never delays a healthy exit (it's killed the instant the process ends)."""
+    import os
+
+    def _force() -> None:
+        time.sleep(delay)
+        log.warning("exit watchdog: interpreter did not exit %.1fs after teardown — forcing", delay)
+        os._exit(0)
+
+    threading.Thread(target=_force, name="saitenka-exit-watchdog", daemon=True).start()
