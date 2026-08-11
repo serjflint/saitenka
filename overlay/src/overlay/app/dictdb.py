@@ -60,6 +60,19 @@ def _svg_text_fonts() -> list[bytes]:
     return _SVG_FONTS
 
 
+def _rasterize_svg(resvglite, name: str, data: bytes) -> bytes | None:
+    """One SVG gaiji → PNG bytes, or ``None`` if it failed to render (logged loudly, ▢ fallback kept).
+    Only ``<text>`` SVGs get the font DB — loading a ~10 MB face for every path-only gaiji (大辞林 alone
+    has thousands) would be pure waste, so gate on the cheap byte check (#283)."""
+    fonts = _svg_text_fonts() if b"<text" in data else None
+    try:
+        png, _w, _h = resvglite.render_svg(data, _MEDIA_PX, fonts)
+    except Exception as e:  # noqa: BLE001  # incl. a pyo3 panic — one bad glyph must not abort the whole import
+        log.warning("resvglite failed on %s: %s — leaving ▢ fallback", name, e)
+        return None
+    return png
+
+
 def default_db_path() -> Path:
     return paths.data_dir() / "dictionaries.sqlite"
 
@@ -83,7 +96,11 @@ CREATE TABLE IF NOT EXISTS kanji(
   PRIMARY KEY(dict_id, chr));
 CREATE TABLE IF NOT EXISTS term_meta(
   dict_id INTEGER, term TEXT, mode TEXT, reading TEXT, rank INTEGER, disp TEXT, positions TEXT);
-CREATE TABLE IF NOT EXISTS tags(dict_id INTEGER, code TEXT, name TEXT, ord INTEGER);
+-- `category`/`notes` come from Yomitan's tag_bank ([name, category, order, notes, score]); they label
+-- and section the kanji panel's stats (misc→Statistics, class→Classifications, …). Additive columns —
+-- a pre-#310 DB gets them via ALTER in _ensure_schema (NULL until re-import), so labels fall back to code.
+CREATE TABLE IF NOT EXISTS tags(
+  dict_id INTEGER, code TEXT, name TEXT, ord INTEGER, category TEXT, notes TEXT);
 -- Inline structured-content images (Yomitan `img` nodes: SVG gaiji / labels), rasterized to PNG at
 -- import via the optional resvglite extra (#283). Additive — no DB_SCHEMA bump, so it stays empty for
 -- existing DBs until the next re-import; the renderer falls back to ▢ when a path isn't present.
@@ -291,19 +308,24 @@ def _apply_occurrence_ranks(
     return out
 
 
-def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int]]:
-    """Yomitan ``tag_bank_*.json`` → [(code, display_name, order)] for defTag pills (★ / priority form)."""
-    out: list[tuple[str, str, int]] = []
+def _tag_row(t: list) -> tuple[str, str, int, str, str]:
+    """One tag_bank record ``[name, category, order, notes, score]`` → ``(code, name, order, category,
+    notes)``. ``name`` stays the code so defTag pills render unchanged; ``category``/``notes`` label +
+    section the kanji stats. Short fields tolerate older banks that omit trailing elements."""
+    code = t[0]
+    order = int(t[2]) if len(t) > 2 else 0
+    category = str(t[1]) if len(t) > 1 else ""
+    notes = str(t[3]) if len(t) > 3 else ""
+    return (code, code, order, category, notes)
+
+
+def _extract_tags(zf: zipfile.ZipFile) -> list[tuple[str, str, int, str, str]]:
+    """Yomitan ``tag_bank_*.json`` → [(code, name, order, category, notes)] for defTag pills + kanji stats."""
+    out: list[tuple[str, str, int, str, str]] = []
     for name in sorted(zf.namelist()):
         if name.startswith("tag_bank") and name.endswith(".json"):
             out.extend(
-                (
-                    t[0],
-                    t[0],
-                    int(t[2]) if len(t) > 2 else 0,
-                )  # [name, category, order, notes, score]
-                for t in read_json_bank(zf, name) or []
-                if t and isinstance(t[0], str)
+                _tag_row(t) for t in read_json_bank(zf, name) or [] if t and isinstance(t[0], str)
             )
     return out
 
@@ -344,6 +366,13 @@ class DictionaryDb:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(entries)")}
             if "seq" not in cols:
                 conn.execute("ALTER TABLE entries ADD COLUMN seq INTEGER")
+            # Same additive pattern for the kanji-stat label/section columns (#310 follow-up): a pre-existing
+            # DB predates them, so add them NULL — kanji labels fall back to the code until a re-import.
+            tag_cols = {r[1] for r in conn.execute("PRAGMA table_info(tags)")}
+            if "category" not in tag_cols:
+                conn.execute("ALTER TABLE tags ADD COLUMN category TEXT")
+            if "notes" not in tag_cols:
+                conn.execute("ALTER TABLE tags ADD COLUMN notes TEXT")
             row = conn.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
             if row is None:
                 conn.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(DB_SCHEMA),))
@@ -564,8 +593,11 @@ class DictionaryDb:
             if on_bank:
                 on_bank(done, total)
         conn.executemany(
-            "INSERT INTO tags VALUES(?,?,?,?)",
-            [(did, code, name, order) for code, name, order in _extract_tags(zf)],
+            "INSERT INTO tags VALUES(?,?,?,?,?,?)",
+            [
+                (did, code, name, order, category, notes)
+                for code, name, order, category, notes in _extract_tags(zf)
+            ],
         )
 
     def _load_media(self, conn: sqlite3.Connection, zf: zipfile.ZipFile, did: int) -> None:
@@ -590,19 +622,11 @@ class DictionaryDb:
             if ext not in _MEDIA_EXTS:
                 continue
             data = zf.read(name)
-            if ext == "svg":
-                # Only <text> SVGs need the font DB; loading a ~10 MB face for every path-only gaiji would
-                # be pure waste (大辞林 alone has thousands), so gate on the cheap byte check.
-                fonts = _svg_text_fonts() if b"<text" in data else None
-                try:
-                    png, _w, _h = resvglite.render_svg(data, _MEDIA_PX, fonts)
-                except Exception as e:  # noqa: BLE001  # incl. a pyo3 panic — one bad glyph must not abort the whole dict import
-                    log.warning("resvglite failed on %s: %s — leaving ▢ fallback", name, e)
-                    failed += 1
-                    continue
-                rows.append((did, name, png))
-            else:
-                rows.append((did, name, data))
+            png = _rasterize_svg(resvglite, name, data) if ext == "svg" else data
+            if png is None:
+                failed += 1
+                continue
+            rows.append((did, name, png))
         if failed:
             log.warning(
                 "dict_id=%d: %d media SVG(s) failed to rasterize — those render as ▢", did, failed

@@ -12,10 +12,11 @@ from overlay.app.tokenize import Token
 from util import FakeIPC, assert_golden
 
 
-def _make_dict_zip(path, title, terms=(), kanji=()):
-    """A minimal Yomitan v3 zip: term_bank + kanji_bank.
+def _make_dict_zip(path, title, terms=(), kanji=(), tags=()):
+    """A minimal Yomitan v3 zip: term_bank + kanji_bank + tag_bank.
 
-    ``terms``: [term, reading, glossary]; ``kanji``: [char, onyomi, kunyomi, tags, meanings, stats].
+    ``terms``: [term, reading, glossary]; ``kanji``: [char, onyomi, kunyomi, tags, meanings, stats];
+    ``tags``: [code, category, order, notes, score] — labels + sections the kanji-panel stats.
     """
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
@@ -24,7 +25,20 @@ def _make_dict_zip(path, title, terms=(), kanji=()):
             zf.writestr("term_bank_1.json", json.dumps(bank, ensure_ascii=False))
         if kanji:
             zf.writestr("kanji_bank_1.json", json.dumps(list(kanji), ensure_ascii=False))
+        if tags:
+            zf.writestr("tag_bank_1.json", json.dumps(list(tags), ensure_ascii=False))
     return str(path)
+
+
+# A trimmed KANJIDIC tag_bank: the four stat categories Yomitan sections by (misc/class/code/index).
+KANJI_TAGS = [
+    ["strokes", "misc", 0, "Stroke count", 0],
+    ["grade", "misc", 0, "Grade level", 0],
+    ["jlpt", "misc", 0, "JLPT level", 0],
+    ["skip", "class", 0, "SKIP code", 0],
+    ["ucs", "code", 0, "Unicode hex code", 0],
+    ["moro", "index", 0, "Daikanwajiten", 0],
+]
 
 
 KANJI_READ = [
@@ -33,13 +47,19 @@ KANJI_READ = [
     "よ.む",
     "jouyou",
     ["reading", "to read"],
-    {"strokes": "14", "jlpt": "3", "grade": "2"},
+    {"strokes": "14", "jlpt": "3", "grade": "2", "skip": "1-7-7", "ucs": "8aad", "moro": "35244"},
 ]
 KANJI_HON = ["本", "ホン", "もと", "jouyou", ["book", "origin", "main"], {"strokes": "5"}]
 
 
 def _fixture_ds(tmp_path, terms=(("読む", "よむ", ["to read"]),)):
-    p = _make_dict_zip(tmp_path / "kd.zip", "KanjiDict", terms=terms, kanji=[KANJI_READ, KANJI_HON])
+    p = _make_dict_zip(
+        tmp_path / "kd.zip",
+        "KanjiDict",
+        terms=terms,
+        kanji=[KANJI_READ, KANJI_HON],
+        tags=KANJI_TAGS,
+    )
     return dicthelp.load_set([p])
 
 
@@ -66,14 +86,26 @@ def test_kanji_for_builds_entry(tmp_path):
     e = ds.kanji_for("読")
     assert e is not None
     assert e.headword == ["読"]
-    # stroke count + stats as pills
-    pills = {(f.name, f.value) for f in e.freqs}
-    assert ("画数", "14") in pills
-    assert any(name == "jlpt" for name, _ in pills)
-    # on/kun + meanings in the def body (normal panel path — no new raster code)
+    # Kanji stats are labeled + sectioned in the def body (Yomitan parity), not green pills.
+    assert e.freqs == []
     body = json.dumps(e.defs[0].content, ensure_ascii=False)
+    # on/kun + meanings (normal panel path — no new raster code)
     assert "ドク トク" in body and "よ.む" in body and "to read" in body
+    # stats rendered under their tag_bank section titles + human labels, not bare codes
+    assert "Statistics" in body and "Stroke count" in body and "JLPT level" in body
+    assert "Codepoints" in body and "Unicode hex code" in body
     assert ds.kanji_for("犬") is None
+
+
+def test_kanji_stats_fall_back_to_codes_without_a_tag_bank(tmp_path):
+    # A pre-#310 DB has no category/notes → every stat still renders (flat, keyed by its bare code),
+    # rather than the old truncated 6-pill dump dropping data.
+    p = _make_dict_zip(tmp_path / "notags.zip", "NoTags", kanji=[KANJI_READ])
+    ds = dicthelp.load_set([p])
+    e = ds.kanji_for("読")
+    assert e is not None and e.freqs == []
+    body = json.dumps(e.defs[0].content, ensure_ascii=False)
+    assert "strokes" in body and "14" in body and "jlpt" in body  # bare codes, all present
 
 
 def test_kanji_panel_golden(tmp_path):
