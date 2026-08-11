@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786435308433,
+  "lastUpdate": 1786436864525,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3527,6 +3527,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.836,
             "range": "±5.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ed6799aa853ef7ae725a815132fa8b51015443fe",
+          "message": "Merge pull request #313 from serjflint/feat/kanji-stroke-order-font\n\nfeat(kanji): stroke-order font for the panel headword",
+          "timestamp": "2026-08-11T11:27:19+03:00",
+          "tree_id": "c416599ccde299868258669d7c9e16723870ce28",
+          "url": "https://github.com/serjflint/saitenka/commit/ed6799aa853ef7ae725a815132fa8b51015443fe"
+        },
+        "date": 1786436863790,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.428,
+            "range": "±0.4%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.121,
+            "range": "±14.6%",
             "unit": "ms"
           }
         ]
