@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786439406492,
+  "lastUpdate": 1786439673458,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3895,6 +3895,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/serjflint/saitenka/commit/5122ff6ac80352c29cc278928c50692e90926de4"
         },
         "date": 1786438785068,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "unit": "frames"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e07dbfa0b9e1e148aa7eab62edce771f764d4395",
+          "message": "Merge pull request #316 from serjflint/fix/pypi-publish-correct-sha\n\nci(release): pin gh-action-pypi-publish v1.14.2 by commit SHA (fix manifest unknown)",
+          "timestamp": "2026-08-11T12:09:33+03:00",
+          "tree_id": "70670e99f855d7900f8ef1f5e612996fc41cb349",
+          "url": "https://github.com/serjflint/saitenka/commit/e07dbfa0b9e1e148aa7eab62edce771f764d4395"
+        },
+        "date": 1786439672595,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
