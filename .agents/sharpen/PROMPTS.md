@@ -14,6 +14,9 @@ When no campaign exists and an existing assertion changes or disappears, supply 
 
 On retry, append only the previous attempted diff and the deterministic bounce report.
 
+A complete mutation survivor may be the coordinate. If the campaign is missing or incomplete, return the
+out-of-band `test-adequacy` prerequisite; never launch it in this role.
+
 ## Objective gate
 
 Run anti-cheat plus either mutation efficacy or, off-allowlist, `sharpen_gate.py preserve`. The old and
@@ -37,3 +40,8 @@ Payload: `[factual_what]`, `[diff]`, `[touched_function]`.
 
 Use the Skeptic prompt in a fresh context. Do not disclose that another reviewer ran, its verdict, or
 its grounds.
+
+## Ship gate
+
+After two independent `UPHELD` verdicts and only when `openPr=true`, run `uv run poe all`. Exit 0 is
+required before opening a ready PR; otherwise revert the edit and record a dry-run/no-PR result.

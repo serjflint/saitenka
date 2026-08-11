@@ -18,6 +18,13 @@ verbatim — never work around it by touching another file.
 > `{target_symbol, dimension, kind}`. `kind=concurrency` iff the gap is a data race; else `scenario`.
 > Return `found=false` if there is no live module or no orphan gap. Never pick an EXCLUDED module.
 
+## Test design (write-test handoff)
+
+> Before authoring, apply the repository `write-test` decision tree to the selected gap. Return only the
+> selected `{tier, boundary_seam, extension_point, oracle_family}` and concise rationale. This Workflow
+> adapter inlines the decision because its runtime cannot load skills; the Codex adapter reads the skill
+> directly. Edit nothing. The result becomes decisive context for the isolated author.
+
 ## Author (write ONE grown test — ADDITIVE)
 
 > You are the Grow AUTHOR. Write ONE test that closes the gap `{target_symbol · dimension}` for module
@@ -42,6 +49,10 @@ verbatim — never work around it by touching another file.
 > Return the additive diff, `test_name`, `target_func` (the production symbol it exercises), `cut_module`
 > (dotted path), `cut_file` (repo-relative CUT path), and a named proposal list. If there is genuinely
 > nothing worth growing, return `applied=false` with the reason — never fabricate a vacuous test.
+
+The root orchestrator applies the `write-test` procedure before invoking this role and supplies the selected
+`{tier, boundary_seam, extension_point, oracle_family}`. Those choices are decisive context, not an
+invitation for the isolated author to call another skill.
 
 ## Objective gate (deterministic — no judgment)
 
@@ -87,12 +98,16 @@ verbatim — never work around it by touching another file.
 
 ## Record (ledger + optional PR)
 
+Before Record on `openPr=true`, run `uv run poe all` as a deterministic Ship gate. Exit 0 is required;
+failure reverts the test, records a dry-run, and opens no PR.
+
 > Append one Grow ledger record via `tools/grow_ledger.py` (compute `gap_id` from
 > `{source, target_symbol, dimension}` and `target_sha` from the target symbol's AST source; stamp
 > `examined` from `date -u`; `toolset_version` from the manifest). Set `state` and `outcome` per the
 > disposition (coverage-only→`closed`; bug→`filed`; robustness/design→`open`+`filed`). Include the review
 > block; list `axes_not_applied` (every arm that was n/a for this gap kind — the silent-no-run guard). Open
-> a PR only when `openPr=true` AND a valid review block exists AND the open-PR exclusion was verified; body
+> a ready PR only when `openPr=true` AND a valid review block exists AND the open-PR exclusion was verified
+> AND the Ship gate passed; body
 > per SPEC "PR body" (the scenario now pinned, why it matters, the gate evidence, the outcome class). Never
 > merge.
 

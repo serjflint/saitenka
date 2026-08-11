@@ -34,7 +34,7 @@ the [AI Policy](.github/AI_POLICY.md) for the full statement. In short, a **huma
 
 **Humans talk; agents build.** Conversation in issues and PRs — motivation, scope, review back-and-forth,
 accept/reject — is done by the human, in their own voice. Agents do the work (code, tests, evidence, the
-draft PR body) and the isolated review; they do not post issue/PR discussion or speak for the maintainer.
+PR body) and the isolated review; they do not post issue/PR discussion or speak for the maintainer.
 
 ## What makes a contribution ready
 
@@ -111,7 +111,10 @@ Before merge, review the diff in a fresh, isolated context that did not author i
 (`.agents/sharpen/`, author→skeptic→judge, two independent UPHOLDs) or `/code-review`. Give it only the
 base, the PR title/description, the diff, and the claimed validation — no prior rationale. Fix every
 P0/P1 (correctness, data loss, false contract, inert feature, FT race); resolve or explicitly accept P2.
-Any code change invalidates a prior pass.
+Any code change invalidates a prior pass. Prefer reviewers from a different model family than the author
+when the host roster makes that available: different families reduce correlated blind spots. This is a
+recommendation, not a validity condition — two genuinely isolated reviewers still satisfy the review
+gate when cross-family routing is unavailable. Deterministic gates remain mandatory either way.
 
 ### 5. Prepare the change package
 

@@ -4,7 +4,7 @@
 Grow loop is, why it exists, how the four-arm gate works, and the reasoning behind each choice.
 
 This is the *reader's guide*. The terse, agent-facing process spec is [`SPEC.md`](SPEC.md); the design
-SSOT is `vibe/grow-loop-plan.md`; the audit trail is `.ledger.grow.jsonl`. If you have five minutes, read
+The durable process SSOT is `SPEC.md`; the audit trail is `.ledger.grow.jsonl`. If you have five minutes, read
 the **Abstract** and **Example** sections.
 
 ## Abstract
@@ -117,7 +117,7 @@ The loop must *terminate*: once a gap is closed, it must stay closed under unrel
 when its own target actually changes. A naive line-number key drifts on any edit above the target and
 re-opens closed gaps forever. So the gap identity is `hash(source, target_symbol, dimension)` plus a
 content-hash of the **target symbol's AST source** — not the whole module. Unrelated edits leave it closed;
-a real change to the target reopens it. This is proven in `vibe/proto_grow_ledger.py` and locked by
+a real change to the target reopens it. This is implemented in `overlay/tools/grow_ledger.py` and locked by
 `tools/test_grow_ledger.py`.
 
 ## Anti-bloat — Grow's characteristic hazard
@@ -147,7 +147,8 @@ landed loop-improvement bumps `loop_version` and resets the count. This is how t
 
 ## References
 
-- Design SSOT and full research provenance: `vibe/grow-loop-plan.md`, `vibe/research/grow-loop-research-*`.
+- Durable design, research conclusions, and decision receipts: `SPEC.md`; scratch research stays private
+  and is never a dependency of this guide.
 - Sibling loop: `.agents/sharpen/{GUIDE,SPEC}.md` — Grow mirrors its structure and shares the fidelity
   rationale (SycEval, FAccT 2025, arXiv:2502.08177) and the isolated-review architecture.
 - Prior art (gated): Meta ACH (arXiv:2501.12862, concern-specific mutants), Uber AutoCover (ICSE-SEIP'26,

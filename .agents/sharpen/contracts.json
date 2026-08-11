@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "proposal": {
     "type": "object",
     "additionalProperties": false,
@@ -29,6 +29,15 @@
           }
         }
       }
+    }
+  },
+  "ship_gate": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["pass", "report"],
+    "properties": {
+      "pass": {"type": "boolean"},
+      "report": {"type": "string"}
     }
   },
   "review": {

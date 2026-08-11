@@ -11,24 +11,25 @@ test -f "$repo_dir/.agents/sharpen/ADAPTERS.md"
 test -f "$repo_dir/.agents/sharpen/PROMPTS.md"
 test -f "$repo_dir/.agents/sharpen/contracts.json"
 
-if git -C "$repo_dir" grep -n -E 'TODO|\[TODO' -- \
-  .agents/skills/sharpen-loop/SKILL.md .agents/skills/sharpen-loop/agents; then
-  echo "sharpen-loop skill contains an unfinished placeholder" >&2
-  exit 1
-fi
+uv run python - "$repo_dir" <<'PY'
+import json
+import pathlib
+import re
+import sys
 
-git -C "$repo_dir" grep -q 'fork_turns="none"' -- .agents/skills/sharpen-loop/SKILL.md
-git -C "$repo_dir" grep -q '"version": 3' -- .agents/sharpen/contracts.json
-git -C "$repo_dir" grep -q 'CONTRACT_VERSION = 3' -- .agents/sharpen/harness.js
-git -C "$repo_dir" grep -q 'better_fix' -- .agents/sharpen/contracts.json
-git -C "$repo_dir" grep -q 'Better fix hand-off' -- .agents/sharpen/harness.js
-git -C "$repo_dir" grep -q 'skeptic_verdict' -- .agents/sharpen/harness.js
-git -C "$repo_dir" grep -q 'judge_verdict' -- .agents/sharpen/harness.js
-git -C "$repo_dir" grep -Fq "verdict = judge?.verdict === 'UPHELD' ? 'UPHELD' : 'REFUTED'" -- .agents/sharpen/harness.js
-if git -C "$repo_dir" grep -q "model:" -- .agents/sharpen/harness.js; then
-  echo "Claude adapter hard-codes a provider model" >&2
-  exit 1
-fi
+root = pathlib.Path(sys.argv[1])
+skill = (root / ".agents/skills/sharpen-loop/SKILL.md").read_text()
+harness = (root / ".agents/sharpen/harness.js").read_text()
+contracts = json.loads((root / ".agents/sharpen/contracts.json").read_text())
+assert "TODO" not in skill and "[TODO" not in skill
+assert 'fork_turns="none"' in skill
+assert contracts["version"] == 4 and "ship_gate" in contracts
+assert "CONTRACT_VERSION = 4" in harness
+for token in ("better_fix", "Better fix hand-off", "skeptic_verdict", "judge_verdict", "uv run poe all"):
+    assert token in harness
+assert re.search(r"verdict = judge\?\.verdict === 'UPHELD' \? 'UPHELD' : 'REFUTED'", harness)
+assert "model:" not in harness
+PY
 
 node "$repo_dir/.agents/sharpen/test_harness.mjs"
 

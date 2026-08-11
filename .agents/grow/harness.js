@@ -4,10 +4,12 @@ export const meta = {
   whenToUse: 'Idle-time test-GROWTH on the Saitenka overlay suite: write ONE missing test for an under-specified scenario/config/invariant/race. One gap per run; author≠skeptic isolation is structural. args.openPr=true reaches the human merge gate; default is a dry-run (ledger only).',
   phases: [
     { title: 'Select' },
+    { title: 'Test design' },
     { title: 'Author' },
     { title: 'Objective gate' },
     { title: 'Skeptic' },
     { title: 'Judge' },
+    { title: 'Ship gate' },
     { title: 'Record' },
     { title: 'Reflect' },
   ],
@@ -24,7 +26,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 4 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 6 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -32,7 +34,7 @@ const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the la
 // The run TRACE — a factual record of what the loop actually did this run, fed to the Reflect phase so it
 // introspects on evidence, not vibes. Populated as the run proceeds; every terminal exit flows through
 // finish() so a bounced / dropped / no-candidate run reflects too (those are the richest lessons).
-const trace = { gap: null, retries: 0, gate: null, review: null, outcome: null, notes: [] }
+const trace = { gap: null, retries: 0, gate: null, review: null, ship_gate: null, outcome: null, notes: [] }
 
 // Worktree-safe: launch from a dedicated git worktree so executor edits can't touch the live tree. Every
 // executor operates on paths RELATIVE to its inherited cwd — an absolute path would escape the worktree.
@@ -62,6 +64,18 @@ const GAP = {
     score: { type: 'number' },
     pr_exclusion_checked: { type: 'boolean', description: 'true ONLY if triage ran the open-PR exclusion (gh authed, no --no-network)' },
     reason: { type: 'string' },
+  },
+}
+
+const TEST_DESIGN = {
+  type: 'object', additionalProperties: false,
+  required: ['tier', 'boundary_seam', 'extension_point', 'oracle_family', 'rationale'],
+  properties: {
+    tier: { type: 'string', enum: ['default', 'integration', 'live'] },
+    boundary_seam: { type: 'string' },
+    extension_point: { type: 'string' },
+    oracle_family: { type: 'string' },
+    rationale: { type: 'string' },
   },
 }
 
@@ -136,6 +150,15 @@ const REVIEW = {
   },
 }
 
+const SHIP_GATE = {
+  type: 'object', additionalProperties: false,
+  required: ['pass', 'report'],
+  properties: {
+    pass: { type: 'boolean' },
+    report: { type: 'string', description: 'poe all exit status and concise failure detail' },
+  },
+}
+
 const RECORD = {
   type: 'object', additionalProperties: false,
   required: ['state', 'ledger_appended', 'filing_blocker'],
@@ -206,6 +229,16 @@ if (OPEN_PR && !canOpenPr) {
   log(`open-PR exclusion unverified (gh unauth / --no-network) — forcing dry-run for ${gap.module}`)
 }
 
+phase('Test design')
+const testDesign = await agent(
+  `Choose the test design for {${gap.target_symbol} · "${gap.dimension}"} before authoring. ${REL} ` +
+  `Apply the repository write-test decision tree: select tier (default/integration/live), the real ` +
+  `collaborator or existing Fake* boundary seam, the existing parametrize/profile/@example extension ` +
+  `point (or why a new test is necessary), and a falsifiable observable oracle family. Read only; edit ` +
+  `nothing. Return the minimum decisive design, not a test implementation.`,
+  { phase: 'Test design', schema: TEST_DESIGN, label: 'test-design', effort: 'low' },
+)
+
 phase('Author')
 // Author gets the MINIMUM decisive context (target symbol, orphan scenario, invariant family, existing
 // test file to extend) — never a whole-repo dump. Retries carry only the prior bounce.
@@ -218,6 +251,7 @@ const testHint = (gap.tests && gap.tests.length) ? gap.tests.join(', ') : '(find
 for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   proposal = await agent(
     `You are the Grow AUTHOR. Write ONE test that closes the gap {${gap.target_symbol} · "${gap.dimension}"} for module ${gap.module} (kind=${gap.kind}). ${REL} ${GUARD}\n` +
+    `TEST DESIGN (selected before this isolated call): tier=${testDesign.tier}; boundary_seam=${testDesign.boundary_seam}; extension_point=${testDesign.extension_point}; oracle_family=${testDesign.oracle_family}. Follow it unless the code proves it impossible; then return the blocker.\n` +
     `EXTEND the existing test(s) (${testHint}) before adding a new file — append a PROFILES/ENTRY_FACTORIES row, a parametrize case, or an @example; a new file only when there is no home. If the gap is a family, emit a Hypothesis property / deal contract, not a bare example.\n` +
     `Assert OBSERVABLE behaviour (return value / emitted IPC / written note / a metamorphic oracle) — never a private attr, mock call-count, or pixels. The test MUST be GREEN on pristine code; if it goes red you found a real defect: set red_on_pristine=true, describe it, STOP (do not massage it green).\n` +
     (gap.kind === 'concurrency'
@@ -328,6 +362,24 @@ if (verdict !== 'UPHELD') {
     `Redundant with: ${refuter?.redundant_with ?? 'n/a'}. Better fix (separate authorization; never applied here): ${JSON.stringify(refuter?.better_fix ?? null)}`)
   trace.outcome = 'dry-run'
   return await finish({ done: true, target: gap.target_symbol, state: 'dry-run', verdict, openPr: OPEN_PR })
+}
+
+if (canOpenPr) {
+  phase('Ship gate')
+  const shipGate = await agent(
+    `Run the deterministic pre-push gate from ${CWD}/: \`uv run poe all\`. ${REL} Edit nothing. ` +
+    `Set pass=true only on exit 0 and return a concise report with the failing task/output when red.`,
+    { phase: 'Ship gate', schema: SHIP_GATE, label: 'ship-gate', effort: 'low' },
+  )
+  trace.ship_gate = shipGate
+  if (!shipGate?.pass) {
+    await revert(proposal)
+    trace.notes.push(`post-review poe all failed: ${shipGate?.report ?? 'no report'}`)
+    const rec = await recordOutcome('dry-run', null, review, null,
+      `Post-review ship gate failed; no PR opened. ${shipGate?.report ?? 'No report returned.'}`)
+    trace.outcome = rec?.state ?? 'dry-run'
+    return await finish({ done: true, target: gap.target_symbol, state: 'dry-run', verdict, openPr: OPEN_PR })
+  }
 }
 
 if (!canOpenPr) {

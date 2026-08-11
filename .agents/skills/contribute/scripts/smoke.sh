@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Smoke: the skill's structure holds and everything SKILL.md points at still exists.
 # Grep-free on purpose — grep/find are PATH-shimmed to a fork-bomb on this machine
-# (see AGENTS.md "Tooling"); the assertions run in pure python3.
+# (see AGENTS.md "Tooling"); the assertions run through the repo's uv-managed Python.
 set -euo pipefail
 skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 repo_root="$(CDPATH='' cd -- "$skill_dir/../../.." && pwd)"
 
-python3 - "$skill_dir" "$repo_root" <<'PY'
+uv run python - "$skill_dir" "$repo_root" <<'PY'
 import sys, pathlib, re
 
 skill, repo = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
@@ -32,7 +32,7 @@ if dm:
          "description lost the negative cut vs write-test/dev-gate/sharpen-loop")
 
 for anchor in ("Restore context", "root cause", "PoC that proves tractability",
-               "adversarial review is a gate", "issue-first"):
+               "adversarial review is a gate", "ready PR by default", "Prefer cross-family when available"):
     need(anchor in text, f"SKILL.md lost phase anchor: {anchor!r}")
 
 ref = skill / "references" / "review-gate.md"

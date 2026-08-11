@@ -1,0 +1,4 @@
+interface:
+  display_name: "Grow Loop"
+  short_description: "Run one safe additive test-growth audit"
+  default_prompt: "Use $grow-loop to run one dry-run Grow audit in an isolated worktree."

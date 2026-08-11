@@ -9,6 +9,7 @@ export const meta = {
     { title: 'Objective gate' },
     { title: 'Skeptic' },
     { title: 'Judge' },
+    { title: 'Ship gate' },
     { title: 'Record' },
   ],
 }
@@ -24,7 +25,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 3 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 4 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -137,6 +138,15 @@ const REVIEW = {
       },
       description: 'smallest alternative when the objective is valid but this candidate is the wrong intervention; null otherwise',
     },
+  },
+}
+
+const SHIP_GATE = {
+  type: 'object', additionalProperties: false,
+  required: ['pass', 'report'],
+  properties: {
+    pass: { type: 'boolean' },
+    report: { type: 'string', description: 'poe all exit status and concise failure detail' },
   },
 }
 
@@ -334,6 +344,24 @@ if (verdict !== 'UPHELD') {
     `Review dropped the change (${judgeNote}). Grounds: ${JSON.stringify(refuter?.grounds ?? [])}. ` +
     `Better fix hand-off (separate authorization required; never applied by this run): ${JSON.stringify(betterFix)}`)
   return { done: true, module: pick.module, state: 'dry-run', verdict, openPr: OPEN_PR }
+}
+
+if (canOpenPr) {
+  phase('Ship gate')
+  const shipGate = await agent(
+    `Run the deterministic pre-push gate from ${CWD}/: \`uv run poe all\`. ${REL} Edit nothing. ` +
+    `Set pass=true only on exit 0 and return a concise report with the failing task/output when red.`,
+    { phase: 'Ship gate', schema: SHIP_GATE, label: 'ship-gate', effort: 'low' },
+  )
+  if (!shipGate?.pass) {
+    await agent(
+      `${REL} Run \`git checkout -- ${proposal.test_file.replace('overlay/', '')}\` — the post-review ship gate failed. Confirm clean tree.`,
+      { phase: 'Ship gate', label: 'revert-ship-gate', effort: 'low' },
+    )
+    const rec = await recordOutcome('dry-run', null, review,
+      `Post-review ship gate failed; no PR opened. ${shipGate?.report ?? 'No report returned.'}`)
+    return { done: true, module: pick.module, state: rec?.state ?? 'dry-run', verdict, openPr: OPEN_PR }
+  }
 }
 
 if (!canOpenPr) {

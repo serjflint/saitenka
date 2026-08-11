@@ -79,6 +79,11 @@ subcommands):
 The harness selects arms from the gap kind and records which arms ran and which were `n/a` in
 `axes_not_applied` (the guard against a silent no-run).
 
+Before authoring, the root orchestrator applies the `write-test` decision tree and injects only its
+selected tier, real-vs-fake seam, extension point, and oracle family. The isolated author does not invoke
+skills. A complete survivor/crasher/counterexample may supply the coordinate; missing adequacy data is
+recorded as an out-of-band `test-adequacy` prerequisite, never generated inline.
+
 Every mutation arm snapshots and restores exact bytes. The adapter reports restoration verification;
 an index lock, failed restore, or byte mismatch is a hard bounce.
 
@@ -94,9 +99,19 @@ an index lock, failed restore, or byte mismatch is a hard bounce.
 - Refuted candidate with `better_fix`: revert it, record the recommendation + scope, stop.
 - Missing isolation or identity: append `state: dry-run`; never open a PR.
 - Unverified open-PR exclusion: force `openPr=false` for the run.
+- On `openPr=true`, a post-review `uv run poe all` failure forces `dry-run` and no PR.
+
+## Skill and review handoffs
+
+- Test-only additive work stays in Grow. Source/tool/config/dependency changes route to `contribute`.
+- Repeated reflection findings that need external prior art route to `research` after frozen-baseline evidence.
+- Optional host LSP navigation is allowed for exact symbol/caller lookup; never invoke or require the
+  infrastructure-only `pyrefly-lsp` skill.
+- Reviewer isolation is required. Cross-family routing is recommended when available, using the shared
+  policy in `CONTRIBUTING.md` §4; unavailability does not invalidate an otherwise isolated review.
 
 ## Adapters
 
 `harness.js` is the Claude Workflow adapter; its inline schemas mirror `contracts.json` (that runtime has
-no filesystem access). A Codex adapter (context-free subagents for the three judgment roles; deterministic
-commands run directly) mirrors `.agents/skills/sharpen-loop/` when built.
+no filesystem access). The Codex adapter is `.agents/skills/grow-loop/`: context-free subagents for the
+judgment roles, deterministic commands run directly.

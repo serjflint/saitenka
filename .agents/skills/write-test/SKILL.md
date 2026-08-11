@@ -20,6 +20,10 @@ Procedure for writing a **new** test in `overlay/tests/`. The *invariants* live 
 `saitenka/AGENTS.md` → "## Testing"; this skill is the *how*. Match the surrounding
 file's style — read a sibling test first.
 
+Grow uses this decision tree at its authoring boundary: the orchestrator chooses the tier, boundary fake,
+extension seam, and oracle family here, then passes only those selected constraints to the isolated author.
+Sharpen owns edits to existing assertions; adequacy coordinates still enter through `test-adequacy`.
+
 ## Decision tree (walk it before typing)
 
 1. **What am I testing?**

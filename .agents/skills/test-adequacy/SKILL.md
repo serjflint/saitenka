@@ -43,6 +43,14 @@ on rerun (`tests/test_sub_index_properties.py`). Then re-run the tool to confirm
   test subprocess still runs free-threaded).
 - The **Sharpen loop** consumes mutation as its Efficacy axis (`.agents/sharpen/GUIDE.md`).
 
+## Grow/Sharpen handoff
+
+The loops consume a **complete existing artifact**; they never launch these slow campaigns inline. A
+missing or partial mutation DB is an out-of-band prerequisite, not permission to improvise a run. Route
+the coordinate back as data: survivor, minimized crasher, or symbolic counterexample. The test authoring
+step then uses the `write-test` decision tree to kill the bug class with a property plus pinned `@example`,
+and this skill reruns the originating instrument to verify the result.
+
 ## Fuzz — `poe fuzz`
 
 atheris / libFuzzer byte-mutation of the subtitle parser. **Contract:** `parse_cues` is robust — any input
