@@ -94,6 +94,13 @@ def _font(file: str, style: Style):
     return fonts.load(fonts.FontSpec(file, style.size, style.weight))
 
 
+def _forced_font(style: Style, ch: str) -> str | None:
+    """The style's explicit font override for ``ch``, but only if that file actually covers it — so an
+    override never introduces tofu; a glyph the forced font lacks falls back to the normal chain."""
+    f = style.font
+    return f if (f is not None and fonts.covers(f, ch)) else None
+
+
 def _word_run(text: str, i: int, n: int) -> tuple[str, int]:
     """The maximal letter run starting at ``i`` → ``(font_file, end_index)``. The whole word renders in
     ONE font — the first covering EVERY char (:func:`fonts.font_for_run`) — so it stays consistent and
@@ -126,7 +133,7 @@ def _tokenize_span(text: str, style: Style, href: str | None = None) -> list[Tok
             )
             i = j
         elif _is_cjk(ch):
-            f = fonts.font_for_char(ch)
+            f = _forced_font(style, ch) or fonts.font_for_char(ch)
             tokens.append(Token(ch, f, "cjk", fonts.text_width(_font(f, style), ch), style, href))
             i += 1
         elif _is_word_char(ch):

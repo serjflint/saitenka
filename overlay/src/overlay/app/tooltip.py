@@ -1187,7 +1187,9 @@ def _navigated_panel(reader: Reader, query: str) -> Panel | None:
     if reader.dict_set is None:
         return None
     if query.startswith("kanji:"):  # a headword kanji click → the kanji entry, navigated in place
-        entry = reader.dict_set.kanji_for(query[len("kanji:") :])
+        entry = reader.dict_set.kanji_for(
+            query[len("kanji:") :], stroke_order=reader.kanji_stroke_order
+        )
         if entry is None:
             return None
         reading = getattr(entry, "reading", "") or ""

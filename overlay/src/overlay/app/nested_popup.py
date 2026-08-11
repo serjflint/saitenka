@@ -184,7 +184,7 @@ def _engaged_open_panel(reader: Reader, source: str, query: str, *, mined: bool 
         return None
     key: tuple  # a ("kanji"/"search", …) tuple or a PanelKey (a NamedTuple) — both are tuples
     if source == "kanji":
-        entry = ds.kanji_for(query)
+        entry = ds.kanji_for(query, stroke_order=reader.kanji_stroke_order)
         if entry is None:
             return None
         key = ("kanji", query, reader.tip_width)
