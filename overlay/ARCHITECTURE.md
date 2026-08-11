@@ -34,9 +34,12 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
 - **`app/`** — the application layer. `controller.py`'s `Reader` is the main-loop orchestrator
-  (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenize.py` (fugashi/unidic-lite word
-  segmentation); `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite dictionary DB);
-  `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring); `anki.py`/`miner.py` (mining);
+  (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenizer.py` (the tokenizer-strategy
+  seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
+  strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine
+  — a French profile ships today); `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
+  dictionary DB); `scoring.py`/`wordlists.py`/`fsrs.py` (word coloring);
+  `anki.py`/`miner.py`/`word_audio.py` (mining + optional word-pronunciation audio);
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
@@ -45,8 +48,9 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 ## Data flow (the hover → lookup → render → mine chain)
 
 1. `Reader` polls mpv's `sub-text`/`mouse-pos` over IPC (event-driven `observe_property`).
-2. Each subtitle line is tokenized (`tokenize()`, fugashi + unidic-lite) into `Token`s with
-   per-word hitboxes, drawn as an OSD overlay.
+2. Each subtitle line is tokenized (the profile's tokenizer strategy — fugashi + unidic-lite for
+   Japanese, the Latin strategy for French/…) into `Token`s with per-word hitboxes, drawn as an OSD
+   overlay.
 3. On hover, hit-testing maps screen coordinates to a token; the word's lemma is looked up against
    the consolidated dictionary DB, producing an `Entry` (one `Definition` per configured
    dictionary).
@@ -217,7 +221,7 @@ the 16ms frame budget even on a cold miss; a whole 34×-viewport block was ≈**
 - **Evict**: `_evict` drops bands **per band** outside `[scroll−overscan, scroll+view_h+overscan]`, so
   even one row 34× the viewport retains only the ~2–3 overlapping bands (a currently-visible band is
   never evicted; `max_cached_blocks` caps the LRU when set).
-- **Render-ahead**: on a wheel notch (`_scroll_tip`, step `round(osd_h·0.08)` ≈ **86px** at 1080p),
+- **Render-ahead**: on a wheel notch (`_scroll_tip`, step `round(_tip_ref_h·0.12)` ≈ **130px** in REF_H space),
   `Panel.render_ahead(overscan=view_h)` warms the next screen's bands off the main thread — threads
   calling `render_window` on a free-threaded build, a process pool (`render_body_band`, injected to keep
   the `render → body_block` import contract) on a GIL build. At flick (~2600px/s) the one-screen lead is
@@ -249,7 +253,7 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
 | Band raster/cache unit | `_BAND_PX = 256`px | `render/banded.py` |
 | Estimated height before measure | `seed_height = 200`px | `BandedTuning` (`WindowedPanel`) |
 | Scroll overscan (warm margin) | one screen (`overscan = view_h`) | tooltip blit + `Panel.render_ahead` |
-| Wheel step | `round(osd_h·0.08)` ≈ 86px @1080p | `Reader._scroll_tip` |
+| Wheel step | `round(_tip_ref_h·0.12)` ≈ 130px (REF_H space) | `Reader._scroll_tip` |
 | Base tooltip viewport cap | `tip_max_frac = 0.4` of video height | `TooltipOptions` |
 | Reference panel width + chrome | `panel.py`'s `width` default; `Theme.margin`/`gap`/`body_indent` | `panel.py`, `model.Theme` |
 | Prefetch workers | `_AUTO_WORKERS_FREE_THREADED` / `_AUTO_WORKERS_GIL`, or pinned `prefetch_workers` | `app/prefetch.py` |
