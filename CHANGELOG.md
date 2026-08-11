@@ -7,6 +7,11 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Episode re-slotting now distinguishes identical filenames in different folders.** Moving between
+  seasons that both contain `Episode.mkv` no longer leaves the overlay attached to the previous file.
+
 ## [3.1.0] - 2026-08-11
 
 ### Added
