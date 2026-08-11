@@ -70,7 +70,9 @@ def _normalize_readings(readings: object) -> dict[str, list[str]]:
         return {}
     out: dict[str, list[str]] = {}
     for reading, entry in readings.items():
-        files = _entry_files(entry) if isinstance(reading, str) else []
+        if not isinstance(reading, str):
+            continue
+        files = _entry_files(entry)
         if files:
             out[reading] = files
     return out

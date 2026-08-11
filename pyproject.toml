@@ -286,6 +286,12 @@ search-path = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/py
 # read back via p["key"]) — real findings there are inference-strictness noise, not import/attr rot (the
 # thing mypy+basedpyright now gate). The `poe types` task runs it over examples/tools/install/.agents too,
 # but advisory (`|| true`), same posture as `ty` below — visibility without blocking the gate on it.
+[tool.pyrefly.errors]
+# The optional PEP-723 script deps (anime_chooser: sudachipy/jreadability/httpx-aiohttp) + the
+# example-local `live_harness` aren't in the checker env — a missing 3rd-party import is not rot here,
+# the same posture as mypy's `ignore_missing_imports` and basedpyright's `reportMissingImports=none`.
+# Resolved first-party modules still get their attribute-rot checks (the SKIP_POS case above).
+missing-import = false
 
 [tool.basedpyright]
 # Same widened scope as mypy above — see [tool.mypy].files for the rationale.
@@ -296,6 +302,19 @@ extraPaths = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/pyt
 stubPath = "stubs"   # local third-party stubs (fugashi — Cython, no py.typed)
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
+
+[tool.ty.environment]
+# ty reads NONE of the keys above — not mypy_path, not pyrefly `search-path`, not basedpyright
+# `extraPaths`/`stubPath`. It needs its own, or it re-reports the stub gaps the others resolve:
+# `python-version` (else it assumes the `requires-python` floor 3.13 and flags 3.14's
+# `concurrent.interpreters`), and `extra-paths` so the local fugashi stub + the taffylite/resvglite
+# `.pyi` resolve (`fugashi.Tagger`, `taffylite.column`/`Tree`).
+python-version = "3.14"
+extra-paths = ["overlay/src", "deinflect/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+# `unresolved-import` (the optional PEP-723 script deps + example-local `live_harness`) is silenced by
+# `--ignore unresolved-import` on the `types` task's ty call — a `[tool.ty.rules]` table here is NOT
+# honored (ty reads `[tool.ty.environment]` from this file but not the rules table), the flag is.
+# Same "missing 3rd-party import isn't rot" posture as pyrefly `missing-import` / mypy above.
 
 [tool.poe.tasks]
 all = { cmd = "uv run poe all", cwd = "overlay" }

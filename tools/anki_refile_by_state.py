@@ -38,8 +38,20 @@ import time
 import urllib.request
 from collections import Counter
 from pathlib import Path
+from typing import TypedDict
 
 MAC_DEFAULT = "~/Library/Application Support/Anki2/User 1/collection.anki2"
+
+
+class PlanRow(TypedDict):
+    cardId: int
+    noteId: int
+    state: str
+    origDeck: str
+    targetDeck: str
+    tag: str
+
+
 ANKICONNECT = "http://127.0.0.1:8765"
 
 
@@ -136,7 +148,7 @@ def main() -> None:
     last_rev = dict(cur.execute("SELECT cid, MAX(id) FROM revlog GROUP BY cid"))
     now_ms = time.time() * 1000.0
 
-    plan = []  # {cardId, noteId, state, origDeck, targetDeck, tag}
+    plan: list[PlanRow] = []
     dist: Counter[str] = Counter()
     for cid, nid, did, ctype, queue, ivl, data in cur.execute(
         "SELECT id,nid,did,type,queue,ivl,data FROM cards"
