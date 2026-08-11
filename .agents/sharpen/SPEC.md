@@ -37,11 +37,11 @@ Conformance lint rules (`poe test-lint`, initial set — grows as smells surface
 - `.assert_called*` / `.call_count` / `.mock_calls` → interaction assertion (this repo is classicist)
 - `monkeypatch` of a **private** production symbol (`_name`) → coupling to internals (the *raw*
   monkeypatch count is fine — it's the sanctioned seam; only a private target is a smell)
-- a default-tier test (no `integration`/`live`/`e2e` marker) that opens a socket, spawns a subprocess,
-  mutates `os.environ`, reads the wall clock, or draws ambient `random` → **mis-levelled / non-deterministic**
+- a default-tier test (no `integration`/`live`/`e2e` marker) that opens a socket or spawns a subprocess
+  → **mis-levelled**; `time.sleep` is a separate advisory polling smell and never drives selection
 - a `session`/`module`-scoped fixture returning a literal mutable (`{}`/`[]`/`set()`) → cross-test state
 - control flow (`if`/`for`/`while`) in a test body → cohesion smell (**advisory, not a bounce**) —
-  **specced, deliberately not built** (noisy on a classicist suite; the 8 shipped rules exclude it).
+  **specced, deliberately not built** (noisy on a classicist suite; the 9 shipped rules exclude it).
   Assertion-Roulette and Eager-Test are deliberately **not** gated — empirically noisy on a classicist
   suite (pytest's assertion rewriting already localises multi-assert failures).
 

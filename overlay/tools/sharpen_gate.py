@@ -169,6 +169,8 @@ def preservation_adhoc_gate(
         (cwd / module).write_text(source.replace(find, replace), encoding="utf-8")
         (cwd / test_file).write_text(before_test, encoding="utf-8")
         killed_before = run(test_cmd) != 0
+        if not killed_before:
+            return PreservationReport(True, False, False)
         (cwd / test_file).write_bytes(test_snapshot.data)
         killed_after = run(test_cmd) != 0
         return PreservationReport(True, killed_before, killed_after)
@@ -413,6 +415,8 @@ def _run_preservation(args: argparse.Namespace) -> int:
         f"preservation: {'PASS' if rep.ok else 'BOUNCE'} "
         f"(applied={rep.applied}, before={rep.killed_before}, after={rep.killed_after})"
     )
+    if rep.applied and not rep.killed_before:
+        print("witness preflight: old test does not kill this mutation; choose an executed path")
     return 0 if rep.ok else 1
 
 

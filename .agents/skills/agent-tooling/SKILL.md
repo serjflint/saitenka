@@ -42,6 +42,16 @@ far cheaper. All optional; the repo works without them.
 | "What did we decide about dict tabs / the port?" | repowise `get_why` or Basic Memory `search_notes` |
 | "How do I set up / reproduce this stack?" | the `agent-setup` skill · docs `contributing/agent-tooling.md` |
 
+## Repowise readiness and fallback
+
+Treat every response as usable only when `_meta.indexed_commit` equals the worktree `HEAD`. For
+`get_answer`, also require a non-empty answer and no `degraded` marker. If either check fails, do not
+retry synthesis in a loop or let it steer selection: use bounded `get_context` / `get_symbol`, then
+confirm correctness-critical claims against live code. Index freshness on disk is not sufficient to
+prove a long-lived MCP process has reloaded it, so a shell readiness helper cannot replace these response
+checks. Raising `REPOWISE_ANSWER_TIMEOUT_S` trades more latency for synthesis headroom; it is a per-user
+choice, not a repository default.
+
 ## Enabling these
 
 Not wired yet? → the **`agent-setup`** skill (renders MCP config, registers the LSP, symlinks skills).

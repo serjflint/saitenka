@@ -119,3 +119,28 @@ def test_context_v2_carries_test_nodeids_into_attribution(tmp_path):
     counts, tests = gt._load_contexts("contexts.json", tmp_path)
     assert counts == {"app/x.py": 3}
     assert tests == {"app/x.py": ["tests/test_x.py"]}
+
+
+def test_context_v3_carries_line_evidence_without_changing_triage_input(tmp_path):
+    path = tmp_path / "contexts.json"
+    path.write_text(
+        '{"version":3,"modules":{"app/x.py":{"under_spec":2,'
+        '"uncovered_lines":[8],"weak_lines":[{"line":9,"test_nodeids":[]}],'
+        '"test_nodeids":["tests/test_x.py::test_one|run"]}}}\n',
+        encoding="utf-8",
+    )
+    counts, tests = gt._load_contexts("contexts.json", tmp_path)
+    assert counts == {"app/x.py": 2}
+    assert tests == {"app/x.py": ["tests/test_x.py"]}
+
+
+def test_context_v3_rejects_inconsistent_line_evidence(tmp_path):
+    path = tmp_path / "contexts.json"
+    path.write_text(
+        '{"version":3,"modules":{"app/x.py":{"under_spec":2,'
+        '"uncovered_lines":[8],"weak_lines":[],'
+        '"test_nodeids":["tests/test_x.py::test_one|run"]}}}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(InstrumentError, match="invalid v3 line evidence"):
+        gt._load_contexts("contexts.json", tmp_path)

@@ -8,13 +8,15 @@ overlay module, counts the code that is genuinely under-specified:
   - WEAKLY-covered lines — executed by ≤1 real test context (covered-but-under-specified, the loop's
     reframe: the line runs, but no more than one test pins it, so its scenarios/combinations are unexplored).
 
-Emits versioned module rows with ``under_spec`` and the executing ``test_nodeids`` for
+Emits versioned module rows with ``under_spec``, line coordinates, and executing ``test_nodeids`` for
 ``grow_triage.py --contexts-json``. Runs the suite under
 **pytest-cov + xdist** (the `poe cov` fast path) so it finishes in ~`poe cov` time (~20s), NOT the age a
 serial ``coverage run`` takes under free-threaded 3.14t. A one-off producer, NOT part of the gate. The
 aggregation is injectable (like the gate arms) so it is unit-tested without a real coverage run.
 
     uv run python tools/grow_contexts.py --out ../.grow-contexts.json   # feeds grow_triage --contexts-json
+    uv run python tools/grow_contexts.py --inspect ../.grow-contexts.json --module app/controller.py
+    uv run python tools/grow_contexts.py --inspect ../.grow-contexts.json --module app/controller.py --show lines
 """
 
 from __future__ import annotations
@@ -36,6 +38,43 @@ MissingFn = Callable[[str], list[int]]  # file -> uncovered executable line numb
 ContextsFn = Callable[[str], dict[int, list[str]]]  # file -> {lineno: [context labels]}
 
 
+def validate_row(row: object, module: str, version: int) -> dict[str, object]:
+    """Validate one persisted module row before presenting it as evidence."""
+    if not isinstance(row, dict):
+        raise InstrumentError(f"contexts JSON has invalid evidence for {module}")
+    under_spec = row.get("under_spec")
+    nodeids = row.get("test_nodeids")
+    if (
+        type(under_spec) is not int
+        or not isinstance(nodeids, list)
+        or not all(isinstance(nodeid, str) for nodeid in nodeids)
+    ):
+        raise InstrumentError(f"contexts JSON has invalid evidence for {module}")
+    if version == 2:
+        return row
+    uncovered = row.get("uncovered_lines")
+    weak = row.get("weak_lines")
+
+    def valid_weak_item(item: object) -> bool:
+        if not isinstance(item, dict):
+            return False
+        item_nodeids = item.get("test_nodeids")
+        return (
+            type(item.get("line")) is int
+            and isinstance(item_nodeids, list)
+            and all(isinstance(nodeid, str) for nodeid in item_nodeids)
+        )
+
+    valid_uncovered = isinstance(uncovered, list) and all(type(line) is int for line in uncovered)
+    valid_weak = isinstance(weak, list) and all(valid_weak_item(item) for item in weak)
+    if not valid_uncovered or not valid_weak:
+        raise InstrumentError(f"contexts JSON has invalid v3 line evidence for {module}")
+    assert isinstance(uncovered, list) and isinstance(weak, list)
+    if under_spec != len(uncovered) + len(weak):
+        raise InstrumentError(f"contexts JSON has invalid v3 line evidence for {module}")
+    return row
+
+
 def aggregate(
     measured: Iterable[str], base: Path, missing_fn: MissingFn, contexts_fn: ContextsFn
 ) -> dict[str, dict[str, object]]:
@@ -50,9 +89,21 @@ def aggregate(
         if not mk.endswith(".py"):
             continue
         contexts = contexts_fn(f)
-        weak = sum(1 for cs in contexts.values() if len([c for c in cs if c]) <= 1)
-        tests = sorted({c.split("|", 1)[0] for cs in contexts.values() for c in cs if c})
-        out[mk] = {"under_spec": len(missing_fn(f)) + weak, "test_nodeids": tests}
+        uncovered = sorted(set(missing_fn(f)))
+        weak_lines = []
+        for line, labels in sorted(contexts.items()):
+            nodeids = sorted({label.split("|", 1)[0] for label in labels if label})
+            if len(nodeids) <= 1:
+                weak_lines.append({"line": line, "test_nodeids": nodeids})
+        tests = sorted(
+            {label.split("|", 1)[0] for labels in contexts.values() for label in labels if label}
+        )
+        out[mk] = {
+            "under_spec": len(uncovered) + len(weak_lines),
+            "uncovered_lines": uncovered,
+            "weak_lines": weak_lines,
+            "test_nodeids": tests,
+        }
     return out
 
 
@@ -123,6 +174,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", help="write the {module: under_spec} JSON here (else stdout)")
     ap.add_argument(
+        "--inspect", help="read an existing contexts JSON instead of rerunning coverage"
+    )
+    ap.add_argument("--module", help="module row to print with --inspect, e.g. app/controller.py")
+    ap.add_argument("--show", choices=("summary", "lines", "tests", "full"), default="summary")
+    ap.add_argument("--limit", type=int, default=50, help="maximum line/test details to print")
+    ap.add_argument(
         "--tests", nargs="*", default=["tests"], help="pytest target(s) for the context run"
     )
     ap.add_argument(
@@ -133,8 +190,39 @@ def main() -> None:
     )
     args = ap.parse_args()
     root = Path.cwd()
+    if args.inspect:
+        if not args.module:
+            ap.error("--inspect requires --module")
+        data = json.loads((root / args.inspect).read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("version") not in {2, 3}:
+            raise InstrumentError("contexts JSON is not v2/v3; regenerate it with grow_contexts.py")
+        modules = data.get("modules")
+        if not isinstance(modules, dict) or args.module not in modules:
+            raise InstrumentError(f"contexts JSON has no module {args.module}")
+        row = validate_row(modules[args.module], args.module, int(data["version"]))
+        if args.show == "summary":
+            output = {
+                "under_spec": row.get("under_spec"),
+                "uncovered_lines": len(row.get("uncovered_lines", [])),
+                "weak_lines": len(row.get("weak_lines", [])),
+                "test_nodeids": len(row.get("test_nodeids", [])),
+                "line_evidence": "available" if "weak_lines" in row else "regenerate-v3",
+            }
+        elif args.show == "lines":
+            output = {
+                "uncovered_lines": row.get("uncovered_lines", [])[: args.limit],
+                "weak_lines": row.get("weak_lines", [])[: args.limit],
+            }
+        elif args.show == "tests":
+            output = {"test_nodeids": row.get("test_nodeids", [])[: args.limit]}
+        else:
+            output = row
+        print(json.dumps(output, indent=2, sort_keys=True))
+        return
+    if args.module:
+        ap.error("--module requires --inspect")
     signal = under_spec_by_module(root, args.tests, use_contexts=args.use_contexts)
-    payload_obj = {"version": 2, "modules": signal}
+    payload_obj = {"version": 3, "modules": signal}
     payload = json.dumps(payload_obj, indent=2, sort_keys=True)
     if args.out:
         (root / args.out).write_text(payload + "\n", encoding="utf-8")

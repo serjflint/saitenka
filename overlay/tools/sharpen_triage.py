@@ -38,8 +38,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 import sharpen_ledger as sl
 from tool_json import InstrumentError, run_json
 
-# Actionable rules yield per-hit fixes; metric rules are per-file coupling counts (rank, don't enumerate).
+# Actionable rules yield per-hit fixes. Metric/advisory rules rank or inform but never select work.
 METRIC_RULES = {"test-assert-private-attr", "test-monkeypatch-private-target"}
+ADVISORY_RULES = {"test-sleep-polling"}
 
 CHURN_WINDOW = "90 days ago"
 
@@ -72,8 +73,10 @@ def _run(cmd: list[str], cwd: Path) -> str:
     return proc.stdout
 
 
-def conformance_by_module(root: Path, test_map: dict[str, list[str]]) -> dict[str, tuple[int, int]]:
-    """module -> (total hits, actionable hits) from a single `test-lint --json` scan."""
+def conformance_by_module(
+    root: Path, test_map: dict[str, list[str]]
+) -> dict[str, tuple[int, int, int]]:
+    """module -> (total, actionable, private-seam metric) from one test-lint scan."""
     hits = run_json(
         ["uv", "run", "ast-grep", "scan", "-c", "sgconfig-tests.yml", "--json=compact", "tests"],
         root,
@@ -87,7 +90,7 @@ def conformance_by_module(root: Path, test_map: dict[str, list[str]]) -> dict[st
         for test in tests:
             modules_by_file.setdefault(test, set()).add(module)
     symbol_owners = sl.private_symbol_owners(root)
-    out: dict[str, list[int]] = {m: [0, 0] for m in test_map}
+    out: dict[str, list[int]] = {m: [0, 0, 0] for m in test_map}
     for h in hits:
         test_file = h.get("file")
         start = h.get("range", {}).get("start", {}).get("line")
@@ -123,9 +126,12 @@ def conformance_by_module(root: Path, test_map: dict[str, list[str]]) -> dict[st
             continue
         for module in modules:
             out[module][0] += 1
-            if target_grounded and h.get("ruleId") not in METRIC_RULES:
+            rule = h.get("ruleId")
+            if target_grounded and rule not in METRIC_RULES | ADVISORY_RULES:
                 out[module][1] += 1
-    return {m: (t, a) for m, (t, a) in out.items()}
+            if rule in METRIC_RULES:
+                out[module][2] += 1
+    return {m: (total, actionable, metric) for m, (total, actionable, metric) in out.items()}
 
 
 def churn_and_age(root: Path, module: str, tests: list[str]) -> tuple[int, int | None]:
@@ -211,7 +217,7 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
     cands: list[Candidate] = []
     for module, tests in sorted(test_map.items()):
         c = Candidate(module=module, tests=tests)
-        c.conformance, c.actionable = conf.get(module, (0, 0))
+        c.conformance, c.actionable, _metric = conf.get(module, (0, 0, 0))
         c.churn, c.age_days = churn_and_age(root, module, tests)
         c.status = ledger.status(module, root, tests)
         c.survival = survival_from_ledger(ledger, module)
