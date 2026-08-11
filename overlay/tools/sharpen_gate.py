@@ -21,7 +21,8 @@ together they stop the lobotomies a green run hides.
 
 Replay primitive: ``cosmic-ray apply <module> <operator> <occurrence>`` mutates the module in place by
 the exact coordinate stored in a prior campaign's session DB (tools/mutate/run.py); we run the impacted
-tests, read the exit code (fail = killed), and restore via git. Not in ``poe all`` — minutes to run.
+tests, read the exit code (fail = killed), and restore the exact pre-run bytes. Not in ``poe all`` —
+minutes to run.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import starmap
 from pathlib import Path
+
+from byte_transaction import ByteSnapshot
 
 # ---------------------------------------------------------------------------------------------------
 # A. Efficacy replay
@@ -81,7 +84,8 @@ Replay = Callable[[Path, Mutant, list[str], Path], bool]
 
 def replay_is_killed(module: Path, m: Mutant, test_cmd: list[str], cwd: Path) -> bool:
     """Apply one mutant to ``module`` in place, run ``test_cmd``, restore. True = the suite killed it
-    (non-zero exit). Restoration via ``git checkout`` always runs, even on an exception."""
+    (non-zero exit). The exact pre-run bytes are restored even for a dirty worktree."""
+    before = ByteSnapshot.capture(cwd / module)
     try:
         subprocess.run(
             ["cosmic-ray", "apply", str(module), m.operator, str(m.occurrence)],
@@ -93,7 +97,7 @@ def replay_is_killed(module: Path, m: Mutant, test_cmd: list[str], cwd: Path) ->
         proc = subprocess.run(test_cmd, cwd=cwd, capture_output=True, text=True, check=False)
         return proc.returncode != 0  # a failing test IS the kill signal
     finally:
-        subprocess.run(["git", "checkout", "--", str(module)], cwd=cwd, check=True)
+        before.restore()
 
 
 @dataclass
@@ -131,6 +135,46 @@ def efficacy_gate(
         (earned if replay(module, m, test_cmd, cwd) else unearned).append(m)
     regressed = [m for m in control if not replay(module, m, test_cmd, cwd)]
     return EfficacyReport(earned, unearned, regressed, len(control))
+
+
+@dataclass
+class PreservationReport:
+    applied: bool
+    killed_before: bool
+    killed_after: bool
+
+    @property
+    def ok(self) -> bool:
+        return self.applied and self.killed_before and self.killed_after
+
+
+def preservation_adhoc_gate(
+    module: Path,
+    find: str,
+    replace: str,
+    test_file: Path,
+    before_test: str,
+    test_cmd: list[str],
+    *,
+    cwd: Path,
+    run: Callable[[list[str]], int],
+) -> PreservationReport:
+    """Prove an assertion-changing Sharpen edit retains one pre-existing kill off the mutation allowlist."""
+    module_snapshot = ByteSnapshot.capture(cwd / module)
+    test_snapshot = ByteSnapshot.capture(cwd / test_file)
+    try:
+        source = module_snapshot.data.decode("utf-8")
+        if source.count(find) != 1:
+            return PreservationReport(False, False, False)
+        (cwd / module).write_text(source.replace(find, replace), encoding="utf-8")
+        (cwd / test_file).write_text(before_test, encoding="utf-8")
+        killed_before = run(test_cmd) != 0
+        (cwd / test_file).write_bytes(test_snapshot.data)
+        killed_after = run(test_cmd) != 0
+        return PreservationReport(True, killed_before, killed_after)
+    finally:
+        test_snapshot.restore()
+        module_snapshot.restore()
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -336,6 +380,42 @@ def _run_efficacy(args: argparse.Namespace) -> int:
     return 0 if rep.ok else 1
 
 
+def _run_preservation(args: argparse.Namespace) -> int:
+    before = git_show(args.ref, args.test_file, cwd=args.repo)
+    test_cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-x",
+        "-q",
+        "--no-header",
+        "-p",
+        "no:randomly",
+        *args.tests,
+    ]
+
+    def run(cmd: list[str]) -> int:
+        return subprocess.run(
+            cmd, cwd=args.repo, capture_output=True, text=True, check=False
+        ).returncode
+
+    rep = preservation_adhoc_gate(
+        args.module,
+        args.find,
+        args.replace,
+        args.test_file,
+        before,
+        test_cmd,
+        cwd=args.repo,
+        run=run,
+    )
+    print(
+        f"preservation: {'PASS' if rep.ok else 'BOUNCE'} "
+        f"(applied={rep.applied}, before={rep.killed_before}, after={rep.killed_after})"
+    )
+    return 0 if rep.ok else 1
+
+
 def _main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -361,8 +441,23 @@ def _main() -> int:
     e.add_argument("--tests", nargs="+", required=True, help="test files/args the campaign used")
     e.add_argument("--repo", type=Path, default=Path.cwd())
 
+    h = sub.add_parser(
+        "preserve", help="off-allowlist witness: a pre-existing kill must remain killed"
+    )
+    h.add_argument("--module", type=Path, required=True)
+    h.add_argument("--find", required=True, help="exact source text occurring once")
+    h.add_argument("--replace", required=True, help="scenario-breaking replacement text")
+    h.add_argument("--test-file", type=Path, required=True)
+    h.add_argument("--ref", default="HEAD")
+    h.add_argument("--tests", nargs="+", required=True)
+    h.add_argument("--repo", type=Path, default=Path.cwd())
+
     args = p.parse_args()
-    return _run_anticheat(args) if args.cmd == "anticheat" else _run_efficacy(args)
+    if args.cmd == "anticheat":
+        return _run_anticheat(args)
+    if args.cmd == "efficacy":
+        return _run_efficacy(args)
+    return _run_preservation(args)
 
 
 if __name__ == "__main__":

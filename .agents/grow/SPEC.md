@@ -80,8 +80,9 @@ and an under-tested dead leaf are both skipped). Every component is a printed co
   documented, still-unwired centrality input).
 - **under-specification:** the **coverage-context signal** (uncovered + weakly-covered lines — those run by
   ≤1 test — produced by `grow_contexts.py` → `--contexts-json`). When supplied it DOMINATES the axis; the
-  private-attr seam proxy drops to a tiebreak (it scales with test VOLUME, not adequacy — review C5). Also
-  un-killed survivors (`--survivors-json`). An **untested** module (no test file) is a candidate at
+  private-attr seam proxy drops to a tiebreak (it scales with test VOLUME, not adequacy — review C5).
+  The v2 context artifact carries executing test nodeids; **TESTLESS** requires neither a static
+  attribution nor an executed context. Also un-killed survivors (`--survivors-json`). An untested module is a candidate at
   under-spec 1.0. With no real signal supplied, the seam proxy is used dampened and a low-confidence warning
   prints — never a silent zero.
 
@@ -104,7 +105,8 @@ module's scenario map is enumerated, not at module triage. repowise steers SELEC
 3. **Objective gate** (deterministic, no agent) — run the applicable `grow_gate` arms. Bounce a test that
    is vacuous (arm 2), redundant / not-load-bearing (arm 1), reaches no new line (arm 3), or whose race has
    no teeth (arm 4). A test **red on pristine code** is not a bounce — it is outcome-class 2 (latent bug):
-   route it to *Product-bug branch*, do not massage it green.
+   route it to *Product-bug branch*, do not massage it green. Temporary mutants restore captured bytes
+   and verify equality; Git-index access is never part of a gate.
 4. **Subjective gate** (see *Review architecture*) — is the added power real and plainly explainable, or
    redundant / over-fit / a change-detector in disguise?
 5. **Product-bug branch** (see *Product bugs*) if the grown test went red on a real defect.
@@ -118,7 +120,8 @@ module's scenario map is enumerated, not at module triage. repowise steers SELEC
 ### Product bugs (green-trunk policy)
 
 A grown test that fails on a real defect can't land red. Mirror Sharpen's source-bug policy, reversed:
-**always file the bug as an issue** (tracking), hand the fix to a dedicated subagent, and land test+fix
+**file the bug as an issue when outward actions are authorized**; otherwise record the explicit dry-run
+filing blocker. Land test+fix
 **together** so the new test guards the bug it found. If a confidently-correct fix can't be produced,
 **don't land the assertion** — file the bug high-severity, record `state: filed` (`filed:[#id]`), and leave
 trunk green. This is the reverse handshake to Sharpen's `grow-filed`.

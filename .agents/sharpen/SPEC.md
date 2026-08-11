@@ -136,6 +136,8 @@ to a dry-run rather than risk sharpening a module under active work.
    - an **asserted value changed to match observed output**;
    - an **expected value derived from the code under test** (a literal equal to a constant read from the
      module under test — a change-detector in disguise; also a Conformance-lint candidate).
+   Off the mutation allowlist, removing or changing an assertion requires an exact-text preservation
+   witness: the old test must kill the supplied source mutant and the proposal must keep killing it.
 5. **Subjective gate** (see *Review architecture*) — is the benefit real and plainly explainable, or
    over-fitting in disguise?
 6. **Source-bug branch** (see *Source bugs*) if a sharpened test went red on a real defect.
@@ -330,8 +332,8 @@ slow instruments never join it.
 Workflow → ExitWorktree) so an executor edit can never touch the maintainer's live tree — all executors
 operate on paths relative to that worktree. The **Efficacy axis consumes a pre-built mutation campaign**
 (`.mutation-cache/`, gitignored, reused across runs); it never launches one inline — a campaign outlives
-a step budget, so `poe mutate <module>` is an out-of-band pre-req and the harness *defers* Efficacy
-(Conformance-driven run) when the DB is absent. The audited-module allowlist is `poe mutate --list`
+a step budget, so `poe mutate <module>` is an out-of-band pre-req. Triage selects a module only when it
+has a complete campaign survivor or a target-grounded actionable Conformance finding. The audited-module allowlist is `poe mutate --list`
 (canonical `TARGETS` in `tools/mutate/run.py`); the harness runs the Efficacy axis only for a listed
 module and treats the rest as Conformance-only.
 

@@ -1,4 +1,4 @@
-"""Tests for the sharpen ledger lib. Run explicitly (tools/ is outside `poe all`):
+"""Tests run by `poe loop-tools-test`, or explicitly:
 uv run python -m pytest tools/test_sharpen_ledger.py
 """
 
@@ -104,30 +104,30 @@ def test_append_round_trips_a_record(tmp_path):
     assert sl.Ledger.load(root / ".ledger.sharpen.jsonl").latest("app/foo.py")["source_sha"] == "z"
 
 
-def test_map_tests_to_modules_picks_the_dominant_import(tmp_path):
+def test_map_tests_to_modules_keeps_every_directly_imported_module(tmp_path):
     root = _repo(tmp_path)
     # imports foo twice, bar once → maps to the module it leans on most
     (root / "tests/test_mix.py").write_text(
         "from overlay.app.foo import X\nfrom overlay.app.foo import X as Y\n"
-        "from overlay.app.bar import Y as Z\n\ndef test_z():\n    assert True\n",
+        "from overlay.app.bar import Y as Z\n\ndef test_z():\n    assert X == Z\n",
         encoding="utf-8",
     )
     mapping = sl.map_tests_to_modules(root)
     assert "tests/test_mix.py" in mapping["app/foo.py"]
-    assert "tests/test_mix.py" not in mapping.get("app/bar.py", [])
+    assert "tests/test_mix.py" in mapping["app/bar.py"]
 
 
-def test_map_tests_to_modules_prefers_the_filename_stem_over_import_count(tmp_path):
+def test_attribution_is_function_level_and_evidence_bearing(tmp_path):
     root = _repo(tmp_path)
     # test_bar.py leans on foo (imported twice) but its stem names bar → must map to bar, not foo
     (root / "tests/test_bar.py").write_text(
-        "from overlay.app.foo import X\nfrom overlay.app.foo import X as Y\n"
-        "from overlay.app.bar import Y as Z\n\ndef test_bar():\n    assert True\n",
+        "from overlay.app.foo import X\nfrom overlay.app.bar import Y as Z\n\n"
+        "def test_bar():\n    assert Z == 2\n",
         encoding="utf-8",
     )
-    mapping = sl.map_tests_to_modules(root)
-    assert "tests/test_bar.py" in mapping["app/bar.py"]
-    assert "tests/test_bar.py" not in mapping["app/foo.py"]
+    edges = [e for e in sl.test_attributions(root) if e.test_file == "tests/test_bar.py"]
+    assert any(e.module == "app/bar.py" and e.function == "test_bar" for e in edges)
+    assert any(e.module == "app/foo.py" and not e.high_confidence for e in edges)
 
 
 def test_status_is_stale_when_the_module_moved_instead_of_raising(tmp_path):

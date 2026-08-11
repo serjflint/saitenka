@@ -331,6 +331,7 @@ crosshair = { cmd = "uv run poe crosshair", cwd = "overlay" }
 complexity = { cmd = "uv run poe complexity", cwd = "overlay" }
 complexity-baseline = { cmd = "uv run poe complexity-baseline", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
+loop-tools-test = { cmd = "uv run poe loop-tools-test", cwd = "overlay" }
 test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
 affected = { cmd = "uv run poe affected", cwd = "overlay" }
 cov = { cmd = "uv run poe cov", cwd = "overlay" }

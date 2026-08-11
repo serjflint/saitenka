@@ -1,14 +1,17 @@
 {
-  "version": 2,
+  "version": 3,
   "proposal": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["applied", "test_file", "cut_module", "touched_func", "diff", "proposals"],
+    "required": ["applied", "test_file", "cut_module", "touched_func", "preservation_required", "witness_find", "witness_replace", "diff", "proposals"],
     "properties": {
       "applied": {"type": "boolean"},
       "test_file": {"type": "string"},
       "cut_module": {"type": "string"},
       "touched_func": {"type": "string"},
+      "preservation_required": {"type": "boolean", "description": "true when an existing assertion is removed or changed without a campaign"},
+      "witness_find": {"type": ["string", "null"], "description": "exact source snippet for the pre-existing kill witness"},
+      "witness_replace": {"type": ["string", "null"], "description": "scenario-breaking replacement for the witness"},
       "diff": {"type": "string"},
       "reason": {"type": ["string", "null"]},
       "proposals": {

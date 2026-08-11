@@ -251,6 +251,9 @@ complexity-baseline = { shell = "cd .. && uv run --project overlay --extra full 
 # Inner-loop task only — NOT in `all`: `cov` runs a superset marker set with `-n auto`, so it is the
 # gate's functional run too (no point running the suite a third time without coverage).
 test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e or live)'" }
+# Deterministic unit coverage for the Grow/Sharpen and reporting tools. Explicit path because pytest's
+# package testpaths intentionally stays on the shipped overlay suite.
+loop-tools-test = { shell = "uv run --extra full pytest -q tools" }
 # -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
 # FT code paths still run without the GIL — it just parallelises (91s → ~22s).
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not (slow or live)'" }
@@ -519,7 +522,7 @@ ps1 = { shell = "cd .. && pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "types", "arch", "invariants", "test-lint-gate", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock"]
+all = ["lint", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —

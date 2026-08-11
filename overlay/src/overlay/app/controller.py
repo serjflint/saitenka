@@ -480,10 +480,10 @@ class Reader:
         self._eof_handled = False
         # #100 reactive re-slot: `reslot_hook` fires on EVERY mpv `file-loaded` (our own eof loadfile,
         # a native autoload/playlist advance, a manual next/prev) so the overlay follows whatever mpv
-        # plays — installed for any interactive run, independent of auto-advance. `_slotted_name` dedups
+        # plays — installed for any interactive run, independent of auto-advance. `_slotted_path` dedups
         # the file we've already set up (the initial load, or a redundant file-loaded for the same file).
         self.reslot_hook: Callable[[Path], None] | None = None
-        self._slotted_name: str | None = None
+        self._slotted_path: Path | None = None
         self.osd = (1280, 720)
         # subtitle state (populated by set_subtitle; initialised for the live run() path)
         self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
@@ -1733,7 +1733,7 @@ class Reader:
         file mpv loads next — a native autoload/playlist advance, our own eof loadfile, or a manual
         next/prev. Seed ``initial`` (already set up by ``run_impl``) so its own file-loaded is skipped."""
         self.reslot_hook = hook
-        self._slotted_name = Path(str(initial)).name
+        self._slotted_path = self.current_media_path() or Path(str(initial)).expanduser()
 
     def _on_file_loaded(self) -> None:
         """A new file finished loading — re-slot the overlay onto it (once per distinct file). Skips the
@@ -1741,9 +1741,9 @@ class Reader:
         if self.reslot_hook is None:
             return
         p = self.current_media_path()
-        if p is None or p.name == self._slotted_name:
+        if p is None or p == self._slotted_path:
             return
-        self._slotted_name = p.name
+        self._slotted_path = p
         self.reslot_hook(p)
 
     def poll_once(self) -> bool:

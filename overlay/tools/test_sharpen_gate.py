@@ -1,4 +1,4 @@
-"""Tests for the Sharpen anti-lobotomization gate. Run explicitly (tools/ is outside `poe all`):
+"""Tests run by `poe loop-tools-test`, or explicitly:
 uv run python -m pytest tools/test_sharpen_gate.py
 """
 
@@ -152,3 +152,57 @@ def test_full_control_catches_the_narrowing_bypass_arm_b_misses():
         Path("m.py"), targets, control, [], cwd=Path(), replay=_fake_replay(killed)
     )
     assert rep.earned and rep.score_dropped and not rep.ok
+
+
+def _adhoc_files(tmp_path: Path) -> tuple[Path, Path]:
+    module = tmp_path / "module.py"
+    test_file = tmp_path / "test_module.py"
+    module.write_text("def enabled():\n    return True\n", encoding="utf-8")
+    test_file.write_text(
+        "def test_enabled():\n    assert enabled() is not None\n", encoding="utf-8"
+    )
+    return module, test_file
+
+
+def test_preservation_adhoc_requires_old_and_new_tests_to_kill_the_witness(tmp_path):
+    module, test_file = _adhoc_files(tmp_path)
+    before = "def test_enabled():\n    assert enabled() is True\n"
+
+    rep = sg.preservation_adhoc_gate(
+        module.relative_to(tmp_path),
+        "return True",
+        "return False",
+        test_file.relative_to(tmp_path),
+        before,
+        ["TEST"],
+        cwd=tmp_path,
+        run=lambda _cmd: 1,
+    )
+
+    assert rep.killed_before and rep.killed_after and rep.ok
+    assert module.read_text(encoding="utf-8") == "def enabled():\n    return True\n"
+    assert test_file.read_text(encoding="utf-8").endswith("is not None\n")
+
+
+def test_preservation_adhoc_bounces_a_lost_preexisting_kill(tmp_path):
+    module, test_file = _adhoc_files(tmp_path)
+    before = "def test_enabled():\n    assert enabled() is True\n"
+
+    def run(_cmd):
+        return 1 if "is True" in test_file.read_text(encoding="utf-8") else 0
+
+    rep = sg.preservation_adhoc_gate(
+        module.relative_to(tmp_path),
+        "return True",
+        "return False",
+        test_file.relative_to(tmp_path),
+        before,
+        ["TEST"],
+        cwd=tmp_path,
+        run=run,
+    )
+
+    assert rep.killed_before and not rep.killed_after
+    assert not rep.ok
+    assert module.read_text(encoding="utf-8") == "def enabled():\n    return True\n"
+    assert test_file.read_text(encoding="utf-8").endswith("is not None\n")

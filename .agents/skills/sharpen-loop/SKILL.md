@@ -28,9 +28,13 @@ Read `.agents/sharpen/GUIDE.md` only when explaining the design or adjudicating 
 
 1. Work in a clean, dedicated git worktree. Keep every command relative to that worktree.
 2. Run selection, baseline checks, lint, gates, hashing, and ledger operations directly with shell tools from `overlay/`. Do not delegate deterministic commands to an agent.
-3. Stop and ledger a `dry-run` when the baseline is red/flaky, the open-PR exclusion is unavailable, or reviewer fidelity cannot be proven.
+3. Stop before authoring when triage has neither a target-grounded actionable finding nor a complete
+   campaign survivor. Ledger a `dry-run` when the baseline is red/flaky, the open-PR exclusion is
+   unavailable, or reviewer fidelity cannot be proven.
 4. Invoke the author in a fresh isolated context. Give it only the selected module, mapped test file, applicable axis evidence, rubric, scope guard, and prior gate bounce on retry. Capture the host-returned invocation id.
-5. Validate the author's response against `.agents/sharpen/contracts.json`, then run the objective gate directly. Retry at most three times, reverting only the patch created by the failed attempt.
+5. Validate the author's response against `.agents/sharpen/contracts.json`, then run the objective gate
+   directly. Off the mutation allowlist, an assertion replacement/removal must pass the exact-text
+   preservation witness. Retry at most three times, reverting only the patch created by the failed attempt.
 6. Invoke the skeptic in a second fresh isolated context with only factual WHAT plus DIFF. Do not include the author's rationale or claimed kills. Capture its invocation id.
 7. If the skeptic says `UPHELD`, invoke the judge in a third fresh isolated context with the same WHAT plus DIFF. Do not include the first review or its grounds. Capture its invocation id.
 8. Ship only when both independent reviewers say `UPHELD`. Either `REFUTED` means drop the candidate.
@@ -54,7 +58,8 @@ Use the host's equivalent of a context-free subagent invocation. In Codex enviro
 Before reporting success, confirm:
 
 - the mapped baseline tests were green before the edit;
-- the anti-cheat arm passed, plus efficacy replay when a complete DB existed;
+- the anti-cheat arm passed, plus efficacy replay or the required preservation witness;
+- every temporary mutation restored its pre-run bytes exactly;
 - author, skeptic, and judge identities are distinct on an upheld path;
 - the ledger's `review.verdict` is the final two-reviewer verdict;
 - a refutation-derived alternative is recorded as a hand-off, never as an UPHOLD or an automatic retry;

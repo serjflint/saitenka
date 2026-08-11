@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import sharpen_ledger as sl
 import sharpen_triage as st
+from tool_json import InstrumentError, run_json
 
 
 @dataclass
@@ -54,18 +54,10 @@ class Candidate:
     notes: list[str] = field(default_factory=list)
 
 
-def _run(cmd: list[str], cwd: Path) -> str:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False).stdout
-
-
 def fan_in_by_module(root: Path) -> dict[str, int]:
     """Import in-degree per module — how many other overlay modules import it (value/centrality proxy).
     From `ruff analyze graph` (a map: file → [files it imports]); we invert it to count dependents."""
-    raw = _run(["uv", "run", "ruff", "analyze", "graph", "src/overlay"], root)
-    try:
-        graph: dict[str, list[str]] = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        return {}
+    graph = run_json(["uv", "run", "ruff", "analyze", "graph", "src/overlay"], root, dict)
 
     def key(path: str) -> str | None:
         p = Path(path).as_posix()
@@ -87,6 +79,19 @@ def all_modules(root: Path) -> list[str]:
     made them invisible (C5). pathlib rglob, not a shell search."""
     base = root / sl.SRC
     return sorted(str(p.relative_to(base)) for p in base.rglob("*.py"))
+
+
+def merge_test_evidence(
+    modules: list[str],
+    static: dict[str, list[str]],
+    contexts: dict[str, list[str]] | None,
+) -> dict[str, list[str]]:
+    """Combine static attribution with tests coverage proved executed for each module."""
+    out = {module: set(static.get(module, [])) for module in modules}
+    for module, tests in (contexts or {}).items():
+        if module in out:
+            out[module].update(tests)
+    return {module: sorted(tests) for module, tests in out.items()}
 
 
 def score_candidates(cands: list[Candidate]) -> None:
@@ -122,6 +127,7 @@ def rank(
     *,
     survivors: dict[str, int] | None = None,
     dead_ctx: dict[str, int] | None = None,
+    context_tests: dict[str, list[str]] | None = None,
     check_network: bool = True,
 ) -> list[Candidate]:
     test_map = sl.map_tests_to_modules(root)
@@ -130,8 +136,7 @@ def rank(
     pr_paths = st.open_pr_paths(root) if check_network else set()
 
     # Universe = every source module, not just those with a test file — so untested code is rankable (C5).
-    universe: dict[str, list[str]] = {m: [] for m in all_modules(root)}
-    universe.update(test_map)
+    universe = merge_test_evidence(all_modules(root), test_map, context_tests)
 
     cands: list[Candidate] = []
     for module, tests in sorted(universe.items()):
@@ -170,6 +175,36 @@ def _load_json_map(path: str | None, root: Path) -> dict[str, int] | None:
     return {str(k): int(v) for k, v in data.items()}
 
 
+def _load_contexts(
+    path: str | None, root: Path
+) -> tuple[dict[str, int] | None, dict[str, list[str]] | None]:
+    if not path:
+        return None, None
+    data = json.loads((root / path).read_text(encoding="utf-8"))
+    if (
+        not isinstance(data, dict)
+        or data.get("version") != 2
+        or not isinstance(data.get("modules"), dict)
+    ):
+        raise InstrumentError("contexts JSON is not v2; regenerate it with grow_contexts.py")
+    counts: dict[str, int] = {}
+    tests: dict[str, list[str]] = {}
+    for module, row in data["modules"].items():
+        if not isinstance(module, str) or not isinstance(row, dict):
+            raise InstrumentError("contexts JSON contains an invalid module row")
+        under_spec = row.get("under_spec")
+        nodeids = row.get("test_nodeids")
+        if (
+            not isinstance(under_spec, int)
+            or not isinstance(nodeids, list)
+            or not all(isinstance(nodeid, str) for nodeid in nodeids)
+        ):
+            raise InstrumentError(f"contexts JSON contains invalid evidence for {module}")
+        counts[module] = under_spec
+        tests[module] = sorted({nodeid.split("::", 1)[0] for nodeid in nodeids})
+    return counts, tests
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--top", type=int, default=0, help="print only the top N live candidates")
@@ -177,9 +212,7 @@ def main() -> None:
     ap.add_argument(
         "--survivors-json", help="optional {module_key: survivor_count} from a mutate campaign"
     )
-    ap.add_argument(
-        "--contexts-json", help="optional {module_key: dead_context_count} from coverage contexts"
-    )
+    ap.add_argument("--contexts-json", help="optional v2 module evidence from grow_contexts.py")
     args = ap.parse_args()
     root = Path.cwd()
     if args.no_network:
@@ -195,10 +228,12 @@ def main() -> None:
             "tested-module order.",
             file=sys.stderr,
         )
+    dead_ctx, context_tests = _load_contexts(args.contexts_json, root)
     cands = rank(
         root,
         survivors=_load_json_map(args.survivors_json, root),
-        dead_ctx=_load_json_map(args.contexts_json, root),
+        dead_ctx=dead_ctx,
+        context_tests=context_tests,
         check_network=not args.no_network,
     )
     live = [c for c in cands if not c.excluded]

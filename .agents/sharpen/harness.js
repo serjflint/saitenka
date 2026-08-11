@@ -24,7 +24,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 2 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 3 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -81,12 +81,15 @@ const BASELINE = {
 
 const PROPOSAL = {
   type: 'object', additionalProperties: false,
-  required: ['applied', 'test_file', 'cut_module', 'touched_func', 'diff', 'proposals'],
+  required: ['applied', 'test_file', 'cut_module', 'touched_func', 'preservation_required', 'witness_find', 'witness_replace', 'diff', 'proposals'],
   properties: {
     applied: { type: 'boolean', description: 'the edit was written to the test file' },
     test_file: { type: 'string', description: 'edited test path, repo-relative (e.g. overlay/tests/test_x.py)' },
     cut_module: { type: 'string', description: 'dotted code-under-test module for anti-cheat cut-derived, e.g. overlay.app.scoring' },
     touched_func: { type: 'string', description: 'the production def whose survivors this claims to kill (scopes the efficacy replay)' },
+    preservation_required: { type: 'boolean', description: 'existing assertion removed/changed without a campaign' },
+    witness_find: { type: ['string', 'null'], description: 'exact source snippet for the old kill witness' },
+    witness_replace: { type: ['string', 'null'], description: 'scenario-breaking witness replacement' },
     diff: { type: 'string', description: 'unified diff of the test edit' },
     reason: { type: ['string', 'null'], description: 'why no edit was applied' },
     proposals: {
@@ -106,11 +109,13 @@ const PROPOSAL = {
 
 const GATE = {
   type: 'object', additionalProperties: false,
-  required: ['pass', 'anticheat_clean', 'efficacy_pass', 'report'],
+  required: ['pass', 'anticheat_clean', 'efficacy_pass', 'preservation_pass', 'restoration_verified', 'report'],
   properties: {
     pass: { type: 'boolean', description: 'both arms clean' },
     anticheat_clean: { type: 'boolean' },
     efficacy_pass: { type: 'boolean' },
+    preservation_pass: { type: ['boolean', 'null'] },
+    restoration_verified: { type: 'boolean' },
     report: { type: 'string', description: 'the exact bounce lines / earned+regressed counts, verbatim from the tool' },
   },
 }
@@ -230,7 +235,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       ? `MODE Efficacy: kill the non-equivalent survivor cluster in \`${base.before.survivor_func ?? 'the module'}\`. Read only that function + the target test file + AGENTS.md "## Testing". Set touched_func to that def and cut_module to its dotted path.\n`
       : `MODE Conformance (${base.before.actionable} actionable violation(s) exist per triage): run \`uv run poe test-lint-json\` and LOCATE the actual actionable hits in ${pick.tests.join(', ')} — rules OTHER than the metric ones (test-assert-private-attr / test-monkeypatch-private-target). Fix ONE genuine hit: correct a mis-levelled tier marker, drop a redundant private half of a compound assert, or tighten an under-assertion to observable behaviour. There is no mutation survivor — do NOT invent one, and do NOT make a cosmetic edit that changes no caught-failure set (splitting \`assert A and B\` into two asserts is worthless — the review WILL drop it). If you cannot tie your edit to a concrete actionable test-lint hit, return applied=false. Set touched_func to "" and cut_module to the dotted module path.\n`) +
     `Minimum decisive context: the before-snapshot is ${JSON.stringify(base.before)}.\n` +
-    `Assert OBSERVABLE behaviour (return value / emitted IPC / written note), never a private attr or mock call-count. Apply the edit ONLY to a target test file. Emit a named, deduplicated proposal list and the unified diff. If there is genuinely nothing worth sharpening, return applied=false with the reason (a valid terminal outcome — never fabricate an edit).\n` +
+    `Assert OBSERVABLE behaviour (return value / emitted IPC / written note), never a private attr or mock call-count. Apply the edit ONLY to a target test file. If an existing assertion is removed or changed and there is no campaign, set preservation_required=true and supply a one-line witness_find→witness_replace source mutation that the old test killed and the proposal must still kill. Emit a named, deduplicated proposal list and the unified diff. If there is genuinely nothing worth sharpening, return applied=false with the reason.\n` +
     (carry ? `\nPRIOR ATTEMPT BOUNCED — do not repeat it. Gate report:\n${carry}\n` : ''),
     { phase: 'Propose', schema: PROPOSAL, label: `author#${attempt}` },
   )
@@ -243,8 +248,10 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `Arm B (anti-cheat, fast): \`uv run python tools/sharpen_gate.py anticheat ${proposal.test_file.replace('overlay/', '')} --cut ${proposal.cut_module} --repo .\` (bounces removed/weakened/trivial/cut-derived asserts vs HEAD).\n` +
     (base.before.db
       ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/overlay/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
-      : `Arm A (efficacy): SKIP — Conformance-driven run (no campaign DB for this module). Record efficacy_pass=true with report "n/a — no mutation campaign".\n`) +
-    `pass = both arms clean. If either bounces, pass=false and quote the BOUNCE/REGRESSED lines.`,
+      : proposal.preservation_required
+        ? `Arm A substitute (preservation witness): \`uv run python tools/sharpen_gate.py preserve --module src/overlay/${pick.module} --find ${JSON.stringify(proposal.witness_find)} --replace ${JSON.stringify(proposal.witness_replace)} --test-file ${proposal.test_file.replace('overlay/', '')} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\`. Set preservation_pass from its verdict and efficacy_pass=true (n/a).\n`
+        : `Arm A/preservation: N/A — no campaign and no existing assertion changed. Set efficacy_pass=true and preservation_pass=null.\n`) +
+    `Verify source and test bytes were restored exactly and set restoration_verified. pass = anticheat_clean AND efficacy_pass AND restoration_verified AND (preservation_pass !== false). Quote every BOUNCE/REGRESSED line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
   if (gate && gate.pass) break

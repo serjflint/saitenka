@@ -59,7 +59,8 @@ verbatim — never work around it by touching another file.
 > - `concurrency` gap: `liveness` on the CONTROL test first (its oracle must be live), then `concurrency
 >   --regression {reg node} --control {control node} --control-file {control file} --control-test {name}
 >   --repo .` (both PASS, control oracle live).
-> `pass` = additive-only AND every applicable arm clean; quote every BOUNCE line.
+> Verify temporary files returned to their pre-gate bytes. `pass` = additive-only AND restoration verified
+> AND every applicable arm clean; quote every BOUNCE line.
 
 ## Skeptic (isolated adversarial verifier)
 

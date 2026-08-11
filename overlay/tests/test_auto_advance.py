@@ -179,6 +179,46 @@ def test_on_file_loaded_reslots_once_per_distinct_file(tmp_path):
     assert seen == [tmp_path / "Show 02.mkv"]
 
 
+def test_on_file_loaded_reslots_same_basename_from_a_different_parent(tmp_path):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    first = tmp_path / "season-1" / "Episode.mkv"
+    second = tmp_path / "season-2" / "Episode.mkv"
+    seen = []
+    reader.install_reslot_hook(seen.append, initial=first)
+
+    ipc.props["path"] = str(second)
+    reader._on_file_loaded()
+
+    assert seen == [second]
+
+
+def test_on_file_loaded_resolves_relative_path_against_working_directory(tmp_path):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    seen = []
+    reader.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
+
+    ipc.props["working-directory"] = str(tmp_path)
+    ipc.props["path"] = "Show 02.mkv"
+    reader._on_file_loaded()
+
+    assert seen == [tmp_path / "Show 02.mkv"]
+
+
+def test_on_file_loaded_expands_tilde_before_reslot(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    seen = []
+    reader.install_reslot_hook(seen.append, initial=tmp_path / "Show 01.mkv")
+
+    ipc.props["path"] = "~/Show 02.mkv"
+    reader._on_file_loaded()
+
+    assert seen == [tmp_path / "Show 02.mkv"]
+
+
 def test_on_file_loaded_dispatched_from_drain_events(tmp_path):
     # Wiring guard: a `file-loaded` event pulled off the mpv stream must reach the re-slot hook.
     ipc = FakeIPC()

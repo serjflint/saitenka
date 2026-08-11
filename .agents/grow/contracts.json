@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "gap": {
     "type": "object",
     "additionalProperties": false,
@@ -57,7 +57,7 @@
   "gate": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["pass", "arms_run", "report"],
+    "required": ["pass", "restoration_verified", "arms_run", "report"],
     "properties": {
       "pass": {"type": "boolean", "description": "every applicable arm clean AND additive-only"},
       "additive_only": {"type": "boolean", "description": "anticheat_diff reports only added assert-nodes (Grow scope)"},
@@ -65,6 +65,7 @@
       "context_pass": {"type": ["boolean", "null"]},
       "growth_pass": {"type": ["boolean", "null"]},
       "concurrency_pass": {"type": ["boolean", "null"]},
+      "restoration_verified": {"type": "boolean", "description": "every temporary source/test edit was restored byte-for-byte"},
       "arms_run": {"type": "array", "items": {"type": "string"}, "description": "which arms actually ran (the rest are n/a for this gap kind)"},
       "report": {"type": "string", "description": "the exact PASS/BOUNCE lines, verbatim from grow_gate"}
     }
@@ -105,13 +106,14 @@
   "record": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["state", "ledger_appended"],
+    "required": ["state", "ledger_appended", "filing_blocker"],
     "properties": {
       "state": {"type": "string", "enum": ["closed", "open", "unclosable", "filed", "dry-run"]},
       "outcome": {"type": ["string", "null"], "enum": ["coverage-only", "bug", "robustness", "design", null]},
       "ledger_appended": {"type": "boolean"},
       "pr_url": {"type": ["string", "null"]},
       "filed_issues": {"type": "array", "items": {"type": "string"}},
+      "filing_blocker": {"type": ["string", "null"], "description": "why a red-on-pristine bug was not filed in a dry run"},
       "note": {"type": "string"}
     }
   },

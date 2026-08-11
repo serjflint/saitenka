@@ -67,7 +67,8 @@ Never copy `skeptic_verdict` into `verdict` without applying the judge result.
 ## Failure semantics
 
 - No green baseline: append `state: dry-run`, list quarantined nodes, and stop.
-- No complete mutation DB: defer Efficacy explicitly; continue only on a real actionable Conformance hit.
+- No complete mutation DB: continue only on a target-grounded actionable Conformance hit. Any assertion
+  replacement/removal must pass `sharpen_gate.py preserve`; exact-byte restoration is mandatory.
 - No actionable finding: record `left-undone`; do not ask the author to fabricate value.
 - Objective gate exhausted: record `left-undone` with the last bounce.
 - Refuted candidate with `better_fix`: revert it, record the recommendation and its scope, then stop;

@@ -1,4 +1,4 @@
-"""Tests for the reflection ledger lib. Run explicitly (tools/ is outside `poe all`):
+"""Tests run by `poe loop-tools-test`, or explicitly:
 uv run python -m pytest tools/test_grow_reflect.py
 """
 

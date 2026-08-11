@@ -28,7 +28,7 @@ in-progress work offline (fail-closed), open-PR needs `gh`. Run from `overlay/`:
 from __future__ import annotations
 
 import argparse
-import json
+import sqlite3
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import sharpen_ledger as sl
+from tool_json import InstrumentError, run_json
 
 # Actionable rules yield per-hit fixes; metric rules are per-file coupling counts (rank, don't enumerate).
 METRIC_RULES = {"test-assert-private-attr", "test-monkeypatch-private-target"}
@@ -52,6 +53,8 @@ class Candidate:
     churn: int = 0
     age_days: int | None = None
     survival: float | None = None
+    campaign_complete: bool = False
+    campaign_survivors: int = 0
     status: str = sl.UNSEEN
     excluded: str = ""  # non-empty → dropped, with the reason
     score: float = 0.0
@@ -59,25 +62,69 @@ class Candidate:
 
 
 def _run(cmd: list[str], cwd: Path) -> str:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False).stdout
+    try:
+        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        raise InstrumentError(f"instrument unavailable: {cmd[0]}") from exc
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or "no stderr"
+        raise InstrumentError(f"instrument failed ({proc.returncode}): {' '.join(cmd)}: {detail}")
+    return proc.stdout
 
 
 def conformance_by_module(root: Path, test_map: dict[str, list[str]]) -> dict[str, tuple[int, int]]:
     """module -> (total hits, actionable hits) from a single `test-lint --json` scan."""
-    raw = _run(
+    hits = run_json(
         ["uv", "run", "ast-grep", "scan", "-c", "sgconfig-tests.yml", "--json=compact", "tests"],
         root,
+        list,
     )
-    hits = json.loads(raw) if raw.strip() else []
-    file_to_module = {t: m for m, ts in test_map.items() for t in ts}
+    edges_by_file: dict[str, list[sl.Attribution]] = {}
+    for edge in sl.test_attributions(root):
+        edges_by_file.setdefault(edge.test_file, []).append(edge)
+    modules_by_file: dict[str, set[str]] = {}
+    for module, tests in test_map.items():
+        for test in tests:
+            modules_by_file.setdefault(test, set()).add(module)
+    symbol_owners = sl.private_symbol_owners(root)
     out: dict[str, list[int]] = {m: [0, 0] for m in test_map}
     for h in hits:
-        m = file_to_module.get(h["file"])
-        if m is None:
+        test_file = h.get("file")
+        start = h.get("range", {}).get("start", {}).get("line")
+        if not isinstance(test_file, str) or not isinstance(start, int):
+            raise InstrumentError("ast-grep finding lacks file/range.start.line")
+        line = start + 1
+        grounded = [
+            edge
+            for edge in edges_by_file.get(test_file, [])
+            if edge.high_confidence and edge.start_line <= line <= edge.end_line
+        ]
+        grounded_modules = {edge.module for edge in grounded}
+        private_names = {
+            item.get("text")
+            for item in h.get("metaVariables", {}).get("multi", {}).get("secondary", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("text"), str)
+            and item["text"].startswith("_")
+            and item["text"].isidentifier()
+        }
+        owner_sets = [symbol_owners.get(name, set()) for name in private_names]
+        owned = set.intersection(*owner_sets) if owner_sets and all(owner_sets) else set()
+        if len(owned) == 1:
+            modules = owned
+            target_grounded = True
+        elif owned and grounded_modules:
+            modules = owned & grounded_modules
+            target_grounded = len(modules) == 1
+        else:
+            modules = grounded_modules or modules_by_file.get(test_file, set())
+            target_grounded = len(modules) == 1
+        if not modules:
             continue
-        out[m][0] += 1
-        if h["ruleId"] not in METRIC_RULES:
-            out[m][1] += 1
+        for module in modules:
+            out[module][0] += 1
+            if target_grounded and h.get("ruleId") not in METRIC_RULES:
+                out[module][1] += 1
     return {m: (t, a) for m, (t, a) in out.items()}
 
 
@@ -97,11 +144,7 @@ def churn_and_age(root: Path, module: str, tests: list[str]) -> tuple[int, int |
 
 def open_pr_paths(root: Path) -> set[str]:
     """Files any OPEN PR is editing — modules under active work are excluded from triage."""
-    raw = _run(["gh", "pr", "list", "--state", "open", "--json", "files"], root.parent)
-    try:
-        prs = json.loads(raw) if raw.strip() else []
-    except json.JSONDecodeError:
-        return set()
+    prs = run_json(["gh", "pr", "list", "--state", "open", "--json", "files"], root.parent, list)
     return {f["path"] for pr in prs for f in pr.get("files", [])}
 
 
@@ -112,15 +155,45 @@ def survival_from_ledger(ledger: sl.Ledger, module: str) -> float | None:
     return None
 
 
+def campaign_readiness(root: Path, module: str) -> tuple[bool, int]:
+    """A campaign is complete only when every declared mutant has a terminal result."""
+    db = root / ".mutation-cache" / f"{sl.SRC}/{module}".replace("/", "_")
+    db = db.with_suffix(".sqlite")
+    if not db.exists():
+        return False, 0
+    try:
+        con = sqlite3.connect(db)
+        total = int(con.execute("select count(*) from mutation_specs").fetchone()[0])
+        done = int(
+            con.execute(
+                "select count(distinct s.job_id) from mutation_specs s "
+                "join work_results r on r.job_id = s.job_id where r.test_outcome is not null"
+            ).fetchone()[0]
+        )
+        survived = int(
+            con.execute(
+                "select count(distinct s.job_id) from mutation_specs s "
+                "join work_results r on r.job_id = s.job_id where r.test_outcome = 'SURVIVED'"
+            ).fetchone()[0]
+        )
+    except sqlite3.DatabaseError as exc:
+        raise InstrumentError(f"invalid mutation campaign: {db}") from exc
+    finally:
+        if "con" in locals():
+            con.close()
+    return total > 0 and done == total, survived
+
+
+def candidate_ready(actionable: int, campaign_complete: bool, campaign_survivors: int) -> bool:
+    return actionable > 0 or (campaign_complete and campaign_survivors > 0)
+
+
 def open_issue(root: Path, ref: str) -> bool:
     num = ref.lstrip("#").split("#")[-1].split()[0].strip("#")
     if not num.isdigit():
         return False
-    out = _run(["gh", "issue", "view", num, "--json", "state"], root.parent)
-    try:
-        return json.loads(out).get("state") == "OPEN" if out.strip() else False
-    except json.JSONDecodeError:
-        return False
+    out = run_json(["gh", "issue", "view", num, "--json", "state"], root.parent, dict)
+    return out.get("state") == "OPEN"
 
 
 def _norm(vals: list[float]) -> list[float]:
@@ -142,6 +215,7 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
         c.churn, c.age_days = churn_and_age(root, module, tests)
         c.status = ledger.status(module, root, tests)
         c.survival = survival_from_ledger(ledger, module)
+        c.campaign_complete, c.campaign_survivors = campaign_readiness(root, module)
         # exclusions (hard drops). Grow-filed and healed-state work offline (ledger-backed);
         # grow-filed is FAIL-CLOSED — excluded unless we can positively confirm every issue closed.
         touched = {f"{sl.SRC}/{module}", *tests} & pr_paths
@@ -153,6 +227,8 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
             not check_network or any(open_issue(root, i) for i in grow[module])
         ):
             c.excluded = f"grow-filed{'' if check_network else ' (offline, assumed open)'} ({','.join(grow[module])})"
+        elif not candidate_ready(c.actionable, c.campaign_complete, c.campaign_survivors):
+            c.excluded = "not-ready: no grounded actionable hit or complete campaign survivor"
         cands.append(c)
 
     live = [c for c in cands if not c.excluded]

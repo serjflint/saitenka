@@ -1,4 +1,4 @@
-"""Tests for the perf rot-guard's compare seam. Run explicitly (tools/ is outside `poe all`):
+"""Tests run by `poe loop-tools-test`, or explicitly:
 uv run python -m pytest tools/test_perf_gate.py
 """
 

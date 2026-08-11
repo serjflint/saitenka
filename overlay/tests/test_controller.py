@@ -1402,9 +1402,9 @@ def test_click_cross_reference_navigates_base_in_place(monkeypatch):
     _point_at_link(r, ipc)
     r.on_click()
     assert r.hover_view().nested.state is None  # NOT a nested popup
-    assert r._tip_state is not None and r._tip_state is not base  # base content replaced in place
-    assert len(r._tip_nav) == 1  # the previous view is pushed for back
-    assert tooltip.tip_back(r) is True and r._tip_state is base  # back restores the original entry
+    assert r.hover_view().tip.state is not None and r.hover_view().tip.state is not base
+    assert tooltip.tip_back(r) is True and r.hover_view().tip.state is base
+    assert tooltip.tip_back(r) is False
 
 
 class _WildcardDS:
