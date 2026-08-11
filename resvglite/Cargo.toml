@@ -1,6 +1,6 @@
 [package]
 name = "resvglite"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Thin PyO3 binding of resvg — the optional SVG rasterizer for saitenka's inline dictionary glyphs"
 license = "MIT OR Apache-2.0"
@@ -13,11 +13,13 @@ crate-type = ["cdylib"]
 # abi3 + abi3t (PEP 803): three wheels per platform from three interpreters — abi3-py313 (GIL 3.13+),
 # cp314t (free-threaded 3.14), abi3t-py315 (FT+GIL 3.15+); maturin picks the family from the build
 # interpreter. resvg is pure Rust (usvg parser + tiny-skia raster), no system libraries — matches the
-# taffylite self-contained-wheel bar. text-svg feature OFF: dictionary gaiji are vector paths, not
-# <text>, so we skip the fontdb dependency entirely.
+# taffylite self-contained-wheel bar. `text` is ON: some dictionary gaiji (大辞林 漢/呉 reading badges)
+# ARE <text> SVGs, not paths, and render as an empty box without a font (the #283 tofu bug); the caller
+# supplies the font bytes, so we still bundle none. `system-fonts` is a standalone-use fallback.
 [dependencies]
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py313", "abi3t-py315"] }
-resvg = { version = "0.45", default-features = false }
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts"] }
+log = "0.4"
 
 [profile.release]
 strip = true
