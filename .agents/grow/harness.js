@@ -24,7 +24,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 3 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 4 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
@@ -103,7 +103,7 @@ const PROPOSAL = {
 
 const GATE = {
   type: 'object', additionalProperties: false,
-  required: ['pass', 'arms_run', 'report'],
+  required: ['pass', 'restoration_verified', 'arms_run', 'report'],
   properties: {
     pass: { type: 'boolean', description: 'additive-only AND every applicable arm clean' },
     additive_only: { type: 'boolean' },
@@ -111,6 +111,7 @@ const GATE = {
     context_pass: { type: ['boolean', 'null'] },
     growth_pass: { type: ['boolean', 'null'] },
     concurrency_pass: { type: ['boolean', 'null'] },
+    restoration_verified: { type: 'boolean', description: 'temporary edits restored byte-for-byte' },
     arms_run: { type: 'array', items: { type: 'string' } },
     report: { type: 'string', description: 'the exact PASS/BOUNCE lines, verbatim' },
   },
@@ -137,13 +138,14 @@ const REVIEW = {
 
 const RECORD = {
   type: 'object', additionalProperties: false,
-  required: ['state', 'ledger_appended'],
+  required: ['state', 'ledger_appended', 'filing_blocker'],
   properties: {
     state: { type: 'string', enum: ['closed', 'open', 'unclosable', 'filed', 'dry-run'] },
     outcome: { type: ['string', 'null'], enum: ['coverage-only', 'bug', 'robustness', 'design', null] },
     ledger_appended: { type: 'boolean' },
     pr_url: { type: ['string', 'null'] },
     filed_issues: { type: 'array', items: { type: 'string' } },
+    filing_blocker: { type: ['string', 'null'] },
     note: { type: 'string' },
   },
 }
@@ -232,11 +234,12 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   if (proposal.red_on_pristine) {
     log(`grown test is RED on pristine code → latent bug (outcome class 2): ${proposal.reason ?? 'see proposal'}`)
     await revert(proposal)
-    trace.notes.push('red-on-pristine → filed a product bug (outcome class 2)')
-    const rec = await recordOutcome('filed', null, null, 'bug',
-      `Grown test for "${gap.dimension}" went red on pristine code — a real defect. Author note: ${proposal.reason ?? '(see diff)'}. File a product issue; do not land the assertion green (green-trunk).`)
-    trace.outcome = rec?.state ?? 'filed'
-    return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? 'filed', outcome: 'bug', openPr: OPEN_PR })
+    const bugState = canOpenPr ? 'filed' : 'dry-run'
+    trace.notes.push(`red-on-pristine → ${canOpenPr ? 'file product bug' : 'record explicit filing blocker'}`)
+    const rec = await recordOutcome(bugState, null, null, 'bug',
+      `Grown test for "${gap.dimension}" went red on pristine code — a real defect. Author note: ${proposal.reason ?? '(see diff)'}. ${canOpenPr ? 'File a product issue with the failing repro.' : 'Filing blocker: dry-run has no outward-action authorization.'}`)
+    trace.outcome = rec?.state ?? bugState
+    return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?? bugState, outcome: 'bug', openPr: OPEN_PR })
   }
 
   phase('Objective gate')
@@ -255,7 +258,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `Run the deterministic Grow objective gate on the author's edit. ${REL} Report tool output VERBATIM. (Read-only tools; edit nothing.)\n` +
     `1. ADDITIVE check (Grow↔Sharpen boundary): \`uv run python tools/grow_gate.py additive ${tf} --repo .\` — it must report ONLY added asserts. Any altered/removed assert ⇒ mutative ⇒ Sharpen scope ⇒ additive_only=false ⇒ BOUNCE. (Do NOT use sharpen_gate anticheat here — it misses same-tier value changes.)\n` +
     `2. ${armsSpec}\n` +
-    `pass (scenario) = additive_only AND liveness_pass AND (growth_pass OR context_pass) — arm-1 and arm-3 are ALTERNATIVE proofs of genuine growth (a killed scenario-mutant OR a newly-lit line); requiring BOTH would reject a covered-but-under-specified branch gap arm-1 proves but line-level arm-3 misses. A scenario gap with NEITHER arm-1 nor arm-3 → BOUNCE (no growth proof). pass (concurrency) = additive_only AND concurrency_pass. arms_run lists the arms actually executed. Quote every BOUNCE line.`,
+    `Verify every temporary source/test file equals its pre-gate bytes after the commands and set restoration_verified. pass (scenario) = additive_only AND restoration_verified AND liveness_pass AND (growth_pass OR context_pass) — arm-1 and arm-3 are ALTERNATIVE proofs of genuine growth. A scenario gap with NEITHER arm-1 nor arm-3 → BOUNCE. pass (concurrency) = additive_only AND restoration_verified AND concurrency_pass. arms_run lists the arms actually executed. Quote every BOUNCE line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
   trace.retries = attempt
@@ -389,15 +392,19 @@ async function revert(prop) {
 async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
   const reviewBlock = reviewResult ? JSON.stringify(reviewResult) : 'null (terminal outcome, no review reached)'
   const wantPr = canOpenPr && state === 'closed' && prop
+  const wantIssue = canOpenPr && state === 'filed' && outcome === 'bug'
   return agent(
-    `Append one Grow ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.grow.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, if opening a PR, git/gh).\n` +
+    `Append one Grow ledger record and ${wantPr ? 'open the PR' : wantIssue ? 'file the product issue' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.grow.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, when authorized below, git/gh).\n` +
     `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Compute gap_id + target_sha with tools/grow_ledger.py, stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, toolset_version from the manifest.\n` +
     `state: "${state}"${outcome ? `, outcome: "${outcome}"` : ''}. review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}.\n` +
     (prop ? `test: ${JSON.stringify(prop.test_name)}. decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. Captured diff: ${JSON.stringify(prop.diff)}.\n` : '') +
     `axes_not_applied: list every gate arm that was n/a for this ${gap.kind} gap and WHY (the silent-no-run guard — SPEC/ADAPTERS).\n` +
+    `Set filing_blocker to null when no bug filing is required or an issue was filed; for a dry-run latent bug set it to the explicit outward-authorization blocker.\n` +
     (extraNote ? `note: ${extraNote}\n` : '') +
     (wantPr
       ? `Then open a PR on a fresh branch off main (feat/grow-<symbol-stem>): body per SPEC "PR body" — the scenario now pinned, why a human should care, the gate evidence (arms run), the outcome class ${JSON.stringify(outcome)}, and gate report ${JSON.stringify(gate.report)}. Return its url. Do NOT merge.\n`
+      : wantIssue
+        ? `File one product issue containing the failing pristine repro, user impact, and target symbol. Return its reference in filed_issues; do not open a PR from the red test.\n`
       : `Do NOT open a PR, push, or file any issue. Leave the ledger append as the only change; print the PR body that WOULD be opened so the maintainer can review before enabling openPr.\n`),
     { phase: 'Record', schema: RECORD, label: 'record' },
   )

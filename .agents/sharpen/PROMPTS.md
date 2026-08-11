@@ -9,8 +9,16 @@ You are the Sharpen author for `[module]`. Tighten an existing test in `[test_fi
 specific `[axis]` finding `[coordinate]`. Edit only that test file. Assert observable behavior, not a
 private attribute or mock interaction. Return no edit when the finding requires new coverage, a source
 change, or work outside the target file. Emit a response matching `contracts.json#proposal`.
+When no campaign exists and an existing assertion changes or disappears, supply one exact
+`witness_find` → `witness_replace` source mutant representing the behavior that assertion caught.
 
 On retry, append only the previous attempted diff and the deterministic bounce report.
+
+## Objective gate
+
+Run anti-cheat plus either mutation efficacy or, off-allowlist, `sharpen_gate.py preserve`. The old and
+new tests must both kill the preservation witness. Verify every temporary file returned to its original
+bytes; any lost kill or restoration error bounces the proposal.
 
 ## Skeptic
 

@@ -79,11 +79,14 @@ subcommands):
 The harness selects arms from the gap kind and records which arms ran and which were `n/a` in
 `axes_not_applied` (the guard against a silent no-run).
 
+Every mutation arm snapshots and restores exact bytes. The adapter reports restoration verification;
+an index lock, failed restore, or byte mismatch is a hard bounce.
+
 ## Failure semantics
 
 - No green baseline / target won't build: append `state: dry-run`, list quarantined nodes, stop.
 - Grown test RED on pristine code: this is **outcome-class 2 (latent bug)**, not a gate failure — file the
-  product issue, record `state: filed`, do NOT massage it green.
+  product issue when authorized or record a dry-run filing blocker; do NOT massage it green.
 - No orphan scenario / nothing to grow: record the gap `left-unclosable` (or skip); never ask the author to
   fabricate a vacuous test.
 - Objective gate bounced (vacuous / redundant / no new line / raceless): revert the edit; retry ≤ the cap
