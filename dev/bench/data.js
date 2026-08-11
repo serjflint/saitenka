@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786446171005,
+  "lastUpdate": 1786449674191,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3779,6 +3779,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.418,
             "range": "±13.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d4ac79624432cc0514f54584d36bcd80f7e1e4d7",
+          "message": "Merge pull request #320 from serjflint/feat/runtime-profile-cycle-subtitle-track\n\nfix: full runtime profile cycle (subtitle track) + always-centered native subs + configurable sub-bg opacity",
+          "timestamp": "2026-08-11T15:00:41+03:00",
+          "tree_id": "263217c4c6635d1e5a7bbca6d21b3ce1155d8117",
+          "url": "https://github.com/serjflint/saitenka/commit/d4ac79624432cc0514f54584d36bcd80f7e1e4d7"
+        },
+        "date": 1786449672908,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.544,
+            "range": "±1.9%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.769,
+            "range": "±15.3%",
             "unit": "ms"
           }
         ]
