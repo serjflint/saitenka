@@ -83,6 +83,15 @@ class SubtitleFetchResult:
     )
 
 
+def has_track_for_slang(ipc, slang: str) -> bool:
+    """Whether a subtitle track is TAGGED with one of ``slang``'s languages — no untagged fallback
+    (unlike :func:`discover_tracks`, which grabs the first track when nothing matches). The live profile
+    switcher gates on this: cycling to a language the file has no track for keeps the current track and
+    warns, instead of silently grabbing an unrelated one."""
+    wants = [part.strip().lower() for part in slang.split(",") if part.strip()]
+    return _matching_track(sub_tracks(ipc), wants) is not None
+
+
 def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
     tracks = sub_tracks(ipc)
     wants = [part.strip().lower() for part in slang.split(",") if part.strip()]

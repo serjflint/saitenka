@@ -136,7 +136,10 @@ family of languages.
   or select one for a single run with `saitenka run … --profile <name>`.
 - A non-Japanese profile **picks its own subtitle track and font** automatically, and swaps in that
   language's dictionaries (a profile's `dicts` replace the base set; its `[mine]` overrides merge).
-- ++alt+shift+p++ cycles the active profile live inside the player (a no-op with a single profile).
+- ++alt+shift+p++ cycles the active profile live inside the player (a no-op with a single profile) —
+  the same full switch as launching with `--profile`: it re-selects that language's subtitle track,
+  so it colors and scans immediately. If the file has no track for that language the current one stays
+  and a toast says so.
 
 Profiles live under `[profiles.<name>]` in your config with a top-level `active_profile`; see
 [configuration](configuration.md).

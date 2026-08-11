@@ -7,6 +7,15 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Live profile cycle (++alt+shift+p++) is now a full switch.** Cycling to a second-language profile
+  mid-playback used to swap only the reading engine, leaving mpv on the original (e.g. Japanese) subtitle
+  track — so lookups ran the new language against the old track's text and missed, and a manual track
+  pick was classified as the plain, unscannable "known-language" secondary. The cycle now re-selects that
+  profile's own subtitle track (the same path a `--profile` launch uses), so it colors and scans at once;
+  a language the file has no track for keeps the current track and warns.
+
 ## [3.0.0] - 2026-08-11
 
 ### Added
