@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786479477752,
+  "lastUpdate": 1786487272945,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3959,6 +3959,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.389,
             "range": "±9.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d50d9b8c4d9f415c953ff125a0ee0b99dea87c08",
+          "message": "Merge pull request #325 from serjflint/chore/root-level-repo-wide-tasks\n\nchore(tasks): define repo-wide tasks at the repo root",
+          "timestamp": "2026-08-12T01:27:01+03:00",
+          "tree_id": "193370c59cac894b7805b6ff70334af746883ffb",
+          "url": "https://github.com/serjflint/saitenka/commit/d50d9b8c4d9f415c953ff125a0ee0b99dea87c08"
+        },
+        "date": 1786487272128,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.482,
+            "range": "±0.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.161,
+            "range": "±0.8%",
             "unit": "ms"
           }
         ]
