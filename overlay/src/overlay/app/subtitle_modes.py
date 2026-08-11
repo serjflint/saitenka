@@ -126,6 +126,10 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.subtitle_slang = slang
     if reader._get("secondary-sid") not in {None, False, "no"}:
         reader.ipc.command("set_property", "secondary-sid", "no")
+    # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),
+    # where a stale _translation_secondary_sid would leave the EN reveal stuck off — setup_secondary's
+    # `mirror == sid` guard would skip re-issuing secondary-sid. At launch the mirror is already None.
+    reader._translation_secondary_sid = None
     from overlay.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)

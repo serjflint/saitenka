@@ -212,6 +212,23 @@ def test_cycle_back_to_the_default_reselects_its_track_via_base_slang():
     assert ("set_property", "sid", 1) in reader.ipc.commands
 
 
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror():
+    """A live cycle re-runs configure(), which resets mpv's secondary-sid. The reader's mirror must be
+    nulled with it, else the EN translation reveal stays stuck off — setup_secondary's ``mirror == sid``
+    guard would skip re-issuing secondary-sid, so the reveal never comes back (P2 from review)."""
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
+    reader.ipc.props["track-list"] = _JA_FR_TRACKS
+    reader.ipc.props["secondary-sid"] = 6  # the EN translation is currently revealed
+    reader._translation_secondary_sid = 6
+
+    reader.cycle_profile()  # → fr, re-selects the track (configure runs mid-session)
+
+    assert reader._translation_secondary_sid is None  # mirror cleared → reveal can re-establish
+    assert ("set_property", "secondary-sid", "no") in reader.ipc.commands
+
+
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------
 
 
