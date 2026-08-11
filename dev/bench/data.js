@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786393704331,
+  "lastUpdate": 1786409823727,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3455,6 +3455,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 6.537,
             "range": "±9.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "55aec5e535f5b5702288c9e56dbc654e5dab7e96",
+          "message": "Merge pull request #310 from serjflint/fix/gaiji-tofu-kanji-nav\n\nfix(images): render <text> gaiji glyphs and preload media in stacked entries",
+          "timestamp": "2026-08-11T03:56:39+03:00",
+          "tree_id": "31f4b84d42d2b4dd809ac5689a2e0c41b14f6288",
+          "url": "https://github.com/serjflint/saitenka/commit/55aec5e535f5b5702288c9e56dbc654e5dab7e96"
+        },
+        "date": 1786409823108,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.382,
+            "range": "±0.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.373,
+            "range": "±15.5%",
             "unit": "ms"
           }
         ]
