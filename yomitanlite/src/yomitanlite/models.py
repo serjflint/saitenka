@@ -75,6 +75,7 @@ class Definition:
     tags: tuple[Tag, ...] = ()
     source: SourceTrace | None = None
     score: int = 0
+    sequence: int = -1
 
 
 @dataclass(frozen=True, slots=True)

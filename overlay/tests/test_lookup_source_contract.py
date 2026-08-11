@@ -6,7 +6,9 @@ import json
 import zipfile
 
 import dicthelp
-from overlay.app.source_adapter import DictionarySourceAdapter
+from overlay.app.config import DictDbOptions
+from overlay.app.dictdb import DictionaryDb
+from overlay.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
 from overlay.app.tokenize import Token
 
 from yomitanlite import (
@@ -28,13 +30,25 @@ from yomitanlite import (
 )
 
 
-def _dictionary(path, title, glossary, *, term="読む", reading="よむ"):
+def _dictionary(
+    path,
+    title,
+    glossary,
+    *,
+    term="読む",
+    reading="よむ",
+    score=5,
+    sequence=1456360,
+    sequenced=False,
+):
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("index.json", json.dumps({"title": title, "format": 3}))
+        archive.writestr(
+            "index.json", json.dumps({"title": title, "format": 3, "sequenced": sequenced})
+        )
         archive.writestr(
             "term_bank_1.json",
             json.dumps(
-                [[term, reading, "v1", "v1", 5, glossary, 1456360, "v1"]],
+                [[term, reading, "v1", "v1", score, glossary, sequence, "v1"]],
                 ensure_ascii=False,
             ),
         )
@@ -177,6 +191,33 @@ def test_production_source_preserves_french_deinflection_and_chain(tmp_path):
     assert entry.inflection_chain
 
 
+def test_production_source_preserves_configured_priority_and_card_provenance(tmp_path):
+    imported_first = _dictionary(
+        tmp_path / "plain.zip", "Plain", ["plain gloss"], score=100, sequence=999
+    )
+    configured_first = _dictionary(
+        tmp_path / "jmdict.zip",
+        "JMdict",
+        ["jmdict gloss"],
+        score=1,
+        sequence=1456360,
+        sequenced=True,
+    )
+    database = DictionaryDb.open(tmp_path / "dictionary.sqlite", DictDbOptions(persist_seq=True))
+    current = dicthelp.load_set([imported_first, configured_first], on=database)
+    current.dicts.reverse()
+    token = Token("読む", "読む", "よむ", "動詞", 0, 2)
+
+    entry = current.entry_for(token)
+    card = current.card_for(token)
+    semantic = current.source.lookup_terms(TermQuery("読む", dictionaries=("JMdict", "Plain")))
+
+    assert [definition.dict_name for definition in entry.defs] == ["JMdict", "Plain"]
+    assert semantic.entries[0].sequence == 1456360
+    assert card.glosses == ("jmdict gloss",)
+    assert card.idseq == "1456360"
+
+
 def test_adapter_search_deduplicates_headword_identity_and_honors_limit():
     class Source:
         capabilities = frozenset({Capability.TERM_LOOKUP, Capability.SEARCH})
@@ -198,6 +239,43 @@ def test_adapter_search_deduplicates_headword_identity_and_honors_limit():
     result = DictionarySourceAdapter(Source()).search("読", limit=1)
 
     assert result.defs[0].dict_name == "検索 “読” · 1件"
+
+
+def test_card_sequence_comes_from_the_definition_that_supplies_the_gloss():
+    class Source:
+        capabilities = frozenset({Capability.TERM_LOOKUP})
+
+        def lookup_terms(self, query):
+            del query
+            trace = SourceTrace("JMdict")
+            return TermResult(
+                (
+                    TermEntry(
+                        (Headword("読む", "よむ"),),
+                        (
+                            Definition((), source=trace, sequence=999),
+                            Definition(("to read",), source=trace, sequence=1456360),
+                        ),
+                        sequence=999,
+                    ),
+                ),
+                2,
+                2,
+            )
+
+        def lookup_kanji(self, query):
+            del query
+            return KanjiResult(())
+
+    adapter = DictionarySourceAdapter(
+        Source(), SourceAdapterOptions(sequence_dictionaries=("JMdict",))
+    )
+    token = Token("読む", "読む", "よむ", "動詞", 0, 2)
+
+    card = adapter.card_for(token)
+
+    assert card.glosses == ("to read",)
+    assert card.idseq == "1456360"
 
 
 def test_overlay_lookup_falls_back_to_the_token_reading(tmp_path):

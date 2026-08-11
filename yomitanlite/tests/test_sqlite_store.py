@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from yomitanlite import KanjiQuery, SqliteDictionaryStore, TermQuery, Translator
+from yomitanlite import KanjiQuery, SearchQuery, SqliteDictionaryStore, TermQuery, Translator
 
 
 def make_legacy_db(path):
@@ -79,3 +79,22 @@ def test_cached_tag_provenance_belongs_to_each_result_record(tmp_path):
 
     assert first.definitions[0].tags[0].source.record_id == 1
     assert second.definitions[0].tags[0].source.record_id == 2
+
+
+def test_search_applies_configured_dictionary_priority_before_limit(tmp_path):
+    path = tmp_path / "dictionary.sqlite"
+    make_legacy_db(path)
+    connection = sqlite3.connect(path)
+    connection.execute("INSERT INTO dictionaries VALUES (2, 'Preferred', 1)")
+    connection.execute(
+        "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (2, 1, "読める", "よめる", json.dumps(["can read"]), "", 2),
+    )
+    connection.commit()
+    connection.close()
+
+    result = Translator(SqliteDictionaryStore(path)).search_terms(
+        SearchQuery("読*", dictionaries=("Preferred", "Core"), max_results=1)
+    )
+
+    assert result.entries[0].definitions[0].source.dictionary == "Preferred"

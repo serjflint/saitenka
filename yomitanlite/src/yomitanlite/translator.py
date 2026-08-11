@@ -80,7 +80,9 @@ class Translator:
         )
         matches = tuple(
             _Match(record, record.term, len(record.term))
-            for record in sorted(records, key=lambda item: item.score, reverse=True)
+            for record in sorted(
+                records, key=lambda item: self._record_order(item, query.dictionaries)
+            )
         )
         term_query = TermQuery(
             query.pattern,
@@ -125,9 +127,18 @@ class Translator:
                 TermSearch(forms, query.dictionaries, query.max_results)
             )
             if records:
-                ordered = sorted(records, key=lambda record: record.score, reverse=True)
+                ordered = sorted(
+                    records,
+                    key=lambda record: self._record_order(record, query.dictionaries),
+                )
                 return tuple(_Match(record, text, length) for record in ordered), length
         return (), 0
+
+    @staticmethod
+    def _record_order(record: TermRecord, dictionaries: tuple[str, ...]) -> tuple[int, int, int]:
+        priorities = {title: index for index, title in enumerate(dictionaries)}
+        dictionary_order = priorities.get(record.source.dictionary, record.source.dictionary_index)
+        return dictionary_order, -record.score, record.source.record_id or 0
 
     def _assemble(
         self, matches: tuple[_Match, ...], mode: TermResultMode, query: TermQuery

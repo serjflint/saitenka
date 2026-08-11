@@ -290,29 +290,31 @@ class DictionarySourceAdapter:
         return cards
 
     def _card_data(self, entry, headword):
+        definitions = self._card_definitions(entry)
         glosses = tuple(
-            gloss
-            for definition in entry.definitions
-            for gloss in _glosses_of(list(definition.content))
+            gloss for definition in definitions for gloss in _glosses_of(list(definition.content))
         )
         body = "".join(f"<li>{html.escape(gloss)}</li>" for gloss in glosses)
         return CardData(
             headword.term,
             headword.reading,
             f"<ol>{body}</ol>",
-            self._sequence(entry),
+            self._sequence(definitions),
             glosses,
         )
 
-    def _sequence(self, entry) -> str:
-        if entry.sequence < 0:
+    @staticmethod
+    def _card_definitions(entry):
+        first = next((item for item in entry.definitions if _glosses_of(list(item.content))), None)
+        return () if first is None else (first,)
+
+    def _sequence(self, definitions) -> str:
+        if not definitions or definitions[0].source is None or definitions[0].sequence < 0:
             return ""
-        sources = {
-            definition.source.dictionary
-            for definition in entry.definitions
-            if definition.source is not None
-        }
-        return str(entry.sequence) if sources & set(self.options.sequence_dictionaries) else ""
+        dictionary = definitions[0].source.dictionary
+        return (
+            str(definitions[0].sequence) if dictionary in self.options.sequence_dictionaries else ""
+        )
 
     def card_for(self, token, *, extra_terms=()):
         cards = self.cards_for(token, extra_terms=extra_terms)

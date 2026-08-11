@@ -115,6 +115,24 @@ def test_entries_and_merged_definitions_are_sorted_by_score():
     ]
 
 
+def test_configured_dictionary_priority_precedes_score():
+    store = FakeStore(
+        (
+            record("打つ", "うつ", "Imported first", score=100),
+            record("打つ", "うつ", "Configured first", score=1),
+        )
+    )
+
+    result = Translator(store).lookup_terms(
+        TermQuery("打つ", dictionaries=("Configured first", "Imported first"))
+    )
+
+    assert [definition.content[0] for definition in result.entries[0].definitions] == [
+        "Configured first",
+        "Imported first",
+    ]
+
+
 def test_longest_prefix_reports_consumed_text():
     store = FakeStore((record("食べる", "たべる", "A"),))
 

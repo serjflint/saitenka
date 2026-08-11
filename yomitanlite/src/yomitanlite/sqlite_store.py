@@ -23,50 +23,56 @@ _TERM_QUERY_LEGACY = (
     "e.tags, e.seq, '' AS rules, 0 AS score, '' AS term_tags "
     "FROM keys k JOIN entries e ON e.dict_id=k.dict_id AND e.id=k.id "
     "JOIN dictionaries d ON d.id=e.dict_id "
+    "LEFT JOIN json_each(?) requested ON requested.value=d.title "
     "WHERE k.key IN (SELECT value FROM json_each(?)) "
-    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
-    "GROUP BY d.id, e.id ORDER BY d.import_order, e.id"
+    "AND (requested.value IS NOT NULL OR ? = '[]') "
+    "GROUP BY d.id, e.id ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id"
 )
 _TERM_QUERY_ENRICHED = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
     "e.tags, e.seq, e.rules, e.score, e.term_tags "
     "FROM keys k JOIN entries e ON e.dict_id=k.dict_id AND e.id=k.id "
     "JOIN dictionaries d ON d.id=e.dict_id "
+    "LEFT JOIN json_each(?) requested ON requested.value=d.title "
     "WHERE k.key IN (SELECT value FROM json_each(?)) "
-    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
-    "GROUP BY d.id, e.id ORDER BY d.import_order, e.id"
+    "AND (requested.value IS NOT NULL OR ? = '[]') "
+    "GROUP BY d.id, e.id ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id"
 )
 _RELATED_QUERY_LEGACY = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
     "e.tags, e.seq, '' AS rules, 0 AS score, '' AS term_tags "
     "FROM entries e JOIN dictionaries d ON d.id=e.dict_id "
+    "LEFT JOIN json_each(?) requested ON requested.value=d.title "
     "WHERE e.seq IN (SELECT value FROM json_each(?)) "
-    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
-    "ORDER BY d.import_order, e.id"
+    "AND (requested.value IS NOT NULL OR ? = '[]') "
+    "ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id"
 )
 _RELATED_QUERY_ENRICHED = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
     "e.tags, e.seq, e.rules, e.score, e.term_tags "
     "FROM entries e JOIN dictionaries d ON d.id=e.dict_id "
+    "LEFT JOIN json_each(?) requested ON requested.value=d.title "
     "WHERE e.seq IN (SELECT value FROM json_each(?)) "
-    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
-    "ORDER BY d.import_order, e.id"
+    "AND (requested.value IS NOT NULL OR ? = '[]') "
+    "ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id"
 )
 _SEARCH_QUERY_LEGACY = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
     "e.tags, e.seq, '' AS rules, 0 AS score, '' AS term_tags "
     "FROM entries e JOIN dictionaries d ON d.id=e.dict_id "
+    "LEFT JOIN json_each(?) requested ON requested.value=d.title "
     "WHERE (e.term GLOB ? OR e.reading GLOB ?) "
-    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
-    "ORDER BY d.import_order, e.id LIMIT ?"
+    "AND (requested.value IS NOT NULL OR ? = '[]') "
+    "ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id LIMIT ?"
 )
 _SEARCH_QUERY_ENRICHED = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
     "e.tags, e.seq, e.rules, e.score, e.term_tags "
     "FROM entries e JOIN dictionaries d ON d.id=e.dict_id "
+    "LEFT JOIN json_each(?) requested ON requested.value=d.title "
     "WHERE (e.term GLOB ? OR e.reading GLOB ?) "
-    "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?))) "
-    "ORDER BY d.import_order, e.id LIMIT ?"
+    "AND (requested.value IS NOT NULL OR ? = '[]') "
+    "ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id LIMIT ?"
 )
 _EXACT_TERMS_QUERY = (
     "SELECT DISTINCT e.term FROM entries e JOIN dictionaries d ON d.id=e.dict_id "
@@ -178,8 +184,9 @@ class SqliteDictionaryStore:
             .execute(
                 query,
                 (
+                    json.dumps(search.dictionaries, ensure_ascii=False),
                     json.dumps(keys, ensure_ascii=False),
-                    *self._dictionary_args(search.dictionaries),
+                    json.dumps(search.dictionaries, ensure_ascii=False),
                 ),
             )
             .fetchall()
@@ -193,7 +200,13 @@ class SqliteDictionaryStore:
         query = _SEARCH_QUERY_ENRICHED if self._has_enriched_entries() else _SEARCH_QUERY_LEGACY
         rows = self._conn().execute(
             query,
-            (pattern, pattern, *self._dictionary_args(search.dictionaries), search.limit),
+            (
+                json.dumps(search.dictionaries, ensure_ascii=False),
+                pattern,
+                pattern,
+                json.dumps(search.dictionaries, ensure_ascii=False),
+                search.limit,
+            ),
         )
         return tuple(self._term_record(row) for row in rows)
 
@@ -226,7 +239,14 @@ class SqliteDictionaryStore:
         query = _RELATED_QUERY_ENRICHED if self._has_enriched_entries() else _RELATED_QUERY_LEGACY
         rows = (
             self._conn()
-            .execute(query, (json.dumps(values), *self._dictionary_args(dictionaries)))
+            .execute(
+                query,
+                (
+                    json.dumps(dictionaries, ensure_ascii=False),
+                    json.dumps(values),
+                    json.dumps(dictionaries, ensure_ascii=False),
+                ),
+            )
             .fetchall()
         )
         return tuple(self._term_record(row) for row in rows)
@@ -250,7 +270,13 @@ class SqliteDictionaryStore:
         tags = self._tags(did)
         definition_tags = self._split_tags(raw_tags, tags, source)
         content = json.loads(glossary or "[]")
-        definition = Definition(tuple(content), definition_tags, source, score or 0)
+        definition = Definition(
+            tuple(content),
+            definition_tags,
+            source,
+            score or 0,
+            sequence if sequence is not None else -1,
+        )
         return TermRecord(
             term,
             reading,
