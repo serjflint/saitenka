@@ -10,10 +10,18 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 
 ## Table of Contents
 
+- [`profile`](#saitenka-profile)
+    - [`list`](#saitenka-profile-list)
+    - [`show`](#saitenka-profile-show)
+    - [`add`](#saitenka-profile-add)
+    - [`use`](#saitenka-profile-use)
+    - [`remove`](#saitenka-profile-remove)
 - [`run`](#saitenka-run)
 - [`doctor`](#saitenka-doctor)
 - [`telemetry`](#saitenka-telemetry)
+- [`prewarm`](#saitenka-prewarm)
 - [`stats`](#saitenka-stats)
+- [`config`](#saitenka-config)
 - [`import`](#saitenka-import)
 - [`set-jimaku-key`](#saitenka-set-jimaku-key)
 - [`jimaku-check`](#saitenka-jimaku-check)
@@ -31,12 +39,15 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 **Commands**:
 
 * [`attach`](#saitenka-attach): Attach to an already-running mpv's IPC socket instead of launching mpv.
+* [`config`](#saitenka-config): Interactively edit ``overlay.toml``: pick a section → an option → a typed field, comment-preserving.
 * [`doctor`](#saitenka-doctor): Check the environment: mpv/ffmpeg, config, dict cache, fonts, AnkiConnect.
 * [`import`](#saitenka-import): Import Yomitan dictionary .zip files into the consolidated database (built once) and register them in the config by title.
 * [`import-dictionaries`](#saitenka-import-dictionaries): Import a Yomitan DATABASE backup (the multi-GB dexie JSON export) directly into the consolidated database. Streamed — never full-loaded. The per-dictionary zips are reconstructed into a TEMP dir, imported, then discarded (no persistent zip copies are kept).
 * [`import-settings`](#saitenka-import-settings): Apply a Yomitan SETTINGS export (dictionary order + options) to your overlay config.
 * [`install-plugin`](#saitenka-install-plugin): Install the saitenka.lua mpv user-script (plugin mode).
 * [`jimaku-check`](#saitenka-jimaku-check): Diagnose jimaku without launching a video: resolve the key and run a test search, printing the exact outcome (key found? 200 OK / 401 bad key / 400 + server message / network error).
+* [`prewarm`](#saitenka-prewarm): Prebuild the persistent tooltip render cache (#149) so even a FIRST-session cold hover on a pathological word is instant (copy+upload), not a 40–170 ms build+raster.
+* [`profile`](#saitenka-profile): Manage reading profiles (the [profile] default and named [profiles.<name>] overlays).
 * [`reinstall`](#saitenka-reinstall): Reinstall to CHANGE your extras or source, preserving what's installed. A bare ``uv tool install --reinstall`` *replaces* the extras set (silently dropping deinflect/telemetry); this detects what's installed and keeps it. From PyPI, falling back to GitHub (which also carries the GPL deinflect add-on). The GitHub attempt targets the latest RELEASE tag by default — not bleeding-edge main; pass ``--ref main`` for that, or ``--ref vX.Y.Z`` to pin a release. For a plain "get the latest" with no extras change, prefer ``update``.
 * [`report`](#saitenka-report): Bundle diagnostics (doctor + versions + config + mpv.conf + plugin lua + log) into a single timestamped zip for bug reports. Local-only, never uploaded; secrets are redacted.
 * [`run`](#saitenka-run): Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv.
@@ -61,6 +72,7 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 * `--jimaku-key`: jimaku.cc API key (else $JIMAKU_API_KEY)
 * `--jimaku-title`: override the title parsed from the filename
 * `--resync, --no-resync`: auto-resync jimaku-sourced subtitles via alass/ffsubsync (default: on)  *[default: True]*
+* `--profile`: active reading profile name ([profiles.<name>] in the config)
 * `--episode`: override the episode parsed from the filename
 * `--width`: test-clip width (default 1080p)  *[default: 1920]*
 * `--height`:   *[default: 1080]*
@@ -78,19 +90,92 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 * `--freq`: imported frequency-dict TITLE (repeatable; green pills + coloring bands)
 * `--pitch`: imported pitch-accent-dict TITLE (repeatable; purple pills)
 * `--mine, --no-mine`: one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)  *[default: True]*
-* `--mine-deck`:   *[default: Saitenka::Mining]*
-* `--mine-model`:   *[default: Lapis]*
+* `--mine-deck`: 
+* `--mine-model`: 
 * `--mine-normalize-audio, --no-mine-normalize-audio`: normalize mined clip loudness to −23 LUFS (EBU R128) so cards play at an even volume  *[default: False]*
+* `--mine-animated-screenshot, --no-mine-animated-screenshot`: mine a short animated (motion) WebP clip of the scene instead of a still frame  *[default: False]*
 * `--mine-key`: mpv key that mines the hovered word  *[default: Ctrl+m]*
 * `--mine-all-key`: mpv key that bulk-mines the cue  *[default: Shift+m]*
 * `--preview-key`: mpv key to replay the last card preview + audio  *[default: p]*
 * `--no-audio-play`: don't auto-play the mined clip  *[default: False]*
+* `--mine-preview, --no-mine-preview`: auto-pop the card-preview panel after a mine (--no-mine-preview mines silently with a toast instead)  *[default: True]*
 * `--tip-height`: max BASE tooltip height as a fraction of the video height (default 0.4)  *[default: 0.4]*
+* `--tip-scale`: fixed tooltip crisp render scale (0 = auto from resolution; e.g. 1.5 renders crisp native glyph masks at 1.5× on any display — a cosmetic preference). Match `saitenka prewarm --scale` to preload native masks  *[default: 0.0]*
 * `--pause-on-tooltip, --no-pause-on-tooltip`: auto-pause playback while a tooltip is shown (resumes when it hides)  *[default: True]*
 * `--prefetch, --no-prefetch`: disable background prefetch of the paused line's tooltips  *[default: True]*
 * `--auto-translate`: auto-reveal the EN translation while a tooltip is shown (else press the translate key). Anti-crutch: the EN only appears when you're looking a word up  *[default: False]*
 * `--hover-switch-delay`: seconds the cursor must rest on a NEW word before the tooltip switches to it (0 = instant)  *[default: 0.15]*
-* `--mpv-arg`: extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own defaults (force-window/slang/sub-visibility/osd-level/loop-file/start) — mpv is last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate script-opts marker, which we always set last
+* `--layout-engine`: tooltip block-geometry backend: 'default' (pure-Python) or 'taffy' (the optional taffylite Rust flexbox engine — needs `pip install 'saitenka[layout-engine]'`; byte-identical output, falls back to default if the wheel is absent)  *[choices: default, taffy]*  *[default: default]*
+* `--mpv-arg`: extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own defaults (force-window/keep-open/slang/sub-visibility/osd-level/start) — mpv is last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate script-opts marker, which we always set last
+
+## saitenka profile
+
+Manage reading profiles (the [profile] default and named [profiles.<name>] overlays).
+
+### saitenka profile list
+
+```console
+saitenka profile list
+```
+
+List configured profiles (base default first), the active one marked ``*``.
+
+### saitenka profile show
+
+```console
+saitenka profile show [ARGS]
+```
+
+Show a profile's fully-resolved identity: language, tokenizer, and the scoped dictionary titles.
+
+**Parameters**:
+
+* `NAME, --name`: profile name (default: the active one)
+
+### saitenka profile add
+
+```console
+saitenka profile add --language STR [OPTIONS] NAME
+```
+
+Create or update a named ``[profiles.<name>]``. Flags only (no prompts), so it works headless.
+
+**Parameters**:
+
+* `NAME, --name`:   **[required]**
+* `--language`: main (target) language code, e.g. fr, de-CH  **[required]**
+* `--second`: second (known) language code
+* `--tokenizer`: tokenizer strategy (default from the language)
+* `--dicts`: comma-separated dictionary TITLES (as shown by `saitenka doctor`), replacing the top-level set
+* `--freq`: comma-separated frequency dict titles
+* `--pitch`: comma-separated pitch dict titles
+* `--yes`: write without prompting  *[default: False]*
+
+### saitenka profile use
+
+```console
+saitenka profile use [OPTIONS] [ARGS]
+```
+
+Set the active profile (top-level ``active_profile``); omit NAME to select the built-in default.
+
+**Parameters**:
+
+* `NAME, --name`: profile to activate (omit for the default [profile])
+* `--yes`: write without prompting  *[default: False]*
+
+### saitenka profile remove
+
+```console
+saitenka profile remove [OPTIONS] NAME
+```
+
+Delete a named ``[profiles.<name>]`` (and clear ``active_profile`` if it pointed there).
+
+**Parameters**:
+
+* `NAME, --name`:   **[required]**
+* `--yes`: write without prompting  *[default: False]*
 
 ## saitenka run
 
@@ -113,6 +198,7 @@ Play a video with Japanese subs; hover a word → Yomitan-like dictionary toolti
 * `--jimaku-key`: jimaku.cc API key (else $JIMAKU_API_KEY)
 * `--jimaku-title`: override the title parsed from the filename
 * `--resync, --no-resync`: auto-resync jimaku-sourced subtitles via alass/ffsubsync (default: on)  *[default: True]*
+* `--profile`: active reading profile name ([profiles.<name>] in the config)
 * `--episode`: override the episode parsed from the filename
 * `--width`: test-clip width (default 1080p)  *[default: 1920]*
 * `--height`:   *[default: 1080]*
@@ -130,19 +216,23 @@ Play a video with Japanese subs; hover a word → Yomitan-like dictionary toolti
 * `--freq`: imported frequency-dict TITLE (repeatable; green pills + coloring bands)
 * `--pitch`: imported pitch-accent-dict TITLE (repeatable; purple pills)
 * `--mine, --no-mine`: one-key mining to Anki (default: on when [mine] is configured; --no-mine to disable)  *[default: True]*
-* `--mine-deck`:   *[default: Saitenka::Mining]*
-* `--mine-model`:   *[default: Lapis]*
+* `--mine-deck`: 
+* `--mine-model`: 
 * `--mine-normalize-audio, --no-mine-normalize-audio`: normalize mined clip loudness to −23 LUFS (EBU R128) so cards play at an even volume  *[default: False]*
+* `--mine-animated-screenshot, --no-mine-animated-screenshot`: mine a short animated (motion) WebP clip of the scene instead of a still frame  *[default: False]*
 * `--mine-key`: mpv key that mines the hovered word  *[default: Ctrl+m]*
 * `--mine-all-key`: mpv key that bulk-mines the cue  *[default: Shift+m]*
 * `--preview-key`: mpv key to replay the last card preview + audio  *[default: p]*
 * `--no-audio-play`: don't auto-play the mined clip  *[default: False]*
+* `--mine-preview, --no-mine-preview`: auto-pop the card-preview panel after a mine (--no-mine-preview mines silently with a toast instead)  *[default: True]*
 * `--tip-height`: max BASE tooltip height as a fraction of the video height (default 0.4)  *[default: 0.4]*
+* `--tip-scale`: fixed tooltip crisp render scale (0 = auto from resolution; e.g. 1.5 renders crisp native glyph masks at 1.5× on any display — a cosmetic preference). Match `saitenka prewarm --scale` to preload native masks  *[default: 0.0]*
 * `--pause-on-tooltip, --no-pause-on-tooltip`: auto-pause playback while a tooltip is shown (resumes when it hides)  *[default: True]*
 * `--prefetch, --no-prefetch`: disable background prefetch of the paused line's tooltips  *[default: True]*
 * `--auto-translate`: auto-reveal the EN translation while a tooltip is shown (else press the translate key). Anti-crutch: the EN only appears when you're looking a word up  *[default: False]*
 * `--hover-switch-delay`: seconds the cursor must rest on a NEW word before the tooltip switches to it (0 = instant)  *[default: 0.15]*
-* `--mpv-arg`: extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own defaults (force-window/slang/sub-visibility/osd-level/loop-file/start) — mpv is last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate script-opts marker, which we always set last
+* `--layout-engine`: tooltip block-geometry backend: 'default' (pure-Python) or 'taffy' (the optional taffylite Rust flexbox engine — needs `pip install 'saitenka[layout-engine]'`; byte-identical output, falls back to default if the wheel is absent)  *[choices: default, taffy]*  *[default: default]*
+* `--mpv-arg`: extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own defaults (force-window/keep-open/slang/sub-visibility/osd-level/start) — mpv is last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate script-opts marker, which we always set last
 
 ## saitenka doctor
 
@@ -156,6 +246,7 @@ Check the environment: mpv/ffmpeg, config, dict cache, fonts, AnkiConnect.
 
 * `--json`: emit the report as JSON  *[default: False]*
 * `--summary, --quiet`: collapse passing checks to a count; show only warnings/failures in full  *[default: False]*
+* `--verbose, -v`: also show informational lines hidden by default (platform, unset sockets, the full dictionary list, telemetry state)  *[default: False]*
 * `--mine-deck`:   *[default: Saitenka::Mining]*
 * `--mine-model`:   *[default: Lapis]*
 
@@ -175,6 +266,30 @@ it's missing (config flag and dependency are two switches). ``status`` (default)
 
 * `ACTION, --action`: flip [telemetry] enabled in overlay.toml, or show status  *[choices: status, enable, disable]*  *[default: status]*
 
+## saitenka prewarm
+
+```console
+saitenka prewarm [OPTIONS] [ARGS]
+```
+
+Prebuild the persistent tooltip render cache (#149) so even a FIRST-session cold hover on a pathological word is instant (copy+upload), not a 40–170 ms build+raster.
+
+Renders the top ``--limit`` most-frequent words (episode-agnostic, population-aware) at ``--width``
+×``--height`` — MUST match your play resolution, or a live hover computes a different key and misses —
+most-popular first, until the ``[tooltip] render_cache_max_mb`` byte ceiling is reached. Needs
+``[tooltip] render_cache`` on and dictionaries imported. Re-run after a resolution or dictionary
+change (both invalidate the cache signature).
+
+**Parameters**:
+
+* `WIDTH, --width`: video/window width in px (your play resolution)  *[default: 1920]*
+* `HEIGHT, --height`: video/window height in px  *[default: 1080]*
+* `LIMIT, --limit`: how many of the most-frequent words to prebuild (popularity cap; 0 = ALL freq-ranked words — full mask-atlas coverage, the render cache stays bounded by its byte ceiling)  *[default: 32000]*
+* `WORKERS, --workers`: parallel render threads (0 = auto, ~cpu count)  *[default: 0]*
+* `ATLAS-SCALE, --atlas-scale`: display scale for the crisp tooltip. EVERY run builds the 1× reference masks; a scale >1 ALSO builds native masks at that scale (so one --atlas-scale 1.5 run covers 1.0 AND 1.5 — you do NOT need a separate 1.0 run). Match your runtime tip_scale; 0 = read it from config (top-level tip_scale). 1.0 = reference only. The render cache stays 1×-reference-only (#149)  *[default: 0.0]*
+* `--atlas-only`: fill ONLY the glyph mask atlas (leave the render cache untouched) — pair with `--limit 0` to saturate the atlas over the whole corpus without growing the render cache  *[default: False]*
+* `--atlas-plateau`: atlas-only: stop early after this many consecutive heartbeats add essentially no new masks. The CJK glyph set saturates in the first few thousand words, so the rest of a `--limit 0` (>1M-word) sweep is near-pure churn. 0 = off (raster every word)  *[default: 0]*
+
 ## saitenka stats
 
 ```console
@@ -186,6 +301,17 @@ Show local immersion-session history.
 **Parameters**:
 
 * `LIMIT, --limit`: number of recent sessions to show  *[default: 20]*
+
+## saitenka config
+
+```console
+saitenka config
+```
+
+Interactively edit ``overlay.toml``: pick a section → an option → a typed field, comment-preserving.
+
+Offers the current value (or the built-in default) and round-trips through tomlkit, so every other
+key + comment survives. On a non-tty it writes nothing (the prompts return their defaults).
 
 ## saitenka import
 
@@ -207,14 +333,14 @@ zips are read **in place** — no copy is kept — so you can delete or move the
 ## saitenka set-jimaku-key
 
 ```console
-saitenka set-jimaku-key [ARGS]
+saitenka set-jimaku-key [OPTIONS] [ARGS]
 ```
 
 Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 
-Uses the OS keyring when available, else an owner-only file beside overlay.toml. Either beats a
-shell env var, which a GUI-launched mpv can't see. Get a free key at https://jimaku.cc/account
-(API docs: https://jimaku.cc/api/docs).
+Uses the OS keyring when available, else an owner-only file beside overlay.toml (force the file with
+``--file``). Either beats a shell env var, which a GUI-launched mpv can't see. Get a free key at
+https://jimaku.cc/account (API docs: https://jimaku.cc/api/docs).
 
 Windows paste tip: the hidden prompt does NOT accept Ctrl+V (it captures one control char), so a
 pasted key can silently truncate to a single character. Right-click to paste at the prompt, or pass
@@ -223,6 +349,8 @@ the key as an argument on the normal command line where Ctrl+V works: ``set-jima
 **Parameters**:
 
 * `KEY, --key`: the key (omit to be prompted with hidden input)
+* `--file, --no-file`: store in the owner-only file, skipping the OS keyring (and persist that opt-out) — for Windows AV that flags the first Credential Locker read  *[default: False]*
+* `--verify, --no-verify`: test the key against jimaku.cc right after saving  *[default: True]*
 
 ## saitenka jimaku-check
 
@@ -377,3 +505,4 @@ subtitle track (the user's mpv may prefer English), fetching from jimaku when as
 * `--jimaku-title`: override the title parsed from the filename
 * `--episode`: override the episode parsed from the filename
 * `--resync, --no-resync`: resync jimaku subs (default: on)  *[default: True]*
+* `--profile`: active reading profile name ([profiles.<name>] in the config)
