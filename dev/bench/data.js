@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786443731403,
+  "lastUpdate": 1786446171005,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3743,6 +3743,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.966,
             "range": "±3.1%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3fc14d886dac8397c0c3b8d5ea0ce2e9ad9b0c29",
+          "message": "Merge pull request #319 from serjflint/docs/actualize-since-1.0\n\ndocs: actualize the docs against the code (post-1.0 features + drift fixes)",
+          "timestamp": "2026-08-11T14:02:22+03:00",
+          "tree_id": "061fe8bbb9d58a25d5b353c7b8a56b8da4cfe2ef",
+          "url": "https://github.com/serjflint/saitenka/commit/3fc14d886dac8397c0c3b8d5ea0ce2e9ad9b0c29"
+        },
+        "date": 1786446170120,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.453,
+            "range": "±0.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.418,
+            "range": "±13.1%",
             "unit": "ms"
           }
         ]
