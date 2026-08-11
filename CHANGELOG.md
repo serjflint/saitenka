@@ -7,6 +7,49 @@ logs.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-11
+
+### Added
+
+- **Inline dictionary images — SVG gaiji (#283).** Yomitan structured-content `img` nodes now render:
+  the optional `images` extra (a pure-Rust resvg binding, `resvglite`) rasterizes SVG gaiji — including
+  `<text>` glyphs like 大辞林's 漢/呉 reading badges, which get the bundled font so they draw the kanji
+  instead of an empty box. Anything unrenderable falls back to the ▢ placeholder; a default install is
+  unchanged.
+- **Kanji panel — Yomitan parity (#99).** The kanji entry (hover a word and press `k`, or click a
+  headword kanji) now matches Yomitan: KANJIDIC stats are **labeled and sectioned** (Statistics /
+  Classifications / Codepoints / Dictionary Indices) instead of cryptic truncated codes, and the big
+  headword is drawn in a numbered **stroke-order font** (on by default — `[tooltip] kanji_stroke_order`).
+  Every headword kanji is a click-to-open link to its own kanji entry, navigated in place.
+- **Pitch-accent detail — devoiced (○) and nasal (゜) mora markers (#305)** rendered from NHK/Kanjium
+  data on the pitch graph.
+- **Structured content — superscript / subscript and strike-through (#303)** now render as small
+  raised/lowered annotations, matching more monolingual dictionaries.
+
+### Changed
+
+- The optional `taffylite` (layout) and `resvglite` (images) Rust extensions now resolve from **PyPI**
+  rather than editable in-tree sources; `taffylite` moves to a pyo3 0.29 abi3 + abi3t wheel matrix (#307).
+
+### Fixed
+
+- **Importing a settings file with nested `[profiles.*]` tables no longer crashes** (#309); inline-image
+  media is now preloaded for stacked (multi-reading) entries too, so their gaiji render (#283).
+
+### Notes
+
+- The richer kanji-stat labels come from each dictionary's own metadata; **re-import your kanji
+  dictionaries** (`saitenka import …`) to populate them — until then the stats show as bare codes.
+
+### Development
+
+- **Tooltip rasterization moved off the interactive thread**: cold nested scan popups and clicked/keyed
+  opens + cross-reference navigation are deferred (tier-3), and the render cache does its IO off the main
+  thread — removing raster stalls from the hover/scroll path.
+- Conformance & adequacy: a French differential deinflection corpus, a `(cue, hover-position) → Entry`
+  pipeline oracle over the real run assembly, a corpus-drift guard, and a commit-time test-kinds advisory.
+- An unattended py-spy benchmark runner with per-span percentiles + speedscope output.
+
 ## [2.4.0] - 2026-08-10
 
 ### Added
