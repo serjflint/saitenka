@@ -116,6 +116,59 @@ def test_kanji_panel_golden(tmp_path):
     assert_golden(img, "kanji_panel.png")
 
 
+# --- stroke-order headword font (Part B) -----------------------------------------------------------
+
+
+def test_stroke_order_toggle_sets_the_headword_font(tmp_path):
+    from overlay.fonts import STROKE_ORDER_FONT
+
+    ds = _fixture_ds(tmp_path)
+    assert ds.kanji_for("読", stroke_order=True).headword_font == STROKE_ORDER_FONT
+    assert ds.kanji_for("読", stroke_order=False).headword_font is None
+    assert ds.kanji_for("読").headword_font is None  # default off — opt-in via the toggle
+
+
+def test_stroke_order_headword_renders_in_the_stroke_font(tmp_path):
+    # Metamorphic oracle (no pixel golden): the big headword glyph resolves to the stroke-order face
+    # when the toggle is on, and to the normal CJK chain when off — a negative control that bites.
+    from overlay.fonts import STROKE_ORDER_FONT
+    from overlay.model import Style
+    from overlay.render import layout
+    from overlay.sc.walk import inline_flow
+
+    ds = _fixture_ds(tmp_path)
+    on = ds.kanji_for("読", stroke_order=True)
+    flow_on = inline_flow(on.headword, Style(size=46, weight=700, font=on.headword_font))
+    files_on = {t.file for t in layout.tokenize_rich(flow_on)}
+    assert files_on == {STROKE_ORDER_FONT}
+
+    off = ds.kanji_for("読", stroke_order=False)
+    flow_off = inline_flow(off.headword, Style(size=46, weight=700, font=off.headword_font))
+    assert STROKE_ORDER_FONT not in {t.file for t in layout.tokenize_rich(flow_off)}
+
+
+def test_forced_font_falls_back_when_it_lacks_the_glyph():
+    # A forced font that doesn't cover the char must NOT introduce tofu — it falls through to the chain.
+    from overlay.model import Span, Style
+    from overlay.render import layout
+
+    toks = layout.tokenize_rich([Span("鳥", Style(size=46, font="NotoEmoji.ttf"))])
+    assert all(t.file != "NotoEmoji.ttf" for t in toks)  # NotoEmoji lacks 鳥 → resolved elsewhere
+
+
+def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path):
+    from dataclasses import replace
+
+    from overlay.app.config import ReaderOptions, TooltipOptions
+
+    assert TooltipOptions().kanji_stroke_order is True  # on by default
+    r = Reader(FakeIPC(), dict_set=_fixture_ds(tmp_path))
+    assert r.kanji_stroke_order is True
+    off_opts = replace(ReaderOptions(), tooltip=TooltipOptions(kanji_stroke_order=False))
+    off = Reader(FakeIPC(), dict_set=_fixture_ds(tmp_path), options=off_opts)
+    assert off.kanji_stroke_order is False
+
+
 # --- `k` key: open / cycle the hovered word's kanji ------------------------------------------------
 
 

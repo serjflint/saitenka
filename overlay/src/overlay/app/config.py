@@ -142,6 +142,10 @@ class TooltipOptions:
         default="full",
         metadata={"help": "Annotate every word (full) or only the hovered one (hover)."},
     )
+    kanji_stroke_order: bool = field(
+        default=True,
+        metadata={"help": "Draw the kanji panel's big headword in a numbered stroke-order font."},
+    )
     scan_delay: float = field(
         default=1.0, metadata={"help": "Dwell (seconds) before a nested scan popup opens."}
     )

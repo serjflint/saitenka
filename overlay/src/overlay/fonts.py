@@ -40,6 +40,11 @@ _MASK_CACHE_MAX = 8192  # (font, text) → getmask2 alpha memo; heavier than wid
 # the Noto Sans faces lack (emoji, pictographs) so text is unaffected while icons/emoji stop being tofu.
 FONT_FILES: tuple[str, ...] = ("NotoSansJP.ttf", "NotoSans.ttf", "NotoEmoji.ttf")
 
+# The numbered stroke-order kanji font (BSD-3, © Ulrich Apel / AAAA / Wadoku). Deliberately NOT in the
+# fallback chain — it only renders via an explicit Style.font override (the kanji-panel headword), so
+# ordinary CJK text never picks up its diagram glyphs.
+STROKE_ORDER_FONT = "KanjiStrokeOrders.ttf"
+
 
 @dataclass(frozen=True)
 class FontSpec:

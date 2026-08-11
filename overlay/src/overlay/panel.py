@@ -100,6 +100,9 @@ class Entry:
     # one EntryGroup per reading, each rendered as its own block with its own ⊕. Empty for the common
     # single-entry case — the fused header path above is unchanged (goldens preserved).
     groups: list[EntryGroup] = field(default_factory=list)
+    # Force a vendored font file for the big headword glyph (kanji panel → stroke-order font); None =
+    # the normal coverage chain. Purely visual — set by the caller from the tooltip toggle.
+    headword_font: str | None = None
 
 
 def _hex(s: str) -> RGBA:
@@ -395,11 +398,18 @@ def panel_rows(
 
     # --- header: ▶ + big ruby headword, ⊕/✓ add + 🔊 speaker top-right ---
     def _header(*, scale: float = 1.0) -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
+        # The numbered stroke-order glyph needs room for its stroke numbers to be legible, so draw it 2×
+        # the normal headword size when that font is active (plain headwords stay at the reference size).
+        # Branchless (bool→0/1) so it adds no cognitive complexity to the already-ceilinged panel_rows.
+        hw_size = theme.px(46 * (1 + bool(entry.headword_font)))
         hw = [
             Span("▶", Style(size=theme.px(28), color=theme.accent)),
-            Span(" ", Style(size=theme.px(46))),
+            Span(" ", Style(size=hw_size)),
         ]
-        hw += inline_flow(entry.headword, Style(size=theme.px(46), weight=700, color=theme.text))
+        hw += inline_flow(
+            entry.headword,
+            Style(size=hw_size, weight=700, color=theme.text, font=entry.headword_font),
+        )
         # Collect per-CJK-char hitboxes (1× coords) so each headword kanji becomes a click-to-open link
         # (Yomitan parity): clicking 勉 in 勉強 opens its kanji entry, which the header couldn't do before.
         scan: list[ScanBox] = []

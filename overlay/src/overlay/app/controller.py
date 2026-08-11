@@ -339,6 +339,10 @@ class Reader:
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
         self.annotation_mode = o.tooltip.annotation_mode
         self._annotation_hover = False
+        # Visual-only: draw the kanji panel's big headword in the numbered stroke-order font. Set here
+        # (the shared Reader init) so both the run and attach seams get it from one place; a pure render
+        # flag threaded onto the kanji Entry, never gating what's looked up or the panel-cache identity.
+        self.kanji_stroke_order = o.tooltip.kanji_stroke_order
         self.hide_delay = o.tooltip.hide_delay  # tooltip linger after the cursor leaves the word
         self.flash_secs = o.tooltip.flash_secs  # "copied" highlight border pulse duration
         self.panel_cache_max = (

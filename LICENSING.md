@@ -35,6 +35,9 @@ In short: **core alone = Apache-2.0; core + `deinflect` = GPL-3.0.**
 ## Vendored third-party assets
 
 - **Noto Sans / Noto Sans JP** (`overlay/src/overlay/assets/fonts/`) — SIL Open Font License 1.1.
+- **Kanji Stroke Order Font** (`overlay/src/overlay/assets/fonts/KanjiStrokeOrders.ttf`, the numbered
+  stroke-order kanji headword) — BSD-3-Clause; stroke data © Ulrich Apel / the AAAA and Wadoku projects,
+  font assembled by Tim Eyre. Redistributed with the notice in the adjacent `KanjiStrokeOrders-LICENSE.txt`.
 - **Frequency dictionaries** (`tools/freq/*.zip`) — **not shipped** (gitignored, user-supplied); each
   keeps its upstream terms.
 - **Dictionaries** shown in the panel are the user's own imported data (not shipped here); some carry
