@@ -7,6 +7,7 @@ install never populates the media table — the renderer just falls back to ▢.
 
 from __future__ import annotations
 
+import logging
 from io import BytesIO
 
 import dicthelp
@@ -22,6 +23,20 @@ _SVG = (
     b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
     b'<rect x="10" y="10" width="80" height="80" fill="black"/></svg>'
 )
+
+# A <text> gaiji — the 大辞林 漢/呉 badge shape: a bordered box with a font-drawn glyph. Without a font
+# resvg draws ONLY the box (the #283 tofu bug); _load_media must hand it the bundled NotoSansJP.
+_TEXT_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'>"
+    "<rect width='128' height='128' fill='none' stroke='black' stroke-width='8'/>"
+    "<text text-anchor='middle' x='50%' y='50%' dy='.35em' font-family='sans-serif' "
+    "font-size='100' fill='black'>漢</text></svg>"
+).encode()
+
+
+def _opaque(png: bytes) -> int:
+    hist = Image.open(BytesIO(png)).convert("RGBA").getchannel("A").histogram()
+    return sum(hist) - hist[0]  # every pixel minus the fully-transparent ones
 
 
 def _png(fill: tuple[int, int, int, int] = (0, 0, 0, 255)) -> bytes:
@@ -134,3 +149,36 @@ def test_one_bad_svg_does_not_abort_the_import(tmp_path):
     d = dicthelp.load_dict(zp)  # must not raise despite the malformed SVG
     got = d.db.media_for(d.dict_id, ["m/ok.svg", "m/bad.svg"])
     assert set(got) == {"m/ok.svg"}  # good glyph stored; bad one skipped → ▢ fallback
+
+
+def test_text_gaiji_rasterizes_with_its_glyph(tmp_path):
+    # #283 regression: a <text> badge (漢) must store MORE ink than the same SVG rendered font-less —
+    # i.e. the glyph is drawn, not an empty box. Metamorphic oracle: with-font ink > box-only ink.
+    resvglite = pytest.importorskip("resvglite")
+    zp = dicthelp.term_zip(
+        tmp_path / "d.zip",
+        "MediaDict",
+        [("漢", "かん", [{"type": "image", "path": "m/kan.svg"}])],
+        media={"m/kan.svg": _TEXT_SVG},
+    )
+    d = dicthelp.load_dict(zp)
+    stored = d.db.media_for(d.dict_id, ["m/kan.svg"])["m/kan.svg"]
+    box_only, _w, _h = resvglite.render_svg(_TEXT_SVG, 64)  # no fonts → border only (the old tofu)
+    assert _opaque(stored) > _opaque(box_only)  # the 漢 glyph adds ink beyond the bare box
+
+
+def test_malformed_svg_is_logged_loudly(tmp_path, caplog):
+    # "loud errors on failed renders": a skipped SVG must warn (per-file + a per-dict summary), not
+    # vanish at debug — the silent ▢ is exactly what hid #283.
+    pytest.importorskip("resvglite")
+    zp = dicthelp.term_zip(
+        tmp_path / "d.zip",
+        "MediaDict",
+        [("語", "ご", [{"type": "image", "path": "m/ok.svg"}])],
+        media={"m/ok.svg": _SVG, "m/bad.svg": b"not an svg at all"},
+    )
+    with caplog.at_level(logging.WARNING, logger="overlay.app.dictdb"):
+        dicthelp.load_dict(zp)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("resvglite failed on m/bad.svg" in m for m in warnings)  # the per-file warning
+    assert any("failed to rasterize" in m for m in warnings)  # the per-dict summary

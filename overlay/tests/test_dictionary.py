@@ -435,6 +435,32 @@ def test_entry_for_builds_stacked_groups_for_multi_reading(tmp_path):
     assert "to retreat" not in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
 
 
+def test_stacked_entry_group_defs_preload_media(tmp_path):
+    # #283 regression: the stacked-entry path (a word with ≥2 readings, like 鳥 = とり/ちょう) must
+    # preload inline-img media just like the fused path — the two builders drifted and this one forgot,
+    # so every gaiji in a multi-reading word rendered ▢ even though the fused Entry.defs had media.
+    pytest.importorskip("resvglite")  # media only populates when the rasterizer is installed
+    svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        b'<rect x="10" y="10" width="80" height="80" fill="black"/></svg>'
+    )
+    zp = dicthelp.term_zip(
+        tmp_path / "grp.zip",
+        "Multi",
+        [
+            ("退く", "しりぞく", ["to retreat", {"type": "image", "path": "m/a.svg"}]),
+            ("退く", "のく", ["to step aside", {"type": "image", "path": "m/b.svg"}]),
+        ],
+        media={"m/a.svg": svg, "m/b.svg": svg},
+    )
+    ds = dicthelp.load_set(dict_zips=[zp])
+    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
+    entry = ds.entry_for(tok)
+    assert len(entry.groups) == 2  # のく / しりぞく stacked
+    for g in entry.groups:
+        assert g.defs and all(d.media for d in g.defs)  # every stacked def preloaded its img media
+
+
 def test_entry_for_header_reading_agrees_with_first_stacked_group(tmp_path):
     """The fused header (big ruby + TTS reading) tracks the best stacked entry, so it doesn't show an
     arbitrary homophone above a differently-read first block — 退いた's header reads のく, like group 0."""

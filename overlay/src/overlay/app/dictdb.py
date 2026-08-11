@@ -46,6 +46,19 @@ _MEDIA_PX = 64
 # Overridable default DB path — tests point this at a tmp file (mirrors the old CACHE_DIR override).
 _DB_PATH_OVERRIDE: Path | None = None
 
+_SVG_FONTS: list[bytes] | None = None
+
+
+def _svg_text_fonts() -> list[bytes]:
+    """Font bytes handed to resvglite so ``<text>`` gaiji render their glyph, not an empty box (#283).
+    The bundled NotoSansJP covers the badge kanji (漢/呉/…) plus Latin; loaded once, then reused."""
+    global _SVG_FONTS
+    if _SVG_FONTS is None:
+        from overlay.resources import asset
+
+        _SVG_FONTS = [asset("fonts", "NotoSansJP.ttf").read_bytes()]
+    return _SVG_FONTS
+
 
 def default_db_path() -> Path:
     return paths.data_dir() / "dictionaries.sqlite"
@@ -561,27 +574,39 @@ class DictionaryDb:
         Runs ONLY when the optional ``resvglite`` extra is installed — so a default (no-extra) import is
         byte-identical to before, and the renderer just keeps drawing ▢. SVG gaiji are rasterized to PNG
         once here (cold cost paid at import, not per hover); raster formats are stored as-is (PIL opens
-        them directly). A malformed SVG is skipped, leaving its ▢ fallback.
+        them directly). A malformed SVG is logged loudly and skipped, leaving its ▢ fallback.
+
+        ``<text>`` gaiji (大辞林's 漢/呉 reading badges) need a font or resvg draws only the box — the
+        #283 tofu bug — so those get the bundled NotoSansJP; path-outlined gaiji skip the font (no cost).
         """
         try:
             import resvglite  # noqa: TID251  # SVG-images chokepoint: this is the one sanctioned importer
         except ImportError:
             return
         rows: list[tuple[int, str, bytes]] = []
+        failed = 0
         for name in zf.namelist():
             ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
             if ext not in _MEDIA_EXTS:
                 continue
             data = zf.read(name)
             if ext == "svg":
+                # Only <text> SVGs need the font DB; loading a ~10 MB face for every path-only gaiji would
+                # be pure waste (大辞林 alone has thousands), so gate on the cheap byte check.
+                fonts = _svg_text_fonts() if b"<text" in data else None
                 try:
-                    png, _w, _h = resvglite.render_svg(data, _MEDIA_PX)
-                except Exception:  # noqa: BLE001  # incl. a pyo3 panic — one bad glyph must not abort the whole dict import
-                    log.debug("resvglite failed on %s; leaving ▢ fallback", name)
+                    png, _w, _h = resvglite.render_svg(data, _MEDIA_PX, fonts)
+                except Exception as e:  # noqa: BLE001  # incl. a pyo3 panic — one bad glyph must not abort the whole dict import
+                    log.warning("resvglite failed on %s: %s — leaving ▢ fallback", name, e)
+                    failed += 1
                     continue
                 rows.append((did, name, png))
             else:
                 rows.append((did, name, data))
+        if failed:
+            log.warning(
+                "dict_id=%d: %d media SVG(s) failed to rasterize — those render as ▢", did, failed
+            )
         if rows:
             conn.executemany("INSERT OR REPLACE INTO media VALUES(?,?,?)", rows)
             self._media_present = (
