@@ -44,6 +44,7 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
 
 from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
+from overlay.fonts import STROKE_ORDER_FONT
 from overlay.panel import Definition, Entry, EntryGroup, Freq
 from overlay.sc.walk import collect_img_paths
 
@@ -615,10 +616,11 @@ class DictionarySet:
             )
         return nodes
 
-    def kanji_for(self, char: str) -> Entry | None:
+    def kanji_for(self, char: str, *, stroke_order: bool = False) -> Entry | None:
         """A panel :class:`Entry` for one kanji, from the first dict whose kanji_bank has it: big
-        glyph headword, 音/訓 reading rows + numbered meanings in the def body, stroke count and
-        stats as pills — rendered through the normal panel path."""
+        glyph headword, 音/訓 reading rows + numbered meanings, and the labeled/sectioned KANJIDIC stats
+        — rendered through the normal panel path. ``stroke_order`` draws the headword in the numbered
+        stroke-order font (the ``[tooltip] kanji_stroke_order`` toggle; visual only)."""
         for d in self.dicts:
             k = d.kanji_lookup(char)
             if k is None:
@@ -631,6 +633,7 @@ class DictionarySet:
                 freqs=[],
                 defs=[Definition(d.title, nodes or ["（データなし）"])],
                 reading=kun or (k["onyomi"].split() or [""])[0],
+                headword_font=STROKE_ORDER_FONT if stroke_order else None,
             )
         return None
 
