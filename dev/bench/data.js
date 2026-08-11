@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786439673458,
+  "lastUpdate": 1786442770960,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3671,6 +3671,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 7.708,
             "range": "±1.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "35c4886b8adeaa68d3f3f73ac914d1f714a7ffd5",
+          "message": "Merge pull request #317 from serjflint/ci/node24-action-bumps\n\nci: bump GitHub Actions off deprecated Node.js 20",
+          "timestamp": "2026-08-11T13:04:22+03:00",
+          "tree_id": "8b13f18cc696d06b221406de97e19446f65be9d0",
+          "url": "https://github.com/serjflint/saitenka/commit/35c4886b8adeaa68d3f3f73ac914d1f714a7ffd5"
+        },
+        "date": 1786442770307,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.377,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.784,
+            "range": "±1.1%",
             "unit": "ms"
           }
         ]
