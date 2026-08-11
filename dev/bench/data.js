@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786438510978,
+  "lastUpdate": 1786438786184,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3825,6 +3825,40 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/serjflint/saitenka/commit/458cff989ca77abc254b0e6e6f79b90c2a64bfb2"
         },
         "date": 1786437788737,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "unit": "frames"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5122ff6ac80352c29cc278928c50692e90926de4",
+          "message": "Merge pull request #315 from serjflint/fix/pypi-publish-metadata-2.5\n\nci(release): bump gh-action-pypi-publish to v1.14.2 (metadata 2.5 upload fix)",
+          "timestamp": "2026-08-11T11:54:41+03:00",
+          "tree_id": "42bedf2d4909a3198cfd5e6733d8262af76e3302",
+          "url": "https://github.com/serjflint/saitenka/commit/5122ff6ac80352c29cc278928c50692e90926de4"
+        },
+        "date": 1786438785068,
         "tool": "customSmallerIsBetter",
         "benches": [
           {
