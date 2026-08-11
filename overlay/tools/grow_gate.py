@@ -45,6 +45,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import sharpen_gate as sg  # reuse Mutant / Replay / replay_is_killed (arm-1) and git_show
+from byte_transaction import ByteSnapshot
+from tool_json import InstrumentError
 
 # ---------------------------------------------------------------------------------------------------
 # Arm 1 — property-mutant: load-bearing AND genuine growth
@@ -86,7 +88,7 @@ def growth_gate(
 # (C2) — the mechanism `vibe/proto_arms_1_3.py` validated, generalised from monkeypatch to a text edit.
 
 ApplyMutation = Callable[[Path, str, str, Path], bool]  # (cut, find, replace, cwd) -> applied?
-Restore = Callable[[Path, Path], None]  # (cut, cwd) -> None
+Snapshot = Callable[[Path], ByteSnapshot]
 
 
 @dataclass
@@ -111,10 +113,6 @@ def _apply_text_mutation(cut: Path, find: str, replace: str, cwd: Path) -> bool:
     return True
 
 
-def _git_restore(cut: Path, cwd: Path) -> None:
-    subprocess.run(["git", "checkout", "--", str(cut)], cwd=cwd, check=True)
-
-
 def growth_adhoc_gate(
     cut: Path,
     find: str,
@@ -124,19 +122,20 @@ def growth_adhoc_gate(
     run: RunExit,
     *,
     apply_mutation: ApplyMutation = _apply_text_mutation,
-    restore: Restore = _git_restore,
+    snapshot: Snapshot = ByteSnapshot.capture,
     cwd: Path,
 ) -> AdhocGrowthReport:
     """Apply the author's scenario-encoding text mutation; the OLD suite must SURVIVE (exit 0) and the
     GROWN suite must be KILLED (non-zero); always restore. Injectable so the logic is unit-tested without
-    touching disk."""
-    if not apply_mutation(cut, find, replace, cwd):
-        return AdhocGrowthReport(applied=False, survived_old=False, killed_new=False)
+    touching disk. Restoration uses the pre-run bytes, not Git, so dirty worktrees are preserved."""
+    before = snapshot(cwd / cut)
     try:
+        if not apply_mutation(cut, find, replace, cwd):
+            return AdhocGrowthReport(applied=False, survived_old=False, killed_new=False)
         survived_old = run(old_cmd) == 0
         killed_new = run(new_cmd) != 0
     finally:
-        restore(cut, cwd)
+        before.restore()
     return AdhocGrowthReport(applied=True, survived_old=survived_old, killed_new=killed_new)
 
 
@@ -384,12 +383,12 @@ def _pytest(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def run_pytest_source(test_file: Path, src: str, test_name: str, cwd: Path) -> bool:
     """Write ``src`` to ``test_file``, run the single ``test_name``, restore. True = the test passed."""
-    original = test_file.read_text(encoding="utf-8")
+    original = ByteSnapshot.capture(test_file)
     try:
         test_file.write_text(src, encoding="utf-8")
         return _pytest(cwd, f"{test_file}::{test_name}").returncode == 0
     finally:
-        test_file.write_text(original, encoding="utf-8")
+        original.restore()
 
 
 def covered_lines(cut_file: Path, test_cmd: list[str], cwd: Path) -> set[int]:
@@ -399,27 +398,33 @@ def covered_lines(cut_file: Path, test_cmd: list[str], cwd: Path) -> set[int]:
 
     data_file = cwd / ".grow_gate.coverage"
     data_file.unlink(missing_ok=True)
-    subprocess.run(
-        [
-            "coverage",
-            "run",
-            f"--data-file={data_file}",
-            "--branch",
-            "-m",
-            "pytest",
-            "-q",
-            *test_cmd,
-        ],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    data = coverage.CoverageData(basename=str(data_file))
-    data.read()
-    lines = set(data.lines(str((cwd / cut_file).resolve())) or [])
-    data_file.unlink(missing_ok=True)
-    return lines
+    try:
+        proc = subprocess.run(
+            [
+                "coverage",
+                "run",
+                f"--data-file={data_file}",
+                "--branch",
+                "-m",
+                "pytest",
+                "-q",
+                *test_cmd,
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip() or "no output"
+            raise InstrumentError(f"coverage measurement failed ({proc.returncode}): {detail}")
+        if not data_file.is_file():
+            raise InstrumentError("coverage measurement produced no data file")
+        data = coverage.CoverageData(basename=str(data_file))
+        data.read()
+        return set(data.lines(str((cwd / cut_file).resolve())) or [])
+    finally:
+        data_file.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------------------------------

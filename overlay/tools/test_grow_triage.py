@@ -1,4 +1,4 @@
-"""Tests for the Grow triage composite. Run explicitly (tools/ is outside `poe all`):
+"""Tests run by `poe loop-tools-test`, or explicitly:
     uv run python -m pytest tools/test_grow_triage.py
 
 Only the PURE scorer is tested — the real gatherers are subprocess glue (ruff/git/gh), like
@@ -11,8 +11,11 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent))
 import grow_triage as gt
+from tool_json import InstrumentError
 
 
 def _cand(
@@ -88,3 +91,31 @@ def test_optional_signals_absent_do_not_crash_and_read_as_zero():
     c = _cand("x.py", fan_in=5, priv_seam=4, survivors=None, dead_ctx=None)
     gt.score_candidates([c])
     assert c.underspec > 0.0  # driven by the always-available seam signal
+
+
+def test_coverage_context_evidence_prevents_a_false_testless_label():
+    merged = gt.merge_test_evidence(["app/x.py"], {}, {"app/x.py": ["tests/test_x.py"]})
+    assert merged == {"app/x.py": ["tests/test_x.py"]}
+
+
+def test_module_without_static_or_context_evidence_remains_testless():
+    assert gt.merge_test_evidence(["app/x.py"], {}, {}) == {"app/x.py": []}
+
+
+def test_legacy_context_json_is_rejected_with_a_regeneration_error(tmp_path):
+    path = tmp_path / "contexts.json"
+    path.write_text('{"app/x.py": 3}\n', encoding="utf-8")
+    with pytest.raises(InstrumentError, match="regenerate"):
+        gt._load_contexts("contexts.json", tmp_path)
+
+
+def test_context_v2_carries_test_nodeids_into_attribution(tmp_path):
+    path = tmp_path / "contexts.json"
+    path.write_text(
+        '{"version":2,"modules":{"app/x.py":{"under_spec":3,'
+        '"test_nodeids":["tests/test_x.py::test_one|run"]}}}\n',
+        encoding="utf-8",
+    )
+    counts, tests = gt._load_contexts("contexts.json", tmp_path)
+    assert counts == {"app/x.py": 3}
+    assert tests == {"app/x.py": ["tests/test_x.py"]}

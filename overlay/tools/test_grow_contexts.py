@@ -30,7 +30,8 @@ def test_aggregate_counts_uncovered_plus_weakly_covered():
         }
     }
     out = gc.aggregate(measured, BASE, lambda f: missing[f], lambda f: contexts[f])
-    assert out["app/x.py"] == 2 + 2  # 2 uncovered + (line2 + line3) weak
+    assert out["app/x.py"]["under_spec"] == 2 + 2  # 2 uncovered + (line2 + line3) weak
+    assert out["app/x.py"]["test_nodeids"] == ["tests.a", "tests.b"]
 
 
 def test_aggregate_ignores_files_outside_the_source_base():
@@ -45,4 +46,4 @@ def test_aggregate_a_fully_specified_module_scores_zero():
         _f("app/clean.py"): {1: ["t.a", "t.b"], 2: ["t.a", "t.c", "t.d"]}
     }  # all ≥2 contexts
     out = gc.aggregate(measured, BASE, lambda _: [], lambda f: contexts[f])
-    assert out["app/clean.py"] == 0
+    assert out["app/clean.py"]["under_spec"] == 0

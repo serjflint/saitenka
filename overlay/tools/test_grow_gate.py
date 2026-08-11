@@ -1,4 +1,4 @@
-"""Tests for the Grow teeth-gate. Run explicitly (tools/ is outside `poe all`):
+"""Tests run by `poe loop-tools-test`, or explicitly:
     uv run python -m pytest tools/test_grow_gate.py
 
 Every arm is exercised through its injected primitive (replay / RunTest / CoverageFn / RunExit), so no
@@ -7,8 +7,11 @@ real cosmic-ray, pytest, or coverage subprocess runs here — the same pattern `
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 import grow_gate as gg
@@ -120,6 +123,22 @@ def test_liveness_bounces_when_a_live_assert_is_mixed_with_a_trivial_one():
     assert not rep.ok  # a stray assert-True is still sloppy — bounce, like sharpen
 
 
+def test_run_pytest_source_restores_exact_bytes(monkeypatch, tmp_path):
+    test_file = tmp_path / "test_sample.py"
+    original = b"\xef\xbb\xbfdef test_it():\r\n    assert True\r\n"
+    test_file.write_bytes(original)
+    monkeypatch.setattr(
+        gg,
+        "_pytest",
+        lambda *_args: subprocess.CompletedProcess([], 0, "", ""),
+    )
+
+    assert gg.run_pytest_source(
+        test_file, "def test_it():\n    assert False\n", "test_it", tmp_path
+    )
+    assert test_file.read_bytes() == original
+
+
 def test_negate_assert_only_touches_the_target_function():
     src = "def test_a():\n    assert one() == 1\n\ndef test_b():\n    assert two() == 2\n"
     out = gg._negate_assert_in(src, "test_b", 0)
@@ -142,6 +161,28 @@ def test_context_delta_bounces_when_no_new_line_is_reached():
     rep = gg.context_delta_gate(["OLD"], ["NEW"], lambda cmd: cov[tuple(cmd)])
     assert rep.delta == set()
     assert not rep.ok
+
+
+def test_covered_lines_fails_closed_when_pytest_fails(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        gg.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 4, "", "missing test"),
+    )
+
+    with pytest.raises(gg.InstrumentError, match="coverage measurement failed"):
+        gg.covered_lines(Path("cut.py"), ["missing.py"], tmp_path)
+
+
+def test_covered_lines_fails_closed_without_coverage_data(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        gg.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "", ""),
+    )
+
+    with pytest.raises(gg.InstrumentError, match="produced no data file"):
+        gg.covered_lines(Path("cut.py"), ["test_ok.py"], tmp_path)
 
 
 # --- Arm 4: concurrency_gate --------------------------------------------------------------------
@@ -245,7 +286,14 @@ def _adhoc_run(fail_on: set[str]):
     return run
 
 
-def test_growth_adhoc_passes_when_old_survives_and_new_kills():
+def _cut(tmp_path: Path) -> Path:
+    path = tmp_path / "cut.py"
+    path.write_text("a\n", encoding="utf-8")
+    return path
+
+
+def test_growth_adhoc_passes_when_old_survives_and_new_kills(tmp_path):
+    cut = _cut(tmp_path)
     rep = gg.growth_adhoc_gate(
         Path("cut.py"),
         "a",
@@ -253,15 +301,15 @@ def test_growth_adhoc_passes_when_old_survives_and_new_kills():
         ["OLD"],
         ["NEW"],
         _adhoc_run({"NEW"}),
-        apply_mutation=lambda *_: True,
-        restore=lambda *_: None,
-        cwd=Path(),
+        cwd=tmp_path,
     )
     assert rep.applied and rep.survived_old and rep.killed_new
     assert rep.ok
+    assert cut.read_text(encoding="utf-8") == "a\n"
 
 
-def test_growth_adhoc_bounces_when_the_old_suite_already_catches_the_mutant():
+def test_growth_adhoc_bounces_when_the_old_suite_already_catches_the_mutant(tmp_path):
+    _cut(tmp_path)
     rep = gg.growth_adhoc_gate(
         Path("cut.py"),
         "a",
@@ -269,15 +317,14 @@ def test_growth_adhoc_bounces_when_the_old_suite_already_catches_the_mutant():
         ["OLD"],
         ["NEW"],
         _adhoc_run({"OLD", "NEW"}),
-        apply_mutation=lambda *_: True,
-        restore=lambda *_: None,
-        cwd=Path(),
+        cwd=tmp_path,
     )
     assert not rep.survived_old
     assert not rep.ok
 
 
-def test_growth_adhoc_bounces_when_the_grown_test_does_not_kill():
+def test_growth_adhoc_bounces_when_the_grown_test_does_not_kill(tmp_path):
+    _cut(tmp_path)
     rep = gg.growth_adhoc_gate(
         Path("cut.py"),
         "a",
@@ -285,31 +332,35 @@ def test_growth_adhoc_bounces_when_the_grown_test_does_not_kill():
         ["OLD"],
         ["NEW"],
         _adhoc_run(set()),
-        apply_mutation=lambda *_: True,
-        restore=lambda *_: None,
-        cwd=Path(),
+        cwd=tmp_path,
     )
     assert not rep.killed_new
     assert not rep.ok
 
 
-def test_growth_adhoc_bounces_and_does_not_restore_when_the_mutation_wont_apply():
-    restored = {"v": False}
-
-    def restore(*_):
-        restored["v"] = True
-
+def test_growth_adhoc_bounces_and_preserves_bytes_when_the_mutation_wont_apply(tmp_path):
+    cut = _cut(tmp_path)
     rep = gg.growth_adhoc_gate(
         Path("cut.py"),
-        "a",
+        "missing",
         "b",
         ["OLD"],
         ["NEW"],
         _adhoc_run(set()),
-        apply_mutation=lambda *_: False,
-        restore=restore,
-        cwd=Path(),
+        cwd=tmp_path,
     )
     assert not rep.applied
     assert not rep.ok
-    assert not restored["v"]  # nothing was written → nothing to restore
+    assert cut.read_bytes() == b"a\n"
+
+
+def test_growth_adhoc_restores_dirty_bytes_when_the_runner_raises(tmp_path):
+    cut = _cut(tmp_path)
+
+    def crash(_cmd):
+        raise RuntimeError("runner failed")
+
+    with pytest.raises(RuntimeError, match="runner failed"):
+        gg.growth_adhoc_gate(Path("cut.py"), "a", "b", ["OLD"], ["NEW"], crash, cwd=tmp_path)
+
+    assert cut.read_bytes() == b"a\n"
