@@ -20,6 +20,22 @@ def test_hitboxes_cover_every_token_in_order():
         assert a.x + a.w <= b.x + 1
 
 
+def test_background_opacity_zero_makes_the_box_fully_transparent():
+    """The configurable sub-background alpha: rendering with a 0-alpha background leaves strictly more
+    fully-transparent pixels than the default translucent box (the box no longer fills), while geometry
+    is unchanged. The default (150) render is the negative control that proves the box is there to remove."""
+    toks = tokenize(LINE)
+
+    boxed = render_subtitle([toks], osd_w=1280, size=44, background=(0, 0, 0, 150))
+    clear = render_subtitle([toks], osd_w=1280, size=44, background=(0, 0, 0, 0))
+
+    def fully_transparent(img):
+        return sum(1 for px in img.getdata() if px[3] == 0)
+
+    assert clear.image.size == boxed.image.size  # only the box alpha changed, not layout
+    assert fully_transparent(clear.image) > fully_transparent(boxed.image)
+
+
 def test_box_contains_hit():
     toks = tokenize(LINE)
     sr = render_subtitle([toks], osd_w=1280, size=44)

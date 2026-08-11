@@ -40,6 +40,15 @@ def test_core_flags_ipc_server_and_video_last():
     assert "--keep-open=yes" in argv
 
 
+def test_native_subs_are_always_center_aligned():
+    # Whatever mpv renders itself (the fallback: a track the overlay doesn't take over) must be centered,
+    # never left-aligned — including ASS subs, via --sub-ass-justify.
+    argv = _argv()
+    assert "--sub-align-x=center" in argv
+    assert "--sub-justify=center" in argv
+    assert "--sub-ass-justify=yes" in argv
+
+
 def test_screenshot_pauses_on_the_first_frame():
     argv = _argv(screenshot=True)
     assert "--pause" in argv and "--loop-file=inf" not in argv

@@ -15,6 +15,7 @@
 
 # ── Subtitles & languages ────────────────────────────────────────────────────────────────────────
 # slang = "ja,jpn,jp"        # primary (Japanese) subtitle languages, priority order
+# sub_background_opacity = 150  # alpha (0–255) of the box behind the subtitle text; 0 = fully transparent
 
 # ── Tooltip geometry & feel ──────────────────────────────────────────────────────────────────────
 # ui_scale = 1.0             # help, sidebar, and episode-analysis size (0.75–2.0)

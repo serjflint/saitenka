@@ -51,6 +51,12 @@ def build_mpv_argv(
         "--keep-open=yes",
         f"--slang={opts.slang}",
         "--sub-visibility=no",  # the overlay renders subs itself; this hides mpv's own sub layer
+        # Center any subtitle mpv renders ITSELF (the fallback path — a track our overlay doesn't take
+        # over, e.g. a manually-picked or native known-language track): never leave dialogue left-aligned.
+        # --sub-ass-justify makes the justification apply to ASS/SSA subs too, not just plain-text ones.
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
         # osd-level stays at mpv's default (1) so native OSD messages show — the z/Z/x sub-delay keys
         # (mpv builtins, repeatable) give feedback. sub-visibility=no already hides the subtitles, so
         # forcing osd-level=0 (an old over-broad hack) only silenced those messages.

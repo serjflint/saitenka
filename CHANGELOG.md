@@ -7,6 +7,17 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **`[tooltip] sub_background_opacity`** (0–255, default 150) sets the alpha of the box behind the
+  subtitle text; `0` makes it fully transparent.
+
+### Changed
+
+- **Any subtitle mpv renders itself is now center-aligned** (`--sub-align-x`/`--sub-justify`/
+  `--sub-ass-justify` at launch), so a fallback/native track — one the overlay doesn't take over — is
+  never left-aligned.
+
 ### Fixed
 
 - **Live profile cycle (++alt+shift+p++) is now a full switch.** Cycling to a second-language profile

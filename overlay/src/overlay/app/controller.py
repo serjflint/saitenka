@@ -291,6 +291,8 @@ class Reader:
         self.renderer = renderer or SubtitleRenderer()  # subtitle raster; NullRenderer() = headless
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
+        # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).
+        self.sub_bg_opacity = max(0, min(255, o.tooltip.sub_background_opacity))
         self.scorer = scorer  # app.scoring.Scorer | None — per-word coloring
         self.styles: list | None = None
         self.anki = anki  # app.anki.Anki | None — enables one-key mining
