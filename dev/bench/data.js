@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786476929081,
+  "lastUpdate": 1786479477752,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -3923,6 +3923,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.145,
             "range": "±7.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f575aa66be51a0167168c2cabed81ecf1653b5c7",
+          "message": "Merge pull request #324 from serjflint/chore/loop-skill-routing\n\nchore(agents): route skills through test loops",
+          "timestamp": "2026-08-11T23:17:18+03:00",
+          "tree_id": "8a56f1e2232469365e775020bc9397badfd8d287",
+          "url": "https://github.com/serjflint/saitenka/commit/f575aa66be51a0167168c2cabed81ecf1653b5c7"
+        },
+        "date": 1786479476448,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.325,
+            "range": "±0.6%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.389,
+            "range": "±9.5%",
             "unit": "ms"
           }
         ]
