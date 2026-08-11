@@ -81,3 +81,26 @@ def test_critical_kind_rows_sort_ahead_of_noncritical() -> None:
         )
     )
     assert rows[0][0] == "tip_compose[nested]"  # critical → first despite its shorter total time
+
+
+def test_mark_interactive_includes_cold_miss_build_spans() -> None:
+    # `*` = reaches the main thread. render/measure/dict_sql count: a warm hover skips them, but a cold
+    # miss builds them inline in show_tooltip_impl (the tracked cold-first-paint) — the weak-HW overshoot.
+    sp = _mod()
+    assert sp._mark("tooltip_show") == "*"
+    assert sp._mark("tip_compose[base]") == "*"  # kind-split base
+    assert sp._mark("render[base]") == "*"  # inline on a cold miss
+    assert sp._mark("measure") == "*"
+    assert sp._mark("dict_sql") == "*"
+    assert sp._mark("some_other_span") == " "  # unlisted
+
+
+def test_mark_background_prefetch_warm_but_engaged_is_interactive() -> None:
+    # prefetch_decode head/warm/head_ahead is the ONLY off-thread span (`~`, never blocks). The engaged_*
+    # kinds are the exception: the user hovered a missed word and WAITS for that compose → `*`.
+    sp = _mod()
+    assert sp._mark("prefetch_decode[head]") == "~"
+    assert sp._mark("prefetch_decode[warm]") == "~"
+    assert sp._mark("prefetch_decode[head_ahead]") == "~"
+    assert sp._mark("prefetch_decode[engaged_open]") == "*"
+    assert sp._mark("prefetch_decode[engaged_nav]") == "*"

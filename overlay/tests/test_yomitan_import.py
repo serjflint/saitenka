@@ -218,6 +218,35 @@ def test_finalize_import_preserves_nested_profile_table(capsys):
     assert reloaded["dicts"] == ["MonoA"] and reloaded["freq"] == ["FreqA"]  # titles registered
 
 
+def test_finalize_import_appends_to_existing_selection():
+    """The zip importers (`import`/`import-dictionaries`) default to merge=True: importing a subset
+    must APPEND to the already-selected dicts, not replace them. Regression: a shallow overlay wiped
+    the active `dicts` list down to just the freshly-imported titles (Ja-En dicts silently dropped
+    from selection though still in the DB)."""
+    from overlay.app.config import config_path, load_config
+
+    config_path().write_text(
+        'dicts = ["Mono明鏡", "Mono三省堂", "Jitendex"]\nfreq = ["BCCWJ"]\n', encoding="utf-8"
+    )
+    # re-import 明鏡 (already present) + a new 大辞林 → 大辞林 appended, order preserved, no dup, Jitendex kept.
+    yi.finalize_import({"dicts": ["Mono明鏡", "大辞林"]}, confirm=lambda _p: True)
+
+    reloaded = load_config()
+    assert reloaded["dicts"] == ["Mono明鏡", "Mono三省堂", "Jitendex", "大辞林"]
+    assert reloaded["freq"] == ["BCCWJ"]  # a kind absent from the import is untouched
+
+
+def test_finalize_import_settings_replaces_selection():
+    """merge=False (import-settings): the settings export is the authoritative ordered enabled set, so
+    it REPLACES the lists wholesale rather than appending."""
+    from overlay.app.config import config_path, load_config
+
+    config_path().write_text('dicts = ["Old1", "Old2"]\n', encoding="utf-8")
+    yi.finalize_import({"dicts": ["New1"]}, confirm=lambda _p: True, merge=False)
+
+    assert load_config()["dicts"] == ["New1"]
+
+
 def test_finalize_import_declined_writes_nothing():
     """confirm=False is the honoured no-op: nothing is written, so no config file appears."""
     from overlay.app.config import config_path

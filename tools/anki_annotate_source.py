@@ -35,8 +35,18 @@ import tempfile
 import urllib.request
 from collections import Counter
 from pathlib import Path
+from typing import TypedDict
 
 MAC_DEFAULT = "~/Library/Application Support/Anki2/User 1/collection.anki2"
+
+
+class PlanRow(TypedDict):
+    nid: int
+    deck: str
+    tag: str
+    misc: bool
+
+
 ANKICONNECT = "http://127.0.0.1:8765"
 
 
@@ -113,7 +123,7 @@ def main():
             note_deck.setdefault(nid, d)
 
     # build plan (tag always; MiscInfo only when field present & empty)
-    plan = []  # {nid, deck, tag, misc: bool}
+    plan: list[PlanRow] = []
     for nid, mid, flds in cur.execute("SELECT id,mid,flds FROM notes"):
         if nid not in note_deck:
             continue

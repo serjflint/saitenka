@@ -46,6 +46,7 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from httpx_aiohttp import HttpxAiohttpClient
 
@@ -492,7 +493,7 @@ def main():
 
     log(f"fetching AniList list for {args.anilist_user} …")
     media, sub_results = asyncio.run(fetch(args))
-    rows = [
+    rows: list[dict[str, Any]] = [  # AniList JSON spread (**m) → genuinely dynamic payload
         {
             **m,
             "subs": avail,

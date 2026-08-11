@@ -230,11 +230,16 @@ def _match_and_report(enabled: list[str], scan_dirs: list[str]) -> dict[str, str
     return matches
 
 
-def finalize_import(cfg: dict, *, confirm, echo=print) -> Path | None:
+def finalize_import(cfg: dict, *, confirm, echo=print, merge: bool = True) -> Path | None:
     """Shared tail of every importer (``import`` / ``import-dictionaries`` / ``import-settings``):
-    overlay the freshly-imported dict/freq/pitch titles onto the existing config, show the proposal,
-    and write it (timestamped backup first, via the comment-preserving tomlkit sink). Returns the
-    backup path, if any.
+    fold the freshly-imported dict/freq/pitch titles into the existing config, show the proposal, and
+    write it (timestamped backup first, via the comment-preserving tomlkit sink). Returns the backup
+    path, if any.
+
+    ``merge=True`` (the zip importers ``import`` / ``import-dictionaries``): **append** the new titles
+    to the existing ``dicts``/``freq``/``pitch`` lists, order-preserving + de-duplicated — importing a
+    few dicts must not silently drop the ones already selected. ``merge=False`` (``import-settings``):
+    the settings export is the authoritative ordered enabled set, so **replace** the lists wholesale.
 
     Extracted so this merge→serialise→write path is unit-tested ONCE and the commands stay thin
     wrappers over it — inlined per command it went uncovered, and a nested ``[profiles.*]`` table (a
@@ -242,7 +247,14 @@ def finalize_import(cfg: dict, *, confirm, echo=print) -> Path | None:
     for kind in ("dicts", "freq", "pitch"):
         if cfg.get(kind):
             echo(f"  {kind}: {cfg[kind]}")
-    merged = {**load_config(), **cfg}  # overlay the imported titles onto the existing config
+    base = load_config()
+    if merge:
+        merged = dict(base)
+        for kind in ("dicts", "freq", "pitch"):
+            if cfg.get(kind):  # existing selection first, then new titles not already present
+                merged[kind] = list(dict.fromkeys([*(base.get(kind) or []), *cfg[kind]]))
+    else:
+        merged = {**base, **cfg}  # authoritative replace (settings export = full enabled set)
     echo("\nProposed config:")
     echo(dumps_toml(merged))
     backup = write_config(merged, confirm=confirm)
@@ -278,5 +290,5 @@ def run_import(
 
     ordered = [matches[name] for name in enabled if name in matches]
     cfg = import_zips(ordered, imported_at=datetime.now(UTC).isoformat())
-    finalize_import(cfg, confirm=confirm)
+    finalize_import(cfg, confirm=confirm, merge=False)  # export is the authoritative enabled set
     return 0

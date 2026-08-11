@@ -205,7 +205,7 @@ lint = { shell = "cd .. && uv run --project overlay --extra full ruff check --fi
 # see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
 # strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
 # scope for visibility, same posture as `ty` (never a hard gate here).
-types = { shell = "cd .. && uv run --project overlay --extra full mypy && uv run --project overlay --extra full basedpyright && uv run --project overlay --extra full pyrefly check overlay/src/overlay deinflect/src && (uv run --project overlay --extra full pyrefly check overlay/examples tools install .agents || true) && (uv run --project overlay --extra full ty check overlay/src/overlay deinflect/src overlay/examples tools install .agents || true)" }
+types = { shell = "cd .. && uv run --project overlay --extra full mypy && uv run --project overlay --extra full basedpyright && uv run --project overlay --extra full pyrefly check overlay/src/overlay deinflect/src && (uv run --project overlay --extra full pyrefly check overlay/examples tools install .agents || true) && (uv run --project overlay --extra full ty check --ignore unresolved-import overlay/src/overlay deinflect/src overlay/examples tools install .agents || true)" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
