@@ -548,6 +548,7 @@ package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-d
 # Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
 yomitan-parity = { shell = "cd saitenka-dict && uv run python -m oracle.parity" }
 yomitan-parity-json = { shell = "cd saitenka-dict && uv run python -m oracle.parity --json" }
+dictionary-structure-oracle = { cmd = "uv run --extra full python tools/dictionary_structure_oracle.py" }
 # -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
 # FT code paths still run without the GIL — it just parallelises (91s → ~22s).
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not (slow or live)'" }

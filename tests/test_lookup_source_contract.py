@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from pathlib import Path
 
 import dicthelp
 from saitenka_dict import (
@@ -26,8 +27,13 @@ from saitenka_dict import (
 
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
+from saitenka.app.dictionary import DictionarySet
 from saitenka.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
 from saitenka.app.tokenize import Token
+from saitenka.model import Style
+from saitenka.sc.walk import walk
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _dictionary(
@@ -132,6 +138,49 @@ def test_overlay_can_swap_to_the_extracted_source_without_renderer_changes(tmp_p
     assert entry.reading == "よむ"
     assert entry.defs[0].dict_name == "Core" and entry.defs[0].content == ["to read"]
     assert card.expression == "読む" and card.glosses == ("to read",)
+
+
+def test_production_source_unwraps_jitendex_structured_content_before_rendering(tmp_path):
+    structured = json.loads((FIXTURES / "sc_jitendex_nested.json").read_text(encoding="utf-8"))
+    archive = _dictionary(
+        tmp_path / "jitendex.zip",
+        "Jitendex",
+        [structured],
+        term="鳥",
+        reading="とり",
+    )
+    database = DictionaryDb.open(tmp_path / "dictionary.sqlite")
+    database.import_zip(archive, imported_at=dicthelp.AT)
+    current = DictionarySet.from_db(database, ["Jitendex"])
+    token = Token("鳥", "鳥", "とり", "名詞", 0, 1)
+
+    assert current.source is not None
+    entry = current.entry_for(token)
+    blocks = walk(entry.defs[0].content, Style(size=26))
+
+    assert [
+        (
+            block.marker,
+            block.indent,
+            "".join(
+                "".join(span.text for span in item.base)
+                if hasattr(item, "base")
+                else getattr(item, "text", "")
+                for item in block.flow
+            ),
+        )
+        for block in blocks
+    ] == [
+        ("＊", 0, "noun"),
+        ("①", 1, "bird"),
+        (None, 2, "鳥が鳴いた。"),
+        (None, 2, "A bird sang."),
+        ("②", 1, "bird meat"),
+        ("", 1, "fowl"),
+        ("", 1, "poultry"),
+        (None, 2, "See: 鶏"),
+        (None, 0, "JMdict"),
+    ]
 
 
 def test_overlay_dispatches_search_and_exact_headword_attestation(tmp_path):

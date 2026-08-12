@@ -26,6 +26,7 @@ from saitenka.app.dictionary_surface import (
 from saitenka.app.dictionary_surface import (
     SearchHit as _SearchHit,
 )
+from saitenka.app.dictionary_surface import glossary_to_nodes as _glossary_to_nodes
 from saitenka.app.dictionary_surface import (
     glosses_of as _glosses_of,
 )
@@ -416,7 +417,7 @@ class DictionarySourceAdapter:
 
     def _definition(self, definition):
         source = definition.source.dictionary if definition.source else "—"
-        content = list(definition.content)
+        content = _glossary_to_nodes(list(definition.content))
         paths = tuple(dict.fromkeys(collect_img_paths(content)))
         media = (
             self.source.media_for(source, paths)
