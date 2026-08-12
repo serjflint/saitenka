@@ -16,7 +16,7 @@ the score, by design (the plan's core-principle: either alone wastes effort).
 The composite is transparent (every component is a column, never just a scalar). Module-level exclusions
 are hard drops: a module any OPEN PR is editing (grow at rest, don't fight in-flight work). Per-GAP
 exclusion (a `.ledger.grow.jsonl` gap already closed-current / unclosable) happens later, when the picked
-module's scenario map is enumerated — not here. Run from `overlay/`:
+module's scenario map is enumerated — not here. Run from the repository root:
     uv run python tools/grow_triage.py                       # ranked table
     uv run python tools/grow_triage.py --top 1               # just the pick
     uv run python tools/grow_triage.py --survivors-json s.json --contexts-json c.json   # full signal set

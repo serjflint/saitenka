@@ -4,7 +4,7 @@
 # Python / uv
 __pycache__/
 *.pyc
-# all uv envs (recursive: also overlay/.venv*). No trailing slash → also ignores the `.venv` SYMLINK
+# all uv envs (recursive). No trailing slash → also ignores the `.venv` SYMLINK
 # uv's centralized-project-envs leaves in the tree (points into ~/.cache/uv), not just real env dirs.
 # Opt-in tasks: fuzz/crosshair run ephemerally (no dir), pyspy uses /tmp, subint repro is manual.
 .venv*
@@ -39,6 +39,11 @@ build/
 # render / test scratch
 out.png
 *.out.png
+bench.json
+jank.json
+jank-bench.json
+.pyscn/
+.complexipy_cache/
 
 # generated ranking + dict outputs
 saitenka-dicts/
@@ -58,11 +63,7 @@ vibe/
 .repowise-workspace/
 .repowise-workspace.yaml
 # repowise also self-installs editor integration wherever it's run from — local machine config,
-# not project source. Scoped to overlay/ (root /.claude/ below serves a different purpose: the
-# repo-local skills symlink).
-overlay/.claude/
-overlay/.mcp.json
-overlay/.vscode/
+# not project source. The root entries below serve the active project.
 
 # Claude Code: entirely local (settings + an optional .claude/skills -> ../.agents/skills symlink). Never committed.
 /.claude/

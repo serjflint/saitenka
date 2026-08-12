@@ -13,7 +13,7 @@ dropped frames while the video runs, no stall when you hover a word.
 
 Measured on an Apple M3 Pro, post-optimization (after the Stage 6/7 render levers). The full
 engineering log — every baseline, every lever, the raw percentile tables — lives in
-[`overlay/BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/overlay/BENCHMARKS.md).
+[`BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/BENCHMARKS.md).
 
 | Metric | Measured (M3 Pro) | Target |
 |---|---|---|
@@ -77,7 +77,7 @@ Add `--pathological` for the 20-worst-words corpus, `--stress` for the sustained
 each mode measures, and every historical baseline, is in the engineering log:
 
 - **Harness:** [`examples/bench_responsiveness.py`](https://github.com/serjflint/saitenka/blob/main/examples/bench_responsiveness.py)
-- **Full log:** [`overlay/BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/overlay/BENCHMARKS.md)
+- **Full log:** [`BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/BENCHMARKS.md)
 
 ## Guarding against regressions
 

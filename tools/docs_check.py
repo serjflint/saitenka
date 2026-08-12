@@ -1,7 +1,7 @@
 """Deterministic doc-to-code checker (`poe docs-refs` / `poe docs-consts`).
 
 Enforces "text explains, checks enforce" for saitenka's agent-facing docs. AGENTS.md,
-`overlay/ARCHITECTURE.md`, and every `.agents/skills/*/SKILL.md` make concrete, checkable claims about
+`ARCHITECTURE.md`, and every `.agents/skills/*/SKILL.md` make concrete, checkable claims about
 the code — poe task names, `.agents/` paths, module files, and constant defaults. Prose can't be
 mechanically verified, so a rename or a retune silently rots the reference. These two zero-LLM passes
 bind each claim to the code, so drift fails the gate instead of misleading the next agent.
@@ -17,8 +17,8 @@ Design templates (the SOTA sweep that motivated this — vibe/harness-engineerin
 ContextCov's Markdown-slice + header-path scope; HANDBOOK.md's two-sided ``verify()`` (assert the
 required claim resolves AND the stale one is caught). Planted +/- controls: tests/test_docs_check.py.
 
-stdlib only (re / pathlib / tomllib / importlib / inspect). Run from `overlay/` via poe, but the repo
-root is derived from the script location, so cwd doesn't matter.
+stdlib only (re / pathlib / tomllib / importlib / inspect). The repo root is derived from the script
+location, so cwd doesn't matter.
 """
 
 from __future__ import annotations
@@ -38,6 +38,14 @@ if TYPE_CHECKING:
 _TOOLS = Path(__file__).resolve().parent
 _REPO = _TOOLS.parent
 _PKG = _REPO / "src" / "saitenka"
+_REQUIRED_DOCS = (
+    _REPO / "AGENTS.md",
+    _REPO / "ARCHITECTURE.md",
+    _REPO / "BENCHMARKS.md",
+    _REPO / "PYPI.md",
+    _REPO / "overlay.example.toml",
+    _REPO / "docs" / "contributing" / "rendering.md",
+)
 
 # --- doc corpus ----------------------------------------------------------------------------------
 # The agent-facing docs whose claims we bind. AGENTS.md is the always-loaded map; ARCHITECTURE.md the
@@ -45,13 +53,17 @@ _PKG = _REPO / "src" / "saitenka"
 
 
 def _doc_files() -> list[Path]:
-    docs = [
-        _REPO / "AGENTS.md",
-        _REPO / "overlay" / "ARCHITECTURE.md",
-        _REPO / "overlay" / "README.md",
-    ]
+    docs = list(_REQUIRED_DOCS)
     docs += sorted((_REPO / ".agents" / "skills").glob("*/SKILL.md"))
     return [d for d in docs if d.is_file()]
+
+
+def _required_doc_failures(required: tuple[Path, ...] = _REQUIRED_DOCS) -> list[str]:
+    return [
+        f"required canonical file missing: {doc.relative_to(_REPO) if doc.is_relative_to(_REPO) else doc}"
+        for doc in required
+        if not doc.is_file()
+    ]
 
 
 # --- refs pass -----------------------------------------------------------------------------------
@@ -62,12 +74,15 @@ _POE = re.compile(r"\bpoe\s+([a-z][a-z0-9-]*)")
 # `.agents/<area>/<rest>` path. Trailing slash allowed (dir refs); trailing punctuation stripped later.
 _AGENTS_PATH = re.compile(r"\.agents/(?:skills|rules|hooks|sharpen|grow|mcp)/[A-Za-z0-9_./-]+")
 # pkg-qualified source file, e.g. `render/banded.py` — resolved under src/saitenka. The
-# lookbehind stops it matching the tail of a longer explicit path (that path matches _OVERLAY_PATH).
+# lookbehind stops it matching the tail of a longer explicit path.
 _MODULE_FILE = re.compile(r"(?<![\w/])(?:app|render|sc|draw|raster|mpvio)/[a-z0-9_]+\.py")
 # tool/script file at the repository root, e.g. `tools/mutate/run.py`, `tools/semgrep/rules.yml`.
 _TOOL_FILE = re.compile(r"(?<![\w/])tools/[A-Za-z0-9_./-]+\.(?:py|yml|toml)")
-# explicit repo-relative historical overlay path with a known extension.
-_OVERLAY_PATH = re.compile(r"(?<![\w/])overlay/[A-Za-z0-9_./-]+\.(?:py|md|json|yml|toml)")
+# explicit repo-relative source/document path with a known extension.
+_ROOT_PATH = re.compile(
+    r"(?<![\w/])(?:(?:src/saitenka|docs|tools)/[A-Za-z0-9_./-]+\.(?:py|md|json|yml|toml)"
+    r"|(?:ARCHITECTURE|BENCHMARKS|PYPI)\.md|overlay\.example\.toml)"
+)
 
 _STRIP = ".,;:)’'\"`"  # trailing prose punctuation to peel off a captured path
 # a poe *invocation* is always in code font here; prose ("a poe gate", "the poe shim") is not a ref.
@@ -90,7 +105,7 @@ def _ref_failures(text: str, rel: str, tasks: set[str]) -> list[str]:
     agents = sorted({m.rstrip(_STRIP) for m in _AGENTS_PATH.findall(text)})
     modules = sorted(set(_MODULE_FILE.findall(text)))
     toolz = sorted(set(_TOOL_FILE.findall(text)))
-    overlays = sorted(set(_OVERLAY_PATH.findall(text)))
+    root_paths = sorted(set(_ROOT_PATH.findall(text)))
     return [
         *(
             f"{rel}: `poe {t}` is not a poe task (see [tool.poe.tasks])"
@@ -108,14 +123,14 @@ def _ref_failures(text: str, rel: str, tasks: set[str]) -> list[str]:
             for m in toolz
             if not (_REPO / m).is_file()
         ),
-        *(f"{rel}: `{m}` does not exist" for m in overlays if not (_REPO / m).is_file()),
+        *(f"{rel}: `{m}` does not exist" for m in root_paths if not (_REPO / m).is_file()),
     ]
 
 
 def check_refs() -> list[str]:
     """Every doc-named poe task / `.agents` path / module file resolves. Returns failure lines."""
     tasks = _poe_tasks()
-    fails: list[str] = []
+    fails = _required_doc_failures()
     for doc in _doc_files():
         fails += _ref_failures(doc.read_text(encoding="utf-8"), str(doc.relative_to(_REPO)), tasks)
     return fails
@@ -193,7 +208,7 @@ _CLAIM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+(?:\.\d+)?)")
 
 def _const_table_rows() -> list[list[str]]:
     """The Constants table as [Knob, Value, Where] rows (header + separator dropped)."""
-    text = (_REPO / "overlay" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    text = (_REPO / "ARCHITECTURE.md").read_text(encoding="utf-8")
     lines = text.splitlines()
     try:
         start = next(i for i, ln in enumerate(lines) if ln.strip() == _CONST_TABLE_HEADER)

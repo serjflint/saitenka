@@ -2,7 +2,7 @@
 
 Layering enforcement (PIL-agnostic core, GPL chokepoint, import cycles) moved to the
 ``.importlinter`` dependency-contract engine (``uv run poe arch``) — see
-``overlay/.importlinter`` and ``AGENTS.md``. This file keeps the behavioral tests: hit geometry
+``.importlinter`` and ``AGENTS.md``. This file keeps the behavioral tests: hit geometry
 (ScanBox/LinkBox) is produced by LAYOUT, not by the raster backend, and the raster backends must
 reproduce identical bytes.
 """
@@ -66,11 +66,10 @@ def test_hit_geometry_is_produced_by_layout_not_raster():
     assert res.scan_boxes and isinstance(res.scan_boxes[0], model.ScanBox)
 
 
-def test_rust_backend_reserved():
-    """rust/ is reserved for the future PyO3 cosmic-text backend; its README must pin the
-    free-threading requirement so the GIL stays off."""
-    readme = SRC.parent.parent / "overlay" / "rust" / "README.md"
-    assert readme.exists(), "rust/README.md missing"
+def test_native_backend_plan_requires_free_threading():
+    """The future cosmic-text backend must preserve free-threaded rendering."""
+    readme = SRC.parent.parent / "docs" / "contributing" / "native-renderer.md"
+    assert readme.exists(), "native-renderer.md missing"
     text = readme.read_text(encoding="utf-8")
     assert "cosmic-text" in text
     assert "free-threading" in text or "free-threaded" in text

@@ -1,4 +1,4 @@
-"""Generate ``overlay/render/_uax14_classes.py`` — the compact Line_Break class table — from the
+"""Generate ``src/saitenka/render/_uax14_classes.py`` — the compact Line_Break class table — from the
 vendored (gzipped) ``tests/fixtures/uax14/LineBreak.txt.gz`` UCD property file.
 
 Emits a gap-free, coalesced ``(start, class_id)`` table covering U+0000..U+10FFFF so a runtime lookup

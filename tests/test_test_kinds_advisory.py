@@ -3,7 +3,7 @@
 The advisory maps a commit's staged source files to the non-unit oracle kinds they warrant. It's only
 useful if the map DISCRIMINATES — a kind-bearing source path surfaces kinds, and a docs/test-only commit
 stays quiet — and if commit detection doesn't fire on `git log`. Loads the agent-agnostic modules by path
-(they're outside the overlay package, like test_corpus_check.py loads tools/corpus_check.py).
+(they're outside the Saitenka package, like test_corpus_check.py loads tools/corpus_check.py).
 """
 
 from __future__ import annotations

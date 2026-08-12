@@ -67,7 +67,7 @@ Tokenization is [fugashi](https://github.com/polm/fugashi) + UniDic with a Yomit
 over an on-disk **SQLite** index built once from your dictionaries (near-constant RAM). On a free-threaded
 Python **3.14t** build the renderer parallelizes across cores (3.13 minimum; `uv` fetches the interpreter).
 
-Full design → **[`overlay/README.md`](overlay/README.md)** and the
+Full design → **[`docs/contributing/rendering.md`](docs/contributing/rendering.md)** and the
 [architecture docs](https://saitenka.readthedocs.io/en/latest/contributing/architecture/).
 
 ## Features
@@ -169,7 +169,7 @@ owner-only `$XDG_CONFIG_HOME/saitenka/jimaku.key` unless `[linux-keyring]` is in
 
 Full docs: **[saitenka.readthedocs.io](https://saitenka.readthedocs.io)** (install, usage,
 [development](https://saitenka.readthedocs.io/en/latest/contributing/development/)). Renderer design:
-**[`overlay/README.md`](overlay/README.md)**.
+**[`docs/contributing/rendering.md`](docs/contributing/rendering.md)**.
 
 ## What's in the repo
 

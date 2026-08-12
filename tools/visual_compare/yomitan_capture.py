@@ -6,14 +6,14 @@ screenshots the entry Yomitan's search page renders. Lets us regenerate the "ref
 word instead of hand-capturing screenshots.
 
 Prereqs: `uv add --dev playwright && uv run playwright install chromium`, and a profile copy at
-$YOMITAN_PROFILE (default /tmp/yomitan-profile) — see compare/README. SubMiner's live profile is
+$YOMITAN_PROFILE (default /tmp/yomitan-profile) — see `tools/visual_compare/README.md`. SubMiner's live profile is
 locked, so copy it while it's fine to read:
     EXT=jbjehhccmhejadgafflkalefjpnepkle
     mkdir -p /tmp/yomitan-profile/Default/IndexedDB "/tmp/yomitan-profile/Default/Local Extension Settings"
     cp -R ~/.config/SubMiner/IndexedDB/chrome-extension_${EXT}_0.indexeddb.* /tmp/yomitan-profile/Default/IndexedDB/
     cp -R ~/.config/SubMiner/"Local Extension Settings"/$EXT "/tmp/yomitan-profile/Default/Local Extension Settings/"
 
-    uv run python overlay/compare/yomitan_capture.py 本命 聞こえる 預ける
+    uv run python tools/visual_compare/yomitan_capture.py 本命 聞こえる 預ける
 """
 
 from __future__ import annotations

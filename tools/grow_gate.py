@@ -545,7 +545,7 @@ def _main() -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     liv = sub.add_parser("liveness", help="arm 2 — negate each assert; ≥1 must flip the test red")
-    liv.add_argument("test_file", type=Path, help="test file relative to repo (overlay/)")
+    liv.add_argument("test_file", type=Path, help="test file relative to repository root")
     liv.add_argument("--test", required=True, help="the grown test function name")
     liv.add_argument("--repo", type=Path, default=Path.cwd())
 

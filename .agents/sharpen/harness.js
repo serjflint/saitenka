@@ -195,7 +195,7 @@ phase('Measure')
 // (SPEC step 2). Read structured tool output (session DB, test-lint --json), never scraped console.
 // Efficacy CONSUMES a pre-built mutation campaign; it never launches one (a campaign outlives a 10-min
 // step budget — that killed the first run). The campaign is a slow out-of-band pre-req.
-const DB_REL = `.mutation-cache/${`src/saitenka/${pick.module}`.replaceAll('/', '_')}.sqlite` // matches run.py db_path(), relative to overlay/
+const DB_REL = `.mutation-cache/${`src/saitenka/${pick.module}`.replaceAll('/', '_')}.sqlite` // matches run.py db_path(), relative to repository root
 const TARGET_KEY = pick.module.split('/').pop().replace('.py', '') // allowlist key = module basename
 const base = await agent(
   `Establish the known-green baseline + before-snapshot for module ${pick.module} (tests: ${pick.tests.join(', ')}). ${REL} ${GUARD} (Measure runs read-only tools — no edits at all.)\n` +

@@ -1,6 +1,6 @@
 # saitenka-deinflect (GPL-3.0)
 
-Optional Japanese **deinflection chain** for [saitenka](../overlay) — the
+Optional Japanese **deinflection chain** for [Saitenka](../README.md) — the
 🧩 `-て « -いる « -た` breakdown Yomitan shows under a headword.
 
 > **License: GPL-3.0-or-later.** This package is a derivative work of

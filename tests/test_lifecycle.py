@@ -18,10 +18,7 @@ def test_reinstall_command_pypi_and_github_forms():
     assert lc.reinstall_command(["telemetry", "deinflect"])[-1] == "saitenka[deinflect,telemetry]"
     assert lc.reinstall_command([])[-1] == "saitenka"  # bare when nothing installed
     gh = lc.reinstall_command(["deinflect"], source="github", ref="v0.5.0")[-1]
-    assert (
-        gh
-        == "saitenka[deinflect] @ git+https://github.com/serjflint/saitenka.git@v0.5.0#subdirectory=overlay"
-    )
+    assert gh == "saitenka[deinflect] @ git+https://github.com/serjflint/saitenka.git@v0.5.0"
     assert (
         "@v" not in lc.reinstall_command([], source="github")[-1]
     )  # no ref → default branch (latest)
@@ -33,9 +30,8 @@ def test_reinstall_attempts_ordering_by_source_and_ref():
 
     auto = lc.reinstall_attempts(["deinflect"], github_ref="v0.5.0")  # PyPI first, then GitHub@tag
     assert len(auto) == 2 and "git+" not in specs(auto)[0]
-    assert (
-        "@v0.5.0#subdirectory=overlay" in specs(auto)[1]
-    )  # github attempt targets the release tag
+    assert "@v0.5.0" in specs(auto)[1]  # github attempt targets the release tag
+    assert "subdirectory=" not in specs(auto)[1]  # installable project is the repository root
     assert specs(lc.reinstall_attempts([], source="pypi")) == ["saitenka"]  # PyPI only
     assert len(lc.reinstall_attempts([], source="github")) == 1  # forced GitHub only
 

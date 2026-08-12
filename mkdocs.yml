@@ -1,7 +1,7 @@
 # Docs site for Saitenka — Material for MkDocs, hosted on Read the Docs (see .readthedocs.yml). Source
-# lives at repo root (docs/ + this file); the build runs in overlay's env (which has the package) via
+# lives at repo root (docs/ + this file); the build runs in the root project env via
 # `uv run poe docs`. Long-form dev docs stay single-source: pages `include-markdown` the canonical files
-# (overlay/ARCHITECTURE.md, CHANGELOG.md) rather than copying them — edit the originals, the site follows.
+# (ARCHITECTURE.md, CHANGELOG.md) rather than copying them — edit the originals, the site follows.
 site_name: Saitenka
 site_description: Learn Japanese from the video you're watching — FSRS subtitle coloring, hover→multi-dict tooltip, one-key Anki mining, drawn inside mpv.
 site_url: https://saitenka.readthedocs.io/
@@ -16,7 +16,7 @@ docs_dir: docs
 exclude_docs: |
   usage/_card_format_markers.md
 
-# The reused long-form docs link to sibling repo files (AGENTS.md, overlay/ARCHITECTURE.md, …) that live
+# The reused long-form docs link to sibling repo files (AGENTS.md, ARCHITECTURE.md, …) that live
 # outside the site tree; lychee (`poe links`) validates those on disk, so downgrade only the
 # "target not found" link check to non-fatal. Everything else stays a warning → fatal under `--strict`.
 validation:
@@ -90,6 +90,8 @@ nav:
       - Performance & benchmarks: why/benchmarks.md
   - Contributing:
       - Architecture: contributing/architecture.md
+      - Rendering: contributing/rendering.md
+      - Future native renderer: contributing/native-renderer.md
       - Development: contributing/development.md
       - Agent tooling: contributing/agent-tooling.md
       - Changelog: contributing/changelog.md

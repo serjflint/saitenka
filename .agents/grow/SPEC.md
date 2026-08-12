@@ -36,7 +36,7 @@ gaps are only **seed + ROI evidence + a held-out backtest corpus**, never the ta
   3. **robustness / spec gap** → a robustness fix + its guard.
   4. **design / observability gap** (no public seam to assert X) → a refactor recommendation.
 - **Assert oracles, not pixels** (platform-independent). **GPL/LGPL is fine as out-of-process tooling,
-  never in the shipped `overlay/` dependency graph** (`blanket` sits in the opt-in `grow` dep group).
+  never in the shipped `saitenka` dependency graph** (`blanket` sits in the opt-in `grow` dep group).
 
 ## The deterministic teeth-gate — four arms (`tools/grow_gate.py`)
 

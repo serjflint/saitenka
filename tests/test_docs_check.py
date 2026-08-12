@@ -77,6 +77,18 @@ def test_refs_pass_a_real_module_file() -> None:
     assert dc._ref_failures("`render/banded.py` is the core", "FAKE.md", set()) == []
 
 
+def test_refs_pass_a_root_canonical_path() -> None:
+    dc = _mod()
+    assert dc._ref_failures("see `ARCHITECTURE.md`", "FAKE.md", set()) == []
+
+
+def test_refs_catches_missing_required_canonical_file(tmp_path) -> None:
+    dc = _mod()
+    missing = tmp_path / "ARCHITECTURE.md"
+    fails = dc._required_doc_failures((missing,))
+    assert any("required canonical file missing" in failure for failure in fails)
+
+
 # --- consts: negative controls (one planted drift each) ------------------------------------------
 
 

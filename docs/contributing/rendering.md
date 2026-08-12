@@ -1,4 +1,4 @@
-# overlay — rich-text + ruby renderer for the in-mpv Yomitan panel
+# Rendering the in-mpv dictionary panel
 
 > This is the renderer's design-rationale readme. **Using Saitenka** (install, features, shortcuts) →
 > the docs site: [saitenka.readthedocs.io](https://saitenka.readthedocs.io).
@@ -18,12 +18,13 @@ the libmpv render API if/when Pillow hits a wall.
 ## Layout
 
 - `src/saitenka/` — the library (`fonts`, `render/`, `model`, `sc/`, `panel`, `draw/`).
-- `assets/fonts/` — **vendored** Noto Sans JP (variable) + Noto Sans, so golden images reproduce
+- `src/saitenka/assets/fonts/` — **vendored** Noto Sans JP (variable) + Noto Sans, so golden images reproduce
   across machines (macOS / Windows / Linux).
 - `tests/golden/` — golden PNGs; `tests/fixtures/` — structured-content JSON.
 - `examples/render_png.py` — CLI: render a string or a fixture JSON to a PNG.
 
-Module-by-module map and the hover→lookup→render→mine data flow: [ARCHITECTURE.md](ARCHITECTURE.md).
+Module-by-module map and the hover→lookup→render→mine data flow:
+[ARCHITECTURE.md](https://github.com/serjflint/saitenka/blob/main/ARCHITECTURE.md).
 
 ## Usage
 
@@ -36,7 +37,8 @@ SAITENKA_UPDATE_GOLDEN=1 uv run pytest   # regenerate goldens (inspect the diff 
 uv run python examples/bench_responsiveness.py   # UI latency vs the saved baseline (BENCHMARKS.md)
 ```
 
-Responsiveness KPIs, targets, and the saved baseline live in [`BENCHMARKS.md`](BENCHMARKS.md).
+Responsiveness KPIs, targets, and the saved baseline live in
+[`BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/BENCHMARKS.md).
 
 ## Bolt to mpv (the airspace-safe cure)
 
@@ -173,8 +175,8 @@ uv run python examples/mpv_reader.py episode.mkv --color \
 
 Pillow + `overlay-add` is the simplest thing that renders this and gets it onto mpv. If it hits a
 wall — per-frame animation, huge panels, GPU scaling, live interactivity — escalate to Rust +
-cosmic-text + the libmpv render API (see `rust/README.md`). The renderer here (walker, ruby, chrome,
-goldens) is the spec that escalation must match.
+cosmic-text + the libmpv render API (see [Future cosmic-text raster backend](native-renderer.md)). The
+renderer here (walker, ruby, chrome, goldens) is the spec that escalation must match.
 
 ## Installing
 
@@ -190,10 +192,11 @@ uv tool install "saitenka[full]" && saitenka setup
 winget→choco→scoop; Linux prints copy-paste hints), runs `doctor`, writes the config (`init`), and
 offers `import-settings` + `install-plugin`. Confirm-first, `--yes`/`--dry-run` honoured, resumable.
 Upgrade = `saitenka update` (keeps your extras). The installer scripts live in
-[`install/`](../install/) and are served from GitHub Pages via `poe pages`.
+[`install/`](https://github.com/serjflint/saitenka/tree/main/install) and are served from GitHub Pages
+via `poe pages`.
 
 ## Development
 
-Local task runner (no CI); `uv run poe all` is the pre-push gate. Full task-by-task breakdown and
-traps: the `dev-gate` skill (`.agents/skills/dev-gate/`) / the
+`uv run poe all` is the local pre-push gate and CI mirrors it. Full task-by-task breakdown and traps:
+the `dev-gate` skill (`.agents/skills/dev-gate/`) / the
 [Development](https://saitenka.readthedocs.io/en/latest/contributing/development/) docs.

@@ -10,7 +10,7 @@ at the generator's pinned commit (resolved from `--yomitan` / `$SAITENKA_YOMITAN
 and are **skipped, not failed**, when it's absent or at the wrong commit — a skip is logged loudly, never
 silent. The fsrs corpus fetches py-fsrs ephemerally (PEP-723) and always runs. Exit 1 only on real drift.
 
-stdlib only. Run from `overlay/` via poe; the repo root is derived from this file, so cwd doesn't matter.
+stdlib only. The repo root is derived from this file, so cwd doesn't matter.
 """
 
 from __future__ import annotations

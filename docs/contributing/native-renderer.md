@@ -1,17 +1,17 @@
-# rust/ — reserved for the future `overlay._native` cosmic-text raster backend
+# Future cosmic-text raster backend
 
-This directory is intentionally empty (Stage 8 groundwork). When the overlay needs a native
-rasteriser, it lands here as a PyO3 extension module named `overlay._native`, implementing the
-`overlay.raster.protocol.RasterBackend` protocol with [cosmic-text](https://github.com/pop-os/cosmic-text)
-for shaping/layout/raster:
+When Saitenka needs a native rasterizer, it should land as a PyO3 extension implementing
+`saitenka.raster.protocol.RasterBackend` with [cosmic-text](https://github.com/pop-os/cosmic-text)
+for shaping, layout, and rasterization. The extension module name and source location are intentionally
+deferred until measured Pillow limits justify adding a Rust build.
 
 - **Input**: the existing pure-data row/block model (`panel.panel_rows` output over `sc/`
   structured-content blocks) — no PIL types cross the seam.
 - **Output**: `RasterResult` — premultiplied BGRA (the canonical interchange at `mpvio/osd.py`) plus
   the layout-produced `ScanBox`/`LinkBox` hit geometry (a raster swap must never change hit
-  geometry; `tests/test_layering.py` pins this).
+  geometry; `tests/test_raster_backend.py` pins this).
 
-**Hard requirement — free-threading:** the overlay runs on CPython 3.14t with the GIL disabled
+**Hard requirement — free-threading:** Saitenka runs on CPython 3.14t with the GIL disabled
 (`PYTHON_GIL=0`), which is what makes the parallel prefetch render (~3.8× on 4 cores) possible. The
 PyO3 module MUST declare free-threaded support (`pyo3::prelude` `#[pymodule(gil_used = false)]` /
 abi with `Py_mod_gil = Py_MOD_GIL_NOT_USED`) — an extension without that declaration silently

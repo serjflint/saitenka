@@ -4,7 +4,7 @@ For each case in ``cases.py``: render OUR tooltip from the real configured dicti
 SubMiner tooltip from its reference screenshot, and compose them side-by-side (+ a contact sheet).
 SubMiner isn't changing, so its side is a fixed reference; ours re-renders each run.
 
-    uv run python overlay/compare/generate.py
+    uv run python tools/visual_compare/generate.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,8 @@ sys.path.insert(0, str(HERE))
 from cases import CASES  # noqa: E402
 
 from saitenka import fonts  # noqa: E402
-from saitenka.app.config import expand_paths, load_config  # noqa: E402
+from saitenka.app.config import load_config  # noqa: E402
+from saitenka.app.dictdb import DictionaryDb  # noqa: E402
 from saitenka.app.dictionary import DictionarySet  # noqa: E402
 from saitenka.app.tokenize import Token  # noqa: E402
 from saitenka.panel import render_panel  # noqa: E402
@@ -107,10 +108,12 @@ def main() -> int:
     if not cfg.get("dicts"):
         print("no dicts in ~/.config/saitenka/overlay.toml — see overlay.example.toml")
         return 2
-    ds = DictionarySet.load(
-        expand_paths(cfg["dicts"]),
-        freq_paths=expand_paths(cfg.get("freq")),
-        pitch_paths=expand_paths(cfg.get("pitch")),
+    ds = DictionarySet.from_db(
+        DictionaryDb.open(),
+        cfg["dicts"],
+        cfg.get("freq") or [],
+        cfg.get("pitch") or [],
+        strict=True,
     )
     OUT.mkdir(exist_ok=True)
     tiles = []

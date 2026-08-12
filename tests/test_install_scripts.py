@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_DIR = REPO_ROOT / "install"
 SH_STUB = INSTALL_DIR / "overlay-install.sh"
 PS1_STUB = INSTALL_DIR / "overlay-install.ps1"
+CHECKOUT_PS1 = INSTALL_DIR / "install-windows.ps1"
 
 
 def test_stub_files_exist_and_reference_setup():
@@ -30,6 +31,14 @@ def test_stub_files_exist_and_reference_setup():
     # dry-run path exists in both
     assert "--dry-run" in sh
     assert "DryRun" in ps1
+
+
+def test_windows_checkout_installer_targets_root_project():
+    ps1 = CHECKOUT_PS1.read_text(encoding="utf-8")
+    assert "Join-Path $Repo 'pyproject.toml'" in ps1
+    assert '"$Repo[$extra]"' in ps1
+    assert "Join-Path $Repo 'overlay'" not in ps1
+    assert '"$Repo\\overlay[$extra]"' not in ps1
 
 
 def test_sh_stub_parses_with_bash():

@@ -235,9 +235,11 @@ def reproduce(video: Path, sub: Path) -> dict:
     ``uv run python``."""
     try:
         from saitenka.app import resync
-    except ModuleNotFoundError as exc:  # isolated `uv run script.py` has no overlay on the path
+    except (
+        ModuleNotFoundError
+    ) as exc:  # isolated `uv run script.py` has no project package on the path
         raise SystemExit(
-            "--video/--sub (reproduce) needs the overlay package; run it in the project env:\n"
+            "--video/--sub (reproduce) needs the Saitenka package; run it in the project env:\n"
             "  uv run python tools/subtitle_report.py --video EP.mkv --sub CACHE"
         ) from exc
     import tempfile

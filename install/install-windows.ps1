@@ -28,11 +28,11 @@ function Confirm($q){ if($Yes -or $DryRun){ return $true }; (Read-Host "$q [Y/n]
 # Capture a full transcript so a failed run leaves an artifact to attach to a bug report (see step 5).
 $LogPath = Join-Path $env:TEMP ("saitenka-install-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 try { Start-Transcript -Path $LogPath -ErrorAction Stop | Out-Null } catch { $LogPath = $null }
-$OverlayFailed = $false
+$InstallFailed = $false
 
 $Repo = Split-Path $PSScriptRoot
-if(-not (Test-Path (Join-Path $Repo 'overlay'))){
-  Warn "no overlay\ next to this installer ($Repo) - run it from a repo checkout, or use install\overlay-install.ps1 (wheel bundle)."
+if(-not (Test-Path (Join-Path $Repo 'pyproject.toml'))){
+  Warn "no pyproject.toml next to this installer ($Repo) - run it from a repo checkout, or use install\overlay-install.ps1 (wheel bundle)."
   exit 1
 }
 $AnkiPresent = (Have anki) -or (Test-Path (Join-Path $env:APPDATA 'Anki2'))
@@ -109,9 +109,9 @@ else {
 }
 # --quiet suppresses the ~30-line reinstalled-package list; build FAILURES still print (they go to
 # stderr), so the "Failed to build ..." block the outcome section points at is unaffected.
-$installArgs = @('tool','install','--python',$pyVer,'--reinstall','--quiet',"$Repo\overlay[$extra]")
+$installArgs = @('tool','install','--python',$pyVer,'--reinstall','--quiet',"$Repo[$extra]")
 if(Have uv){
-  Log "Installing/updating saitenka[$extra] from $Repo\overlay"
+  Log "Installing/updating saitenka[$extra] from $Repo"
   if($DryRun){ Write-Host "  DRY: uv $($installArgs -join ' ')" }
   else {
     & uv @installArgs
@@ -122,13 +122,13 @@ if(Have uv){
       Start-Sleep -Seconds 3
       & uv @installArgs
     }
-    if($LASTEXITCODE -ne 0){ $OverlayFailed = $true; Warn "overlay install still failing (uv exit $LASTEXITCODE)." }
+    if($LASTEXITCODE -ne 0){ $InstallFailed = $true; Warn "Saitenka install still failing (uv exit $LASTEXITCODE)." }
   }
-} else { Warn "uv unavailable - install it, then re-run to install the overlay."; $OverlayFailed = $true }
+} else { Warn "uv unavailable - install it, then re-run to install Saitenka."; $InstallFailed = $true }
 
 # Persist %USERPROFILE%\.local\bin on PATH for FUTURE terminals (a choco-installed uv won't have done
 # this). This session already has it (prepended above); new terminals also need a restart to pick it up.
-if((-not $OverlayFailed) -and (-not $DryRun) -and (Have uv)){ uv tool update-shell }
+if((-not $InstallFailed) -and (-not $DryRun) -and (Have uv)){ uv tool update-shell }
 
 # --- 3. Dev/authoring extras (-Dev only) -------------------------------------
 if($Dev){
@@ -143,7 +143,7 @@ if($Dev){
 # (The guided setup in §6 runs the overlay's own doctor twice - an initial read and a final
 # self-verify - so there's no separate doctor-windows.ps1 pass here. Run it standalone any time:
 # powershell -ExecutionPolicy Bypass -File install\doctor-windows.ps1)
-if($OverlayFailed){
+if($InstallFailed){
   Write-Host ""
   Write-Host "[saitenka] INSTALL DID NOT COMPLETE - saitenka is not installed." -ForegroundColor Red
   Write-Host "How to report this so it can be fixed:" -ForegroundColor Yellow

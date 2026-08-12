@@ -2,7 +2,7 @@
 
 Guidance for AI agents and developers working in this repo. Feature docs: the docs site
 (`docs/`, `mkdocs.yml` → [saitenka.readthedocs.io](https://saitenka.readthedocs.io); run/usage/dev live
-there), `overlay/README.md` (renderer design), and `overlay/ARCHITECTURE.md` (module map + data flow).
+there), `docs/contributing/rendering.md` (renderer design), and `ARCHITECTURE.md` (module map + data flow).
 
 ## Planning artifacts
 
@@ -72,7 +72,7 @@ scripts declare deps via PEP 723 inline metadata.
   an explicit param/flag instead of inferring it from a display toggle.
 - **Perf claims:** measure with the instrument that isolates the change (py-spy/Scalene self-time on the
   hot path), not a wall-clock proxy a dominant unrelated cost can swamp — and verify the premise before
-  implementing. Tooling + baselines → `overlay/BENCHMARKS.md`.
+  implementing. Tooling + baselines → `BENCHMARKS.md`.
 - **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
   `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
   each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**

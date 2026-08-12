@@ -1,7 +1,7 @@
 // Dump Yomitan's Japanese transform descriptor → the GPL-3.0 deinflect package's data file.
 // This tool reads Yomitan source; its output feeds the GPL-3.0 saitenka-deinflect package.
 // Regenerate when upgrading Yomitan (run from the repository root):
-//   node compare/dump_transforms.mjs > ../deinflect/src/saitenka_deinflect/data/japanese_transforms.json
+//   node tools/visual_compare/dump_transforms.mjs > deinflect/src/saitenka_deinflect/data/japanese_transforms.json
 // Edit the import path to point at your Yomitan checkout:
 import {japaneseTransforms} from '/path/to/yomitan/ext/js/language/ja/japanese-transforms.js';
 const rule = (r) => {

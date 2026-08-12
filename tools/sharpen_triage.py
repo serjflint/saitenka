@@ -19,7 +19,7 @@ Signals per module:
 Composite (higher = sharpen sooner) = 0.4·survival + 0.4·actionable + 0.2·churn + freshness-bonus
 (unseen/stale). Efficacy and actionable-conformance are co-primary; the metric count is a separate
 column. Exclusions (sharpened-and-unchanged, grow-filed, open-PR) are hard drops; grow-filed and
-in-progress work offline (fail-closed), open-PR needs `gh`. Run from `overlay/`:
+in-progress work offline (fail-closed), open-PR needs `gh`. Run from the repository root:
     uv run python tools/sharpen_triage.py            # ranked table
     uv run python tools/sharpen_triage.py --top 1    # just the pick
     uv run python tools/sharpen_triage.py --no-network   # offline: open-PR exclusion disabled (warned)

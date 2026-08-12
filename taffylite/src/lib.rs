@@ -1,6 +1,6 @@
 //! taffylite — a thin, fixed-size PyO3 binding of taffy 0.7 for saitenka's tooltip geometry.
 //!
-//! It exposes exactly what the `LayoutBackend` seam (overlay/render/layout_backend.py) needs:
+//! It exposes exactly what the `LayoutBackend` seam (`src/saitenka/render/layout_backend.py`) needs:
 //! integer-exact box geometry from a flex tree whose leaf sizes are *already known*. Pillow measures
 //! every row/glyph on the Python side before the backend is called, so — unlike the bake-off
 //! prototype — there is **no measure callback and no Rust-side measure cache**. That machinery only

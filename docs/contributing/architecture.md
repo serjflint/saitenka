@@ -1,3 +1,3 @@
 {%
-  include-markdown "../../overlay/ARCHITECTURE.md"
+  include-markdown "../../ARCHITECTURE.md"
 %}

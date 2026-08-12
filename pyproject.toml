@@ -2,7 +2,7 @@
 name = "saitenka"
 version = "3.1.0"
 description = "Learn Japanese from the video you're watching: FSRS-aware subtitle coloring + one-key Anki mining, drawn inside mpv"
-readme = "overlay/PYPI.md"
+readme = "PYPI.md"
 license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is a separate opt-in dist
 requires-python = ">=3.13"
 dependencies = [
@@ -59,7 +59,7 @@ images = ["resvglite>=0.2.0"]
 # on Windows ([WinError 32] while it decompresses jamdict.db.xz). On Windows the extra pulls
 # jamdict-data-fix instead: a drop-in with the same CC BY-SA database that builds cleanly.
 # Mining prefers your own dictionaries, so a dict-first user never needs this. Opt in with e.g.
-# `uv tool install './overlay[jmdict]'`.
+# `uv tool install '.[jmdict]'` from a checkout.
 jmdict = [
     "jamdict>=0.1a11.post2",
     "jamdict-data>=1.5; platform_system != 'Windows'",
@@ -99,7 +99,7 @@ saitenka-dict = { path = "saitenka-dict", editable = true }
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
 # lightweight `.venv` symlink for editor / basedpyright discovery, instead of a heavy in-tree `.venv`
-# dir — so `overlay/` holds no env dir. The pinned-3.13 opt-in tasks manage their own envs: `fuzz` /
+# directory. The pinned-3.13 opt-in tasks manage their own envs: `fuzz` /
 # `crosshair` run ephemerally (`uv run --no-project --with-editable '.[full]' --with …`, uvx-style,
 # cached, no dir); `pyspy` uses `/tmp/venv-py-spy` because it prints a stable
 # `sudo /tmp/venv-py-spy/bin/py-spy` path a hashed cache env can't give (a reboot just re-syncs it).
@@ -194,7 +194,7 @@ DEP002 = [
 ]
 DEP003 = ["saitenka_deinflect"]  # GPL add-on via the `deinflect` extra (PyPI) — the chokepoint import
 
-# --- Stage 8b: local task runner (no CI — `poe all` is the pre-push gate) -------------------------
+# --- Task runner ---------------------------------------------------------------------------------
 # Every `uv run` carries `--extra full` so the optional features (deinflect inflection chain + JMdict
 # fallback) are present for tests without living in the dev group — they're optional EXTRAS, not dev
 # deps. Keeping the flag on every task avoids uv re-syncing (installing/removing the extras) between
@@ -393,8 +393,8 @@ max-args = 8
 # too-many-{arguments,positional} also relaxed here: a run-once bench/tool signature is not a shipped API,
 # so bundling its params into a config object buys nothing (the library max-args=8 ratchet is #216-scoped).
 "**/examples/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "lambda-assignment", "FBT", "N", "too-many-arguments", "too-many-positional-arguments"]
-# overlay/compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
-"overlay/compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
+# tools/visual_compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
+"tools/visual_compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
 "**/tools/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check", "too-many-arguments", "too-many-positional-arguments"]
 ".agents/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "shebang-not-executable"]
 "install/**" = ["print", "implicit-namespace-package", "S", "DTZ", "shebang-not-executable"]

@@ -31,8 +31,8 @@ _EXTRA_PROBES = {
     "jmdict": "jamdict",
 }
 
-# The overlay lives in the repo's overlay/ subdirectory; uv maps its `../deinflect` path source to the
-# repo's deinflect/ subdirectory, so a git install carries the GPL add-on too (verified via dry-run).
+# The root project maps its local `deinflect/` source, so a git install carries the GPL add-on too
+# (verified via dry-run).
 _GIT_URL = "git+https://github.com/serjflint/saitenka.git"
 
 
@@ -52,7 +52,7 @@ def reinstall_command(
     the GPL ``deinflect`` add-on from the repo's ``deinflect/`` subdirectory. Pure — unit-tested."""
     es = f"[{','.join(sorted(extras))}]" if extras else ""
     if source == "github":
-        spec = f"saitenka{es} @ {_GIT_URL}{f'@{ref}' if ref else ''}#subdirectory=overlay"
+        spec = f"saitenka{es} @ {_GIT_URL}{f'@{ref}' if ref else ''}"
     else:
         spec = f"saitenka{es}"
     return ["uv", "tool", "install", "--reinstall", spec]

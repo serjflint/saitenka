@@ -1,7 +1,7 @@
 # Configuration
 
 Saitenka reads its settings from a single TOML file, `overlay.toml`. The shipped
-[`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay/overlay.example.toml)
+[`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay.example.toml)
 is the exhaustive, self-documenting reference: **every** recognized key appears there at its built-in
 default, commented, sshd_config style. This page is the curated tour of the handful of settings most
 people actually touch — what each does and *why* you'd change it. For the full list, read the example
@@ -243,7 +243,7 @@ example file is a complete template.
 
 !!! note "Everything is in the example file"
     Every recognized key, at its default, with an inline comment, is in the commented
-    [`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay/overlay.example.toml).
+    [`overlay.example.toml`](https://github.com/serjflint/saitenka/blob/main/overlay.example.toml).
     Uncomment a line only to change it. This page covers the common cases; that file is the source of
     truth for prefetch tuning, mpv coexistence, telemetry, stats, `[dictdb]`, the `[tsukihime]`
     subtitle fallback, `[watch]` playback continuity, and the rest.

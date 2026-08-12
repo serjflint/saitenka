@@ -2,7 +2,8 @@
 
 Structural (not pixel) comparison — asserts our render carries the same frequency dictionaries and
 the same inflection chain SubMiner shows. Skipped unless the configured dictionaries are present
-(they're large and live outside the repo); run `uv run python compare/generate.py` for the visuals.
+(they're large and live outside the repo); run `uv run python tools/visual_compare/generate.py` for
+the visuals.
 """
 
 # ruff: noqa: E402 -- comparison cases are loaded from the adjacent upstream harness.
@@ -12,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-COMPARE = Path(__file__).resolve().parent.parent / "overlay" / "compare"
+COMPARE = Path(__file__).resolve().parent.parent / "tools" / "visual_compare"
+assert COMPARE.is_dir(), "visual comparison harness missing"
 sys.path.insert(0, str(COMPARE))
 from cases import CASES
 
@@ -47,7 +49,7 @@ def dict_set():
         dictdb._DB_PATH_OVERRIDE = saved
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c["word"] for c in CASES])
+@pytest.mark.parametrize("case", CASES, ids=[str(c["word"]) for c in CASES])
 def test_tooltip_parity(case, dict_set):
     from saitenka.app.tokenize import Token
 
