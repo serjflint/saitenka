@@ -1,7 +1,7 @@
-"""sc/walk.py parsing helpers, exercised through the public surface (link_query + inline_flow).
+"""render/sc_adapter.py parsing helpers, exercised through link_query + inline_flow.
 
 The CSS colour/size parsing branches (hex 3/6-digit, rgb(), named, em/%/px + their fallbacks) and the
-`<a>`-target resolution were the uncovered part of sc/walk.py. Driven via the public walker rather
+`<a>`-target resolution were the uncovered part of the adapter. Driven via the public walker rather
 than the private `_parse_*` helpers.
 """
 
