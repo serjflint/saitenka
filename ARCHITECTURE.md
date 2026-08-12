@@ -18,8 +18,8 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 All shipped Python lives under one import namespace, `src/saitenka/`. The directories below are
 internal modules with explicit dependency contracts, not independently published distributions.
 
-- **`sc/`** — Yomitan `structured-content` model and parsing (the input format). Kept PIL-agnostic
-  (enforced by `.importlinter`).
+- **`sc/`** — the renderer-neutral Yomitan `structured-content` input model. Kept PIL-agnostic
+  (enforced by `.importlinter`); `render/sc_adapter.py` maps it into renderer-owned layout blocks.
 - **`render/`** — layout/flow: the text walker, ruby positioning, line wrapping, panel chrome.
   `render.flow` is the core. `render/window.py` is the PIL-free geometry kernel (block offset table +
   half-open visible-range) and `render/banded.py` the **windowed (banded) tooltip engine**
@@ -28,7 +28,8 @@ internal modules with explicit dependency contracts, not independently published
   `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
   search) is a `Panel` (`app/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
-- **`raster/`** + top-level **`panel`** — compose the final RGBA panel image; `Definition`/`Entry`
+- **`raster/`** + top-level **`panel`** — define the renderer backend result and compose the final RGBA
+  panel image; `app/render_backend.py` is the Pillow adapter above both layers. `Definition`/`Entry`
   (in `panel.py`) hold one dictionary's rendered entry for a word. Value types with no render deps —
   `model.Theme`, `version.overlay_version` — live at the package root to keep `render`/`app` acyclic.
 - **`parallel.py`** — the CPU-bound-render executor policy: free-threaded threads (FreeType releases

@@ -43,7 +43,7 @@ from saitenka.app.lookup import CardData, furigana
 from saitenka.fonts import STROKE_ORDER_FONT
 from saitenka.model import PitchAccent
 from saitenka.panel import Definition, Entry, EntryGroup, Freq
-from saitenka.sc.walk import collect_img_paths
+from saitenka.render.sc_adapter import collect_img_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable

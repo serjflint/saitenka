@@ -9,7 +9,7 @@ from util import assert_golden
 from saitenka.model import Style
 from saitenka.render.document import DocStyle, layout_document, render_document
 from saitenka.render.flow import ChipBox, ImgBox, RubyBox
-from saitenka.sc.walk import walk
+from saitenka.render.sc_adapter import walk
 
 FIX = Path(__file__).resolve().parent / "fixtures"
 BASE = Style(size=26)
@@ -303,7 +303,7 @@ def test_bordered_label_chip_stays_transparent_with_border():
 
 
 def test_link_query_resolves_internal_targets():
-    from saitenka.sc.walk import link_query
+    from saitenka.render.sc_adapter import link_query
 
     assert link_query("?query=見る&wildcards=off", "みる") == "見る"  # Yomitan cross-ref → term
     assert link_query("?query=%E8%A6%8B%E3%82%8B") == "見る"  # URL-encoded
@@ -325,7 +325,7 @@ def test_link_target_stamped_on_spans():
 def test_external_link_is_muted_and_not_underlined():
     # A dictionary's source-attribution link is external — visually distinct from clickable cross-refs:
     # muted gray, NOT underlined, no click target.
-    from saitenka.sc.walk import _LINK_EXTERNAL
+    from saitenka.render.sc_adapter import _LINK_EXTERNAL
 
     node = {"tag": "a", "href": "https://www.edrdg.org/x?q=1", "content": "JMdict"}
     spans = [s for b in walk(node, BASE) for s in b.flow if hasattr(s, "style")]
@@ -335,7 +335,7 @@ def test_external_link_is_muted_and_not_underlined():
 
 
 def test_internal_link_stays_blue_and_underlined():
-    from saitenka.sc.walk import _NAMED
+    from saitenka.render.sc_adapter import _NAMED
 
     node = {"tag": "a", "href": "?query=見る", "content": "見る"}
     spans = [s for b in walk(node, BASE) for s in b.flow if getattr(s, "href", None)]

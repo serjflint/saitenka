@@ -1,1 +1,1 @@
-"""Yomitan structured-content → layout blocks."""
+"""Renderer-neutral Yomitan structured-content data."""

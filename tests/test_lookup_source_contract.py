@@ -31,7 +31,7 @@ from saitenka.app.dictionary import DictionarySet
 from saitenka.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
 from saitenka.app.tokenize import Token
 from saitenka.model import Style
-from saitenka.sc.walk import walk
+from saitenka.render.sc_adapter import walk
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

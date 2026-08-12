@@ -16,7 +16,7 @@ from PIL import Image
 
 from saitenka.model import Style
 from saitenka.render.flow import ImgBox
-from saitenka.sc.walk import collect_img_paths, walk
+from saitenka.render.sc_adapter import collect_img_paths, walk
 
 # A monochrome gaiji: one black square on transparent — the common 外字 shape. Stored as a PNG so the
 # render-side tests don't need resvglite (the walker consumes decoded image bytes, not SVG).

@@ -24,7 +24,7 @@ from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG
 from saitenka.app.profiles import resolve_launch_identity
 from saitenka.app.tooltip import entry_for_tok, resolve_hover
-from saitenka.sc.walk import _text_of
+from saitenka.render.sc_adapter import _text_of
 
 pytest.importorskip(
     "saitenka_deinflect"

@@ -1,13 +1,13 @@
 """The Pillow raster backend: today's renderer behind the :class:`RasterBackend` seam.
 
-Mechanical wrapper — the render internals stay where they are (``panel.py`` + ``draw/`` +
-``render/``); this is the entry point a future cosmic-text backend replaces. Byte-identity with the
-direct ``LazyPanel.finish() + to_bgra_array`` path is pinned by ``tests/test_layering.py``.
+This application adapter sits above ``panel`` and the neutral raster protocol; a future cosmic-text
+backend replaces it at the composition boundary. Byte-identity with the direct
+``LazyPanel.finish() + to_bgra_array`` path is pinned by ``tests/test_raster_backend.py``.
 """
 
 from __future__ import annotations
 
-from saitenka.mpvio.osd import to_bgra_array
+from saitenka.bgra import to_bgra_array
 from saitenka.panel import LazyPanel, Row, Theme
 from saitenka.raster.protocol import RasterResult
 

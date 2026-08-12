@@ -34,7 +34,7 @@ class RasterResult:
 
 @runtime_checkable
 class RasterBackend(Protocol):
-    """A panel rasteriser. Implementations: ``raster.pillow_backend.PillowBackend`` (today),
+    """A panel rasteriser. Implementations: ``app.render_backend.PillowBackend`` (today),
     ``saitenka._native`` PyO3 cosmic-text (future — must declare free-threading support)."""
 
     def raster_rows(self, rows: list[Row], width: int, theme: Theme | None = None) -> RasterResult:

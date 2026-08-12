@@ -42,7 +42,7 @@ from saitenka.render.chip import ChipStyle
 from saitenka.render.document import GUTTER_PX, INDENT_PX
 from saitenka.render.flow import ChipBox, ImgBox, render_chip_row, render_flow
 from saitenka.render.layout import Block as FlowBlock
-from saitenka.sc.walk import inline_flow
+from saitenka.render.sc_adapter import inline_flow
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -106,7 +106,7 @@ class Entry:
 
 
 def _hex(s: str) -> RGBA:
-    from saitenka.sc.walk import _parse_color
+    from saitenka.render.sc_adapter import _parse_color
 
     return _parse_color(s, (90, 122, 160, 255))
 

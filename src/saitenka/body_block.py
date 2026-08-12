@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from saitenka.render.document import DocLayout, DocStyle, layout_document, render_document
-from saitenka.sc.walk import walk
+from saitenka.render.sc_adapter import walk
 
 if TYPE_CHECKING:
     from PIL import Image

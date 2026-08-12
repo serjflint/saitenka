@@ -134,7 +134,7 @@ Standard smoke-line benchmark also improved across the board (reps 8):
 
 Three independent levers, all byte-identical / behavior-preserving:
 
-1. **BGRA LUT** (`osd.to_bgra_array`): the per-pixel uint16 widen×multiply÷255 premultiply replaced
+1. **BGRA LUT** (`bgra.to_bgra_array`, compatibility-exported by `osd`): the per-pixel uint16 widen×multiply÷255 premultiply replaced
    by a flat `np.take` gather from a precomputed 256×256 table (64 KB, L2-resident). Property test
    pins byte-identity vs the reference formula over random RGBA.
 2. **SQLite mmap** (`dictionary.Dictionary._conn`): `PRAGMA mmap_size=1073741824` +

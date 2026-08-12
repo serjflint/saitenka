@@ -25,7 +25,7 @@ from saitenka.panel import _DEFAULT_THEME, Theme
 from saitenka.render.chip import ChipStyle, render_chip
 from saitenka.render.flow import render_flow
 from saitenka.render.layout import Block
-from saitenka.sc.walk import inline_flow
+from saitenka.render.sc_adapter import inline_flow
 
 RED: RGBA = (200, 60, 60, 255)
 OUTLINE: RGBA = (200, 200, 200, 255)  # thumbnail / screenshot border

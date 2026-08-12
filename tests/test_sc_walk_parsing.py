@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from saitenka.model import Style
-from saitenka.sc.walk import inline_flow, link_query
+from saitenka.render.sc_adapter import inline_flow, link_query
 
 BASE = Style(size=20)
 

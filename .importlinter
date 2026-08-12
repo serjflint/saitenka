@@ -33,9 +33,8 @@ name = Package layering — a lower layer must not import a higher one
 # Positive DIRECTION contract (no-cycles only forbids round-trips; this forbids a backward edge even
 # without a cycle). High→low follows the data flow: app orchestrates → mpvio bridges → panel/raster
 # compose → draw rasterises → render lays out → sc models the input → model/version are leaf values.
-# TYPE_CHECKING edges don't count (exclude_type_checking_imports). Known RUNTIME backedges are
-# ratcheted below (same posture as no-cycles) — burn them down, never add. ruff analyze counts
-# typing-only edges, so it will show phantom backedges this contract does not: import-linter is the SSOT.
+# TYPE_CHECKING edges don't count (exclude_type_checking_imports). Ruff analyze counts typing-only
+# edges, so it can show phantom backedges this contract does not: import-linter is the SSOT.
 type = layers
 exhaustive = False
 layers =
@@ -48,17 +47,6 @@ layers =
     saitenka.draw
     saitenka.sc
     saitenka.model
-# Ratchet baseline (2026-08): pre-existing runtime backedges (a backedge is a direction violation even
-# without a round-trip, so these outlive the no-cycles burn-down).
-# - sc.walk imports render for the Inline type (the coupling burned down under the controller split).
-# - raster.pillow_backend reaches up to panel + mpvio.osd — it is high-level backend glue miscategorised
-#   under raster/; ratcheted here, move it to burn these down. Never add a new entry; only remove.
-ignore_imports =
-    saitenka.sc.walk -> saitenka.render.ruby
-    saitenka.sc.walk -> saitenka.render.flow
-    saitenka.sc.walk -> saitenka.render.chip
-    saitenka.raster.pillow_backend -> saitenka.panel
-    saitenka.raster.pillow_backend -> saitenka.mpvio.osd
 
 [importlinter:contract:pil-agnostic-core]
 name = sc/ and model.py stay PIL-agnostic
