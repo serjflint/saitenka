@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from saitenka.app import cli_run, subselect, subtitle_cache
 from saitenka.app import jimaku as jimaku_mod
+from saitenka.app import subselect, subtitle_cache
+from saitenka.app.launch import run as cli_run
 
 
 def _resolve(tmp_path, *, jimaku: bool):

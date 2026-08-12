@@ -443,7 +443,7 @@ def test_list_candidates_turns_a_provider_failure_into_a_warning(monkeypatch):
     assert warnings == ["jimaku: no entry"]
 
 
-# --- shared run/attach provider wiring (dedup of cli.py + cli_run.py) ------------------------------
+# --- shared run/attach provider wiring -------------------------------------------------------------
 
 
 class _FakeReader:

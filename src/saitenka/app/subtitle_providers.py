@@ -79,7 +79,7 @@ def providers_for_language(
 
 def enabled_providers_for(language: str, flags: Iterable[tuple[str, bool]]) -> tuple[str, ...]:
     """Turn ``(provider_name, enabled)`` config flags into the enabled-and-language-eligible provider
-    tuple — the one place that replaces the duplicated enablement tuples in ``cli.py``/``cli_run.py``."""
+    tuple — the one place that replaces the duplicated enablement tuples in both launch paths."""
     configured = tuple(name for name, enabled in flags if enabled)
     return providers_for_language(language, candidates=configured)
 

@@ -4,8 +4,9 @@ AND our own eof loadfile through one setup path; auto-advance only decides wheth
 
 from __future__ import annotations
 
-from saitenka.app import cli_run, session_stats, subselect
+from saitenka.app import session_stats, subselect
 from saitenka.app.controller import Reader
+from saitenka.app.launch import run as cli_run
 
 
 class FakeIPC:

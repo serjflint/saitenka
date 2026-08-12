@@ -9,12 +9,13 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 import cyclopts
 
+from saitenka.app.config import config_path, load_config
+
 # _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.cli_run import (
+from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
+from saitenka.app.launch.run import (
     jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
 )
-from saitenka.app.config import config_path, load_config
 
 if TYPE_CHECKING:
     from saitenka.app.prewarm import PrewarmPlan, PrewarmProgress, PrewarmResult

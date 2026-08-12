@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING, Annotated
 
 import cyclopts
 
-# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.cli_run import (
-    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
-)
 from saitenka.app.config import TooltipOptions, load_config
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
+
+# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
+from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
+from saitenka.app.launch.run import (
+    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
+)
 from saitenka.app.subselect import ProviderConfig
 
 log = logging.getLogger(__name__)
@@ -257,8 +258,8 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         daemon=True,
     ).start()
 
-    from saitenka.app.cli_run import setup_session_telemetry
     from saitenka.app.controller import Reader
+    from saitenka.app.launch.run import setup_session_telemetry
     from saitenka.mpvio.ipc import MpvIPC, default_attach_ipc_path
 
     setup_session_telemetry(cfg)  # capture is per reader session, not global (see cli.main note)

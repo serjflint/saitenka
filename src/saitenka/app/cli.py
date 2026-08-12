@@ -10,8 +10,6 @@ import sysconfig
 import cyclopts
 
 from saitenka import __version__
-from saitenka.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414
-from saitenka.app.cli_run import jimaku_should_fetch as jimaku_should_fetch  # noqa: PLC0414
 from saitenka.app.commands import attach as attach_commands
 from saitenka.app.commands import configuration as configuration_commands
 from saitenka.app.commands import diagnostics as diagnostics_commands
@@ -22,6 +20,8 @@ from saitenka.app.commands.diagnostics import (
     _resolve_atlas_scale as _resolve_atlas_scale,  # noqa: PLC0414
 )
 from saitenka.app.config import config_path
+from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414
+from saitenka.app.launch.run import jimaku_should_fetch as jimaku_should_fetch  # noqa: PLC0414
 from saitenka.app.paths import cache_dir
 from saitenka.app.profile_cli import profile_app
 

@@ -2,8 +2,8 @@
 
 from dataclasses import replace
 
-from saitenka.app.cli_run import RunFlags, _build_run_options
 from saitenka.app.commands.attach import _build_attach_options
+from saitenka.app.launch.run import RunFlags, _build_run_options
 
 _BASE_FLAGS = RunFlags(
     mine_key="Ctrl+m",
@@ -80,7 +80,8 @@ def test_run_options_read_mine_preview_toggle():
 def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
     # The RUN path rebuilds a synthetic effective_cfg dict from the CLI kwargs; the animated flag must
     # survive it or it silently no-ops on `run` while working on `attach` (the both-seams trap).
-    from saitenka.app import cli_run, reader_deps
+    from saitenka.app import reader_deps
+    from saitenka.app.launch import run as cli_run
 
     captured: dict = {}
     monkeypatch.setattr(
@@ -128,7 +129,8 @@ def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
 def test_run_threads_field_map_and_card_kind(monkeypatch):
     # #101 field-map/card-kind have no CLI flag — they must ride through the RUN seam purely via the
     # raw [mine] table (the both-seams trap), or they'd work on attach but silently no-op on run.
-    from saitenka.app import cli_run, reader_deps
+    from saitenka.app import reader_deps
+    from saitenka.app.launch import run as cli_run
 
     captured: dict = {}
     monkeypatch.setattr(
@@ -161,7 +163,8 @@ def test_run_threads_field_map_and_card_kind(monkeypatch):
 
 def test_run_threads_card_format(monkeypatch):
     # [mine.card_format] has no CLI flag — like fields/card_kind it must ride the RUN seam via raw [mine].
-    from saitenka.app import cli_run, reader_deps
+    from saitenka.app import reader_deps
+    from saitenka.app.launch import run as cli_run
 
     captured: dict = {}
     monkeypatch.setattr(

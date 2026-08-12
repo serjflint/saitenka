@@ -53,7 +53,7 @@ internal modules with explicit dependency contracts, not independently published
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
   (subtitle fetching); `cli.py` is the process/composition root, `commands/` owns Cyclopts domain
-  surfaces, and `cli_run.py` owns run orchestration.
+  surfaces, and `launch/run.py` owns run orchestration.
 - **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
   `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the

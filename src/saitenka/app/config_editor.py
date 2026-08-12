@@ -122,7 +122,7 @@ _TOML_OVERRIDES: dict[str, dict[str, tuple[str, ...]]] = {
 # Each reason is load-bearing: exposing a non-wired field would write a key the runtime silently ignores.
 _EXEMPT: dict[str, frozenset[str]] = {
     # Read off the dataclass but NEVER populated from overlay.toml — both TooltipOptions(...) construction
-    # sites (cli.py / cli_run.py) omit them, so writing the key is a no-op the user mistakes for a change.
+    # launch sites omit them, so writing the key is a no-op the user mistakes for a change.
     # (tip_max_frac IS wired, but is edited as the top-level `tip_height` scalar in the general section.)
     "tooltip": frozenset(
         {

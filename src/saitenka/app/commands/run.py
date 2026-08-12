@@ -4,14 +4,15 @@ from typing import Annotated, Literal
 
 import cyclopts
 
-# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.cli_run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.cli_run import (
-    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
-)
-from saitenka.app.cli_run import run_impl
 from saitenka.app.command_defaults import _mine_cfg
 from saitenka.app.config import TooltipOptions
+
+# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
+from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
+from saitenka.app.launch.run import (
+    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
+)
+from saitenka.app.launch.run import run_impl
 
 
 def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual params for --help/parsing
