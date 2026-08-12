@@ -97,8 +97,8 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 9. **Post-release:** confirm the Release + PyPI distributions are live, `## [Unreleased]` is empty on
    top, the tag matches `pyproject.toml`, and `uv tool install "saitenka[full]"` pulls the new version.
 
-Register `extracted-package-release.yml` as the trusted publisher for `yomitanlite` and
-`ankiconnect-client`. Bump and publish a changed dependency first, using
+Register `yomitanlite-release.yml` and `ankiconnect-client-release.yml` as the respective projects'
+trusted publishers. Bump and publish a changed dependency first, using
 `yomitanlite-vX.Y.Z` or `ankiconnect-client-vX.Y.Z`; then update Saitenka's dependency floor and lock.
 
 ## deinflect (GPL add-on)
