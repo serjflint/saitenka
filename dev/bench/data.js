@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786561627637,
+  "lastUpdate": 1786563507974,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4175,6 +4175,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.127,
             "range": "±7.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "97dd93239fa55b6d4fbad8b6213412f5b6045911",
+          "message": "docs: document dictionary structure oracle (#331)",
+          "timestamp": "2026-08-12T22:37:42+03:00",
+          "tree_id": "613c58b24f282bb517917339440c027f193e182e",
+          "url": "https://github.com/serjflint/saitenka/commit/97dd93239fa55b6d4fbad8b6213412f5b6045911"
+        },
+        "date": 1786563506998,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.97,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.766,
+            "range": "±11.9%",
             "unit": "ms"
           }
         ]
