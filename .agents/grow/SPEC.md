@@ -36,9 +36,9 @@ gaps are only **seed + ROI evidence + a held-out backtest corpus**, never the ta
   3. **robustness / spec gap** → a robustness fix + its guard.
   4. **design / observability gap** (no public seam to assert X) → a refactor recommendation.
 - **Assert oracles, not pixels** (platform-independent). **GPL/LGPL is fine as out-of-process tooling,
-  never in the shipped `overlay/` dependency graph** (`blanket` sits in the opt-in `grow` dep group).
+  never in the shipped `saitenka` dependency graph** (`blanket` sits in the opt-in `grow` dep group).
 
-## The deterministic teeth-gate — four arms (`overlay/tools/grow_gate.py`)
+## The deterministic teeth-gate — four arms (`tools/grow_gate.py`)
 
 The mirror of Sharpen's anti-lobotomization gate, reversed: it proves an ADDITION adds power. A green new
 test proves nothing. An ordinary scenario/config gap clears arm 2 plus either arm 1 or arm 3; arm 4
@@ -69,7 +69,7 @@ Discovery-tier (feeds arm 4, not a gate): TSan `--with-thread-sanitizer` + `pyte
 (stochastic, needs a no-GIL build). Deferred/optional: checked-coverage (pyChecco, abandoned; the
 C-extension boundary defeats it here).
 
-## Triage — value × under-specification (`overlay/tools/grow_triage.py`)
+## Triage — value × under-specification (`tools/grow_triage.py`)
 
 Where Sharpen SUMS its signals, Grow ranks the **product** of two axes — a target is worth growing only if
 it is BOTH valuable AND under-specified; either axis at zero zeroes the score (a fully-specified hot module
@@ -183,7 +183,7 @@ closes one (a landed test), Sharpen's filed-and-skip flips back on. Conversely, 
 bug (outcome class 2) it files a product issue and records it (`filed`) so it does not re-surface the same
 gap until the issue closes or the target symbol changes.
 
-## Ledger — `.ledger.grow.jsonl` (repo top level, committed; `overlay/tools/grow_ledger.py`)
+## Ledger — `.ledger.grow.jsonl` (repo top level, committed; `tools/grow_ledger.py`)
 
 Durable across cron runs. The gap key is **semantic**, not positional, or line-drift from unrelated edits
 would spuriously reopen a closed gap and the loop would never terminate (proven in
@@ -214,7 +214,7 @@ and reopens ONLY when its own target symbol changes. `filed` records a confirmed
 records a run with no outward action. Any shippable state additionally requires a valid `review` block
 (see *Fidelity* in `ADAPTERS.md`); without one the run is a `dry-run`.
 
-## Self-reflection — every run introspects the LOOP (`overlay/tools/grow_reflect.py`)
+## Self-reflection — every run introspects the LOOP (`tools/grow_reflect.py`)
 
 The loop's own thesis applied to itself: a green run proves nothing about whether the LOOP is any good. Both
 dogfood runs found real loop-design bugs the design docs missed (run 1 → 8 flaws under adversarial review;

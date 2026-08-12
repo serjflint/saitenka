@@ -13,7 +13,7 @@ Derived components:
 
   - src/saitenka_deinflect/data/japanese_transforms.json
         Dumped verbatim from Yomitan's `ext/js/language/ja/japanese-transforms.js`
-        (regenerate with `overlay/compare/dump_transforms.mjs`).
+        (regenerate with `tools/visual_compare/dump_transforms.mjs`).
 
   - tests/fixtures/japanese_transforms_cases.json
         The conformance vectors the port is tested against, transcribed from Yomitan's

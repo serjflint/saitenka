@@ -1,5 +1,5 @@
 # Spell-check allowlist for `poe spell` (typos, run repo-wide from here). Config lives at the repo root,
-# not in overlay/pyproject.toml, because the scan covers the whole repo (overlay + deinflect + docs) and
+# not in pyproject.toml, because the scan covers the whole repo (overlay + deinflect + docs) and
 # typos resolves config from the scan root. These are intentional/valid tokens, not corrections to make.
 [files]
 # Vendored Unicode UAX #14 data (property table + conformance corpus) — verbatim upstream text whose
@@ -8,7 +8,7 @@
 # Latin conjugation suffixes (siez, âtes, …) that read as English typos; never hand-edit, regenerate. The
 # French differential corpus + its seed word-list are likewise French vocabulary (vas, vai, …), not typos.
 extend-exclude = [
-    "overlay/tests/fixtures/uax14/",
+    "tests/fixtures/uax14/",
     "deinflect/src/saitenka_deinflect/data/",
     "deinflect/tests/fixtures/french_transforms_cases.json",
     "deinflect/tools/differential_seeds/",

@@ -93,7 +93,7 @@ The workflows compose — Autocards' back-fill is
 
 ## Visual parity harness
 
-Comparison isn't only about features. Saitenka ships a visual parity harness in `overlay/compare/` that
+Comparison isn't only about features. Saitenka ships a visual parity harness in `tools/visual_compare/` that
 renders its in-mpv tooltip side-by-side with real Yomitan and SubMiner popups for the same words, so its
 dictionary UI can be checked against the tools it reproduces. (No screenshots here yet — the harness
 generates them locally.)

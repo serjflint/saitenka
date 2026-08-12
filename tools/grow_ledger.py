@@ -1,0 +1,225 @@
+"""Read/write library for the grow ledger (`.ledger.grow.jsonl`, repo top level) — the loop's durable
+memory of which behaviour-gaps have been examined.
+
+Sharpen keys on a whole-module content-hash; a Grow gap is fuzzier and must be keyed SEMANTICALLY, or
+line-number drift from unrelated edits spuriously reopens a closed gap and the loop never terminates
+(proven in `vibe/proto_grow_ledger.py`). So:
+
+    gap_id      = hash(source, target_symbol, dimension)          # position-free identity
+    target_sha  = content-hash of the TARGET SYMBOL's AST source  # NOT the whole module
+
+``source`` ∈ {survivor, dead_config, invariant, filed}; ``target_symbol`` = ``module_key::dotted.symbol``
+(e.g. ``app/dictionary.py::Dictionary._entry_from_row``); ``dimension`` = the under-specified axis (a
+coverage-context label like ``scale=2.0``, an invariant like ``warm==cold``, a survivor's operator, a
+filed issue id). A closed gap stays closed under unrelated churn and reopens ONLY when its own target
+symbol changes. See `.agents/grow/SPEC.md` → *Ledger*.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import hashlib
+import json
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+SRC = "src/saitenka"  # module keys are relative to here (matching the sharpen ledger)
+
+# Gap status against the ledger (what triage acts on).
+UNSEEN = "unseen"  # never examined → a candidate
+OPEN = "open"  # examined, work left undone (e.g. a product issue filed, no test yet)
+CLOSED_CURRENT = "closed-current"  # a grown test landed, target unchanged → SKIP
+STALE_TARGET = "stale-target"  # the target symbol changed since → reopen
+STALE_TOOLSET = "stale-toolset"  # toolset_version bumped → whole ledger re-examines
+UNCLOSABLE = "unclosable"  # recorded infeasible (equivalent mutant / infeasible config) → SKIP
+
+
+def gap_id(source: str, target_symbol: str, dimension: str) -> str:
+    """Semantic, position-free identity — same gap, same id, wherever the symbol sits in the file."""
+    return hashlib.sha256(f"{source}\x00{target_symbol}\x00{dimension}".encode()).hexdigest()[:16]
+
+
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _symbol_nodes(module_src: str, symbol: str) -> list[ast.AST]:
+    """Every def/class node matching a possibly-dotted ``symbol`` (``Foo`` or ``Foo.method``), walking
+    into class bodies for the prefix. The final segment may resolve to MORE THAN ONE node — ``@overload``
+    stubs plus the implementation, or a redefinition — and ALL are returned so a change to any reopens the
+    gap (C7). Raises ``KeyError`` if any path segment is absent."""
+    body: list[ast.stmt] = ast.parse(module_src).body
+    *prefix, last = symbol.split(".")
+    for part in prefix:
+        node = next((n for n in body if isinstance(n, _DEFS) and n.name == part), None)
+        if node is None:
+            raise KeyError(symbol)
+        body = node.body
+    nodes = [n for n in body if isinstance(n, _DEFS) and n.name == last]
+    if not nodes:
+        raise KeyError(symbol)
+    return nodes
+
+
+def symbol_source(module_src: str, symbol: str) -> str:
+    """The normalised source (via ``ast.unparse``, which INCLUDES decorators) of every node matching
+    ``symbol``, concatenated. Hashing this reopens the gap on a decorator swap (``@property`` →
+    ``@cached_property``) or an overload/redefinition change (C7); formatting and comments normalise away
+    (not behaviour), which also strengthens the P1 line-drift idempotency."""
+    return "\n".join(ast.unparse(n) for n in _symbol_nodes(module_src, symbol))
+
+
+def target_sha(module_src: str, symbol: str) -> str:
+    return hashlib.sha256(symbol_source(module_src, symbol).encode()).hexdigest()[:16]
+
+
+@dataclass
+class Ledger:
+    path: Path
+    lines: list[dict]
+
+    @classmethod
+    def load(cls, path: Path) -> Ledger:
+        recs = [
+            json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()
+        ]
+        return cls(path, recs)
+
+    @property
+    def manifest(self) -> dict:
+        return next((r for r in self.lines if r.get("type") == "manifest"), {})
+
+    @property
+    def toolset_version(self) -> int:
+        return int(self.manifest.get("toolset_version", 1))
+
+    def _gap_records(self) -> list[dict]:
+        return [r for r in self.lines if "gap_id" in r]
+
+    def latest(self, gap: str) -> dict | None:
+        """The most recent record for a gap (records are chronological)."""
+        for r in reversed(self._gap_records()):
+            if r["gap_id"] == gap:
+                return r
+        return None
+
+    def status(self, gap: str, root: Path) -> str:
+        """Resolve a gap's status. The module + symbol come from the stored ``target_symbol``, so the
+        caller needs only the gap id and the repo root."""
+        rec = self.latest(gap)
+        if rec is None:
+            return UNSEEN
+        if int(rec.get("toolset_version", 1)) != self.toolset_version:
+            return STALE_TOOLSET
+        module_key, _, symbol = rec.get("target_symbol", "").partition("::")
+        try:
+            src = (root / SRC / module_key).read_text(encoding="utf-8")
+            current = target_sha(src, symbol)
+        except (FileNotFoundError, KeyError, SyntaxError):
+            return STALE_TARGET  # module/symbol moved or unparsable → reopen, never crash
+        if rec.get("target_sha") != current:
+            return STALE_TARGET
+        state = rec.get("state")
+        if state == "closed":
+            return CLOSED_CURRENT
+        if state == "unclosable":
+            return UNCLOSABLE
+        return OPEN
+
+    def filed(self) -> dict[str, list[str]]:
+        """`gap_id -> [product issue refs]` from each gap's latest record (open-ness checked by triage).
+        The reverse of Sharpen's grow-filed handshake — gaps Grow found that need a product fix."""
+        out: dict[str, list[str]] = {}
+        for r in self._gap_records():
+            ids = r.get("filed") or r.get("grow-filed") or []
+            if ids:
+                out[r["gap_id"]] = list(ids)
+        return out
+
+    def append(self, record: dict) -> None:
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self.lines.append(record)
+
+
+def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
+    """Fill the semantic identity fields a loop record must not hand-calculate."""
+    source = record.get("source")
+    target_symbol = record.get("target_symbol")
+    dimension = record.get("dimension")
+    if not all(isinstance(value, str) and value for value in (source, target_symbol, dimension)):
+        raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    module_key, separator, symbol = target_symbol.partition("::")
+    if not separator or not module_key or not symbol:
+        raise ValueError("target_symbol must be module_key::dotted.symbol")
+    source_root = (root / SRC).resolve()
+    module_path = (source_root / module_key).resolve()
+    try:
+        module_path.relative_to(source_root)
+    except ValueError as exc:
+        raise ValueError("target module must stay under src/saitenka") from exc
+    module_src = module_path.read_text(encoding="utf-8")
+    prepared = dict(record)
+    prepared["gap_id"] = gap_id(source, target_symbol, dimension)
+    prepared["target_sha"] = target_sha(module_src, symbol)
+    prepared["toolset_version"] = ledger.toolset_version
+    return prepared
+
+
+def _main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument("--ledger", type=Path, default=Path("../.ledger.grow.jsonl"))
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    identity = sub.add_parser("identity", help="print semantic gap_id and target_sha")
+    identity.add_argument("--source", required=True)
+    identity.add_argument("--target-symbol", required=True)
+    identity.add_argument("--dimension", required=True)
+
+    append = sub.add_parser("append", help="fill identity fields and append one JSON record")
+    records = append.add_mutually_exclusive_group(required=True)
+    records.add_argument("--record-json", help="record as one JSON object")
+    records.add_argument("--record-file", type=Path, help="path containing one JSON object")
+
+    args = parser.parse_args()
+    root = args.repo.resolve()
+    ledger_path = args.ledger if args.ledger.is_absolute() else root / args.ledger
+    ledger = Ledger.load(ledger_path.resolve())
+    if args.command == "identity":
+        record = {
+            "source": args.source,
+            "target_symbol": args.target_symbol,
+            "dimension": args.dimension,
+        }
+        prepared = prepare_record(record, root, ledger)
+        print(
+            json.dumps({key: prepared[key] for key in ("gap_id", "target_sha", "toolset_version")})
+        )
+        return 0
+
+    raw = (
+        args.record_file.read_text(encoding="utf-8")
+        if args.record_file is not None
+        else args.record_json
+    )
+    record = json.loads(raw)
+    if not isinstance(record, dict):
+        raise TypeError("record must be a JSON object")
+    prepared = prepare_record(record, root, ledger)
+    ledger.append(prepared)
+    print(json.dumps(prepared, ensure_ascii=False))
+    return 0
+
+
+def main() -> int:
+    try:
+        return _main()
+    except (OSError, ValueError, TypeError, SyntaxError, KeyError) as exc:
+        print(f"grow-ledger: error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

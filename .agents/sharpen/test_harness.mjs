@@ -9,7 +9,7 @@ const runHarness = new AsyncFunction('args', 'phase', 'agent', 'log', source)
 const pick = {
   found: true,
   module: 'app/example.py',
-  tests: ['overlay/tests/test_example.py'],
+  tests: ['tests/test_example.py'],
   status: 'unseen',
   score: 1,
   conformance: 1,
@@ -26,8 +26,8 @@ const green = {
 
 const proposal = {
   applied: true,
-  test_file: 'overlay/tests/test_example.py',
-  cut_module: 'overlay.app.example',
+  test_file: 'tests/test_example.py',
+  cut_module: 'saitenka.app.example',
   touched_func: '',
   diff: 'fixture diff',
   proposals: [{ target_test: 'test_example', axis: 'Conformance', change: 'assert output', rationale: 'fixture' }],

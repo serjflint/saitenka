@@ -52,7 +52,7 @@ actually gets it wrong.
 | a hard checkable ban (shell-search, a forbidden import, editing a generated dir) | a **PreToolUse hook** (`.agents/hooks/`, e.g. `block-shell-search.py`) and/or ast-grep (`poe invariants`) / import-linter (`poe arch`) |
 | a deterministic pass/fail check | a **poe gate** — required in `poe all` if fast+clean, else advisory (SSOT: `[tool.poe.tasks]`) |
 | a "how to do X" recipe/procedure | a **skill** (`.agents/skills/`) — loads on demand, doesn't tax every session |
-| deep reference / architecture / rationale | docs site / `README` / `overlay/ARCHITECTURE.md`, linked |
+| deep reference / architecture / rationale | docs site / `README` / `ARCHITECTURE.md`, linked |
 | *which* pluggable/optional tool to use | a **path-scoped rule** (`.agents/rules/`) |
 | live API/config the agent queries | an **MCP server** (`.agents/mcp/servers.json`) |
 

@@ -11,7 +11,7 @@ Hermetic (reads committed JSON; no Node in `poe all`), and asserts through the S
 port as the JP corpus — the sole differences are `language='fr'` and how the vectors were sourced.
 
 This is the RULE-DATA layer only. Elision / decapitalization / apostrophe are preprocessor concerns
-pinned end-to-end by the pipeline oracle (`overlay/tests/test_pipeline_oracle.py`) — a complementary layer.
+pinned end-to-end by the pipeline oracle (`tests/test_pipeline_oracle.py`) — a complementary layer.
 """
 
 from __future__ import annotations

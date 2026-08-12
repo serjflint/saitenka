@@ -1,0 +1,19 @@
+id: test-monkeypatch-private-target
+valid:
+  # public 3-arg seam — the normal, sanctioned form
+  - monkeypatch.setattr(saitenka.app.mod, "public_fn", fake)
+  # public 2-arg dotted-string seam
+  - monkeypatch.setattr("saitenka.app.mod.public_fn", fake)
+  # a different monkeypatch method entirely
+  - monkeypatch.setenv("LANG", "ja_JP.UTF-8")
+  # dunder is not the single-underscore private smell
+  - monkeypatch.setattr(obj, "__class__", Foo)
+invalid:
+  # 3-arg private attribute name
+  - monkeypatch.setattr(reader, "_paused_by_tip", True)
+  # 3-arg private with a raising= kwarg
+  - monkeypatch.setattr(obj, "_cache", {}, raising=False)
+  # 2-arg dotted-string ending in a private symbol
+  - monkeypatch.setattr("saitenka.app.mpvio._send", fake)
+  # 2-arg dotted-string, name-mangled private
+  - monkeypatch.setattr("saitenka.app.controller._Reader__state", x)

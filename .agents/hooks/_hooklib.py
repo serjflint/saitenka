@@ -1,7 +1,7 @@
 """Shared helpers for the commit-time PreToolUse hooks (`comment-review.py`, `test-kinds-advisory.py`).
 
 Both fire on `git commit`, inspect the staged diff, and surface a one-time advisory — so the commit
-detection and the git shell-out live here once. Extracted verbatim from comment-review.py; `overlay/tests/
+detection and the git shell-out live here once. Extracted verbatim from comment-review.py; `tests/
 test_test_kinds_advisory.py` covers `is_git_commit` (its first test). stdlib only; a hook must never crash
 work, so callers keep their own try/except around these.
 """

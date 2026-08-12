@@ -1,7 +1,7 @@
 # Sharpen host-adapter contract
 
 `SPEC.md` owns behavior. This file owns the transport boundary between that behavior and an agent host.
-The deterministic instruments under `overlay/tools/` are the shared core; a host adapter supplies shell
+The deterministic instruments under `tools/` are the shared core; a host adapter supplies shell
 execution, isolated agent invocations, phase reporting, and optional PR transport.
 
 ## Host operations

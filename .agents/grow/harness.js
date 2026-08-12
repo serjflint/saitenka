@@ -29,7 +29,7 @@ const cfg = args || {}
 const CONTRACT_VERSION = 7 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
-const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
+const CWD = '.' // poe tasks + tools run from the launch worktree root
 
 // The run TRACE — a factual record of what the loop actually did this run, fed to the Reflect phase so it
 // introspects on evidence, not vibes. Populated as the run proceeds; every terminal exit flows through
@@ -38,7 +38,7 @@ const trace = { gap: null, retries: 0, gate: null, review: null, ship_gate: null
 
 // Worktree-safe: launch from a dedicated git worktree so executor edits can't touch the live tree. Every
 // executor operates on paths RELATIVE to its inherited cwd — an absolute path would escape the worktree.
-const REL = 'Run from the `' + CWD + '/` directory relative to your current working directory. Do NOT use ' +
+const REL = 'Run from the worktree root relative to your current working directory. Do NOT use ' +
   'absolute paths or `cd` outside the repo you were launched in — this run may be inside a git worktree.'
 
 // Hard scope guard, plus the Grow-specific additive rule.
@@ -55,7 +55,7 @@ const GAP = {
   required: ['found', 'module', 'target_symbol', 'dimension', 'kind', 'source', 'tests', 'status', 'pr_exclusion_checked', 'reason'],
   properties: {
     found: { type: 'boolean' },
-    module: { type: 'string', description: 'module key relative to src/overlay, e.g. app/tooltip.py' },
+    module: { type: 'string', description: 'module key relative to src/saitenka, e.g. app/tooltip.py' },
     target_symbol: { type: 'string', description: 'module_key::dotted.symbol' },
     dimension: { type: 'string', description: 'the under-specified axis (context label / invariant / survivor / issue id)' },
     kind: { type: 'string', enum: ['scenario', 'concurrency'], description: 'scenario ⇒ arms 1-3; concurrency ⇒ arm 4' },
@@ -87,7 +87,7 @@ const PROPOSAL = {
     applied: { type: 'boolean' },
     test_file: { type: 'string', description: 'edited test path, repo-relative' },
     cut_module: { type: 'string', description: 'dotted code-under-test module' },
-    cut_file: { type: 'string', description: 'CUT path relative to repo (e.g. src/overlay/app/config.py) — for context/growth-adhoc' },
+    cut_file: { type: 'string', description: 'CUT path relative to repo (e.g. src/saitenka/app/config.py) — for context/growth-adhoc' },
     target_func: { type: 'string', description: 'production symbol the grown test exercises (scopes arm-1)' },
     test_name: { type: 'string', description: 'the grown test function name (arm-2 liveness / --deselect node)' },
     red_on_pristine: { type: 'boolean', description: 'author suspicion only; root pristine execution is authoritative' },
@@ -145,11 +145,11 @@ function validModuleKey(module) {
 }
 
 function proposalTargetsGap(gap, proposal) {
-  const expectedCutModule = `overlay.${gap.module.replace(/\.py$/, '').replaceAll('/', '.')}`
+  const expectedCutModule = `saitenka.${gap.module.replace(/\.py$/, '').replaceAll('/', '.')}`
   const expectedTarget = gap.target_symbol.split('::')[1]
   const testFile = proposal?.test_file?.replace(/^overlay\//, '')
   return validModuleKey(gap.module) && gap.target_symbol.startsWith(`${gap.module}::`) &&
-    proposal?.cut_file === `src/overlay/${gap.module}` && proposal?.cut_module === expectedCutModule &&
+    proposal?.cut_file === `src/saitenka/${gap.module}` && proposal?.cut_module === expectedCutModule &&
     proposal?.target_func === expectedTarget && typeof testFile === 'string' &&
     testFile.startsWith('tests/') && !testFile.split('/').includes('..')
 }
@@ -301,7 +301,7 @@ const gap = await agent(
   `Run the Grow triage and pick the highest-value ORPHAN scenario gap. ${REL}\n` +
   `From ${CWD}/ run: \`uv run python tools/grow_triage.py --top 1\`. Set pr_exclusion_checked=true ONLY if it ran with the open-PR exclusion active (gh authenticated, NO --no-network); if gh is unauth you may add --no-network but then set pr_exclusion_checked=false (the harness will refuse to open a PR).\n` +
   (cfg.module ? `The maintainer pinned module=${cfg.module}; use it ONLY if triage lists it as a live (non-excluded) candidate.\n` : '') +
-  `The "→ pick:" line names the module; map it to its test files. Build a scenario map for that module — its intents, edge conditions, and invariant families (agreement, cache-equivalence, back-restores-state, config-matrix corners) — and subtract what the coverage baseline already exercises and what the grow ledger (\`.ledger.grow.jsonl\`, parent of ${CWD}/) records closed-current/unclosable (\`tools/grow_ledger.py\`). Return the single highest-value orphan gap: target_symbol (module_key::dotted.symbol), dimension, and kind (concurrency iff a data race, else scenario). Return found=false if there is no live module or no orphan gap.`,
+  `The "→ pick:" line names the module; map it to its test files. Build a scenario map for that module — its intents, edge conditions, and invariant families (agreement, cache-equivalence, back-restores-state, config-matrix corners) — and subtract what the coverage baseline already exercises and what the root \`.ledger.grow.jsonl\` records closed-current/unclosable (\`tools/grow_ledger.py\`). Return the single highest-value orphan gap: target_symbol (module_key::dotted.symbol), dimension, and kind (concurrency iff a data race, else scenario). Return found=false if there is no live module or no orphan gap.`,
   { phase: 'Select', schema: GAP, label: 'triage' },
 )
 
@@ -348,7 +348,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     (gap.kind === 'concurrency'
       ? `This is a CONCURRENCY gap: ship a PAIR of PASSING tests as in tests/test_cache_race.py, driven by \`blanket\` (opt-in \`grow\` group) — a regression (guard present → no error) AND a self-certifying negative control that unguards a throwaway instance and ASSERTS the bug reproduces. Set regression_node, control_node, control_test.\n`
       : `This is a SCENARIO gap: the test must exercise a configuration/combination the existing suite never does. Supply a one-line scenario-encoding mutation of the CUT (mutant_find → mutant_replace, mutant_find occurring exactly once) when one cleanly represents the scenario; the grown test must KILL it and the existing suite must SURVIVE. If no honest mutant exists, set both mutant fields null and rely on a newly-lit context line. At least one of those proofs is required.\n`) +
-    `Return the additive diff, test_name, target_func (the production symbol exercised), cut_module (dotted path) and cut_file (repo-relative path, e.g. src/overlay/${gap.module}). If nothing is worth growing, return applied=false with the reason — never fabricate a vacuous test.\n` +
+    `Return the additive diff, test_name, target_func (the production symbol exercised), cut_module (dotted path) and cut_file (repo-relative path, e.g. src/saitenka/${gap.module}). If nothing is worth growing, return applied=false with the reason — never fabricate a vacuous test.\n` +
     (carry ? `\nPRIOR ATTEMPT BOUNCED — do not repeat it. Gate report:\n${carry}\n` : ''),
     { phase: 'Author', schema: PROPOSAL, label: `author#${attempt}` },
   )
@@ -566,8 +566,8 @@ async function finish(result) {
     `3. IMPROVE — for each real finding, the SMALLEST concrete change to a loop TOOL/SPEC/harness (never the ` +
     `product code). Mark self_referential=true if the proposal touches the reflection machinery itself ` +
     `(needs extra human scrutiny). category ∈ ${JSON.stringify(REFLECT_CATEGORIES)}; severity low|medium|high.\n\n` +
-    `Then APPEND each finding to the reflection ledger and report escalations. From ${CWD}/:\n` +
-    `- the ledger \`.reflection.grow.jsonl\` is at the repo root (parent of ${CWD}/); if absent, create it ` +
+    `Then APPEND each finding to the reflection ledger and report escalations. From the repository root:\n` +
+    `- the ledger is \`.reflection.grow.jsonl\`; if absent, create it ` +
     `with a manifest line \`{"type":"manifest","loop_version":1}\` first.\n` +
     `- FIRST read the existing findings. Recurrence keys on finding_id=hash(category,subject), so if this ` +
     `run's weakness is the SAME root cause as one already recorded, REUSE that record's exact category + ` +
@@ -597,8 +597,8 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
   const wantIssue = canOpenPr && state === 'filed' && outcome === 'bug'
   const ledgerState = wantPr || wantIssue ? 'open' : state
   const recorded = await agent(
-    `Append one Grow ledger record. ${REL} The ledger \`.ledger.grow.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger; do not run git/gh or take any outward action.\n` +
-    `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Build the record without gap_id, target_sha, or toolset_version, then MUST invoke \`uv run python tools/grow_ledger.py --ledger ../.ledger.grow.jsonl append --record-json '<record-json>'\`; that CLI owns those fields. Do not hash or append manually. Stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`.\n` +
+    `Append one Grow ledger record. ${REL} The ledger is \`.ledger.grow.jsonl\`. Touch ONLY the ledger; do not run git/gh or take any outward action.\n` +
+    `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Build the record without gap_id, target_sha, or toolset_version, then MUST invoke \`uv run python tools/grow_ledger.py --ledger .ledger.grow.jsonl append --record-json '<record-json>'\`; that CLI owns those fields. Do not hash or append manually. Stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`.\n` +
     `state: "${ledgerState}", outcome: ${JSON.stringify(outcome ?? null)}. review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}. A pending outward action MUST remain open until finalized.\n` +
     (prop ? `test: ${JSON.stringify(prop.test_name)}. decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. Captured diff: ${JSON.stringify(prop.diff)}.\n` : '') +
     `axes_not_applied: list every gate arm that was n/a for this ${gap.kind} gap and WHY (the silent-no-run guard — SPEC/ADAPTERS).\n` +

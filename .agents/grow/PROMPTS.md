@@ -1,7 +1,7 @@
 # Grow role prompts
 
 Canonical role prompts, provider-neutral. `harness.js` inlines equivalents (the Workflow runtime can't
-read files); keep the two in sync. Every prompt runs from `overlay/` relative to the launch worktree —
+read files); keep the two in sync. Every prompt runs from the repository root relative to the launch worktree —
 never an absolute path or a `cd` outside it (a run may be inside a git worktree). Hard scope guard: the
 author edits ONLY the one named target test file, ADDITIVELY; if blocked, STOP and return the blocker
 verbatim — never work around it by touching another file.
@@ -9,7 +9,7 @@ verbatim — never work around it by touching another file.
 ## Select (triage → scenario map)
 
 > Run the Grow triage and pick the most under-tested valuable module, then enumerate its orphan scenarios.
-> From `overlay/` run `uv run python tools/grow_triage.py --top 1`. Set `pr_exclusion_checked=true` ONLY
+> From the repository root run `uv run python tools/grow_triage.py --top 1`. Set `pr_exclusion_checked=true` ONLY
 > if it ran with the open-PR exclusion active (gh authenticated, no `--no-network`). The `→ pick:` line
 > names the module; map it to its test files. When a context artifact is available, inspect only that row
 > with `grow_contexts.py --inspect {artifact} --module {module} --show lines`. Build a scenario map — its intents, edge
@@ -58,7 +58,7 @@ invitation for the isolated author to call another skill.
 
 ## Objective gate (deterministic — no judgment)
 
-> Run the deterministic Grow gate on the author's edit; report the tool output VERBATIM. From `overlay/`:
+> Run the deterministic Grow gate on the author's edit; report the tool output VERBATIM. From the repository root:
 > First, the additive boundary — `uv run python tools/grow_gate.py additive {test_file} --repo .` must
 > report ONLY added asserts (any altered/removed ⇒ mutative ⇒ Sharpen scope ⇒ bounce). Do NOT use
 > `sharpen_gate anticheat` — it misses same-tier value changes (review C4).

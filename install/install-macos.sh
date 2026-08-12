@@ -29,8 +29,8 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo .)"
 REPO="$(cd "$SELF_DIR/.." && pwd)"
 
 # This installer runs FROM the repo checkout — that IS the source of the code we install.
-if [ ! -d "$REPO/overlay" ]; then
-  warn "no overlay/ next to this installer ($REPO) — run it from a repo checkout, or use install/overlay-install.sh (wheel bundle)."
+if [ ! -f "$REPO/pyproject.toml" ] || [ ! -d "$REPO/src/saitenka" ]; then
+  warn "no Saitenka project next to this installer ($REPO) — run it from a repo checkout, or use install/overlay-install.sh (wheel bundle)."
   exit 1
 fi
 
@@ -85,8 +85,8 @@ export PATH="$HOME/.local/bin:$PATH"
 # `[full]` is GPL-3.0 (see ../LICENSING.md); a wheel/bundle install without deinflect/ stays Apache-2.0.
 if [ -d "$REPO/deinflect" ]; then extra=full; log "including GPL-3.0 deinflect add-on (inflection chains)"
 else extra=jmdict; warn "no deinflect/ in this checkout — installing [jmdict] only (no inflection chains)"; fi
-log "Installing/updating saitenka[$extra] from $REPO/overlay"
-run uv tool install --reinstall --quiet "$REPO/overlay[$extra]"
+log "Installing/updating saitenka[$extra] from $REPO"
+run uv tool install --reinstall --quiet "$REPO[$extra]"
 
 # ── 3. Dev/authoring extras (--dev only): repo + vault tooling ──────────────
 if $DEV && have brew; then

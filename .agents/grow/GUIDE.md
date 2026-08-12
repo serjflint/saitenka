@@ -48,7 +48,7 @@ saw it. Grow reasons about scenarios and their *sequences*, not lines.
 
 ## Example — the worked output
 
-The canonical Grow artifact in this repo is `overlay/tests/test_tooltip_statemachine.py`. A single-action
+The canonical Grow artifact in this repo is `tests/test_tooltip_statemachine.py`. A single-action
 test (`test_scale_boundary.py`) already proves the render↔hit-test **agreement oracle** for one action:
 every drawn element's displayed centre round-trips back to that element through the real hit path. Grow
 made it **stateful** — a `RuleBasedStateMachine` drives the real controller through arbitrary
@@ -61,7 +61,7 @@ panel, a resize that missed the hit path — *not* pixel-vs-panel drift; the one
 round-trip, is what catches a second draw-panel. It ships a permanent negative control
 (`test_the_agreement_oracle_has_teeth`) proving a deliberately-drifted transform *does* mis-hit.
 
-The other worked artifact is `overlay/tests/test_cache_race.py`: a `blanket`-scripted deterministic
+The other worked artifact is `tests/test_cache_race.py`: a `blanket`-scripted deterministic
 regression for a cache eviction race, with a negative control that fails against the unguarded variant.
 
 ## Background — the four arms, for the pytest-only reader
@@ -95,7 +95,7 @@ subprocess (`tools/test_grow_gate.py`).
 
 ## Discovery — where the loop points first
 
-Triage (`overlay/tools/grow_triage.py`) ranks the **product** of two axes: **value** (import fan-in +
+Triage (`tools/grow_triage.py`) ranks the **product** of two axes: **value** (import fan-in +
 churn) × **under-specification** (the missing-public-seam proxy + optional survivors + optional dead
 coverage-contexts). The product matters: a valuable but fully-specified module and an under-tested dead leaf
 both score zero — you want the intersection. From the top module, an AutoCover-style *scenario map* (intents
@@ -119,7 +119,7 @@ The loop must *terminate*: once a gap is closed, it must stay closed under unrel
 when its own target actually changes. A naive line-number key drifts on any edit above the target and
 re-opens closed gaps forever. So the gap identity is `hash(source, target_symbol, dimension)` plus a
 content-hash of the **target symbol's AST source** — not the whole module. Unrelated edits leave it closed;
-a real change to the target reopens it. This is implemented in `overlay/tools/grow_ledger.py` and locked by
+a real change to the target reopens it. This is implemented in `tools/grow_ledger.py` and locked by
 `tools/test_grow_ledger.py`.
 
 ## Anti-bloat — Grow's characteristic hazard

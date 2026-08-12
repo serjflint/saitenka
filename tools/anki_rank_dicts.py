@@ -271,9 +271,13 @@ def emit_ranking(out_dir, stem, title, desc, ranked):
         }
         for i, w in enumerate(ranked)
     ]
-    (out_dir / f"{stem}.json").write_text(json.dumps(js, ensure_ascii=False, indent=1), "utf-8")
+    (out_dir / f"{stem}.json").write_text(
+        json.dumps(js, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
     top = sorted({nid for w in ranked[:2000] for nid in w["nids"]})
-    (out_dir / f"{stem}.nids.txt").write_text("nid:" + ",".join(map(str, top)) + "\n", "utf-8")
+    (out_dir / f"{stem}.nids.txt").write_text(
+        "nid:" + ",".join(map(str, top)) + "\n", encoding="utf-8"
+    )
     return len(rows), len(top)
 
 

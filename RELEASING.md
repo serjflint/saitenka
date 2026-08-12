@@ -21,7 +21,7 @@ and merging the PR — still happen exactly where they're described here.
 breaking change) is a minor bump — `0.2.0 → 0.3.0`. Don't reach for `1.0.0` until the CLI/config is
 being frozen.
 
-Saitenka's version source is **`overlay/pyproject.toml`**. `saitenka-dict` and `ankiconnect-client` keep
+Saitenka's version source is **`pyproject.toml`**. `saitenka-dict` and `ankiconnect-client` keep
 independent versions in their own `pyproject.toml` and publish only from their namespaced tags. A
 Saitenka release consumes already-published dependency versions; it never republishes them.
 
@@ -59,7 +59,7 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 
 ## Before merge (on the release branch, in the PR)
 
-1. **Bump** `overlay/pyproject.toml` `version` to the new `X.Y.Z`.
+1. **Bump** `pyproject.toml` `version` to the new `X.Y.Z`.
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
@@ -67,7 +67,7 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
    be published from their namespaced tags; the Saitenka release consumes them as ordinary dependencies.
 4. **Smoke-test the artifact, not the tree** — install the *built wheel* in an isolated env:
    ```sh
-   uvx --from overlay/dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
+   uvx --from dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
    ```
    This catches packaging breakage (missing data files, entry point, published deps) that
    `poe pre-release` can't.
@@ -78,7 +78,7 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
    version-referenced docs.
 6. **Merge the PR** into the default branch.
 
-`overlay/dist/` is git-ignored — the wheel is **not** committed; `release.yml` rebuilds it from the tag.
+`dist/` is git-ignored — the wheel is **not** committed; `release.yml` rebuilds it from the tag.
 
 ## After merge (on the default branch) — the tag push publishes Saitenka
 
@@ -137,7 +137,7 @@ on its own 0.x line without cutting a `saitenka` release:
   and test.pypi.org, repo `serjflint/saitenka`, workflow `taffylite-release.yml`.
 
 Publishing this doesn't change `saitenka[layout-engine]`'s dev-only posture — flipping
-`overlay/pyproject.toml`'s `[tool.uv.sources]` editable pin to resolve from PyPI is separate follow-up
+`pyproject.toml`'s `[tool.uv.sources]` editable pin to resolve from PyPI is separate follow-up
 work, gated on the first real `taffylite` publish existing to resolve against.
 
 ## Notes

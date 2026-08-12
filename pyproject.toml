@@ -1,36 +1,204 @@
-# Repo-root task runner. NOT a package (`package = false`) — it ships nothing. Repo-wide tasks are
-# defined here; anything needing overlay's env is defined there and forwarded. Either file resolves
-# every name, so `uv run poe <task>` works from either directory.
-#
-#   uv run poe all          # full dev gate (lint + types + tests + free-threaded + coverage)
-#   uv run poe test         # tests only
-#   uv run poe smoke-live   # L3 real-mpv smoke (needs a display)
 [project]
-name = "saitenka-tasks"
-version = "0"
+name = "saitenka"
+version = "3.1.0"
+description = "Learn Japanese from the video you're watching: FSRS-aware subtitle coloring + one-key Anki mining, drawn inside mpv"
+readme = "PYPI.md"
+license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is a separate opt-in dist
 requires-python = ">=3.13"
+dependencies = [
+    "ankiconnect-client>=0.1.0",
+    "saitenka-dict>=0.1.0",
+    "pillow>=11.0",
+    "fonttools>=4.55",
+    "numpy>=2.0",
+    "fugashi>=1.5.2",
+    "unidic-lite>=1.0.8",
+    "cyclopts>=4.22.1",
+    "ijson>=3.5.1",
+    "platformdirs>=4.11.0",
+    "pysubs2>=1.8.1",
+    "keyring>=25.7.0; sys_platform != 'linux' or python_version < '3.15'",
+    "psutil>=7.2.2",
+    "filelock>=3.32.0",
+    "certifi>=2026.6.17",
+    "stamina>=26.1.0",
+    "tomlkit>=0.15.1",
+    "msgspec>=0.21.1",
+    "structlog>=26.1.0",
+    "rich>=14.0",  # progress bars in cli.py; used directly, so declared (not left transitive via cyclopts)
+    "questionary>=2.1.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/serjflint/saitenka"
+Documentation = "https://saitenka.readthedocs.io"
+Repository = "https://github.com/serjflint/saitenka"
+Issues = "https://github.com/serjflint/saitenka/issues"
+Changelog = "https://github.com/serjflint/saitenka/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+# GPL-3.0 add-on (derived from Yomitan) — enables the inflection-chain display. Kept OUT of the
+# core deps so the default install stays Apache-2.0-clean. See LICENSING.md.
+deinflect = ["saitenka-deinflect>=0.2.0"]  # >=0.2.0: French rule set + language= API (#254)
+# Optional layout engine: the taffy (CSS flexbox) row-stack solver behind the LayoutBackend seam
+# (TaffyLayoutBackend, #146). A Rust PyO3 extension (MIT/Apache-2.0), published to PyPI (0.1.0, #231) with
+# prebuilt abi3 (GIL 3.13+) + cp314t + abi3t (FT+GIL 3.15+) wheels — kept OUT of `full` so a default
+# install stays pure-Python. The pure-Python DefaultLayoutBackend is the always-available, byte-identical
+# fallback; this is additive and parity-gated. `saitenka[layout-engine]` resolves taffylite from PyPI. (For
+# hacking on the in-repo Rust crate, add a `[tool.uv.sources]` editable path override or `uv run --with-editable taffylite`.)
+layout-engine = ["taffylite>=0.1.0"]
+# Optional SVG rasterizer: the resvg PyO3 binding that turns Yomitan inline `img` gaiji (SVG labels /
+# reference glyphs) into PNGs at import, so the panel draws the real glyph instead of a ▢ (#283). A Rust
+# extension vendoring resvg (MPL-2.0, contained to this separately-published optional wheel — see
+# LICENSING.md), kept OUT of `full` so the default install stays Apache-clean and pure-Python. Without
+# it, import stores no media and the renderer falls back to ▢ — fully additive.
+images = ["resvglite>=0.2.0"]
+# JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
+# configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
+# default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
+# on Windows ([WinError 32] while it decompresses jamdict.db.xz). On Windows the extra pulls
+# jamdict-data-fix instead: a drop-in with the same CC BY-SA database that builds cleanly.
+# Mining prefers your own dictionaries, so a dict-first user never needs this. Opt in with e.g.
+# `uv tool install '.[jmdict]'` from a checkout.
+jmdict = [
+    "jamdict>=0.1a11.post2",
+    "jamdict-data>=1.5; platform_system != 'Windows'",
+    "jamdict-data-fix>=1.5.1a2; platform_system == 'Windows'",
+]
+# Runtime tracing/metrics. OFF by default even when installed —
+# `[telemetry] enabled = true` is the actual opt-in. Kept out of core deps so a default install never
+# pulls the OTel SDK: `app/telemetry.py` imports it lazily, only once `enabled=true` is read from
+# config. Both packages are pure-Python (py3-none-any), so no free-threading risk either way.
+telemetry = [
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+]
+# Linux Secret Service support on Python 3.15+. Earlier Linux and other platforms install keyring by
+# default; omitting this extra on 3.15+ falls back to JIMAKU_API_KEY or an owner-only file.
+linux-keyring = ["keyring>=25.7.0; sys_platform == 'linux'"]
+# Convenience bundles. `minimal` is the bare install (no optional features — same as no extra); it
+# exists only so `saitenka[minimal]` reads as a deliberate choice. `full` pulls every portable feature
+# and is what the checkout installers install; Linux Secret Service remains an explicit platform
+# integration. Note `full` includes the GPL-3.0 `deinflect` add-on, so a `full` install is GPL-3.0,
+# not Apache-2.0 (see LICENSING.md).
+minimal = []
+full = ["saitenka[deinflect]", "saitenka[jmdict]", "saitenka[telemetry]"]
+
+[project.scripts]
+saitenka = "saitenka.app.cli:main"
+
+[tool.uv.sources]
+# Dev editable resolution of the GPL add-on so overlay changes see local deinflect edits (e.g. the
+# French rule set / language= API). Stripped from published metadata — a PyPI `saitenka[deinflect]`
+# install still pulls the published saitenka-deinflect wheel. (taffylite/resvglite are no longer sourced
+# editable — the `layout-engine`/`images` extras resolve the published wheels from PyPI, #282/#308.)
+saitenka-deinflect = { path = "deinflect", editable = true }
+ankiconnect-client = { path = "ankiconnect-client", editable = true }
+saitenka-dict = { path = "saitenka-dict", editable = true }
 
 [tool.uv]
-package = false
-# Store this (poe-only) env in uv's managed cache with a lightweight `.venv` symlink, matching
-# overlay/. Keeps the tree free of heavy in-tree venv dirs. See overlay/pyproject.toml [tool.uv].
+# Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
+# lightweight `.venv` symlink for editor / basedpyright discovery, instead of a heavy in-tree `.venv`
+# directory. The pinned-3.13 opt-in tasks manage their own envs: `fuzz` /
+# `crosshair` run ephemerally (`uv run --no-project --with-editable '.[full]' --with …`, uvx-style,
+# cached, no dir); `pyspy` uses `/tmp/venv-py-spy` because it prints a stable
+# `sudo /tmp/venv-py-spy/bin/py-spy` path a hashed cache env can't give (a reboot just re-syncs it).
 preview-features = ["centralized-project-envs"]
 
 [dependency-groups]
-# Checkers that resolve no first-party imports: ruff parses, complexipy walks the AST. `types` is
-# absent because mypy/basedpyright must import overlay's runtime deps to say anything useful.
-dev = ["poethepoet>=0.30", "ruff>=0.15", "complexipy>=5"]
+# libcst is a codemod-authoring tool (see AGENTS.md "Refactoring") — nothing in src/tests/gate imports
+# it. Its pyo3 native build has no free-threaded 3.15t wheel yet, and keeping it in `dev` made every
+# `uv sync` (incl. the CI test matrix) fail to even create the env on 3.15+. Isolated here so the default
+# dev env stays lean and forward-compatible; author codemods with `uv run --group codemod <script>`.
+codemod = ["libcst>=1.8.6"]
+# blanket drives DETERMINISTIC thread interleavings for the concurrency tests (tests/test_cache_race.py):
+# it turns a no-GIL cache TOCTOU race into a 100%-reproducible regression instead of flaky stress. MIT,
+# pure-Python, runs under 3.14t; opt-in so only the concurrency tests pull it — `uv run --group grow …`.
+grow = ["blanket>=1.0"]
+# Minimal deps to RUN the suite. The CI test matrix installs ONLY this group
+# (`--no-default-groups --group test`), so new-interpreter legs (e.g. 3.15t) aren't blocked building the
+# heavy native dev tools they never use (memray/py-spy/mypy/ruff/…, which lack free-threaded wheels).
+test = [
+    "hypothesis>=6.157.2",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "pytest-randomly>=4.1.0",
+    "pytest-xdist>=3.8.0",
+    "pytest-timeout>=2.4.0",
+    "dirty-equals>=0.11",
+    "pyfakefs>=6.2.0",
+]
+dev = [
+    { include-group = "test" },
+    "mypy>=2.3.0",
+    "playwright>=1.61.0",
+    "poethepoet>=0.48.0",
+    "pyrefly>=1.2.0",
+    "ty>=0.0.61",
+    "basedpyright>=1.39",
+    # memray has no Windows support (native build needs libbacktrace/pkg-config); its memory-regression
+    # test (`poe stress-memory`) is a Linux/macOS dev+CI concern, so keep it off win32 — else `uv sync`
+    # on the Windows E2E leg fails building it from sdist.
+    "memray>=1.19.3; sys_platform != 'win32'",
+    "pytest-memray>=1.9.0; sys_platform != 'win32'",
+    "import-linter>=2.13",
+    "complexipy>=6.2.0",
+    "ruff>=0.16",
+    "deptry>=0.23",
+]
+# Lean group for the `/tmp/venv-py-spy` profiling venv (the `*-pyspy` poe tasks below) — just the one
+# binary, so that venv doesn't drag in mypy/pyrefly/memray/… via `dev`. Was previously (wrongly, per a
+# stale comment) assumed to ride along on `--extra full`; py-spy is dev tooling, not a runtime extra.
+profiling = ["py-spy>=0.4.2"]
+docs = [
+    "mkdocs-include-markdown-plugin>=6.2",
+    "mkdocs-material>=9.5",
+]
 
-# ── Repo-wide tool config (SSOT) ──────────────────────────────────────────────────────────────────
-# Ruff / complexipy / the type-checkers live HERE, at the workspace root, so ONE config governs ALL
-# first-party Python — overlay/, saitenka-dict/, ankiconnect-client/ (Apache core), deinflect/ (GPL
-# add-on), taffylite/ (Rust bindings), plus tools/, install/, and .agents/ scripts. Ruff discovers this
-# by walking up from each file (the
-# sub-packages carry no [tool.ruff] of their own), so there's no second rule-list to drift. The gate
-# tasks below invoke each tool from the root over the whole tree.
-# NOT hoisted (they encode overlay's ARCHITECTURE, not general policy, so they stay overlay-scoped in
-# overlay/pyproject.toml): import-linter (the GPL/layout chokepoint + layer contracts), deptry (per-package
-# dependency hygiene), corpus-lock / docs-refs / docs-consts, and mutate / fuzz / crosshair (pure-core).
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/saitenka"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "live: real-mpv smoke needing a display (opt-in via SAITENKA_LIVE=1; run `poe smoke-live`)",
+    "windows_sim: Windows behaviour SIMULATED on the host (use_platform / pyfakefs OSType.WINDOWS). Runs everywhere by default — a fast honesty label for what is faked vs. really executed; NOT a substitute for the real-Windows executor (R5).",
+    "slow: slower than the fast default loop; excluded from `poe test`, run explicitly or in CI.",
+    "integration: crosses a real boundary (subprocess / socket / filesystem); excluded from `poe test`.",
+    "requires_display: needs a real GUI/display; excluded from `poe test`.",
+    "e2e: full-stack end-to-end; excluded from `poe test`.",
+]
+
+# Ruff, complexipy, and the type-checkers are configured once here for all first-party Python.
+# deptry and import-linter still encode the Saitenka package boundary specifically.
+
+# Spell-check allowlist lives in the repo-root _typos.toml (poe spell scans repo-wide; typos resolves
+# config from the scan root, not from overlay/).
+
+# Dependency hygiene (poe deps, now clean → folded into `all`). Every ignore below is a runtime-implicit
+# data package, an extras self-reference, or a deliberate forward-declaration — not a silenced defect.
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+    "unidic-lite",      # runtime dictionary data loaded implicitly by fugashi (never imported)
+    "jamdict-data",     # CC BY-SA DB loaded by jamdict at runtime (never imported)
+    "jamdict-data-fix", # Windows drop-in for jamdict-data (never imported)
+    "saitenka", # self-reference from the `full`/`minimal` convenience extras
+    "saitenka-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
+    "filelock",         # declared ahead of use for the planned Windows mandatory-lock work; not yet
+                        # imported. Remove IF that work is dropped.
+]
+DEP003 = ["saitenka_deinflect"]  # GPL add-on via the `deinflect` extra (PyPI) — the chokepoint import
+
+# --- Task runner ---------------------------------------------------------------------------------
+# Every `uv run` carries `--extra full` so the optional features (deinflect inflection chain + JMdict
+# fallback) are present for tests without living in the dev group — they're optional EXTRAS, not dev
+# deps. Keeping the flag on every task avoids uv re-syncing (installing/removing the extras) between
+# steps of `poe all`.
 
 [tool.ruff]
 line-length = 100
@@ -132,7 +300,7 @@ ignore = [
                # geometry), not tolerance bugs; adding math.isclose everywhere would be wrong here
     "used-dummy-variable",  # used-dummy-variable — `_`-prefixed locals kept alive on purpose (bench keep-alives,
                # partial tuple-unpacks); the unsafe rename is churn without correctness value
-    "non-empty-init-module",  # non-empty-init-module — the version() try/except in overlay/__init__.py is the standard
+    "non-empty-init-module",  # non-empty-init-module — the version() try/except in saitenka/__init__.py is the standard
                # installed-dist-vs-source-tree pattern, not stray logic
     "no-self-use", # no-self-use — 141 sites; methods-as-namespace is deliberate and it's complexity-adjacent
                # (the PLR count cousins already defer to complexipy)
@@ -163,34 +331,34 @@ max-args = 8
 # cyclopts binds flags via Parameter(...) calls in parameter defaults — that IS its API shape.
 # T201: cli.py + cli_run.py are the CLI entrypoint/runtime-banner surface — print() IS the UX,
 # mirrors sgconfig/rules/no-print-in-lib.yml's `ignores:` (which cli_run.py should join too).
-"overlay/src/overlay/app/cli.py" = ["function-call-in-default-argument", "print"]
-"overlay/src/overlay/app/cli_run.py" = ["print"]
+"src/saitenka/app/cli.py" = ["function-call-in-default-argument", "print"]
+"src/saitenka/app/cli_run.py" = ["print"]
 # T201: interactive first-run wizards — print() is the prompt UX, matches no-print-in-lib.yml.
-"overlay/src/overlay/app/init_wizard.py" = ["print"]
-"overlay/src/overlay/app/setup_wizard.py" = ["print"]
-"overlay/src/overlay/app/prompt.py" = ["print"]  # shared prompt seam: the numbered fallback prints its choices
+"src/saitenka/app/init_wizard.py" = ["print"]
+"src/saitenka/app/setup_wizard.py" = ["print"]
+"src/saitenka/app/prompt.py" = ["print"]  # shared prompt seam: the numbered fallback prints its choices
 # T201: the `saitenka config` editor + `saitenka profile` manager are user-invoked subcommands — print() is UX.
-"overlay/src/overlay/app/config_editor.py" = ["print"]
-"overlay/src/overlay/app/profile_cli.py" = ["print"]
+"src/saitenka/app/config_editor.py" = ["print"]
+"src/saitenka/app/profile_cli.py" = ["print"]
 # Palette's defaults are pure constant color parses (_hex on literals) in a frozen dataclass —
 # hoisting five one-use constants would only add indirection.
-"overlay/src/overlay/app/scoring.py" = ["function-call-in-dataclass-default-argument"]
+"src/saitenka/app/scoring.py" = ["function-call-in-dataclass-default-argument"]
 # NB: the TID251 GPL/layout-engine chokepoint bans are per-LINE `# noqa: TID251 # reason` at each
 # sanctioned import (dictionary.py/doctor.py/layout_backend.py/test_properties.py), NOT per-file —
 # per-line is more precise AND keeps guarding a SECOND illicit import in the same file (defense-in-depth
 # alongside the .importlinter gpl-chokepoint / layout-engine-chokepoint contracts).
 # T201: doctor is a user-invoked diagnostic subcommand — print() IS its report output.
-"overlay/src/overlay/app/doctor.py" = ["print"]
+"src/saitenka/app/doctor.py" = ["print"]
 # T201: user-invoked import subcommand — print() reports progress/results to the terminal.
-"overlay/src/overlay/app/yomitan_import.py" = ["print"]
+"src/saitenka/app/yomitan_import.py" = ["print"]
 # T201: pre-logging bootstrap — runs before configure_logging() attaches handlers, so log.*
 # has nowhere to go yet; matches no-print-in-lib.yml.
-"overlay/src/overlay/app/reader_deps.py" = ["print"]
-"overlay/src/overlay/app/crashlog.py" = ["print"]
+"src/saitenka/app/reader_deps.py" = ["print"]
+"src/saitenka/app/crashlog.py" = ["print"]
 # media.py dispatches on sys.platform with a `return` per branch; the explicit `else` is a DELIBERATE
 # mypy platform-narrowing guard (without it, mypy flags the fall-through as unreachable on the build
 # host). RET's else-after-return "simplification" fights that guard, so opt those rules out here.
-"overlay/src/overlay/app/media.py" = ["superfluous-else-return", "superfluous-else-raise", "superfluous-else-break"]
+"src/saitenka/app/media.py" = ["superfluous-else-return", "superfluous-else-raise", "superfluous-else-break"]
 # The TID251 saitenka_deinflect/taffylite bans guard OVERLAY importing the add-ons; the add-on packages
 # themselves (and their own tests) import themselves legitimately — exempt them.
 "deinflect/**" = ["banned-api"]
@@ -225,23 +393,23 @@ max-args = 8
 # too-many-{arguments,positional} also relaxed here: a run-once bench/tool signature is not a shipped API,
 # so bundling its params into a config object buys nothing (the library max-args=8 ratchet is #216-scoped).
 "**/examples/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "lambda-assignment", "FBT", "N", "too-many-arguments", "too-many-positional-arguments"]
-# overlay/compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
-"overlay/compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
+# tools/visual_compare/ is the yomitan visual-comparison harness (dev bench, not shipped) — same posture.
+"tools/visual_compare/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "N"]
 "**/tools/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "FBT", "N", "raise-without-from-inside-except", "DTZ", "shebang-not-executable", "subprocess-run-without-check", "too-many-arguments", "too-many-positional-arguments"]
 ".agents/**" = ["print", "implicit-namespace-package", "blind-except", "S", "PTH", "shebang-not-executable"]
 "install/**" = ["print", "implicit-namespace-package", "S", "DTZ", "shebang-not-executable"]
 # vulture's whitelist file is intentionally "dead": bare attribute/name expressions that only exist to
 # mark interface-mandated symbols as used — so useless-expression + undefined-name are the whole point.
-"overlay/.vulture_whitelist.py" = ["useless-expression", "undefined-name"]
+".vulture_whitelist.py" = ["useless-expression", "undefined-name"]
 # NOTE: security suppressions in `src/` are DELIBERATELY per-line `# noqa: S…  # reason` at each
 # site (see anki.py/jimaku.py/wordlists.py/crashlog.py/fsrs.py/dictdb.py/doctor.py), not centralized
 # here — a per-line noqa is more precise (a NEW unsafe occurrence in the same file still fails) and
 # self-documents the reason next to the code. Config-level ignores stay reserved for categorical rules.
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"saitenka_deinflect".msg = "GPL-3.0 add-on — only overlay/app/dictionary.py and overlay/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
-"taffylite".msg = "Optional layout engine — only overlay/render/layout_backend.py (TaffyLayoutBackend) may import it (see .importlinter's layout-engine-chokepoint contract)."
-"resvglite".msg = "Optional SVG rasterizer — only overlay/app/dictdb.py (_load_media) may import it: gaiji are rasterized once at import, never on the render thread (see .importlinter's svg-images-chokepoint contract)."
+"saitenka_deinflect".msg = "GPL-3.0 add-on — only saitenka/app/dictionary.py and saitenka/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
+"taffylite".msg = "Optional layout engine — only saitenka/render/layout_backend.py (TaffyLayoutBackend) may import it (see .importlinter's layout-engine-chokepoint contract)."
+"resvglite".msg = "Optional SVG rasterizer — only saitenka/app/dictdb.py (_load_media) may import it: gaiji are rasterized once at import, never on the render thread (see .importlinter's svg-images-chokepoint contract)."
 
 [tool.complexipy]
 # Cognitive-complexity gate (uv run poe complexity, folded into poe all), now repo-wide (#216).
@@ -249,27 +417,27 @@ max-args = 8
 # regenerate after a deliberate refactor): the pre-existing high-complexity functions are grandfathered,
 # so the gate only fails on NEW complexity growth, not on adoption. max-complexity-allowed=15 is
 # complexipy's own default — set explicitly so it's visible.
-paths = ["overlay/src/overlay", "deinflect/src", "taffylite/python", "resvglite/python", "tools", "install", ".agents"]
+paths = ["src/saitenka", "deinflect/src", "taffylite/python", "resvglite/python", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/repowise_ops.py", "install", ".agents"]
 max-complexity-allowed = 15
 
 [tool.mypy]
 python_version = "3.13"
 # LIBRARY code (#216): the Apache core + the GPL add-on — imported, shipped, contract-bearing, so the
 # heavy checker earns its keep (it already caught a real set/tuple mismatch in deinflect). The dev
-# SCRIPTS (overlay/examples, tools, install, .agents) are now IN this tier too (2026-08): a stale
+# SCRIPTS (examples, tools, install, .agents) are now IN this tier too (2026-08): a stale
 # cross-module import there (SKIP_POS moving out of controller.py) was caught by NOTHING — ruff doesn't
 # resolve cross-module symbol existence, and the checkers were library-only. Coverage widened; strictness
 # did NOT — still non-strict (below), not `--strict`. `tests/` stays OUT for now (its pervasive
 # `Fake*`-as-real-type doubles are a separate, larger adaptation — see follow-up note). taffylite/python
 # is a thin binding over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it stays
 # out of the type tier.
-files = ["overlay/src/overlay", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "overlay/examples", "tools", "install", ".agents"]
+files = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/repowise_ops.py", "install", ".agents"]
 # Source roots on the path so first-party + optional-ext imports resolve when mypy runs from the repo
 # root — incl. taffylite/python so `import taffylite` finds the committed .pyi stub (column) rather than
 # the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
 # absent, e.g. the CI gate env — the layout-engine extra is deliberately not installed there). `stubs/`
 # holds our local third-party stubs (fugashi — Cython, no py.typed).
-mypy_path = ["overlay/src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+mypy_path = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # Stage 8b tooling: good additional checks, NOT --strict (plan decision).
 check_untyped_defs = true
 no_implicit_optional = true
@@ -282,7 +450,7 @@ ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 # Run from the repo root → the first-party source roots must be on the search path (same reason as
 # basedpyright's extraPaths) so `saitenka_deinflect.engine` / `overlay.*` resolve from source.
 # `stubs/` holds local third-party stubs (fugashi).
-search-path = ["overlay/src", "deinflect/src", "saitenka-dict/src", "ankiconnect-client/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+search-path = ["src", "deinflect/src", "saitenka-dict/src", "ankiconnect-client/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # Library-only, deliberately NOT widened alongside mypy/basedpyright above: pyrefly's inference is far
 # stricter on the ad-hoc untyped dict-literal "records" idiom pervasive in tools/ (e.g. plan.append({...})
 # read back via p["key"]) — real findings there are inference-strictness noise, not import/attr rot (the
@@ -297,10 +465,10 @@ missing-import = false
 
 [tool.basedpyright]
 # Same widened scope as mypy above — see [tool.mypy].files for the rationale.
-include = ["overlay/src/overlay", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "overlay/examples", "tools", "install", ".agents"]
+include = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/repowise_ops.py", "install", ".agents"]
 # Run from the repo root, so the first-party source roots must be on the search path explicitly (else
 # `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
-extraPaths = ["overlay/src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", ".agents/hooks"]
+extraPaths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", ".agents/hooks"]
 stubPath = "stubs"   # local third-party stubs (fugashi — Cython, no py.typed)
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
@@ -312,94 +480,336 @@ reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers imp
 # `concurrent.interpreters`), and `extra-paths` so the local fugashi stub + the taffylite/resvglite
 # `.pyi` resolve (`fugashi.Tagger`, `taffylite.column`/`Tree`).
 python-version = "3.14"
-extra-paths = ["overlay/src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+extra-paths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # `unresolved-import` (the optional PEP-723 script deps + example-local `live_harness`) is silenced by
 # `--ignore unresolved-import` on the `types` task's ty call — a `[tool.ty.rules]` table here is NOT
 # honored (ty reads `[tool.ty.environment]` from this file but not the rules table), the flag is.
 # Same "missing 3rd-party import isn't rot" posture as pyrefly `missing-import` / mypy above.
 
 [tool.poe.tasks]
-all = { cmd = "uv run poe all", cwd = "overlay" }
-types = { cmd = "uv run poe types", cwd = "overlay" }
-arch = { cmd = "uv run poe arch", cwd = "overlay" }
-arch-report = { cmd = "uv run poe arch-report", cwd = "overlay" }
-invariants = { cmd = "uv run poe invariants", cwd = "overlay" }
-invariants-test = { cmd = "uv run poe invariants-test", cwd = "overlay" }
-invariants-taint = { cmd = "uv run poe invariants-taint", cwd = "overlay" }
-mutate = { cmd = "uv run poe mutate", cwd = "overlay" }
-fuzz = { cmd = "uv run poe fuzz", cwd = "overlay" }
-crosshair = { cmd = "uv run poe crosshair", cwd = "overlay" }
-test = { cmd = "uv run poe test", cwd = "overlay" }
-loop-tools-test = { cmd = "uv run poe loop-tools-test", cwd = "overlay" }
-package-test = { cmd = "uv run poe package-test", cwd = "overlay" }
-yomitan-parity = { cmd = "uv run poe yomitan-parity", cwd = "overlay" }
-yomitan-parity-json = { cmd = "uv run poe yomitan-parity-json", cwd = "overlay" }
-test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
-affected = { cmd = "uv run poe affected", cwd = "overlay" }
-cov = { cmd = "uv run poe cov", cwd = "overlay" }
-bench = { cmd = "uv run poe bench", cwd = "overlay" }
-smoke-live = { cmd = "uv run poe smoke-live", cwd = "overlay" }
-docs = { cmd = "uv run poe docs", cwd = "overlay" }
-docs-serve = { cmd = "uv run poe docs-serve", cwd = "overlay" }
-docs-cli = { cmd = "uv run poe docs-cli", cwd = "overlay" }
-# Supply-chain & hygiene (real tasks + rationale live in overlay/pyproject.toml).
-audit = { cmd = "uv run poe audit", cwd = "overlay" }
-pip-audit = { cmd = "uv run poe pip-audit", cwd = "overlay" }
-deps = { cmd = "uv run poe deps", cwd = "overlay" }
-licenses = { cmd = "uv run poe licenses", cwd = "overlay" }
-deadcode = { cmd = "uv run poe deadcode", cwd = "overlay" }
-dup = { cmd = "uv run poe dup", cwd = "overlay" }
-bench-pyspy-all = { cmd = "uv run poe bench-pyspy-all", cwd = "overlay" }
-call-args = { cmd = "uv run poe call-args", cwd = "overlay" }
-call-args-test = { cmd = "uv run poe call-args-test", cwd = "overlay" }
-corpus-drift = { cmd = "uv run poe corpus-drift", cwd = "overlay" }
-corpus-lock = { cmd = "uv run poe corpus-lock", cwd = "overlay" }
-docs-consts = { cmd = "uv run poe docs-consts", cwd = "overlay" }
-docs-markers = { cmd = "uv run poe docs-markers", cwd = "overlay" }
-docs-refs = { cmd = "uv run poe docs-refs", cwd = "overlay" }
-install-smoke = { cmd = "uv run poe install-smoke", cwd = "overlay" }
-jank-live = { cmd = "uv run poe jank-live", cwd = "overlay" }
-perf-bless = { cmd = "uv run poe perf-bless", cwd = "overlay" }
-perf-check = { cmd = "uv run poe perf-check", cwd = "overlay" }
-pre-release = { cmd = "uv run poe pre-release", cwd = "overlay" }
-scroll-jank-pyspy = { cmd = "uv run poe scroll-jank-pyspy", cwd = "overlay" }
-stress-memory = { cmd = "uv run poe stress-memory", cwd = "overlay" }
-stress-pyspy = { cmd = "uv run poe stress-pyspy", cwd = "overlay" }
-synth-bench = { cmd = "uv run poe synth-bench", cwd = "overlay" }
-test-lint = { cmd = "uv run poe test-lint", cwd = "overlay" }
-test-lint-gate = { cmd = "uv run poe test-lint-gate", cwd = "overlay" }
-test-lint-gate-test = { cmd = "uv run poe test-lint-gate-test", cwd = "overlay" }
-test-lint-json = { cmd = "uv run poe test-lint-json", cwd = "overlay" }
-test-lint-test = { cmd = "uv run poe test-lint-test", cwd = "overlay" }
-test-live = { cmd = "uv run poe test-live", cwd = "overlay" }
-timeline-bench = { cmd = "uv run poe timeline-bench", cwd = "overlay" }
-timeline-bench-banded = { cmd = "uv run poe timeline-bench-banded", cwd = "overlay" }
-timeline-pyspy = { cmd = "uv run poe timeline-pyspy", cwd = "overlay" }
-trace-pyspy = { cmd = "uv run poe trace-pyspy", cwd = "overlay" }
-vocab-pyspy = { cmd = "uv run poe vocab-pyspy", cwd = "overlay" }
-vocab-pyspy-mp = { cmd = "uv run poe vocab-pyspy-mp", cwd = "overlay" }
-
-# ── Defined here, not forwarded ───────────────────────────────────────────────────────────────────
-# Everything above needs overlay's env; everything below needs only this one or a standalone binary.
-# Which side a task lives on is a question about its environment, not its scope.
+# lint / types / complexity run repo-wide from the root configuration.
 lint = { shell = "uv run ruff check --fix . && uv run ruff format ." }
+# mypy/basedpyright gate the widened scope (library + examples + tools + install + .agents —
+# see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
+# strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
+# scope for visibility, same posture as `ty` (never a hard gate here).
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --extra full pyrefly check examples tools install .agents || true) && (uv run --extra full ty check --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src examples tools install .agents || true)" }
+# Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
+# PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
+# + app/doctor.py chokepoint. Config: .importlinter.
+arch = { shell = "uv run --extra full lint-imports" }
+# Call-level invariant gate (ast-grep, config: sgconfig.yml) — anti-patterns import-linter can't see:
+# no time.sleep in the mpv reader thread, single-writer IPC pipe, no model-derived readings.
+# `severity: error` fails the gate; `warning` advises. Rust binary, no build/FT exposure. Tests run
+# first so a rule can't rot into a no-op. Install: `uvx --from ast-grep-cli ast-grep` / `brew install`.
+invariants = { shell = "ast-grep test --skip-snapshot-tests && ast-grep scan" }
+invariants-test = { shell = "ast-grep test --skip-snapshot-tests" }
+# Test-code lint (ast-grep, config: sgconfig-tests.yml) — the sharpen loop's Conformance instrument
+# (.agents/sharpen/SPEC.md, Axis 2): measures test↔implementation coupling (private-attr asserts,
+# mock-interaction, ambient wall-clock/entropy, env mutation, mutable session fixtures). ALL rules are
+# `warning` (advisory — exits 0), scoped to tests/, and DELIBERATELY NOT in `poe all`. `--json=compact`
+# for the loop's per-file counts. Planted +/- tests keep a rule from rotting into a no-op.
+test-lint = { shell = "ast-grep test -c sgconfig-tests.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests.yml tests" }
+test-lint-test = { shell = "ast-grep test -c sgconfig-tests.yml --skip-snapshot-tests" }
+test-lint-json = { shell = "ast-grep scan -c sgconfig-tests.yml --json=compact tests" }
+# GATE (in `all`) — the test-code invariants that are baseline-clean, at `severity: error` so a NEW
+# violation fails the push (config: sgconfig-tests-gate.yml). Only zero-violation rules graduate here
+# from the advisory `test-lint`; the sanctioned classicist debt stays advisory. Tests run first so a
+# rule can't rot into a no-op. Rust binary, no build/FT exposure — same posture as `invariants`.
+test-lint-gate = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-tests-gate.yml tests" }
+test-lint-gate-test = { shell = "ast-grep test -c sgconfig-tests-gate.yml --skip-snapshot-tests" }
+# Call-site arg-naming convention (ast-grep, config: sgconfig-call-args.yml, #225) — flags a call
+# passing 3+ unnamed positional args (ruff PLR0913/PLR0917 only bound the definition side). A first
+# repo-wide pass surfaces ~900 existing call sites, so this stays `severity: warning` and DELIBERATELY
+# NOT in `poe all` — same advisory posture as `test-lint`, until triage narrows the noise.
+call-args = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snapshot-tests && ast-grep scan -c sgconfig-call-args.yml src" }
+call-args-test = { shell = "ast-grep test -c sgconfig-call-args.yml --skip-snapshot-tests" }
+# OPT-IN taint tier (not in `all`): semgrep dataflow for what ast-grep can't — model output reaching a
+# reading/pitch field via intermediate vars. Pinned to 3.13 (prebuilt clib wheel; semgrep never imports
+# our code, so its interpreter is unrelated to the 3.14t runtime). For 3.14t use the clib-drop crutch:
+# `--config-file tools/semgrep/uv.toml --python 3.14t`. ~2s → opt-in; run when touching lookup/scoring/miner.
+invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semgrep/rules.yml src" }
+# Cognitive-complexity gate, ratcheted against complexipy-snapshot.json (config: root [tool.complexipy]).
+# Fails only on NEW complexity growth past max-complexity-allowed=15, not on pre-existing debt.
 complexity = { cmd = "uv run complexipy" }
+# Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,
+# review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
 complexity-baseline = { cmd = "uv run complexipy --snapshot-create" }
+# Fast default loop: everything EXCEPT the opt-in tiers (windows_sim stays IN — it's fast + mac-runnable).
+# Inner-loop task only — NOT in `all`: `cov` runs a superset marker set with `-n auto`, so it is the
+# gate's functional run too (no point running the suite a third time without coverage).
+test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integration or requires_display or e2e or live)'" }
+subtitle-test = { shell = "uv run --extra full pytest -q -n auto tests/test_sub_index.py tests/test_sub_index_properties.py tests/test_subtitle_metamorphic.py" }
+# Deterministic unit coverage for the Grow/Sharpen and reporting tools. Explicit path because pytest's
+# package testpaths intentionally stays on the shipped overlay suite.
+loop-tools-test = { shell = "uv run --extra full pytest -q tools" }
+# Independent package surfaces stay runnable without the overlay dependency graph.
+package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-dict/pyproject.toml -m 'not integration' saitenka-dict/tests && uv run --project ankiconnect-client pytest -q -c ankiconnect-client/pyproject.toml ankiconnect-client/tests" }
+# Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
+yomitan-parity = { shell = "cd saitenka-dict && uv run python -m oracle.parity" }
+yomitan-parity-json = { shell = "cd saitenka-dict && uv run python -m oracle.parity --json" }
+# -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
+# FT code paths still run without the GIL — it just parallelises (91s → ~22s).
+test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not (slow or live)'" }
+# Inner-loop test selector (NOT a gate — `all`/`test-ft` stay the pre-push net). Runs only the tests a
+# change can affect: ruff dependents reverse-closure + a full-run fallback on static-graph blind spots.
+# `poe affected` (working tree) / `poe affected --base main` (vs a branch) / `--print` to just list them.
+affected = { cmd = "uv run --extra full python tools/affected.py" }
+# The gate's functional + coverage run. `-n auto` parallelises it (~99s → ~38s); pytest-cov combines
+# per-worker data. Its marker set (`not (slow or live)`) is a superset of `test`'s, so `all` runs this
+# instead of a separate `test` — the suite runs twice total (here + `test-ft` under PYTHON_GIL=0).
+cov = "uv run --extra full pytest -q -n auto --cov=saitenka --cov-report=term-missing --cov-fail-under=85 -m 'not (slow or live)'"
+bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
+# Dict-free deterministic render bench — the CI/asv-safe gate target (no overlay.toml, no randomness).
+# --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
+synth-bench = "uv run --extra full python examples/bench_responsiveness.py --synth --reps 5 --loops 5"
+# Local perf rot-guard (#33): ratchet the --synth render throughput against perf-baseline.json, failing
+# only on GROSS regression (per-metric tolerance: median +50%, tail-noisy p99 +100% → catches a 2-4x
+# rot, never micro-drift). LOCAL/OPT-IN, wall-clock + machine-specific → deliberately NOT in `all` (like
+# mutate/bench). The statistical trend gate is github-action-benchmark on gh-pages (.github/workflows/
+# perf.yml). Re-bless after a deliberate perf change. See tools/perf_gate.py.
+perf-check = "uv run --extra full python tools/perf_gate.py"
+perf-bless = "uv run --extra full python tools/perf_gate.py --bless"
+# Idle-paced ground truth (hot-path-idle-spreading-plan.md Stage 1) — real-time dwell between
+# synthetic cues, so it's slower than the other benches; not folded into `bench`/`poe all`.
+# PYTHON_GIL=0 so the prefetch workers run truly free-threaded (fugashi is main-thread-only here, so
+# no MeCab races) — without it fugashi re-enables the GIL and worker scaling collapses to ~2, halving
+# decode stall (48%→19%) and inflating the finish_tail tail measured for the idle-warming path.
+timeline-bench = { shell = "PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline" }
+# Reproduces the SHIPPED/real config (overlay.toml: head_prefetch_lookahead=1, prefetch_lookahead=2)
+# with the banded (windowed) render path on (SAITENKA_BANDED=1 flips reader._banded, no config file) —
+# the only bench that mirrors a live session's hover-warmth + worker keep-ahead. Use it to measure the
+# engaged head-first render fix against the report baseline (2.8s full renders → queue-11 backlog).
+timeline-bench-banded = { shell = "PYTHON_GIL=0 uv run --extra full python examples/bench_responsiveness.py --timeline --timeline-head-prefetch 1 --timeline-lookahead 2" }
+# L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
+# No PYTHON_GIL=0 — the smoke tests input→OSD mapping, not free-threading, and forcing the GIL off is a
+# fatal `config_read_gil` error on a non-free-threaded interpreter (the E2E leg pins 3.13 for fugashi wheels).
+smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
+# Live-mpv jank harness (#32): drive the overlay against a real PLAYING mpv and poll mpv's own
+# frame-drop counters — the true real-time signal the headless benches can't see. Needs a display; the
+# E2E GUI tier runs it under Xvfb. --max-drops is the catastrophic-jank gate.
+jank-live = { shell = "SAITENKA_LIVE=1 uv run --extra full python examples/jank_live.py --json jank.json --bench-json jank-bench.json --max-drops 30" }
+# Install-bootstrap smoke — the ONLY tier that drives the packaged `uv tool install` entrypoint on a
+# clean machine (assets from the installed wheel, PATH handoff, setup wizard non-tty path). `--source
+# wheel` (default) builds + installs the current tree; `--source pypi` validates the published artifact
+# (release tag). `--no-project`: the orchestrator is stdlib-only and installs saitenka GLOBALLY, so it
+# needs no dev env. CI-only (the e2e install-smoke leg runs it across all 3 OSes) — NOT in `all`.
+install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
+# Memory-regression companion to `test`/`all` — memray tracking overhead makes this ~1 minute, so it's
+# `slow`-marked (excluded from the fast default loop) and run explicitly, not as part of `poe all`.
+stress-memory = { shell = "uv run --extra full pytest -q --memray -p no:xdist tests/test_stress_memory.py" }
+# py-spy can't introspect the free-threaded 3.14t build ("Failed to find python version from target
+# process") — same out-of-process 3.13 crutch as fuzz/crosshair/invariants-taint, in
+# `/tmp/venv-py-spy` (a reboot/tmp-cleaner just wipes it and the next run re-syncs; a stable ABSOLUTE
+# path is what the printed `sudo …/bin/py-spy` line needs — a hashed uv-cache env can't give one).
+# NOT `uv run --isolated` either — that forks the interpreter as a CHILD of the `uv` process, so py-spy
+# needs `--subprocesses` to see it, which measured ~10x slower sampling (100-300 Hz → 10-30 Hz) — too
+# coarse for the ms-scale jank this profiles. A stable venv lets py-spy attach to the interpreter
+# directly, no wrapper, full rate).
+# `sudo` needs a real controlling tty that poe's subprocess doesn't give it ("a terminal is required to
+# read the password" even run from an interactive shell), so this task only syncs the env and PRINTS
+# the profiling command — copy-paste and run the printed line yourself, NOT through poe. `uv sync`
+# (not a hand-rolled `uv venv`/`uv pip install`) manages `/tmp/venv-py-spy`; `py-spy` lives in the
+# dedicated `profiling` dependency group (pyproject `[dependency-groups]`), so `--group profiling` on
+# the sync also installs it INTO `/tmp/venv-py-spy` — no Homebrew/uvx py-spy needed, one fewer moving part.
+stress-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/stress-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --stress --reps 3\"" }
+# Same 3.13 crutch, but profiling the VOCAB render benchmark (examples/vocab.json — real-episode words,
+# parser out of the loop) so the sampled hot frames are pure lookup/decode/SC-walk/document-layout: the
+# windowed render tail this is meant to dissect. Prints the sudo line to run yourself.
+# `--subprocesses` on all py-spy tasks: harmless single-process, but never silently miss a worker (the
+# GIL-fallback process pool that `--vocab --parallel` uses — see vocab-pyspy-mp).
+vocab-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --reps 3\"" }
+# END-STATE profile of the fixed + banded + PARALLEL render. py-spy CANNOT introspect the free-threaded
+# 3.14t build ("Failed to find a python interpreter in the .data section" — the interpreter state isn't
+# where py-spy scans on nogil; benfred/py-spy#460), so profile on GIL 3.13 where pick_executor falls back
+# to a PROCESS pool: --subprocesses captures the workers. The parallelism mechanism differs from the
+# shipped threads, but the per-render hot-spots (getmask2/getlength, banded block layout) are identical —
+# which is what this profile is for. (For a true free-threaded sample py-spy is out; a nogil-aware
+# sampler would be needed.)
+vocab-pyspy-mp = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'run yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/vocab-mp-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --vocab --parallel --reps 3\"" }
+# TIMELINE: a realistic idle-paced session — real-time dwell between cues, prefetch/lookahead warming
+# ahead of hovers. Dwell-paced → the process is mostly SLEEPING, so on-CPU samples are sparse; the
+# bench's OWN report (misses / worker lead time / warm-vs-cold) is the primary SCHEDULING signal — does
+# prefetch keep ahead? py-spy just shows where the prefetch+render CPU goes. --rate 500 to catch enough
+# active samples; add `--timeline-dwell-s 0.05` for a dense CPU profile at the cost of realism.
+timeline-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/timeline-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --timeline --timeline-cues 120 --timeline-head-prefetch 1 --timeline-lookahead 2\"" }
+# TRACE REPLAY: the truthful stress profile — replays a real diagnostics report's event cadence with
+# idle COMPRESSED (--idle-scale), so the sampled CPU is the actual hover/scroll/cue mix a session
+# produced, not a synthetic guess. Auto-picks the newest report; squeeze --idle-scale down to starve
+# prefetch. Same 3.14t→3.13 crutch as the others; --rate 500 since idle-compressed still sleeps some.
+trace-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/trace-profile.raw -f raw --rate 500 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --trace \\\"\\$(ls -t ~/.local/share/saitenka/reports/*.zip | head -1)\\\" --idle-scale 0.05 --trace-loops 5\"" }
+# --scroll-jank CPU profile: WHERE the scroll-frame tail goes — getmask2 in the scrolled-into block, or
+# the viewport re-composite? Synchronous single-process render (prefetch=False) → CPU-dense, no --idle.
+scroll-jank-pyspy = { shell = "UV_PROJECT_ENVIRONMENT=/tmp/venv-py-spy uv sync --python 3.13 --extra full --group profiling -q && echo 'env ready — run this yourself (sudo needs a real terminal):' && echo \"sudo /tmp/venv-py-spy/bin/py-spy record --subprocesses -o /tmp/scroll-jank-profile.raw -f raw --rate 200 -- /tmp/venv-py-spy/bin/python examples/bench_responsiveness.py --scroll-jank --reps 3\"" }
+# Drives ALL the *-pyspy profiles in one unattended pass (one password, kept warm) and adds a per-span
+# latency-percentile report (tooltip open / scroll frame / sub-seek …) the individual tasks can't — it
+# wraps each bench in a telemetry bootstrap so the CTF span trace exists to compute percentiles from.
+# The script elevates only py-spy; if poe won't hand its `sudo -v` a tty (same caveat as the print-only
+# tasks above — "a terminal is required"), invoke it as root up front instead: `sudo tools/bench_
+# pyspy_all.sh` (the script drops back to $SUDO_USER for the venv/cache/HOME so nothing lands root-
+# owned). To subset, call the script with bench names (poe doesn't forward args): `tools/bench_pyspy_
+# all.sh scroll-jank`.
+bench-pyspy-all = { shell = "bash tools/bench_pyspy_all.sh" }
+# Offline coupling/complexity metrics (pyscn) — NOT in `all`: an analysis aid to guide the
+# controller.py split, not a gate (Goodhart: metrics inform, contracts enforce). `pyscn` runs
+# out-of-process on the standard interpreter (a separate Go binary), never imported into the
+# free-threaded runtime. Install once: `uv tool install pyscn`.
+arch-report = { shell = "uvx pyscn analyze --select complexity,cbo --no-open src/saitenka" }
+# Mutation campaign over the pure core (cosmic-ray, git-guarded, scoped). Opt-in, NOT in `all` —
+# minutes/module. `poe mutate` runs all targets; `poe mutate sub_index` narrows. Survivors → harden
+# with Hypothesis properties, re-run to confirm. See tools/mutate/run.py + AGENTS.md "Mutation auditing".
+mutate = { cmd = "uv run --extra full --with cosmic-ray python tools/mutate/run.py" }
+# Coverage-guided fuzzing of the subtitle parser (atheris/libFuzzer). Opt-in, NOT in `all`. Runs in an
+# EPHEMERAL uvx-style env (`uv run --no-project --with-editable '.[full]' --with atheris`, uv-cached, no
+# dir) pinned to CPython 3.13 — atheris is a libFuzzer C-extension that can't load under the
+# free-threaded 3.14t default; the parser itself is pure-Python, fine on 3.13
+# (same out-of-process 3.13 pattern as `invariants-taint`). 60s bounded default; a crasher drops a
+# `crash-*` repro → shrink it, add as a regression golden, fix. Complements the Hypothesis property tests.
+fuzz = { shell = "uv run --no-project --python 3.13 --with-editable '.[full]' --with atheris python tools/fuzz/fuzz_sub_index.py -max_total_time=60 -artifact_prefix=tools/fuzz/" }
+# Symbolic-execution adequacy pass over the pure-core property tests (CrossHair via the Hypothesis
+# `crosshair` backend) — a THIRD technique next to mutation (cosmic-ray) and coverage-guided fuzzing
+# (atheris): a z3 SMT solver finds exact-boundary counterexamples random search misses. Opt-in, NOT in
+# `all` (slow). Runs in an EPHEMERAL uvx-style env (`uv run --no-project`, uv-cached, no dir) pinned to
+# CPython 3.13 (z3 is a C-ext, no free-threading); the
+# crosshair backend is registered in conftest only when hypothesis-crosshair is present. HypoFuzz was
+# TEST-DRIVEN (ran clean on the property suite, found nothing atheris/crosshair didn't) but NOT adopted:
+# its licence is `LicenseRef-HypoFuzz` (custom/source-available, not FOSS) — unfit to commit into a
+# licence-careful Apache-2.0 repo — and atheris+crosshair already cover the pure-core adequacy angle.
+crosshair = { shell = "uv run --no-project --python 3.13 --with-editable '.[full]' --with hypothesis-crosshair pytest -q -p no:randomly --hypothesis-profile=crosshair tests/test_sub_index_properties.py tests/test_properties.py tests/test_property.py" }
+# ADVISORY (NOT in `all`) — oracle-liveness on ONE new/changed test, for the coding loop. Negates each
+# assert in the named test and re-runs it: every live oracle must flip it red, or the test is vacuous
+# (swallowed/unreachable/tautology). It's arm-2 of the Grow gate (tools/grow_gate.py) exposed here so a
+# feature-writer can prove a new test is load-bearing WITHOUT the whole idle loop. Runs the test under a
+# real pytest subprocess (needs `--extra full`), so it's per-test and opt-in, never a required gate — the
+# idle Grow loop sweeps the whole tree. `uv run poe test-live tests/test_x.py --test test_name`. See the
+# write-test skill (Verify) + .agents/skills/write-test/references/oracle-catalog.md.
+test-live = { cmd = "uv run --extra full python tools/grow_gate.py liveness" }
+# Draft the unreleased changelog from Conventional Commits (repo root); review, then hand-merge into
+# CHANGELOG.md — generated output is raw material, not the finished changelog.
 changelog = { cmd = "uvx git-cliff@2.13.1 --unreleased" }
-spell = { cmd = "uvx typos" }
-links = { shell = "lychee --offline --no-progress $(git ls-files '*.md')" }
-links-net = { shell = "lychee --cache --max-cache-age 14d --no-progress $(git ls-files '*.md')" }
-pages = { cmd = "bash install/publish-pages.sh" }
-perf-risk = { cmd = "repowise health --module overlay/src/overlay" }
-shell = { shell = "shellcheck install/*.sh" }
-ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost -EnableExit\"" }
+# RELEASING.md steps 1-5, automated: bump version, insert the curated RELEASE_NOTES.md entry (write
+# that first — the changelog is never auto-generated unattended), gate, build+smoke-test the wheel,
+# commit. Never pushes or opens a PR on its own. $POE_EXTRA_ARGS forwards flags, e.g.
+# `poe release-prepare --dry-run` or `--bump minor` — see `release.py`'s docstring for the full set.
 release-prepare = { shell = "uv run install/release.py prepare $POE_EXTRA_ARGS" }
+# RELEASING.md steps 7-8, automated: tag, rebuild+smoke-test the wheel from the merged commit, draft the
+# (notes-only) GitHub Release. Draft unless `--publish`; `uv publish` to PyPI stays a separate manual step.
 release-publish = { shell = "uv run install/release.py publish $POE_EXTRA_ARGS" }
 
-# Guards and rationale: tools/repowise_ops.py.
+# --- Supply-chain & hygiene (test-driven & wired 2026-07-25; see vibe/quality-growth-plan.md) --------
+# Winners chosen by running each candidate on THIS repo, not by reputation. Design: only fast,
+# deterministic, already-clean checks join `all` (audit/spell/links). Tools that surface real findings
+# today (sec/deps/deadcode/dup) stay ADVISORY — graduating each to the gate is its own focused sweep,
+# deliberately deferred. Rust/Go binaries are preferred (out-of-process → free-threading-safe).
+
+# GATE (in `all`) — vulnerability scan over the resolved uv.lock. Native uv command (Rust): reads the
+# lockfile directly, no venv build (pip-audit SIGABRTs building one on uv-managed pythons; its
+# `--no-deps` mode is the documented fallback). Experimental → the preview flag pins the interface.
+audit = { shell = "uv audit --preview-features audit-command" }
+# ADVISORY (not in `all`) — second-opinion CVE scan via pip-audit (PyPA Advisory DB + OSV) over the
+# exported lockfile. `--no-deps` audits the pinned graph WITHOUT building a venv (a full build SIGABRTs
+# on uv-managed pythons, per the `audit` note above); runs out-of-process via uvx (free-threading-safe).
+pip-audit = { shell = "uv export --frozen --no-emit-project --no-hashes --all-extras | uvx pip-audit --no-deps -r /dev/stdin" }
+# GATE (in `all`) — spelling across code + docs. typos (Rust via uvx), gitignore-aware; allowlist in
+# [tool.typos]. Ran from repo root so it covers the top-level docs and the deinflect add-on too.
+spell = { cmd = "uvx typos" }
+# GATE (in `all`) — local link integrity (relative/anchor links resolve). `--offline` checks only
+# on-disk targets → deterministic and network-free; the full external-URL crawl is the advisory
+# `links-net` below (network → flaky → not in `all`). lychee = Rust binary (brew install lychee).
+# `git ls-files` scopes it to TRACKED markdown — an explicit `**/*.md` glob bypasses .gitignore and would
+# drag in git-ignored `vibe/` scratch (Yandex-wiki root-relative links that can't resolve on disk).
+links = { shell = "lychee --offline --no-progress $(git ls-files '*.md')" }
+links-net = { shell = "lychee --cache --max-cache-age 14d --no-progress $(git ls-files '*.md')" }
+# GATE (in `all`) — deterministic doc↔code binding (lychee checks link *targets*; these check the
+# claims INSIDE the prose). `docs-refs`: every `poe <task>` / `.agents/<path>` / module|tool file an
+# agent-facing doc (AGENTS.md, ARCHITECTURE.md, each SKILL.md) names must resolve. `docs-consts`: each
+# numeric default in ARCHITECTURE.md's constants table is attributed to its real defining symbol AND
+# equals the code value (both sides bound — a doc-only claim or a dropped one fails). Zero-LLM, stdlib
+# only. Planted +/- controls: tests/test_docs_check.py. See tools/docs_check.py + AGENTS.md "Documentation".
+docs-refs = { shell = "uv run --extra full python tools/docs_check.py refs" }
+docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" }
+# GATE (in `all`) — census-lock the vendored external-oracle corpora (UAX #14, deinflect, subtitle). Each
+# corpus's case census (count + a hash over the sorted key-list) must equal a committed manifest, so a
+# re-vendor / re-gen that silently DROPS or mutates cases fails the gate until the manifest is deliberately
+# re-blessed (`python tools/corpus_check.py show`). Same drift-guard idiom docs-consts applies to constants,
+# here applied to stolen conformance suites. Zero-LLM, stdlib. Planted +/- controls: tests/test_corpus_check.py.
+corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check" }
+# NOT in `all` (needs Node + a pinned Yomitan checkout; fetches py-fsrs) — the regenerate-and-diff sibling
+# of corpus-lock for GENERATED corpora (fsrs vectors, JP/FR transform differentials). corpus-lock guards
+# *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
+# pin. Yomitan-backed corpora skip (not fail) when no checkout at the pin is found. See tools/corpus_drift.py.
+corpus-drift = { shell = "uv run --extra full python tools/corpus_drift.py" }
+# Docs site (Material for MkDocs → Read the Docs). `--strict` fails on broken links/nav, so a docs
+# regression is caught locally, not on RTD. NOT in `all` (docs deps are an opt-in group).
+# `docs-cli`/`docs-markers` regenerate committed reference fragments from the code (run after changing
+# commands / the card_markers.CATALOG); a golden test guards `docs-markers` against drift.
+docs = { shell = "uv run --group docs mkdocs build -f mkdocs.yml --strict" }
+docs-serve = { shell = "uv run --group docs mkdocs serve -f mkdocs.yml" }
+docs-cli = { shell = "uv run python -m saitenka.app.gen_cli_docs > docs/usage/cli.md" }
+docs-markers = { shell = "uv run python -m saitenka.app.gen_card_format_markers > docs/usage/_card_format_markers.md" }
+# Publish the install scripts to the gh-pages branch (https://serjflint.github.io/saitenka/). Keeps the
+# served install.sh/install.ps1 in sync with install/overlay-install.{sh,ps1}; re-run after editing them
+# and at each release. Not in `all` (touches the remote).
+pages = { cmd = "bash install/publish-pages.sh" }
+
+# SAST (flake8-bandit `S`) is now folded into the ruff `select` above, so it runs inside `lint` (in
+# `all`) — no separate `sec` task. The 2026-07-25 triage put reasoned per-line `# noqa: S…` at each
+# legitimate site (subprocess launch of mpv/ffmpeg/anki, localhost/HTTPS urlopen, the dictdb SQL) and
+# the four categorically-safe rules in `ignore`. semgrep taint (the cross-file layer `S` can't do)
+# stays as the opt-in `invariants-taint`.
+# GATE (in `all`) — unused/missing/misplaced deps. deptry lives in the `dev` group (synced by the cached
+# project `.venv`, incl. in CI's `uv sync --locked --extra full`), so this runs against the already-built
+# env instead of `--with deptry` minting a fresh ephemeral overlay env every gate run. Clean after
+# the [tool.deptry] ignores (declared rich, forward-declared filelock). JSON for agents: add `-o dep.json`.
+deps = { shell = "uv run --extra full deptry src" }
+# ADVISORY — cross-module dead code (ruff `F` only catches unused imports/locals). vulture with a
+# whitelist for interface-mandated params (structlog processors, OTel exporter overrides, signal
+# handlers) that are "unused" by signature but required. Tune with --min-confidence.
+deadcode = { shell = "uvx vulture src .vulture_whitelist.py --min-confidence 80" }
+# ADVISORY — copy-paste detection. jscpd v5 (Rust core via npx). 0.19% today (the controller split
+# paid off); `--threshold` can gate a ceiling later. `--reporters ai` emits agent/MCP-friendly output.
+dup = { shell = "npx --yes jscpd@latest src --min-tokens 50 --threshold 3 --reporters consoleFull" }
+# ADVISORY (NOT in `all`) — repowise's static code-health + PERF-RISK (I/O-in-loop / N+1 / regex- and
+# defer-in-loop / blocking-in-async), the unique non-LLM check it offers over our other tools. Runs
+# in-process, no network, NO LLM (it rebuilds its own call graph each run — no stale-index problem; the
+# `--generate-code` LLM flag is opt-in and NOT used here). Metric-that-informs, not a contract that
+# enforces (Goodhart), so it stays out of the gate. Prereq: `uv tool install repowise` + a built index
+# (.repowise/). `--format json` for agent triage. See vibe/quality-growth-plan.md (repowise finding).
+perf-risk = { cmd = "repowise health --module src/saitenka" }
+# These tasks operate on the whole repository and use the root configuration.
 repowise-preflight = { cmd = "uv run python tools/repowise_ops.py preflight" }
 repowise-reindex = { cmd = "uv run python tools/repowise_ops.py reindex" }
 repowise-watch = { cmd = "uv run python tools/repowise_ops.py watch" }
 repowise-backup = { cmd = "uv run python tools/repowise_ops.py backup" }
 repowise-corrections = { cmd = "uv run python tools/repowise_ops.py corrections" }
-hygiene = { cmd = "uv run poe hygiene", cwd = "overlay" }
+# GATE (in `all`) — dependency license boundary. The ONLY copyleft in our graph must be our own
+# deliberate GPL-3.0 add-on (saitenka-deinflect); ANY other GPL/AGPL/LGPL is a transitive leak
+# into the Apache-2.0-clean core and fails. Complements the import-linter GPL chokepoint (code boundary)
+# and ruff TID251 (import boundary) with a dependency-graph boundary. If a benign LGPL dep ever appears,
+# add it to --ignore-packages with a note (ratchet), don't drop the check. pip-licenses reads installed
+# metadata → needs the full env. See LICENSING.md.
+licenses = { shell = "uv run --extra full --with pip-licenses pip-licenses --partial-match --fail-on 'GPL' --ignore-packages saitenka-deinflect" }
+# GATE (in `all`) — shell installer static analysis (shellcheck, standalone binary: brew install
+# shellcheck). The install/*.sh scripts run on users' machines, so correctness matters. Clean at
+# default severity after the 2026-07-25 nit sweep (SC2043/SC2012 fixed, SC2016/SC2329 reasoned-disabled).
+shell = { shell = "shellcheck install/*.sh" }
+# ADVISORY — PowerShell installer static analysis (PSScriptAnalyzer). Prereqs: `brew install --cask
+# powershell` + `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`. Kept OUT of `hygiene`
+# because pwsh is a heavy, mac-uncommon prereq and the .ps1 files only matter for Windows packaging.
+# Excludes PSAvoidUsingWriteHost (installers legitimately colour output) + PSUseBOMForUnicodeEncodedFile
+# (bad advice cross-platform); leaves the real ones (empty catch, Invoke-Expression). -EnableExit → rc=findings.
+ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install -Recurse -ExcludeRule PSAvoidUsingWriteHost -EnableExit\"" }
+
+# Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
+hygiene = ["deadcode", "dup"]
+
+all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock"]
+
+# Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
+# `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
+# rarely relevant to a code PR, release-critical to verify once) plus the checks too slow/heavy for it:
+# network link integrity, a `mkdocs build --strict` (the golden test guards fragment↔generator drift, but
+# only this proves the generated partials still *render* — includes resolve, table intact), the real-mpv
+# smoke, and a bench-runs smoke. Needs mpv + network; NOT for PR iteration. The human-triage advisory tools
+# (hygiene/ps1/perf-risk) stay OUT — deterministic pass/fail only; run those by hand and triage.
+pre-release = ["all", "audit", "licenses", "shell", "links-net", "docs", "smoke-live", "bench"]

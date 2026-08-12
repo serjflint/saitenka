@@ -1,0 +1,111 @@
+"""Click-driven surfaces are spanned (PR C): a sidebar click, a bookmark write, and a mined-store
+write all touch the main thread (SQLite / a full redraw) but were BLIND — no span, so a report couldn't
+tell whether a click stutters (the class of bug #293 fixed for the hover path, here for clicks). These
+assert the span fires with its low-cardinality attribute, via the sanctioned traced-recorder seam
+(monkeypatch ``otel_metrics.traced``), the same pattern as tests/test_osd_telemetry.py.
+"""
+
+from __future__ import annotations
+
+import contextlib
+
+from saitenka import otel_metrics
+from saitenka.app import backlog, sidebar
+from saitenka.app.controller import Reader
+from saitenka.app.subtitles import SidebarHitBox
+
+
+def _record_spans(monkeypatch) -> list[dict]:
+    spans: list[dict] = []
+
+    @contextlib.contextmanager
+    def _fake_traced(name, **attrs):
+        rec = {"name": name, "attrs": dict(attrs)}
+        spans.append(rec)
+
+        class _Setter:
+            def set(self, key, value):
+                rec["attrs"][key] = value
+
+        yield _Setter()
+
+    monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
+    return spans
+
+
+class _FakeIPC:
+    def __init__(self, props):
+        self.props = props
+
+    def command(self, *args):
+        if args[0] == "get_property":
+            return {"data": self.props.get(args[1])}
+        return {"data": None}
+
+
+def _named(spans: list[dict], name: str) -> list[dict]:
+    return [s["attrs"] for s in spans if s["name"] == name]
+
+
+def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
+    # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
+    spans = _record_spans(monkeypatch)
+    monkeypatch.setattr(
+        sidebar, "_activate_hit", lambda *_a: None
+    )  # isolate the span from the action
+    monkeypatch.setattr(sidebar, "redraw", lambda *_a: None)
+    reader = Reader(_FakeIPC({}))
+    reader.sidebar.open = True
+    reader.sidebar.rect = (0, 0, 100, 100)
+    reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=100, h=20),)
+
+    assert sidebar.on_click(reader, 10, 10) is True
+    (attrs,) = _named(spans, "sidebar_click")
+    assert attrs["kind"] == "bookmark"
+
+
+def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
+    # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
+    spans = _record_spans(monkeypatch)
+    reader = Reader(_FakeIPC({}))
+    reader.sidebar.open = True
+    reader.sidebar.rect = (0, 0, 100, 100)
+    reader.sidebar.hits = (SidebarHitBox(kind="bookmark", value=0, x=0, y=0, w=10, h=10),)
+
+    assert sidebar.on_click(reader, 50, 50) is True  # inside the panel, off every hitbox
+    assert _named(spans, "sidebar_click") == []
+
+
+def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
+    # capture_current's durable backlog write (main-thread SQLite) is spanned backlog_write[op=toggle].
+    spans = _record_spans(monkeypatch)
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"v")
+    reader = Reader(
+        _FakeIPC({"path": str(video), "sub-start": 1.0, "sub-end": 3.0, "track-list": []})
+    )
+    reader.sub_text = "猫です"
+    reader._backlog_store = backlog.BacklogStore(tmp_path / "backlog.sqlite")
+
+    backlog.capture_current(reader)
+    (attrs,) = _named(spans, "backlog_write")
+    assert attrs["op"] == "toggle"
+
+
+def test_mined_store_write_is_spanned(monkeypatch):
+    # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
+    from types import SimpleNamespace
+
+    from saitenka.app import mined_store
+    from saitenka.app.miner import Miner
+
+    spans = _record_spans(monkeypatch)
+    monkeypatch.setattr(
+        mined_store, "ensure_store", lambda _r: SimpleNamespace(record=lambda **_kw: None)
+    )
+    reader = Reader(_FakeIPC({"sub-start": 1.0, "sub-end": 3.0}))
+    reader.mine_cfg = SimpleNamespace(deck="Mining")
+    card = SimpleNamespace(expression="猫", reading="ねこ")
+
+    Miner(reader)._persist_mined(note_id=42, card=card, video="/x/Show - 01.mkv")
+    assert len(_named(spans, "mined_store_write")) == 1

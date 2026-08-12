@@ -13,7 +13,7 @@ dropped frames while the video runs, no stall when you hover a word.
 
 Measured on an Apple M3 Pro, post-optimization (after the Stage 6/7 render levers). The full
 engineering log — every baseline, every lever, the raw percentile tables — lives in
-[`overlay/BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/overlay/BENCHMARKS.md).
+[`BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/BENCHMARKS.md).
 
 | Metric | Measured (M3 Pro) | Target |
 |---|---|---|
@@ -69,15 +69,15 @@ The benchmarks are reproducible — the harness is committed and runs headless a
 dictionary set via a fake mpv IPC:
 
 ```bash
-uv run python overlay/examples/bench_responsiveness.py --reps 12
+uv run python examples/bench_responsiveness.py --reps 12
 ```
 
 Add `--pathological` for the 20-worst-words corpus, `--stress` for the sustained chained session, or
 `--timeline` for an idle-paced run that models real passive watching. The full walkthrough of what
 each mode measures, and every historical baseline, is in the engineering log:
 
-- **Harness:** [`overlay/examples/bench_responsiveness.py`](https://github.com/serjflint/saitenka/blob/main/overlay/examples/bench_responsiveness.py)
-- **Full log:** [`overlay/BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/overlay/BENCHMARKS.md)
+- **Harness:** [`examples/bench_responsiveness.py`](https://github.com/serjflint/saitenka/blob/main/examples/bench_responsiveness.py)
+- **Full log:** [`BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/BENCHMARKS.md)
 
 ## Guarding against regressions
 

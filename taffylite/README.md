@@ -2,7 +2,7 @@
 
 A deliberately thin [PyO3](https://pyo3.rs) binding of the [taffy](https://github.com/DioxusLabs/taffy)
 flexbox layout engine, packaged as the optional **layout engine** behind saitenka's `LayoutBackend`
-seam (`overlay/render/layout_backend.py`, issue #146).
+seam (`src/saitenka/render/layout_backend.py`, issue #146).
 
 It is a *fixed-size* geometry solver: every leaf's width/height is supplied by the caller (Pillow has
 already measured the text on the Python side), so taffylite has **no measure callback and no Rust-side

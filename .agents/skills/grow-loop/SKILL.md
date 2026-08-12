@@ -38,7 +38,7 @@ Read `.agents/grow/GUIDE.md` only to explain the design or resolve ambiguity.
 ## Execute with Codex
 
 1. Work in a clean dedicated worktree; keep commands relative to it.
-2. Run triage, baselines, objective gates, hashing, and ledgers directly from `overlay/`.
+2. Run triage, baselines, objective gates, hashing, and ledgers directly from the repository root.
 3. Apply the `write-test` decision tree. Pass only the selected tier, seam, extension point, oracle,
    gap coordinate, scope guard, and prior bounce to a fresh isolated author.
 4. Permit additive test edits only. Any changed/removed existing assertion routes to Sharpen.

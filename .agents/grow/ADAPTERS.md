@@ -1,7 +1,7 @@
 # Grow host-adapter contract
 
 `SPEC.md` owns behavior. This file owns the transport boundary between that behavior and an agent host.
-The deterministic instruments under `overlay/tools/` (`grow_triage`, `grow_gate`, `grow_ledger`) are the
+The deterministic instruments under `tools/` (`grow_triage`, `grow_gate`, `grow_ledger`) are the
 shared core; a host adapter supplies shell execution, isolated agent invocations, phase reporting, and
 optional PR transport. It mirrors `.agents/sharpen/ADAPTERS.md` — read that for the shared rationale; only
 the Grow-specific deltas are spelled out here.

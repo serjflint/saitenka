@@ -28,12 +28,12 @@ const cfg = args || {}
 const CONTRACT_VERSION = 4 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
-const CWD = 'overlay' // poe tasks + tools run from overlay/, RELATIVE to the launch dir
+const CWD = '.' // poe tasks + tools run from the launch worktree root
 
 // Worktree-safe: launch this run from a dedicated git worktree (EnterWorktree → Workflow → ExitWorktree)
 // so executor edits can't touch the maintainer's live tree. Every executor therefore operates on paths
 // RELATIVE to its inherited cwd — an absolute `cd /Users/.../saitenka` would escape the worktree.
-const REL = 'Run from the `' + CWD + '/` directory relative to your current working directory. Do NOT use ' +
+const REL = 'Run from the worktree root relative to your current working directory. Do NOT use ' +
   'absolute paths or `cd` outside the repo you were launched in — this run may be inside a git worktree.'
 
 // Hard scope guard — the 2026-07-30 first run edited a tracked tool to work around a blocker. Never again.
@@ -49,7 +49,7 @@ const SELECT = {
   required: ['found', 'module', 'tests', 'status', 'reason'],
   properties: {
     found: { type: 'boolean', description: 'false when triage has no live candidate (all excluded/sharpened)' },
-    module: { type: 'string', description: 'module key relative to src/overlay, e.g. app/scoring.py' },
+    module: { type: 'string', description: 'module key relative to src/saitenka, e.g. app/scoring.py' },
     tests: { type: 'array', items: { type: 'string' }, description: 'mapped test file paths' },
     status: { type: 'string', description: 'ledger status of the pick (unseen/stale-sha/in-progress/...)' },
     survival: { type: ['number', 'null'], description: 'recorded non-equiv mutation survival, or null' },
@@ -86,8 +86,8 @@ const PROPOSAL = {
   required: ['applied', 'test_file', 'cut_module', 'touched_func', 'preservation_required', 'witness_find', 'witness_replace', 'diff', 'proposals'],
   properties: {
     applied: { type: 'boolean', description: 'the edit was written to the test file' },
-    test_file: { type: 'string', description: 'edited test path, repo-relative (e.g. overlay/tests/test_x.py)' },
-    cut_module: { type: 'string', description: 'dotted code-under-test module for anti-cheat cut-derived, e.g. overlay.app.scoring' },
+    test_file: { type: 'string', description: 'edited test path, repo-relative (e.g. tests/test_x.py)' },
+    cut_module: { type: 'string', description: 'dotted code-under-test module for anti-cheat cut-derived, e.g. saitenka.app.scoring' },
     touched_func: { type: 'string', description: 'the production def whose survivors this claims to kill (scopes the efficacy replay)' },
     preservation_required: { type: 'boolean', description: 'existing assertion removed/changed without a campaign' },
     witness_find: { type: ['string', 'null'], description: 'exact source snippet for the old kill witness' },
@@ -195,7 +195,7 @@ phase('Measure')
 // (SPEC step 2). Read structured tool output (session DB, test-lint --json), never scraped console.
 // Efficacy CONSUMES a pre-built mutation campaign; it never launches one (a campaign outlives a 10-min
 // step budget — that killed the first run). The campaign is a slow out-of-band pre-req.
-const DB_REL = `.mutation-cache/${`src/overlay/${pick.module}`.replaceAll('/', '_')}.sqlite` // matches run.py db_path(), relative to overlay/
+const DB_REL = `.mutation-cache/${`src/saitenka/${pick.module}`.replaceAll('/', '_')}.sqlite` // matches run.py db_path(), relative to repository root
 const TARGET_KEY = pick.module.split('/').pop().replace('.py', '') // allowlist key = module basename
 const base = await agent(
   `Establish the known-green baseline + before-snapshot for module ${pick.module} (tests: ${pick.tests.join(', ')}). ${REL} ${GUARD} (Measure runs read-only tools — no edits at all.)\n` +
@@ -258,9 +258,9 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `Run the deterministic Sharpen objective gate on the author's edit. ${REL} Report the tool output VERBATIM — do not interpret. (This step runs read-only tools; it must not edit any file.)\n` +
     `Arm B (anti-cheat, fast): \`uv run python tools/sharpen_gate.py anticheat ${proposal.test_file.replace('overlay/', '')} --cut ${proposal.cut_module} --repo .\` (bounces removed/weakened/trivial/cut-derived asserts vs HEAD).\n` +
     (base.before.db
-      ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/overlay/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
+      ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/saitenka/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
       : proposal.preservation_required
-        ? `Arm A substitute (preservation witness): \`uv run python tools/sharpen_gate.py preserve --module src/overlay/${pick.module} --find ${JSON.stringify(proposal.witness_find)} --replace ${JSON.stringify(proposal.witness_replace)} --test-file ${proposal.test_file.replace('overlay/', '')} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\`. Set preservation_pass from its verdict and efficacy_pass=true (n/a).\n`
+        ? `Arm A substitute (preservation witness): \`uv run python tools/sharpen_gate.py preserve --module src/saitenka/${pick.module} --find ${JSON.stringify(proposal.witness_find)} --replace ${JSON.stringify(proposal.witness_replace)} --test-file ${proposal.test_file.replace('overlay/', '')} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\`. Set preservation_pass from its verdict and efficacy_pass=true (n/a).\n`
         : `Arm A/preservation: N/A — no campaign and no existing assertion changed. Set efficacy_pass=true and preservation_pass=null.\n`) +
     `Verify source and test bytes were restored exactly and set restoration_verified. pass = anticheat_clean AND efficacy_pass AND restoration_verified AND (preservation_pass !== false). Quote every BOUNCE/REGRESSED line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
@@ -387,7 +387,7 @@ async function recordOutcome(state, prop, reviewResult, extraNote) {
     : 'null (terminal outcome, no review reached)'
   const wantPr = canOpenPr && state === 'in-progress' && prop
   return agent(
-    `Append one Sharpen ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger \`.ledger.sharpen.jsonl\` is at the repo root (parent of ${CWD}/). Touch ONLY the ledger (and, if opening a PR, git/gh) — no other file.\n` +
+    `Append one Sharpen ledger record and ${wantPr ? 'open the PR' : 'stop at the ledger (dry-run: no PR, no outward action)'}. ${REL} The ledger is \`.ledger.sharpen.jsonl\`. Touch ONLY the ledger (and, if opening a PR, git/gh) — no other file.\n` +
     `Module ${pick.module}. Compute source_sha with tools/sharpen_ledger.py, stamp \`audited\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, toolset_version from the ledger manifest.\n` +
     `state: "${state}". review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}.\n` +
     (prop ? `decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. axes before: ${JSON.stringify(base.before)}. Captured diff: ${JSON.stringify(prop.diff)}.\n` : '') +

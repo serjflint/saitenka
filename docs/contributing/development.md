@@ -95,7 +95,7 @@ What to verify after a change that could touch rendering, coloring, mining, or t
 `uv run poe all` is the pre-push gate — run it before pushing.
 
 !!! tip "Point, don't restate"
-    The task list is authoritative in `overlay/pyproject.toml` (`[tool.poe.tasks]`). The task-by-task
+    The task list is authoritative in `pyproject.toml` (`[tool.poe.tasks]`). The task-by-task
     breakdown, how to read a failure, the advisory `poe hygiene` tier, and the free-threaded /
     3.13-pinned-env traps live in the **`dev-gate` skill** (`.agents/skills/dev-gate/`) — consult it
     rather than duplicating it here. Authoring a test the house way is the **`write-test` skill**

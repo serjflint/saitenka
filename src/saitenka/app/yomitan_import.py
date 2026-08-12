@@ -1,0 +1,294 @@
+"""``saitenka import-settings`` — map a Yomitan settings export onto our config.
+
+Reads a Yomitan **settings export** — the small file from Yomitan → Settings → Backup, NOT the
+multi-GB collection/dictionary export. We refuse anything over ``MAX_SETTINGS_BYTES`` (a settings
+export is well under a megabyte; a collection export is gigabytes) so the tool can never be pointed
+at the wrong file and eat memory.
+
+Flow: the enabled dictionaries in Yomitan priority order are matched to their ``.zip`` files under
+``--scan-dir DIR`` (opt-in, repeatable — we never auto-scan personal folders; scan-dir zips are
+validated as Yomitan-format via ``index.json``), then **imported into the consolidated database**
+(:func:`import_zips`) and recorded in the config as ordered **titles**, bucketed into ``dicts`` /
+``freq`` / ``pitch`` by INSPECTING EACH ZIP'S CONTENT the way Yomitan does — definition dicts carry
+``term_bank`` glossaries; frequency and pitch dicts carry ``term_meta`` banks whose entries declare a
+``"freq"`` / ``"pitch"`` mode. Titles with no matching zip can't be imported and are reported for the
+user to supply a ``--scan-dir`` that contains them.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import zipfile
+from dataclasses import dataclass
+from datetime import UTC
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from saitenka.app import prompt
+from saitenka.app.bankreader import zip_roles
+from saitenka.app.config import load_config
+from saitenka.app.init_wizard import dumps_toml, write_config
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+MAX_SETTINGS_BYTES = 50 * 1024 * 1024  # a settings export is < 1 MB; refuse a collection export
+
+
+class YomitanImportError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class DictRef:
+    name: str
+    enabled: bool
+    priority: int
+
+
+@dataclass(frozen=True)
+class YomitanSettings:
+    dictionaries: list[DictRef]  # enabled-first, priority-desc order
+    scan_modifier: str
+    popup_scale: float
+
+
+def parse_settings(path: str | Path) -> YomitanSettings:
+    """Parse a Yomitan settings export. Raises :class:`YomitanImportError` on the wrong file."""
+    p = Path(path)
+    size = p.stat().st_size
+    if size > MAX_SETTINGS_BYTES:
+        raise YomitanImportError(
+            f"{p} is {size} bytes — too large for a settings export (did you export the "
+            f"whole collection? point at the small Settings → Backup file instead)"
+        )
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        raise YomitanImportError(f"couldn't parse {p}: {e}") from e
+
+    profiles = obj.get("options", {}).get("profiles", [])
+    if not profiles:
+        raise YomitanImportError(f"{p} has no options.profiles — not a Yomitan settings export")
+    popts = profiles[0].get("options", {})
+
+    refs = [
+        DictRef(d.get("name", ""), bool(d.get("enabled", False)), int(d.get("priority", 0) or 0))
+        for d in popts.get("dictionaries", [])
+        if d.get("name")
+    ]
+    # Yomitan renders higher-priority dicts first; keep a stable order for equal priorities.
+    ordered = sorted(refs, key=lambda r: (not r.enabled, -r.priority))
+
+    scan_mod = ""
+    for inp in popts.get("scanning", {}).get("inputs", []):
+        if inp.get("types", {}).get("mouse"):
+            scan_mod = inp.get("include", "") or ""
+            break
+    scale = popts.get("general", {}).get("popupScale")
+    popup_scale = float(scale) if isinstance(scale, (int, float)) else 1.0
+
+    return YomitanSettings(ordered, scan_mod, popup_scale)
+
+
+def _index_title(zip_path: Path) -> str | None:
+    """The Yomitan ``index.json`` title if the zip is a valid Yomitan dictionary, else None."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            idx = json.loads(zf.read("index.json"))
+    except (OSError, KeyError, zipfile.BadZipFile, json.JSONDecodeError):
+        return None
+    if "format" not in idx and "version" not in idx:
+        return None  # not a Yomitan dictionary index
+    title = idx.get("title")
+    return str(title) if title else None
+
+
+def match_scan_dirs(
+    titles: list[str], scan_dirs: list[str | Path]
+) -> tuple[dict[str, str], list[str]]:
+    """Match dictionary ``titles`` against Yomitan zips found in ``scan_dirs`` (opt-in).
+
+    Returns ``(matches, missing)`` where ``matches`` maps title → zip path and ``missing`` lists the
+    titles with no matching zip. Non-Yomitan zips are ignored.
+    """
+    by_title: dict[str, str] = {}
+    for d in scan_dirs:
+        dp = Path(d)
+        if not dp.is_dir():
+            continue
+        for zp in sorted(dp.rglob("*.zip")):
+            t = _index_title(zp)
+            if t and t not in by_title:
+                by_title[t] = str(zp)
+    matches = {t: by_title[t] for t in titles if t in by_title}
+    missing = [t for t in titles if t not in matches]
+    return matches, missing
+
+
+def import_zips(
+    zip_paths: Sequence[str | Path],
+    *,
+    imported_at: str,
+    progress: Callable[[int, int, str, int, int], None] | None = None,
+) -> dict[str, list[str]]:
+    """Import each Yomitan dictionary zip into the consolidated DB (build once) and return the config
+    fragment (``dicts``/``freq``/``pitch``) as ordered **titles**, bucketed by the imported kind.
+
+    The source zip is read in place — no copy is kept. ``progress(done_sources, total_sources, name,
+    bank_done, bank_total)`` mirrors the old per-source + per-bank shape so a long single dict still
+    moves. ``imported_at`` is an ISO timestamp stamped by the caller."""
+    from saitenka.app.dictdb import DictionaryDb
+
+    db = DictionaryDb.open()
+    buckets: dict[str, list[str]] = {"dicts": [], "freq": [], "pitch": []}
+    bucket_of = {"dict": "dicts", "freq": "freq", "pitch": "pitch"}
+    total = len(zip_paths)
+    for i, zp in enumerate(zip_paths):
+        name = Path(zp).stem
+        if progress:
+            progress(i, total, name, 0, 0)
+        sink = (lambda d, t, i=i, name=name: progress(i, total, name, d, t)) if progress else None
+        row = db.import_zip(zp, imported_at=imported_at, import_order=i, on_bank=sink)
+        # A zip can fill several roles (a combined definition+frequency dict) — register the title in
+        # EVERY matching config bucket so it's consulted for each, not just its primary kind.
+        for role in sorted(zip_roles(zp)):
+            buckets[bucket_of[role]].append(row.title)
+    if progress:
+        progress(total, total, "", 0, 0)
+    return {k: v for k, v in buckets.items() if v}
+
+
+def gather_yomitan_zips(paths: Sequence[str | Path]) -> list[str]:
+    """Expand ``paths`` (files and/or directories) into a de-duplicated list of Yomitan dictionary
+    zip file paths, validated by ``index.json`` and preserving input order."""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(zp: Path) -> None:
+        s = str(zp)
+        if s not in seen and _index_title(zp) is not None:
+            seen.add(s)
+            out.append(s)
+
+    for p in paths:
+        pp = Path(p).expanduser()
+        if pp.is_dir():
+            for zp in sorted(pp.rglob("*.zip")):
+                add(zp)
+        elif pp.suffix.lower() == ".zip":
+            add(pp)
+    return out
+
+
+SETTINGS_GLOB = "yomitan-settings*.json"
+
+
+def find_settings_export() -> str | None:
+    """Newest Yomitan *settings* export in the usual spots — Downloads (where the browser drops it),
+    the repo's ``yomitan/`` dir, then home. Returns its path, or None if none is found."""
+    dirs = [Path.home() / "Downloads", Path.home() / "Documents/Japanese/yomitan", Path.home()]
+    found = [p for d in dirs for p in d.glob(SETTINGS_GLOB)]
+    # ty widens the max() key-lambda param to `object` (inference limit); mypy/pyright infer Path fine.
+    return str(max(found, key=lambda p: p.stat().st_mtime)) if found else None  # ty: ignore[unresolved-attribute]
+
+
+def _resolve_settings_path(settings_path: str | None) -> str | None:
+    """Given path, found export, interactive prompt, or None (caller reports failure)."""
+    if settings_path:
+        return settings_path
+    settings_path = find_settings_export()
+    if settings_path:
+        print(f"using {settings_path}")
+        return settings_path
+    if sys.stdin.isatty():
+        # Interactive: don't skip past silently — ask for the path and WAIT.
+        entered = (
+            prompt.text(
+                "Yomitan settings export not found. Enter its path (Yomitan → Settings → Backup → "
+                "Export Settings), or press Enter to skip:"
+            )
+            .strip()
+            .strip("\"'")
+        )
+        if not entered:
+            print("import skipped — run `saitenka import-settings <settings.json>` later")
+            return None
+        return str(Path(entered).expanduser())
+    print("no settings export given and none found — pass the path explicitly")
+    return None
+
+
+def _match_and_report(enabled: list[str], scan_dirs: list[str]) -> dict[str, str]:
+    matches, missing = match_scan_dirs(enabled, list(scan_dirs))
+    print(f"matched {len(matches)} zip(s) in {len(scan_dirs)} scan dir(s)")
+    if missing:
+        print("no zip found for (supply a --scan-dir that contains them):")
+        for t in missing:
+            print(f"  - {t}")
+    return matches
+
+
+def finalize_import(cfg: dict, *, confirm, echo=print, merge: bool = True) -> Path | None:
+    """Shared tail of every importer (``import`` / ``import-dictionaries`` / ``import-settings``):
+    fold the freshly-imported dict/freq/pitch titles into the existing config, show the proposal, and
+    write it (timestamped backup first, via the comment-preserving tomlkit sink). Returns the backup
+    path, if any.
+
+    ``merge=True`` (the zip importers ``import`` / ``import-dictionaries``): **append** the new titles
+    to the existing ``dicts``/``freq``/``pitch`` lists, order-preserving + de-duplicated — importing a
+    few dicts must not silently drop the ones already selected. ``merge=False`` (``import-settings``):
+    the settings export is the authoritative ordered enabled set, so **replace** the lists wholesale.
+
+    Extracted so this merge→serialise→write path is unit-tested ONCE and the commands stay thin
+    wrappers over it — inlined per command it went uncovered, and a nested ``[profiles.*]`` table (a
+    named reading profile, #254) in the existing config crashed the proposal serialiser unseen."""
+    for kind in ("dicts", "freq", "pitch"):
+        if cfg.get(kind):
+            echo(f"  {kind}: {cfg[kind]}")
+    base = load_config()
+    if merge:
+        merged = dict(base)
+        for kind in ("dicts", "freq", "pitch"):
+            if cfg.get(kind):  # existing selection first, then new titles not already present
+                merged[kind] = list(dict.fromkeys([*(base.get(kind) or []), *cfg[kind]]))
+    else:
+        merged = {**base, **cfg}  # authoritative replace (settings export = full enabled set)
+    echo("\nProposed config:")
+    echo(dumps_toml(merged))
+    backup = write_config(merged, confirm=confirm)
+    if backup:
+        echo(f"backed up existing config → {backup}")
+    return backup
+
+
+def run_import(
+    settings_path: str | None, scan_dirs: list[str] | None, confirm
+) -> int:  # pragma: no cover — interactive glue; the pieces above are unit-tested
+    """CLI entry: parse → match → propose → write via the shared confirm+backup sink."""
+    settings_path = _resolve_settings_path(settings_path)
+    if not settings_path:
+        return 1
+
+    settings = parse_settings(settings_path)
+    enabled = [d.name for d in settings.dictionaries if d.enabled]
+    print(f"{len(enabled)} enabled dictionaries in Yomitan order")
+
+    if not scan_dirs:
+        print(
+            "no --scan-dir given — pass the folder(s) holding your Yomitan dictionary .zip files so "
+            "they can be imported, e.g. `import-settings <settings.json> --scan-dir ~/yomitan`"
+        )
+        return 1
+    matches = _match_and_report(enabled, scan_dirs)
+    if not matches:
+        return 1
+
+    # Import the matched zips into the consolidated DB, in Yomitan (settings) order.
+    from datetime import datetime
+
+    ordered = [matches[name] for name in enabled if name in matches]
+    cfg = import_zips(ordered, imported_at=datetime.now(UTC).isoformat())
+    finalize_import(cfg, confirm=confirm, merge=False)  # export is the authoritative enabled set
+    return 0

@@ -31,7 +31,7 @@ _BOXED_TEXT = (
 )
 # NotoSans (Latin) is enough to prove <text> renders; it's the same OFL face saitenka bundles.
 _FONT = (
-    Path(__file__).resolve().parents[2] / "overlay/src/overlay/assets/fonts/NotoSans.ttf"
+    Path(__file__).resolve().parents[2] / "src/saitenka/assets/fonts/NotoSans.ttf"
 ).read_bytes()
 
 
