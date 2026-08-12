@@ -1,3 +1,6 @@
+from util import FakeIPC
+
+from saitenka.app.reader_factory import ReaderServices, create_reader
 from saitenka.app.runtime import CommandRouter, TickPipeline, TickStage
 
 
@@ -50,3 +53,16 @@ def test_tick_pipeline_rejects_ambiguous_duplicate_phase():
         assert str(exc) == "tick stage already registered: tooltip"
     else:  # pragma: no cover - the assertion above is the contract
         raise AssertionError("duplicate tick stage was accepted")
+
+
+def test_composition_threads_grouped_optional_services():
+    services = ReaderServices(scorer="score", anki="anki", mining="mine", dictionaries="dict")
+
+    reader = create_reader(FakeIPC(), services=services)
+
+    assert (reader.scorer, reader.anki, reader.mine_cfg, reader.dict_set) == (
+        "score",
+        "anki",
+        "mine",
+        "dict",
+    )

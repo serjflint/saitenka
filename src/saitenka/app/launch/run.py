@@ -958,7 +958,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     profile: str | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
-    from saitenka.app.controller import Reader
     from saitenka.app.reader_deps import begin_deps_build, warm_tokenizer
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
@@ -1101,12 +1100,11 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     # coloring/tooltips/mining land in place once loaded.
     if demo_word or screenshot:
         scorer, anki, mine_conf, dict_set = _build_deps()
-        reader = Reader(
+        from saitenka.app.reader_factory import ReaderServices, create_reader
+
+        reader = create_reader(
             ipc,
-            scorer=scorer,
-            anki=anki,
-            mine_cfg=mine_conf,
-            dict_set=dict_set,
+            services=ReaderServices(scorer, anki, mine_conf, dict_set),
             options=opts,
             profile=active_profile,
         )
@@ -1114,9 +1112,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
         )
     else:
-        reader = Reader(
-            ipc, options=opts, profile=active_profile
-        )  # deps injected asynchronously below
+        from saitenka.app.reader_factory import create_reader
+
+        reader = create_reader(ipc, options=opts, profile=active_profile)
         reader.set_profile_cycle(
             profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
         )

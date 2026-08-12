@@ -258,7 +258,6 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         daemon=True,
     ).start()
 
-    from saitenka.app.controller import Reader
     from saitenka.app.launch.run import setup_session_telemetry
     from saitenka.mpvio.ipc import MpvIPC, default_attach_ipc_path
 
@@ -341,7 +340,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
     opts = _build_attach_options(cfg, mine=mc)
-    reader = Reader(ipc, options=opts, profile=active_profile)  # deps injected asynchronously below
+    from saitenka.app.reader_factory import create_reader
+
+    reader = create_reader(ipc, options=opts, profile=active_profile)
     from saitenka.app.reader_deps import make_dict_scoper
 
     reader.set_profile_cycle(

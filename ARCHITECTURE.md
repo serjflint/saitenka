@@ -42,7 +42,8 @@ internal modules with explicit dependency contracts, not independently published
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
 - **`app/`** — the application layer. `controller.py`'s `Reader` retains the mpv lifecycle while
-  `runtime/` owns explicit command routing and ordered tick phases;
+  `runtime/` owns explicit command routing and ordered tick phases; `reader_factory.py` owns production
+  composition;
   (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
   strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine

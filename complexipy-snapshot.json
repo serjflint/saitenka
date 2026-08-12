@@ -50,8 +50,8 @@
     ]
   },
   {
-    "path": "src/saitenka/sc/walk.py",
-    "file_name": "walk.py",
+    "path": "src/saitenka/render/sc_adapter.py",
+    "file_name": "sc_adapter.py",
     "functions": [
       {
         "name": "_Walker::_emit_inline",
