@@ -1,4 +1,4 @@
-from yomitanlite.media import image_size, normalize_glossary
+from saitenka_dict.media import image_size, normalize_glossary
 
 
 def test_gif_size_and_preferred_dimensions_are_separate():

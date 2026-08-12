@@ -44,7 +44,7 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
   (subtitle fetching); `cli.py`/`cli_run.py` (the entry point — thin parser + real orchestration).
-- **`../yomitanlite/`** — the renderer-neutral dictionary boundary: archive validation/import,
+- **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, all five Yomitan result modes, and the reusable headless
   Yomitan differential client. `app/source_adapter.py` presents any `LookupSource` through the stable
   Saitenka tooltip/card facade; the legacy facade remains the default during migration.
@@ -281,7 +281,7 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
   what makes this airspace-safe on Windows fullscreen.
 - **Dictionaries are imported once** into a consolidated SQLite DB (the Yomitan model); play-time
   only opens it — nothing rebuilds during playback, RAM stays low.
-- **Dictionary semantics and rendering are separate contracts.** `yomitanlite.LookupSource` is the
+- **Dictionary semantics and rendering are separate contracts.** `saitenka_dict.LookupSource` is the
   swappable information seam; Saitenka's `Entry`/panel backends are the swappable presentation seam.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable

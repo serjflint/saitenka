@@ -1,15 +1,12 @@
 [project]
-name = "yomitanlite"
+name = "saitenka-dict"
 version = "0.1.0"
-description = "Headless Yomitan-compatible dictionary lookup core"
+description = "Independent Python engine with high Yomitan format and lookup compatibility"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = []
-
-[project.scripts]
-yomitanlite-parity = "yomitanlite.parity:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "pytest-timeout>=2.4"]
@@ -20,4 +17,5 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = ["integration: crosses the headless Yomitan subprocess boundary"]

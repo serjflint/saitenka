@@ -7,10 +7,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from yomitanlite.archive import ArchiveLimits, DictionaryArchive, DictionaryArchiveError
-from yomitanlite.media import normalize_glossary
-from yomitanlite.metadata import parse_frequency
-from yomitanlite.models import Capability, DictionaryInfo
+from saitenka_dict.archive import ArchiveLimits, DictionaryArchive, DictionaryArchiveError
+from saitenka_dict.media import normalize_glossary
+from saitenka_dict.metadata import parse_frequency
+from saitenka_dict.models import Capability, DictionaryInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable

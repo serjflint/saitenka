@@ -1,4 +1,4 @@
-"""Characterization bridge between Saitenka's stable facade and yomitanlite's semantic surface."""
+"""Characterization bridge between Saitenka's facade and saitenka-dict's semantic surface."""
 
 from __future__ import annotations
 
@@ -10,8 +10,7 @@ from overlay.app.config import DictDbOptions
 from overlay.app.dictdb import DictionaryDb
 from overlay.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
 from overlay.app.tokenize import Token
-
-from yomitanlite import (
+from saitenka_dict import (
     Capability,
     Definition,
     DictionaryDatabase,

@@ -12,8 +12,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -29,6 +31,16 @@ def _free_bytes(path: Path) -> int:
     return shutil.disk_usage(path).free
 
 
+def _assert_oracle_absent(members: list[str]) -> None:
+    forbidden_names = {"oracle.py", "parity.py", "upstream-lock.json", "yomitan_oracle.mjs"}
+    leaked = [
+        member
+        for member in members
+        if "oracle" in PurePosixPath(member).parts or PurePosixPath(member).name in forbidden_names
+    ]
+    assert leaked == []
+
+
 def test_wheel_installs_and_assets_load():
     if _free_bytes(PROJECT) < 2 * 1024**3:  # need headroom for the venv + deps
         pytest.skip("insufficient free disk for the install test")
@@ -36,18 +48,26 @@ def test_wheel_installs_and_assets_load():
     try:
         # 1. build the wheel into an isolated dir
         dist = work / "dist"
+        dictionary_project = PROJECT.parent / "saitenka-dict"
         for project in (
-            PROJECT.parent / "yomitanlite",
+            dictionary_project,
             PROJECT.parent / "ankiconnect-client",
             PROJECT,
         ):
+            build_kind = [] if project == dictionary_project else ["--wheel"]
             subprocess.run(
-                ["uv", "build", "--wheel", "--out-dir", str(dist)],
+                ["uv", "build", *build_kind, "--out-dir", str(dist)],
                 cwd=project,
                 check=True,
                 capture_output=True,
                 text=True,
             )
+        dictionary_wheel = next(dist.glob("saitenka_dict-*.whl"))
+        dictionary_sdist = next(dist.glob("saitenka_dict-*.tar.gz"))
+        with zipfile.ZipFile(dictionary_wheel) as archive:
+            _assert_oracle_absent(archive.namelist())
+        with tarfile.open(dictionary_sdist, "r:gz") as archive:
+            _assert_oracle_absent(archive.getnames())
         wheels = list(dist.glob("saitenka-*.whl"))
         assert wheels, "uv build produced no wheel"
         wheel = wheels[0]
@@ -82,17 +102,18 @@ def test_wheel_installs_and_assets_load():
 
         # 4. assets load from the INSTALLED package (importlib.resources), not the source tree
         smoke = (
-            "import json;"
+            "import importlib.util;"
             "from importlib.resources import files;"
             "from overlay.resources import asset;"
-            "from yomitanlite.parity import _assert_pinned_revision;"
             "assert asset('fonts','NotoSansJP.ttf').exists();"
             "assert asset('wordlists','jlpt.zip').exists();"
             "assert asset('saitenka.lua').exists();"
-            "pkg=files('yomitanlite');"
-            "assert pkg.joinpath('yomitan_oracle.mjs').is_file();"
-            "lock=json.loads(pkg.joinpath('upstream-lock.json').read_text(encoding='utf-8'));"
-            "_assert_pinned_revision(lock['yomitan']);"
+            "pkg=files('saitenka_dict');"
+            "assert importlib.util.find_spec('oracle') is None;"
+            "assert not pkg.joinpath('oracle.py').is_file();"
+            "assert not pkg.joinpath('parity.py').is_file();"
+            "assert not pkg.joinpath('yomitan_oracle.mjs').is_file();"
+            "assert not pkg.joinpath('upstream-lock.json').is_file();"
             "print('assets-ok')"
         )
         out2 = subprocess.run(

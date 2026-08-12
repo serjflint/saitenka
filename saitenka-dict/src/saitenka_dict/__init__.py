@@ -1,6 +1,6 @@
-from yomitanlite.archive import ArchiveLimits, DictionaryArchiveError
-from yomitanlite.importer import DictionaryDatabase, ImportProgress, ImportRequest
-from yomitanlite.models import (
+from saitenka_dict.archive import ArchiveLimits, DictionaryArchiveError
+from saitenka_dict.importer import DictionaryDatabase, ImportProgress, ImportRequest
+from saitenka_dict.models import (
     Capability,
     Definition,
     DictionaryInfo,
@@ -20,8 +20,7 @@ from yomitanlite.models import (
     TermResult,
     TermResultMode,
 )
-from yomitanlite.oracle import HeadlessYomitanOracle, OracleQuery
-from yomitanlite.protocols import (
+from saitenka_dict.protocols import (
     AttestationSource,
     DictionaryAdmin,
     FrequencySource,
@@ -30,8 +29,8 @@ from yomitanlite.protocols import (
     PronunciationSource,
     SearchSource,
 )
-from yomitanlite.sqlite_store import SqliteDictionaryStore
-from yomitanlite.translator import Translator
+from saitenka_dict.sqlite_store import SqliteDictionaryStore
+from saitenka_dict.translator import Translator
 
 __all__ = [
     "ArchiveLimits",
@@ -44,7 +43,6 @@ __all__ = [
     "DictionaryInfo",
     "Frequency",
     "FrequencySource",
-    "HeadlessYomitanOracle",
     "Headword",
     "ImportProgress",
     "ImportRequest",
@@ -55,7 +53,6 @@ __all__ = [
     "LookupSource",
     "MatchSource",
     "MediaSource",
-    "OracleQuery",
     "Pronunciation",
     "PronunciationSource",
     "SearchQuery",

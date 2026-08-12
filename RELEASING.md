@@ -21,7 +21,7 @@ and merging the PR — still happen exactly where they're described here.
 breaking change) is a minor bump — `0.2.0 → 0.3.0`. Don't reach for `1.0.0` until the CLI/config is
 being frozen.
 
-Saitenka's version source is **`overlay/pyproject.toml`**. `yomitanlite` and `ankiconnect-client` keep
+Saitenka's version source is **`overlay/pyproject.toml`**. `saitenka-dict` and `ankiconnect-client` keep
 independent versions in their own `pyproject.toml` and publish only from their namespaced tags. A
 Saitenka release consumes already-published dependency versions; it never republishes them.
 
@@ -63,7 +63,7 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
-3. **Build the Saitenka wheel.** Any required `yomitanlite` / `ankiconnect-client` versions must already
+3. **Build the Saitenka wheel.** Any required `saitenka-dict` / `ankiconnect-client` versions must already
    be published from their namespaced tags; the Saitenka release consumes them as ordinary dependencies.
 4. **Smoke-test the artifact, not the tree** — install the *built wheel* in an isolated env:
    ```sh
@@ -97,9 +97,9 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 9. **Post-release:** confirm the Release + PyPI distributions are live, `## [Unreleased]` is empty on
    top, the tag matches `pyproject.toml`, and `uv tool install "saitenka[full]"` pulls the new version.
 
-Register `yomitanlite-release.yml` and `ankiconnect-client-release.yml` as the respective projects'
+Register `saitenka-dict-release.yml` and `ankiconnect-client-release.yml` as the respective projects'
 trusted publishers. Bump and publish a changed dependency first, using
-`yomitanlite-vX.Y.Z` or `ankiconnect-client-vX.Y.Z`; then update Saitenka's dependency floor and lock.
+`saitenka-dict-vX.Y.Z` or `ankiconnect-client-vX.Y.Z`; then update Saitenka's dependency floor and lock.
 
 ## deinflect (GPL add-on)
 

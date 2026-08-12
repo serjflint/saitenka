@@ -7,7 +7,7 @@ license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is
 requires-python = ">=3.13"
 dependencies = [
     "ankiconnect-client>=0.1.0",
-    "yomitanlite>=0.1.0",
+    "saitenka-dict>=0.1.0",
     "pillow>=11.0",
     "fonttools>=4.55",
     "numpy>=2.0",
@@ -93,7 +93,7 @@ saitenka = "overlay.app.cli:main"
 # editable — the `layout-engine`/`images` extras resolve the published wheels from PyPI, #282/#308.)
 saitenka-deinflect = { path = "../deinflect", editable = true }
 ankiconnect-client = { path = "../ankiconnect-client", editable = true }
-yomitanlite = { path = "../yomitanlite", editable = true }
+saitenka-dict = { path = "../saitenka-dict", editable = true }
 
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
@@ -209,7 +209,7 @@ lint = { cmd = "uv run poe lint", cwd = ".." }
 # see [tool.mypy].files); pyrefly stays a HARD gate on library-only (its dict-literal inference is too
 # strict for the dev-script idiom to gate on) with an ADVISORY (`|| true`) second pass over the widened
 # scope for visibility, same posture as `ty` (never a hard gate here).
-types = { shell = "cd .. && uv run --project overlay --extra full mypy && uv run --project overlay --extra full basedpyright && uv run --project overlay --extra full pyrefly check overlay/src/overlay deinflect/src yomitanlite/src ankiconnect-client/src && (uv run --project overlay --extra full pyrefly check overlay/examples tools install .agents || true) && (uv run --project overlay --extra full ty check --ignore unresolved-import overlay/src/overlay deinflect/src yomitanlite/src ankiconnect-client/src overlay/examples tools install .agents || true)" }
+types = { shell = "cd .. && uv run --project overlay --extra full mypy && uv run --project overlay --extra full basedpyright && uv run --project overlay --extra full pyrefly check overlay/src/overlay deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src && (uv run --project overlay --extra full pyrefly check overlay/examples tools install .agents || true) && (uv run --project overlay --extra full ty check --ignore unresolved-import overlay/src/overlay deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src overlay/examples tools install .agents || true)" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
@@ -259,10 +259,10 @@ test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integra
 # package testpaths intentionally stays on the shipped overlay suite.
 loop-tools-test = { shell = "uv run --extra full pytest -q tools" }
 # Independent package surfaces stay runnable without the overlay dependency graph.
-package-test = { shell = "uv run --project ../yomitanlite pytest -q -c ../yomitanlite/pyproject.toml -m 'not integration' ../yomitanlite/tests && uv run --project ../ankiconnect-client pytest -q -c ../ankiconnect-client/pyproject.toml ../ankiconnect-client/tests" }
+package-test = { shell = "uv run --project ../saitenka-dict pytest -q -c ../saitenka-dict/pyproject.toml -m 'not integration' ../saitenka-dict/tests && uv run --project ../ankiconnect-client pytest -q -c ../ankiconnect-client/pyproject.toml ../ankiconnect-client/tests" }
 # Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
-yomitan-parity = { shell = "uv run --project ../yomitanlite yomitanlite-parity" }
-yomitan-parity-json = { shell = "uv run --project ../yomitanlite yomitanlite-parity --json" }
+yomitan-parity = { shell = "cd ../saitenka-dict && uv run python -m oracle.parity" }
+yomitan-parity-json = { shell = "cd ../saitenka-dict && uv run python -m oracle.parity --json" }
 # -n auto is safe under PYTHON_GIL=0: each xdist worker is its own free-threaded interpreter, so the
 # FT code paths still run without the GIL — it just parallelises (91s → ~22s).
 test-ft = { shell = "PYTHON_GIL=0 uv run --extra full pytest -q -n auto -m 'not (slow or live)'" }

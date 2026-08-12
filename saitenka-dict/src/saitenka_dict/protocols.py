@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from yomitanlite.models import (
+    from saitenka_dict.models import (
         Capability,
         DictionaryInfo,
         Frequency,

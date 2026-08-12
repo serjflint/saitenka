@@ -15,7 +15,7 @@ logs.
 ### Development
 
 - Extracted renderer-neutral Yomitan dictionary semantics into the independently testable
-  `yomitanlite` package and AnkiConnect transport/protocol handling into `ankiconnect-client`.
+  `saitenka-dict` package and AnkiConnect transport/protocol handling into `ankiconnect-client`.
   Saitenka now has a swappable lookup-source adapter, a dictionary-independent known-word cache, and a
   batched headless-Yomitan differential report covering all term modes, metadata, structured content,
   and kanji.

@@ -1,4 +1,4 @@
-from yomitanlite.metadata import FrequencyValue, parse_frequency
+from saitenka_dict.metadata import FrequencyValue, parse_frequency
 
 
 def test_frequency_forms_share_one_normalization_contract():

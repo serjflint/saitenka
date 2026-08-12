@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from yomitanlite.models import (
+from saitenka_dict.models import (
     Capability,
     Headword,
     KanjiQuery,
@@ -16,7 +16,7 @@ from yomitanlite.models import (
     TermResult,
     TermResultMode,
 )
-from yomitanlite.store import DictionaryStore, TermRecord, TermSearch
+from saitenka_dict.store import DictionaryStore, TermRecord, TermSearch
 
 
 @dataclass(frozen=True, slots=True)

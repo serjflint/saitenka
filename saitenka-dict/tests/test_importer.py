@@ -5,10 +5,7 @@ import sqlite3
 import zipfile
 
 import pytest
-from yomitanlite.archive import DictionaryArchive
-from yomitanlite.store import TermSearch
-
-from yomitanlite import (
+from saitenka_dict import (
     ArchiveLimits,
     Capability,
     DictionaryArchiveError,
@@ -20,6 +17,8 @@ from yomitanlite import (
     TermQuery,
     Translator,
 )
+from saitenka_dict.archive import DictionaryArchive
+from saitenka_dict.store import TermSearch
 
 
 def write_dictionary(path, *, root="", title="Core", term="読む", extra_terms=(), malformed=False):

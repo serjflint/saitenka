@@ -4,9 +4,7 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 
 import pytest
-from yomitanlite.store import TermRecord, TermSearch
-
-from yomitanlite import (
+from saitenka_dict import (
     Definition,
     Headword,
     KanjiEntry,
@@ -18,6 +16,7 @@ from yomitanlite import (
     TermResultMode,
     Translator,
 )
+from saitenka_dict.store import TermRecord, TermSearch
 
 
 @dataclass

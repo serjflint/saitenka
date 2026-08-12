@@ -1988,11 +1988,11 @@ dependencies = [
     { name = "psutil" },
     { name = "questionary" },
     { name = "rich" },
+    { name = "saitenka-dict" },
     { name = "stamina" },
     { name = "structlog" },
     { name = "tomlkit" },
     { name = "unidic-lite" },
-    { name = "yomitanlite" },
 ]
 
 [package.optional-dependencies]
@@ -2101,12 +2101,12 @@ requires-dist = [
     { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
+    { name = "saitenka-dict", editable = "../saitenka-dict" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "taffylite", marker = "extra == 'layout-engine'", specifier = ">=0.1.0" },
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
-    { name = "yomitanlite", editable = "../yomitanlite" },
 ]
 provides-extras = ["deinflect", "layout-engine", "images", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
@@ -2160,6 +2160,19 @@ source = { editable = "../deinflect" }
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
+name = "saitenka-dict"
+version = "0.1.0"
+source = { editable = "../saitenka-dict" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-timeout", specifier = ">=2.4" },
+]
 
 [[package]]
 name = "secretstorage"
@@ -2426,17 +2439,4 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/34/74/c6428f875774288bec1396f5bfcbc2d925700a4dad61727fd5f2b12f249d/wcwidth-0.8.2.tar.gz", hash = "sha256:91fbef97204b96a3d4d421609b80340b760cf33e26da123ff243d76b1fda8dda", size = 1466253, upload-time = "2026-06-29T18:11:11.601Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/42/3e5985a0a7e57de470b320c6d6a1a67c844f6737a587f3d44dd13d1819e7/wcwidth-0.8.2-py3-none-any.whl", hash = "sha256:d63947694a0539a1d51e01eda7caf800c291020e6cdd7e28ad7b14dd33ad4f85", size = 323166, upload-time = "2026-06-29T18:11:09.888Z" },
-]
-
-[[package]]
-name = "yomitanlite"
-version = "0.1.0"
-source = { editable = "../yomitanlite" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-timeout", specifier = ">=2.4" },
 ]

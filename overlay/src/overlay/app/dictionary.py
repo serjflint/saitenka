@@ -102,10 +102,10 @@ if TYPE_CHECKING:
     from collections.abc import Container, Sequence
 
     from saitenka_deinflect import Deinflection  # noqa: TID251  # GPL chokepoint (type only)
+    from saitenka_dict import LookupSource
 
     from overlay.app.dictdb import DictionaryDb, DictRow
     from overlay.app.tokenize import Token
-    from yomitanlite import LookupSource
 
 log = logging.getLogger(__name__)
 
@@ -481,7 +481,7 @@ class DictionarySet:
         language: str = "jp",
     ) -> DictionarySet:
         """Build an ordered dictionary set from already-resolved :class:`DictRow`s of the given DB."""
-        from yomitanlite import SqliteDictionaryStore, Translator
+        from saitenka_dict import SqliteDictionaryStore, Translator
 
         return cls(
             dicts=[Dictionary(db, r) for r in dict_rows],

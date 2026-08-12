@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from yomitanlite.models import (
+    from saitenka_dict.models import (
         Definition,
         Frequency,
         KanjiEntry,

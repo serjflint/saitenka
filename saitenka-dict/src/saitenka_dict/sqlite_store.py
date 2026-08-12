@@ -7,8 +7,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from yomitanlite.metadata import parse_frequency
-from yomitanlite.models import (
+from saitenka_dict.metadata import parse_frequency
+from saitenka_dict.models import (
     Definition,
     Frequency,
     KanjiEntry,
@@ -16,7 +16,7 @@ from yomitanlite.models import (
     SourceTrace,
     Tag,
 )
-from yomitanlite.store import TermRecord, TermSearch
+from saitenka_dict.store import TermRecord, TermSearch
 
 _TERM_QUERY_LEGACY = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "

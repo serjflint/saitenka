@@ -47,7 +47,11 @@ def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
 
 def _build_wheel() -> Path:
     dist = OVERLAY / "dist"
-    for project in (OVERLAY.parent / "yomitanlite", OVERLAY.parent / "ankiconnect-client", OVERLAY):
+    for project in (
+        OVERLAY.parent / "saitenka-dict",
+        OVERLAY.parent / "ankiconnect-client",
+        OVERLAY,
+    ):
         out = _run(["uv", "build", "--wheel", "--out-dir", str(dist)], cwd=project)
         if out.returncode != 0:
             sys.exit(f"uv build failed for {project.name}:\n{out.stdout}\n{out.stderr}")

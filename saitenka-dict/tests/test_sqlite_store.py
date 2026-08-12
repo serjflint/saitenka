@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from yomitanlite import KanjiQuery, SearchQuery, SqliteDictionaryStore, TermQuery, Translator
+from saitenka_dict import KanjiQuery, SearchQuery, SqliteDictionaryStore, TermQuery, Translator
 
 
 def make_legacy_db(path):

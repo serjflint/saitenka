@@ -5,6 +5,17 @@ import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from saitenka_dict import (
+    AttestationSource,
+    KanjiQuery,
+    LookupSource,
+    MediaSource,
+    SearchQuery,
+    SearchSource,
+    TermQuery,
+    TermResultMode,
+)
+
 from overlay.app.dictionary_surface import (
     FREQ_COLOR,
     PITCH_COLOR,
@@ -32,23 +43,13 @@ from overlay.fonts import STROKE_ORDER_FONT
 from overlay.model import PitchAccent
 from overlay.panel import Definition, Entry, EntryGroup, Freq
 from overlay.sc.walk import collect_img_paths
-from yomitanlite import (
-    AttestationSource,
-    KanjiQuery,
-    LookupSource,
-    MediaSource,
-    SearchQuery,
-    SearchSource,
-    TermQuery,
-    TermResultMode,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-from yomitanlite import (
+from saitenka_dict import (
     FrequencySource as SemanticFrequencySource,
 )
-from yomitanlite import (
+from saitenka_dict import (
     PronunciationSource as SemanticPronunciationSource,
 )
 

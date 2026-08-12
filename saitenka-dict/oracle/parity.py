@@ -6,18 +6,18 @@ import sys
 import tempfile
 import zipfile
 from dataclasses import asdict, dataclass
-from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from yomitanlite.importer import DictionaryDatabase
-from yomitanlite.models import KanjiQuery, TermQuery, TermResultMode
-from yomitanlite.oracle import HeadlessYomitanOracle, OracleQuery
-from yomitanlite.sqlite_store import SqliteDictionaryStore
-from yomitanlite.translator import Translator
+from saitenka_dict.importer import DictionaryDatabase
+from saitenka_dict.models import KanjiQuery, TermQuery, TermResultMode
+from saitenka_dict.sqlite_store import SqliteDictionaryStore
+from saitenka_dict.translator import Translator
+
+from oracle.headless import HeadlessYomitanOracle, OracleQuery
 
 _MODES = tuple(TermResultMode)
-_UPSTREAM_LOCK = files("yomitanlite").joinpath("upstream-lock.json")
+_ORACLE_DIRECTORY = Path(__file__).parent
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,11 +94,13 @@ class ParityReport:
         return "\n".join(lines) + "\n"
 
 
-def compare_with_yomitan(checkout: str | Path) -> ParityReport:
+def compare_with_yomitan(
+    checkout: str | Path, *, runner: str | Path, upstream_lock: str | Path
+) -> ParityReport:
     root = Path(checkout).expanduser().resolve()
-    oracle = HeadlessYomitanOracle.for_upstream_fixture(root)
+    oracle = HeadlessYomitanOracle.for_upstream_fixture(root, runner=runner)
     revision = oracle.revision()
-    _assert_pinned_revision(revision)
+    _assert_pinned_revision(revision, upstream_lock)
     fixture = oracle.dictionary_directory
     queries = (
         *(
@@ -126,7 +128,7 @@ def compare_with_yomitan(checkout: str | Path) -> ParityReport:
     )
     oracle_results = oracle.batch(queries)
 
-    with tempfile.TemporaryDirectory(prefix="yomitanlite-parity-") as directory:
+    with tempfile.TemporaryDirectory(prefix="saitenka-dict-parity-") as directory:
         temporary = Path(directory)
         archive = temporary / "dictionary.zip"
         with zipfile.ZipFile(archive, "w") as output:
@@ -196,8 +198,8 @@ def compare_with_yomitan(checkout: str | Path) -> ParityReport:
     return ParityReport(str(root), revision, tuple(checks))
 
 
-def _assert_pinned_revision(actual: str) -> None:
-    expected = json.loads(_UPSTREAM_LOCK.read_text())["yomitan"]
+def _assert_pinned_revision(actual: str, upstream_lock: str | Path) -> None:
+    expected = json.loads(Path(upstream_lock).read_text(encoding="utf-8"))["yomitan"]
     if actual != expected:
         raise RuntimeError(
             f"Yomitan checkout is {actual}, expected pinned revision {expected}; "
@@ -422,13 +424,21 @@ def _oracle_kanji_frequencies(result: list[dict[str, Any]]) -> list[Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare yomitanlite with a headless Yomitan checkout"
+        description="Compare saitenka-dict with a headless Yomitan checkout"
     )
     parser.add_argument("--checkout", type=Path, default=Path.home() / "workspace/yomitan")
+    parser.add_argument("--runner", type=Path, default=_ORACLE_DIRECTORY / "yomitan_oracle.mjs")
+    parser.add_argument(
+        "--upstream-lock", type=Path, default=_ORACLE_DIRECTORY / "upstream-lock.json"
+    )
     parser.add_argument("--json", action="store_true", dest="json_output")
     parser.add_argument("--output", type=Path)
     arguments = parser.parse_args()
-    report = compare_with_yomitan(arguments.checkout)
+    report = compare_with_yomitan(
+        arguments.checkout,
+        runner=arguments.runner,
+        upstream_lock=arguments.upstream_lock,
+    )
     rendered = report.as_json() + "\n" if arguments.json_output else report.as_markdown()
     if arguments.output is None:
         sys.stdout.write(rendered)
