@@ -14,9 +14,9 @@ metadata:
 
 # dev-gate
 
-Two gates, both defined in `overlay/pyproject.toml` `[tool.poe.tasks]` — that is the source of truth for
-what each runs; `uv run poe --dry-run <gate>` prints the exact chain. Run either from the repo root or
-`overlay/` (a root shim delegates). CI (`.github/workflows/ci.yml`) mirrors `poe all` on PRs + pushes to main.
+Two gates, both defined in `pyproject.toml` `[tool.poe.tasks]` — that is the source of truth for
+what each runs; `uv run poe --dry-run <gate>` prints the exact chain. Run either from the repo root.
+CI (`.github/workflows/ci.yml`) mirrors `poe all` on PRs + pushes to main.
 
 - **`poe all`** — the fast pre-push PR gate. Run before every push.
 - **`poe pre-release`** — the slower superset run once before tagging; `release.py` gates on this, not

@@ -69,14 +69,14 @@ The benchmarks are reproducible — the harness is committed and runs headless a
 dictionary set via a fake mpv IPC:
 
 ```bash
-uv run python overlay/examples/bench_responsiveness.py --reps 12
+uv run python examples/bench_responsiveness.py --reps 12
 ```
 
 Add `--pathological` for the 20-worst-words corpus, `--stress` for the sustained chained session, or
 `--timeline` for an idle-paced run that models real passive watching. The full walkthrough of what
 each mode measures, and every historical baseline, is in the engineering log:
 
-- **Harness:** [`overlay/examples/bench_responsiveness.py`](https://github.com/serjflint/saitenka/blob/main/overlay/examples/bench_responsiveness.py)
+- **Harness:** [`examples/bench_responsiveness.py`](https://github.com/serjflint/saitenka/blob/main/examples/bench_responsiveness.py)
 - **Full log:** [`overlay/BENCHMARKS.md`](https://github.com/serjflint/saitenka/blob/main/overlay/BENCHMARKS.md)
 
 ## Guarding against regressions

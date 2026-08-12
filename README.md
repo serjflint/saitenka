@@ -173,7 +173,7 @@ Full docs: **[saitenka.readthedocs.io](https://saitenka.readthedocs.io)** (insta
 
 ## What's in the repo
 
-- **[`overlay/`](overlay/)** — the in-mpv overlay (`saitenka`): colored subtitles, hover
+- **[`src/saitenka/`](src/saitenka/)** — the in-mpv application: colored subtitles, hover
   tooltip, mining, English reveal, jimaku fetch, dictionary import, `doctor`/`setup`.
 - **[`tools/`](tools/)** — the Anki/FSRS deck engine: FSRS-based dictionary ranking, field
   normalization, provenance annotation, deck building, refile-by-review-state, anime chooser.
@@ -200,13 +200,13 @@ Every path (config, data, cache, dictionaries, the mpv binary and socket) is ove
 ## Conventions
 
 Python is standardized on **`uv`** (never bare `python`/`pip`/`venv`). LLM use is optional, local-first,
-and grounded — readings and pitch always come from dictionaries, never a model. There's no CI; the
-pre-push gate is `uv run poe all` in `overlay/` (lint, types, tests, coverage floor 85%). See
+and grounded — readings and pitch always come from dictionaries, never a model. CI mirrors the
+root-level `uv run poe all` pre-push gate (lint, types, tests, coverage floor 85%). See
 **[AGENTS.md](AGENTS.md)** for full contributor / AI-agent guidance.
 
 ## License
 
-**[Apache-2.0](LICENSE)** for the core (`overlay/`, `tools/`, `install/`). The optional `deinflect/`
+**[Apache-2.0](LICENSE)** for the core (`src/saitenka/`, `tools/`, `install/`). The optional `deinflect/`
 add-on is **GPL-3.0** (derived from Yomitan) — installing it makes the *combined* work GPL-3.0. Full
 map: **[LICENSING.md](LICENSING.md)**. Vendored fonts are SIL OFL; frequency and definition
 dictionaries are user-supplied (not shipped).

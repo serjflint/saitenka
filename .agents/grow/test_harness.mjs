@@ -13,7 +13,7 @@ const gap = {
   dimension: 'relative path',
   kind: 'scenario',
   source: 'invariant',
-  tests: ['overlay/tests/test_example.py'],
+  tests: ['tests/test_example.py'],
   status: 'unseen',
   score: 1,
   pr_exclusion_checked: true,
@@ -28,9 +28,9 @@ const design = {
 }
 const proposal = {
   applied: true,
-  test_file: 'overlay/tests/test_example.py',
-  cut_module: 'overlay.app.example',
-  cut_file: 'src/overlay/app/example.py',
+  test_file: 'tests/test_example.py',
+  cut_module: 'saitenka.app.example',
+  cut_file: 'src/saitenka/app/example.py',
   target_func: 'example',
   test_name: 'test_example_relative',
   red_on_pristine: false,
@@ -114,7 +114,7 @@ async function scenario(responses, args = { openPr: true }) {
 }
 
 {
-  const mismatchedCut = { ...proposal, cut_file: 'src/overlay/app/other.py' }
+  const mismatchedCut = { ...proposal, cut_file: 'src/saitenka/app/other.py' }
   const result = await scenario({
     triage: gap,
     'test-design': design,
@@ -131,8 +131,8 @@ async function scenario(responses, args = { openPr: true }) {
   const traversalGap = { ...gap, module: '../escape.py', target_symbol: '../escape.py::example' }
   const traversalProposal = {
     ...proposal,
-    cut_file: 'src/overlay/../escape.py',
-    cut_module: 'overlay...escape',
+    cut_file: 'src/saitenka/../escape.py',
+    cut_module: 'saitenka...escape',
   }
   const result = await scenario({
     triage: traversalGap,
@@ -328,7 +328,7 @@ async function scenario(responses, args = { openPr: true }) {
   assert.ok(labels.indexOf('ship-gate') < labels.indexOf('record'))
   assert.ok(labels.indexOf('record') < labels.indexOf('outward'))
   assert.ok(labels.indexOf('outward') < labels.indexOf('finalize'))
-  assert.match(result.calls.find(({ label }) => label === 'record').prompt, /grow_ledger\.py --ledger \.\.\/\.ledger\.grow\.jsonl append/)
+  assert.match(result.calls.find(({ label }) => label === 'record').prompt, /grow_ledger\.py --ledger \.ledger\.grow\.jsonl append/)
   assert.equal(result.result.pr, 'https://example.invalid/pr/1')
 }
 

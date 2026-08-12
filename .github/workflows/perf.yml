@@ -44,16 +44,13 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-          working-directory: overlay
 
       - name: Sync (test group only, 3.13 → prebuilt fugashi)
-        working-directory: overlay
         run: |
           uv python install
           uv sync --locked --extra full --no-default-groups --group test
 
       - name: Run synth bench
-        working-directory: overlay
         run: >-
           uv run --no-sync python examples/bench_responsiveness.py
           --synth --reps 5 --loops 5 --bench-json bench.json
@@ -63,7 +60,7 @@ jobs:
         with:
           name: Saitenka render (synth)
           tool: customSmallerIsBetter
-          output-file-path: overlay/bench.json
+          output-file-path: bench.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           gh-pages-branch: gh-pages
@@ -86,16 +83,13 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-          working-directory: overlay
 
       - name: Sync (test group only, 3.13 → prebuilt fugashi)
-        working-directory: overlay
         run: |
           uv python install
           uv sync --locked --extra full --no-default-groups --group test
 
       - name: Run synth bench
-        working-directory: overlay
         run: >-
           uv run --no-sync python examples/bench_responsiveness.py
           --synth --reps 5 --loops 5 --bench-json bench.json
@@ -105,7 +99,7 @@ jobs:
         with:
           name: Saitenka render (synth)
           tool: customSmallerIsBetter
-          output-file-path: overlay/bench.json
+          output-file-path: bench.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: dev/bench

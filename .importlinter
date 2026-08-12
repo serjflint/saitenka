@@ -1,0 +1,123 @@
+[importlinter]
+root_packages =
+    saitenka
+include_external_packages = True
+exclude_type_checking_imports = True
+
+[importlinter:contract:subtitle-core-independent]
+name = Subtitle core never imports the Saitenka application
+type = forbidden
+source_modules =
+    saitenka.subtitles
+forbidden_modules =
+    saitenka.app
+    saitenka.mpvio
+    saitenka.render
+
+[importlinter:contract:no-cycles]
+name = No import cycles among Saitenka's top-level packages
+type = acyclic_siblings
+ancestors =
+    saitenka
+# Fully enforced — zero grandfathered cycles remain (#30, burned down 2026-08-08). Every edge once
+# ratcheted here is gone: mpvio<->app (otel_metrics relocated to its leaf layer) and
+# render.document->sc.model / otel_export->telemetry (moved into TYPE_CHECKING) earlier; then, closing
+# #30, draw.chip->render.layout (chip moved into render/, since it consumes layout), dictdb<->yomitan_import
+# and dictdb<->wordlists (the pure zip-parse helpers classify_zip/read_json_bank/_title_of extracted to the
+# leaf app/bankreader.py), doctor/report<->crashlog (crash_dir() moved to the leaf app/paths.py), and
+# controller<->miner (miner imports SKIP_POS from its real home app/tokenize, not controller).
+# No ignore_imports — the contract is exhaustive. Never add one; only sever edges.
+
+[importlinter:contract:layers]
+name = Package layering — a lower layer must not import a higher one
+# Positive DIRECTION contract (no-cycles only forbids round-trips; this forbids a backward edge even
+# without a cycle). High→low follows the data flow: app orchestrates → mpvio bridges → panel/raster
+# compose → draw rasterises → render lays out → sc models the input → model/version are leaf values.
+# TYPE_CHECKING edges don't count (exclude_type_checking_imports). Known RUNTIME backedges are
+# ratcheted below (same posture as no-cycles) — burn them down, never add. ruff analyze counts
+# typing-only edges, so it will show phantom backedges this contract does not: import-linter is the SSOT.
+type = layers
+exhaustive = False
+layers =
+    saitenka.app
+    saitenka.mpvio
+    saitenka.panel
+    saitenka.raster
+    saitenka.subtitles
+    saitenka.render
+    saitenka.draw
+    saitenka.sc
+    saitenka.model
+# Ratchet baseline (2026-08): pre-existing runtime backedges (a backedge is a direction violation even
+# without a round-trip, so these outlive the no-cycles burn-down).
+# - sc.walk imports render for the Inline type (the coupling burned down under the controller split).
+# - raster.pillow_backend reaches up to panel + mpvio.osd — it is high-level backend glue miscategorised
+#   under raster/; ratcheted here, move it to burn these down. Never add a new entry; only remove.
+ignore_imports =
+    saitenka.sc.walk -> saitenka.render.ruby
+    saitenka.sc.walk -> saitenka.render.flow
+    saitenka.sc.walk -> saitenka.render.chip
+    saitenka.raster.pillow_backend -> saitenka.panel
+    saitenka.raster.pillow_backend -> saitenka.mpvio.osd
+
+[importlinter:contract:pil-agnostic-core]
+name = sc/ and model.py stay PIL-agnostic
+type = forbidden
+# Direct imports only (allow_indirect_imports): sc/ legitimately imports saitenka.render for the
+# Inline type (see the no-cycles ratchet above) and render/draw pull in PIL themselves — a
+# transitive check would flag that pre-existing, accepted design. This preserves the original
+# test_layering.py semantics (a literal `import PIL` line), just without the hand-parsed
+# TYPE_CHECKING logic (exclude_type_checking_imports does that for free).
+allow_indirect_imports = True
+source_modules =
+    saitenka.sc
+    saitenka.model
+forbidden_modules =
+    PIL
+
+[importlinter:contract:pil-app-allowlist]
+name = app/ imports PIL only via raster/ or the migration allowlist
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    saitenka.app
+forbidden_modules =
+    PIL
+# subtitles/toast/card_preview/controller migrate to the raster protocol opportunistically, later
+# (see tests/test_layering.py docstring, pre-existing allowlist).
+ignore_imports =
+    saitenka.app.subtitles -> PIL
+    saitenka.app.toast -> PIL
+    saitenka.app.card_preview -> PIL
+    saitenka.app.miner_ui -> PIL
+
+[importlinter:contract:gpl-chokepoint]
+name = only app.dictionary / app.doctor may import the GPL deinflect add-on
+type = forbidden
+source_modules =
+    saitenka
+forbidden_modules =
+    saitenka_deinflect
+ignore_imports =
+    saitenka.app.dictionary -> saitenka_deinflect
+    saitenka.app.doctor -> saitenka_deinflect
+
+[importlinter:contract:layout-engine-chokepoint]
+name = only render.layout_backend may import the optional taffylite layout engine
+type = forbidden
+source_modules =
+    saitenka
+forbidden_modules =
+    taffylite
+ignore_imports =
+    saitenka.render.layout_backend -> taffylite
+
+[importlinter:contract:svg-images-chokepoint]
+name = only app.dictdb may import the optional resvglite SVG rasterizer
+type = forbidden
+source_modules =
+    saitenka
+forbidden_modules =
+    resvglite
+ignore_imports =
+    saitenka.app.dictdb -> resvglite

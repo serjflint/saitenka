@@ -17,7 +17,7 @@ the libmpv render API if/when Pillow hits a wall.
 
 ## Layout
 
-- `src/overlay/` — the library (`fonts`, `render/`, `model`, `sc/`, `panel`, `draw/`).
+- `src/saitenka/` — the library (`fonts`, `render/`, `model`, `sc/`, `panel`, `draw/`).
 - `assets/fonts/` — **vendored** Noto Sans JP (variable) + Noto Sans, so golden images reproduce
   across machines (macOS / Windows / Linux).
 - `tests/golden/` — golden PNGs; `tests/fixtures/` — structured-content JSON.

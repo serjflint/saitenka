@@ -15,5 +15,5 @@ have .agents/rules
 have .agents/skills
 have .agents/hooks/block-shell-search.py
 have .agents/mcp/servers.json
-have overlay/pyproject.toml            # the poe gates (required in `all` vs advisory)
+have pyproject.toml            # the poe gates (required in `all` vs advisory)
 if [ "$fail" -eq 0 ]; then echo "agents-md smoke OK"; else echo "agents-md smoke FAILED"; exit 1; fi

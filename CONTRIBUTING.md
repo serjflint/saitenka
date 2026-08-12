@@ -18,7 +18,7 @@ tokenizer/golden traps, the dev gate, refactoring seams, and the testing invaria
 - **Module map & data flow:** [`overlay/ARCHITECTURE.md`](overlay/ARCHITECTURE.md)
 - **The dev gate and its env traps:** the `dev-gate` skill (`.agents/skills/dev-gate/`)
 - **Writing a test the house way:** the `write-test` skill (`.agents/skills/write-test/`)
-- **What actually runs:** `overlay/pyproject.toml` `[tool.poe.tasks]` (the authoritative task list)
+- **What actually runs:** `pyproject.toml` `[tool.poe.tasks]` (the authoritative task list)
 
 ## AI-assisted contributions & human accountability
 

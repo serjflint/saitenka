@@ -3,7 +3,7 @@
 `.agents/skills/write-test/references/coverage-matrix.md` is the human audit; this is the same map made
 computable, so `test-kinds-advisory.py` can turn a diff into "you touched X → these non-unit kinds apply"
 instead of the maintainer having to nudge for every integration / invariant / e2e test by hand. Pure +
-stdlib (fnmatch), imported by the hook and tested from `overlay/tests/test_test_kinds_advisory.py`.
+stdlib (fnmatch), imported by the hook and tested from `tests/test_test_kinds_advisory.py`.
 
 Each subsystem lists the **non-unit** kinds worth reaching for when its source changes (the metamorphic /
 external-oracle / other families from `oracle-catalog.md`). A path may match several subsystems — the union

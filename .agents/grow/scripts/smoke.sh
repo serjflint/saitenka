@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rot-guard for the .agents/grow/ loop artifacts. Grep-free on purpose — grep/find/rg are PATH-shimmed to
 # a fork-bomb mock in this env (see .agents/rules/searching.md); all text checks go through python.
-# Run: bash .agents/grow/scripts/smoke.sh   (from the repo root or the overlay/ parent)
+# Run: bash .agents/grow/scripts/smoke.sh   (from the repository root)
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # .agents/grow
@@ -43,7 +43,7 @@ fi
 
 # 4. The deterministic tools the harness orchestrates exist and their unit tests are present.
 for t in grow_gate.py grow_ledger.py grow_triage.py grow_contexts.py grow_reflect.py test_grow_gate.py test_grow_ledger.py test_grow_triage.py test_grow_contexts.py test_grow_reflect.py; do
-  [ -f "$root/overlay/tools/$t" ] || fail "missing overlay/tools/$t"
+  [ -f "$root/tools/$t" ] || fail "missing tools/$t"
 done
 
 # 5. SPEC and GUIDE cross-reference each other (the reader's-guide handshake).

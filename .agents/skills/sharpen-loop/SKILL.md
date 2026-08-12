@@ -27,7 +27,7 @@ Read `.agents/sharpen/GUIDE.md` only when explaining the design or adjudicating 
 ## Execute with Codex
 
 1. Work in a clean, dedicated git worktree. Keep every command relative to that worktree.
-2. Run selection, baseline checks, lint, gates, hashing, and ledger operations directly with shell tools from `overlay/`. Do not delegate deterministic commands to an agent.
+2. Run selection, baseline checks, lint, gates, hashing, and ledger operations directly with shell tools from the repository root. Do not delegate deterministic commands to an agent.
 3. Stop before authoring when triage has neither a target-grounded actionable finding nor a complete
    campaign survivor. Ledger a `dry-run` when the baseline is red/flaky, the open-PR exclusion is
    unavailable, or reviewer fidelity cannot be proven.

@@ -349,7 +349,7 @@ def main():
     )
     Path("/tmp/saitenka-normalize-plan.json").write_text(
         json.dumps({"add_fields": add_fields, "id_fill": id_fill}, ensure_ascii=False),
-        "utf-8",
+        encoding="utf-8",
     )
 
     if not args.apply:

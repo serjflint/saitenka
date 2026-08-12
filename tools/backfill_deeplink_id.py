@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from overlay.app.dictionary import DictionarySet
+    from saitenka.app.dictionary import DictionarySet
 
 _TAG = re.compile(r"<[^>]+>")
 _FURIGANA = re.compile(r"\[[^\]]*\]")  # Anki inline reading: 読[よ]む → 読む
@@ -144,7 +144,7 @@ def build_query(deck: str, model: str | None = None, query: str | None = None) -
     term and re-scope onto unintended notes — the same escaping `dedupe()` uses). `query` is raw,
     advanced search syntax supplied on the CLI (trusted, added after the deck term); it is deliberately
     NOT sanitized so `is:due`/field terms still work — only ever narrows within the deck in normal use."""
-    from overlay.app.anki import _q
+    from saitenka.app.anki import _q
 
     parts = [f'deck:"{_q(deck)}"']
     if model:
@@ -162,8 +162,8 @@ def make_resolver(dict_set: DictionarySet | None) -> Callable[[str, str], str | 
     dict's persisted `seq` first (`DictionarySet.card_for`), else jamdict (`lookup.card_for`). A
     non-JMdict dict's seq never surfaces as an id (the `_looks_like_jmdict` gate lives inside
     `card_for`), so it's never duplicated here."""
-    from overlay.app import lookup
-    from overlay.app.tokenize import Token
+    from saitenka.app import lookup
+    from saitenka.app.tokenize import Token
 
     def resolve(term: str, reading: str) -> str | None:
         if not term:
@@ -179,8 +179,8 @@ def make_resolver(dict_set: DictionarySet | None) -> Callable[[str, str], str | 
 def _build_dict_set(cfg: dict) -> DictionarySet | None:
     """The configured definition dictionaries as a `DictionarySet` (id source when JMdict-derived +
     `persist_seq`), or None when none are imported — then resolution falls back to jamdict only."""
-    from overlay.app.dictdb import DictionaryDb
-    from overlay.app.dictionary import DictionarySet
+    from saitenka.app.dictdb import DictionaryDb
+    from saitenka.app.dictionary import DictionarySet
 
     titles = list(cfg.get("dicts") or [])
     if not titles:
@@ -233,9 +233,9 @@ def _apply_writes(
 
 
 def _run(args: argparse.Namespace) -> int:
-    from overlay.app.anki import ANKI_DOWN_ERRORS, Anki
-    from overlay.app.config import load_config
-    from overlay.app.reader_deps import _mine_config_from
+    from saitenka.app.anki import ANKI_DOWN_ERRORS, Anki
+    from saitenka.app.config import load_config
+    from saitenka.app.reader_deps import _mine_config_from
 
     cfg = load_config()
     deck = args.deck or _mine_config_from(cfg.get("mine") or {}).deck

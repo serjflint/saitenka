@@ -96,7 +96,7 @@ def _launch_update(repo_root: Path, repowise_dir: Path) -> None:
     log = (repowise_dir / "refresh.log").open("a")
     subprocess.Popen(
         ["uv", "run", "poe", "repowise-doc-update"],
-        cwd=repo_root / "overlay",
+        cwd=repo_root,
         stdout=log,
         stderr=log,
         stdin=subprocess.DEVNULL,

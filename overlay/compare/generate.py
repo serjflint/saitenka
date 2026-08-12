@@ -4,7 +4,7 @@ For each case in ``cases.py``: render OUR tooltip from the real configured dicti
 SubMiner tooltip from its reference screenshot, and compose them side-by-side (+ a contact sheet).
 SubMiner isn't changing, so its side is a fixed reference; ours re-renders each run.
 
-    cd overlay && uv run python compare/generate.py
+    uv run python overlay/compare/generate.py
 """
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from cases import CASES  # noqa: E402
-from overlay.app.config import expand_paths, load_config  # noqa: E402
-from overlay.app.dictionary import DictionarySet  # noqa: E402
-from overlay.app.tokenize import Token  # noqa: E402
-from overlay.panel import render_panel  # noqa: E402
 
-from overlay import fonts  # noqa: E402
+from saitenka import fonts  # noqa: E402
+from saitenka.app.config import expand_paths, load_config  # noqa: E402
+from saitenka.app.dictionary import DictionarySet  # noqa: E402
+from saitenka.app.tokenize import Token  # noqa: E402
+from saitenka.panel import render_panel  # noqa: E402
 
 REFS = HERE / "refs"
 OUT = HERE / "out"

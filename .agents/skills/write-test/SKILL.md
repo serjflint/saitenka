@@ -4,7 +4,7 @@ description: >-
   Author a new pytest test for the Saitenka overlay the house way — pick the test
   tier, decide real-vs-fake at each boundary, construct-vs-fixture, and the assertion
   ladder, then write it against the real fakes. Use when adding or rewriting a test
-  under overlay/tests: "write a test for", "add a test", "cover this", "test build_note
+  under tests/: "write a test for", "add a test", "cover this", "test build_note
   / the IPC path / mining / the tokenizer". Encodes the AGENTS.md "Testing" invariants
   as a step procedure and points at the canonical example tests. NOT for running the
   suite or the pre-push gate (use `poe test` / the dev-gate skill); NOT for
@@ -16,7 +16,7 @@ metadata:
 
 # write-test
 
-Procedure for writing a **new** test in `overlay/tests/`. The *invariants* live in
+Procedure for writing a **new** test in `tests/`. The *invariants* live in
 `saitenka/AGENTS.md` → "## Testing"; this skill is the *how*. Match the surrounding
 file's style — read a sibling test first.
 

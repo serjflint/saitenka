@@ -1,0 +1,35 @@
+id: subprocess-utf8-encoding
+language: python
+severity: error
+message: >-
+  subprocess text mode (text=True / universal_newlines=True) without encoding="utf-8" decodes child
+  output with the OS locale codec (cp932/cp1252 on non-UTF-8 Windows) — Japanese ffprobe stream tags /
+  filenames then mojibake or raise. Pass encoding="utf-8" explicitly (the subprocess sibling of PLW1514).
+note: >-
+  Files are already guarded by ruff PLW1514; subprocess has no such rule, so this closes the same
+  Windows-locale bug class for spawned tools (ffprobe/ffmpeg/mpv/pgrep).
+files:
+  - "src/saitenka/**/*.py"
+rule:
+  all:
+    - any:
+        - pattern: subprocess.run($$$)
+        - pattern: subprocess.Popen($$$)
+        - pattern: subprocess.check_output($$$)
+        - pattern: subprocess.check_call($$$)
+        - pattern: subprocess.call($$$)
+    - has:
+        stopBy: end
+        any:
+          - pattern:
+              context: f(text=True)
+              selector: keyword_argument
+          - pattern:
+              context: f(universal_newlines=True)
+              selector: keyword_argument
+    - not:
+        has:
+          stopBy: end
+          pattern:
+            context: f(encoding=$ENC)
+            selector: keyword_argument

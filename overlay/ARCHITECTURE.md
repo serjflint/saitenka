@@ -15,6 +15,9 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 
 ## Module map
 
+All shipped Python lives under one import namespace, `src/saitenka/`. The directories below are
+internal modules with explicit dependency contracts, not independently published distributions.
+
 - **`sc/`** — Yomitan `structured-content` model and parsing (the input format). Kept PIL-agnostic
   (enforced by `.importlinter`).
 - **`render/`** — layout/flow: the text walker, ruby positioning, line wrapping, panel chrome.
@@ -33,6 +36,10 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
   fallback on a GIL build. Sub-interpreters are out (PIL's C extension segfaults across them).
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
+- **`subtitles/`** — the pure subtitle seam: immutable cues, SRT/ASS/VTT parsing, and cue navigation.
+  It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
+  file-loading adapter. The corpus and differential checks therefore exercise the stable surface
+  without constructing a `Reader`.
 - **`app/`** — the application layer. `controller.py`'s `Reader` is the main-loop orchestrator
   (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin

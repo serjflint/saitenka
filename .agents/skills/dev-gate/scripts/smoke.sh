@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Structural rot-guard; overlay/pyproject.toml remains the sole task-list authority.
+# Structural rot-guard; pyproject.toml remains the sole task-list authority.
 set -euo pipefail
 
 skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -8,7 +8,7 @@ repo_dir="$(CDPATH='' cd -- "$skill_dir/../../.." && pwd)"
 test -f "$skill_dir/SKILL.md"
 test -f "$skill_dir/agents/openai.yaml"
 
-uv run python - "$repo_dir/overlay/pyproject.toml" <<'PY'
+uv run python - "$repo_dir/pyproject.toml" <<'PY'
 import sys
 import tomllib
 

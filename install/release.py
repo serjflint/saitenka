@@ -17,7 +17,7 @@ resolve from ``__file__``.
 Distribution is **PyPI** (`uv tool install "saitenka[full]"`) plus the hosted install scripts
 (`serjflint.github.io/saitenka`, see `poe pages`); a release is a git tag + a notes-only GitHub
 Release. This script builds and smoke-tests the wheel but does NOT upload it — publish the built wheel
-to PyPI yourself with ``cd overlay && uv publish`` (needs your token; irreversible).
+to PyPI yourself with ``uv publish`` (needs your token; irreversible).
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OVERLAY_DIR = REPO_ROOT / "overlay"
-PYPROJECT = OVERLAY_DIR / "pyproject.toml"
+OVERLAY_DIR = REPO_ROOT
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 DEFAULT_NOTES = REPO_ROOT / "RELEASE_NOTES.md"
 
@@ -307,7 +307,7 @@ def cmd_publish(args: PublishArgs) -> int:
         )
     # PyPI is the install channel — this is what makes `uv tool install`/`curl … | sh` see the new
     # version. Manual on purpose (needs your token, irreversible):
-    print(f"\nUpload the wheel to PyPI:\n  (cd overlay && uv publish)   # built: {wheel.name}")
+    print(f"\nUpload the wheel to PyPI:\n  uv publish   # built: {wheel.name}")
     return 0
 
 
@@ -340,7 +340,7 @@ def main() -> int:
     )
 
     q = sub.add_parser("publish", help="tag, build, draft-release, optionally publish (post-merge)")
-    q.add_argument("--version", help="defaults to overlay/pyproject.toml's current version")
+    q.add_argument("--version", help="defaults to pyproject.toml's current version")
     q.add_argument(
         "--publish", action="store_true", help="flip the draft live (default: leave as draft)"
     )

@@ -47,11 +47,11 @@ EMBED_MODEL = "qwen3-embedding-4b"
 #: overwrites them; `restore` puts them back keeping the current page id and
 #: source hash. See the Basic Memory note "Repowise local indexing".
 CORRECTIONS = (
-    "module_page:overlay/src/overlay",
+    "module_page:src/saitenka",
     "onboarding:onboarding/getting_started",
     "onboarding:onboarding/how_it_works",
     "onboarding:onboarding/key_concepts",
-    "file_page:overlay/src/overlay/app/controller.py",
+    "file_page:src/saitenka/app/controller.py",
 )
 
 

@@ -7,8 +7,7 @@ timestamps in the Nippon Sangoku episode. SubMiner isn't changing, so its side i
 ## Generate the side-by-sides
 
 ```bash
-cd overlay
-uv run python compare/generate.py     # → compare/out/<word>.png + _sheet.png
+uv run python overlay/compare/generate.py     # → overlay/compare/out/<word>.png + _sheet.png
 ```
 
 Needs `~/.config/saitenka/overlay.toml` pointing at your dictionaries (see `overlay.example.toml`).
@@ -24,8 +23,8 @@ Skipped automatically when the (large, out-of-repo) dictionaries aren't present.
 
 ## Add a case
 
-1. Screenshot SubMiner's popup for a word → save as `refs/<name>_subminer.jpeg`.
-2. Add a row to `cases.py`: the word, its surface/reading/lemma/pos, the subtitle line + timestamp,
+1. Screenshot SubMiner's popup for a word → save as `overlay/compare/refs/<name>_subminer.jpeg`.
+2. Add a row to `overlay/compare/cases.py`: the word, its surface/reading/lemma/pos, the subtitle line + timestamp,
    the ref filename, and a `crop` (x0,y0,x1,y1 as fractions of the ref) isolating the popup.
 
 ## Live Yomitan reference (recommended)
@@ -45,8 +44,8 @@ cp -R ~/.config/SubMiner/IndexedDB/chrome-extension_${EXT}_0.indexeddb.* /tmp/yo
 cp -R ~/.config/SubMiner/"Local Extension Settings"/$EXT "/tmp/yomitan-profile/Default/Local Extension Settings/"
 
 # render Yomitan for the surface forms, then compose
-uv run python compare/yomitan_capture.py 本命 聞こえてた 預けた
-uv run python compare/generate.py
+uv run python overlay/compare/yomitan_capture.py 本命 聞こえてた 預けた
+uv run python overlay/compare/generate.py
 ```
 
 Notes: query the **surface** form (聞こえてた) so Yomitan deinflects it and shows the 🧩 chain. The

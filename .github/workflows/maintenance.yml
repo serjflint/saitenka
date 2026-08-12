@@ -35,10 +35,8 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-          working-directory: overlay
 
       - name: Sync (free-threaded 3.14t, full extras)
-        working-directory: overlay
         run: |
           uv python install
           uv sync --locked --extra full
@@ -46,20 +44,17 @@ jobs:
       # External URL integrity — the network crawl `poe all` runs only offline (`links`). Rot here is a
       # doc-maintenance signal, not a build break.
       - name: Links (network)
-        working-directory: overlay
         continue-on-error: true
         run: uv run poe links-net
 
       # Second-opinion CVE scan over the pinned graph (PyPA + OSV) — new advisories land against a frozen
       # lockfile, so this only bites on a schedule, never on the unchanged-deps PR.
       - name: Dependency CVE audit
-        working-directory: overlay
         continue-on-error: true
         run: uv run poe pip-audit
 
       # Cross-module dead code + copy-paste. Advisory (surfaces real findings today), so it reports here
       # instead of blocking every PR.
       - name: Hygiene (deadcode + dup)
-        working-directory: overlay
         continue-on-error: true
         run: uv run poe hygiene

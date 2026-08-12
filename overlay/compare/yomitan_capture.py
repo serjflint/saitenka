@@ -13,7 +13,7 @@ locked, so copy it while it's fine to read:
     cp -R ~/.config/SubMiner/IndexedDB/chrome-extension_${EXT}_0.indexeddb.* /tmp/yomitan-profile/Default/IndexedDB/
     cp -R ~/.config/SubMiner/"Local Extension Settings"/$EXT "/tmp/yomitan-profile/Default/Local Extension Settings/"
 
-    cd overlay && uv run python compare/yomitan_capture.py 本命 聞こえる 預ける
+    uv run python overlay/compare/yomitan_capture.py 本命 聞こえる 預ける
 """
 
 from __future__ import annotations

@@ -140,7 +140,7 @@ mod tests {
     // dropped glyph) is font-independent. Ported in spirit from resvg's text reference tests, which
     // likewise assert a `<text>` node produces coverage when a matching font is present.
     const TEST_FONT: &[u8] =
-        include_bytes!("../../overlay/src/overlay/assets/fonts/NotoSans.ttf");
+        include_bytes!("../../src/saitenka/assets/fonts/NotoSans.ttf");
     const TEXT_SVG: &[u8] = br#"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'>
         <text x='10' y='90' font-family='sans-serif' font-size='100' fill='black'>A</text></svg>"#;
     const BOXED_TEXT_SVG: &[u8] = br#"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'>

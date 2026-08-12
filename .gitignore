@@ -14,7 +14,7 @@ __pycache__/
 crash-*
 timeout-*
 oom-*
-overlay/tools/fuzz/corpus/
+tools/fuzz/corpus/
 
 # tooling caches
 .pytest_cache/

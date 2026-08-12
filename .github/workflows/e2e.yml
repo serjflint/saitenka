@@ -43,10 +43,8 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-          working-directory: overlay
 
       - name: Sync
-        working-directory: overlay
         run: |
           uv python install
           uv sync --locked --extra full
@@ -54,7 +52,6 @@ jobs:
       # Real per-OS boundary, no GUI: integration (real socket/subprocess) + windows_sim executing on
       # the real kernel. This is the leg that catches the named-pipe / Scripts-vs-bin class Linux can't.
       - name: Real-boundary + per-OS suite
-        working-directory: overlay
         run: uv run --extra full pytest -q -m "not (slow or requires_display or e2e or live)"
 
       # Linux only: real mpv window under Xvfb — the L3 live smoke (mouse-pos → OSD coord mapping).
@@ -67,14 +64,12 @@ jobs:
       # way the local task does rather than a `-m` expression (which would match zero tests).
       - name: GUI tier (Linux/Xvfb, real mpv)
         if: runner.os == 'Linux'
-        working-directory: overlay
         run: xvfb-run -a uv run poe smoke-live
 
       # Live-mpv jank harness (#32/#33): poll mpv's own frame-drop counters while driving the overlay —
       # the true real-time signal. `poe jank-live` fails past --max-drops (catastrophic-jank gate).
       - name: Live jank harness (Linux/Xvfb, real mpv)
         if: runner.os == 'Linux'
-        working-directory: overlay
         run: xvfb-run -a uv run poe jank-live
 
       # Track the jank totals on the SAME gh-pages dashboard as the render bench (second series). Only
@@ -85,7 +80,7 @@ jobs:
         with:
           name: Saitenka live jank
           tool: customSmallerIsBetter
-          output-file-path: overlay/jank-bench.json
+          output-file-path: jank-bench.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           gh-pages-branch: gh-pages
@@ -114,7 +109,6 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-          working-directory: overlay
 
       - run: uv python install
 
@@ -125,7 +119,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mpv ffmpeg
 
       - name: Install-smoke (pypi on tag, local wheel otherwise)
-        working-directory: overlay
         run: >-
           uv run poe install-smoke
           --source ${{ startsWith(github.ref, 'refs/tags/v') && 'pypi' || 'wheel' }}
@@ -144,16 +137,13 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
-          working-directory: overlay
 
       - name: Sync
-        working-directory: overlay
         run: |
           uv python install
           uv sync --locked --extra full
 
       - name: Windows regressions
-        working-directory: overlay
         run: >-
           uv run pytest -q
           tests/test_plugin.py

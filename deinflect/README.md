@@ -19,7 +19,7 @@ uv pip install ./deinflect
 ```
 
 With it installed, the overlay picks it up automatically (`saitenka_deinflect`); without it,
-`overlay.app.dictionary` falls back to an empty chain.
+`saitenka.app.dictionary` falls back to an empty chain.
 
 ## API
 

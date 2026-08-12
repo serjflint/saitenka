@@ -1,0 +1,146 @@
+"""Episode analysis runs off-thread and its overlay never mutates playback."""
+
+from saitenka.app import analysis_overlay
+from saitenka.app.bindings import ANALYSIS_MSG
+from saitenka.app.controller import Reader
+from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.scoring import Scorer
+from saitenka.app.wordlists import KnownWords
+from saitenka.render.analysis import render_analysis
+from saitenka.subtitles import Cue, CueIndex
+
+
+class FakeIPC:
+    def __init__(self):
+        self.commands: list[tuple] = []
+
+    def command(self, *args):
+        self.commands.append(args)
+        return {"data": None}
+
+
+def _reader() -> Reader:
+    reader = Reader(FakeIPC(), scorer=Scorer(known=KnownWords.from_set(["本"])))
+    reader.jp_sid = 1
+    reader.subtitle_language = "jp"
+    reader._sub_index = CueIndex([Cue(0, 1, "私は本を読む。")])
+    return reader
+
+
+def _finish(reader: Reader) -> None:
+    reader.analysis.threads[-1].join(timeout=2)
+    assert not reader.analysis.threads[-1].is_alive()
+    analysis_overlay.apply_results(reader)
+
+
+def test_toggle_shows_analyzing_then_result_without_pause_or_seek():
+    reader = _reader()
+
+    reader._handle(ANALYSIS_MSG)
+    assert reader.analysis.status == "Analyzing…"
+    _finish(reader)
+
+    assert reader.analysis.current is not None
+    assert reader.analysis.status == "Ready"
+    assert OverlayId.ANALYSIS in reader.ov._live
+    forbidden = {"sub-seek", "seek"}
+    assert not any(command and command[0] in forbidden for command in reader.ipc.commands)
+    assert not any(command[:2] == ("set_property", "pause") for command in reader.ipc.commands)
+
+    reader._handle(ANALYSIS_MSG)
+    assert OverlayId.ANALYSIS not in reader.ov._live
+
+
+def test_external_srt_without_mpv_sid_is_still_analyzable():
+    # Regression: JP subs from an external / extracted / jimaku .srt carry no mpv jp_sid, but _sub_index
+    # holds the cues we render AND analyse — so analysis must run, not report "Japanese track unavailable".
+    reader = _reader()
+    reader.jp_sid = None  # external index → no embedded-track sid
+
+    reader._handle(ANALYSIS_MSG)
+    assert reader.analysis.status == "Analyzing…"
+    _finish(reader)
+    assert reader.analysis.status == "Ready"
+    assert reader.analysis.current is not None
+
+
+def test_no_index_reports_unavailable():
+    reader = _reader()
+    reader._sub_index = None  # the real SSOT for "no analysable JP cues"
+
+    reader._handle(ANALYSIS_MSG)
+    assert reader.analysis.status == "Japanese track unavailable"
+    assert not reader.analysis.threads  # no worker spawned
+
+
+def test_cache_hit_does_not_start_another_worker():
+    reader = _reader()
+    analysis_overlay.toggle(reader)
+    _finish(reader)
+    workers = len(reader.analysis.threads)
+
+    analysis_overlay.toggle(reader)
+    analysis_overlay.toggle(reader)
+
+    assert len(reader.analysis.threads) == workers
+    assert reader.analysis.current is not None
+
+
+def test_track_analysis_completes_while_overlay_is_closed():
+    reader = _reader()
+
+    analysis_overlay.on_index_changed(reader)
+    _finish(reader)
+
+    assert reader.analysis.current is not None
+    assert not reader.analysis.open
+    assert OverlayId.ANALYSIS not in reader.ov._live
+
+
+def test_dependency_loading_defers_analysis_until_vocabulary_arrives():
+    reader = _reader()
+    reader._loading = True
+
+    analysis_overlay.on_index_changed(reader)
+    assert not reader.analysis.threads
+
+    reader._loading = False
+    analysis_overlay.on_vocabulary_changed(reader)
+    _finish(reader)
+    assert reader.analysis.current is not None
+
+
+def test_vocabulary_and_track_changes_invalidate_and_restart():
+    reader = _reader()
+    analysis_overlay.toggle(reader)
+    _finish(reader)
+
+    analysis_overlay.on_vocabulary_changed(reader)
+    assert reader.analysis.status == "Analyzing…"
+    assert len(reader.analysis.threads) == 2
+    _finish(reader)
+
+    reader._sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
+    analysis_overlay.on_index_changed(reader)
+    assert len(reader.analysis.threads) == 3
+    _finish(reader)
+    assert analysis_overlay.cue_result(reader, 0) is not None
+
+
+def test_english_or_missing_japanese_track_is_unavailable():
+    reader = _reader()
+    reader.subtitle_language = "en"
+
+    analysis_overlay.toggle(reader)
+
+    assert reader.analysis.status == "Japanese track unavailable"
+    assert reader.analysis.current is None
+    assert not reader.analysis.threads
+
+
+def test_ui_scale_enlarges_episode_analysis_window():
+    normal = render_analysis(None, "Analyzing…", osd=(1920, 1080), close_key="`")
+    enlarged = render_analysis(None, "Analyzing…", osd=(1920, 1080), close_key="`", scale=1.5)
+
+    assert enlarged.width > normal.width
+    assert enlarged.height > normal.height

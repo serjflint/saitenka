@@ -65,7 +65,7 @@ scripts declare deps via PEP 723 inline metadata.
   via AnkiConnect; FSRS state (`s`/`d`) is in `cards.data`.
 - **LLMs:** optional, **local-first**, and **grounded (RAG)** — operate on provided authoritative sources,
   never parametric facts (readings/pitch stay from dictionaries).
-- **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `overlay/`
+- **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `tests/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
 - **Visual config stays visual.** Config that's purely look-and-feel (a display toggle) must never gate
   behavior or identity (what gets looked up/cached, how a build is labeled) — thread real intent through
@@ -76,14 +76,9 @@ scripts declare deps via PEP 723 inline metadata.
 - **Dev gate:** `uv run poe all` is the pre-push gate (CI mirrors it — `.github/workflows/ci.yml`);
   `poe pre-release` is the pre-tag superset. Task definitions are `[tool.poe.tasks]` (SSOT); how to read
   each failure, the advisory tiers, and the free-threaded / 3.13-pinned-env traps → the **dev-gate skill**
-  (`.agents/skills/dev-gate/`). Every task name resolves from either directory; which file *defines*
-  it is a question about its environment, not its scope — `overlay/pyproject.toml` when it needs
-  overlay's env (pytest, the overlay runtime), the repo root when it needs only ruff/complexipy or a
-  standalone binary. Each file aliases the other's group, so a repo-wide task never round-trips through
-  overlay to come back. Ruff / complexipy / the type-checkers are configured ONCE at the
-  repo-root `pyproject.toml` (SSOT) and run repo-wide (overlay + deinflect + taffylite + tools + install
-  + .agents); overlay/`pyproject.toml` keeps the overlay-scoped contracts (deptry, import-linter) and
-  `types`, which must import overlay's runtime deps to check anything.
+  (`.agents/skills/dev-gate/`). The repo-root `pyproject.toml` is the package, environment, task, and
+  tool-configuration SSOT; its gates run repo-wide (`src/saitenka` + extracted packages + tools +
+  install + `.agents`).
   Standing constraints while editing (don't relitigate): `lint` is an
   **explicit** ruff select (never `ALL`, bandit `S` folded in) — justify each `# noqa`/`ignore`;
   `complexity` is ratcheted against `complexipy-snapshot.json` (never regenerate to silence a
@@ -204,7 +199,7 @@ Consult it when adding or rewriting a test.
   matrix via `.agents/hooks/test_kinds.py`) surfaces the applicable kinds once per subsystem — a nudge,
   not a gate (adequacy stays the Grow/Sharpen/mutation loops' job).
 - **A stolen conformance corpus has a locked denominator.** A vendored upstream suite used as an oracle
-  (UAX #14, deinflect, subtitle) must not silently shrink: `poe corpus-lock` (`tools/corpus_check.py`, in
+  (UAX #14, deinflect) must not silently shrink: `poe corpus-lock` (`tools/corpus_check.py`, in
   `all`) binds each corpus's case census (count + key-set hash) to a committed manifest, so a re-vendor /
   re-gen that drops or mutates cases fails until the manifest is **deliberately re-blessed**
   (`python tools/corpus_check.py show`) — same discipline as a golden re-bless.
