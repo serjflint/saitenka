@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786511930082,
+  "lastUpdate": 1786556211292,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4067,6 +4067,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.572,
             "range": "±2.6%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e15bb3a1a49f0ae4983e7fd77af698719f823375",
+          "message": "fix: preserve nested dictionary structure (#328)",
+          "timestamp": "2026-08-12T20:36:12+03:00",
+          "tree_id": "23d345e8f0a93b47899e79e9904a444f23076054",
+          "url": "https://github.com/serjflint/saitenka/commit/e15bb3a1a49f0ae4983e7fd77af698719f823375"
+        },
+        "date": 1786556210075,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.656,
+            "range": "±0.8%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 10.043,
+            "range": "±1.3%",
             "unit": "ms"
           }
         ]
