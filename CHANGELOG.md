@@ -9,6 +9,9 @@ logs.
 
 ### Fixed
 
+- **Structured Jitendex entries keep their document shape.** Nested senses, examples, translations,
+  cross-references, forms, and attribution now render on separate lines with the dictionary's own list
+  markers instead of being glued into one paragraph.
 - **Episode re-slotting now distinguishes identical filenames in different folders.** Moving between
   seasons that both contain `Episode.mkv` no longer leaves the overlay attached to the previous file.
 

@@ -52,6 +52,7 @@ _BOX_KEYS = frozenset(
 
 INLINE_TAGS = {"span", "a", "em", "strong", "b", "i", "u", "code", "ruby", "rt", "rb", "sub", "sup"}
 BLOCK_TAGS = {"div", "p", "ul", "ol", "li", "details", "summary", "table", "tr", "td", "th"}
+_LI_BLOCK_TAGS = {"div", "p", "details", "summary", "table"}
 
 _TABLE_SEP: RGBA = (150, 150, 150, 255)  # muted vertical bar between cells — reads as a divider
 
@@ -210,6 +211,26 @@ def _is_boxed(node: dict) -> bool:
     return not _BOX_KEYS.isdisjoint(st)
 
 
+def _list_marker(list_node: dict, item: dict) -> str | None:
+    """Literal Yomitan ``listStyleType`` marker, ``""`` for none, or None for our default."""
+    item_style = item.get("style")
+    list_style = list_node.get("style")
+    item_style = item_style if isinstance(item_style, dict) else {}
+    list_style = list_style if isinstance(list_style, dict) else {}
+    value = item_style.get("listStyleType", list_style.get("listStyleType"))
+    data = list_node.get("data")
+    if value is None and isinstance(data, dict) and data.get("content") == "glossary":
+        return ""  # Jitendex's stylesheet makes semantic glossary lists markerless
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.lower() == "none":
+        return ""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return None
+
+
 _tls = threading.local()  # per-walk _text_of memo (see walk()); thread-local so prefetch workers
 # don't share, and id()-keyed so it MUST NOT outlive the tree it indexes.
 
@@ -364,11 +385,12 @@ class _Walker:
             # inline style-carrying / unknown tag → recurse
             self._emit_inline(node.get("content"), _apply_style(node, style))
 
-    def _emit_table(self, node: dict, style: Style) -> None:
+    def _emit_table(self, node: dict, style: Style, indent: int) -> None:
         # Minimal grid: each row on its own line, cells joined by a muted │. NOT column-aligned (a
         # proportional font has no tab stops — true alignment needs the layout engine); but rows +
         # cell dividers turn the old flattened blob into something readable. Header cells (th) bold.
         self._flush()
+        self.cur = Block(indent=indent)
         rows = _table_rows(node)
         sep_style = style.with_(color=_TABLE_SEP)
         for ri, tr in enumerate(rows):
@@ -382,6 +404,7 @@ class _Walker:
             if ri < len(rows) - 1:
                 self.cur.flow.append(Span("\n", style))  # row break (flow force-breaks on \n)
         self._flush()
+        self.cur = Block(indent=indent)
 
     def _walk_list(self, node: dict, style: Style, indent: int) -> None:
         self._flush()
@@ -392,7 +415,11 @@ class _Walker:
         for child in items:
             if isinstance(child, dict) and child.get("tag") == "li":
                 self.cur = Block(
-                    kind="list-item", list_type=list_type, ordinal=ordinal, indent=indent
+                    kind="list-item",
+                    list_type=list_type,
+                    ordinal=ordinal,
+                    marker=_list_marker(node, child),
+                    indent=indent,
                 )
                 self._emit_li(child.get("content"), _apply_style(child, style), indent)
                 self._flush()
@@ -400,20 +427,66 @@ class _Walker:
         self.cur = Block(indent=indent)
 
     def _emit_li(self, node, style: Style, indent: int) -> None:
-        # A list item may itself contain nested block content; keep it inline for now unless it has
-        # a nested list, which we split into following list-item blocks.
-        if isinstance(node, dict) and node.get("tag") in {"ul", "ol"}:
-            self._walk_list(node, style, indent + 1)
-            return
-        if isinstance(node, list):
-            for n in node:
-                if isinstance(n, dict) and n.get("tag") in {"ul", "ol"}:
-                    self._flush()
-                    self._walk_list(n, style, indent + 1)
-                else:
-                    self._emit_inline(n, style)
-            return
-        self._emit_inline(node, style)
+        items = node if isinstance(node, list) else [node]
+        parent = self.cur
+        marker_pending = True
+        for child in items:
+            tag = child.get("tag") if isinstance(child, dict) else None
+            if tag in {"ul", "ol"}:
+                marker_pending = self._emit_li_list(
+                    child, style, indent, parent, marker_pending=marker_pending
+                )
+            elif tag in _LI_BLOCK_TAGS:
+                marker_pending = self._emit_li_block(
+                    child, style, indent, parent, marker_pending=marker_pending
+                )
+            else:
+                self._emit_inline(child, style)
+
+    def _place_parent_marker(self, parent: Block, start: int, style: Style) -> bool:
+        if len(self.blocks) <= start:
+            return False
+        first = self.blocks[start]
+        if first.kind == "list-item" and first.marker == "":
+            for block in self.blocks[start:]:
+                block.indent = max(parent.indent, block.indent - 1)
+        if first.kind != "list-item" or first.marker == "":
+            first.kind = parent.kind
+            first.list_type = parent.list_type
+            first.ordinal = parent.ordinal
+            first.marker = parent.marker
+            first.indent = parent.indent
+        elif parent.marker != "":
+            parent.flow.append(Span("\N{NO-BREAK SPACE}", style))
+            self.blocks.insert(start, parent)
+        return True
+
+    def _emit_li_list(
+        self, node: dict, style: Style, indent: int, parent: Block, *, marker_pending: bool
+    ) -> bool:
+        if not self.cur.is_empty():
+            self._flush()
+            marker_pending = False
+        start = len(self.blocks)
+        self._walk_list(node, style, indent + 1)
+        if marker_pending and self._place_parent_marker(parent, start, style):
+            marker_pending = False
+        self.cur = parent if marker_pending else Block(indent=indent + 1)
+        return marker_pending
+
+    def _emit_li_block(
+        self, node: dict, style: Style, indent: int, parent: Block, *, marker_pending: bool
+    ) -> bool:
+        if not self.cur.is_empty():
+            self._flush()
+            marker_pending = False
+        self.cur = Block(indent=indent + 1)
+        start = len(self.blocks)
+        self._walk_block(node, style, indent + 1)
+        if marker_pending and self._place_parent_marker(parent, start, style):
+            marker_pending = False
+        self.cur = parent if marker_pending else Block(indent=indent + 1)
+        return marker_pending
 
     def walk(self, node) -> list[Block]:
         self._walk_block(node, self.base, 0)
@@ -431,12 +504,14 @@ class _Walker:
                 self._walk_list(node, style, indent)
                 return
             if tag == "table":
-                self._emit_table(node, style)
+                self._emit_table(node, style, indent)
                 return
             if tag in {"div", "p", "details", "summary"}:
                 self._flush()
+                self.cur = Block(indent=indent)
                 self._walk_block(node.get("content"), _apply_style(node, style), indent)
                 self._flush()
+                self.cur = Block(indent=indent)
                 return
             # inline or unknown at block level → treat as inline in current paragraph
             self._emit_inline(node, style)

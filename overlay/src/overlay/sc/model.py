@@ -20,6 +20,7 @@ class Block:
     list_type: str | None = None  # 'ul' | 'ol' when kind == 'list-item'
     ordinal: int | None = None  # 1-based index for ordered lists
     indent: int = 0  # nesting depth (list nesting)
+    marker: str | None = None  # explicit marker; "" suppresses, None uses the list default
 
     def is_empty(self) -> bool:
         return not self.flow

@@ -1,0 +1,99 @@
+{
+  "type": "structured-content",
+  "content": [
+    {
+      "tag": "ul",
+      "style": {"listStyleType": "\"＊\""},
+      "content": [
+        {
+          "tag": "li",
+          "content": [
+            {
+              "tag": "span",
+              "style": {
+                "backgroundColor": "#565656",
+                "color": "white",
+                "borderRadius": "0.3em"
+              },
+              "content": "noun"
+            },
+            {
+              "tag": "ol",
+              "content": [
+                {
+                  "tag": "li",
+                  "style": {"listStyleType": "\"①\""},
+                  "content": [
+                    {
+                      "tag": "ul",
+                      "style": {"listStyleType": "none"},
+                      "content": {"tag": "li", "content": "bird"}
+                    },
+                    {
+                      "tag": "div",
+                      "data": {"content": "example-sentence"},
+                      "content": [
+                        {
+                          "tag": "div",
+                          "data": {"content": "example-sentence-a"},
+                          "content": [
+                            {"tag": "ruby", "content": ["鳥", {"tag": "rt", "content": "とり"}]},
+                            "が鳴いた。"
+                          ]
+                        },
+                        {
+                          "tag": "div",
+                          "data": {"content": "example-sentence-b"},
+                          "content": "A bird sang."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "tag": "li",
+                  "style": {"listStyleType": "\"②\""},
+                  "content": [
+                    {
+                      "tag": "ul",
+                      "data": {"content": "glossary"},
+                      "content": [
+                        {"tag": "li", "content": "bird meat"},
+                        {"tag": "li", "content": "fowl"},
+                        {"tag": "li", "content": "poultry"}
+                      ]
+                    },
+                    {
+                      "tag": "div",
+                      "data": {"content": "xref"},
+                      "content": [
+                        "See: ",
+                        {
+                          "tag": "a",
+                          "href": "?query=鶏",
+                          "content": {
+                            "tag": "ruby",
+                            "content": ["鶏", {"tag": "rt", "content": "にわとり"}]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tag": "div",
+      "data": {"content": "attribution"},
+      "content": {
+        "tag": "a",
+        "href": "https://www.edrdg.org/",
+        "content": "JMdict"
+      }
+    }
+  ]
+}
