@@ -17,6 +17,30 @@ DEINFLECT_FORM_CAP = 24
 JP_LANGS = frozenset({"jp", "ja"})
 
 
+def glossary_to_nodes(glossary: list) -> list:
+    """Normalize Yomitan glossary item envelopes into renderer nodes."""
+    wrap = len(glossary) > 1
+    nodes: list = []
+    for item in glossary:
+        node: object
+        if isinstance(item, str):
+            node = item
+        elif isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type == "structured-content":
+                node = item.get("content")
+            elif item_type == "text":
+                node = item.get("text", "")
+            elif item_type == "image":
+                node = {"tag": "img", "path": item.get("path", "")}
+            else:
+                node = item
+        else:
+            continue
+        nodes.append({"tag": "div", "content": node} if wrap else node)
+    return nodes
+
+
 def to_glob(pattern: str) -> str:
     return pattern.replace("＊", "*").replace("？", "?")
 
