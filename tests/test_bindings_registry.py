@@ -4,7 +4,7 @@ mode) as a *class*, not a single case: registration must not gate on an async-lo
 message must round-trip binding ↔ handler.
 
 The firing tests use ``util.press`` — a synthetic mpv ``client-message`` driven through the REAL
-``_drain_events`` → ``_handle`` → ``_HANDLERS`` chain — so they assert a keypress *runs* its action, not
+``_drain_events`` → ``_handle`` → command router chain — so they assert a keypress *runs* its action, not
 merely that saitenka *sent* the bind string (the seam a plain FakeIPC can't cross)."""
 
 from __future__ import annotations
@@ -64,14 +64,14 @@ def test_binding_messages_and_handlers_correspond_exactly():
     slips through. Assert the sets agree both ways so "defined but never wired" (either direction) is
     a red test."""
     binding_msgs = {b.message for b in BINDINGS if b.source == "saitenka" and b.message is not None}
-    handler_msgs = set(Reader._HANDLERS)
+    handler_msgs = set(Reader(FakeIPC()).commands.names())
 
     unhandled = binding_msgs - handler_msgs
     assert not unhandled, (
-        f"binding messages with no _HANDLERS entry (a key that no-ops): {unhandled}"
+        f"binding messages with no command handler (a key that no-ops): {unhandled}"
     )
     orphan = handler_msgs - binding_msgs
-    assert not orphan, f"_HANDLERS entries no binding can reach (dead handler / message): {orphan}"
+    assert not orphan, f"command handlers no binding can reach (dead handler / message): {orphan}"
 
 
 # --- firing: a press actually runs the bound action -----------------------------------------------
@@ -79,7 +79,7 @@ def test_binding_messages_and_handlers_correspond_exactly():
 
 def test_press_runs_a_real_handler_through_the_event_loop(monkeypatch):
     """End-to-end proof the firing seam works on a REAL, unstubbed handler: F1 → toggle_help →
-    open_help flips _help_open. Exercises client-message → _drain_events → _handle → _HANDLERS with a
+    open_help flips _help_open. Exercises client-message → _drain_events → _handle → router with a
     genuine state mutation, not a spy."""
     ipc = FakeIPC()
     r = Reader(ipc)

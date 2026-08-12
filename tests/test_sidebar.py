@@ -163,7 +163,7 @@ def test_sidebar_bookmark_and_keybind_route_to_the_same_flow(monkeypatch):
     invoked = []
     monkeypatch.setattr(reader, "toggle_bookmark", lambda: invoked.append("toggle"))
 
-    Reader._HANDLERS[BOOKMARK_MSG](reader)  # the Alt+b path
+    reader._handle(BOOKMARK_MSG)  # the Alt+b path
     reader.sidebar.open = True
     reader.sidebar.rect = (100, 100, 400, 500)
     reader.sidebar.hits = (SidebarHitBox("bookmark", 3, 0, 0, 40, 40),)

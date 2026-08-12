@@ -14,7 +14,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app import (
@@ -98,6 +98,7 @@ from saitenka.app.reader_context import (
     RenderCacheState,
     SessionContext,
 )
+from saitenka.app.runtime import CommandRouter, TickPipeline, TickStage
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
@@ -503,6 +504,8 @@ class Reader:
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
+        self.commands = self._build_command_router()
+        self.tick_pipeline = self._build_tick_pipeline()
 
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
@@ -1644,47 +1647,59 @@ class Reader:
         self.ipc.command("set_property", "sub-delay", f"{new_delay:.3f}")
         self._toast(f"Subtitles anchored — delay {new_delay:+.1f}s")
 
-    # msg -> handler(reader). Subtitle-nav entries render the target cue from the index INSTANTLY
-    # (if we have one), then issue the real sub-seek so the video catches up behind it (read the
-    # position first: _sub_nav samples sub-start/time-pos before the seek moves them).
-    _HANDLERS: ClassVar[dict] = {
-        MINE_MSG: lambda r: r.mine_current(),
-        MINE_VIDEO_MSG: lambda r: r.mine_current_video(),
-        MINE_ALL_MSG: lambda r: r.bulk_mine(),
-        TRANS_MSG: lambda r: r.toggle_translation(),
-        OVERLAY_TOGGLE_MSG: lambda r: r.toggle_overlay(),
-        SUBTITLE_LANGUAGE_MSG: lambda r: r.toggle_subtitle_language(),
-        SUBTITLE_MARK_JP_MSG: lambda r: r.mark_current_subtitle_japanese(),
-        SUBTITLE_RETRY_MSG: lambda r: r.retry_japanese_subtitles(),
-        PROFILE_CYCLE_MSG: lambda r: r.cycle_profile(),
-        HOVER_PAUSE_MSG: lambda r: r.toggle_hover_pause(),
-        BOOKMARK_MSG: lambda r: r.toggle_bookmark(),
-        SIDEBAR_MSG: lambda r: r.toggle_sidebar(),
-        SUB_PICKER_MSG: lambda r: r.toggle_sub_picker(),
-        ANALYSIS_MSG: lambda r: r.toggle_analysis(),
-        ANNOTATION_MSG: lambda r: r.toggle_annotation_mode(),
-        HELP_TOGGLE_MSG: lambda r: r.toggle_help(),
-        HELP_PREV_MSG: lambda r: help_overlay.step(r, -1),
-        HELP_NEXT_MSG: lambda r: help_overlay.step(r, 1),
-        HELP_CLOSE_MSG: lambda r: help_overlay.close_help(r),
-        PREVIEW_MSG: lambda r: r.replay_preview(),
-        PREVIEW_CLOSE_MSG: lambda r: r._hide_preview(),
-        SCROLL_UP_MSG: lambda r: r._scroll_tip(-round(r._tip_ref_h * 0.12)),
-        SCROLL_DOWN_MSG: lambda r: r._scroll_tip(round(r._tip_ref_h * 0.12)),
-        SPEAK_MSG: lambda r: r.speak_hovered(),
-        COPY_MSG: lambda r: r.copy_hovered(),
-        COPY_LINE_MSG: lambda r: r.copy_line(),
-        COPY_CLICK_MSG: lambda r: r.copy_click(),
-        CLICK_MSG: lambda r: r.on_click(),
-        SUB_PREV_MSG: lambda r: (r._sub_nav(-1), r.ipc.command("sub-seek", "-1")),
-        SUB_NEXT_MSG: lambda r: (r._sub_nav(1), r.ipc.command("sub-seek", "1")),
-        SUB_REPLAY_MSG: lambda r: (r._sub_nav(0), r.ipc.command("sub-seek", "0")),
-        KANJI_MSG: lambda r: r.kanji_current(),
-        TIP_UP_MSG: lambda r: r._scroll_tip(-round(r._tip_ref_h * 0.12)),
-        TIP_DOWN_MSG: lambda r: r._scroll_tip(round(r._tip_ref_h * 0.12)),
-        TIP_CLOSE_MSG: lambda r: r._tip_close_or_back(),
-        SUB_ANCHOR_MSG: lambda r: r._anchor_subtitles(),
-    }
+    def _build_command_router(self) -> CommandRouter:
+        """Assemble feature-owned actions once; handlers are bound and receive no god context."""
+
+        def action(method_name: str) -> Callable[[], None]:
+            return lambda: getattr(self, method_name)()
+
+        def seek(delta: int) -> None:
+            self._sub_nav(delta)
+            self.ipc.command("sub-seek", str(delta))
+
+        def scroll(delta: int) -> Callable[[], None]:
+            return lambda: self._scroll_tip(round(self._tip_ref_h * 0.12) * delta)
+
+        return CommandRouter(
+            {
+                MINE_MSG: action("mine_current"),
+                MINE_VIDEO_MSG: action("mine_current_video"),
+                MINE_ALL_MSG: action("bulk_mine"),
+                TRANS_MSG: action("toggle_translation"),
+                OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
+                SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
+                SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
+                SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
+                PROFILE_CYCLE_MSG: action("cycle_profile"),
+                HOVER_PAUSE_MSG: action("toggle_hover_pause"),
+                BOOKMARK_MSG: action("toggle_bookmark"),
+                SIDEBAR_MSG: action("toggle_sidebar"),
+                SUB_PICKER_MSG: action("toggle_sub_picker"),
+                ANALYSIS_MSG: action("toggle_analysis"),
+                ANNOTATION_MSG: action("toggle_annotation_mode"),
+                HELP_TOGGLE_MSG: action("toggle_help"),
+                HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
+                HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
+                HELP_CLOSE_MSG: lambda: help_overlay.close_help(self),
+                PREVIEW_MSG: action("replay_preview"),
+                PREVIEW_CLOSE_MSG: action("_hide_preview"),
+                SCROLL_UP_MSG: scroll(-1),
+                SCROLL_DOWN_MSG: scroll(1),
+                SPEAK_MSG: action("speak_hovered"),
+                COPY_MSG: action("copy_hovered"),
+                COPY_LINE_MSG: action("copy_line"),
+                COPY_CLICK_MSG: action("copy_click"),
+                CLICK_MSG: action("on_click"),
+                SUB_PREV_MSG: lambda: seek(-1),
+                SUB_NEXT_MSG: lambda: seek(1),
+                SUB_REPLAY_MSG: lambda: seek(0),
+                KANJI_MSG: action("kanji_current"),
+                TIP_UP_MSG: scroll(-1),
+                TIP_DOWN_MSG: scroll(1),
+                TIP_CLOSE_MSG: action("_tip_close_or_back"),
+                SUB_ANCHOR_MSG: action("_anchor_subtitles"),
+            }
+        )
 
     def _handle(self, msg: str) -> None:
         # Every saitenka script-message that reaches us (key- or mouse-driven) — the ground truth for
@@ -1694,9 +1709,52 @@ class Reader:
         log.debug("script-message: %s", msg)
         if self._help_open and msg not in HELP_MESSAGES:
             return
-        handler = self._HANDLERS.get(msg)
-        if handler:
-            handler(self)
+        self.commands.dispatch(msg)
+
+    def _build_tick_pipeline(self) -> TickPipeline:
+        return TickPipeline(
+            (
+                TickStage("expire-surfaces", self._expire_surfaces),
+                TickStage("refresh-osd", self._refresh_surfaces),
+                TickStage("reconcile-subtitles", self._reconcile_subtitles),
+                TickStage("apply-background-results", self._apply_background_results),
+                TickStage("update-interaction", self._update_interaction),
+            )
+        )
+
+    def _expire_surfaces(self) -> None:
+        self._expire_toast()
+        self._expire_flash()
+
+    def _refresh_surfaces(self) -> None:
+        if self.refresh_osd():
+            if self.sub_text.strip():
+                self._draw_subtitle()
+            help_overlay.redraw(self)
+            analysis_overlay.redraw(self)
+
+    def _reconcile_subtitles(self) -> None:
+        self._reconcile_sub_text(self._prop("sub-text") or "")
+        self._maybe_log_stall()
+        self._maybe_clear_startup_hint()
+
+    def _apply_background_results(self) -> None:
+        self._apply_pending_deps_or_spinner()
+        self._apply_pending_anki_seed()
+        tooltip.apply_engaged_results(self)
+        tooltip.apply_pending_crisp(self, self._tip_view)
+        tooltip.apply_pending_crisp(self, self._nest)
+        subtitle_modes.apply_fetch_results(self)
+        analysis_overlay.apply_results(self)
+        sub_picker.update(self)
+        sidebar.update(self)
+
+    def _update_interaction(self) -> None:
+        self._update_hover()
+        self._sync_mouse_capture()
+        self._update_prefetch()
+        if self._translation_visible() and self._secondary_text() != self._trans_text:
+            self._draw_translation()
 
     # --- run loop -----------------------------------------------------------------------------
     def _maybe_advance(self) -> None:
@@ -1760,31 +1818,7 @@ class Reader:
                 surfaces.route_scroll(
                     self, scroll_steps
                 )  # topmost surface claims it; tooltip is terminal
-            self._expire_toast()
-            self._expire_flash()
-            if self.refresh_osd():
-                if self.sub_text.strip():
-                    self._draw_subtitle()
-                help_overlay.redraw(self)
-                analysis_overlay.redraw(self)
-            self._reconcile_sub_text(self._prop("sub-text") or "")
-            self._maybe_log_stall()
-            self._maybe_clear_startup_hint()  # hand off from mpv's OSD breadcrumb once we can draw
-            self._apply_pending_deps_or_spinner()
-            self._apply_pending_anki_seed()
-            tooltip.apply_engaged_results(self)  # a cold-miss head composed → show it now (warm)
-            # upgrade a soft first paint to crisp once bands warm — per view (base AND nested)
-            tooltip.apply_pending_crisp(self, self._tip_view)
-            tooltip.apply_pending_crisp(self, self._nest)
-            subtitle_modes.apply_fetch_results(self)
-            analysis_overlay.apply_results(self)
-            sub_picker.update(self)
-            sidebar.update(self)
-            self._update_hover()
-            self._sync_mouse_capture()  # own clicks/wheel while a surface is up (this tick, no gap)
-            self._update_prefetch()
-            if self._translation_visible() and self._secondary_text() != self._trans_text:
-                self._draw_translation()  # keep the (manual or auto) translation current as subs change
+            self.tick_pipeline.run()
             self._schedule_paused_nudge(ops_before)
             return True
         except (OSError, ValueError):
