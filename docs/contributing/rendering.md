@@ -26,6 +26,12 @@ the libmpv render API if/when Pillow hits a wall.
 Module-by-module map and the hover→lookup→render→mine data flow:
 [ARCHITECTURE.md](https://github.com/serjflint/saitenka/blob/main/ARCHITECTURE.md).
 
+For structured-content interpretation bugs, use the opt-in `dictionary-structure-oracle` documented in
+[`saitenka-dict/ORACLE.md`](https://github.com/serjflint/saitenka/blob/main/saitenka-dict/ORACLE.md). It compares Yomitan's generated DOM with
+Saitenka's blocks for the same selected glossary immediately before layout, so glued lines, lost
+markers, and wrong nesting can be diagnosed independently of font metrics and rasterization. It does
+not independently validate dictionary import or glossary selection.
+
 ## Usage
 
 ```bash
