@@ -331,6 +331,9 @@ fuzz = { cmd = "uv run poe fuzz", cwd = "overlay" }
 crosshair = { cmd = "uv run poe crosshair", cwd = "overlay" }
 test = { cmd = "uv run poe test", cwd = "overlay" }
 loop-tools-test = { cmd = "uv run poe loop-tools-test", cwd = "overlay" }
+package-test = { cmd = "uv run poe package-test", cwd = "overlay" }
+yomitan-parity = { cmd = "uv run poe yomitan-parity", cwd = "overlay" }
+yomitan-parity-json = { cmd = "uv run poe yomitan-parity-json", cwd = "overlay" }
 test-ft = { cmd = "uv run poe test-ft", cwd = "overlay" }
 affected = { cmd = "uv run poe affected", cwd = "overlay" }
 cov = { cmd = "uv run poe cov", cwd = "overlay" }
