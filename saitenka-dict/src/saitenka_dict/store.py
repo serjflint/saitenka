@@ -34,6 +34,14 @@ class TermSearch:
     limit: int = 50
 
 
+class CacheObserver(Protocol):
+    def hit(self) -> None: ...
+
+    def miss(self) -> None: ...
+
+    def eviction(self) -> None: ...
+
+
 class DictionaryStore(Protocol):
     def find_terms(self, search: TermSearch) -> tuple[TermRecord, ...]: ...
 

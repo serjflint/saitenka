@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -9,6 +10,7 @@ from ankiconnect_client import (
     AnkiConnectProtocolError,
     AnkiConnectUnavailable,
 )
+from ankiconnect_client.transport import UrllibTransport
 
 
 class FakeTransport:
@@ -57,3 +59,33 @@ def test_transport_error_is_retried_then_typed(monkeypatch):
 def test_malformed_response_is_rejected():
     with pytest.raises(AnkiConnectProtocolError):
         AnkiConnectClient(transport=FakeTransport({"error": None})).call("version")
+
+
+def test_urllib_transport_observes_http_and_json_parse_separately(monkeypatch):
+    phases: list[tuple[str, str]] = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @staticmethod
+        def read():
+            return b'{"result": 6, "error": null}'
+
+    class Observer:
+        @contextmanager
+        def phase(self, name: str, action: str):
+            phases.append((name, action))
+            yield
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response())
+
+    result = AnkiConnectClient(transport=UrllibTransport("http://127.0.0.1:8765")).call(
+        "version", phase_observer=Observer()
+    )
+
+    assert result == 6
+    assert phases == [("http_call", "version"), ("json_parse", "version")]

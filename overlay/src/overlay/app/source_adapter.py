@@ -406,9 +406,9 @@ class DictionarySourceAdapter:
                 break
         return items
 
-    @staticmethod
-    def decoded_entry_count() -> int:
-        return 0
+    def decoded_entry_count(self) -> int:
+        counter = getattr(self.source, "decoded_entry_count", None)
+        return counter() if counter is not None else 0
 
     def _headwords(self, token) -> tuple[tuple[str, str], ...]:
         forms = (token.lemma, token.surface, *self._deinflected(token.lemma))

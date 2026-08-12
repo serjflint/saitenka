@@ -10,7 +10,13 @@ from ankiconnect_client.errors import (
     AnkiConnectProtocolError,
     AnkiConnectUnavailable,
 )
-from ankiconnect_client.transport import Observer, Transport, UrllibTransport
+from ankiconnect_client.transport import (
+    Observer,
+    PhasedTransport,
+    PhaseObserver,
+    Transport,
+    UrllibTransport,
+)
 
 
 class AnkiConnectClient:
@@ -35,6 +41,7 @@ class AnkiConnectClient:
         *,
         timeout: float = 20,
         attempts: int = 2,
+        phase_observer: PhaseObserver | None = None,
         **params: Any,
     ) -> Any:
         if attempts < 1:
@@ -46,7 +53,12 @@ class AnkiConnectClient:
             if self.observer is not None:
                 self.observer.request_started(action)
             try:
-                response = self.transport.send(payload, timeout=timeout)
+                if phase_observer is not None and isinstance(self.transport, PhasedTransport):
+                    response = self.transport.send_phased(
+                        payload, timeout=timeout, observer=phase_observer
+                    )
+                else:
+                    response = self.transport.send(payload, timeout=timeout)
             except OSError as exc:
                 if attempt + 1 == attempts:
                     raise AnkiConnectUnavailable(

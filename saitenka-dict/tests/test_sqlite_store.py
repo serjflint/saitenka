@@ -81,6 +81,43 @@ def test_cached_tag_provenance_belongs_to_each_result_record(tmp_path):
     assert second.definitions[0].tags[0].source.record_id == 2
 
 
+def test_decoded_entry_cache_honors_configured_limit(tmp_path):
+    path = tmp_path / "dictionary.sqlite"
+    make_legacy_db(path)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1, 2, "詠む", "よむ", json.dumps(["to compose"]), "v1", 1456361),
+    )
+    connection.execute("INSERT INTO keys VALUES (?, ?, ?)", (1, "詠む", 2))
+    connection.commit()
+    connection.close()
+    events: list[str] = []
+
+    class Observer:
+        @staticmethod
+        def hit():
+            events.append("hit")
+
+        @staticmethod
+        def miss():
+            events.append("miss")
+
+        @staticmethod
+        def eviction():
+            events.append("eviction")
+
+    store = SqliteDictionaryStore(path, entry_cache_max=1, cache_observer=Observer())
+    translator = Translator(store)
+
+    translator.lookup_terms(TermQuery("読む"))
+    translator.lookup_terms(TermQuery("読む"))
+    translator.lookup_terms(TermQuery("詠む"))
+
+    assert translator.decoded_entry_count() == 1
+    assert events == ["miss", "hit", "miss", "eviction"]
+
+
 def test_search_applies_configured_dictionary_priority_before_limit(tmp_path):
     path = tmp_path / "dictionary.sqlite"
     make_legacy_db(path)

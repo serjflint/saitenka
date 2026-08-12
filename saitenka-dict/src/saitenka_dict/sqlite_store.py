@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from saitenka_dict.models import (
     SourceTrace,
     Tag,
 )
-from saitenka_dict.store import TermRecord, TermSearch
+from saitenka_dict.store import CacheObserver, TermRecord, TermSearch
 
 _TERM_QUERY_LEGACY = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
@@ -116,9 +117,19 @@ _KANJI_FREQUENCY_QUERY = (
 class SqliteDictionaryStore:
     """Read-only adapter for Saitenka's schema-1 consolidated dictionary database."""
 
-    def __init__(self, path: str | Path):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        entry_cache_max: int = 256,
+        cache_observer: CacheObserver | None = None,
+    ):
         self.path = Path(path)
         self._local = threading.local()
+        self._entry_cache_max = max(0, entry_cache_max)
+        self._cache_observer = cache_observer
+        self._entry_caches: dict[int, OrderedDict[int, TermRecord]] = {}
+        self._entry_lock = threading.Lock()
         self._tag_cache: dict[int, dict[str, Tag]] = {}
         self._tag_lock = threading.Lock()
 
@@ -252,6 +263,19 @@ class SqliteDictionaryStore:
         return tuple(self._term_record(row) for row in rows)
 
     def _term_record(self, row: tuple[Any, ...]) -> TermRecord:
+        dictionary_id, record_id = row[0], row[3]
+        with self._entry_lock:
+            cache = self._entry_caches.get(dictionary_id)
+            cached = cache.get(record_id) if cache is not None else None
+            if cached is not None:
+                assert cache is not None
+                cache.move_to_end(record_id)
+        if cached is not None:
+            if self._cache_observer is not None:
+                self._cache_observer.hit()
+            return cached
+        if self._cache_observer is not None:
+            self._cache_observer.miss()
         (
             did,
             title,
@@ -277,7 +301,7 @@ class SqliteDictionaryStore:
             score or 0,
             sequence if sequence is not None else -1,
         )
-        return TermRecord(
+        record = TermRecord(
             term,
             reading,
             (definition,),
@@ -288,6 +312,26 @@ class SqliteDictionaryStore:
             score or 0,
             sequence if sequence is not None else -1,
         )
+        if self._entry_cache_max == 0:
+            return record
+        evicted = False
+        with self._entry_lock:
+            cache = self._entry_caches.setdefault(dictionary_id, OrderedDict())
+            existing = cache.get(record_id)
+            if existing is not None:
+                cache.move_to_end(record_id)
+                return existing
+            cache[record_id] = record
+            while len(cache) > self._entry_cache_max:
+                cache.popitem(last=False)
+                evicted = True
+        if evicted and self._cache_observer is not None:
+            self._cache_observer.eviction()
+        return record
+
+    def decoded_entry_count(self) -> int:
+        with self._entry_lock:
+            return sum(map(len, self._entry_caches.values()))
 
     def find_frequencies(
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...]

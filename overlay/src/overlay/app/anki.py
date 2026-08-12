@@ -344,8 +344,18 @@ class Anki:
                 return self._client.call(action, timeout=timeout, attempts=attempts, **params)
             from overlay import otel_metrics
 
-            with otel_metrics.traced("anki_http_call", action=action):
-                return self._client.call(action, timeout=timeout, attempts=attempts, **params)
+            class _PhaseObserver:
+                @staticmethod
+                def phase(name: str, action: str):
+                    return otel_metrics.traced(f"anki_{name}", action=action)
+
+            return self._client.call(
+                action,
+                timeout=timeout,
+                attempts=attempts,
+                phase_observer=_PhaseObserver(),
+                **params,
+            )
         except AnkiConnectUnavailable as exc:
             raise _AnkiRetryable(str(exc)) from exc
         except AnkiConnectError as exc:

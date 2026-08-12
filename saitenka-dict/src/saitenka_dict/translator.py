@@ -101,6 +101,10 @@ class Translator:
     def media_for(self, dictionary: str, paths: tuple[str, ...]) -> dict[str, bytes]:
         return self.store.media_for(dictionary, paths)
 
+    def decoded_entry_count(self) -> int:
+        counter = getattr(self.store, "decoded_entry_count", None)
+        return counter() if counter is not None else 0
+
     def frequencies_for(
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...] = ()
     ):

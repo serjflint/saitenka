@@ -66,8 +66,12 @@ def test_wheel_installs_and_assets_load():
         dictionary_sdist = next(dist.glob("saitenka_dict-*.tar.gz"))
         with zipfile.ZipFile(dictionary_wheel) as archive:
             _assert_oracle_absent(archive.namelist())
+            assert "saitenka_dict/py.typed" in archive.namelist()
         with tarfile.open(dictionary_sdist, "r:gz") as archive:
             _assert_oracle_absent(archive.getnames())
+        anki_wheel = next(dist.glob("ankiconnect_client-*.whl"))
+        with zipfile.ZipFile(anki_wheel) as archive:
+            assert "ankiconnect_client/py.typed" in archive.namelist()
         wheels = list(dist.glob("saitenka-*.whl"))
         assert wheels, "uv build produced no wheel"
         wheel = wheels[0]

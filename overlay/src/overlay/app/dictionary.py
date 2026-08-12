@@ -483,12 +483,34 @@ class DictionarySet:
         """Build an ordered dictionary set from already-resolved :class:`DictRow`s of the given DB."""
         from saitenka_dict import SqliteDictionaryStore, Translator
 
+        class _CacheObserver:
+            @staticmethod
+            def hit() -> None:
+                if otel_metrics.dict_cache_hits is not None:
+                    otel_metrics.dict_cache_hits.add(1)
+
+            @staticmethod
+            def miss() -> None:
+                if otel_metrics.dict_cache_misses is not None:
+                    otel_metrics.dict_cache_misses.add(1)
+
+            @staticmethod
+            def eviction() -> None:
+                if otel_metrics.dict_cache_evictions is not None:
+                    otel_metrics.dict_cache_evictions.add(1)
+
         return cls(
             dicts=[Dictionary(db, r) for r in dict_rows],
             freqs=[FreqSource(db, r) for r in freq_rows],
             pitches=[PitchSource(db, r) for r in pitch_rows],
             language=language,
-            source=Translator(SqliteDictionaryStore(db.path)),
+            source=Translator(
+                SqliteDictionaryStore(
+                    db.path,
+                    entry_cache_max=db._opts.entry_cache_max,
+                    cache_observer=_CacheObserver(),
+                )
+            ),
         )
 
     @classmethod
@@ -549,8 +571,7 @@ class DictionarySet:
         }
 
     def decoded_entry_count(self) -> int:
-        """Decoded :class:`DictEntry` objects currently cached across every dictionary — the
-        ``dict_cache.size`` gauge (each dict's ``_entry_cache`` is bounded by ``entry_cache_max``)."""
+        """Decoded entries currently held by the active source's bounded per-dictionary LRUs."""
         if adapter := self._source_view():
             return adapter.decoded_entry_count()
         return sum(len(d._entry_cache) for d in self.dicts)
