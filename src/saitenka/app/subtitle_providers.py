@@ -6,7 +6,7 @@ an empty ``languages`` set is language-agnostic and always available.
 
 Leaf module (no ``subselect`` import — the registry direction is one-way, ``subselect`` → here, to keep
 ``saitenka.app`` acyclic). The built-in jimaku/tsukihime providers self-register at ``subselect`` import;
-every consumer (``cli``/``cli_run``) imports ``subselect`` so the registry is populated before use.
+launch paths import ``subselect`` before querying the registry.
 """
 
 from __future__ import annotations
