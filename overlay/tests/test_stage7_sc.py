@@ -3,8 +3,9 @@
 import json
 from pathlib import Path
 
+import pytest
 from overlay.model import Style
-from overlay.render.document import DocStyle, render_document
+from overlay.render.document import DocStyle, layout_document, render_document
 from overlay.render.flow import ChipBox, ImgBox, RubyBox
 from overlay.sc.walk import walk
 from util import assert_golden
@@ -48,6 +49,199 @@ def test_bold_and_link_styles_applied():
 
 def _chips(blocks):
     return [x for b in blocks for x in b.flow if isinstance(x, ChipBox)]
+
+
+def _flow_text(block):
+    parts = []
+    for item in block.flow:
+        if isinstance(item, RubyBox):
+            parts.extend(span.text for span in item.base)
+        elif hasattr(item, "text"):
+            parts.append(item.text)
+    return "".join(parts)
+
+
+def test_jitendex_nested_content_preserves_readable_blocks():
+    blocks = walk(_load("sc_jitendex_nested.json"), BASE)
+
+    assert [
+        (
+            block.kind,
+            block.list_type,
+            block.ordinal,
+            getattr(block, "marker", None),
+            block.indent,
+            _flow_text(block),
+        )
+        for block in blocks
+    ] == [
+        ("list-item", "ul", 1, "＊", 0, "noun"),
+        ("list-item", "ol", 1, "①", 1, "bird"),
+        ("para", None, None, None, 2, "鳥が鳴いた。"),
+        ("para", None, None, None, 2, "A bird sang."),
+        ("list-item", "ol", 2, "②", 1, "bird meat"),
+        ("list-item", "ul", 2, "", 1, "fowl"),
+        ("list-item", "ul", 3, "", 1, "poultry"),
+        ("para", None, None, None, 2, "See: 鶏"),
+        ("para", None, None, None, 0, "JMdict"),
+    ]
+
+
+def test_jitendex_structural_split_preserves_ruby_and_link_targets():
+    blocks = walk(_load("sc_jitendex_nested.json"), BASE)
+    rubies = [item for block in blocks for item in block.flow if isinstance(item, RubyBox)]
+
+    assert [("".join(span.text for span in ruby.base), ruby.reading) for ruby in rubies] == [
+        ("鳥", "とり"),
+        ("鶏", "にわとり"),
+    ]
+    assert [span.href for span in rubies[1].base] == ["鶏"]
+
+
+def test_jitendex_markers_reach_document_layout():
+    blocks = walk(_load("sc_jitendex_nested.json"), BASE)
+
+    document = layout_document(blocks, 800, BASE)
+
+    assert [block.marker for block in document.blocks] == [
+        "＊",
+        "①",
+        "",
+        "",
+        "②",
+        "",
+        "",
+        "",
+        "",
+    ]
+    assert len({block.x for block in document.blocks[4:7]}) == 1
+
+
+def test_list_item_marker_moves_to_its_first_block_child():
+    node = {
+        "tag": "ol",
+        "content": {
+            "tag": "li",
+            "style": {"listStyleType": '"①"'},
+            "content": {"tag": "div", "content": "bird"},
+        },
+    }
+
+    blocks = walk(node, BASE)
+
+    assert [(block.kind, block.marker, block.indent, _flow_text(block)) for block in blocks] == [
+        ("list-item", "①", 0, "bird")
+    ]
+
+
+def test_empty_parent_list_item_does_not_replace_nested_list_marker():
+    node = {
+        "tag": "ul",
+        "content": {
+            "tag": "li",
+            "content": {
+                "tag": "ol",
+                "content": [
+                    {"tag": "li", "content": "first"},
+                    {"tag": "li", "content": "second"},
+                ],
+            },
+        },
+    }
+
+    blocks = walk(node, BASE)
+
+    assert [(block.marker, block.ordinal, _flow_text(block)) for block in blocks] == [
+        (None, 1, "\N{NO-BREAK SPACE}"),
+        (None, 1, "first"),
+        (None, 2, "second"),
+    ]
+
+
+def test_parent_marker_does_not_replace_block_wrapped_nested_markers():
+    node = {
+        "tag": "ul",
+        "content": {
+            "tag": "li",
+            "style": {"listStyleType": '"P"'},
+            "content": {
+                "tag": "div",
+                "content": {
+                    "tag": "ol",
+                    "content": [
+                        {"tag": "li", "content": "first"},
+                        {"tag": "li", "content": "second"},
+                    ],
+                },
+            },
+        },
+    }
+
+    document = layout_document(walk(node, BASE), 800, BASE)
+
+    assert [block.marker for block in document.blocks] == ["P", "1.", "2."]
+
+
+def test_table_inside_list_keeps_continuation_indentation():
+    node = {
+        "tag": "ol",
+        "content": {
+            "tag": "li",
+            "content": [
+                {"tag": "p", "content": "before"},
+                "middle",
+                {
+                    "tag": "table",
+                    "content": {
+                        "tag": "tr",
+                        "content": {"tag": "td", "content": "cell"},
+                    },
+                },
+                "after",
+            ],
+        },
+    }
+
+    blocks = walk(node, BASE)
+
+    assert [(block.indent, _flow_text(block)) for block in blocks] == [
+        (0, "before"),
+        (1, "middle"),
+        (1, "cell"),
+        (1, "after"),
+    ]
+
+
+def test_item_marker_overrides_markerless_nested_list():
+    node = {
+        "tag": "ul",
+        "content": {
+            "tag": "li",
+            "style": {"listStyleType": '"P"'},
+            "content": {
+                "tag": "ul",
+                "style": {"listStyleType": "none"},
+                "content": {
+                    "tag": "li",
+                    "style": {"listStyleType": '"C"'},
+                    "content": "child",
+                },
+            },
+        },
+    }
+
+    document = layout_document(walk(node, BASE), 800, BASE)
+
+    assert [block.marker for block in document.blocks] == ["P", "C"]
+
+
+@pytest.mark.parametrize("field", ["style", "data"])
+def test_malformed_list_metadata_does_not_abort_rendering(field):
+    node = {"tag": "ul", field: "bad", "content": {"tag": "li", "content": "kept"}}
+
+    blocks = walk(node, BASE)
+
+    assert _flow_text(blocks[0]) == "kept"
 
 
 def test_pos_tag_chip_uses_background_color_not_empty_box():

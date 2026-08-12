@@ -32,6 +32,8 @@ GUTTER_PX = 22
 def _marker(block: Block) -> str:
     if block.kind != "list-item":
         return ""
+    if block.marker is not None:
+        return block.marker
     if block.list_type == "ol" and block.ordinal is not None:
         return f"{block.ordinal}."
     return "・"
