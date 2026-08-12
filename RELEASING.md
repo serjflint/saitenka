@@ -63,13 +63,14 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
-3. **Build the wheels:** build `yomitanlite/`, `ankiconnect-client/`, then `overlay/` into one local
-   dist directory so the Saitenka artifact is tested with the exact dependency artifacts under review.
+3. **Build the Saitenka wheel.** Any required `yomitanlite` / `ankiconnect-client` versions must already
+   be published from their namespaced tags; the Saitenka release consumes them as ordinary dependencies.
 4. **Smoke-test the artifact, not the tree** — install the *built wheel* in an isolated env:
    ```sh
    uvx --from overlay/dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
    ```
-   This catches packaging breakage (missing data files, entry point, deps) that `poe pre-release` can't.
+   This catches packaging breakage (missing data files, entry point, published deps) that
+   `poe pre-release` can't.
 5. **Gate:** `uv run poe pre-release` green — the fast `poe all` plus the release-only checks pulled
    from the PR loop (supply-chain `audit`/`licenses`, installer `shell`) and the heavier `links-net`
    (network), `smoke-live` (real mpv), and `bench` smokes; needs mpv + network. The advisory tier
@@ -79,7 +80,7 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 
 `overlay/dist/` is git-ignored — the wheel is **not** committed; `release.yml` rebuilds it from the tag.
 
-## After merge (on the default branch) — the tag push publishes everything
+## After merge (on the default branch) — the tag push publishes Saitenka
 
 7. **Annotated tag on the merge commit**, then push it — this is the whole publish:
    ```sh
