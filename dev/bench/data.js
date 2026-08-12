@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786560571207,
+  "lastUpdate": 1786561627637,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4139,6 +4139,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.787,
             "range": "±0.8%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "213f0dffab19615787018b7f6398ab69b2dc7c1c",
+          "message": "fix: preserve source-backed dictionary structure (#330)\n\n* fix: unwrap semantic dictionary glossaries\n\n* test: add dictionary structure oracle",
+          "timestamp": "2026-08-12T22:05:18+03:00",
+          "tree_id": "95b4d61cfcfca00b6c3929f6e8b0a434654abd18",
+          "url": "https://github.com/serjflint/saitenka/commit/213f0dffab19615787018b7f6398ab69b2dc7c1c"
+        },
+        "date": 1786561626378,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.524,
+            "range": "±0.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.127,
+            "range": "±7.3%",
             "unit": "ms"
           }
         ]
