@@ -1,7 +1,7 @@
 """One definition-body block's render and layout, as plain picklable inputs.
 
 This top-level worker boundary lets ``render/banded.py`` call :func:`render_body_block` on its GIL-build
-process-pool path) without ``panel.py``'s ``panel_rows()`` closures in the way. ``panel.py`` imports
+process-pool path without ``panel.py``'s ``panel_rows()`` closures in the way. ``panel.py`` imports
 and re-exports from here so ``from saitenka.panel import BodyRenderArgs`` keeps working.
 """
 
