@@ -8,12 +8,6 @@ from typing import Annotated, Literal
 
 import cyclopts
 
-# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.launch.run import (
-    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
-)
-
 
 def install_plugin() -> int:  # pragma: no cover — thin CLI wrapper; plugin ops are unit-tested
     """Install the saitenka.lua mpv user-script (plugin mode)."""

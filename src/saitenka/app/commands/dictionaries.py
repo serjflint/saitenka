@@ -7,12 +7,6 @@ from typing import Annotated
 
 import cyclopts
 
-# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.launch.run import (
-    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
-)
-
 
 def _print_legacy_note() -> None:  # pragma: no cover — cosmetic, filesystem-dependent
     """After a successful import, point out pre-consolidation files that are now unused (the old per-zip

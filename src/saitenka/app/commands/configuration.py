@@ -5,12 +5,6 @@ from typing import Annotated
 
 import cyclopts
 
-# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.launch.run import (
-    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
-)
-
 
 def init() -> int:  # pragma: no cover — interactive wizard, exercised live
     """Write a starter config (the config-file primitive `setup` builds on). Prefer `setup`/`install`."""

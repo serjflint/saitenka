@@ -10,12 +10,6 @@ import cyclopts
 
 from saitenka.app.config import TooltipOptions, load_config
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-# _resolve_names/jimaku_should_fetch: re-exported — tests import them from here directly.
-from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414  # re-export
-from saitenka.app.launch.run import (
-    jimaku_should_fetch as jimaku_should_fetch,  # noqa: PLC0414  # re-export
-)
 from saitenka.app.subselect import ProviderConfig
 
 log = logging.getLogger(__name__)
