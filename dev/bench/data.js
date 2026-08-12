@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786556211292,
+  "lastUpdate": 1786560571207,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4103,6 +4103,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 10.043,
             "range": "±1.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4cecefac4c5020bb85e154563199c3c3f753a103",
+          "message": "refactor: establish modular Saitenka package boundaries (#329)\n\n* refactor: consolidate the saitenka source layout\n\n* refactor: remove legacy overlay project directory",
+          "timestamp": "2026-08-12T21:48:40+03:00",
+          "tree_id": "6224c751a75c64a4e9514556b7c86f065b949edf",
+          "url": "https://github.com/serjflint/saitenka/commit/4cecefac4c5020bb85e154563199c3c3f753a103"
+        },
+        "date": 1786560569595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.436,
+            "range": "±0.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.787,
+            "range": "±0.8%",
             "unit": "ms"
           }
         ]
