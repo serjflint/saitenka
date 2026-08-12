@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786491253759,
+  "lastUpdate": 1786511930082,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4031,6 +4031,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.829,
             "range": "±4.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e2215c378ec657d35739659492dd157b54463d9",
+          "message": "refactor: extract saitenka-dict dictionary engine (#327)\n\n* feat(anki): extract AnkiConnect client\n\n* feat(yomitanlite): add dictionary core and oracle\n\n* refactor(overlay): add swappable lookup sources\n\n* build(release): publish extracted packages independently\n\n* docs: document extracted runtime boundaries\n\n* fix(yomitanlite): preserve configured source priority\n\n* chore: normalize extracted package licenses\n\n* build: mirror extracted package tasks at repo root\n\n* docs: clarify extracted package release ordering\n\n* ci: split extracted package releases\n\n* refactor(dictionary): rename package and isolate oracle\n\n* fix(extraction): preserve runtime contracts",
+          "timestamp": "2026-08-12T08:17:57+03:00",
+          "tree_id": "27b1aa24c55abefee9fd02a5ca6a81df780c14eb",
+          "url": "https://github.com/serjflint/saitenka/commit/0e2215c378ec657d35739659492dd157b54463d9"
+        },
+        "date": 1786511929212,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.627,
+            "range": "±0.9%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.572,
+            "range": "±2.6%",
             "unit": "ms"
           }
         ]
