@@ -41,7 +41,8 @@ internal modules with explicit dependency contracts, not independently published
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
-- **`app/`** — the application layer. `controller.py`'s `Reader` is the main-loop orchestrator
+- **`app/`** — the application layer. `controller.py`'s `Reader` retains the mpv lifecycle while
+  `runtime/` owns explicit command routing and ordered tick phases;
   (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
   strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine
@@ -51,7 +52,8 @@ internal modules with explicit dependency contracts, not independently published
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
-  (subtitle fetching); `cli.py`/`cli_run.py` (the entry point — thin parser + real orchestration).
+  (subtitle fetching); `cli.py` is the process/composition root, `commands/` owns Cyclopts domain
+  surfaces, and `cli_run.py` owns run orchestration.
 - **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
   `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the

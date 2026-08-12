@@ -2,8 +2,8 @@
 
 from dataclasses import replace
 
-from saitenka.app.cli import _build_attach_options
 from saitenka.app.cli_run import RunFlags, _build_run_options
+from saitenka.app.commands.attach import _build_attach_options
 
 _BASE_FLAGS = RunFlags(
     mine_key="Ctrl+m",
@@ -116,12 +116,12 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
 def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
     # preset-only config must resolve to the preset's note type on run/doctor, matching the attach
     # seam's _mine_config_from — else `preset = "Kiku"` (no model) mines to Kiku on attach but Lapis on run.
-    from saitenka.app.cli import _resolve_mine_model
+    from saitenka.app.command_defaults import resolve_mine_model
 
-    assert _resolve_mine_model({}) == "Lapis"
-    assert _resolve_mine_model({"preset": "Kiku"}) == "Kiku"
+    assert resolve_mine_model({}) == "Lapis"
+    assert resolve_mine_model({"preset": "Kiku"}) == "Kiku"
     assert (
-        _resolve_mine_model({"model": "Custom", "preset": "Kiku"}) == "Custom"
+        resolve_mine_model({"model": "Custom", "preset": "Kiku"}) == "Custom"
     )  # explicit model wins
 
 

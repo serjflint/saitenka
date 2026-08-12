@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from saitenka.app import cli, subselect
+from saitenka.app import subselect
+from saitenka.app.commands import attach as attach_commands
 from saitenka.app.subtitle_modes import SubtitleStartup, SubtitleTracks
 
 
@@ -34,7 +35,7 @@ class Reader:
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
     reader, ipc = Reader(), IPC()
     calls = []
-    monkeypatch.setattr(cli, "build_sub_index_for_current_track", lambda _reader: None)
+    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _reader: None)
 
     def fetch(video, providers, **kwargs):
         calls.append((video, providers, kwargs["tsukihime_config"]))
@@ -42,7 +43,7 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
 
     monkeypatch.setattr(subselect, "fetch_provider_path", fetch)
 
-    cli._finish_attach_subtitle_startup(
+    attach_commands._finish_attach_subtitle_startup(
         reader,
         ipc,
         None,
@@ -68,9 +69,9 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
 
 def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch):
     reader, ipc = Reader(), IPC()
-    monkeypatch.setattr(cli, "build_sub_index_for_current_track", lambda _reader: None)
+    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _reader: None)
 
-    cli._finish_attach_subtitle_startup(
+    attach_commands._finish_attach_subtitle_startup(
         reader,
         ipc,
         None,
@@ -128,7 +129,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     started: list[str] = []
     monkeypatch.setattr(session_stats, "finish", lambda _r: None)
     monkeypatch.setattr(session_stats, "start", lambda r: started.append(str(r._prop("path"))))
-    monkeypatch.setattr(cli, "build_sub_index_for_current_track", lambda _r: None)
+    monkeypatch.setattr(attach_commands, "build_sub_index_for_current_track", lambda _r: None)
     monkeypatch.setattr(reader, "start_prefetch", lambda: None)
     monkeypatch.setattr(reader, "_toast", lambda *_a, **_k: None)
     # new episode carries English only → prepare_attach_startup defers a jimaku fetch
@@ -144,7 +145,7 @@ def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(mon
     background: list = []
     monkeypatch.setattr(reader, "fetch_japanese_subs_async", lambda fetch: background.append(fetch))
 
-    cli._attach_reslot(
+    attach_commands._attach_reslot(
         reader,
         ipc,
         Path("/videos/Show - 03.mkv"),
