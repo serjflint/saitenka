@@ -49,10 +49,8 @@ if TYPE_CHECKING:
 
 # Theme + _DEFAULT_THEME moved to saitenka.model (value types, no render deps) to break the
 # render↔panel cycle; re-exported here so ``from saitenka.panel import Theme`` keeps working.
-# BodyRenderArgs/SCNode/render_body_block live in the TOP-LEVEL overlay.body_block for the same
-# reason (render/banded.py needs render_body_block; sc.walk already imports from render.flow, so a
-# copy inside the render/ package would cycle); re-exported here so ``from saitenka.panel import
-# BodyRenderArgs`` keeps working.
+# BodyRenderArgs/SCNode/render_body_block live in top-level body_block so the process-pool worker stays
+# picklable; re-exported here so ``from saitenka.panel import BodyRenderArgs`` keeps working.
 
 
 @dataclass

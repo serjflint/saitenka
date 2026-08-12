@@ -42,7 +42,7 @@ SUBSYSTEMS: dict[str, tuple[list[str], list[str]]] = {
         ["warm==cold cache-equivalence", "concurrency (race gate)", "eviction / idempotence"],
     ),
     "cli assembly": (
-        ["*/app/commands/*.py", "*/app/launch/*.py", "*/app/controller.py"],
+        ["*/app/cli.py", "*/app/commands/*.py", "*/app/launch/*.py", "*/app/controller.py"],
         ["assembly / pipeline integration oracle"],
     ),
     "profiles": (

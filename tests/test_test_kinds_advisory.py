@@ -39,6 +39,16 @@ def test_map_unions_kinds_when_a_path_matches_several_subsystems():
     assert {"cli assembly", "panel / windowed / interaction"} <= names
 
 
+def test_map_tracks_extracted_cli_and_structured_content_paths():
+    tk = _load("test_kinds", "test_kinds.py")
+
+    assert "cli assembly" in dict(tk.applicable(["src/saitenka/app/cli.py"]))
+    assert "cli assembly" in dict(tk.applicable(["src/saitenka/app/commands/run.py"]))
+    assert "structured-content adapter" in dict(
+        tk.applicable(["src/saitenka/render/sc_adapter.py"])
+    )
+
+
 def test_map_stays_quiet_for_docs_and_test_only_changes():
     """Negative control: a commit that touches no kind-bearing SOURCE must surface nothing (else the
     advisory would nag on every docs/test commit and get muted)."""

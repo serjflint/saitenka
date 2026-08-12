@@ -1,10 +1,6 @@
-"""One def-body block's render: the SC-walk + document layout, as plain picklable inputs.
+"""One definition-body block's render and layout, as plain picklable inputs.
 
-A TOP-LEVEL module (sibling to ``panel.py``/``model.py``), not nested under ``render/`` — it needs
-``sc.walk`` (structured-content walking), and ``sc.walk`` itself already imports from
-``render.flow``, so a copy living inside the ``render`` package would create a
-``render -> sc -> render`` cycle. Same reason ``Theme``/``Style`` live in ``saitenka.model`` rather
-than ``panel.py``. Exists so ``render/banded.py`` can call :func:`render_body_block` (its GIL-build
+This top-level worker boundary lets ``render/banded.py`` call :func:`render_body_block` on its GIL-build
 process-pool path) without ``panel.py``'s ``panel_rows()`` closures in the way. ``panel.py`` imports
 and re-exports from here so ``from saitenka.panel import BodyRenderArgs`` keeps working.
 """
