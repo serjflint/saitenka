@@ -20,9 +20,6 @@ from pathlib import Path
 from typing import Literal
 
 from saitenka.app import session_stats
-from saitenka.app import (
-    subselect as _subselect,  # noqa: F401  # import registers built-in providers
-)
 from saitenka.app.config import config_path, load_config
 from saitenka.app.continuity import resolve_sibling
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
