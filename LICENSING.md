@@ -5,6 +5,8 @@ This repository is **mixed-license**. Read this before redistributing.
 | Path | License | Notes |
 |---|---|---|
 | `overlay/` (`saitenka`) | **Apache-2.0** | The core: renderer, reader, mining, CLI, installers. |
+| `saitenka-dict/` (`saitenka-dict`) | **Apache-2.0** | Independent dictionary import/lookup contracts. Optional repository-only test tooling loads the GPL Yomitan oracle from an external checkout. |
+| `ankiconnect-client/` (`ankiconnect-client`) | **Apache-2.0** | Independent stdlib-only AnkiConnect client. |
 | `tools/`, `install/` | **Apache-2.0** | Anki/FSRS engine + installers. |
 | `deinflect/` (`saitenka-deinflect`) | **GPL-3.0-or-later** | Derived from [Yomitan](https://github.com/yomidevs/yomitan) — see `deinflect/NOTICE`. |
 | `taffylite/` (`taffylite`) | **MIT OR Apache-2.0** | Optional layout engine — a PyO3 binding of [taffy](https://github.com/DioxusLabs/taffy) (MIT) + [pyo3](https://github.com/PyO3/pyo3) (Apache-2.0/MIT). Permissive, so the `layout-engine` extra keeps the install Apache-2.0-clean — unlike `deinflect`. See `taffylite/NOTICE`. |
@@ -15,6 +17,10 @@ which carries its own [`deinflect/LICENSE`](deinflect/LICENSE) (GPL-3.0). `taffy
 licensed (MIT/Apache-2.0), so it does not change that boundary. `resvglite/` vendors MPL-2.0 code, whose
 copyleft is *file-scoped* — combining it (the `images` extra) leaves the Apache-2.0 core unaffected; only
 the separately-published `resvglite` wheel must honour MPL (offer resvg's source, keep its notices).
+
+`saitenka-dict/oracle/` is optional, repository-only differential-test tooling that dynamically loads an
+external Yomitan checkout. It is excluded from published distributions and does not copy or distribute
+Yomitan implementation code or fixtures.
 
 ## Why the split — and what it means for you
 

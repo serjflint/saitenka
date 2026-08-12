@@ -8,6 +8,16 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "ankiconnect-client"
+version = "0.1.0"
+source = { editable = "../ankiconnect-client" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1963,6 +1973,7 @@ name = "saitenka"
 version = "3.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "ankiconnect-client" },
     { name = "certifi" },
     { name = "cyclopts" },
     { name = "filelock" },
@@ -1977,6 +1988,7 @@ dependencies = [
     { name = "psutil" },
     { name = "questionary" },
     { name = "rich" },
+    { name = "saitenka-dict" },
     { name = "stamina" },
     { name = "structlog" },
     { name = "tomlkit" },
@@ -2063,6 +2075,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ankiconnect-client", editable = "../ankiconnect-client" },
     { name = "certifi", specifier = ">=2026.6.17" },
     { name = "cyclopts", specifier = ">=4.22.1" },
     { name = "filelock", specifier = ">=3.32.0" },
@@ -2088,6 +2101,7 @@ requires-dist = [
     { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "../deinflect" },
+    { name = "saitenka-dict", editable = "../saitenka-dict" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "taffylite", marker = "extra == 'layout-engine'", specifier = ">=0.1.0" },
@@ -2146,6 +2160,19 @@ source = { editable = "../deinflect" }
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
+name = "saitenka-dict"
+version = "0.1.0"
+source = { editable = "../saitenka-dict" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-timeout", specifier = ">=2.4" },
+]
 
 [[package]]
 name = "secretstorage"

@@ -40,11 +40,11 @@ _AUTO_WORKERS_GIL = 2  # a GIL build can't render in parallel — extra workers 
 class PrefetchItem:
     """One speculative background job for ``token``: either a FULL panel render (``full=True``,
     when the user is *engaged* — paused or hovering the video, a hover is imminent) or a cheap
-    dict-only WARM (``full=False``): just decode+cache each dictionary's glossary for this word,
+    dict-only WARM (``full=False``): just decode+cache each dictionary's semantic entry for this word,
     skipping layout/drawing entirely. Warm jobs run for every new subtitle line regardless of
     engagement — genuinely idle CPU time while the line is only being watched/listened to, not yet
     looked at — so that the JSON-decode cost (the single biggest cost in a `--stress` profile, see
-    ``Dictionary._entry_cache``) is usually already paid by the time a hover actually happens.
+    decoded-entry LRU) is usually already paid by the time a hover actually happens.
 
     ``gen`` is the prefetch generation at enqueue time — a line change / resume / seek bumps the
     Reader's counter, so stale items are dropped by the worker. ``mined`` is evaluated on the MAIN
@@ -236,7 +236,7 @@ def start_prefetch(reader: Reader) -> None:
 
 def _run_item(reader: Reader, item: PrefetchItem) -> None:
     """A viewport-first HEAD render when the user's engaged (a hover is imminent), else a cheap
-    dict-only WARM (decode+cache the glossary into ``Dictionary._entry_cache``, no layout) so a
+    dict-only WARM (decode+cache the semantic entry in the source's decoded-entry LRU, no layout) so a
     later hover/render skips the decode."""
     # Idle-warming span: how much idle budget the worker actually spends warming upcoming words —
     # the live counterpart to what --timeline measures out-of-band (worker keep-ahead margin).

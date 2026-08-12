@@ -105,12 +105,6 @@ CREATE TABLE IF NOT EXISTS tags(
 -- import via the optional resvglite extra (#283). Additive — no DB_SCHEMA bump, so it stays empty for
 -- existing DBs until the next re-import; the renderer falls back to ▢ when a path isn't present.
 CREATE TABLE IF NOT EXISTS media(dict_id INTEGER, path TEXT, png BLOB, PRIMARY KEY(dict_id, path));
--- Persistent cache of the Anki known-word set (startup perf): one row per note, `words` = a JSON list
--- of the extracted forms, `mod` = the note's Anki modification time for the background subset-diff
--- refresh. Independent of dictionary imports (survives everything but a DB_SCHEMA rebuild → then a
--- one-time full reload repopulates it). See wordlists.KnownWords / reader_deps._load_known_words.
-CREATE TABLE IF NOT EXISTS anki_known_cache(
-  deck TEXT, note_id INTEGER, mod INTEGER, words TEXT, PRIMARY KEY(deck, note_id));
 CREATE INDEX IF NOT EXISTS idx_keys ON keys(dict_id, key);
 CREATE INDEX IF NOT EXISTS idx_meta_term ON term_meta(dict_id, term);
 -- PitchSource.accents() (wordlists.py) queries `dict_id=? AND mode='pitch' AND (term=? OR reading=?)`.
@@ -405,55 +399,6 @@ class DictionaryDb:
             c.execute(f"PRAGMA cache_size=-{self._opts.cache_size_kib}")
             self._local.conn = c
         return c
-
-    # --- Anki known-word cache (startup perf; see wordlists / reader_deps) --------------------
-
-    def known_cache_read(
-        self, decks: Sequence[str]
-    ) -> dict[str, dict[int, tuple[int, list[list[str]]]]]:
-        """``{deck: {note_id: (mod, [[surface, reading]])}}`` from the persistent cache — the last-known
-        extracted forms per note, for an instant startup load. A deck with no cached rows maps to ``{}``.
-        The payload shape is opaque here (JSON round-trip); :mod:`wordlists` owns its meaning + format
-        version."""
-        out: dict[str, dict[int, tuple[int, list[list[str]]]]] = {d: {} for d in decks}
-        if not decks:
-            return out
-        placeholders = ",".join("?" * len(decks))
-        for deck, note_id, mod, words in self._conn().execute(
-            f"SELECT deck, note_id, mod, words FROM anki_known_cache WHERE deck IN ({placeholders})",  # noqa: S608  # placeholders are '?'s, params bound below
-            tuple(decks),
-        ):
-            out.setdefault(deck, {})[note_id] = (mod, json.loads(words))
-        return out
-
-    def known_cache_write(
-        self,
-        deck: str,
-        upserts: Sequence[tuple[int, int, list[list[str]]]],
-        deleted_ids: Sequence[int] = (),
-    ) -> None:
-        """Apply one deck's diff (``upserts`` = ``(note_id, mod, [[surface, reading]])``; ``deleted_ids`` gone from
-        Anki) in a single transaction. Runs on the background refresh thread — a fresh RW connection
-        keeps it off the per-thread RO lookup conns; ``timeout`` rides out a concurrent lookup's lock."""
-        conn = sqlite3.connect(self.path, timeout=10)
-        try:
-            if deleted_ids:
-                conn.executemany(
-                    "DELETE FROM anki_known_cache WHERE deck=? AND note_id=?",
-                    [(deck, nid) for nid in deleted_ids],
-                )
-            if upserts:
-                conn.executemany(
-                    "INSERT OR REPLACE INTO anki_known_cache(deck, note_id, mod, words) "
-                    "VALUES(?,?,?,?)",
-                    [
-                        (deck, nid, mod, json.dumps(words, ensure_ascii=False))
-                        for nid, mod, words in upserts
-                    ],
-                )
-            conn.commit()
-        finally:
-            conn.close()
 
     def meta_get(self, key: str) -> str | None:
         row = self._conn().execute("SELECT v FROM meta WHERE k=?", (key,)).fetchone()

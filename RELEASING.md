@@ -21,8 +21,9 @@ and merging the PR — still happen exactly where they're described here.
 breaking change) is a minor bump — `0.2.0 → 0.3.0`. Don't reach for `1.0.0` until the CLI/config is
 being frozen.
 
-Single source of truth: **`overlay/pyproject.toml` `version`** (read at runtime via
-`importlib.metadata`). Nothing else hardcodes the version.
+Saitenka's version source is **`overlay/pyproject.toml`**. `saitenka-dict` and `ankiconnect-client` keep
+independent versions in their own `pyproject.toml` and publish only from their namespaced tags. A
+Saitenka release consumes already-published dependency versions; it never republishes them.
 
 ## Automated
 
@@ -62,13 +63,14 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 2. **Changelog** — draft with `uv run poe changelog` (git-cliff), then **hand-curate** `CHANGELOG.md`:
    promote `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, open a fresh empty `## [Unreleased]`. Curate for
    readers (Added / Changed / Fixed / Development) — never ship raw git-cliff output.
-3. **Build the wheel:** `cd overlay && uv build --wheel` → `overlay/dist/saitenka-X.Y.Z-py3-none-any.whl`
-   (a local packaging check; `release.yml` rebuilds the published artifact from the tag).
+3. **Build the Saitenka wheel.** Any required `saitenka-dict` / `ankiconnect-client` versions must already
+   be published from their namespaced tags; the Saitenka release consumes them as ordinary dependencies.
 4. **Smoke-test the artifact, not the tree** — install the *built wheel* in an isolated env:
    ```sh
    uvx --from overlay/dist/saitenka-X.Y.Z-py3-none-any.whl saitenka --version   # → X.Y.Z
    ```
-   This catches packaging breakage (missing data files, entry point, deps) that `poe pre-release` can't.
+   This catches packaging breakage (missing data files, entry point, published deps) that
+   `poe pre-release` can't.
 5. **Gate:** `uv run poe pre-release` green — the fast `poe all` plus the release-only checks pulled
    from the PR loop (supply-chain `audit`/`licenses`, installer `shell`) and the heavier `links-net`
    (network), `smoke-live` (real mpv), and `bench` smokes; needs mpv + network. The advisory tier
@@ -78,7 +80,7 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
 
 `overlay/dist/` is git-ignored — the wheel is **not** committed; `release.yml` rebuilds it from the tag.
 
-## After merge (on the default branch) — the tag push publishes everything
+## After merge (on the default branch) — the tag push publishes Saitenka
 
 7. **Annotated tag on the merge commit**, then push it — this is the whole publish:
    ```sh
@@ -92,8 +94,12 @@ packaging breakage is still caught). See `uv run install/release.py prepare --he
    running either duplicates what CI already did. The GPL `deinflect` add-on ships separately (below).
 8. **Watch it go green:** `gh run watch --workflow=release.yml`. If it fails mid-way, fix forward and
    re-run the job (or, CI-down, fall back to `release.py publish` — the only time it's the right tool).
-9. **Post-release:** confirm the Release + both PyPI packages are live, `## [Unreleased]` is empty on
+9. **Post-release:** confirm the Release + PyPI distributions are live, `## [Unreleased]` is empty on
    top, the tag matches `pyproject.toml`, and `uv tool install "saitenka[full]"` pulls the new version.
+
+Register `saitenka-dict-release.yml` and `ankiconnect-client-release.yml` as the respective projects'
+trusted publishers. Bump and publish a changed dependency first, using
+`saitenka-dict-vX.Y.Z` or `ankiconnect-client-vX.Y.Z`; then update Saitenka's dependency floor and lock.
 
 ## deinflect (GPL add-on)
 

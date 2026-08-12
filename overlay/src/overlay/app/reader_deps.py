@@ -152,7 +152,7 @@ def make_dict_scoper(cfg: dict):
     return scope
 
 
-def _spawn_known_refresh(db, known_cfg) -> None:
+def _spawn_known_refresh(store, known_cfg) -> None:
     """Background: reconcile the known-word cache against Anki (subset mod-time diff) so the NEXT launch
     reads a current set off disk. Fire-and-forget — a failure (Anki down) leaves the cache as-is; this
     session already colored from it. Daemon so it never holds up shutdown."""
@@ -161,7 +161,7 @@ def _spawn_known_refresh(db, known_cfg) -> None:
 
     def _refresh() -> None:
         try:
-            refresh_known_cache(db, known_cfg)
+            refresh_known_cache(store, known_cfg)
         except Exception as e:
             # Anki down is expected — one compact line, traceback only for a real fault.
             log.debug(
@@ -171,7 +171,7 @@ def _spawn_known_refresh(db, known_cfg) -> None:
     threading.Thread(target=_refresh, name="saitenka-known-refresh", daemon=True).start()
 
 
-def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
+def _load_known_words(store, known_cfg, *, fallback_words=(), on_error=None):
     """Cache-first: serve the last-known set from our SQLite cache (~1 ms) and reconcile in the
     background, so the ~190 ms IO-bound AnkiConnect load is off the startup critical path. A cache miss
     (first launch / changed config) falls back to a blocking full load that populates the cache.
@@ -184,13 +184,13 @@ def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
     if not known_cfg:
         return KnownWords.from_set(fallback_words)
     try:
-        cached = KnownWords.from_cache(db, known_cfg)
+        cached = KnownWords.from_cache(store, known_cfg)
     except Exception:
         log.debug("known-word cache read failed; doing a full load", exc_info=True)
         cached = None
     if cached is not None:
         _spawn_known_refresh(
-            db, known_cfg
+            store, known_cfg
         )  # freshen the cache for next launch, off the critical path
         return cached
     # Anki closed / AnkiConnect down (incl. the client's _AnkiRetryable, an AnkiError → covered by the
@@ -203,7 +203,7 @@ def _load_known_words(db, known_cfg, *, fallback_words=(), on_error=None):
         TypeError,
     )
     try:  # cache miss: full load NOW (populates the cache + signature for next time)
-        return refresh_known_cache(db, known_cfg)
+        return refresh_known_cache(store, known_cfg)
     except known_load_errors as e:
         if on_error is not None:
             on_error(e)
@@ -389,9 +389,11 @@ def build_reader_deps(
     from concurrent.futures import ThreadPoolExecutor
 
     from overlay.app.dictdb import DictionaryDb
+    from overlay.app.known_cache import KnownWordCache
 
     with otel_metrics.traced("dictdb_open"):
         db = DictionaryDb.open()
+    known_cache = KnownWordCache.open(db.path.with_name("anki-known.sqlite"), legacy_path=db.path)
     # Fan the independent pieces of this out across threads (free-threaded build → real parallelism,
     # not just I/O interleaving): Anki launch/poll, dict-title resolution, and the JLPT table load
     # don't depend on each other, so this turns load_deps_async's wall time from their SUM into their
@@ -414,7 +416,7 @@ def build_reader_deps(
         kw_fut = (
             ex.submit(
                 _load_known_words,
-                db,
+                known_cache,
                 known_cfg,
                 fallback_words=fallback_words,
                 on_error=on_known_words_error,

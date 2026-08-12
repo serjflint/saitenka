@@ -42,6 +42,34 @@ except ImportError:  # pragma: no cover — exercised via the deinflect-absent p
         return []
 
 
+from overlay.app.dictionary_surface import (
+    DEINFLECT_FORM_CAP as _DEINFLECT_FORM_CAP,
+)
+from overlay.app.dictionary_surface import (
+    FREQ_COLOR,
+    PITCH_COLOR,
+)
+from overlay.app.dictionary_surface import (
+    JP_LANGS as _JP_LANGS,
+)
+from overlay.app.dictionary_surface import (
+    KANJI_STAT_SECTIONS as _KANJI_STAT_SECTIONS,
+)
+from overlay.app.dictionary_surface import (
+    SearchHit as _SearchHit,
+)
+from overlay.app.dictionary_surface import (
+    glosses_of as _glosses_of,
+)
+from overlay.app.dictionary_surface import (
+    reading_affinity as _reading_affinity,
+)
+from overlay.app.dictionary_surface import (
+    search_result_nodes as _search_result_nodes,
+)
+from overlay.app.dictionary_surface import (
+    to_glob as _to_glob,
+)
 from overlay.app.lookup import CardData, furigana
 from overlay.app.wordlists import FreqSource, PitchSource
 from overlay.fonts import STROKE_ORDER_FONT
@@ -49,6 +77,7 @@ from overlay.panel import Definition, Entry, EntryGroup, Freq
 from overlay.sc.walk import collect_img_paths
 
 if TYPE_CHECKING:
+    from overlay.app.source_adapter import DictionarySourceAdapter
     from overlay.model import PitchAccent  # annotation-only (positions come typed from PitchSource)
 
 # dict_sql step-resolution is kept on the interactive path but SAMPLED in the background prefetch
@@ -73,6 +102,7 @@ if TYPE_CHECKING:
     from collections.abc import Container, Sequence
 
     from saitenka_deinflect import Deinflection  # noqa: TID251  # GPL chokepoint (type only)
+    from saitenka_dict import LookupSource
 
     from overlay.app.dictdb import DictionaryDb, DictRow
     from overlay.app.tokenize import Token
@@ -105,28 +135,6 @@ def split_existing(paths: Sequence[str | Path]) -> tuple[list[str], list[str]]:
     for p in paths:
         (existing if Path(str(p)).expanduser().exists() else missing).append(str(p))
     return existing, missing
-
-
-FREQ_COLOR = (74, 158, 92, 255)  # green pill, like SubMiner's frequency row
-PITCH_COLOR = (126, 96, 168, 255)  # purple pill, for pitch-accent dicts
-
-# Kanji-panel stat sections, ordered as Yomitan shows them; keyed by the tag_bank `category` field
-# (KANJIDIC: misc/class/code/index — the `frequent` category is the jōyō/jinmeiyō membership pill, not a
-# stats row). Un-tagged codes fall through to a trailing untitled table.
-_KANJI_STAT_SECTIONS = (
-    ("misc", "Statistics"),
-    ("class", "Classifications"),
-    ("code", "Codepoints"),
-    ("index", "Dictionary Indices"),
-)
-
-# Cap on deinflected dictionary-form candidates folded into one lookup — the French suffix ruleset
-# over-generates, and a real word resolves within the first handful; the rest only miss.
-_DEINFLECT_FORM_CAP = 24
-
-# Japanese language codes — the MeCab lemma is already the dict form and the JP not-found message is
-# Japanese, so these keep every JP path byte-identical. `jp` is the overlay's internal code, `ja` ISO.
-_JP_LANGS = frozenset({"jp", "ja"})
 
 
 _JMDICT_LIKE = re.compile(r"jmdict|jitendex", re.IGNORECASE)
@@ -167,52 +175,6 @@ class DictEntry:
     dict_title: str = ""
 
 
-def _to_glob(pattern: str) -> str:
-    """Normalise a user wildcard pattern to a SQLite GLOB pattern: fullwidth ＊/？ → ASCII ``*``/``?``."""
-    return pattern.replace("＊", "*").replace("？", "?")
-
-
-def _reading_affinity(dict_reading: str, ctx_reading: str) -> int:
-    """How well a dictionary headword reading matches the token's contextual (surface) reading, so a
-    multi-reading kanji picks the reading actually used. Exact match wins; otherwise the longest common
-    kana prefix — 退いた's surface reading のいた shares の with のく but nothing with しりぞく. Survives
-    inflection because the stem reading is a prefix of the conjugated surface reading for godan/ichidan
-    verbs (irregulars like する/来る carry a single reading, so there is nothing to disambiguate)."""
-    if not dict_reading or not ctx_reading:
-        return 0
-    if dict_reading == ctx_reading:
-        return len(dict_reading) + 1  # exact reading beats any prefix
-    n = 0
-    for a, b in zip(dict_reading, ctx_reading, strict=False):
-        if a != b:
-            break
-        n += 1
-    return n
-
-
-def _glosses_of(glossary: list) -> list[str]:
-    """Every glossary item flattened to plain text (SC/HTML stripped, whitespace collapsed)."""
-    from overlay.sc.walk import _text_of
-
-    out: list[str] = []
-    for it in glossary:
-        text = (
-            it
-            if isinstance(it, str)
-            else (
-                _text_of(it.get("content"))
-                if isinstance(it, dict) and it.get("type") == "structured-content"
-                else it.get("text", "")
-                if isinstance(it, dict)
-                else ""
-            )
-        )
-        text = re.sub(r"\s+", " ", text or "").strip()
-        if text:
-            out.append(text)
-    return out
-
-
 def _first_gloss(glossary: list, limit: int = 40) -> str:
     """A short plain-text first-gloss preview for a search-result row (strips SC/HTML, truncates)."""
     glosses = _glosses_of(glossary)
@@ -249,18 +211,6 @@ def _glossary_to_nodes(glossary: list) -> list:
             continue
         nodes.append({"tag": "div", "content": node} if wrap else node)
     return nodes
-
-
-def _search_result_nodes(items: list[tuple[str, str, str]]) -> list:
-    li_nodes: list = []
-    for term, reading, gloss in items:
-        li: list = [{"tag": "a", "href": f"?query={term}", "content": term}]
-        if reading and reading != term:
-            li.append(f"【{reading}】")
-        if gloss:
-            li.append({"tag": "span", "style": {"color": "#6a6a6a"}, "content": f" — {gloss}"})
-        li_nodes.append({"tag": "li", "content": li})
-    return li_nodes
 
 
 class Dictionary:
@@ -481,6 +431,44 @@ class DictionarySet:
     # Active profile's main language (#254) — routes the deinflection chain to the right rule set.
     # Yomitan's ``jp`` default keeps every existing JP path byte-identical.
     language: str = "jp"
+    source: LookupSource | None = None
+    _adapter: DictionarySourceAdapter | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    def _source_view(self) -> DictionarySourceAdapter | None:
+        if self.source is None:
+            return None
+        if self._adapter is None:
+            from overlay.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
+
+            dictionaries = tuple(
+                dict.fromkeys(
+                    (
+                        *(dictionary.title for dictionary in self.dicts),
+                        *(frequency.title for frequency in self.freqs),
+                        *(pitch.title for pitch in self.pitches),
+                    )
+                )
+            )
+            self._adapter = DictionarySourceAdapter(
+                self.source,
+                SourceAdapterOptions(
+                    dictionaries=dictionaries,
+                    sequence_dictionaries=tuple(
+                        dictionary.title
+                        for dictionary in self.dicts
+                        if _looks_like_jmdict(dictionary.title)
+                    ),
+                    language=self.language,
+                    deinflected_forms=self._deinflected_candidates,
+                    inflection_chain=self._source_inflection_chain,
+                ),
+            )
+        return self._adapter
+
+    def _source_inflection_chain(self, surface: str, targets: tuple[str, ...]) -> list[str]:
+        return inflection_chain(surface, *targets, language=self.language)
 
     @classmethod
     def from_rows(
@@ -493,11 +481,36 @@ class DictionarySet:
         language: str = "jp",
     ) -> DictionarySet:
         """Build an ordered dictionary set from already-resolved :class:`DictRow`s of the given DB."""
+        from saitenka_dict import SqliteDictionaryStore, Translator
+
+        class _CacheObserver:
+            @staticmethod
+            def hit() -> None:
+                if otel_metrics.dict_cache_hits is not None:
+                    otel_metrics.dict_cache_hits.add(1)
+
+            @staticmethod
+            def miss() -> None:
+                if otel_metrics.dict_cache_misses is not None:
+                    otel_metrics.dict_cache_misses.add(1)
+
+            @staticmethod
+            def eviction() -> None:
+                if otel_metrics.dict_cache_evictions is not None:
+                    otel_metrics.dict_cache_evictions.add(1)
+
         return cls(
             dicts=[Dictionary(db, r) for r in dict_rows],
             freqs=[FreqSource(db, r) for r in freq_rows],
             pitches=[PitchSource(db, r) for r in pitch_rows],
             language=language,
+            source=Translator(
+                SqliteDictionaryStore(
+                    db.path,
+                    entry_cache_max=db._opts.entry_cache_max,
+                    cache_observer=_CacheObserver(),
+                )
+            ),
         )
 
     @classmethod
@@ -529,6 +542,8 @@ class DictionarySet:
 
     def has_term(self, *forms: str | None) -> bool:
         """Any exact term/reading hit across the dictionaries? (kanji-fallback gate.)"""
+        if adapter := self._source_view():
+            return adapter.has_term(*forms)
         return any(d.lookup(*forms) for d in self.dicts)
 
     def terms_exist(self, forms: Sequence[str]) -> set[str]:
@@ -538,6 +553,8 @@ class DictionarySet:
         whole line via :meth:`_batch_exact`. Term-only, NOT reading: a kanji-compound candidate that
         merely coincides with some entry's *reading* must not license a false merge (unlike
         :meth:`has_term`, whose reading hits are wanted for the kanji-fallback gate)."""
+        if adapter := self._source_view():
+            return adapter.terms_exist(forms)
         keys = tuple(dict.fromkeys(f for f in forms if f))
         if not keys:
             return set()
@@ -554,8 +571,9 @@ class DictionarySet:
         }
 
     def decoded_entry_count(self) -> int:
-        """Decoded :class:`DictEntry` objects currently cached across every dictionary — the
-        ``dict_cache.size`` gauge (each dict's ``_entry_cache`` is bounded by ``entry_cache_max``)."""
+        """Decoded entries currently held by the active source's bounded per-dictionary LRUs."""
+        if adapter := self._source_view():
+            return adapter.decoded_entry_count()
         return sum(len(d._entry_cache) for d in self.dicts)
 
     @staticmethod
@@ -621,6 +639,8 @@ class DictionarySet:
         glyph headword, 音/訓 reading rows + numbered meanings, and the labeled/sectioned KANJIDIC stats
         — rendered through the normal panel path. ``stroke_order`` draws the headword in the numbered
         stroke-order font (the ``[tooltip] kanji_stroke_order`` toggle; visual only)."""
+        if adapter := self._source_view():
+            return adapter.kanji_for(char, stroke_order=stroke_order)
         for d in self.dicts:
             k = d.kanji_lookup(char)
             if k is None:
@@ -640,6 +660,8 @@ class DictionarySet:
     def frequency_field(self, token) -> tuple[str, str]:
         """(Frequency field HTML, FreqSort number) for a mined Lapis card — the same values the tooltip
         shows as green pills. Empty when no freq source has the word. The plan maps ``freq → Frequency``."""
+        if adapter := self._source_view():
+            return adapter.frequency_field(token)
         forms = (token.lemma, token.surface, token.reading)
         rows = [(fs.title, disp) for fs in self.freqs if (disp := fs.display(forms, token.reading))]
         if not rows:
@@ -653,6 +675,8 @@ class DictionarySet:
         """(pitch-accent field HTML, positions text) for a mined card — the same accents the tooltip
         shows as purple pills. Empty when no pitch source has the word. ``{pitch-accents}`` renders the
         HTML; ``{pitch-accent-positions}`` the bare numbers (e.g. ``0`` / ``0, 2``)."""
+        if adapter := self._source_view():
+            return adapter.pitch_field(token)
         forms = (token.lemma, token.surface, token.reading)
         accents = self._pitch_accents(forms, token.reading)
         if not accents:
@@ -753,6 +777,8 @@ class DictionarySet:
         ``glossary_html``) so the caller can fall back to the JMdict/jamdict source. No JMdict sequence
         id — Yomitan terms carry none. ``extra_terms`` are longer phrases (数ある) that outrank the bare
         word, so a hovered phrase mines the phrase by default."""
+        if adapter := self._source_view():
+            return adapter.card_for(token, extra_terms=extra_terms)
         forms, _, preferred = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
         for d in self.dicts:
@@ -771,6 +797,8 @@ class DictionarySet:
         so the caller falls back to the JMdict source. ``cards_for(token)[0] == card_for(token)`` for a
         single dictionary. ``extra_terms`` (longer phrases 数ある) are looked up too and, being longer,
         sort ahead of the bare word."""
+        if adapter := self._source_view():
+            return adapter.cards_for(token, extra_terms=extra_terms)
         forms, termforms, preferred = self._forms(token, extra_terms)
         formset = {f for f in forms if f}
         batched = self._batch_exact(forms)  # one query for all dicts (no per-dict _fetch)
@@ -789,16 +817,22 @@ class DictionarySet:
             key=lambda c: self._rank_key(c.expression, c.reading, token, formset, preferred),
         )
 
-    def _collect_search_hits(self, glob: str, limit: int) -> list[tuple[str, str, str]]:
+    def _collect_search_hits(self, glob: str, limit: int) -> list[_SearchHit]:
         seen: set[tuple[str, str]] = set()
-        items: list[tuple[str, str, str]] = []  # (term, reading, gloss)
+        items: list[_SearchHit] = []
         for d in self.dicts:
             for h in d.lookup(glob, wildcard=True, limit=limit):
                 key = (h.term, h.reading)
                 if key in seen:
                     continue
                 seen.add(key)
-                items.append((h.term, h.reading, _first_gloss(h.glossary)))
+                items.append(
+                    _SearchHit(
+                        term=h.term,
+                        reading=h.reading,
+                        gloss=_first_gloss(h.glossary),
+                    )
+                )
                 if len(items) >= limit:
                     break
             if len(items) >= limit:
@@ -810,6 +844,8 @@ class DictionarySet:
         lists each matching headword as a **clickable** link: drilling into a result opens that
         exact term. ``pattern`` uses GLOB wildcards (``*``/``?``); a bare term prefix-matches via
         ``term*``."""
+        if adapter := self._source_view():
+            return adapter.search(pattern, limit)
         glob = _to_glob(pattern)
         if not any(c in glob for c in "*?"):
             glob += "*"  # a bare query → prefix search
@@ -1017,6 +1053,8 @@ class DictionarySet:
     def entry_for(
         self, token: Token, inflected: str | None = None, *, extra_terms: Sequence[str] = ()
     ) -> Entry:
+        if adapter := self._source_view():
+            return adapter.entry_for(token, inflected, extra_terms=extra_terms)
         # `inflected` is the full inflected surface incl. trailing auxiliaries (習わ + ぬ → 習わぬ) so
         # the chain deinflects the whole word; the tokenizer splits those into separate tokens.
         # `extra_terms` are longer multi-token phrases starting at this word (数ある over 数); being

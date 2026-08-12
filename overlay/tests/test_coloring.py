@@ -288,3 +288,34 @@ def test_known_cache_and_its_invalidation_are_durable_across_a_db_reopen(tmp_pat
     # invalidation is durable too: the same on-disk cache must NOT satisfy a changed field config,
     # even though its rows are physically present — the signature stored on disk no longer matches.
     assert KnownWords.from_cache(reopened, {"D": ["Entry", "Meaning"]}) is None
+
+
+def test_known_cache_migrates_the_previous_dictionary_db_state(tmp_path):
+    import json
+    import sqlite3
+
+    from overlay.app import wordlists as wl
+    from overlay.app.dictdb import DictionaryDb
+
+    decks = {"D": ["Entry"]}
+    path = tmp_path / "dictionaries.sqlite"
+    db = DictionaryDb.open(path)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE anki_known_cache("
+        "deck TEXT, note_id INTEGER, mod INTEGER, words TEXT, PRIMARY KEY(deck, note_id))"
+    )
+    connection.execute(
+        "INSERT INTO anki_known_cache VALUES(?, ?, ?, ?)",
+        ("D", 1, 10, json.dumps([["人", "ひと"]], ensure_ascii=False)),
+    )
+    connection.execute(
+        "INSERT OR REPLACE INTO meta(k, v) VALUES('anki_known_sig', ?)",
+        (wl._known_signature(decks),),
+    )
+    connection.commit()
+    connection.close()
+
+    migrated = KnownWords.from_cache(db, decks)
+
+    assert migrated is not None and migrated.words == {"人", "ひと"}

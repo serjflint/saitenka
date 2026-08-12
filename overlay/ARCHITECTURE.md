@@ -44,6 +44,15 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
   (subtitle fetching); `cli.py`/`cli_run.py` (the entry point — thin parser + real orchestration).
+- **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
+  SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
+  `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the
+  legacy facade is the compatibility fallback. The headless-Yomitan oracle is repository-only test
+  tooling and is excluded from published artifacts.
+- **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
+  `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
+- **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
+  and schema rebuilds no longer own Anki-derived state.
 
 ## Data flow (the hover → lookup → render → mine chain)
 
@@ -51,13 +60,13 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 2. Each subtitle line is tokenized (the profile's tokenizer strategy — fugashi + unidic-lite for
    Japanese, the Latin strategy for French/…) into `Token`s with per-word hitboxes, drawn as an OSD
    overlay.
-3. On hover, hit-testing maps screen coordinates to a token; the word's lemma is looked up against
-   the consolidated dictionary DB, producing an `Entry` (one `Definition` per configured
-   dictionary).
+3. On hover, hit-testing maps screen coordinates to a token. A `LookupSource` produces semantic term
+   or kanji results; `DictionarySourceAdapter` maps them to the stable `Entry` render input. The
+   legacy consolidated-DB facade remains available as a compatibility fallback.
 4. The panel code (`panel.py`) walks the `Definition`s' structured content into a rendered tooltip
    image via `render/` → `draw/`, composited over the mpv frame.
-5. Optionally, mining the hovered word builds an Anki note via AnkiConnect (`anki.py`, `miner.py`):
-   sentence, screenshot, audio clip, provenance.
+5. Optionally, mining builds a note through `ankiconnect-client`; `anki.py`/`miner.py` own sentence,
+   screenshot, audio, provenance, launch behavior, and telemetry.
 
 ## Tooltip render pipeline (end-to-end)
 
@@ -70,7 +79,7 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | Entity | Lives in | What it is |
 | --- | --- | --- |
 | **Token** (the *term*) | `app/tokenize.py` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
-| **Dictionary** | `app/dictionary.py` | One imported Yomitan dict over the consolidated SQLite DB. Holds a per-instance LRU of decoded `DictEntry` (`entry_cache_max`). |
+| **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
 | **`Entry`** | `panel.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
 | **`Row`** | `panel.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |
@@ -140,10 +149,10 @@ Entry  (one hovered term's whole tooltip content)
 └─ groups: EntryGroup[]    ← only ≥2 readings: one block/reading, its own ⊕
      └─ EntryGroup { headword · reading · defs: Definition[] }
 
-  Definition.content is decoded from:
+  Definition.content is adapted from:
   dictionaries.sqlite  (one consolidated DB, opened read-only at play time)
-  └─ Dictionary[]  scoped by dict_id
-       └─ DictEntry { term · reading · glossary = SC nodes · tags }  (LRU 256/dict)
+  └─ SqliteDictionaryStore  scoped by configured dictionary titles
+       └─ TermRecord { term · reading · semantic definitions · tags }  (LRU 256/dict)
 ```
 
 ### Stage 1 — speculative prefetch (before the hover) · `app/prefetch.py`
@@ -153,8 +162,8 @@ Every subtitle-line change enqueues background work on the persistent prefetch w
 `prefetch_workers`). A generation counter (`_prefetch_gen`) invalidates in-flight jobs the instant the
 line changes. Three job classes, cheapest-first:
 
-- **Warm** (`PrefetchItem(full=False)`) — decode + cache each dictionary's glossary JSON into the
-  `Dictionary._entry_cache`. The JSON decode is the single biggest per-word cost in a `--stress`
+- **Warm** (`PrefetchItem(full=False)`) — decode + cache each dictionary's glossary JSON as semantic
+  `TermRecord`s in `SqliteDictionaryStore`. The JSON decode is the single biggest per-word cost in a `--stress`
   profile, so paying it during idle playback makes the eventual hover a cache hit. Runs for **every**
   new line, and — with `prefetch_lookahead > 0` (default `0`) — for the next N cues too (needs an
   external sub index).
@@ -168,13 +177,14 @@ line changes. Three job classes, cheapest-first:
 `mined` state (jamdict/`card_for`) is resolved on the **main thread** and passed by value — jamdict is
 not worker-safe under free-threading.
 
-### Stage 2 — lookup → `Entry` · `app/dictionary.py`
+### Stage 2 — lookup → `Entry` · `saitenka-dict`, `app/source_adapter.py`
 
-On hover, the token's lemma (plus surface + reading forms) is looked up. `DictionarySet._batch_exact`
-issues **one** `IN`-list SQL query across all configured dicts (`_EXACT_Q`, `ORDER BY e.id` for
-deterministic reassembly), then each `Dictionary` decodes its rows into `DictEntry` (LRU-cached,
-`entry_cache_max = 256`/dict). The assembled `Entry` carries one `Definition` per dict. This is the
-only synchronous DB touch on the hover path; prefetch usually paid it already.
+On hover, the adapter sends the token's lemma, surface, reading, and deinflected forms to `Translator`.
+`SqliteDictionaryStore` loads ordered term rows, metadata, and pronunciations with bound queries and
+decodes them into LRU-cached `TermRecord`s (`entry_cache_max = 256`/dict). `Translator` assembles the
+configured result mode; the adapter maps those semantic entries into the stable tooltip `Entry`.
+Prefetch normally warms the same path before hover. The legacy `_batch_exact`/`DictEntry` pipeline is
+used only when no semantic source is installed.
 
 ### Stage 3 — build rows (deferred) · `panel.py`
 
@@ -273,6 +283,11 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
   what makes this airspace-safe on Windows fullscreen.
 - **Dictionaries are imported once** into a consolidated SQLite DB (the Yomitan model); play-time
   only opens it — nothing rebuilds during playback, RAM stays low.
+- **Dictionary semantics and rendering are separate contracts.** `saitenka_dict.LookupSource` is the
+  swappable information seam; Saitenka's `Entry`/panel backends are the swappable presentation seam.
+  The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
+- **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
+  sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`
   may import it (enforced by import-linter + ruff `TID251` + the license gate) — keeps the core
   Apache-2.0-clean.
