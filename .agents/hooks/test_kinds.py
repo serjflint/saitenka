@@ -42,7 +42,7 @@ SUBSYSTEMS: dict[str, tuple[list[str], list[str]]] = {
         ["warm==cold cache-equivalence", "concurrency (race gate)", "eviction / idempotence"],
     ),
     "cli assembly": (
-        ["*/app/launch/*.py", "*/app/controller.py"],
+        ["*/app/commands/*.py", "*/app/launch/*.py", "*/app/controller.py"],
         ["assembly / pipeline integration oracle"],
     ),
     "profiles": (
@@ -65,8 +65,8 @@ SUBSYSTEMS: dict[str, tuple[list[str], list[str]]] = {
         ["*/app/sub_index.py"],
         ["metamorphic", "property-based"],
     ),
-    "sc.walk": (
-        ["*/sc/*.py"],
+    "structured-content adapter": (
+        ["*/render/sc_adapter.py", "*/sc/*.py"],
         ["golden-image"],
     ),
 }

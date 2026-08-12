@@ -128,4 +128,18 @@ def test_real_registry_offers_jimaku_and_tsukihime_for_japanese():
         "tsukihime",
     }
     assert get_provider("jimaku") is not None
+
+
+def test_run_launch_registers_builtin_providers_from_an_empty_registry(monkeypatch):
+    from saitenka.app.launch import run
+
+    _isolated_registry(monkeypatch)
+
+    assert run._enabled_provider_names(
+        "episode.mkv",
+        jimaku=True,
+        jimaku_cfg={},
+        tsukihime_cfg={"enabled": True},
+        language="jp",
+    ) == ("jimaku", "tsukihime")
     assert get_provider("tsukihime") is not None

@@ -30,7 +30,7 @@ that map is what fires — keep them in sync.
 | **cli assembly** | n/a | n/a | n/a | n/a | n/a | n/a | **✔³** | n/a | ✔ |
 | profiles | ✔ commutativity | n/a | gap | n/a | n/a | n/a | ✔ (pipeline) | n/a | n/a |
 | subtitle providers | ✔ input-equiv | n/a | gap | n/a | n/a | n/a | partial | n/a | ✔ |
-| sc.walk | n/a | ✔ (sc goldens) | gap | n/a | n/a | n/a | n/a | n/a | n/a |
+| structured-content adapter | n/a | ✔ (sc goldens) | gap | n/a | n/a | n/a | n/a | n/a | n/a |
 
 ¹ FR has no upstream conformance suite to steal — *why* the differential exists. ² Closed this session
 (`test_transform_differential_corpus.py`). ³ Closed this session (`test_pipeline_oracle.py`). The two ³/²

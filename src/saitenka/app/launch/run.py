@@ -1,10 +1,4 @@
-"""Wave-2 P3: the guts of ``cli.py``'s ``run`` command, extracted behind a stable seam.
-
-``run`` stays a thin cyclopts-decorated forwarder in ``cli.py`` (its exact signature has to live
-there for cyclopts to build ``--help``/parsing — see ``tests/test_cli.py``'s flag-inventory
-contract); this module holds ``run_impl`` and the cohesive helpers it's built from, split out of
-what used to be one ~350-line, CCN-147 function. Behavior is unchanged from the pre-split version.
-"""
+"""Run-mode launch orchestration behind the Cyclopts boundary in ``commands/run.py``."""
 
 from __future__ import annotations
 
@@ -20,6 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from saitenka.app import session_stats
+from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config
 from saitenka.app.continuity import resolve_sibling
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
@@ -296,6 +291,7 @@ def _cached_subtitles(
 def _enabled_provider_names(
     video: str | None, *, jimaku: bool, jimaku_cfg: dict, tsukihime_cfg: dict, language: str
 ) -> tuple[str, ...]:
+    _subselect.register_builtin_providers()
     if not video:
         return ()
     flags = (
