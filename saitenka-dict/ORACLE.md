@@ -19,3 +19,10 @@ Run `uv run poe yomitan-parity` for the Markdown report or `uv run poe yomitan-p
 output. The report exits nonzero on drift and reports the first semantic difference. The browser-backed
 `yomitan-api` remains useful for live checks against a user's installed dictionaries; the headless
 runner is the deterministic CI/dev oracle.
+
+For a rendering-structure diagnosis against an installed Saitenka database, run
+`uv run poe dictionary-structure-oracle 鳥 --reading とり --dictionary 'Jitendex.org [2024-07-31]' --artifacts /tmp/tori-oracle`.
+It sends the glossary returned by `saitenka-dict` through
+Yomitan's real `StructuredContentGenerator`, compares its semantic DOM blocks with Saitenka's blocks
+immediately before layout, and exits nonzero at the first glued, missing, reordered, or mismarked block.
+Use `--artifacts <dir>` to retain the generated HTML and both traces.

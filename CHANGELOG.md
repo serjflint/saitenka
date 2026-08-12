@@ -22,7 +22,8 @@ logs.
   `saitenka-dict` package and AnkiConnect transport/protocol handling into `ankiconnect-client`.
   Saitenka now has a swappable lookup-source adapter, a dictionary-independent known-word cache, and a
   batched headless-Yomitan differential report covering all term modes, metadata, structured content,
-  and kanji.
+  and kanji. An opt-in structure oracle also compares Yomitan's generated DOM with Saitenka's blocks
+  immediately before layout for an entry in the installed database.
 
 ## [3.1.0] - 2026-08-11
 
