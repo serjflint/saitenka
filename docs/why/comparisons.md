@@ -16,11 +16,12 @@ approach immersion from five different angles.
 - **Anki Miner** is a batch-mining desktop GUI: point it at a folder, whole series, YouTube playlist,
   audiobook, manga, or ebook, review the candidate words in a curator, and it builds a frequency-ranked
   deck in one pass — the opposite pole from Saitenka's live, one-word-at-a-time overlay.
-- **Migaku** is a proprietary commercial platform: its Chrome extension and mobile apps make
+- **Migaku** is a commercial platform: its Chrome extension and mobile apps make
   streaming video, local files, webpages, reader documents, and camera OCR interactive. It creates
   cards in Migaku Memory; the browser extension can also send them to Anki. It trades Saitenka's narrow
   local-mpv focus for broader media coverage, built-in courses, cloud sync, and optional AI
-  explanations/subtitles.
+  explanations/subtitles. Its current Anki bridge and several companion tools are open source, though
+  the platform as a whole is not.
 
 So this is a map of trade-offs across different jobs, not a scoreboard. For raw rendering and lookup
 latency, see [Speed](benchmarks.md); to try it, see [Get started](../start/install.md).
@@ -30,49 +31,50 @@ latency, see [Speed](benchmarks.md); to try it, see [Get started](../start/insta
 | Capability | 再点火 Saitenka | SubMiner | Autocards | Anki Miner | Migaku |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Category | live in-mpv engine | Electron mining app | retroactive enricher | batch mining GUI | commercial immersion platform |
-| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ | ❌ | ❌ | — |
+| Runs inside mpv's **own surface** — no second window, fullscreen/airspace-safe | ✅ | ❌ | ❌ | ❌ | ❌ [older mpv add-on opens a browser UI](https://github.com/migaku-official/migaku-mpv/blob/a20b49219be1b31967138128845f8ba7f8a54eb2/migaku_mpv.py) |
 | Multi-dictionary Yomitan tooltip · pitch accent · frequency | ✅ | ✅ | ❌ | ✅ | ⚠️ [dictionary](https://migaku.com/faq/features) + [frequency](https://migaku.com/blog/changelog) |
 | One-key **Anki mining** with video audio + screenshot | ✅ | ✅ | ❌ | ✅ | ✅ [browser extension](https://migaku.com/blog/youtube/card-creation-from-video-content-migaku-browser-extension) |
 | Bulk card creation | ✅ | ✅ | ❌ | ✅ | ⚠️ [Migaku app; surface-specific](https://migaku.com/blog/changelog) |
-| **Retroactive media back-fill** onto existing text-only cards (sentence↔sub-timing match) | ❌* | ❌ | ✅ | ❌ | — |
-| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ | ❌ | ❌ | — |
-| **N+1** sentence targeting | ✅ | ✅ | ❌ | ✅ | — |
+| **Retroactive media back-fill** onto existing text-only cards (sentence↔sub-timing match) | ❌* | ❌ | ✅ | ❌ | ❌ |
+| **Reading-aware** known-word matching (homograph-safe) | ✅ | ✅ | ❌ | ❌ | ⚠️ [own word-status model](https://migaku.com/blog/youtube/supercharge-your-language-learning-tracking-learned-words) |
+| **N+1** sentence targeting | ✅ | ✅ | ❌ | ✅ | ⚠️ [known-word recommendations](https://migaku.com/faq/features) |
 | **Live FSRS review-state** coloring — forgotten words resurface | ✅ | ❌ | ❌ | ❌ | ⚠️ [own word-status model](https://migaku.com/blog/youtube/supercharge-your-language-learning-tracking-learned-words) |
 | Account-free operation | ✅ | ✅ | ✅ | ✅ | ❌ [account required](https://migaku.com/faq/features) |
 | Dictionary-sourced definitions | ✅ | ✅ | ❌ | ✅ | ✅ [real/user dictionaries](https://migaku.com/faq/features) |
 | Optional AI explanations / translations | ❌ | ❌ | ❌ | ❌ | ✅ [built in](https://migaku.com/faq/features) |
-| Batch folder / whole-series **frequency-ranked deck building** | ❌ | ❌ | ❌ | ✅ | — |
-| Manga mining (mokuro) | ❌ | ❌ | ❌ | ✅ | — |
+| Batch folder / whole-series **frequency-ranked deck building** | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Manga mining (mokuro) | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Document/web text mining (epub/html/txt/rtf · webpages · pasted text) | ❌ | ❌ | ❌ | ⚠️ epub/txt · pasted text | ✅ [Reader formats](https://migaku.com/blog/changelog) · [web + clipboard](https://migaku.com/faq/features) |
 | Camera OCR mining | ❌ | ❌ | ❌ | ❌ | ✅ [mobile OCR](https://migaku.com/faq/features) |
 | Streaming video mining (YouTube · Netflix · Disney+ · Viki) | ❌ | ❌ | ❌ | ⚠️ YouTube import | ✅ [desktop sites](https://migaku.com/faq/getting-started) |
-| Audiobook / **YouTube URL + playlist** batch mining (yt-dlp) | ❌ | ❌ | ❌ | ✅ | — |
-| **Pre-mine word curation** — review candidates before cards | ❌ | ❌ | ❌ | ✅ | — |
+| Audiobook / **YouTube URL + playlist** batch mining (yt-dlp) | ❌ | ❌ | ❌ | ✅ | ❌ |
+| **Pre-mine word curation** — review candidates before cards | ❌ | ❌ | ❌ | ✅ | ❌ |
 | Built-in courses + spaced-repetition app | ❌ | ❌ | ❌ | ❌ | ✅ [Migaku Memory](https://migaku.com/faq/features) |
-| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ | ❌ | — |
-| Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool | ✅ utility | — |
+| jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool | ✅ utility | ⚠️ [manual timing offsets](https://migaku.com/blog/changelog) |
 | Built-in subtitle generation (when no subs exist) | ❌ | ❌ | ❌ | ✅ local ASR | ✅ [Migaku AI service](https://migaku.com/blog/changelog) |
-| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ | ⚠️ YouTube only | — |
-| AniList **progress scrobbling** | ❌ | ✅ | ❌ | ❌ | — |
-| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ | ❌ | — |
+| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ | ⚠️ YouTube only | ⚠️ streaming-site subs |
+| AniList **progress scrobbling** | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Content comprehension analysis | ✅ | ✅ | ❌ | ✅ | ✅ [personalized difficulty](https://migaku.com/faq/features) |
-| Local session history | ✅ | ✅ | ❌ | ✅ | — |
+| Local session history | ✅ | ✅ | ❌ | ✅ | ⚠️ [browser history + resume progress](https://migaku.com/blog/changelog) |
 | Cross-machine data sync | ❌ | ✅ | ❌ | ❌ | ✅ [cloud/local sync](https://migaku.com/blog/changelog) |
-| Mined-audio loudness normalization | ❌* | ✅ | ❌ | ❌ | — |
-| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ | ❌ | — |
-| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ | ❌ | — |
+| Mined-audio loudness normalization | ❌* | ✅ | ❌ | ❌ | ❌ |
+| Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Account + paid plan required after trial | ❌ | ❌ | ❌ | ❌ | ✅ [10-day trial](https://migaku.com/signup); [recurring or Lifetime](https://migaku.com/faq/getting-started) |
-| One-command installer / portable bundle | ✅ | ✅ | ✅ | ✅ | — |
-| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ | ❌ | ⚠️ AppImage · deb · exe | — |
+| One-command installer / portable bundle | ✅ | ✅ | ✅ | ✅ | ⚠️ browser/mobile stores |
+| Native desktop packages (AppImage · DMG · AUR · winget) | ❌ | ✅ | ❌ | ⚠️ AppImage · deb · exe | ❌ Chrome extension |
 | Mobile apps | ❌ | ❌ | ❌ | ❌ | ✅ [iOS + Android](https://migaku.com/faq/getting-started) |
-| Core license | Apache-2.0 | GPL-3.0 | GPL-3.0 | GPL-3.0 | [proprietary service](https://migaku.com/terms) |
-| Linux · macOS · Windows | ✅ | ✅ | ❌ Windows | ✅ | — |
+| Source / license | Apache-2.0 core | GPL-3.0 | GPL-3.0 | GPL-3.0 | ⚠️ [proprietary platform](https://migaku.com/terms) + [GPL-3.0 Anki add-on](https://github.com/migaku-official/Migaku-Anki-Addon/tree/1507fc054319cd94767888427de132ee9f3ff1f3) and [companion tools](https://github.com/migaku-official) |
+| Linux · macOS · Windows | ✅ | ✅ | ❌ Windows | ✅ | ⚠️ Chrome desktop + mobile apps |
 
-<sub>✅ yes · ❌ no / out of scope · ⚠️ partial or a different mechanism · — not documented in the
-cited product material · \* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
+<sub>✅ yes · ❌ no / out of scope · ⚠️ partial or a different mechanism ·
+\* [on the roadmap](https://github.com/serjflint/saitenka/issues)</sub>
 
-Migaku cells link to the first-party material checked on **2026-08-12**. `—` means its cited
-product material does not establish the capability; it is not a claim that the capability cannot exist.
+Linked Migaku cells use first-party product material and public source checked on **2026-08-13**. The
+current Anki add-on is active; the public mpv integration is older and opens its study UI in a browser,
+so it is evidence for historical/companion capabilities rather than the current platform's architecture.
 
 ## Where it fits in your setup
 
