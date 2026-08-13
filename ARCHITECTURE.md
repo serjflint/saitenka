@@ -28,24 +28,27 @@ internal modules with explicit dependency contracts, not independently published
   `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
   search) is a `Panel` (`app/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
-- **`raster/`** + **`panel/`** — define the renderer backend result and compose the final RGBA
-  panel image; `app/render_backend.py` is the Pillow adapter above both layers. `panel.model` owns
+- **`raster/`** + **`panel/`** — define the one-shot raster contract and compose the final RGBA
+  panel image. `app/render_backend.py` is the characterized Pillow implementation; the interactive
+  tooltip still uses `WindowedPanel` directly because its incremental viewport protocol is richer
+  than `RasterBackend`. `panel.model` owns
   `Definition`/`Entry`; `panel.rows` plans deferred rows; `panel.body` owns picklable definition-body
-  workers; and `panel.compose` owns full and viewport-first composition. Value types with no render deps —
-  `model.Theme`, `version.overlay_version` — live at the package root to keep `render`/`app` acyclic.
+  workers; and `panel.compose` owns full and viewport-first composition. `body_block.py` is a
+  compatibility import for pre-package callers, not a second implementation.
 - **`parallel.py`** — the CPU-bound-render executor policy: free-threaded threads (FreeType releases
-  the GIL, faces are thread-local; ~78% of the render tail is `getmask2`/`getlength`), process-pool
-  fallback on a GIL build. Sub-interpreters are out (PIL's C extension segfaults across them).
+  the GIL and faces are thread-local), process-pool fallback on a GIL build. Sub-interpreters are out
+  because PIL's C extension is not safe across them.
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
 - **`subtitles/`** — the pure subtitle seam: immutable cues, SRT/ASS/VTT parsing, and cue navigation.
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
-- **`app/`** — the application layer. `controller.py`'s `Reader` retains the mpv lifecycle while
-  `runtime/` owns explicit command routing and ordered tick phases; `reader_factory.py` owns production
-  composition;
-  (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenizer.py` (the tokenizer-strategy
+- **`app/`** — the application layer. `controller.py`'s `Reader` owns the mpv session lifecycle and
+  interactive state. `runtime/` owns command dispatch and ordered tick primitives;
+  `reader_factory.py` is the production `Reader` construction seam. `cli.py` owns process setup and
+  Cyclopts registration, `commands/` owns domain command surfaces and attach orchestration, and
+  `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
   strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine
   — a French profile ships today); `dictionary.py`/`dictdb.py`/`lookup.py` (the consolidated SQLite
@@ -53,9 +56,11 @@ internal modules with explicit dependency contracts, not independently published
   `anki.py`/`miner.py`/`word_audio.py` (mining + optional word-pronunciation audio);
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
-  `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
-  (subtitle fetching); `cli.py` is the process/composition root, `commands/` owns Cyclopts domain
-  surfaces, and `launch/run.py` owns run orchestration.
+  `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
+- **Root leaf modules** — dependency-neutral types and policies shared across layers live directly in
+  `saitenka` rather than a generic `utils` package: `model.py`, `bgra.py`, `fonts.py`, `mask_atlas.py`,
+  `otel_metrics.py`, `parallel.py`, `resources.py`, `session.py`, and `version.py`. A root module should
+  stay a cohesive leaf; a growing subsystem gets a package named for its intent.
 - **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
   `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the
@@ -66,23 +71,93 @@ internal modules with explicit dependency contracts, not independently published
 - **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
   and schema rebuilds no longer own Anki-derived state.
 
+## Composition and extension seams
+
+The process entry point does not construct the reader graph itself. The assembly path is:
+
+```
+cli.create_app
+  -> app.commands.<domain>
+     -> run: app.launch.run -> reader_factory.create_reader(...)
+     -> attach: app.commands.attach -> reader_factory.create_reader(...)
+        -> Reader
+```
+
+Inside a `Reader`, mpv script messages go through a closed `CommandRouter`, and each poll executes a
+named `TickPipeline`. Both reject duplicate names, which makes ordering and ownership independently
+testable. `Reader` still assembles those tables from its feature methods, so this is an explicit
+internal composition seam rather than an open third-party plugin API.
+
+The extension points have different maturity levels; keeping that distinction explicit prevents a
+protocol-shaped class from being mistaken for production swappability.
+
+| Capability | Boundary | Current status |
+| --- | --- | --- |
+| Dictionary semantics | `saitenka_dict.LookupSource` | Live: `DictionarySourceAdapter` is the default; the legacy facade is a fallback. |
+| Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
+| Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
+| Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
+| Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
+
+`render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
+Only `saitenka-dict` and `ankiconnect-client` are independently published packages.
+
+## Work before playback
+
+The interactive loop is fast partly because it does not begin from archive files or a live Anki
+scan. Expensive, reusable work is shifted to explicit import, synchronization, or optional prewarm
+steps:
+
+1. `saitenka import` validates Yomitan archives and writes their term, kanji, frequency, pitch, tag,
+   and media records into the consolidated `dictionaries.sqlite`. Playback opens that database
+   read-only; it never parses dictionary ZIP banks.
+2. Known forms synchronized from Anki live in the independent `anki-known.sqlite` cache. Dictionary
+   re-imports therefore cannot discard Anki-derived state, and normal coloring reads local data rather
+   than issuing an AnkiConnect request per token.
+3. Acquired and resynchronized subtitles are cached by video identity, episode, file size, and mode.
+   Each logical slot keeps one current subtitle file, so a provider fetch/alignment can be reused.
+4. Optional `saitenka prewarm` walks popular terms to populate two rebuildable accelerators. The render
+   cache stores complete, premultiplied-BGRA first viewports for costly entries. The mask atlas stores
+   deterministic FreeType glyph masks, avoiding repeated rasterization across words and sessions.
+
+These are caches, not sources of truth. A miss, incompatible signature, or absent prewarm artifact
+falls back to dictionary lookup, subtitle acquisition, or live rasterization. Render-cache keys include
+format, geometry, and dictionary identity, so a changed configuration misses rather than serving
+pixels with stale layout. SQLite failures degrade cleanly; malformed compressed blobs are not yet
+handled as misses on every read path.
+
 ## Data flow (the hover → lookup → render → mine chain)
 
-1. `Reader` polls mpv's `sub-text`/`mouse-pos` over IPC (event-driven `observe_property`).
-2. Each subtitle line is tokenized (the profile's tokenizer strategy — fugashi + unidic-lite for
-   Japanese, the Latin strategy for French/…) into `Token`s with per-word hitboxes, drawn as an OSD
-   overlay.
-3. On hover, hit-testing maps screen coordinates to a token. A `LookupSource` produces semantic term
-   or kanji results; `DictionarySourceAdapter` maps them to the stable `Entry` render input. The
-   legacy consolidated-DB facade remains available as a compatibility fallback.
-4. The panel package walks the `Definition`s' structured content into a rendered tooltip
-   image via `render/` → `draw/`, composited over the mpv frame.
-5. Optionally, mining builds a note through `ankiconnect-client`; `anki.py`/`miner.py` own sentence,
-   screenshot, audio, provenance, launch behavior, and telemetry.
+1. `Reader.poll_once` pumps observed mpv properties and input events, then runs the named tick stages:
+   expire surfaces, refresh OSD, reconcile subtitles, apply background results, and update interaction.
+2. A new subtitle line is normalized, tokenized by the active profile, compound-merged against the
+   dictionary capability, scored, and cached as a `TokenizedCue`. Subtitle rendering returns the
+   visible word boxes used by the hover test.
+3. Prefetch treats the time spent reading the line as work budget. It decode-warms content words and,
+   when the user is engaged, precomposes likely tooltip heads. An external cue index enables bounded
+   lookahead into upcoming lines and a background whole-episode token warm.
+4. On hover, hit-testing maps the pointer to a token. The tokenizer supplies longest dictionary-backed
+   phrase candidates; `LookupSource` returns semantic term or kanji results; and
+   `DictionarySourceAdapter` maps them to the stable `Entry` presentation model.
+5. `panel_rows` creates deferred rows. `WindowedPanel` measures only far enough to place the requested
+   viewport, rasters body rows in bands, retains hit geometry independently of pixels, composites a
+   premultiplied-BGRA viewport, and uploads it to mpv's OSD.
+6. Scanning inside a tooltip maps screen coordinates back into retained panel geometry. It can open one
+   depth-1 popup, which reuses the same lookup, panel, cache, scroll, and blit path as the base tooltip.
+7. Optionally, mining builds a note through `ankiconnect-client`; `anki.py`/`miner.py` own sentence,
+   screenshot, audio, provenance, launch behavior, and telemetry. Network and media work is outside the
+   hover-to-paint path.
+
+Background workers never read the mpv socket or mutate displayed state directly. Cache warmers operate
+through the shared `Reader` and mutate thread-safe dictionary, token, panel, and raster caches. Jobs
+that would change the visible interaction publish a result to a queue; the tick applies it only when
+the appropriate generation and target-identity guards still match. This keeps IPC and UI publication
+single-owner and prevents a result for an abandoned word, seek, episode, or profile from flashing on
+screen.
 
 ## Tooltip render pipeline (end-to-end)
 
-The 5-step chain above is the *reader loop*; this section zooms into how one tooltip actually gets on
+The chain above is the *reader loop*; this section zooms into how one tooltip actually gets on
 screen — from the speculative work done *before* a hover, through the DB query, layout, band raster,
 compression, and blit. It is the canonical walkthrough; the module docstrings own the fine print.
 
@@ -95,14 +170,12 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
 | **`Row`** | `panel/rows.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |
-| **Block** | `render/document.py` | One block-level unit inside a def body (a paragraph or list item) after the SC-walk. A pathological def body is ~79 `<div>`s flattened into a tall stack of blocks. |
+| **Block** | `render/document.py` | One block-level unit inside a def body (a paragraph or list item) after the SC-walk. Nested dictionary markup is flattened into a vertical block sequence. |
 | **Band** | `render/banded.py` | A ≤`_BAND_PX` (256px) horizontal slice of a **row** — the unit of raster, cache, and eviction. A row of height `H` has `ceil(H/256)` bands. |
 | **Layout** | `render/flow.py`, `render/document.py`, `panel/body.py` | The wrapped-but-not-drawn state: `FlowLayout` (one flow → line boxes), `DocLayout` (stacked blocks + tops), `LaidOutBody` (a def body's walk+wrap, memoised per row). Cheap; no `getmask2`. |
 | **Offset tables** | `render/window.py` | `OffsetTable` (exact block starts/ends + the half-open visible-range kernel) and `LazyOffsets` (heights filled in as rows measure — exact for the visited prefix, estimated below). |
 | **`ScanBox` / `LinkBox`** | `model.py` | Per-CJK-char hover hitboxes and per-`<a>` click regions, in panel space — retained past pixel eviction so a scrolled-away word still hovers. |
-| **`CachedBlock` / `BlockGeom`** | `render/banded.py` | A cached band's pixels (`zlib`-packed) at its `(row, band)` key; `BlockGeom` is the row's retained hit geometry, never evicted. |
-
-### Containment (what's inside what)
+| **`CachedBlock` / `BlockGeom`** | `render/banded.py` | A cached band's raw or zlib-packed pixels at its `(row, band)` key; `BlockGeom` is the row's retained hit geometry, never evicted. |
 
 The entities nest three ways — too deep to draw as one matryoshka, so read them as three
 "what's inside what" views. The **runtime panel** (the object that lives in the cache) and the
@@ -118,8 +191,8 @@ render-side hierarchies; the **content model** is the input that `panel_rows()` 
 │ │ rows: list[Row]          ← built once by panel_rows(Entry)     ││
 │ │ _offsets: LazyOffsets    ← per-row heights + gaps → scroll math││
 │ │ ┌─ _blocks: {(row, band) -> CachedBlock}  ← LRU pixel cache ──┐││
-│ │ │ one band's image, zlib-packed; + row-local scan/links       │││
-│ │ │ bounded O(viewport) — even a 34x-viewport row keeps ~2-3    │││
+│ │ │ one band's raw/packed image; + row-local scan/links         │││
+│ │ │ bounded by the visible/warm window and the configured LRU   │││
 │ │ └─────────────────────────────────────────────────────────────┘││
 │ │ ┌─ _geom: {row -> BlockGeom}  ← retained hit geometry ──┐      ││
 │ │ │ ScanBox/LinkBox in panel space; never evicted, so a   │      ││
@@ -171,8 +244,8 @@ Entry  (one hovered term's whole tooltip content)
 
 Every subtitle-line change enqueues background work on the persistent prefetch worker pool
 (`_AUTO_WORKERS_FREE_THREADED = 4` free-threaded, `_AUTO_WORKERS_GIL = 2`, or a pinned
-`prefetch_workers`). A generation counter (`_prefetch_gen`) invalidates in-flight jobs the instant the
-line changes. Three job classes, cheapest-first:
+`prefetch_workers`). A generation counter (`_prefetch_gen`) invalidates stale jobs when the line,
+profile, seek position, or episode changes. Interactive requests are checked before speculative work:
 
 - **Warm** (`PrefetchItem(full=False)`) — decode + cache each dictionary's glossary JSON as semantic
   `TermRecord`s in `SqliteDictionaryStore`. The JSON decode is the single biggest per-word cost in a `--stress`
@@ -183,11 +256,18 @@ line changes. Three job classes, cheapest-first:
   cues' words (default `1`), speculatively render the same viewport-capped head a hover would, straight
   into the shared `panel_cache`. Selectivity is the cap: only n+1 / forgotten / rare-frequency words
   qualify (`_head_priority`), known/mined words never. Bounded by `head_prefetch_queue_max = 24`
-  in-flight (the transient-RSS cap, distinct from `panel_cache`'s retained-size LRU).
+  queued candidates; up to the fixed worker count can additionally be active. This bounds speculative
+  backlog separately from `panel_cache`'s retained-size LRU.
 - **Render-ahead** (`RenderAheadReq`) — the on-screen tooltip's scroll warm; see Stage 6.
+- **Engaged work** — a cold hover, nested open, or link navigation occupies a newest-wins slot rather
+  than accumulating a queue. The worker warms the current intent first; the tick revalidates it before
+  showing anything.
 
 `mined` state (jamdict/`card_for`) is resolved on the **main thread** and passed by value — jamdict is
-not worker-safe under free-threading.
+not worker-safe under free-threading. The speculative head priority queue has a hard capacity and drops
+excess candidates. The decode-warm FIFO is not capacity-bounded; its practical input is the finite set
+of de-duplicated content words in the configured cue window, and generation checks make old work cheap
+to discard. That is a workload bound, not a strict memory bound.
 
 ### Stage 2 — lookup → `Entry` · `saitenka-dict`, `app/source_adapter.py`
 
@@ -204,8 +284,10 @@ used only when no semantic source is installed.
 then per-dict `(def-name chip, def-body)` pairs. **Nothing is walked or drawn here.** Each def-body row
 closes over one memoised `layout_body_block` handle and exposes `measure()`, `render_window(y0,y1)`,
 `geometry()`, plus the full `render()` (the golden/finish source of truth). `Panel.from_rows` wraps
-them in a `WindowedPanel(tuning=BandedTuning(compress=True))`. Reference width is `384`px at `scale 1.0`; the runtime
-`tip_width` scales with window height (mpv's OSD model — same content at any size).
+them in a `WindowedPanel(tuning=BandedTuning(compress=True))`. `panel_rows` has a standalone default
+width, but production passes `Reader.tip_width`: a fixed 640px reference geometry. At upload, the
+composited result scales with display height; layout and persistent render-cache identity remain
+resolution-independent.
 
 ### Stage 4 — measure (layout-only, no raster) · `render/banded.py` → `panel/body.py`
 
@@ -213,9 +295,9 @@ To show at scroll `S`, `WindowedPanel` grows its exact-offset prefix to cover `S
 by **measuring** each row top-down:
 
 - **body rows** call `Row.measure()` → `layout_body_block` runs `walk()` + wrap → a `LaidOutBody` whose
-  `full_height` seeds `LazyOffsets` — **without any `getmask2`**. The `walk` (~200ms on pathological
-  entries — the *other* big cost besides drawing) runs **once per row** (memoised) and is run ahead of
-  the viewport, so a band never pays it synchronously.
+  `full_height` seeds `LazyOffsets` — **without any `getmask2`**. The walk runs **once per row**
+  (memoised), before that row's bands raster; prefetch moves it off the interaction tick in the common
+  warm case.
 - **non-body rows** (header/chip/freq — one band, never split) render eagerly to learn their height.
 
 Hit geometry (`ScanBox`/`LinkBox`) is seeded from the *layout* at this point (`document_geometry`), so
@@ -229,65 +311,96 @@ A visible band `[y0,y1)` of a body row is drawn by `raster_body_window` →
 `render_document(y_window=…)` → `render_flow_window`: only the wrapped lines overlapping the window get
 a `getmask2`, into a `(y1−y0)`-tall image. It is **pixel-identical to the full render cropped to that
 band** (a band is a shorter block at a within-row offset) — the whole property the composite rests on
-(`test_body_window.py`, `test_document_window.py`). At ≈**0.034ms/px**, a 256px band ≈ **9ms**, under
-the 16ms frame budget even on a cold miss; a whole 34×-viewport block was ≈**500ms**.
+(`test_body_window.py`, `test_document_window.py`). Band height is the structural bound on one body
+raster task. Whether that work meets a frame budget is benchmark evidence, not guaranteed by the type;
+the dated measurements and environment live in `BENCHMARKS.md`.
 
 ### Stage 6 — cache, compress, composite, evict · `render/banded.py`
 
-- **Cache**: each rendered band becomes a `CachedBlock` keyed `(row, band)` in an LRU, its RGBA
-  bytes `zlib.compress(…, 1)`-packed (`compress=True`) — a mostly-transparent panel packs hard, so a
-  warmed cache keeps the old whole-panel blob's memory profile.
+- **Cache**: each rendered band becomes a `CachedBlock` keyed `(row, band)` in an LRU. Bands remain raw
+  while the estimated panel is below `raw_band_ceiling_mb`; larger panels use
+  `zlib.compress(…, 1)`. This avoids inflate cost for normal panels while bounding the retained bytes
+  of pathological ones.
 - **Composite**: `viewport(scroll, view_h, overscan)` builds an ephemeral per-band `OffsetTable` and
   hands it to `composite_window`, which clips each visible band to the viewport by an integer crop and
   `alpha_composite`s it — O(viewport), byte-identical to a one-shot `render_panel` crop.
-- **Evict**: `_evict` drops bands **per band** outside `[scroll−overscan, scroll+view_h+overscan]`, so
-  even one row 34× the viewport retains only the ~2–3 overlapping bands (a currently-visible band is
-  never evicted; `max_cached_blocks` caps the LRU when set).
-- **Render-ahead**: on a wheel notch (`_scroll_tip`, step `round(_tip_ref_h·0.12)` ≈ **130px** in REF_H space),
+- **Evict**: `_evict` works **per band**, so one very tall row does not force retention of all its
+  pixels. Without `max_cached_blocks`, it drops every band outside
+  `[scroll−overscan, scroll+view_h+overscan]`; with the normal configured cap, it retains recent
+  off-window bands until the LRU exceeds that cap. A currently-visible band is never evicted.
+- **Render-ahead**: on a wheel notch (`_scroll_tip`, step `round(_tip_ref_h·0.12)` in reference space),
   `Panel.render_ahead(overscan=view_h)` warms the next screen's bands off the main thread — threads
   calling `render_window` on a free-threaded build, a process pool (`render_body_band`, injected to keep
-  the `render → panel.body` import contract) on a GIL build. At flick (~2600px/s) the one-screen lead is
-  ≈**0.16s**, in which a ~9ms band is warmable ~18× over — so the worker keeps ahead where it couldn't
-  on a ~500ms whole block.
+  the `render → panel.body` import contract) on a GIL build. The request is a newest-wins single slot.
+  The parallel path submits its selected bands together; cancellation drops queued futures when
+  possible and ignores results after the view changes.
 
 ### Stage 7 — blit to mpv · `mpvio/osd.py`, `app/popups.py`
 
 `Panel.viewport` converts the composited RGBA to a premultiplied BGRA array (`to_bgra_array`) and
 pushes it into mpv's own OSD surface via `overlay-add` — one surface, no second window (the load-bearing
-decision below). Scrolling re-runs Stage 6 for the new offset; a warm frame is a compress→decompress +
-composite + convert, no `getmask2`.
+decision below). Scrolling re-runs Stage 6 for the new offset; a warm frame reuses cached BGRA bands
+(inflating only packed ones), composites, decorates, and uploads without `getmask2`.
 
 ### Stage 8 — mine (optional) · `app/anki.py`, `app/miner.py`
 
-One key builds an Anki note over AnkiConnect: sentence, screenshot, audio clip, and provenance. The
-hovered `EntryGroup.card_index` selects exactly which entry is mined.
+One key mines the hovered subtitle token. Clicking a definition group's `mine:<card_index>` link
+selects that exact card, while the add button on a nested scan popup mines its inner token. Each path
+builds an Anki note over AnkiConnect with sentence, screenshot, audio, and provenance.
 
-### Constants, limits, and measured timings
+## Why the interactive path stays responsive
 
-Values are **defaults** unless noted; each lives at the cited symbol (the SSOT — this table points, it
-doesn't own). A number is written inline **only** where `poe docs-consts` binds it (`ident = value`);
-otherwise the row names the symbol, so there's no unchecked copy to drift. Timings are
-order-of-magnitude, measured on the pathological corpus under free-threaded 3.14t
-(`examples/bench_responsiveness.py`).
+Python is not removed from the hot path; the design limits how much Python and native raster work a
+user action can demand, reuses prior work, and moves optional work away from the tick. These are the
+current bounds and failure modes:
 
-| Knob / metric | Value | Where |
+| Subsystem | Bound or scheduling rule | Consequence |
+| --- | --- | --- |
+| mpv IPC | One socket owner; properties are observed and buffered; one reply can be in flight. | The tick drains local events instead of issuing several blocking property round-trips. |
+| Subtitle work | One cue is rendered; tokenization is LRU-cached by normalized text. A background warm may cover the finite cue index. | Repeated, replayed, and prefetched lines avoid parsing and scoring. The token cache cannot grow with session length. |
+| Lookup | SQL values are bound; wildcard searches have a result limit; decoded records use a per-dictionary LRU. | Result construction and decoded glossary retention are capped independently of dictionary size. |
+| Panel identity | An LRU bounds retained `Panel`s. Keys include every value that changes content or header state. | Re-hover is a cache hit without reusing a semantically stale image. |
+| Layout | Rows are deferred; only the prefix covering `scroll + viewport + overscan` is measured. Each measured body row lays out that whole definition and memoises it. | Definitions below the required prefix stay untouched. A pathological first definition is not viewport-bounded; prefetch only moves its full-row layout off the interaction tick when it finishes in time. |
+| Raster | Body rows are split into `_BAND_PX = 256`px tasks. Only bands intersecting the viewport and one-screen overscan are required. | Raster work and compositing scale with the visible window, not total glossary height. |
+| Band retention | Per-panel LRU capacity or, without one, eviction outside viewport±overscan; visible bands are protected. Raw retention changes to compressed storage above the configured byte estimate. Native-scale bands have a separate fixed LRU. | A pathological row cannot retain all of its pixels merely because it is one row. Geometry survives pixel eviction. |
+| Speculation | Fixed worker count; bounded head-render priority queue; newest-wins input slots for hover, navigation, open, and scroll; generation cancellation. | The current intent displaces an older pending intent and stale output is rejected. The decode-warm FIFO and worker-result handoff queues are not capacity-bounded. |
+| Hi-DPI | A cold native-scale viewport first shows the bounded 1× composition; native bands warm in the background and replace it only when ready. | Crispness cannot force native raster work onto the interaction tick. |
+| Cross-session render cache | Disk rows are cost-gated and keyed by format, geometry, and dictionaries; the RAM front tier has a byte LRU. | A valid hit is inflate/copy/upload rather than layout+raster. Key or geometry drift is a safe miss; malformed compressed data is a known robustness gap. |
+| Providers and analysis | Subtitle acquisition and episode analysis run outside the hover-to-paint chain and hand results back to the tick. | Provider network and analysis work do not block pointer interaction. Mining is user-triggered and remains synchronous on the main thread. |
+
+### Mechanically checked defaults
+
+These defaults determine the working-set bounds above. `poe docs-consts` binds each value and owner to
+the code; the configuration reference owns the user-facing tuning guidance.
+
+| Knob | Value | Where |
 | --- | --- | --- |
 | Band raster/cache unit | `_BAND_PX = 256`px | `render/banded.py` |
-| Estimated height before measure | `seed_height = 200`px | `BandedTuning` (`WindowedPanel`) |
-| Scroll overscan (warm margin) | one screen (`overscan = view_h`) | tooltip blit + `Panel.render_ahead` |
-| Wheel step | `round(_tip_ref_h·0.12)` ≈ 130px (REF_H space) | `Reader._scroll_tip` |
-| Base tooltip viewport cap | `tip_max_frac = 0.4` of video height | `TooltipOptions` |
-| Reference panel width + chrome | `panel_rows`'s `width` default; `Theme.margin`/`gap`/`body_indent` | `panel/rows.py`, `model.Theme` |
-| Prefetch workers | `_AUTO_WORKERS_FREE_THREADED` / `_AUTO_WORKERS_GIL`, or pinned `prefetch_workers` | `app/prefetch.py` |
-| Decode-warm lookahead | `prefetch_lookahead = 0` cues | `PerfOptions` |
-| Head-render lookahead / queue | `head_prefetch_lookahead = 1`, `head_prefetch_queue_max = 24` | `PerfOptions` |
-| Decoded-entry LRU | `entry_cache_max = 256`/dict | `DictDbOptions` |
-| Panel LRU | `panel_cache_max = 128` | `TooltipOptions` |
-| Raster cost | ≈0.034ms/px → 256px band ≈9ms | bench |
-| SC-walk cost (pathological) | ≈200ms/row, run once + ahead | bench |
-| Whole tall block (pre-band) | up to 14 700px ≈500ms `getmask2` | bench |
-| Scroll frame p50 (banded) | ≈10ms flick / 14ms normal (< 16ms budget) | bench |
-| Worst first-reach (banded) | ≈12ms (≈1 band; was ≈530ms) | bench |
+| Estimated row height before measurement | `seed_height = 200`px | `BandedTuning` |
+| Base tooltip viewport fraction | `tip_max_frac = 0.4` | `TooltipOptions` |
+| Retained panels | `panel_cache_max = 128` | `TooltipOptions` |
+| Retained bands per panel | `band_cache_max = 128` | `TooltipOptions` |
+| Raw-band estimate ceiling | `raw_band_ceiling_mb = 100` MiB | `TooltipOptions` |
+| Decoded records | `entry_cache_max = 256` per dictionary | `DictDbOptions` |
+| Tokenized cues | `token_cache_max = 2500` | `PerfOptions` |
+| Decode-warm cue lookahead | `prefetch_lookahead = 0` | `PerfOptions` |
+| Selective head-render lookahead | `head_prefetch_lookahead = 1` | `PerfOptions` |
+| Selective head-render queue | `head_prefetch_queue_max = 24` | `PerfOptions` |
+
+The remaining non-hard bounds are intentional and visible. Live render-cache writes are trimmed to
+`render_cache_max_mb` only when `saitenka prewarm` runs; between trims the finite population can grow.
+The mask atlas and provider subtitle cache are rebuildable but have no global byte ceiling. The
+decode-warm FIFO, worker-result queues, and subtitle-result handoff are generation- or identity-guarded
+where applicable but not capacity-bounded. The compressed-head RAM tier is byte-bounded independently
+of the disk ceiling. These are disk or speculative-work risks, not reasons for the UI thread to
+synchronously render a whole dictionary entry.
+
+The responsiveness claim is therefore two-part: the architecture bounds first-paint and scroll
+**raster/composition** to a viewport-sized region and moves common lookup, layout, and raster misses
+off-thread; `BENCHMARKS.md` then verifies the remaining full-row layout and bounded pixel work against
+latency targets on recorded hardware. `examples/bench_responsiveness.py` is the canonical harness. A
+frame-time number copied into this document would become stale evidence, so it belongs with the dated
+baseline instead.
 
 ## Load-bearing decisions
 
@@ -296,8 +409,12 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
 - **Dictionaries are imported once** into a consolidated SQLite DB (the Yomitan model); play-time
   only opens it — nothing rebuilds during playback, RAM stays low.
 - **Dictionary semantics and rendering are separate contracts.** `saitenka_dict.LookupSource` is the
-  swappable information seam; Saitenka's `Entry`/panel backends are the swappable presentation seam.
+  swappable information seam; Saitenka's `Entry`/panel model is the presentation boundary. The
+  incremental renderer is not yet fully swappable through `RasterBackend`.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
+- **Composition is explicit at the application boundary.** `cli.py` registers commands and process
+  policy; domain commands call launch use cases; `reader_factory.py` constructs `Reader`. Runtime
+  command and tick primitives never receive a god context, although `Reader` still owns their assembly.
 - **SQLite statements bind every value.** Fixed query templates plus `json_each(?)` handle variable
   sets; no ORM/query-builder dependency is needed for the small, explicit schema.
 - **GPL-3.0 `saitenka_deinflect` is chokepointed**: only `app/dictionary.py` and `app/doctor.py`
