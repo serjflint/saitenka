@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786621950504,
+  "lastUpdate": 1786621976387,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5663,6 +5663,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 13.98784,
             "range": "3 replicas; min 13.7994; max 14.0902; MAD 0.1024",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "4cecefac4c5020bb85e154563199c3c3f753a103",
+          "message": "refactor: establish modular Saitenka package boundaries (#329)\n\n* refactor: consolidate the saitenka source layout\n\n* refactor: remove legacy overlay project directory",
+          "timestamp": "2026-08-12T18:48:40Z",
+          "url": "https://github.com/serjflint/saitenka/commit/4cecefac4c5020bb85e154563199c3c3f753a103"
+        },
+        "date": 1786621974984,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 52.113988,
+            "range": "3 replicas; min 50.0927; max 53.5147; MAD 1.40067; worst 53.5147",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 315.681773,
+            "range": "3 replicas; min 60.0653; max 390.801; MAD 75.1194; worst 390.801",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 13.512704,
+            "range": "3 replicas; min 12.3904; max 14.1476; MAD 0.63488",
             "unit": "MB"
           }
         ]
