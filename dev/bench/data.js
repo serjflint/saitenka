@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786604107020,
+  "lastUpdate": 1786605184643,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4355,6 +4355,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.824,
             "range": "±3.5%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4bbe1c5b10f1b9a62f02a91b5c298ad627ed9897",
+          "message": "docs: compare adjacent mobile immersion tools (#341)",
+          "timestamp": "2026-08-13T10:12:08+03:00",
+          "tree_id": "65929d2348376b01aa20982bc9e3f7992f4f341d",
+          "url": "https://github.com/serjflint/saitenka/commit/4bbe1c5b10f1b9a62f02a91b5c298ad627ed9897"
+        },
+        "date": 1786605183741,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.22,
+            "range": "±1.3%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.661,
+            "range": "±4.0%",
             "unit": "ms"
           }
         ]
