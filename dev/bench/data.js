@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786618184609,
+  "lastUpdate": 1786618202810,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5297,6 +5297,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 12.673024,
             "range": "3 replicas; min 11.7965; max 12.6935; MAD 0.02048",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "22c89758de25a68756e478c458f601141d8323a2",
+          "message": "fix(perf): exercise live scroll rendering",
+          "timestamp": "2026-08-13T09:58:05Z",
+          "url": "https://github.com/serjflint/saitenka/commit/22c89758de25a68756e478c458f601141d8323a2"
+        },
+        "date": 1786618202004,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 52.392893,
+            "range": "3 replicas; min 48.768; max 54.6453; MAD 2.25244; worst 54.6453",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 374.263789,
+            "range": "3 replicas; min 344.898; max 440.257; MAD 29.3654; worst 440.257",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 12.488704,
+            "range": "3 replicas; min 12.1201; max 12.6607; MAD 0.172032",
             "unit": "MB"
           }
         ]
