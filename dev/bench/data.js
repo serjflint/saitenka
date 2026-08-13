@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786616133032,
+  "lastUpdate": 1786617459707,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4581,6 +4581,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.160566,
             "range": "3 replicas; min 1.02806; max 2.15474; MAD 0.132509; worst 2.15474",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "948872c35e736621c514b9840619226c569087f7",
+          "message": "Merge pull request #344 from serjflint/fix/windows-e2e-portability\n\nfix: make E2E regressions portable on Windows",
+          "timestamp": "2026-08-13T13:36:40+03:00",
+          "tree_id": "d4fed6ae3f5809acae19cfb895dfa3693bc02ffe",
+          "url": "https://github.com/serjflint/saitenka/commit/948872c35e736621c514b9840619226c569087f7"
+        },
+        "date": 1786617458960,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.353009,
+            "range": "3 replicas; min 5.12863; max 6.73297; MAD 0.379963",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.665015,
+            "range": "3 replicas; min 7.61693; max 9.92405; MAD 1.04808; worst 9.92405",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 19.493983,
+            "range": "3 replicas; min 14.2321; max 19.8059; MAD 0.311912",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.777845,
+            "range": "3 replicas; min 14.3191; max 20.1986; MAD 0.420733; worst 20.1986",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 22.121921,
+            "range": "3 replicas; min 20.5028; max 34.8374; MAD 1.61908",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.168025,
+            "range": "3 replicas; min 0.106929; max 0.171932; MAD 0.003907; worst 0.171932",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 52.234979,
+            "range": "3 replicas; min 44.7634; max 119.572; MAD 7.4716; worst 119.572",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.229132,
+            "range": "3 replicas; min 2.91554; max 4.45682; MAD 0.313597; worst 4.45682",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.439769,
+            "range": "3 replicas; min 1.33329; max 3.65399; MAD 0.10648; worst 3.65399",
             "unit": "ms"
           }
         ]
