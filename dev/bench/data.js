@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786616043674,
+  "lastUpdate": 1786616133032,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4929,6 +4929,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 0.476059,
             "range": "3 replicas; min 0.449087; max 0.482409; MAD 0.00635",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "382df36e01d30fb90d39a96c5bba4bc4dacb7b0e",
+          "message": "Merge pull request #343 from serjflint/perf/continuous-benchmark-portfolio\n\nfeat(perf): add continuous benchmark portfolio",
+          "timestamp": "2026-08-13T10:11:56Z",
+          "url": "https://github.com/serjflint/saitenka/commit/382df36e01d30fb90d39a96c5bba4bc4dacb7b0e"
+        },
+        "date": 1786616132267,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 231.367552,
+            "range": "3 replicas; min 179.455; max 272.802; MAD 41.434",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 50.645058,
+            "range": "3 replicas; min 49.2805; max 56.5026; MAD 1.36454",
             "unit": "ms"
           }
         ]
