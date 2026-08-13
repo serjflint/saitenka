@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786622014103,
+  "lastUpdate": 1786622029537,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5497,6 +5497,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 54.89461,
             "range": "3 replicas; min 51.12; max 63.2408; MAD 3.77465",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "6c0052f37f373ccdfc5d8eab70573c4d24acf581",
+          "message": "refactor: modularize reader runtime and CLI (#332)\n\n* refactor(render): remove remaining layer backedges\n\n* refactor(reader): introduce explicit runtime seams\n\n* refactor(cli): split command domains\n\n* refactor(launch): isolate run orchestration\n\n* refactor(reader): centralize production composition\n\n* chore(launch): remove obsolete registry import\n\n* docs(launch): update provider registration boundary\n\n* refactor(cli): narrow command module imports\n\n* docs(render): update structured-content test reference\n\n* fix(launch): register subtitle providers explicitly\n\n* docs(architecture): align advisory and render boundaries\n\n* docs(render): fix worker-boundary wording",
+          "timestamp": "2026-08-13T05:15:18Z",
+          "url": "https://github.com/serjflint/saitenka/commit/6c0052f37f373ccdfc5d8eab70573c4d24acf581"
+        },
+        "date": 1786622028875,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 246.282255,
+            "range": "3 replicas; min 220.417; max 248.059; MAD 1.77701",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 51.231728,
+            "range": "3 replicas; min 50.8532; max 59.5832; MAD 0.378565",
             "unit": "ms"
           }
         ]
