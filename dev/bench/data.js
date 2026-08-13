@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786600571706,
+  "lastUpdate": 1786600700490,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4283,6 +4283,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.952,
             "range": "±9.4%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "39761eeef2d53cb8ca034b3a4f35b2d5f7d7d0b6",
+          "message": "refactor: organize panel subsystem package (#334)",
+          "timestamp": "2026-08-13T08:57:24+03:00",
+          "tree_id": "2763328ef8332c20d511fc6de372e9f548ec88d0",
+          "url": "https://github.com/serjflint/saitenka/commit/39761eeef2d53cb8ca034b3a4f35b2d5f7d7d0b6"
+        },
+        "date": 1786600699584,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.163,
+            "range": "±1.5%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.646,
+            "range": "±9.0%",
             "unit": "ms"
           }
         ]
