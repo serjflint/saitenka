@@ -1,0 +1,11 @@
+[
+  {"name": "synth median render", "unit": "ms", "value": 0},
+  {"name": "synth p99 render", "unit": "ms", "value": 0},
+  {"name": "subtitles: parse/index/tokenize median", "unit": "ms", "value": 0},
+  {"name": "subtitles: parse/index/tokenize p95", "unit": "ms", "value": 0},
+  {"name": "dictionary: generated archive import", "unit": "ms", "value": 0},
+  {"name": "dictionary: exact lookup p95", "unit": "ms", "value": 0},
+  {"name": "click: sidebar redraw p95", "unit": "ms", "value": 0},
+  {"name": "click: backlog write p95", "unit": "ms", "value": 0},
+  {"name": "click: mined-card store p95", "unit": "ms", "value": 0}
+]

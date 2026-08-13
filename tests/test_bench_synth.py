@@ -75,6 +75,27 @@ def test_to_bench_json_drops_a_zero_cv_band():
     assert "range" not in out[0]
 
 
+def test_synthetic_stress_corpus_forces_cache_eviction():
+    mod = _bench_module()
+    corpus = mod._synthetic_stress_terms()
+
+    assert len(corpus) > mod._STRESS_CACHE_CAP
+    assert len({term for term, _reading in corpus}) == len(corpus)
+
+
+def test_stress_to_bench_json_keeps_tail_and_memory_signals():
+    mod = _bench_module()
+    result = mod.stress_to_bench_json(
+        {"frame_latency_ms": {"p99": 12.5, "max": 20.0}, "rss_growth_mb": 3.0}
+    )
+
+    assert [item["name"] for item in result] == [
+        "lifecycle: frame p99",
+        "lifecycle: worst frame",
+        "lifecycle: RSS growth",
+    ]
+
+
 def test_clicks_bench_emits_the_three_click_spans(monkeypatch, capsys):
     # Rot guard: --clicks must actually drive the surfaces so sidebar_click / backlog_write /
     # mined_store_write reach a trace — record the spans via the sanctioned traced seam, run a tiny sweep.

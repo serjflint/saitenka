@@ -657,6 +657,25 @@ def _rss_mb() -> float:
     return psutil.Process().memory_info().rss / 1e6
 
 
+def _synthetic_stress_terms() -> list[tuple[str, str]]:
+    """A generated fallback larger than the forced cache cap, so CI exercises eviction."""
+    return [(f"語{index:02d}", f"ご{index}") for index in range(_STRESS_CACHE_CAP + 8)]
+
+
+def stress_to_bench_json(metrics: dict) -> list[dict]:
+    """Project the lifecycle signals onto customSmallerIsBetter."""
+    frames = metrics["frame_latency_ms"]
+    return [
+        {"name": "lifecycle: frame p99", "unit": "ms", "value": frames["p99"]},
+        {"name": "lifecycle: worst frame", "unit": "ms", "value": frames["max"]},
+        {
+            "name": "lifecycle: RSS growth",
+            "unit": "MB",
+            "value": max(0.0, metrics["rss_growth_mb"]),
+        },
+    ]
+
+
 def run_stress(
     reps: int,
     rt: dict,
@@ -664,6 +683,7 @@ def run_stress(
     json_path: str | None = None,
     max_frame_ms: float | None = None,
     max_rss_mb: float | None = None,
+    bench_json: str | None = None,
 ) -> int:
     """A sustained, DETERMINISTIC chained session — cold hover → scroll → nested popup → scroll →
     dismiss — over a corpus of distinct heavy entries, repeated ``reps`` rounds. Unlike the isolated
@@ -690,7 +710,7 @@ def run_stress(
         per_dict = max(3, _STRESS_CACHE_CAP // len(ds.dicts) + 2)
         corpus = [(t, r) for _s, t, r in _pathological_corpus(ds, per_dict=per_dict)]
     else:
-        corpus = [(w, w) for w in ("手", "気", "出る", "見る", "行く", "上げる")]
+        corpus = _synthetic_stress_terms()
     step = round(OSD[1] * 0.12)
     frames: list[float] = []
 
@@ -723,10 +743,12 @@ def run_stress(
     tracemalloc.start()
     rss_base = _rss_mb()
     rss_peak = rss_base
+    rss_by_round: list[float] = []
     for _ in range(max(1, reps)):
         for term, reading in corpus:
             one_word(term, reading)
-        rss_peak = max(rss_peak, _rss_mb())
+        rss_by_round.append(_rss_mb())
+        rss_peak = max(rss_peak, rss_by_round[-1])
     _cur, py_peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -769,26 +791,27 @@ def run_stress(
             f"FAIL: peak RSS {rss_peak:.0f} MB exceeds --max-rss-mb {max_rss_mb}", file=sys.stderr
         )
         rc = rc or 1
+    metrics = {
+        "runtime": rt,
+        "osd": OSD,
+        "rounds": reps,
+        "corpus_size": len(corpus),
+        "frame_latency_ms": m,
+        "panel_cache_len": cache_len,
+        "panel_cache_max": reader.panel_cache_max,
+        "rss_peak_mb": rss_peak,
+        "rss_growth_mb": growth,
+        "rss_by_round_mb": rss_by_round,
+        "py_obj_peak_mb": py_peak / 1e6,
+    }
     if json_path:
-        Path(json_path).write_text(
-            json.dumps(
-                {
-                    "runtime": rt,
-                    "osd": OSD,
-                    "rounds": reps,
-                    "corpus_size": len(corpus),
-                    "frame_latency_ms": m,
-                    "panel_cache_len": cache_len,
-                    "panel_cache_max": reader.panel_cache_max,
-                    "rss_peak_mb": rss_peak,
-                    "rss_growth_mb": growth,
-                    "py_obj_peak_mb": py_peak / 1e6,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        Path(json_path).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
         print(f"\nwrote stress baseline → {json_path}")
+    if bench_json:
+        Path(bench_json).write_text(
+            json.dumps(stress_to_bench_json(metrics), indent=2), encoding="utf-8"
+        )
+        print(f"wrote github-action-benchmark JSON → {bench_json}")
     return rc
 
 
@@ -2179,7 +2202,13 @@ def main() -> int:
         )
     if args.stress:
         return run_stress(
-            args.reps, rt, args.require_ft, args.json, args.max_frame_ms, args.max_rss_mb
+            args.reps,
+            rt,
+            args.require_ft,
+            args.json,
+            args.max_frame_ms,
+            args.max_rss_mb,
+            args.bench_json,
         )
     if args.scroll_jank:
         return run_scroll_jank(args.reps, rt, args.require_ft, args.json)

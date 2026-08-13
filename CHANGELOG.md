@@ -18,6 +18,10 @@ logs.
 
 ### Development
 
+- Continuous benchmark points now aggregate three independent GitHub runners, validate metric schemas,
+  summarize results on pull requests, and serialize Pages writes. The core suite covers rendering,
+  subtitle scanning, generated-dictionary import/query, and click/store work; weekly jobs cover bounded
+  cache churn and live-mpv jank.
 - Extracted renderer-neutral Yomitan dictionary semantics into the independently testable
   `saitenka-dict` package and AnkiConnect transport/protocol handling into `ankiconnect-client`.
   Saitenka now has a swappable lookup-source adapter, a dictionary-independent known-word cache, and a
