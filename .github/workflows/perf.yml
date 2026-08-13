@@ -1,17 +1,5 @@
-# Continuous perf history (#33/#32) — the STATISTICAL trend gate, complementing the LOCAL hard
-# rot-guard (`poe perf-check`). Runs the dict-free `--synth` bench and feeds github-action-benchmark:
-#   - store (push to main): append to dev/bench/data.js on the gh-pages branch → time-series chart at
-#     https://serjflint.github.io/saitenka/dev/bench, alert (commit comment) on a gross regression.
-#   - compare (PR): compare vs the stored history, comment on the PR, and NEVER push — the write-perm
-#     job must not run on pull_request (github-action-benchmark's own safety rule).
-# This is a TREND signal, NOT a hard gate (`fail-on-alert: false`): GitHub-hosted runners are
-# wall-clock-noisy (>30% variance is common). The hard guard is local `poe perf-check`.
-# UV_PYTHON=3.13 → prebuilt fugashi wheels (no MeCab source build) + steady single-threaded wall-clock.
-#
-# ONE-TIME SETUP (not scripted here): create the history branch and enable Pages on it —
-#   git checkout --orphan gh-pages && git rm -rf . && git commit --allow-empty -m "init gh-pages" \
-#     && git push origin gh-pages
-# then Settings → Pages → Deploy from branch → gh-pages / (root).
+# Advisory continuous history. Each point is the median of three independent runner jobs; only the
+# aggregate job may compare or publish it. The deterministic hard guard remains `poe perf-check`.
 name: Perf
 
 on:
@@ -19,41 +7,172 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      revision:
+        description: Commit SHA to backfill (must contain the continuous benchmark harness)
+        required: false
+        type: string
 
 concurrency:
-  group: perf-${{ github.ref }}
-  cancel-in-progress: true
+  group: perf-${{ github.event_name == 'workflow_dispatch' && 'backfill' || github.run_id }}
+  queue: max
 
 permissions:
   contents: read
 
 env:
-  UV_PYTHON: "3.13"
+  UV_PYTHON: "3.13" # prebuilt fugashi wheels and a steady single-threaded wall-clock
 
 jobs:
-  store:
-    if: github.event_name != 'pull_request'
-    name: store history (push to main)
+  resolve:
+    name: resolve immutable revision
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # auto-push the benchmark data to gh-pages
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
+    steps:
+      - id: revision
+        name: Require a full commit SHA
+        env:
+          REVISION: ${{ inputs.revision || github.sha }}
+        run: |
+          if [[ ! "$REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "revision must be a full 40-character commit SHA" >&2
+            exit 1
+          fi
+          echo "revision=${REVISION,,}" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: core replica ${{ matrix.replica }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.revision }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
 
-      - name: Sync (test group only, 3.13 → prebuilt fugashi)
+      - name: Sync
         run: |
           uv python install
           uv sync --locked --extra full --no-default-groups --group test
 
-      - name: Run synth bench
+      - name: Run independent core replica
         run: >-
-          uv run --no-sync python examples/bench_responsiveness.py
-          --synth --reps 5 --loops 5 --bench-json bench.json
+          uv run --no-sync python examples/bench_core.py
+          --reps 5 --output bench-${{ matrix.replica }}.json
+
+      - name: Upload replica
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perf-replica-${{ matrix.replica }}
+          path: bench-${{ matrix.replica }}.json
+          retention-days: 1
+
+  compare:
+    if: github.event_name == 'pull_request'
+    name: compare aggregate vs main
+    needs: [resolve, measure]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Download replicas
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: perf-replica-*
+          path: replicas
+          merge-multiple: true
+
+      - name: Validate and aggregate replicas
+        run: >-
+          uv run --no-project python tools/benchmark_results.py replicas/*.json
+          --output bench.json --markdown benchmark-summary.md
+          --manifest benchmarks/continuous-core-metrics.json
+
+      - name: Compare against stored history
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        with:
+          name: Saitenka render (synth)
+          tool: customSmallerIsBetter
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          auto-push: false
+          save-data-file: false
+          alert-threshold: "200%"
+          comment-on-alert: false
+          fail-on-alert: false
+
+      - name: Update PR benchmark summary
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- saitenka-continuous-benchmarks -->';
+            const body = fs.readFileSync('benchmark-summary.md', 'utf8');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const previous = comments.find(comment =>
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+            const request = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            };
+            if (previous) {
+              await github.rest.issues.updateComment({...request, comment_id: previous.id});
+            } else {
+              await github.rest.issues.createComment({...request, issue_number: context.issue.number});
+            }
+
+  store:
+    if: github.event_name != 'pull_request'
+    name: store aggregate history
+    needs: [resolve, measure]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: benchmark-pages
+      queue: max
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Download replicas
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: perf-replica-*
+          path: replicas
+          merge-multiple: true
+
+      - name: Validate and aggregate replicas
+        run: >-
+          uv run --no-project python tools/benchmark_results.py replicas/*.json
+          --output bench.json --manifest benchmarks/continuous-core-metrics.json
 
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
@@ -65,46 +184,7 @@ jobs:
           auto-push: true
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: dev/bench
-          alert-threshold: "200%" # 2x = the gross-rot line (matches the local p99 +100% tolerance)
-          comment-on-alert: true
-          fail-on-alert: false # trend signal, not a gate — the local rot-guard is the hard one
-
-  compare:
-    if: github.event_name == 'pull_request'
-    name: compare vs main (PR, no push)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write # post the comparison comment on the PR
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          enable-cache: true
-
-      - name: Sync (test group only, 3.13 → prebuilt fugashi)
-        run: |
-          uv python install
-          uv sync --locked --extra full --no-default-groups --group test
-
-      - name: Run synth bench
-        run: >-
-          uv run --no-sync python examples/bench_responsiveness.py
-          --synth --reps 5 --loops 5 --bench-json bench.json
-
-      - name: Compare against stored history
-        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
-        with:
-          name: Saitenka render (synth)
-          tool: customSmallerIsBetter
-          output-file-path: bench.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench
-          auto-push: false # PR: compare only, never mutate gh-pages
-          save-data-file: false
+          ref: ${{ needs.resolve.outputs.revision }}
           alert-threshold: "200%"
           comment-on-alert: true
           fail-on-alert: false

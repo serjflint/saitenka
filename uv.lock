@@ -2188,6 +2188,7 @@ dev = [
     { name = "pytest-randomly" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -2210,6 +2211,7 @@ test = [
     { name = "pytest-randomly" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -2271,6 +2273,7 @@ dev = [
     { name = "pytest-randomly", specifier = ">=4.1.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.16" },
     { name = "ty", specifier = ">=0.0.61" },
 ]
@@ -2289,6 +2292,7 @@ test = [
     { name = "pytest-randomly", specifier = ">=4.1.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [[package]]

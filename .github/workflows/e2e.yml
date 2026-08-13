@@ -24,8 +24,6 @@ jobs:
   e2e:
     if: github.event_name != 'pull_request'
     name: e2e (${{ matrix.os }})
-    permissions:
-      contents: write # the Linux GUI tier auto-pushes the jank result to gh-pages
     strategy:
       fail-fast: false
       matrix:
@@ -66,21 +64,160 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a uv run poe smoke-live
 
-      # Live-mpv jank harness (#32/#33): poll mpv's own frame-drop counters while driving the overlay —
-      # the true real-time signal. `poe jank-live` fails past --max-drops (catastrophic-jank gate).
-      - name: Live jank harness (Linux/Xvfb, real mpv)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a uv run poe jank-live
 
-      # Track the jank totals on the SAME gh-pages dashboard as the render bench (second series). Only
-      # on the non-PR GUI tier (weekly/tag/dispatch) → auto-push (store) mode; matches perf.yml's rule.
+  jank-measure:
+    if: github.event_name != 'pull_request'
+    name: live jank replica ${{ matrix.replica }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2, 3]
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Sync
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      - name: Install mpv + Xvfb
+        run: sudo apt-get update && sudo apt-get install -y mpv xvfb
+
+      - name: Run independent live-player replica
+        run: >-
+          xvfb-run -a env SAITENKA_LIVE=1 uv run --extra full python examples/jank_live.py
+          --json jank.json --bench-json jank-bench.json
+
+      - name: Upload replica
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jank-replica-${{ matrix.replica }}
+          path: jank-bench.json
+          retention-days: 1
+
+  jank-store:
+    if: github.event_name != 'pull_request'
+    name: store live jank aggregate
+    needs: jank-measure
+    runs-on: ubuntu-latest
+    concurrency:
+      group: benchmark-pages
+      queue: max
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Download replicas
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: jank-replica-*
+          path: replicas
+
+      - name: Validate and aggregate replicas
+        run: >-
+          uv run --no-project python tools/benchmark_results.py replicas/*/jank-bench.json
+          --output jank-bench.json
+
       - name: Store jank result
-        if: runner.os == 'Linux'
         uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
         with:
           name: Saitenka live jank
           tool: customSmallerIsBetter
           output-file-path: jank-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          alert-threshold: "200%"
+          comment-on-alert: true
+          fail-on-alert: false
+
+      - name: Apply catastrophic-jank guard after preserving history
+        run: >-
+          uv run --no-project python tools/benchmark_results.py
+          replicas/*/jank-bench.json --output /tmp/jank-check.json
+          --max-value 'live jank: total dropped frames=30'
+
+  lifecycle-measure:
+    if: github.event_name != 'pull_request'
+    name: lifecycle replica ${{ matrix.replica }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [1, 2, 3]
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Sync
+        run: |
+          uv python install
+          uv sync --locked --extra full
+
+      - name: Run independent bounded-cache lifecycle replica
+        run: >-
+          uv run --no-sync python examples/bench_responsiveness.py
+          --stress --reps 3 --bench-json lifecycle-bench.json
+
+      - name: Upload replica
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lifecycle-replica-${{ matrix.replica }}
+          path: lifecycle-bench.json
+          retention-days: 1
+
+  lifecycle-store:
+    if: github.event_name != 'pull_request'
+    name: store lifecycle aggregate
+    needs: lifecycle-measure
+    runs-on: ubuntu-latest
+    concurrency:
+      group: benchmark-pages
+      queue: max
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Download replicas
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: lifecycle-replica-*
+          path: replicas
+
+      - name: Validate and aggregate replicas
+        run: >-
+          uv run --no-project python tools/benchmark_results.py replicas/*/lifecycle-bench.json
+          --output lifecycle-bench.json
+
+      - name: Store lifecycle result
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        with:
+          name: Saitenka bounded-cache lifecycle
+          tool: customSmallerIsBetter
+          output-file-path: lifecycle-bench.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
           gh-pages-branch: gh-pages

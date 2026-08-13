@@ -127,6 +127,7 @@ test = [
     "pytest-timeout>=2.4.0",
     "dirty-equals>=0.11",
     "pyfakefs>=6.2.0",
+    "pyyaml>=6.0.3",
 ]
 dev = [
     { include-group = "test" },
@@ -417,7 +418,7 @@ max-args = 8
 # regenerate after a deliberate refactor): the pre-existing high-complexity functions are grandfathered,
 # so the gate only fails on NEW complexity growth, not on adoption. max-complexity-allowed=15 is
 # complexipy's own default — set explicitly so it's visible.
-paths = ["src/saitenka", "deinflect/src", "taffylite/python", "resvglite/python", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/repowise_ops.py", "install", ".agents"]
+paths = ["src/saitenka", "deinflect/src", "taffylite/python", "resvglite/python", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
 max-complexity-allowed = 15
 
 [tool.mypy]
@@ -431,7 +432,7 @@ python_version = "3.13"
 # `Fake*`-as-real-type doubles are a separate, larger adaptation — see follow-up note). taffylite/python
 # is a thin binding over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it stays
 # out of the type tier.
-files = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/repowise_ops.py", "install", ".agents"]
+files = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
 # Source roots on the path so first-party + optional-ext imports resolve when mypy runs from the repo
 # root — incl. taffylite/python so `import taffylite` finds the committed .pyi stub (column) rather than
 # the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
@@ -465,7 +466,7 @@ missing-import = false
 
 [tool.basedpyright]
 # Same widened scope as mypy above — see [tool.mypy].files for the rationale.
-include = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/repowise_ops.py", "install", ".agents"]
+include = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
 # Run from the repo root, so the first-party source roots must be on the search path explicitly (else
 # `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
 extraPaths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "taffylite/python", "resvglite/python", ".agents/hooks"]
@@ -564,6 +565,7 @@ bench = "uv run --extra full python examples/bench_responsiveness.py --pathologi
 # Dict-free deterministic render bench — the CI/asv-safe gate target (no overlay.toml, no randomness).
 # --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
 synth-bench = "uv run --extra full python examples/bench_responsiveness.py --synth --reps 5 --loops 5"
+continuous-bench = "uv run --extra full python examples/bench_core.py --reps 5"
 # Local perf rot-guard (#33): ratchet the --synth render throughput against perf-baseline.json, failing
 # only on GROSS regression (per-metric tolerance: median +50%, tail-noisy p99 +100% → catches a 2-4x
 # rot, never micro-drift). LOCAL/OPT-IN, wall-clock + machine-specific → deliberately NOT in `all` (like

@@ -1,5 +1,9 @@
 # Responsiveness benchmark — in-mpv tooltip
 
+The hosted benchmark portfolio, replica statistics, and CI publishing contract are documented in
+[`docs/contributing/continuous-benchmarks.md`](docs/contributing/continuous-benchmarks.md). This file
+keeps dated measurements and profiler evidence.
+
 The perceived snappiness of the overlay is gated by a handful of latencies. This is the saved baseline
 so future changes can be compared against it. Regenerate with:
 
