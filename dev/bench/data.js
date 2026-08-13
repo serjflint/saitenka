@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786621913263,
+  "lastUpdate": 1786621927617,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5577,6 +5577,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 13.754368,
             "range": "3 replicas; min 13.1809; max 13.7748; MAD 0.02048",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "6c0052f37f373ccdfc5d8eab70573c4d24acf581",
+          "message": "refactor: modularize reader runtime and CLI (#332)\n\n* refactor(render): remove remaining layer backedges\n\n* refactor(reader): introduce explicit runtime seams\n\n* refactor(cli): split command domains\n\n* refactor(launch): isolate run orchestration\n\n* refactor(reader): centralize production composition\n\n* chore(launch): remove obsolete registry import\n\n* docs(launch): update provider registration boundary\n\n* refactor(cli): narrow command module imports\n\n* docs(render): update structured-content test reference\n\n* fix(launch): register subtitle providers explicitly\n\n* docs(architecture): align advisory and render boundaries\n\n* docs(render): fix worker-boundary wording",
+          "timestamp": "2026-08-13T05:15:18Z",
+          "url": "https://github.com/serjflint/saitenka/commit/6c0052f37f373ccdfc5d8eab70573c4d24acf581"
+        },
+        "date": 1786621926901,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 52.414794,
+            "range": "3 replicas; min 50.962; max 57.4863; MAD 1.45277; worst 57.4863",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 395.4071,
+            "range": "3 replicas; min 52.4558; max 672.074; MAD 276.667; worst 672.074",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 13.98784,
+            "range": "3 replicas; min 13.7994; max 14.0902; MAD 0.1024",
             "unit": "MB"
           }
         ]
