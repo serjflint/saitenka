@@ -18,6 +18,16 @@ def test_pr_benchmark_has_three_replicas_one_aggregate_and_one_summary_comment()
     compare_steps = jobs["compare"]["steps"]
     assert any("benchmark-summary.md" in step.get("run", "") for step in compare_steps)
     assert sum("actions/github-script" in step.get("uses", "") for step in compare_steps) == 1
+    compare_action = next(
+        step for step in compare_steps if "github-action-benchmark" in step.get("uses", "")
+    )
+    store_action = next(
+        step for step in jobs["store"]["steps"] if "github-action-benchmark" in step.get("uses", "")
+    )
+    assert compare_action["with"]["auto-push"] is False
+    assert compare_action["with"]["save-data-file"] is False
+    assert jobs["store"]["if"] == "github.event_name != 'pull_request'"
+    assert store_action["with"]["auto-push"] is True
     assert jobs["store"]["concurrency"]["group"] == "benchmark-pages"
     assert jobs["store"]["concurrency"]["queue"] == "max"
 
@@ -53,9 +63,15 @@ def test_weekly_benchmarks_aggregate_three_live_and_lifecycle_replicas():
         measure = jobs[f"{surface}-measure"]
         store = jobs[f"{surface}-store"]
         assert measure["strategy"]["matrix"]["replica"] == [1, 2, 3]
+        assert measure["if"] == "github.event_name != 'pull_request'"
+        assert store["if"] == "github.event_name != 'pull_request'"
         assert store["needs"] == f"{surface}-measure"
         assert store["concurrency"]["group"] == "benchmark-pages"
         assert store["concurrency"]["queue"] == "max"
+        store_action = next(
+            step for step in store["steps"] if "github-action-benchmark" in step.get("uses", "")
+        )
+        assert store_action["with"]["auto-push"] is True
     lifecycle_command = next(
         step["run"]
         for step in jobs["lifecycle-measure"]["steps"]
