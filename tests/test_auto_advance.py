@@ -209,6 +209,7 @@ def test_on_file_loaded_resolves_relative_path_against_working_directory(tmp_pat
 
 def test_on_file_loaded_expands_tilde_before_reslot(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     ipc = FakeIPC()
     reader = Reader(ipc)
     seen = []

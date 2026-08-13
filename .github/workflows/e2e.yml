@@ -289,3 +289,5 @@ jobs:
           tests/test_subtitle_modes.py
           tests/test_overlay_visibility.py
           tests/test_doctor.py
+          tests/test_auto_advance.py
+          tests/test_corpus_drift.py

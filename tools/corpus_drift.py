@@ -119,15 +119,17 @@ def _check(corpus: Corpus, checkout: Path | None) -> tuple[str, str]:
             return "skip", "no Yomitan checkout (set --yomitan / $SAITENKA_YOMITAN)"
         if not _at_pin(checkout, pin):
             return "skip", f"checkout not at pinned {pin}"
-    with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
-        out = Path(tmp.name)
+    # The generator is a child process, so it must own an unoccupied path. Windows
+    # does not allow it to reopen a NamedTemporaryFile held open by this process.
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "corpus.json"
         try:
             _regen(corpus, checkout, out)
+            got, want = out.read_bytes(), corpus.committed.read_bytes()
         except subprocess.CalledProcessError as exc:
             return "error", (exc.stderr or exc.stdout or str(exc)).strip().splitlines()[-1]
         except OSError as exc:
             return "error", str(exc)
-        got, want = out.read_bytes(), corpus.committed.read_bytes()
     return ("ok", "byte-identical") if got == want else ("drift", "regenerated output differs")
 
 
