@@ -77,7 +77,7 @@ def test_glossary_unwrap():
 def test_multi_item_glossary_blocks_each_sense_on_its_own_line():
     # Regression (大辞林 相手 → 相手方/相手次第/相手役): each glossary ARRAY item is a separate cross-ref;
     # they must render as separate blocks, not one flowing underlined run. Multi-item ⇒ each div-wrapped.
-    from saitenka.sc.walk import walk
+    from saitenka.render.sc_adapter import walk
 
     glossary = [
         {

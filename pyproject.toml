@@ -329,10 +329,10 @@ max-args = 8
 # Paths are workspace-root-relative (this config is the root SSOT). Glob patterns (`**/tests/**` etc.)
 # cover the same tree in every package; ruff UNIONS all matching entries for a file.
 # cyclopts binds flags via Parameter(...) calls in parameter defaults — that IS its API shape.
-# T201: cli.py + cli_run.py are the CLI entrypoint/runtime-banner surface — print() IS the UX,
-# mirrors sgconfig/rules/no-print-in-lib.yml's `ignores:` (which cli_run.py should join too).
+# T201: command and launch modules own terminal presentation — print() is their UX.
 "src/saitenka/app/cli.py" = ["function-call-in-default-argument", "print"]
-"src/saitenka/app/cli_run.py" = ["print"]
+"src/saitenka/app/commands/*.py" = ["print"]
+"src/saitenka/app/launch/run.py" = ["print"]
 # T201: interactive first-run wizards — print() is the prompt UX, matches no-print-in-lib.yml.
 "src/saitenka/app/init_wizard.py" = ["print"]
 "src/saitenka/app/setup_wizard.py" = ["print"]

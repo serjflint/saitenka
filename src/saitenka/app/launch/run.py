@@ -1,10 +1,4 @@
-"""Wave-2 P3: the guts of ``cli.py``'s ``run`` command, extracted behind a stable seam.
-
-``run`` stays a thin cyclopts-decorated forwarder in ``cli.py`` (its exact signature has to live
-there for cyclopts to build ``--help``/parsing — see ``tests/test_cli.py``'s flag-inventory
-contract); this module holds ``run_impl`` and the cohesive helpers it's built from, split out of
-what used to be one ~350-line, CCN-147 function. Behavior is unchanged from the pre-split version.
-"""
+"""Run-mode launch orchestration behind the Cyclopts boundary in ``commands/run.py``."""
 
 from __future__ import annotations
 
@@ -20,9 +14,7 @@ from pathlib import Path
 from typing import Literal
 
 from saitenka.app import session_stats
-from saitenka.app import (
-    subselect as _subselect,  # noqa: F401  # import registers built-in providers
-)
+from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config
 from saitenka.app.continuity import resolve_sibling
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
@@ -299,6 +291,7 @@ def _cached_subtitles(
 def _enabled_provider_names(
     video: str | None, *, jimaku: bool, jimaku_cfg: dict, tsukihime_cfg: dict, language: str
 ) -> tuple[str, ...]:
+    _subselect.register_builtin_providers()
     if not video:
         return ()
     flags = (
@@ -958,7 +951,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     profile: str | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
-    from saitenka.app.controller import Reader
     from saitenka.app.reader_deps import begin_deps_build, warm_tokenizer
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
@@ -1101,12 +1093,11 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     # coloring/tooltips/mining land in place once loaded.
     if demo_word or screenshot:
         scorer, anki, mine_conf, dict_set = _build_deps()
-        reader = Reader(
+        from saitenka.app.reader_factory import ReaderServices, create_reader
+
+        reader = create_reader(
             ipc,
-            scorer=scorer,
-            anki=anki,
-            mine_cfg=mine_conf,
-            dict_set=dict_set,
+            services=ReaderServices(scorer, anki, mine_conf, dict_set),
             options=opts,
             profile=active_profile,
         )
@@ -1114,9 +1105,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
         )
     else:
-        reader = Reader(
-            ipc, options=opts, profile=active_profile
-        )  # deps injected asynchronously below
+        from saitenka.app.reader_factory import create_reader
+
+        reader = create_reader(ipc, options=opts, profile=active_profile)
         reader.set_profile_cycle(
             profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
         )

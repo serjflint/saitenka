@@ -100,7 +100,7 @@ class ImgBox:
 def img_box(png: bytes | None, height: int, tint: RGBA | None) -> ImgBox:
     """Build an inline image box for a structured-content ``img`` (#283): the decoded sprite scaled to
     ``height`` (a monochrome gaiji recoloured to ``tint``), or the ▢ placeholder when there is no
-    decodable image. All PIL lives here, so ``sc.walk`` stays PIL-agnostic (the sc/-layering contract)."""
+    decodable image. PIL decoding stays in the renderer, outside the structured-content model."""
     sprite = _decode_sprite(png, tint) if png is not None else None
     if sprite is None:
         return ImgBox(width=round(height * 1.6), height=height, label="▢")

@@ -351,7 +351,7 @@ def test_profile_override_selects_scoping_like_resolve_profile():
 def test_scoped_dicts_are_what_the_run_path_resolves():
     """Observable through the actual run-path seam: with no --dict flag, ``_resolve_names`` reads the
     profile-scoped dict list (which dictionaries load)."""
-    from saitenka.app.cli_run import _resolve_names
+    from saitenka.app.launch.run import _resolve_names
 
     cfg = scope_config(
         {
@@ -396,7 +396,7 @@ def test_profile_mine_targets_its_own_deck_model_and_fields_in_a_built_mineconfi
 def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
     """The (deck, model) a [mine] table implies with no CLI flag — the shared default the run signature
     AND the profile-scoped fallback use so a profile's deck/model isn't clobbered by a still-default flag."""
-    from saitenka.app.cli_run import default_mine_target
+    from saitenka.app.launch.run import default_mine_target
 
     assert default_mine_target({}) == ("Saitenka::Mining", "Lapis")
     assert default_mine_target({"preset": "Kiku"}) == ("Saitenka::Mining", "Kiku")
@@ -406,7 +406,7 @@ def test_default_mine_target_prefers_explicit_then_preset_then_lapis():
 def _scope_and_mine(cfg, mine_deck, mine_model):
     """The run seam, post-dedup: the shared identity spine scopes the cfg, then _resolve_mine_target
     resolves the effective deck/model off it. Mirrors run_impl's two lines."""
-    from saitenka.app.cli_run import _resolve_mine_target
+    from saitenka.app.launch.run import _resolve_mine_target
 
     scoped = resolve_launch_identity(cfg, profile_override=None, slang="ja,jpn,jp").cfg
     deck, model = _resolve_mine_target(scoped, mine_deck, mine_model)

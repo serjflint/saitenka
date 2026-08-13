@@ -1,6 +1,6 @@
 """RGBA → premultiplied-BGRA conversion for mpv's ``overlay-add`` — a pure PIL/numpy leaf.
 
-Lives at the ``overlay`` root (not under ``mpvio``) so both the OSD upload (``mpvio.osd``) and the
+Lives at the package root (not under ``mpvio``) so both the OSD upload (``mpvio.osd``) and the
 windowed compositor (``render.banded``, which converts each band once — #138) can use it without a
 ``render → mpvio`` import cycle. Same relocation pattern as ``saitenka.otel_metrics``.
 """

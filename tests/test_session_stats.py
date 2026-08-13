@@ -177,7 +177,7 @@ def test_disabled_reader_does_not_touch_ipc():
 
 def test_stats_command_lists_complete_and_incomplete_sessions(tmp_path, monkeypatch, capsys):
     from saitenka.app import session_stats
-    from saitenka.app.cli import stats
+    from saitenka.app.commands.diagnostics import stats
 
     path = tmp_path / "sessions.sqlite"
     store = SessionStore(path)

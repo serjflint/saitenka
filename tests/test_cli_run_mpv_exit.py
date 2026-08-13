@@ -1,10 +1,10 @@
-"""``_log_mpv_exit`` (cli_run.py): mpv's own crash (e.g. a GPU-driver SIGSEGV) drops the IPC socket
+"""``_log_mpv_exit`` (launch/run.py): mpv's own crash (e.g. a GPU-driver SIGSEGV) drops the IPC socket
 the same way a clean quit does — this is the one place that checks the real exit code (``proc.
 returncode``) so a crash shows up in overlay.log/report instead of reading as a normal quit."""
 
 import logging
 
-from saitenka.app.cli_run import _log_mpv_exit
+from saitenka.app.launch.run import _log_mpv_exit
 
 
 def test_silent_on_clean_quit(caplog):

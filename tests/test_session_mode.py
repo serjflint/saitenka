@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from saitenka.app import cli_run
+from saitenka.app.launch import run as cli_run
 
 
 class _FakeReader:
@@ -25,7 +25,7 @@ class _FakeReader:
 
 def test_run_session_logs_mode_run_before_the_loop(caplog):
     reader = _FakeReader()
-    with caplog.at_level(logging.INFO, logger="saitenka.app.cli_run"):
+    with caplog.at_level(logging.INFO, logger="saitenka.app.launch.run"):
         cli_run._execute_reader_session(
             reader,
             ipc=None,

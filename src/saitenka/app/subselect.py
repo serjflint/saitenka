@@ -320,24 +320,32 @@ def _tsukihime_provider_fetch(
     )
 
 
-# Both providers are Japanese-only today — capability, not a branch, so a future non-JP profile
-# excludes them without touching this module (#254 phase 1).
-register_provider(
+_BUILTIN_PROVIDERS = (
     SubtitleProvider(
         name="jimaku",
         languages=frozenset({"jp"}),
         candidates=_jimaku_provider_candidates,
         fetch_attempt=_jimaku_provider_fetch,
-    )
-)
-register_provider(
+    ),
     SubtitleProvider(
         name="tsukihime",
         languages=frozenset({"jp"}),
         candidates=_tsukihime_provider_candidates,
         fetch_attempt=_tsukihime_provider_fetch,
-    )
+    ),
 )
+
+
+def register_builtin_providers() -> None:
+    """Install built-ins into the active registry; safe after an isolated-registry reset."""
+    for provider in _BUILTIN_PROVIDERS:
+        if get_provider(provider.name) is None:
+            register_provider(provider)
+
+
+# Both providers are Japanese-only today — capability, not a branch, so a future non-JP profile
+# excludes them without touching this module (#254 phase 1).
+register_builtin_providers()
 
 
 def list_candidates(

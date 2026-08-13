@@ -18,8 +18,8 @@ Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
 All shipped Python lives under one import namespace, `src/saitenka/`. The directories below are
 internal modules with explicit dependency contracts, not independently published distributions.
 
-- **`sc/`** — Yomitan `structured-content` model and parsing (the input format). Kept PIL-agnostic
-  (enforced by `.importlinter`).
+- **`sc/`** — the renderer-neutral Yomitan `structured-content` input model. Kept PIL-agnostic
+  (enforced by `.importlinter`); `render/sc_adapter.py` maps it into renderer-owned layout blocks.
 - **`render/`** — layout/flow: the text walker, ruby positioning, line wrapping, panel chrome.
   `render.flow` is the core. `render/window.py` is the PIL-free geometry kernel (block offset table +
   half-open visible-range) and `render/banded.py` the **windowed (banded) tooltip engine**
@@ -28,7 +28,8 @@ internal modules with explicit dependency contracts, not independently published
   `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
   search) is a `Panel` (`app/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
-- **`raster/`** + top-level **`panel`** — compose the final RGBA panel image; `Definition`/`Entry`
+- **`raster/`** + top-level **`panel`** — define the renderer backend result and compose the final RGBA
+  panel image; `app/render_backend.py` is the Pillow adapter above both layers. `Definition`/`Entry`
   (in `panel.py`) hold one dictionary's rendered entry for a word. Value types with no render deps —
   `model.Theme`, `version.overlay_version` — live at the package root to keep `render`/`app` acyclic.
 - **`parallel.py`** — the CPU-bound-render executor policy: free-threaded threads (FreeType releases
@@ -40,7 +41,9 @@ internal modules with explicit dependency contracts, not independently published
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
-- **`app/`** — the application layer. `controller.py`'s `Reader` is the main-loop orchestrator
+- **`app/`** — the application layer. `controller.py`'s `Reader` retains the mpv lifecycle while
+  `runtime/` owns explicit command routing and ordered tick phases; `reader_factory.py` owns production
+  composition;
   (poll mpv → tokenize → hover hit-test → lookup → mine); `tokenizer.py` (the tokenizer-strategy
   seam) over `tokenize.py` (fugashi/unidic-lite JP segmentation) and `tokenizer_latin.py` (the Latin
   strategy); `profiles.py`/`profile_cli.py`/`languages.py` (the second-language reading-profile engine
@@ -50,7 +53,8 @@ internal modules with explicit dependency contracts, not independently published
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py`
-  (subtitle fetching); `cli.py`/`cli_run.py` (the entry point — thin parser + real orchestration).
+  (subtitle fetching); `cli.py` is the process/composition root, `commands/` owns Cyclopts domain
+  surfaces, and `launch/run.py` owns run orchestration.
 - **`../saitenka-dict/`** — the renderer-neutral dictionary boundary: archive validation/import,
   SQLite lookup, semantic term/kanji models, and all five Yomitan result modes.
   `app/source_adapter.py` presents it by default through the stable Saitenka tooltip/card facade; the

@@ -6,7 +6,7 @@ an empty ``languages`` set is language-agnostic and always available.
 
 Leaf module (no ``subselect`` import — the registry direction is one-way, ``subselect`` → here, to keep
 ``saitenka.app`` acyclic). The built-in jimaku/tsukihime providers self-register at ``subselect`` import;
-every consumer (``cli``/``cli_run``) imports ``subselect`` so the registry is populated before use.
+launch paths import ``subselect`` before querying the registry.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def providers_for_language(
 
 def enabled_providers_for(language: str, flags: Iterable[tuple[str, bool]]) -> tuple[str, ...]:
     """Turn ``(provider_name, enabled)`` config flags into the enabled-and-language-eligible provider
-    tuple — the one place that replaces the duplicated enablement tuples in ``cli.py``/``cli_run.py``."""
+    tuple — the one place that replaces the duplicated enablement tuples in both launch paths."""
     configured = tuple(name for name, enabled in flags if enabled)
     return providers_for_language(language, candidates=configured)
 

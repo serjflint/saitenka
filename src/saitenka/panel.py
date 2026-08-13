@@ -42,17 +42,15 @@ from saitenka.render.chip import ChipStyle
 from saitenka.render.document import GUTTER_PX, INDENT_PX
 from saitenka.render.flow import ChipBox, ImgBox, render_chip_row, render_flow
 from saitenka.render.layout import Block as FlowBlock
-from saitenka.sc.walk import inline_flow
+from saitenka.render.sc_adapter import inline_flow
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 # Theme + _DEFAULT_THEME moved to saitenka.model (value types, no render deps) to break the
 # render↔panel cycle; re-exported here so ``from saitenka.panel import Theme`` keeps working.
-# BodyRenderArgs/SCNode/render_body_block live in the TOP-LEVEL overlay.body_block for the same
-# reason (render/banded.py needs render_body_block; sc.walk already imports from render.flow, so a
-# copy inside the render/ package would cycle); re-exported here so ``from saitenka.panel import
-# BodyRenderArgs`` keeps working.
+# BodyRenderArgs/SCNode/render_body_block live in top-level body_block so the process-pool worker stays
+# picklable; re-exported here so ``from saitenka.panel import BodyRenderArgs`` keeps working.
 
 
 @dataclass
@@ -106,7 +104,7 @@ class Entry:
 
 
 def _hex(s: str) -> RGBA:
-    from saitenka.sc.walk import _parse_color
+    from saitenka.render.sc_adapter import _parse_color
 
     return _parse_color(s, (90, 122, 160, 255))
 

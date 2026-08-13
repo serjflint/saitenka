@@ -367,7 +367,7 @@ def build_reader_deps(
     leave this empty. ``on_anki_unreachable``/``on_known_words_error`` let ``run`` print a console
     note on those two failure paths instead of the default log-only warning (``attach`` is detached,
     so logging is all it can do) — see :func:`_maybe_start_anki`/:func:`_load_known_words`. This one
-    implementation backs both ``run`` and ``attach`` (`cli_run.py`'s own copy of this used to drift
+    implementation backs both ``run`` and ``attach`` (the run launcher's own copy used to drift
     out of sync with it — see CHANGELOG)."""
     from saitenka.app.profiles import resolve_profile
 
@@ -451,7 +451,7 @@ def warm_tokenizer(tokenizer: str = "unidic") -> None:
     an isolated same-conditions timing) — mutual, too: it slowed the DAG's own tasks down as much as
     they slowed it.
 
-    Callers (`cli_run.py`/`cli.py`) spawn this on its OWN thread, as early as possible — ideally
+    The run and attach launchers spawn this on its OWN thread, as early as possible — ideally
     before mpv even launches, so it overlaps mpv's own launch/connect dead time instead of sitting
     on the critical path. This is a race, not a guarantee: if mpv comes up unusually fast, the real
     first subtitle line's own ``tokenize()`` call could still overlap this one. In every session

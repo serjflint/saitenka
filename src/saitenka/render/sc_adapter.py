@@ -1,4 +1,4 @@
-"""Walk Yomitan structured-content JSON into layout :class:`Block`s.
+"""Adapt Yomitan structured-content JSON into renderer layout :class:`Block`s.
 
 Structured content is a recursive tree: a node is a string (text), a list of nodes, or an object
 ``{"tag": ..., "content": ..., "style": {...}}``. We support the subset the dictionary panel needs —

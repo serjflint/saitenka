@@ -135,7 +135,7 @@ def test_stroke_order_headword_renders_in_the_stroke_font(tmp_path):
     from saitenka.fonts import STROKE_ORDER_FONT
     from saitenka.model import Style
     from saitenka.render import layout
-    from saitenka.sc.walk import inline_flow
+    from saitenka.render.sc_adapter import inline_flow
 
     ds = _fixture_ds(tmp_path)
     on = ds.kanji_for("読", stroke_order=True)

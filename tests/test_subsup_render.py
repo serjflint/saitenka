@@ -7,7 +7,7 @@ from __future__ import annotations
 from saitenka.model import Style
 from saitenka.render.flow import build_items, layout_flow, render_flow
 from saitenka.render.layout import Block
-from saitenka.sc.walk import inline_flow
+from saitenka.render.sc_adapter import inline_flow
 
 BASE = Style(size=28)
 

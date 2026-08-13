@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from saitenka.sc.walk import _text_of
+from saitenka.render.sc_adapter import _text_of
 
 FREQ_COLOR = (74, 158, 92, 255)
 PITCH_COLOR = (126, 96, 168, 255)

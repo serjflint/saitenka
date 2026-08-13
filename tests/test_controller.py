@@ -318,16 +318,17 @@ def test_mine_keybinds_register_even_when_anki_absent():
     assert _msg_for(ipc, "Shift+m") == MINE_ALL_MSG
 
 
-def test_mine_video_key_registers_and_routes_to_the_video_mine():
+def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
     from saitenka.app.bindings import MINE_VIDEO_MSG
 
     ipc = FakeIPC()
-    Reader(ipc, anki=object())._register_keybinds()  # mine bindings require anki
+    reader = Reader(ipc, anki=object())
+    reader._register_keybinds()  # mine bindings require anki
     assert _msg_for(ipc, "Ctrl+Shift+m") == MINE_VIDEO_MSG  # default shortcut is bound
     # and the message routes to the video-mine action (not the still mine)
     calls: list = []
-    fake = type("R", (), {"mine_current_video": lambda _self: calls.append("video")})()
-    Reader._HANDLERS[MINE_VIDEO_MSG](fake)
+    monkeypatch.setattr(reader, "mine_current_video", lambda: calls.append("video"))
+    reader._handle(MINE_VIDEO_MSG)
     assert calls == ["video"]
 
 
