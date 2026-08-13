@@ -51,12 +51,20 @@ def test_reduce_handles_too_few_samples():
 def test_to_bench_json_keeps_the_frame_sentinel_and_trends_live_latency():
     mod = _jank_module()
     out = mod.to_bench_json(
-        {"total_dropped": 3, "max_interaction_ms": 12.5, "total_interaction_ms": 30.0}
+        {
+            "total_dropped": 3,
+            "total_delayed": 1,
+            "steps": [
+                {"step": "hover", "interaction_ms": 12.5},
+                {"step": "scroll", "interaction_ms": 30.0},
+            ],
+        }
     )
     assert [e["name"] for e in out] == [
         "live jank: total dropped frames",
-        "live: worst interaction latency",
-        "live: scripted interaction latency",
+        "live jank: total delayed frames",
+        "live: hover interaction latency",
+        "live: four-scroll interaction latency",
     ]
-    assert [e["unit"] for e in out] == ["frames", "ms", "ms"]
-    assert [e["value"] for e in out] == [3, 12.5, 30.0]
+    assert [e["unit"] for e in out] == ["frames", "frames", "ms", "ms"]
+    assert [e["value"] for e in out] == [3, 1, 12.5, 30.0]

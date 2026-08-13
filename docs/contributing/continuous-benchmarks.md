@@ -29,15 +29,16 @@ benchmark writers share one concurrency group, so the render and live-player his
 | Core | pull request, push to `main`, manual | generated Yomitan archive import and exact SQLite lookup | Exercises the offline-cache build and decoded-entry query boundary without private dictionaries |
 | Core | pull request, push to `main`, manual | click/store actions against temporary SQLite and fake IPC | Covers synchronous mining/bookkeeping work without Anki or network noise |
 | Lifecycle | weekly, release tag, manual | bounded-cache stress | Longer-lived eviction and memory behavior is useful, but too noisy and costly for every PR |
-| Live | weekly, release tag, manual | real mpv/Xvfb dropped-frame sentinel and interaction latency | Only this tier sees compositor and player interaction |
+| Live | weekly, release tag, manual | real mpv/Xvfb frame counters plus hover and scroll latency | Only this tier sees compositor and player interaction |
 | Local | developer-invoked | installed-dictionary pathological/vocabulary, render-cache prewarm, trace replay, profiler runs | Requires private corpora, true disk-cold state, or diagnostic interpretation |
 
 The continuous core suite publishes render, subtitle, generated-dictionary, and click/store metrics.
-The weekly suite publishes bounded-cache lifecycle and real-player metrics. The full live report keeps
-both mpv frame counters for diagnosis, but the chart retains only dropped frames as a catastrophic-jank
-sentinel and trends the non-zero scripted interaction latencies. The result schema and workflow are
-shared so a future synthetic prefetch keep-ahead corpus can be added without inventing another
-statistics or storage path.
+The weekly suite publishes bounded-cache lifecycle and real-player metrics. The live charts retain both
+mpv frame counters as compositor sentinels and add non-zero latency for two directly observable paths:
+opening a tooltip and applying four scroll updates. Dwell-based nested/switch/dismiss steps remain in
+the frame-counter workload but are not mislabeled as latency measurements. The result schema and
+workflow are shared so a future synthetic prefetch keep-ahead corpus can be added without inventing
+another statistics or storage path.
 
 ## Statistical contract
 
@@ -64,8 +65,8 @@ the point links to the code that was actually measured rather than to the dispat
 revision must contain `examples/bench_core.py`, and its metric names and units must match the committed
 series manifest; incompatible historical harnesses cannot be mixed into the chart.
 
-Backfill several commits by dispatching once per SHA, oldest to newest. Manual Perf runs share one
-FIFO concurrency group, so a later dispatch waits rather than replacing a pending result:
+Backfill several commits by dispatching once per SHA. Manual Perf runs share one concurrency group, so
+a later dispatch waits rather than replacing a pending result; GitHub does not guarantee queue order:
 
 ```console
 gh workflow run perf.yml --ref main -f revision=<full-commit-sha>

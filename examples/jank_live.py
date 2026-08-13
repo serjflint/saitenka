@@ -62,7 +62,8 @@ def reduce_jank_samples(samples: list[dict]) -> dict:
 
 
 def to_bench_json(result: dict) -> list[dict]:
-    """Trend real interaction latency while retaining dropped frames as a sentinel."""
+    """Trend observable interactions while retaining both mpv frame-counter sentinels."""
+    latency = {step["step"]: step["interaction_ms"] for step in result["steps"]}
     return [
         {
             "name": "live jank: total dropped frames",
@@ -70,14 +71,19 @@ def to_bench_json(result: dict) -> list[dict]:
             "value": result["total_dropped"],
         },
         {
-            "name": "live: worst interaction latency",
-            "unit": "ms",
-            "value": result["max_interaction_ms"],
+            "name": "live jank: total delayed frames",
+            "unit": "frames",
+            "value": result["total_delayed"],
         },
         {
-            "name": "live: scripted interaction latency",
+            "name": "live: hover interaction latency",
             "unit": "ms",
-            "value": result["total_interaction_ms"],
+            "value": latency["hover"],
+        },
+        {
+            "name": "live: four-scroll interaction latency",
+            "unit": "ms",
+            "value": latency["scroll"],
         },
     ]
 
@@ -89,7 +95,7 @@ def _counter(ipc, prop: str) -> int:
 
 def run(*, settle_s: float = 0.4) -> dict:
     """Drive the scripted workload against a live, PLAYING mpv and return the reduced jank report."""
-    from live_harness import live_reader
+    from live_harness import live_reader, poll_until
 
     with live_reader(paused=False) as (_tmp, reader, ipc):
         samples: list[dict] = []
@@ -109,9 +115,12 @@ def run(*, settle_s: float = 0.4) -> dict:
                 }
             )
 
-        def timed(action: Callable[[], None]) -> float:
+        def timed(action: Callable[[], None], ready: Callable[[], bool] | None = None) -> float:
             start = time.perf_counter()
             action()
+            if ready is not None:
+                poll_until(reader, ready, "timed live interaction did not complete")
+            reader.poll_once()  # flush the paused-overlay repaint scheduled by the rendering tick
             return (time.perf_counter() - start) * 1000.0
 
         i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
@@ -127,9 +136,8 @@ def run(*, settle_s: float = 0.4) -> dict:
 
         def hover() -> None:
             ipc.command("mouse", cx, cy)  # tooltip composites; pause lease engages
-            reader.poll_once()
 
-        sample("hover", timed(hover))
+        sample("hover", timed(hover, lambda: reader._tip_rect is not None))
 
         def scroll() -> None:
             for _ in range(4):
@@ -145,7 +153,8 @@ def run(*, settle_s: float = 0.4) -> dict:
                 ipc.command("mouse", int(tx + tw / 2), int(ty + th / 2))
                 reader.poll_once()
 
-            sample("nested", timed(nested))
+            nested()
+            sample("nested")
 
         def sweep() -> None:
             for k in range(len(reader.boxes)):
@@ -153,13 +162,15 @@ def run(*, settle_s: float = 0.4) -> dict:
                 ipc.command("mouse", int(ox + b.x + b.w / 2), int(oy + b.y + b.h / 2))
                 reader.poll_once()
 
-        sample("sweep", timed(sweep))
+        sweep()
+        sample("sweep")
 
         def dismiss() -> None:
             ipc.command("mouse", 5, 5)
             reader.poll_once()
 
-        sample("dismiss", timed(dismiss))
+        dismiss()
+        sample("dismiss")
 
     return reduce_jank_samples(samples)
 
