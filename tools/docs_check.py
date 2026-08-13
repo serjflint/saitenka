@@ -9,7 +9,7 @@ bind each claim to the code, so drift fails the gate instead of misleading the n
   refs   — every code-font ``poe <task>`` a doc names is a real poe task; every ``.agents/{skills,rules,
            hooks,sharpen,grow,mcp}/<name>`` path and every package-qualified module/tool path it
            RECOGNISES exists on disk (best-effort recall — bare filenames / prose refs are out of scope).
-  consts — each numeric default in ARCHITECTURE.md's "Constants, limits" table is (a) attributed to
+  consts — each numeric default in ARCHITECTURE.md's checked-defaults table is (a) attributed to
            its real defining symbol and (b) equal to the value the code actually holds. Two-sided:
            a doc-only claim with no registry binding, or a registry entry the doc dropped, both fail.
 
@@ -137,7 +137,7 @@ def check_refs() -> list[str]:
 
 
 # --- consts pass ---------------------------------------------------------------------------------
-# Each entry binds one numeric default the ARCHITECTURE.md "Constants, limits" table claims to the
+# Each entry binds one numeric default the ARCHITECTURE.md checked-defaults table claims to the
 # code symbol that actually owns it: `where` is a substring the row's "Where" cell must contain
 # (attribution bind), `resolve` returns the live code value (value bind). The doc supplies the claimed
 # number; code supplies the truth; a mismatch on either side fails. Every `ident = N` row in the table
@@ -191,7 +191,12 @@ CONSTS: list[ConstSpec] = [
     ),
     ConstSpec("tip_max_frac", "TooltipOptions", _cfg("TooltipOptions", "tip_max_frac")),
     ConstSpec("panel_cache_max", "TooltipOptions", _cfg("TooltipOptions", "panel_cache_max")),
+    ConstSpec("band_cache_max", "TooltipOptions", _cfg("TooltipOptions", "band_cache_max")),
+    ConstSpec(
+        "raw_band_ceiling_mb", "TooltipOptions", _cfg("TooltipOptions", "raw_band_ceiling_mb")
+    ),
     ConstSpec("entry_cache_max", "DictDbOptions", _cfg("DictDbOptions", "entry_cache_max")),
+    ConstSpec("token_cache_max", "PerfOptions", _cfg("PerfOptions", "token_cache_max")),
     ConstSpec("prefetch_lookahead", "PerfOptions", _cfg("PerfOptions", "prefetch_lookahead")),
     ConstSpec(
         "head_prefetch_lookahead", "PerfOptions", _cfg("PerfOptions", "head_prefetch_lookahead")
@@ -201,13 +206,13 @@ CONSTS: list[ConstSpec] = [
     ),
 ]
 
-_CONST_TABLE_HEADER = "### Constants, limits, and measured timings"
+_CONST_TABLE_HEADER = "### Mechanically checked defaults"
 # a `word = number` claim inside a table cell (number may be float); trailing unit (px) ignored.
 _CLAIM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+(?:\.\d+)?)")
 
 
 def _const_table_rows() -> list[list[str]]:
-    """The Constants table as [Knob, Value, Where] rows (header + separator dropped)."""
+    """The checked-defaults table as [Knob, Value, Where] rows."""
     text = (_REPO / "ARCHITECTURE.md").read_text(encoding="utf-8")
     lines = text.splitlines()
     try:
@@ -266,7 +271,7 @@ def _consts_failures(doc: dict[str, tuple[str, str]], registry: dict[str, ConstS
         except Exception as exc:
             fails.append(f"docs_check: cannot resolve `{ident}` in code ({exc!r})")
             continue
-        if float(code_value) != float(literal):
+        if float(str(code_value)) != float(literal):
             fails.append(
                 f"ARCHITECTURE.md: `{ident}` = {literal} in the doc but {code_value} in code"
             )
