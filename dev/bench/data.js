@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786621976387,
+  "lastUpdate": 1786621995996,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5703,6 +5703,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 13.512704,
             "range": "3 replicas; min 12.3904; max 14.1476; MAD 0.63488",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "39761eeef2d53cb8ca034b3a4f35b2d5f7d7d0b6",
+          "message": "refactor: organize panel subsystem package (#334)",
+          "timestamp": "2026-08-13T05:57:24Z",
+          "url": "https://github.com/serjflint/saitenka/commit/39761eeef2d53cb8ca034b3a4f35b2d5f7d7d0b6"
+        },
+        "date": 1786621994691,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 54.536539,
+            "range": "3 replicas; min 53.0276; max 56.8432; MAD 1.50897; worst 56.8432",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 339.78993,
+            "range": "3 replicas; min 265.392; max 620.656; MAD 74.3977; worst 620.656",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 14.102528,
+            "range": "3 replicas; min 13.5537; max 14.8972; MAD 0.548864",
             "unit": "MB"
           }
         ]
