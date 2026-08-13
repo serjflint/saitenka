@@ -87,8 +87,8 @@ The exact commands live in `pyproject.toml`'s `[tool.poe.tasks]` and the workflo
 | Layer | What it is | When it runs | Signal |
 |---|---|---|---|
 | **Local rot-guard** | `poe perf-check` ratchets the dict-free `--synth` render bench against `perf-baseline.json` (per-metric tolerance: median +50%, tail-noisy p99 +100%). `poe perf-bless` after a deliberate change. | Locally, on demand (hard fail). | Catches a 2-4× rot before you push. |
-| **Continuous history** | [`github-action-benchmark`](https://github.com/benchmark-action/github-action-benchmark) charts the same `--synth` numbers on a gh-pages dashboard; PRs get a comparison comment. | Every push to `main` (stores) + every PR (compares). | Trend over time — a chart, not a gate. |
-| **Live-mpv interaction harness** | `poe jank-live` drives the overlay against a real *playing* mpv, times observable hover/scroll updates, and polls mpv's own frame counters. | The e2e GUI tier (Linux/Xvfb, weekly/tag). | Hover/scroll latency plus compositor sentinels. |
+| **Continuous history** | [`github-action-benchmark`](https://github.com/benchmark-action/github-action-benchmark) charts the same `--synth` numbers on a gh-pages dashboard; PRs get a current-value summary. | Every push to `main` (stores) + every PR (compares). | Trend over time — a chart, not a gate. |
+| **Live-mpv interaction harness** | `poe jank-live` drives the overlay against a real *playing* mpv, times observable hover/scroll updates, and polls mpv's own frame counters. | The e2e GUI tier (Linux/Xvfb, weekly/tag). | Hover/scroll latency plus decoder and compositor sentinels. |
 
 The `--synth` corpus is dict-free and deterministic on purpose: it needs no `overlay.toml`, so the same
 numbers come out on any machine and any commit, which is what makes CI history meaningful. Run

@@ -4,6 +4,8 @@ dropped/delayed frames. No mpv, no display — the humble-object part the real h
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 JANK_PATH = Path(__file__).resolve().parent.parent / "examples" / "jank_live.py"
 
 
@@ -68,3 +70,55 @@ def test_to_bench_json_keeps_the_frame_sentinel_and_trends_live_latency():
     ]
     assert [e["unit"] for e in out] == ["frames", "frames", "ms", "ms"]
     assert [e["value"] for e in out] == [3, 1, 12.5, 30.0]
+
+
+def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
+    mod = _jank_module()
+
+    class Reader:
+        _tip_scroll = 0
+        osd = (1920, 1080)
+
+        def _scroll_tip(self, delta):
+            self._tip_scroll += delta
+
+        def poll_once(self):
+            return True
+
+    reader = Reader()
+    mod._scroll_four(reader)
+    assert reader._tip_scroll == 4 * round(1080 * 0.12)
+
+
+def test_scroll_workload_rejects_a_non_scrollable_tooltip():
+    mod = _jank_module()
+
+    class Reader:
+        _tip_scroll = 0
+        osd = (1920, 1080)
+
+        def _scroll_tip(self, _delta):
+            pass
+
+        def poll_once(self):
+            return True
+
+    with pytest.raises(RuntimeError, match="did not advance"):
+        mod._scroll_four(Reader())
+
+
+def test_live_latency_boundary_repaints_the_overlay():
+    mod = _jank_module()
+
+    class Overlay:
+        repaints = 0
+
+        def repaint(self):
+            self.repaints += 1
+
+    class Reader:
+        ov = Overlay()
+
+    reader = Reader()
+    mod._present_overlay(reader)
+    assert reader.ov.repaints == 1

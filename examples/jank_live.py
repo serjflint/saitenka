@@ -93,12 +93,47 @@ def _counter(ipc, prop: str) -> int:
     return int(data) if isinstance(data, (int, float)) else 0
 
 
+def _scroll_four(reader) -> None:
+    before = reader._tip_scroll
+    for _ in range(4):
+        reader._scroll_tip(round(reader.osd[1] * 0.12))
+        reader.poll_once()
+    if reader._tip_scroll == before:
+        raise RuntimeError("live scroll workload did not advance the tooltip viewport")
+
+
+def _present_overlay(reader) -> None:
+    """Synchronously ask mpv to re-composite the changed paused overlay."""
+    reader.ov.repaint()
+
+
 def run(*, settle_s: float = 0.4) -> dict:
     """Drive the scripted workload against a live, PLAYING mpv and return the reduced jank report."""
     from live_harness import live_reader, poll_until
 
     with live_reader(paused=False) as (_tmp, reader, ipc):
         samples: list[dict] = []
+
+        class TallDS:
+            dicts = ()
+            freqs = ()
+            pitches = ()
+
+            def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002
+                from saitenka.panel import Definition, Entry
+
+                paragraph = "とても長い定義の本文で" * 8
+                return Entry(
+                    headword=[tok.surface],
+                    reading=getattr(tok, "reading", "") or tok.surface,
+                    defs=[Definition(f"辞書{i}", [paragraph]) for i in range(6)],
+                )
+
+            def has_term(self, *_forms):
+                return False
+
+        reader.dict_set = TallDS()
+        reader._panel_cache.clear()
 
         def sample(step: str, interaction_ms: float = 0.0) -> None:
             # let playback advance so any overlay-induced VO delay accrues before we read the counters
@@ -120,7 +155,7 @@ def run(*, settle_s: float = 0.4) -> dict:
             action()
             if ready is not None:
                 poll_until(reader, ready, "timed live interaction did not complete")
-            reader.poll_once()  # flush the paused-overlay repaint scheduled by the rendering tick
+            _present_overlay(reader)
             return (time.perf_counter() - start) * 1000.0
 
         i = next(k for k, t in enumerate(reader.tokens) if t.is_content)
@@ -139,12 +174,7 @@ def run(*, settle_s: float = 0.4) -> dict:
 
         sample("hover", timed(hover, lambda: reader._tip_rect is not None))
 
-        def scroll() -> None:
-            for _ in range(4):
-                reader._scroll_tip(round(reader.osd[1] * 0.12))
-                reader.poll_once()
-
-        sample("scroll", timed(scroll))
+        sample("scroll", timed(lambda: _scroll_four(reader)))
 
         if reader._tip_rect is not None:  # nested popup over an inner word
             tx, ty, tw, th = reader._tip_rect

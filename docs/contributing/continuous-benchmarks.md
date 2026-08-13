@@ -33,8 +33,8 @@ benchmark writers share one concurrency group, so the render and live-player his
 | Local | developer-invoked | installed-dictionary pathological/vocabulary, render-cache prewarm, trace replay, profiler runs | Requires private corpora, true disk-cold state, or diagnostic interpretation |
 
 The continuous core suite publishes render, subtitle, generated-dictionary, and click/store metrics.
-The weekly suite publishes bounded-cache lifecycle and real-player metrics. The live charts retain both
-mpv frame counters as compositor sentinels and add non-zero latency for two directly observable paths:
+The weekly suite publishes bounded-cache lifecycle and real-player metrics. The live charts retain
+mpv's decoder-late and VO/compositor-delayed counters as playback sentinels and add non-zero latency for two directly observable paths:
 opening a tooltip and applying four scroll updates. Dwell-based nested/switch/dismiss steps remain in
 the frame-counter workload but are not mislabeled as latency measurements. The result schema and
 workflow are shared so a future synthetic prefetch keep-ahead corpus can be added without inventing
