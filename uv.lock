@@ -2188,6 +2188,8 @@ dev = [
     { name = "pytest-randomly" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
+    { name = "pyyaml", marker = "python_full_version >= '3.14'" },
+    { name = "pyyaml-ft", marker = "python_full_version < '3.14'" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -2210,6 +2212,8 @@ test = [
     { name = "pytest-randomly" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
+    { name = "pyyaml", marker = "python_full_version >= '3.14'" },
+    { name = "pyyaml-ft", marker = "python_full_version < '3.14'" },
 ]
 
 [package.metadata]
@@ -2271,6 +2275,8 @@ dev = [
     { name = "pytest-randomly", specifier = ">=4.1.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "pyyaml", marker = "python_full_version >= '3.14'", specifier = ">=6.0.3" },
+    { name = "pyyaml-ft", marker = "python_full_version < '3.14'", specifier = ">=8.0.0" },
     { name = "ruff", specifier = ">=0.16" },
     { name = "ty", specifier = ">=0.0.61" },
 ]
@@ -2289,6 +2295,8 @@ test = [
     { name = "pytest-randomly", specifier = ">=4.1.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "pyyaml", marker = "python_full_version >= '3.14'", specifier = ">=6.0.3" },
+    { name = "pyyaml-ft", marker = "python_full_version < '3.14'", specifier = ">=8.0.0" },
 ]
 
 [[package]]
