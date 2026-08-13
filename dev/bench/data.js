@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786616023044,
+  "lastUpdate": 1786616043674,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4971,6 +4971,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 13.017088,
             "range": "3 replicas; min 12.9802; max 14.5449; MAD 0.036864",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "382df36e01d30fb90d39a96c5bba4bc4dacb7b0e",
+          "message": "Merge pull request #343 from serjflint/perf/continuous-benchmark-portfolio\n\nfeat(perf): add continuous benchmark portfolio",
+          "timestamp": "2026-08-13T10:11:56Z",
+          "url": "https://github.com/serjflint/saitenka/commit/382df36e01d30fb90d39a96c5bba4bc4dacb7b0e"
+        },
+        "date": 1786616042437,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 127.8209,
+            "range": "3 replicas; min 51.4205; max 235.132; MAD 76.4004; worst 235.132",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 203.27252,
+            "range": "3 replicas; min 53.6387; max 470.56; MAD 149.634; worst 470.56",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 12.693504,
+            "range": "3 replicas; min 12.3986; max 12.9802; MAD 0.28672",
             "unit": "MB"
           }
         ]
