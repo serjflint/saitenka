@@ -53,13 +53,13 @@ latency, see [Speed](benchmarks.md); to try it, see [Get started](../start/insta
 | jimaku.cc · TsukiHime subtitle fetch | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ⚠️ | ❌ external tool | ✅ utility | ⚠️ [manual timing offsets](https://migaku.com/blog/changelog) |
 | Built-in subtitle generation (when no subs exist) | ❌ | ❌ | ❌ | ✅ local ASR | ✅ [Migaku AI service](https://migaku.com/blog/changelog) |
-| Extra subtitle sources (Animetosho) · YouTube subs | ❌* | ✅ | ❌ | ⚠️ YouTube only | ⚠️ streaming-site subs |
+| Extra subtitle sources (AniMeTosho) · YouTube subs | ⚠️ [AniMeTosho via TsukiHime](../usage/features.md#jimaku-fetch) | ✅ | ❌ | ⚠️ YouTube only | ⚠️ streaming-site subs |
 | AniList **progress scrobbling** | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Jellyfin integration · media launcher (fzf/rofi) | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Content comprehension analysis | ✅ | ✅ | ❌ | ✅ | ✅ [personalized difficulty](https://migaku.com/faq/features) |
 | Local session history | ✅ | ✅ | ❌ | ✅ | ⚠️ [browser history + resume progress](https://migaku.com/blog/changelog) |
 | Cross-machine data sync | ❌ | ✅ | ❌ | ❌ | ✅ [cloud/local sync](https://migaku.com/blog/changelog) |
-| Mined-audio loudness normalization | ❌* | ✅ | ❌ | ❌ | ❌ |
+| Mined-audio loudness normalization | ✅ [opt-in](../usage/configuration.md#mining-to-anki) | ✅ | ❌ | ❌ | ❌ |
 | Built-in **latency profiling / OpenTelemetry traces** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Free-threaded **parallel rendering** (Python 3.14t) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Account + paid plan required after trial | ❌ | ❌ | ❌ | ❌ | ✅ [10-day trial](https://migaku.com/signup); [recurring or Lifetime](https://migaku.com/faq/getting-started) |

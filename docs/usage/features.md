@@ -174,7 +174,8 @@ saitenka run show.mkv --jimaku --color
 ```
 
 - ++ctrl+shift+t++ retries the enabled provider chain (jimaku, then opt-in TsukiHime) for the
-  current media without switching tracks.
+  current media without switching tracks. TsukiHime can surface Japanese text attachments imported
+  from AniMeTosho.
 - ++ctrl+j++ opens the **jimaku download picker** — browse and choose which subtitle file to
   pull for the current media, rather than taking the automatic best match.
 - Store the key once with `saitenka set-jimaku-key`; `saitenka jimaku-check` diagnoses it
