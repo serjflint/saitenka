@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786617488343,
+  "lastUpdate": 1786617566995,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5053,6 +5053,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 50.645058,
             "range": "3 replicas; min 49.2805; max 56.5026; MAD 1.36454",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "948872c35e736621c514b9840619226c569087f7",
+          "message": "Merge pull request #344 from serjflint/fix/windows-e2e-portability\n\nfix: make E2E regressions portable on Windows",
+          "timestamp": "2026-08-13T10:36:40Z",
+          "url": "https://github.com/serjflint/saitenka/commit/948872c35e736621c514b9840619226c569087f7"
+        },
+        "date": 1786617566243,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 231.732982,
+            "range": "3 replicas; min 181.287; max 265.696; MAD 33.9635",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 54.509922,
+            "range": "3 replicas; min 51.6769; max 56.3905; MAD 1.88053",
             "unit": "ms"
           }
         ]
