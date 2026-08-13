@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786563507974,
+  "lastUpdate": 1786598168292,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4211,6 +4211,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 7.766,
             "range": "±11.9%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6c0052f37f373ccdfc5d8eab70573c4d24acf581",
+          "message": "refactor: modularize reader runtime and CLI (#332)\n\n* refactor(render): remove remaining layer backedges\n\n* refactor(reader): introduce explicit runtime seams\n\n* refactor(cli): split command domains\n\n* refactor(launch): isolate run orchestration\n\n* refactor(reader): centralize production composition\n\n* chore(launch): remove obsolete registry import\n\n* docs(launch): update provider registration boundary\n\n* refactor(cli): narrow command module imports\n\n* docs(render): update structured-content test reference\n\n* fix(launch): register subtitle providers explicitly\n\n* docs(architecture): align advisory and render boundaries\n\n* docs(render): fix worker-boundary wording",
+          "timestamp": "2026-08-13T08:15:18+03:00",
+          "tree_id": "f269c9b94cebb296926de344a12720e8a5806c72",
+          "url": "https://github.com/serjflint/saitenka/commit/6c0052f37f373ccdfc5d8eab70573c4d24acf581"
+        },
+        "date": 1786598167601,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.772,
+            "range": "±0.7%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.485,
+            "range": "±1.3%",
             "unit": "ms"
           }
         ]
