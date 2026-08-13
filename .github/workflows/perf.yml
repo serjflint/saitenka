@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       revision:
-        description: Commit SHA to backfill (must contain the continuous benchmark harness)
+        description: Commit SHA whose production code should be measured
         required: false
         type: string
 
@@ -45,6 +45,8 @@ jobs:
     name: core replica ${{ matrix.replica }}
     needs: resolve
     runs-on: ubuntu-latest
+    env:
+      BENCHMARK_HARNESS: ${{ github.event_name == 'workflow_dispatch' && inputs.revision != '' && '.benchmark-harness' || '.' }}
     strategy:
       fail-fast: false
       matrix:
@@ -53,6 +55,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.resolve.outputs.revision }}
+
+      - name: Checkout current benchmark harness for a historical revision
+        if: github.event_name == 'workflow_dispatch' && inputs.revision != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .benchmark-harness
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -66,7 +75,7 @@ jobs:
 
       - name: Run independent core replica
         run: >-
-          uv run --no-sync python examples/bench_core.py
+          uv run --no-sync python $BENCHMARK_HARNESS/examples/bench_core.py
           --reps 5 --output bench-${{ matrix.replica }}.json
 
       - name: Upload replica

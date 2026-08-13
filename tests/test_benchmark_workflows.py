@@ -36,7 +36,7 @@ def test_manual_backfill_checks_out_and_reports_the_selected_revision():
     workflow = _workflow("perf.yml")
     jobs = workflow["jobs"]
     measure_steps = jobs["measure"]["steps"]
-    checkout = next(step for step in measure_steps if "actions/checkout" in step.get("uses", ""))
+    checkouts = [step for step in measure_steps if "actions/checkout" in step.get("uses", "")]
     store_action = next(
         step for step in jobs["store"]["steps"] if "github-action-benchmark" in step.get("uses", "")
     )
@@ -44,7 +44,15 @@ def test_manual_backfill_checks_out_and_reports_the_selected_revision():
     assert "^[0-9a-fA-F]{40}$" in jobs["resolve"]["steps"][0]["run"]
     assert "'backfill'" in workflow["concurrency"]["group"]
     assert workflow["concurrency"]["queue"] == "max"
-    assert checkout["with"]["ref"] == "${{ needs.resolve.outputs.revision }}"
+    assert checkouts[0]["with"]["ref"] == "${{ needs.resolve.outputs.revision }}"
+    assert checkouts[1]["with"] == {
+        "ref": "${{ github.workflow_sha }}",
+        "path": ".benchmark-harness",
+    }
+    benchmark_command = next(
+        step["run"] for step in measure_steps if "bench_core.py" in step.get("run", "")
+    )
+    assert "$BENCHMARK_HARNESS/examples/bench_core.py" in benchmark_command
     assert store_action["with"]["ref"] == "${{ needs.resolve.outputs.revision }}"
     aggregate_steps = [*jobs["compare"]["steps"], *jobs["store"]["steps"]]
     assert (
@@ -65,7 +73,7 @@ def test_weekly_benchmarks_aggregate_three_live_and_lifecycle_replicas():
         assert measure["strategy"]["matrix"]["replica"] == [1, 2, 3]
         assert measure["if"] == "github.event_name != 'pull_request'"
         assert store["if"] == "github.event_name != 'pull_request'"
-        assert store["needs"] == f"{surface}-measure"
+        assert store["needs"] == ["resolve", f"{surface}-measure"]
         assert store["concurrency"]["group"] == "benchmark-pages"
         assert store["concurrency"]["queue"] == "max"
         store_action = next(
@@ -97,3 +105,36 @@ def test_weekly_benchmarks_aggregate_three_live_and_lifecycle_replicas():
     )
     assert publish_index < guard_index
     assert "permissions" not in jobs["e2e"]
+
+
+def test_manual_e2e_backfill_uses_current_harness_and_labels_selected_revision():
+    workflow = _workflow("e2e.yml")
+    jobs = workflow["jobs"]
+
+    assert "^[0-9a-fA-F]{40}$" in jobs["resolve"]["steps"][0]["run"]
+    assert "inputs.revision || github.ref" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+    assert "queue" not in workflow["concurrency"]
+    for surface, script in (("jank", "jank_live.py"), ("lifecycle", "bench_responsiveness.py")):
+        measure = jobs[f"{surface}-measure"]
+        checkouts = [
+            step for step in measure["steps"] if "actions/checkout" in step.get("uses", "")
+        ]
+        assert measure["needs"] == "resolve"
+        assert checkouts[0]["with"]["ref"] == "${{ needs.resolve.outputs.revision }}"
+        assert checkouts[1]["with"] == {
+            "ref": "${{ github.workflow_sha }}",
+            "path": ".benchmark-harness",
+        }
+        command = next(step["run"] for step in measure["steps"] if script in step.get("run", ""))
+        assert f"$BENCHMARK_HARNESS/examples/{script}" in command
+
+        store = jobs[f"{surface}-store"]
+        assert store["needs"] == ["resolve", f"{surface}-measure"]
+        action = next(
+            step for step in store["steps"] if "github-action-benchmark" in step.get("uses", "")
+        )
+        assert action["with"]["ref"] == "${{ needs.resolve.outputs.revision }}"
+
+    assert "inputs.revision == ''" in jobs["e2e"]["if"]
+    assert "inputs.revision == ''" in jobs["install-smoke"]["if"]
