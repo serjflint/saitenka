@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786600700490,
+  "lastUpdate": 1786604107020,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4319,6 +4319,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.646,
             "range": "±9.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5f1d3adab0a48ae9600b7232e847e701fb810c4a",
+          "message": "docs: actualize runtime architecture (#340)",
+          "timestamp": "2026-08-13T09:54:15+03:00",
+          "tree_id": "37a89d0c2e7f07f324fa44e1eb86231a237a9d60",
+          "url": "https://github.com/serjflint/saitenka/commit/5f1d3adab0a48ae9600b7232e847e701fb810c4a"
+        },
+        "date": 1786604105717,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.324,
+            "range": "±1.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.824,
+            "range": "±3.5%",
             "unit": "ms"
           }
         ]
