@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786617459707,
+  "lastUpdate": 1786617488343,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5135,6 +5135,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 12.693504,
             "range": "3 replicas; min 12.3986; max 12.9802; MAD 0.28672",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "948872c35e736621c514b9840619226c569087f7",
+          "message": "Merge pull request #344 from serjflint/fix/windows-e2e-portability\n\nfix: make E2E regressions portable on Windows",
+          "timestamp": "2026-08-13T10:36:40Z",
+          "url": "https://github.com/serjflint/saitenka/commit/948872c35e736621c514b9840619226c569087f7"
+        },
+        "date": 1786617487641,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 55.864234,
+            "range": "3 replicas; min 51.7044; max 109.622; MAD 4.15979; worst 109.622",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 169.699467,
+            "range": "3 replicas; min 57.485; max 451.725; MAD 112.214; worst 451.725",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 12.673024,
+            "range": "3 replicas; min 11.7965; max 12.6935; MAD 0.02048",
             "unit": "MB"
           }
         ]
