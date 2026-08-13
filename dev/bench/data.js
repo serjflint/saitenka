@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786605184643,
+  "lastUpdate": 1786608416795,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4391,6 +4391,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 8.661,
             "range": "±4.0%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "48ddfa4d584766b930643ca98a2c8c2094fe9723",
+          "message": "chore(tools): make repowise runs observable and route them through guards (#342)\n\nA run whose requests are dropped server-side is indistinguishable from a\nhealthy one: the progress bar sits still, the GPU pins at 100%, and\nnothing below ERROR is logged. Three faults hid in that silence — a\nserver-side per-request timeout killing generation, the embedder's\nhardcoded 10s expiring every batch, and a killed job record that reports\n'running' forever.\n\nEvery command that spends GPU time now streams a line while it runs\n(settled/started calls, pages landing, phase), so a live run cannot be\nmistaken for a wedged one, and 'started but never settled' names the drop\nsignature directly. watch treats an untouched job record as stale rather\nthan live, and the runs export REPOWISE_EMBEDDING_TIMEOUT.\n\nAdds update (the everyday incremental path) and vectors (embedding-only\nrepair); reindex is now documented as what a mass rename requires, since\nupdate moves the file layer but never re-partitions the concept layer.",
+          "timestamp": "2026-08-13T11:06:04+03:00",
+          "tree_id": "84ea4d0230d422155ff1fc3e73b43524af9cb594",
+          "url": "https://github.com/serjflint/saitenka/commit/48ddfa4d584766b930643ca98a2c8c2094fe9723"
+        },
+        "date": 1786608415407,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.245,
+            "range": "±1.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.702,
+            "range": "±5.4%",
             "unit": "ms"
           }
         ]
