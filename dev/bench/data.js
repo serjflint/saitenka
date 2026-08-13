@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786622029537,
+  "lastUpdate": 1786622046395,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5543,6 +5543,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 51.231728,
             "range": "3 replicas; min 50.8532; max 59.5832; MAD 0.378565",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "4cecefac4c5020bb85e154563199c3c3f753a103",
+          "message": "refactor: establish modular Saitenka package boundaries (#329)\n\n* refactor: consolidate the saitenka source layout\n\n* refactor: remove legacy overlay project directory",
+          "timestamp": "2026-08-12T18:48:40Z",
+          "url": "https://github.com/serjflint/saitenka/commit/4cecefac4c5020bb85e154563199c3c3f753a103"
+        },
+        "date": 1786622045473,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 189.431858,
+            "range": "3 replicas; min 176.217; max 410.436; MAD 13.2149",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 48.334446,
+            "range": "3 replicas; min 41.4009; max 54.8081; MAD 6.47361",
             "unit": "ms"
           }
         ]
