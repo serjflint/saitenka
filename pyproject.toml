@@ -778,9 +778,16 @@ dup = { shell = "npx --yes jscpd@latest src --min-tokens 50 --threshold 3 --repo
 # (.repowise/). `--format json` for agent triage. See vibe/quality-growth-plan.md (repowise finding).
 perf-risk = { cmd = "repowise health --module src/saitenka" }
 # These tasks operate on the whole repository and use the root configuration.
-repowise-preflight = { cmd = "uv run python tools/repowise_ops.py preflight" }
+# Go through them rather than a hand-typed `repowise ...`: they set the endpoint
+# and the embedding timeout, stream progress so a live run can't be mistaken for
+# a wedged one, and refuse to start against an endpoint that can't serve them.
+# Why each guard exists → the module docstring in tools/repowise_ops.py.
+repowise-update = { cmd = "uv run python tools/repowise_ops.py update" }
+repowise-vectors = { cmd = "uv run python tools/repowise_ops.py vectors" }
 repowise-reindex = { cmd = "uv run python tools/repowise_ops.py reindex" }
 repowise-watch = { cmd = "uv run python tools/repowise_ops.py watch" }
+repowise-bench = { cmd = "uv run python tools/repowise_ops.py bench" }
+repowise-preflight = { cmd = "uv run python tools/repowise_ops.py preflight" }
 repowise-backup = { cmd = "uv run python tools/repowise_ops.py backup" }
 repowise-corrections = { cmd = "uv run python tools/repowise_ops.py corrections" }
 # GATE (in `all`) — dependency license boundary. The ONLY copyleft in our graph must be our own
