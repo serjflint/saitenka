@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786621927617,
+  "lastUpdate": 1786621950504,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5375,6 +5375,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 61.760116,
             "range": "3 replicas; min 53.0534; max 62.2454; MAD 0.485242",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "213f0dffab19615787018b7f6398ab69b2dc7c1c",
+          "message": "fix: preserve source-backed dictionary structure (#330)\n\n* fix: unwrap semantic dictionary glossaries\n\n* test: add dictionary structure oracle",
+          "timestamp": "2026-08-12T19:05:18Z",
+          "url": "https://github.com/serjflint/saitenka/commit/213f0dffab19615787018b7f6398ab69b2dc7c1c"
+        },
+        "date": 1786621949135,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 257.049066,
+            "range": "3 replicas; min 214.13; max 273.104; MAD 16.0554",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 54.89461,
+            "range": "3 replicas; min 51.12; max 63.2408; MAD 3.77465",
             "unit": "ms"
           }
         ]
