@@ -67,10 +67,10 @@ def _full_height(entry: Entry) -> int:
 
 def test_construction_walks_no_content(monkeypatch):
     # The deferred-thunk contract: building rows + the WindowedPanel must not walk any def body.
-    # walk() is called from overlay.body_block.render_body_block (extracted so render/banded.py's
-    # process-pool path can call it without panel.py's closures), not from saitenka.panel directly.
-    import saitenka.body_block as BB
+    # walk() is called from panel.body.render_body_block so the process-pool path can use a module-level
+    # worker without capturing row closures.
     import saitenka.panel as P
+    import saitenka.panel.body as BB
 
     calls = [0]
     orig = BB.walk

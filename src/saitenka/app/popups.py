@@ -58,10 +58,10 @@ class Panel:
         gaps from it, so a scaled native panel (``Theme(scale)``) needs it forwarded or its vertical
         geometry silently falls back to scale-1.0 while the row content is scaled. Shared by the base
         tooltip and the nested/kanji/search popups."""
-        # Lazy imports: overlay.body_block depends on render.document, so a module-level import of
+        # Lazy imports: panel.body depends on render.document, so a module-level import of
         # render_body_band would cycle back through .render at the package level. It's injected as the
         # windowed engine's GIL-build process-pool band renderer for the same reason (see WindowedPanel).
-        from saitenka.body_block import render_body_band
+        from saitenka.panel.body import render_body_band
         from saitenka.render.banded import BandedTuning, WindowedPanel
 
         return cls(

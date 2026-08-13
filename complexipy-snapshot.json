@@ -30,8 +30,8 @@
     ]
   },
   {
-    "path": "src/saitenka/panel.py",
-    "file_name": "panel.py",
+    "path": "src/saitenka/panel/rows.py",
+    "file_name": "rows.py",
     "functions": [
       {
         "name": "panel_rows",

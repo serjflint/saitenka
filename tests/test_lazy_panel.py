@@ -105,10 +105,10 @@ def _huge_single_block_entry(n_senses: int = 200) -> Entry:
 def test_panel_rows_defers_walk_to_render(monkeypatch):
     # Stage 6: building rows must not walk ANY def content (the SC-walk of a huge 取る-class def
     # costs 200+ ms — measured), and the head must walk only the defs the viewport shows.
-    # walk() is called from overlay.body_block.render_body_block (extracted so render/banded.py's
-    # process-pool path can call it without panel.py's closures), not from saitenka.panel directly.
-    import saitenka.body_block as BB
+    # walk() is called from panel.body.render_body_block so the process-pool path can use a module-level
+    # worker without capturing row closures.
     import saitenka.panel as P
+    import saitenka.panel.body as BB
 
     calls = [0]
     orig = BB.walk
@@ -250,14 +250,14 @@ def test_finish_with_a_single_pending_row_skips_the_pool(monkeypatch):
     # A defless entry's rows are just the header (panel_rows: 1 + 2*n_defs) — one pending row is
     # not worth dispatch overhead, so finish() must take the plain serial path and never touch
     # shared_executor.
-    import saitenka.panel as P
+    import saitenka.panel.compose as PC
 
     calls = []
 
     def _tracked_shared_executor(*_a, **_k):
         calls.append(1)
 
-    monkeypatch.setattr(P, "shared_executor", _tracked_shared_executor)
+    monkeypatch.setattr(PC, "shared_executor", _tracked_shared_executor)
     e = Entry(headword=["本"], defs=[])
     lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
     lp.finish()

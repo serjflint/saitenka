@@ -34,7 +34,7 @@ SUBSYSTEMS: dict[str, tuple[list[str], list[str]]] = {
         ["metamorphic (sub-pixel / scale-invariance)", "golden-image", "property-based"],
     ),
     "panel / windowed / interaction": (
-        ["*/render/window.py", "*/app/controller.py"],
+        ["*/panel/*.py", "*/render/window.py", "*/app/controller.py"],
         ["agreement / hit-test round-trip", "stateful (RuleBasedStateMachine)", "golden-image"],
     ),
     "cache layers": (

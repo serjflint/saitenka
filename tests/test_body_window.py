@@ -1,4 +1,4 @@
-"""Stage 4: the measure/raster split in ``body_block`` — a walked def body lays out once, then any
+"""Stage 4: the measure/raster split in ``panel.body`` — a walked def body lays out once, then any
 y-window rasters from that handle pixel-identically to the full render cropped to the band.
 
 This is the caching contract the banded block cache stands on: ``layout_body_block`` pays the walk +
@@ -12,13 +12,13 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from saitenka.body_block import (
+from saitenka.model import Style
+from saitenka.panel.body import (
     BodyRenderArgs,
     layout_body_block,
     raster_body_window,
     render_body_block,
 )
-from saitenka.model import Style
 
 
 def _args(n: int = 40) -> BodyRenderArgs:
@@ -67,7 +67,7 @@ def test_any_band_is_pixel_identical_to_the_full_crop(data):
 
 def test_one_layout_serves_many_band_rasters_walking_once(monkeypatch):
     # The caching contract: laying out once then rastering many bands walks the SC exactly once.
-    import saitenka.body_block as BB
+    import saitenka.panel.body as BB
 
     calls = [0]
     orig = BB.walk

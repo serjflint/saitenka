@@ -28,9 +28,10 @@ internal modules with explicit dependency contracts, not independently published
   `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
   search) is a `Panel` (`app/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
-- **`raster/`** + top-level **`panel`** — define the renderer backend result and compose the final RGBA
-  panel image; `app/render_backend.py` is the Pillow adapter above both layers. `Definition`/`Entry`
-  (in `panel.py`) hold one dictionary's rendered entry for a word. Value types with no render deps —
+- **`raster/`** + **`panel/`** — define the renderer backend result and compose the final RGBA
+  panel image; `app/render_backend.py` is the Pillow adapter above both layers. `panel.model` owns
+  `Definition`/`Entry`; `panel.rows` plans deferred rows; `panel.body` owns picklable definition-body
+  workers; and `panel.compose` owns full and viewport-first composition. Value types with no render deps —
   `model.Theme`, `version.overlay_version` — live at the package root to keep `render`/`app` acyclic.
 - **`parallel.py`** — the CPU-bound-render executor policy: free-threaded threads (FreeType releases
   the GIL, faces are thread-local; ~78% of the render tail is `getmask2`/`getlength`), process-pool
@@ -74,7 +75,7 @@ internal modules with explicit dependency contracts, not independently published
 3. On hover, hit-testing maps screen coordinates to a token. A `LookupSource` produces semantic term
    or kanji results; `DictionarySourceAdapter` maps them to the stable `Entry` render input. The
    legacy consolidated-DB facade remains available as a compatibility fallback.
-4. The panel code (`panel.py`) walks the `Definition`s' structured content into a rendered tooltip
+4. The panel package walks the `Definition`s' structured content into a rendered tooltip
    image via `render/` → `draw/`, composited over the mpv frame.
 5. Optionally, mining builds a note through `ankiconnect-client`; `anki.py`/`miner.py` own sentence,
    screenshot, audio, provenance, launch behavior, and telemetry.
@@ -91,12 +92,12 @@ compression, and blit. It is the canonical walkthrough; the module docstrings ow
 | --- | --- | --- |
 | **Token** (the *term*) | `app/tokenize.py` | One segmented word: `surface`/`lemma`/`reading`/`pos` + its subtitle hitbox. The lemma is the DB lookup key. |
 | **Dictionary source** | `saitenka-dict`, `app/source_adapter.py` | Semantic lookup over the consolidated SQLite DB. `SqliteDictionaryStore` bounds decoded `TermRecord`s with a per-dictionary LRU (`entry_cache_max`); the legacy `Dictionary` path remains a compatibility fallback. |
-| **`Entry`** | `panel.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
+| **`Entry`** | `panel/model.py` | The whole tooltip's content for one term: a ruby headword + one **`Definition`** per configured dictionary (+ freq pills, pitch graphs, inflection chain). ≥2 readings ⇒ one **`EntryGroup`** per reading. |
 | **Panel** | `app/popups.py` | The cached, view-bearing tooltip: a `Panel` wraps exactly one `WindowedPanel`. Base / nested / kanji / search popups are all `Panel`s. |
-| **`Row`** | `panel.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |
+| **`Row`** | `panel/rows.py` | One horizontal slice of the panel (header, freq row, a def-name chip, or a **def body**), as a *deferred thunk* — building rows walks no content. Only def-body rows are expensive. |
 | **Block** | `render/document.py` | One block-level unit inside a def body (a paragraph or list item) after the SC-walk. A pathological def body is ~79 `<div>`s flattened into a tall stack of blocks. |
 | **Band** | `render/banded.py` | A ≤`_BAND_PX` (256px) horizontal slice of a **row** — the unit of raster, cache, and eviction. A row of height `H` has `ceil(H/256)` bands. |
-| **Layout** | `render/flow.py`, `render/document.py`, `body_block.py` | The wrapped-but-not-drawn state: `FlowLayout` (one flow → line boxes), `DocLayout` (stacked blocks + tops), `LaidOutBody` (a def body's walk+wrap, memoised per row). Cheap; no `getmask2`. |
+| **Layout** | `render/flow.py`, `render/document.py`, `panel/body.py` | The wrapped-but-not-drawn state: `FlowLayout` (one flow → line boxes), `DocLayout` (stacked blocks + tops), `LaidOutBody` (a def body's walk+wrap, memoised per row). Cheap; no `getmask2`. |
 | **Offset tables** | `render/window.py` | `OffsetTable` (exact block starts/ends + the half-open visible-range kernel) and `LazyOffsets` (heights filled in as rows measure — exact for the visited prefix, estimated below). |
 | **`ScanBox` / `LinkBox`** | `model.py` | Per-CJK-char hover hitboxes and per-`<a>` click regions, in panel space — retained past pixel eviction so a scrolled-away word still hovers. |
 | **`CachedBlock` / `BlockGeom`** | `render/banded.py` | A cached band's pixels (`zlib`-packed) at its `(row, band)` key; `BlockGeom` is the row's retained hit geometry, never evicted. |
@@ -133,9 +134,9 @@ memoised `LaidOutBody`; the row is rasterised across `ceil(height / 256px)` band
 each):*
 
 ```
-┌─ Row  (def-body; panel.py)  — one memoised layout handle ─────────┐
+┌─ Row  (def-body; panel/rows.py)  — one memoised layout handle ────┐
 │ measure() · render_window(y0,y1) · geometry() · render()          │
-│ ┌─ LaidOutBody  (body_block.py)  — walk()+wrap once, cached ─────┐│
+│ ┌─ LaidOutBody  (panel/body.py)  — walk()+wrap once, cached ─────┐│
 │ │ ┌─ DocLayout  (render/document.py)  — stacked blocks + tops ──┐││
 │ │ │ ┌─ LaidBlock[]  — one per block (paragraph / list-item) ──┐ │││
 │ │ │ │ ┌─ FlowLayout  (render/flow.py)  — the wrapped flow ──┐ │ │││
@@ -197,7 +198,7 @@ configured result mode; the adapter maps those semantic entries into the stable 
 Prefetch normally warms the same path before hover. The legacy `_batch_exact`/`DictEntry` pipeline is
 used only when no semantic source is installed.
 
-### Stage 3 — build rows (deferred) · `panel.py`
+### Stage 3 — build rows (deferred) · `panel/rows.py`
 
 `panel_rows(entry, width)` produces the `Row` list — header, pitch/inflection/tag/freq/reading rows,
 then per-dict `(def-name chip, def-body)` pairs. **Nothing is walked or drawn here.** Each def-body row
@@ -206,7 +207,7 @@ closes over one memoised `layout_body_block` handle and exposes `measure()`, `re
 them in a `WindowedPanel(tuning=BandedTuning(compress=True))`. Reference width is `384`px at `scale 1.0`; the runtime
 `tip_width` scales with window height (mpv's OSD model — same content at any size).
 
-### Stage 4 — measure (layout-only, no raster) · `render/banded.py` → `body_block.py`
+### Stage 4 — measure (layout-only, no raster) · `render/banded.py` → `panel/body.py`
 
 To show at scroll `S`, `WindowedPanel` grows its exact-offset prefix to cover `S + view_h + overscan`
 by **measuring** each row top-down:
@@ -245,7 +246,7 @@ the 16ms frame budget even on a cold miss; a whole 34×-viewport block was ≈**
 - **Render-ahead**: on a wheel notch (`_scroll_tip`, step `round(_tip_ref_h·0.12)` ≈ **130px** in REF_H space),
   `Panel.render_ahead(overscan=view_h)` warms the next screen's bands off the main thread — threads
   calling `render_window` on a free-threaded build, a process pool (`render_body_band`, injected to keep
-  the `render → body_block` import contract) on a GIL build. At flick (~2600px/s) the one-screen lead is
+  the `render → panel.body` import contract) on a GIL build. At flick (~2600px/s) the one-screen lead is
   ≈**0.16s**, in which a ~9ms band is warmable ~18× over — so the worker keeps ahead where it couldn't
   on a ~500ms whole block.
 
@@ -276,7 +277,7 @@ order-of-magnitude, measured on the pathological corpus under free-threaded 3.14
 | Scroll overscan (warm margin) | one screen (`overscan = view_h`) | tooltip blit + `Panel.render_ahead` |
 | Wheel step | `round(_tip_ref_h·0.12)` ≈ 130px (REF_H space) | `Reader._scroll_tip` |
 | Base tooltip viewport cap | `tip_max_frac = 0.4` of video height | `TooltipOptions` |
-| Reference panel width + chrome | `panel.py`'s `width` default; `Theme.margin`/`gap`/`body_indent` | `panel.py`, `model.Theme` |
+| Reference panel width + chrome | `panel_rows`'s `width` default; `Theme.margin`/`gap`/`body_indent` | `panel/rows.py`, `model.Theme` |
 | Prefetch workers | `_AUTO_WORKERS_FREE_THREADED` / `_AUTO_WORKERS_GIL`, or pinned `prefetch_workers` | `app/prefetch.py` |
 | Decode-warm lookahead | `prefetch_lookahead = 0` cues | `PerfOptions` |
 | Head-render lookahead / queue | `head_prefetch_lookahead = 1`, `head_prefetch_queue_max = 24` | `PerfOptions` |

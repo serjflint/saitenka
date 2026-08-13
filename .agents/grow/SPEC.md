@@ -58,7 +58,7 @@ proof and works for the flagship covered-but-under-specified class. Arm-3 (a new
 ALTERNATIVE for a dead-config / uncovered-line gap that has no clean one-line mutant. A `scenario` gap
 passes on EITHER; requiring both is wrong — **arm-3 is LINE-level, so a covered-but-under-specified BRANCH
 of an already-covered line (e.g. an untested arm of a ternary) lights no new line and bounces arm-3, though
-arm-1 proves it** (found live: `panel.py::header_add_rect(speak_button=False)` — arm-1 PASS, arm-3 BOUNCE).
+arm-1 proves it** (found live: `panel/rows.py::header_add_rect(speak_button=False)` — arm-1 PASS, arm-3 BOUNCE).
 So the gate is: additive AND liveness AND (arm-1 OR arm-3). A gap with NEITHER has no growth proof → bounce.
 (Future refinement: make arm-3 branch/arc-aware so it corroborates branch gaps too.)
 
