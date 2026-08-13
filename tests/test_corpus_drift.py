@@ -48,6 +48,21 @@ def test_check_catches_drift_when_regen_differs(tmp_path):
     assert status == "drift"
 
 
+def test_check_gives_generator_an_unoccupied_output_path(tmp_path, monkeypatch):
+    mod = _mod()
+    committed = tmp_path / "corpus.json"
+    committed.write_bytes(b"IDENTICAL\n")
+    corpus = _writer_corpus(mod, committed, b"unused")
+
+    def write_output(_corpus, _checkout, out):
+        assert not out.exists()
+        out.write_bytes(b"IDENTICAL\n")
+
+    monkeypatch.setattr(mod, "_regen", write_output)
+    status, _ = mod._check(corpus, None)
+    assert status == "ok"
+
+
 def test_check_skips_when_no_yomitan_checkout(tmp_path):
     """A pin_source corpus with no checkout skips (not fails) — the opt-in posture, logged not silent."""
     mod = _mod()
@@ -72,6 +87,20 @@ def test_check_reports_error_when_generator_fails(tmp_path):
         name="boom",
         committed=committed,
         argv=[sys.executable, "-c", "import sys;sys.exit(3)"],
+        pin_source=None,
+    )
+    status, _ = mod._check(corpus, None)
+    assert status == "error"
+
+
+def test_check_reports_error_when_generator_writes_no_output(tmp_path):
+    mod = _mod()
+    committed = tmp_path / "corpus.json"
+    committed.write_bytes(b"x\n")
+    corpus = mod.Corpus(
+        name="no-output",
+        committed=committed,
+        argv=[sys.executable, "-c", "pass"],
         pin_source=None,
     )
     status, _ = mod._check(corpus, None)
