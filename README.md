@@ -89,17 +89,19 @@ actions never pause or seek a Syncplay room.
 
 Saitenka, **[SubMiner](https://github.com/ksyasuda/SubMiner)**,
 **[Autocards](https://learnjapanese.moe/autocards/)**, and
-**[Anki Miner](https://github.com/0xzerolight/anki_miner)** all get Japanese vocabulary from video into
-Anki from four different angles: Saitenka is a **grounded, FSRS-driven engine composited inside mpv's own
+**[Anki Miner](https://github.com/0xzerolight/anki_miner)** get Japanese vocabulary from video into Anki,
+while **[Migaku](https://migaku.com/)** spans streaming video, web reading, mobile OCR, and its own study
+system. Five different angles: Saitenka is a **grounded, FSRS-driven engine composited inside mpv's own
 surface**; SubMiner a **feature-broad Electron app**; Autocards a **retroactive back-filler**; Anki Miner
-a **batch-mining desktop GUI**. Trade-offs across different jobs, not a scoreboard.
+a **batch-mining desktop GUI**; Migaku a **commercial browser-and-mobile immersion platform**. Trade-offs
+across different jobs, not a scoreboard.
 
 **Why reach for Saitenka:** a fast, single-surface engine that draws straight into mpv — no second window,
 fullscreen/airspace-safe; **live FSRS review-state coloring** so forgotten words resurface and **N+1**
 sentences are highlighted; a multi-dictionary Yomitan tooltip; and one-key + bulk mining, all grounded
 (readings/pitch from dictionaries, never an LLM).
 
-📊 **Full capability matrix (all four) and where Saitenka fits in a media-server / watch-tracking rig →
+📊 **Full capability matrix (all five) and where Saitenka fits in a media-server / watch-tracking rig →
 [Why Saitenka → How it compares](https://saitenka.readthedocs.io/en/latest/why/comparisons/).**
 
 ## Quick start
