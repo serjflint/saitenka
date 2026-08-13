@@ -101,7 +101,7 @@ fullscreen/airspace-safe; **live FSRS review-state coloring** so forgotten words
 sentences are highlighted; a multi-dictionary Yomitan tooltip; and one-key + bulk mining, all grounded
 (readings/pitch from dictionaries, never an LLM).
 
-📊 **Full capability matrix (all five) and where Saitenka fits in a media-server / watch-tracking rig →
+📊 **Full capability matrix, adjacent mobile immersion tools, and where Saitenka fits in a media-server / watch-tracking rig →
 [Why Saitenka → How it compares](https://saitenka.readthedocs.io/en/latest/why/comparisons/).**
 
 ## Quick start

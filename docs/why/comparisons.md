@@ -76,6 +76,44 @@ Linked Migaku cells use first-party product material and public source checked o
 current Anki add-on is active; the public mpv integration is older and opens its study UI in a browser,
 so it is evidence for historical/companion capabilities rather than the current platform's architecture.
 
+## Adjacent mobile immersion tools
+
+[Yomihon](https://github.com/yomihon/yomihon) and
+[Chimahon](https://github.com/sohilsayed/chimahon) are active Mihon forks for language learners.
+[PopLingo](https://poplingo.net/) is a separate Android overlay that works over manga readers and other
+apps. They are not replacements for Saitenka's local-mpv engine, but their lookup and mining loops expose
+useful adjacent prior art.
+
+| Capability | 再点火 Saitenka | Yomihon | Chimahon | PopLingo |
+|---|:---:|:---:|:---:|:---:|
+| Primary surface | local mpv video | Mihon manga reader | Mihon manga · novel · video reader | system-wide Android overlay |
+| Spatial image/screen OCR lookup | ❌ [planned](https://github.com/serjflint/saitenka/issues/337) | ✅ [manga pages](https://github.com/yomihon/yomihon/blob/b915c978035657c5c7d1365a42f51ea1204e4269/CHANGELOG.md) | ✅ [reader, video, other apps](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/CHANGELOG.md) | ✅ [other apps](https://poplingo.net/) |
+| Yomitan-format dictionaries | ✅ | ✅ [source](https://github.com/yomihon/yomihon/tree/b915c978035657c5c7d1365a42f51ea1204e4269/domain/src/main/java/mihon/domain/dictionary) | ✅ [source](https://github.com/sohilsayed/chimahon/tree/9561d44132371564451f252dd1e434803872a782/chimahon/src/main/java/chimahon/dictionary) | ✅ [product page](https://poplingo.net/) |
+| Dictionary-grounded pitch · frequency | ✅ | ✅ [source](https://github.com/yomihon/yomihon/tree/b915c978035657c5c7d1365a42f51ea1204e4269/app/src/main/java/eu/kanade/presentation/dictionary/components) | ✅ [source](https://github.com/sohilsayed/chimahon/tree/9561d44132371564451f252dd1e434803872a782/chimahon/src/main/java/chimahon/dictionary) | ⚠️ dictionary details, no pitch/frequency claim verified |
+| One-action Anki card with contextual media | ✅ desktop Anki | ✅ [AnkiDroid + cropped image](https://github.com/yomihon/yomihon/blob/b915c978035657c5c7d1365a42f51ea1204e4269/CHANGELOG.md) | ✅ [AnkiDroid](https://github.com/sohilsayed/chimahon/tree/9561d44132371564451f252dd1e434803872a782/chimahon/src/main/java/chimahon/anki) | ⚠️ [no Anki integration advertised](https://poplingo.net/) |
+| Recursive definition lookup | ✅ | ✅ [dictionary-authored links](https://github.com/yomihon/yomihon/blob/b915c978035657c5c7d1365a42f51ea1204e4269/app/src/main/java/eu/kanade/presentation/dictionary/components/DictionaryComponents.kt) | ✅ [three navigation modes](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/CHANGELOG.md) | ⚠️ [not advertised](https://poplingo.net/) |
+| Video subtitle lookup/mining | ✅ | ❌ manga-only | ✅ | ⚠️ screen OCR, not subtitle-aware |
+| Live Anki/FSRS state drives visible words | ✅ | ❌ | ❌ | ⚠️ no Anki/FSRS mechanism verified |
+| Source / license | Apache-2.0 core | [Apache-2.0](https://github.com/yomihon/yomihon/blob/b915c978035657c5c7d1365a42f51ea1204e4269/LICENSE) | [GPL-3.0](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/LICENSE) | Google Play distribution; no public source/license verified |
+
+<sub>Source and current product material checked on **2026-08-13**. A hard negative is used only where
+the product architecture or inspected source establishes the absence; ⚠️ marks a different mechanism or
+a claim that current first-party material does not establish.</sub>
+
+### Transferable lessons for Saitenka
+
+| Mechanism | Verified signal | Saitenka action |
+|---|---|---|
+| Mining continues without blocking lookup/player interaction; optional media is prepared on demand | [Chimahon lifecycle](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/CHANGELOG.md) · [marker gate](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/chimahon/src/main/java/chimahon/anki/AnkiSentenceAudio.kt) | [Defer marker-required media and Anki work](https://github.com/serjflint/saitenka/issues/338) |
+| Configurable subtitle cleanup removes study-irrelevant labels and markup before parsing | [Chimahon's tested subtitle filters](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/app/src/main/java/eu/kanade/tachiyomi/ui/player/utils/SubtitleRegexFilters.kt) | [Derive semantic text without rewriting the displayed cue](https://github.com/serjflint/saitenka/issues/335) |
+| Explicit spatial OCR handles signs, hardsubs, and missing subtitle lines | [Yomihon spatial OCR](https://github.com/yomihon/yomihon/tree/b915c978035657c5c7d1365a42f51ea1204e4269/domain/src/main/java/mihon/domain/ocr) · [Chimahon video OCR](https://github.com/sohilsayed/chimahon/tree/9561d44132371564451f252dd1e434803872a782/chimahon/src/main/java/chimahon/ocr) | [Route current-frame OCR into the existing tooltip/miner](https://github.com/serjflint/saitenka/issues/337) |
+| Card templates expose every value the lookup already grounds | [Chimahon Anki markers](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/chimahon/src/main/java/chimahon/anki/AnkiCardCreator.kt) | [Complete word-audio and pitch-graph markers](https://github.com/serjflint/saitenka/issues/339) |
+| Per-title session/today/all-time views turn event rows into feedback | [Chimahon statistics](https://github.com/sohilsayed/chimahon/blob/9561d44132371564451f252dd1e434803872a782/CHANGELOG.md) | [Aggregate local trends by series and episode](https://github.com/serjflint/saitenka/issues/336) |
+
+OCR is deliberately a fallback here, not a bid to turn Saitenka into a manga reader or continuously scan
+video. Readings and pitch remain dictionary-grounded, and an OCR provider must stay optional and
+license-compatible with the Apache core.
+
 ## Where it fits in your setup
 
 Saitenka is the **study layer at the mpv playback point**. It doesn't acquire, organize, serve, or track
