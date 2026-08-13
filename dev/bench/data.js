@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786621892607,
+  "lastUpdate": 1786621913263,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5537,6 +5537,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 12.488704,
             "range": "3 replicas; min 12.1201; max 12.6607; MAD 0.172032",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "213f0dffab19615787018b7f6398ab69b2dc7c1c",
+          "message": "fix: preserve source-backed dictionary structure (#330)\n\n* fix: unwrap semantic dictionary glossaries\n\n* test: add dictionary structure oracle",
+          "timestamp": "2026-08-12T19:05:18Z",
+          "url": "https://github.com/serjflint/saitenka/commit/213f0dffab19615787018b7f6398ab69b2dc7c1c"
+        },
+        "date": 1786621912370,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 51.172001,
+            "range": "3 replicas; min 50.689; max 52.5332; MAD 0.483026; worst 52.5332",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 58.680598,
+            "range": "3 replicas; min 53.0789; max 595.67; MAD 5.60165; worst 595.67",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 13.754368,
+            "range": "3 replicas; min 13.1809; max 13.7748; MAD 0.02048",
             "unit": "MB"
           }
         ]
