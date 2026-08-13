@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786598168292,
+  "lastUpdate": 1786600571706,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4247,6 +4247,42 @@ window.BENCHMARK_DATA = {
             "name": "synth p99 render",
             "value": 9.485,
             "range": "±1.3%",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "41f3be4152d9462578962dc8f228a394de404693",
+          "message": "docs: compare Saitenka with Migaku (#333)\n\n* docs: compare Saitenka with Migaku\n\n* docs: correct Migaku source comparison\n\n* docs: reflect implemented Saitenka features",
+          "timestamp": "2026-08-13T08:55:23+03:00",
+          "tree_id": "be668bf03adc7619c9d185cd5d34ace323e5031a",
+          "url": "https://github.com/serjflint/saitenka/commit/41f3be4152d9462578962dc8f228a394de404693"
+        },
+        "date": 1786600571016,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.401,
+            "range": "±0.2%",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.952,
+            "range": "±9.4%",
             "unit": "ms"
           }
         ]
