@@ -29,13 +29,15 @@ benchmark writers share one concurrency group, so the render and live-player his
 | Core | pull request, push to `main`, manual | generated Yomitan archive import and exact SQLite lookup | Exercises the offline-cache build and decoded-entry query boundary without private dictionaries |
 | Core | pull request, push to `main`, manual | click/store actions against temporary SQLite and fake IPC | Covers synchronous mining/bookkeeping work without Anki or network noise |
 | Lifecycle | weekly, release tag, manual | bounded-cache stress | Longer-lived eviction and memory behavior is useful, but too noisy and costly for every PR |
-| Live | weekly, release tag, manual | real mpv/Xvfb dropped and delayed frame counters | Only this tier sees compositor and player interaction |
+| Live | weekly, release tag, manual | real mpv/Xvfb dropped-frame sentinel and interaction latency | Only this tier sees compositor and player interaction |
 | Local | developer-invoked | installed-dictionary pathological/vocabulary, render-cache prewarm, trace replay, profiler runs | Requires private corpora, true disk-cold state, or diagnostic interpretation |
 
 The continuous core suite publishes render, subtitle, generated-dictionary, and click/store metrics.
-The weekly suite publishes bounded-cache lifecycle and real-player jank metrics. The result schema and
-workflow are shared so a future synthetic prefetch keep-ahead corpus can be added without inventing
-another statistics or storage path.
+The weekly suite publishes bounded-cache lifecycle and real-player metrics. The full live report keeps
+both mpv frame counters for diagnosis, but the chart retains only dropped frames as a catastrophic-jank
+sentinel and trends the non-zero scripted interaction latencies. The result schema and workflow are
+shared so a future synthetic prefetch keep-ahead corpus can be added without inventing another
+statistics or storage path.
 
 ## Statistical contract
 
