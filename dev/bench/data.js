@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786614904473,
+  "lastUpdate": 1786614920969,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4806,6 +4806,52 @@ window.BENCHMARK_DATA = {
             "name": "live jank: total delayed frames",
             "value": 0,
             "unit": "frames"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "id": "c58e0eed36bcbd801e3164cd8e3f5817982183f5",
+          "message": "test(perf): pin benchmark publish safety",
+          "timestamp": "2026-08-13T09:47:51Z",
+          "url": "https://github.com/serjflint/saitenka/commit/c58e0eed36bcbd801e3164cd8e3f5817982183f5"
+        },
+        "date": 1786614920257,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 204.025838,
+            "range": "3 replicas; min 152.41; max 235.479; MAD 31.4531",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 0.476059,
+            "range": "3 replicas; min 0.449087; max 0.482409; MAD 0.00635",
+            "unit": "ms"
           }
         ]
       }
