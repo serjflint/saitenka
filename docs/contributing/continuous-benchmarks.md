@@ -59,25 +59,33 @@ spend storage/compute without increasing release confidence.
 
 ### Selected-commit backfill
 
-The manual Perf workflow accepts one full 40-character `revision` SHA. A preflight job rejects mutable
-or abbreviated refs, then passes the immutable SHA to all three replicas and the chart publisher, so
-the point links to the code that was actually measured rather than to the dispatch commit. The selected
-revision must contain `examples/bench_core.py`, and its metric names and units must match the committed
-series manifest; incompatible historical harnesses cannot be mixed into the chart.
+The manual Perf and E2E workflows accept one full 40-character `revision` SHA. A preflight job rejects
+mutable or abbreviated refs. Measurement jobs install the selected revision's production package and
+dependencies, but load the measurement scripts separately from the workflow revision. The publisher
+labels the point with the selected SHA, so adding a harness later does not prevent measuring compatible
+earlier code or make the point link to the dispatch commit. E2E backfills run only the live and lifecycle
+replicas; the unrelated cross-platform and installer matrices stay skipped.
 
-Backfill several commits by dispatching once per SHA. Manual Perf runs share one concurrency group, so
-a later dispatch waits rather than replacing a pending result; GitHub does not guarantee queue order:
+This is a fixed-workload comparison, not unlimited backwards compatibility. The selected production
+revision must implement the API consumed by the current harness, and the core metric names and units
+must match the committed series manifest. The comparable full-portfolio epoch begins at the consolidated
+`src/saitenka` layout; older `overlay`-namespace releases retain their original render history rather
+than being mixed into the new charts through a behavior-changing adapter.
+
+Backfill several commits by dispatching both workflows once per SHA. Manual Perf runs queue instead of
+replacing a pending result. E2E measurement runs use the immutable revision in their concurrency key,
+so different revisions may measure concurrently without canceling one another:
 
 ```console
 gh workflow run perf.yml --ref main -f revision=<full-commit-sha>
+gh workflow run e2e.yml --ref main -f revision=<full-commit-sha>
 ```
 
 Replica workflows may run concurrently, but their `gh-pages` publishers are serialized and retain up
 to 100 pending writes through GitHub's `queue: max` concurrency policy.
 
-The dashboard point uses the time the benchmark ran. Backfill therefore appends a present-day
-measurement attributed to the selected historical commit; it does not rewrite the point into the
-commit's original date.
+Backfills append in publication order. The tooltip and link retain the selected commit's identity and
+original timestamp; the chart does not reorder already-published points chronologically.
 
 ## Rollout
 
