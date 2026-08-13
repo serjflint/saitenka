@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786622069640,
+  "lastUpdate": 1786622087736,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -4965,6 +4965,82 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.199364,
             "range": "3 replicas; min 0.975051; max 1.40331; MAD 0.203942; worst 1.40331",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "6c0052f37f373ccdfc5d8eab70573c4d24acf581",
+          "message": "refactor: modularize reader runtime and CLI (#332)\n\n* refactor(render): remove remaining layer backedges\n\n* refactor(reader): introduce explicit runtime seams\n\n* refactor(cli): split command domains\n\n* refactor(launch): isolate run orchestration\n\n* refactor(reader): centralize production composition\n\n* chore(launch): remove obsolete registry import\n\n* docs(launch): update provider registration boundary\n\n* refactor(cli): narrow command module imports\n\n* docs(render): update structured-content test reference\n\n* fix(launch): register subtitle providers explicitly\n\n* docs(architecture): align advisory and render boundaries\n\n* docs(render): fix worker-boundary wording",
+          "timestamp": "2026-08-13T05:15:18Z",
+          "url": "https://github.com/serjflint/saitenka/commit/6c0052f37f373ccdfc5d8eab70573c4d24acf581"
+        },
+        "date": 1786622086807,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.467111,
+            "range": "3 replicas; min 6.42917; max 6.66936; MAD 0.037943",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.675197,
+            "range": "3 replicas; min 9.56654; max 10.1792; MAD 0.108652; worst 10.1792",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 19.329035,
+            "range": "3 replicas; min 17.9792; max 19.7211; MAD 0.392102",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.535562,
+            "range": "3 replicas; min 18.3308; max 19.9515; MAD 0.415915; worst 19.9515",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 22.122915,
+            "range": "3 replicas; min 15.643; max 23.44; MAD 1.31706",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.173385,
+            "range": "3 replicas; min 0.167673; max 0.179043; MAD 0.005658; worst 0.179043",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 42.992279,
+            "range": "3 replicas; min 40.09; max 53.616; MAD 2.90223; worst 53.616",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 5.616482,
+            "range": "3 replicas; min 3.266; max 236.846; MAD 2.35049; worst 236.846",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 2.308957,
+            "range": "3 replicas; min 1.3234; max 4.09009; MAD 0.985558; worst 4.09009",
             "unit": "ms"
           }
         ]
