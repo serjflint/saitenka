@@ -47,6 +47,7 @@ def test_map_tracks_extracted_cli_and_structured_content_paths():
     assert "structured-content adapter" in dict(
         tk.applicable(["src/saitenka/render/sc_adapter.py"])
     )
+    assert "panel / windowed / interaction" in dict(tk.applicable(["src/saitenka/panel/rows.py"]))
 
 
 def test_map_stays_quiet_for_docs_and_test_only_changes():

@@ -53,7 +53,7 @@ def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
     # forcing a fresh pool per iteration — a stale pool from a differently-configured earlier test
     # must never leak in (that mismatch used to crash with an opaque PicklingError).
     import saitenka.parallel as PA
-    from saitenka.body_block import render_body_band
+    from saitenka.panel.body import render_body_band
 
     entry = _entry(20)
     ref = render_panel(entry, width=WIDTH)

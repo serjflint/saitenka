@@ -29,13 +29,13 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
     from typing import Any
 
-    from saitenka.body_block import BodyRenderArgs
     from saitenka.model import RGBA, LinkBox, ScanBox, Theme
     from saitenka.panel import Row
+    from saitenka.panel.body import BodyRenderArgs
     from saitenka.render.layout_backend import LayoutBackend
 
 # The def-body renderer is injected by the caller (app/popups.py, which builds WindowedPanel) rather
-# than imported here: body_block.py depends on render.document, so a module-level import would cycle
+# than imported here: panel.body depends on render.document, so a module-level import would cycle
 # back through .render at the package level. render_block_fn now only GATES the GIL-build process pool
 # (None → hermetic in-process warm); the actual band renders use Row.render_window (threads) or a
 # function-scope import of render_body_band (process pool). See WindowedPanel's render_block_fn param.
@@ -274,7 +274,7 @@ class WindowedPanel:
         # 0 disables the exception (honour _compress for every band, the pre-1.3 always-compress path).
         self._raw_band_ceiling = tuning.raw_band_ceiling
         # A truthy value ENABLES the GIL-build process pool in render_ahead (the actual band renderer,
-        # render_body_band, is a function-scope import — module-level would cycle body_block →
+        # render_body_band, is a function-scope import — module-level would cycle panel.body →
         # render.document → back through .render). None keeps render_ahead in-process (hermetic tests).
         self._render_block_fn = render_block_fn
         gaps = [r.gap if r.gap is not None else self.theme.gap for r in self._rows]
@@ -944,7 +944,7 @@ class WindowedPanel:
         Runs on the process-wide shared pool (:func:`saitenka.parallel.shared_executor`, sized
         ``workers``): free-threaded → threads calling ``Row.render_window`` (the memoised layout is
         walk-once, each band cached the instant it lands via ``as_completed`` → progressive paint). A
-        GIL build submits the picklable :func:`saitenka.body_block.render_body_band` per band to a process
+        GIL build submits the picklable :func:`saitenka.panel.body.render_body_band` per band to a process
         pool (threads there serialise for worse than serial). ``should_cancel`` is checked between
         completions and cancels not-yet-started renders. Returns how many bands rendered."""
         if scale != 1.0:
@@ -1031,9 +1031,9 @@ class WindowedPanel:
         self, ex, targets: list[tuple[int, int, int, int]]
     ) -> dict[Future[Any], tuple[int, int, int, int]]:
         """Submit every band target to the process pool via the INJECTED picklable band renderer
-        (``render_block_fn`` = ``saitenka.body_block.render_body_band`` — plain ``BodyRenderArgs`` + band
+        (``render_block_fn`` = ``saitenka.panel.body.render_body_band`` — plain ``BodyRenderArgs`` + band
         bounds; re-walks per call, but the GIL build has no shared-memory handle to reuse anyway). It is
-        injected, not imported, to keep ``render`` free of the ``render → body_block`` import cycle. Only
+        injected, not imported, to keep ``render`` free of the ``render → panel.body`` import cycle. Only
         reached when ``render_block_fn`` is truthy (the None gate ran in the caller). All targets are
         body bands, so there is no cheap-inline split as the whole-row path once had."""
         fn = self._render_block_fn
