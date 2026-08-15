@@ -140,6 +140,24 @@ Publishing this doesn't change `saitenka[layout-engine]`'s dev-only posture — 
 `pyproject.toml`'s `[tool.uv.sources]` editable pin to resolve from PyPI is separate follow-up
 work, gated on the first real `taffylite` publish existing to resolve against.
 
+## libasslite (experimental system-libass binding)
+
+`libasslite` versions and publishes independently through
+`.github/workflows/libasslite-release.yml`. It ships only the MIT PyO3 loader; libass and its
+font/shaping dependencies remain external runtime components.
+
+- **Tag:** bump both manifests, relock `libasslite/Cargo.lock`, merge, then push
+  `libasslite-vX.Y.Z` on the merge commit.
+- **Validate:** run the Rust unit/clippy checks plus the Python suite against an explicit
+  `LIBASSLITE_LIBRARY`. CI repeats the render contract on Linux, macOS, and Windows.
+- **Publish:** the tag builds abi3, cp314t, and abi3t wheels plus an sdist and publishes with OIDC;
+  `workflow_dispatch` targets TestPyPI.
+- **One-time setup:** register `libasslite-release.yml` as the trusted publisher for the
+  `libasslite` project on PyPI and TestPyPI before the first publish.
+
+Publishing the binding does not enable Saitenka's libass geometry provider. That separately reviewed
+adapter remains gated by #350's correctness and performance evidence.
+
 ## Notes
 
 - **Compare-link footers** in `CHANGELOG.md` need tags to exist. No `v0.2.0` tag was ever cut; to make

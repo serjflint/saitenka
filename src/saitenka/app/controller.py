@@ -99,6 +99,7 @@ from saitenka.app.reader_context import (
     SessionContext,
 )
 from saitenka.app.runtime import CommandRouter, TickPipeline, TickStage
+from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
@@ -289,7 +290,9 @@ class Reader:
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
-        self.renderer = renderer or SubtitleRenderer()  # subtitle raster; NullRenderer() = headless
+        self.subtitle_pipeline = SubtitleModeCoordinator(
+            renderer or SubtitleRenderer()
+        )  # subtitle raster; NullRenderer() = headless
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
         # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).
@@ -514,6 +517,14 @@ class Reader:
 
     # scale subtitle/tooltip to the video size (the user usually watches 1080p)
     @property
+    def renderer(self) -> CurrentSubtitleRenderer:
+        return self.subtitle_pipeline.renderer
+
+    @renderer.setter
+    def renderer(self, renderer: CurrentSubtitleRenderer) -> None:
+        self.subtitle_pipeline.renderer = renderer
+
+    @property
     def sub_size(self) -> int:
         return self.sub_size_override or max(28, round(self.osd[1] * 0.05))
 
@@ -613,6 +624,7 @@ class Reader:
                 log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
             if name == "sid" and changed:
+                self.subtitle_pipeline.invalidate()
                 subtitle_modes.on_primary_changed(self, ev.get("data"))
 
     def refresh_osd(self) -> bool:
@@ -620,6 +632,7 @@ class Reader:
         w, h = int(d.get("w") or self.osd[0]), int(d.get("h") or self.osd[1])
         if (w, h) != self.osd and w > 0 and h > 0:
             self.osd = (w, h)
+            self.subtitle_pipeline.invalidate()
             self._probe_display_sources("osd-change", d)
             return True
         return False
@@ -692,6 +705,7 @@ class Reader:
             self._set_subtitle_inner(text)
 
     def _set_subtitle_inner(self, text: str) -> None:
+        self.subtitle_pipeline.invalidate()
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
@@ -774,6 +788,7 @@ class Reader:
         cached tokenizations are strategy-specific, so a stale entry would leak the old language's
         segmentation into the new profile."""
         self.tokenizer = tokenizer
+        self.subtitle_pipeline.invalidate()
         self.token_cache.clear()
 
     def set_profile_cycle(
@@ -884,7 +899,7 @@ class Reader:
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
-        self.renderer.draw(self)
+        self.subtitle_pipeline.draw_current(self)
 
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
@@ -1654,6 +1669,7 @@ class Reader:
             return lambda: getattr(self, method_name)()
 
         def seek(delta: int) -> None:
+            self.subtitle_pipeline.invalidate()
             self._sub_nav(delta)
             self.ipc.command("sub-seek", str(delta))
 
@@ -2021,6 +2037,7 @@ class Reader:
             th.join(timeout=2.0)
         for th in self.analysis.threads:
             th.join(timeout=2.0)
+        self.subtitle_pipeline.close()
         stats_summary = session_stats.finish(self)
         if stats_summary and self.options.stats.summary:
             print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # requested close summary

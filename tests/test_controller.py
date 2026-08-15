@@ -159,6 +159,7 @@ def test_sub_seek_prev_sends_ipc_command():
     assert ("sub-seek", "-1") in [(c[0], c[1]) for c in ipc.commands], (
         f"sub-seek -1 not sent; commands={ipc.commands}"
     )
+    assert r.subtitle_pipeline.generation == 1
 
 
 def test_sub_seek_next_sends_ipc_command():
@@ -342,6 +343,55 @@ def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.sub_text == "に"  # cue 2 rendered instantly, before any seek settles
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]  # video seek still fired
+
+
+def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
+    from saitenka.subtitles import (
+        GeometryRequest,
+        GeometrySnapshot,
+        SubtitleEventId,
+        SubtitleTrackId,
+    )
+
+    class PublishingRenderer:
+        def draw(self, reader: Reader) -> None:
+            track_id = SubtitleTrackId("track-1")
+            source_order = {"いち": 1, "に": 2}[reader.sub_text]
+            request = GeometryRequest(
+                reader.subtitle_pipeline.generation,
+                track_id,
+                SubtitleEventId(
+                    track_id, source_order * 1_000, source_order * 1_000 + 500, 0, source_order
+                ),
+                source_order * 1_000,
+                reader.osd,
+                reader.osd,
+                b"[Script Info]\n",
+            )
+            ticket = reader.subtitle_pipeline.prepare(request)
+            assert ticket is not None
+            assert reader.subtitle_pipeline.publish(
+                ticket,
+                GeometrySnapshot(
+                    request.generation,
+                    request.track_id,
+                    request.event_id,
+                    request.timestamp_ms,
+                    request.variant,
+                    (),
+                ),
+            )
+
+    r, ipc = _reader_with_index(monkeypatch)
+    r.renderer = PublishingRenderer()
+    ipc.props["sub-text"] = "いち"
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+
+    assert r.subtitle_pipeline.current is not None
+    assert r.subtitle_pipeline.current.event_id.source_order == 2
 
 
 def test_sub_nav_prev_and_replay(monkeypatch):
@@ -2290,6 +2340,54 @@ def test_property_change_event_drives_subtitle_update(monkeypatch):
     ipc.set_prop("sub-text", "新しい字幕")
     r.poll_once()
     assert seen == ["新しい字幕"]  # the buffered event drove the update, no get_property
+
+
+def test_property_change_invalidates_subtitle_geometry():
+    from util import FakeIPC as EventIPC
+
+    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
+    from saitenka.subtitles import (
+        GeometryRequest,
+        GeometrySnapshot,
+        SubtitleEventId,
+        SubtitleTrackId,
+    )
+
+    class Backend:
+        def render(self, request: GeometryRequest) -> GeometrySnapshot:
+            return GeometrySnapshot(
+                request.generation,
+                request.track_id,
+                request.event_id,
+                request.timestamp_ms,
+                request.variant,
+                (),
+            )
+
+        def close(self) -> None:
+            pass
+
+    ipc = EventIPC()
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    r.subtitle_pipeline = SubtitleModeCoordinator(NullRenderer(), Backend())
+    r.start_observing()
+    track_id = SubtitleTrackId("track-1")
+    request = GeometryRequest(
+        r.subtitle_pipeline.generation,
+        track_id,
+        SubtitleEventId(track_id, 1_000, 2_000, 0, 2),
+        1_250,
+        (1920, 1080),
+        (1920, 1080),
+        b"[Script Info]\n",
+    )
+    assert r.subtitle_pipeline.render(request) is not None
+    assert r.subtitle_pipeline.current is not None
+
+    ipc.set_prop("sub-text", "新しい字幕")
+    r.poll_once()
+
+    assert r.subtitle_pipeline.current is None
 
 
 def test_property_change_event_drives_hover(monkeypatch):

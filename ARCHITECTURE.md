@@ -40,7 +40,10 @@ internal modules with explicit dependency contracts, not independently published
   because PIL's C extension is not safe across them.
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
-- **`subtitles/`** — the pure subtitle seam: immutable cues, SRT/ASS/VTT parsing, and cue navigation.
+- **`subtitles/`** — the pure subtitle seam: immutable cues, SRT/ASS/VTT parsing, cue navigation, and
+  provider-neutral geometry request/snapshot contracts. `app/subtitle_pipeline.py` provides tested
+  generation and request ordering, but `Reader` still uses its legacy Pillow draw path; no
+  `GeometryBackend` is wired in production yet.
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
@@ -68,6 +71,9 @@ internal modules with explicit dependency contracts, not independently published
   tooling and is excluded from published artifacts.
 - **`../ankiconnect-client/`** — the application-neutral AnkiConnect transport/retry/protocol client.
   `app/anki.py` retains Saitenka launch policy, telemetry, compatibility exceptions, and note building.
+- **`../libasslite/`** — an independently versioned experimental PyO3 binding for copied libass image
+  layers. It dynamically loads libass 0.17.x and stays outside production Saitenka until the geometry
+  adapter passes issue #350's parity and performance gates.
 - **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
   and schema rebuilds no longer own Anki-derived state.
 
@@ -98,9 +104,10 @@ protocol-shaped class from being mistaken for production swappability.
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
 | Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
+| Subtitle geometry | `GeometryBackend` | Contracts and lifecycle coordinator exist; no backend is wired into production yet. |
 
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
-Only `saitenka-dict` and `ankiconnect-client` are independently published packages.
+`saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
 
 ## Work before playback
 
