@@ -590,7 +590,7 @@ timeline-bench-banded = { shell = "PYTHON_GIL=0 uv run --extra full python examp
 # L3 real-mpv smoke: opens a real mpv window + injects mouse/keys (needs a display). Serial (-p no:xdist).
 # No PYTHON_GIL=0 — the smoke tests input→OSD mapping, not free-threading, and forcing the GIL off is a
 # fatal `config_read_gil` error on a non-free-threaded interpreter (the E2E leg pins 3.13 for fugashi wheels).
-smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py" }
+smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdist tests/test_live_mpv.py tests/test_live_ass_document.py" }
 # Live-mpv jank harness (#32): drive the overlay against a real PLAYING mpv and poll mpv's own
 # frame-drop counters — the true real-time signal the headless benches can't see. Needs a display; the
 # E2E GUI tier runs it under Xvfb. --max-drops is the catastrophic-jank gate.

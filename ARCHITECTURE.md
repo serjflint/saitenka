@@ -40,10 +40,11 @@ internal modules with explicit dependency contracts, not independently published
   because PIL's C extension is not safe across them.
 - **`mpvio/`** — the mpv IPC bridge: JSON-IPC transport (`ipc.py`), mpv/ffmpeg discovery
   (`discover.py`), pushing panels into mpv's OSD surface (`osd.py`).
-- **`subtitles/`** — the pure subtitle seam: immutable cues, SRT/ASS/VTT parsing, cue navigation, and
-  provider-neutral geometry request/snapshot contracts. `app/subtitle_pipeline.py` provides tested
-  generation and request ordering, but `Reader` still uses its legacy Pillow draw path; no
-  `GeometryBackend` is wired in production yet.
+- **`subtitles/`** — the pure subtitle seam: immutable cues and authored events, lossless ASS semantic
+  spans and fail-closed token-color rewriting, SRT/ASS/VTT parsing, cue navigation, and provider-neutral
+  geometry request/snapshot contracts. `app/subtitle_pipeline.py` provides tested generation and request
+  ordering, but `Reader` still uses its legacy Pillow draw path; no `GeometryBackend` is wired in
+  production yet.
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
