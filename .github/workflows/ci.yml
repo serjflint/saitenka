@@ -111,6 +111,50 @@ jobs:
           uv python install 3.14t
           uv run --python 3.14t --with-editable . --with pytest --with pillow pytest -q tests
 
+  libasslite:
+    name: libasslite (${{ matrix.os }}, ${{ matrix.py }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        py: ["3.13", "3.14t"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - name: Install libass (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libass9 fonts-noto-cjk
+      - name: Install libass (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libass
+      - name: Install libass (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install libass:x64-windows
+          $bin = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
+          $dll = Get-ChildItem $bin | Where-Object { $_.Name -match '^(lib)?ass(-9)?\.dll$' } | Select-Object -First 1
+          if (-not $dll) { throw "vcpkg installed no libass DLL" }
+          "LIBASSLITE_LIBRARY=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append
+          $bin | Out-File $env:GITHUB_PATH -Append
+      - name: Build and test
+        working-directory: libasslite
+        run: |
+          uv python install ${{ matrix.py }}
+          cargo test --locked
+          cargo clippy --all-targets -- -D warnings
+          uv run --python ${{ matrix.py }} --with-editable . --with pytest pytest -q tests
+      - name: Verify locked dependency notices
+        if: runner.os == 'Linux' && matrix.py == '3.13'
+        working-directory: libasslite
+        run: |
+          cargo install cargo-about --locked --version 0.9.1 --features cli
+          cargo about generate --locked --fail licenses.hbs --output-file /tmp/THIRD_PARTY_LICENSES
+          diff -u THIRD_PARTY_LICENSES /tmp/THIRD_PARTY_LICENSES
+
   deinflect:
     name: deinflect add-on (GPL)
     runs-on: ubuntu-latest

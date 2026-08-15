@@ -18,6 +18,11 @@ logs.
 
 ### Development
 
+- Extracted provider-neutral subtitle geometry and event identity seams, with generation/request
+  ordering that rejects stale background results without discarding a freshly sought cue. Added the
+  independently publishable experimental `libasslite` package for copied libass 0.17.x image layers;
+  default subtitle rendering is unchanged while parity and performance work continues in #350.
+
 - Continuous benchmark points now aggregate three independent GitHub runners, validate metric schemas,
   summarize results on pull requests, and serialize Pages writes. The core suite covers rendering,
   subtitle scanning, generated-dictionary import/query, and click/store work; weekly jobs cover bounded

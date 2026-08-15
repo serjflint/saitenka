@@ -1,0 +1,14 @@
+libasslite
+Copyright 2026 Sergei Iakhnitskii and saitenka contributors
+
+libasslite is a runtime-loaded binding and does not bundle libass or its
+transitive dependencies.
+
+Third-party components used by the package:
+
+- libass (https://github.com/libass/libass) — ISC license. Loaded from the
+  user's system at runtime; not included in libasslite wheels or sdists.
+- libloading (https://github.com/nagisa/rust_libloading) — ISC license.
+- pyo3 (https://github.com/PyO3/pyo3) — Apache-2.0 OR MIT license.
+
+Their complete copyright and permission notices ship in THIRD_PARTY_LICENSES.

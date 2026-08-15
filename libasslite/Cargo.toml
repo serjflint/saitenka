@@ -1,0 +1,19 @@
+[package]
+name = "libasslite"
+version = "0.1.0"
+edition = "2021"
+description = "Small runtime-loaded PyO3 binding for libass image layers"
+license = "MIT"
+repository = "https://github.com/serjflint/saitenka"
+
+[lib]
+name = "libasslite"
+crate-type = ["cdylib"]
+
+[dependencies]
+libloading = "0.8"
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py313", "abi3t-py315"] }
+
+[profile.release]
+strip = true
+

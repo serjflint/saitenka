@@ -365,10 +365,12 @@ max-args = 8
 "deinflect/**" = ["banned-api"]
 "taffylite/**" = ["banned-api"]
 "resvglite/**" = ["banned-api"]
-# taffylite/resvglite re-export their compiled Rust ext via `from .<pkg> import *` — the star is
+"libasslite/**" = ["banned-api"]
+# Native add-ons re-export their compiled Rust ext via `from .<pkg> import *` — the star is
 # unavoidable for a native module with no static names ruff can see.
 "taffylite/python/taffylite/__init__.py" = ["undefined-local-with-import-star", "undefined-local-with-import-star-usage"]
 "resvglite/python/resvglite/__init__.py" = ["undefined-local-with-import-star", "undefined-local-with-import-star-usage"]
+"libasslite/python/libasslite/__init__.py" = ["undefined-local-with-import-star", "undefined-local-with-import-star-usage"]
 # Tests legitimately reach into private members and take shortcuts a library shouldn't:
 "**/tests/**" = [
     "private-member-access",  # white-box access to _private state is how the internals get tested
@@ -411,6 +413,7 @@ max-args = 8
 "saitenka_deinflect".msg = "GPL-3.0 add-on — only saitenka/app/dictionary.py and saitenka/app/doctor.py may import it (see .importlinter's gpl-chokepoint contract)."
 "taffylite".msg = "Optional layout engine — only saitenka/render/layout_backend.py (TaffyLayoutBackend) may import it (see .importlinter's layout-engine-chokepoint contract)."
 "resvglite".msg = "Optional SVG rasterizer — only saitenka/app/dictdb.py (_load_media) may import it: gaiji are rasterized once at import, never on the render thread (see .importlinter's svg-images-chokepoint contract)."
+"libasslite".msg = "Experimental libass boundary — Saitenka must use it only through a reviewed subtitle geometry adapter."
 
 [tool.complexipy]
 # Cognitive-complexity gate (uv run poe complexity, folded into poe all), now repo-wide (#216).
@@ -418,7 +421,7 @@ max-args = 8
 # regenerate after a deliberate refactor): the pre-existing high-complexity functions are grandfathered,
 # so the gate only fails on NEW complexity growth, not on adoption. max-complexity-allowed=15 is
 # complexipy's own default — set explicitly so it's visible.
-paths = ["src/saitenka", "deinflect/src", "taffylite/python", "resvglite/python", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
+paths = ["src/saitenka", "deinflect/src", "taffylite/python", "resvglite/python", "libasslite/python", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
 max-complexity-allowed = 15
 
 [tool.mypy]

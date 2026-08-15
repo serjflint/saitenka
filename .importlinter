@@ -109,3 +109,11 @@ forbidden_modules =
     resvglite
 ignore_imports =
     saitenka.app.dictdb -> resvglite
+
+[importlinter:contract:libasslite-boundary]
+name = production code cannot import the experimental libass binding yet
+type = forbidden
+source_modules =
+    saitenka
+forbidden_modules =
+    libasslite
