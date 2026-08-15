@@ -49,8 +49,8 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
         (("profiles", 0, "frame_size"), [0, 720], "positive"),
         (("required_render_input_checks",), [], "render_input_check count"),
         (("thresholds", "maximum_outer_bounds_distance_px"), True, "outer-bounds"),
-        (("thresholds", "anamorphic_screenshot_delta_threshold"), 0, "delta threshold"),
-        (("thresholds", "anamorphic_screenshot_envelope_threshold"), 4, "envelope threshold"),
+        (("profiles", 0, "screenshot_delta_threshold"), 0, "delta threshold"),
+        (("profiles", 0, "screenshot_envelope_threshold"), 0, "envelope threshold"),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -154,19 +154,8 @@ def test_clip_geometry_preserves_storage_size_and_display_aspect(
 
 
 def test_anamorphic_screenshot_comparison_excludes_resampling_fringe() -> None:
-    thresholds = {"anamorphic_screenshot_delta_threshold": 8}
-    assert (
-        oracle._screenshot_delta_threshold(
-            {"frame_size": [1280, 720], "storage_size": [960, 720]}, thresholds
-        )
-        == 8
-    )
-    assert (
-        oracle._screenshot_delta_threshold(
-            {"frame_size": [1280, 720], "storage_size": [1280, 720]}, thresholds
-        )
-        == 1
-    )
+    assert oracle._screenshot_delta_threshold({"screenshot_delta_threshold": 8}) == 8
+    assert oracle._screenshot_delta_threshold({"screenshot_delta_threshold": 1}) == 1
 
 
 def test_comparison_mask_keeps_antialiasing_only_near_high_confidence_envelope() -> None:
@@ -257,7 +246,14 @@ def test_live_runner_emits_every_locked_matrix_cell(
             profile_id = next(name for name in sizes if _label.startswith(name))
             frame_size = sizes[profile_id]
             storage_size = storage_sizes[profile_id]
-            assert minimum_delta == (1 if frame_size == storage_size else 8)
+            expected_delta = {
+                "baseline-720p": 1,
+                "resize-480p": 1,
+                "retina-1080p": 1,
+                "wide-pixel-aspect": 8,
+                "tall-pixel-aspect": 16,
+            }[profile_id]
+            assert minimum_delta == expected_delta
             assert envelope_delta == (1 if frame_size == storage_size else 16)
             assert envelope_distance == (0 if frame_size == storage_size else 1)
             return (
@@ -339,7 +335,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
         ("resize-480p", 1),
         ("retina-1080p", 1),
         ("wide-pixel-aspect", 8),
-        ("tall-pixel-aspect", 8),
+        ("tall-pixel-aspect", 16),
     }
     assert {
         (

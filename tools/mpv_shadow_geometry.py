@@ -109,12 +109,6 @@ def _validate_thresholds(thresholds: dict[str, Any]) -> None:
         or bounds_distance < 0
     ):
         raise ValueError("maximum outer-bounds distance must be a non-negative integer")
-    delta = thresholds.get("anamorphic_screenshot_delta_threshold")
-    envelope = thresholds.get("anamorphic_screenshot_envelope_threshold")
-    if isinstance(delta, bool) or not isinstance(delta, int) or not 1 <= delta <= 255:
-        raise ValueError("anamorphic screenshot delta threshold must be in [1, 255]")
-    if isinstance(envelope, bool) or not isinstance(envelope, int) or not delta <= envelope <= 255:
-        raise ValueError("anamorphic screenshot envelope threshold must be in [delta, 255]")
 
 
 def _validate_ids(values: Any, denominator: dict[str, Any], prefix: str) -> tuple[str, ...]:
@@ -174,6 +168,15 @@ def _validate_profile(profile: dict[str, Any]) -> None:
             )
         ):
             raise ValueError(f"profile {name} must contain two positive integers")
+    delta = profile.get("screenshot_delta_threshold")
+    envelope = profile.get("screenshot_envelope_threshold")
+    distance = profile.get("screenshot_envelope_distance_px")
+    if isinstance(delta, bool) or not isinstance(delta, int) or not 1 <= delta <= 255:
+        raise ValueError("profile screenshot delta threshold must be in [1, 255]")
+    if isinstance(envelope, bool) or not isinstance(envelope, int) or not delta <= envelope <= 255:
+        raise ValueError("profile screenshot envelope threshold must be in [delta, 255]")
+    if isinstance(distance, bool) or not isinstance(distance, int) or distance < 0:
+        raise ValueError("profile screenshot envelope distance must be non-negative")
 
 
 def _validate_upstream_ids(
@@ -381,12 +384,8 @@ def _video_pixel_aspect(profile: dict[str, Any]) -> float:
     return float(Fraction(frame_width * storage_height, frame_height * storage_width))
 
 
-def _screenshot_delta_threshold(profile: dict[str, Any], thresholds: dict[str, Any]) -> int:
-    return (
-        int(thresholds["anamorphic_screenshot_delta_threshold"])
-        if profile["frame_size"] != profile["storage_size"]
-        else 1
-    )
+def _screenshot_delta_threshold(profile: dict[str, Any]) -> int:
+    return int(profile["screenshot_delta_threshold"])
 
 
 def _comparison_mask(
@@ -641,15 +640,9 @@ def _evaluate_cell(
     frame_size = tuple(profile["frame_size"])
     storage_size = tuple(profile["storage_size"])
     video_pixel_aspect = _video_pixel_aspect(profile)
-    screenshot_delta = _screenshot_delta_threshold(profile, thresholds)
-    screenshot_envelope = (
-        int(thresholds["anamorphic_screenshot_envelope_threshold"])
-        if frame_size != storage_size
-        else 1
-    )
-    screenshot_envelope_distance = (
-        int(thresholds["maximum_outer_bounds_distance_px"]) if frame_size != storage_size else 0
-    )
+    screenshot_delta = _screenshot_delta_threshold(profile)
+    screenshot_envelope = int(profile["screenshot_envelope_threshold"])
+    screenshot_envelope_distance = int(profile["screenshot_envelope_distance_px"])
     ass_data = _d_ass_bytes(case[event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"

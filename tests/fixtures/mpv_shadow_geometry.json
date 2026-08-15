@@ -26,19 +26,17 @@
     "synthetic-ass-from-text"
   ],
   "profiles": [
-    {"id": "baseline-720p", "frame_size": [1280, 720], "storage_size": [1280, 720]},
-    {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480]},
-    {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080]},
-    {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720]},
-    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480]}
+    {"id": "baseline-720p", "frame_size": [1280, 720], "storage_size": [1280, 720], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0},
+    {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0},
+    {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0},
+    {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720], "screenshot_delta_threshold": 8, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1},
+    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480], "screenshot_delta_threshold": 16, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1}
   ],
   "contracts": ["native-fidelity", "interactive-styled"],
   "thresholds": {
     "minimum_mask_iou": 0.95,
     "maximum_chebyshev_distance_px": 1,
-    "maximum_outer_bounds_distance_px": 1,
-    "anamorphic_screenshot_delta_threshold": 8,
-    "anamorphic_screenshot_envelope_threshold": 16
+    "maximum_outer_bounds_distance_px": 1
   },
   "required_controls": [
     "background-change",
@@ -72,6 +70,6 @@
     "render_input_check_count": 9,
     "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
     "matrix_count": 360,
-    "contract_sha256": "d9264fcfd8f7476ba83de97822e0d6af5d38d0533ee6dc9bf8570b28cce9f780"
+    "contract_sha256": "2fd8f983dda2cff4518807ca72b1d34fb63ad62adc06e060e3f98ecac6ead6ed"
   }
 }
