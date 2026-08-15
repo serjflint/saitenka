@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from mpv_source_transition import (
     FrameSample,
+    _duplicate_layers_visible,
+    _mask_coverage,
     _shadow_render,
     ass_hashes,
     assess_frames,
@@ -68,6 +70,24 @@ def test_manifest_rejects_changed_transition_contract(tmp_path: Path) -> None:
     manifest["transition"]["selected_contract"] = "live-switch"
 
     with pytest.raises(ValueError, match="execution contract changed"):
+        load_manifest(_write_manifest(tmp_path, manifest), repo_root=ROOT)
+
+
+def test_manifest_rejects_invalid_duplicate_coverage_after_relock(tmp_path: Path) -> None:
+    manifest = json.loads(json.dumps(MANIFEST))
+    manifest["transition"]["duplicate_minimum_coverage"] = 0
+    _relock(manifest)
+
+    with pytest.raises(ValueError, match="duplicate minimum coverage"):
+        load_manifest(_write_manifest(tmp_path, manifest), repo_root=ROOT)
+
+
+def test_manifest_rejects_boolean_duplicate_coverage_after_relock(tmp_path: Path) -> None:
+    manifest = json.loads(json.dumps(MANIFEST))
+    manifest["transition"]["duplicate_minimum_coverage"] = True
+    _relock(manifest)
+
+    with pytest.raises(ValueError, match="duplicate minimum coverage"):
         load_manifest(_write_manifest(tmp_path, manifest), repo_root=ROOT)
 
 
@@ -208,6 +228,39 @@ def test_transition_oracle_detects_injected_duplicate_layer() -> None:
     assert not result.passed and result.blank_indices == () and result.duplicate_indices == (1,)
 
 
+def test_duplicate_layer_oracle_allows_small_compositing_edge_delta() -> None:
+    native = set(range(100))
+    generated = set(range(50, 150))
+    duplicate = native | generated
+    duplicate.remove(0)
+    duplicate.remove(149)
+
+    assert _mask_coverage(native, duplicate) == 0.99
+    assert _mask_coverage(generated, duplicate) == 0.99
+    assert _duplicate_layers_visible(native, generated, duplicate)
+
+
+def test_duplicate_layer_oracle_rejects_native_only_sample() -> None:
+    native = set(range(100))
+    generated = set(range(50, 150))
+
+    assert not _duplicate_layers_visible(native, generated, native)
+
+
+def test_duplicate_layer_oracle_rejects_excessive_added_pixels() -> None:
+    native = set(range(100))
+    generated = set(range(50, 150))
+    full_frame_artifact = set(range(1_000))
+
+    assert not _duplicate_layers_visible(native, generated, full_frame_artifact)
+
+
+def test_duplicate_layer_oracle_requires_independent_regions() -> None:
+    native = set(range(100))
+
+    assert not _duplicate_layers_visible(native, native, native)
+
+
 def test_sampled_public_ipc_without_exact_frame_callback_selects_native_visible_contract() -> None:
     assert select_transition_contract(presented_frames_observed=False) == "native-visible"
     assert select_transition_contract(presented_frames_observed=True) == "paused-only-switch"
@@ -311,7 +364,11 @@ def test_real_mpv_reports_track_identity_and_events_for_pause_and_playback(tmp_p
     assert sampling["blank_pixels"] == 0 and sampling["blank_control_detected"]
     assert sampling["duplicate_native_overlap"] > 0
     assert sampling["duplicate_generated_overlap"] > 0
-    assert sampling["duplicate_matches_union"]
+    assert sampling["duplicate_native_coverage"] >= 0.99
+    assert sampling["duplicate_generated_coverage"] >= 0.99
+    assert sampling["duplicate_union_precision"] >= 0.99
+    assert sampling["duplicate_minimum_coverage"] == 0.99
+    assert sampling["duplicate_layers_visible"]
     assert sampling["duplicate_control_detected"]
     assert sampling["native_restored_before_transition"]
     assert report["exact_presented_frame_callback"] == "unavailable-through-public-ipc"

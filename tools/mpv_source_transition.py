@@ -93,6 +93,13 @@ def load_manifest(path: Path, *, repo_root: Path | None = None) -> dict[str, Any
         "selected_contract"
     ) not in transition.get("candidates", ()):
         raise ValueError("selected transition contract is not a candidate")
+    duplicate_minimum_coverage = transition.get("duplicate_minimum_coverage")
+    if (
+        isinstance(duplicate_minimum_coverage, bool)
+        or not isinstance(duplicate_minimum_coverage, (int, float))
+        or not 0 < duplicate_minimum_coverage <= 1
+    ):
+        raise ValueError("duplicate minimum coverage must be in (0, 1]")
     inputs = manifest.get("render_inputs")
     if not isinstance(inputs, list) or not inputs or not all(item.get("owner") for item in inputs):
         raise ValueError("every render input needs an owner")
@@ -531,8 +538,38 @@ def _mask_sha256(mask: set[int]) -> str:
     return sha256(",".join(str(index) for index in sorted(mask)).encode())
 
 
+def _mask_coverage(reference: set[int], observed: set[int]) -> float:
+    if not reference:
+        raise ValueError("subtitle mask must not be empty")
+    return len(reference & observed) / len(reference)
+
+
+def _duplicate_layers_visible(
+    native: set[int], generated: set[int], duplicate: set[int], *, minimum_coverage: float = 0.99
+) -> bool:
+    if not 0 < minimum_coverage <= 1:
+        raise ValueError("minimum coverage must be in (0, 1]")
+    native_only = native - generated
+    generated_only = generated - native
+    expected_union = native | generated
+    return bool(
+        native_only
+        and generated_only
+        and duplicate & native_only
+        and duplicate & generated_only
+        and _mask_coverage(native, duplicate) >= minimum_coverage
+        and _mask_coverage(generated, duplicate) >= minimum_coverage
+        and _mask_coverage(duplicate, expected_union) >= minimum_coverage
+    )
+
+
 def _sample_frame_controls(
-    ipc, workspace: Path, *, native_sid: int, generated_sid: int
+    ipc,
+    workspace: Path,
+    *,
+    native_sid: int,
+    generated_sid: int,
+    duplicate_minimum_coverage: float,
 ) -> dict[str, Any]:
     def sample(label: str, sid: int | str, secondary_sid: int | str = "no") -> set[int]:
         for name, value in (("sid", sid), ("secondary-sid", secondary_sid)):
@@ -551,7 +588,15 @@ def _sample_frame_controls(
         raise AssertionError("mpv static screenshot omitted a selected subtitle")
     duplicate_native = len(duplicate & native)
     duplicate_generated = len(duplicate & generated_secondary)
-    duplicate_matches_union = duplicate == native | generated_secondary
+    duplicate_native_coverage = _mask_coverage(native, duplicate)
+    duplicate_generated_coverage = _mask_coverage(generated_secondary, duplicate)
+    duplicate_union_precision = _mask_coverage(duplicate, native | generated_secondary)
+    duplicate_layers_visible = _duplicate_layers_visible(
+        native,
+        generated_secondary,
+        duplicate,
+        minimum_coverage=duplicate_minimum_coverage,
+    )
     return {
         "api": "screenshot-to-file",
         "native_pixels": len(native),
@@ -562,14 +607,18 @@ def _sample_frame_controls(
         "duplicate_pixels": len(duplicate),
         "duplicate_native_overlap": duplicate_native,
         "duplicate_generated_overlap": duplicate_generated,
-        "duplicate_matches_union": duplicate_matches_union,
+        "duplicate_native_coverage": duplicate_native_coverage,
+        "duplicate_generated_coverage": duplicate_generated_coverage,
+        "duplicate_union_precision": duplicate_union_precision,
+        "duplicate_minimum_coverage": duplicate_minimum_coverage,
+        "duplicate_layers_visible": duplicate_layers_visible,
         "restored_native_mask_sha256": _mask_sha256(restored_native),
         "native_restored_before_transition": restored_native == native,
         "blank_control_detected": not assess_frames([FrameSample(len(blank), 0)]).passed,
         "duplicate_control_detected": not assess_frames(
             [FrameSample(duplicate_native, duplicate_generated)]
         ).passed
-        and duplicate_matches_union,
+        and duplicate_layers_visible,
     }
 
 
@@ -702,7 +751,11 @@ def run_mpv_transition_probe(
         generated_sid = int(generated_track["id"])
         _require(generated_sid != native_sid, "generated track reused the native identity")
         frame_sampling = _sample_frame_controls(
-            ipc, workspace, native_sid=native_sid, generated_sid=generated_sid
+            ipc,
+            workspace,
+            native_sid=native_sid,
+            generated_sid=generated_sid,
+            duplicate_minimum_coverage=float(manifest["transition"]["duplicate_minimum_coverage"]),
         )
         phases = [
             _probe_phase(ipc, generated_sid, native_sid, paused=True),

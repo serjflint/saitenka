@@ -7,7 +7,7 @@
     "render_input_key_set_sha256": "d2de6f43d11c0501404e92c33d0194cdd6151b79420bdd66238ee410da29a517",
     "required_control_count": 6,
     "required_control_key_set_sha256": "7af5563c046a994ec25f0030b52d26f5e81a283ad8663d7f22c48805d8a6ac2e",
-    "contract_sha256": "3317d07cac653b628b31cc748010a4cd8887526ccf1031265cfdf95bede1db86"
+    "contract_sha256": "41d0ec376da9bda5f1a2234b7f54150635195755f9c2771a9d0bc3852d1b28c5"
   },
   "sources": [
     {
@@ -72,6 +72,7 @@
     "candidates": ["live-switch", "paused-only-switch", "native-visible"],
     "selected_contract": "native-visible",
     "reason": "public IPC can sample screenshots but has no exact presented-frame callback",
+    "duplicate_minimum_coverage": 0.99,
     "required_controls": [
       "wrong-track",
       "blank-frame",
