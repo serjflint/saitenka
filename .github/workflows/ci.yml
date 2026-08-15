@@ -239,6 +239,32 @@ jobs:
             libasslite/shadow-geometry.json
             libasslite/shadow-geometry.log
           if-no-files-found: warn
+      - name: Measure shadow prototype
+        if: runner.os == 'macOS' && matrix.py == '3.13'
+        id: prototype-benchmark
+        working-directory: libasslite
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -o pipefail
+          uv run --python ${{ matrix.py }} --with-editable . --with-editable .. \
+            --with pytest \
+            pytest -q ../tools/test_libass_prototype_benchmark.py
+          uv run --python ${{ matrix.py }} --with-editable . --with-editable .. \
+            python ../tools/libass_prototype_benchmark.py \
+            --manifest ../tests/fixtures/libass_prototype_benchmark.json \
+            --output prototype-benchmark.json \
+            2>&1 | tee prototype-benchmark.log
+      - name: Upload shadow prototype evidence
+        if: always() && runner.os == 'macOS' && matrix.py == '3.13'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: libass-prototype-benchmark-macOS
+          path: |
+            libasslite/prototype-benchmark.json
+            libasslite/prototype-benchmark.log
+          if-no-files-found: warn
       - name: Verify locked dependency notices
         if: runner.os == 'Linux' && matrix.py == '3.13'
         working-directory: libasslite
