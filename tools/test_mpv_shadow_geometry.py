@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -47,6 +48,7 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
         (("thresholds", "minimum_mask_iou"), 0.0, "IoU"),
         (("profiles", 0, "frame_size"), [0, 720], "positive"),
         (("required_render_input_checks",), [], "render_input_check count"),
+        (("renderer_pixel_aspect",), 4 / 3, "renderer pixel aspect"),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -127,6 +129,9 @@ def test_clip_geometry_preserves_storage_size_and_display_aspect(
     profile: dict[str, list[int]], source_size: tuple[int, int], sample_aspect_ratio: str
 ) -> None:
     assert oracle._clip_geometry(profile) == (source_size, sample_aspect_ratio)
+    assert oracle._video_pixel_aspect(profile) == pytest.approx(
+        float(Fraction(sample_aspect_ratio))
+    )
 
 
 def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable() -> None:
@@ -263,9 +268,10 @@ def test_live_runner_emits_every_locked_matrix_cell(
     )
     assert all(
         row["mpv_render_inputs"]["video-out-params"]["par"]
-        == pytest.approx(row["expected_pixel_aspect"], abs=1e-6)
+        == pytest.approx(row["expected_video_pixel_aspect"], abs=1e-6)
         for row in report["cases"]
     )
+    assert all(row["expected_renderer_pixel_aspect"] == 1.0 for row in report["cases"])
     assert {
         (row["case_id"], row["source_class"], row["profile_id"], row["contract"])
         for row in report["cases"]

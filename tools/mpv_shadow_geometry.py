@@ -78,6 +78,7 @@ def contract_hash(manifest: dict[str, Any]) -> str:
             "thresholds",
             "required_controls",
             "required_render_input_checks",
+            "renderer_pixel_aspect",
         )
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -139,6 +140,8 @@ def load_manifest(path: Path, *, repo_root: Path) -> dict[str, Any]:
     for profile in profiles:
         _validate_profile(profile)
     _validate_thresholds(manifest.get("thresholds", {}))
+    if manifest.get("renderer_pixel_aspect") != 1.0:
+        raise ValueError("screenshot renderer pixel aspect must remain square")
     expected_matrix = len(cases) * len(sources) * len(profile_ids) * len(contracts)
     if expected_matrix != denominator.get("matrix_count"):
         raise ValueError("geometry matrix count changed")
@@ -350,7 +353,7 @@ def _clip_geometry(profile: dict[str, Any]) -> tuple[tuple[int, int], str]:
     return (storage_width, storage_height), f"{ratio.numerator}/{ratio.denominator}"
 
 
-def _pixel_aspect(profile: dict[str, Any]) -> float:
+def _video_pixel_aspect(profile: dict[str, Any]) -> float:
     frame_width, frame_height = profile["frame_size"]
     storage_width, storage_height = profile["storage_size"]
     return float(Fraction(frame_width * storage_height, frame_height * storage_width))
@@ -522,7 +525,7 @@ def _render_input_checks(
     frame_size: tuple[int, ...],
     storage_size: tuple[int, ...],
     observed_size: tuple[int, int],
-    pixel_aspect: float,
+    video_pixel_aspect: float,
 ) -> dict[str, bool]:
     video = render_inputs["video-out-params"]
     return {
@@ -531,7 +534,7 @@ def _render_input_checks(
         "video-storage-size": (video.get("w"), video.get("h")) == storage_size,
         "video-pixel-aspect": isinstance(video.get("par"), (int, float))
         and not isinstance(video.get("par"), bool)
-        and abs(float(video["par"]) - pixel_aspect) <= 1e-6,
+        and abs(float(video["par"]) - video_pixel_aspect) <= 1e-6,
         "lossless-444-capture": video.get("pixelformat") == "yuv444p",
         "authored-ass-style": render_inputs["options/sub-ass-override"] in {False, "no"},
         "ass-window-scale-disabled": render_inputs["options/sub-ass-scale-with-window"] is False,
@@ -550,10 +553,11 @@ def _evaluate_cell(
     contract: str,
     event_key: str,
     thresholds: dict[str, Any],
+    renderer_pixel_aspect: float,
 ) -> list[dict[str, Any]]:
     frame_size = tuple(profile["frame_size"])
     storage_size = tuple(profile["storage_size"])
-    pixel_aspect = _pixel_aspect(profile)
+    video_pixel_aspect = _video_pixel_aspect(profile)
     ass_data = _d_ass_bytes(case[event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
@@ -567,7 +571,7 @@ def _evaluate_cell(
         int(case["timestamp_ms"]),
         frame_size,
         storage_size,
-        pixel_aspect,
+        renderer_pixel_aspect,
     )
     try:
         shadow_mask = layer_support(result)
@@ -587,7 +591,7 @@ def _evaluate_cell(
             frame_size,
             storage_size,
             observed_size,
-            pixel_aspect,
+            video_pixel_aspect,
         )
         assessment = replace(assessment, passed=assessment.passed and all(input_checks.values()))
         return [
@@ -599,7 +603,8 @@ def _evaluate_cell(
                 "shared_render_sources": list(sources),
                 "expected_frame_size": list(frame_size),
                 "observed_frame_size": list(observed_size),
-                "expected_pixel_aspect": pixel_aspect,
+                "expected_video_pixel_aspect": video_pixel_aspect,
+                "expected_renderer_pixel_aspect": renderer_pixel_aspect,
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,
                 "mpv_difference_threshold_support": difference_threshold_support,
@@ -621,6 +626,7 @@ def _run_session_matrix(
     sources: tuple[str, ...],
     fonts: tuple[Path, ...],
     thresholds: dict[str, Any],
+    renderer_pixel_aspect: float,
     *,
     mpv: str,
 ) -> tuple[list[dict[str, Any]], str]:
@@ -643,6 +649,7 @@ def _run_session_matrix(
                         contract,
                         event_key,
                         thresholds,
+                        renderer_pixel_aspect,
                     )
                 )
     finally:
@@ -660,6 +667,7 @@ def run_live_matrix(
     manifest = load_manifest(manifest_path, repo_root=repo_root)
     cases = _case_inputs(repo_root, manifest)
     thresholds = manifest["thresholds"]
+    renderer_pixel_aspect = float(manifest["renderer_pixel_aspect"])
     reports: list[dict[str, Any]] = []
     logs: list[str] = []
     with tempfile.TemporaryDirectory(prefix="saitenka-gate-d-") as raw_workspace:
@@ -675,6 +683,7 @@ def run_live_matrix(
                     sources,
                     fonts,
                     thresholds,
+                    renderer_pixel_aspect,
                     mpv=mpv,
                 )
                 reports.extend(group_reports)
