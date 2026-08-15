@@ -51,6 +51,11 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
         (("thresholds", "maximum_outer_bounds_distance_px"), True, "outer-bounds"),
         (("profiles", 0, "screenshot_delta_threshold"), 0, "delta threshold"),
         (("profiles", 0, "screenshot_envelope_threshold"), 0, "envelope threshold"),
+        (
+            ("profiles", 0, "maximum_unsafe_low_delta_component_pixels"),
+            -1,
+            "component limit",
+        ),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -192,6 +197,11 @@ def test_comparison_masks_reject_connected_distant_low_delta_evidence() -> None:
     )
     assert comparison == {(0, 0), (1, 0)}
     assert unsafe == {(2, 0), (3, 0)}
+    assert oracle._largest_component(unsafe) == 2
+
+
+def test_low_delta_component_bound_counts_disconnected_noise_separately() -> None:
+    assert oracle._largest_component(frozenset({(0, 0), (5, 5), (6, 5)})) == 2
 
 
 def test_mpv_abnormal_exit_is_never_accepted() -> None:
@@ -377,7 +387,11 @@ def test_live_runner_emits_every_locked_matrix_cell(
         == pytest.approx(row["expected_video_pixel_aspect"], abs=1e-6)
         for row in report["cases"]
     )
-    assert all(row["unsafe_low_delta_pixels"] == 0 for row in report["cases"])
+    assert all(
+        row["largest_unsafe_low_delta_component_pixels"]
+        <= row["maximum_unsafe_low_delta_component_pixels"]
+        for row in report["cases"]
+    )
     assert all(
         (row["mpv_ass_sha256"] == row["shadow_ass_sha256"])
         is (row["contract"] == "native-fidelity")

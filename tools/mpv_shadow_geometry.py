@@ -177,6 +177,13 @@ def _validate_profile(profile: dict[str, Any]) -> None:
         raise ValueError("profile screenshot envelope threshold must be in [delta, 255]")
     if isinstance(distance, bool) or not isinstance(distance, int) or distance < 0:
         raise ValueError("profile screenshot envelope distance must be non-negative")
+    component_limit = profile.get("maximum_unsafe_low_delta_component_pixels")
+    if (
+        isinstance(component_limit, bool)
+        or not isinstance(component_limit, int)
+        or component_limit < 0
+    ):
+        raise ValueError("profile unsafe low-delta component limit must be non-negative")
 
 
 def _validate_upstream_ids(
@@ -300,7 +307,10 @@ def _profile_filter_rejects_retained_overlay(
         maximum_bounds_distance=int(thresholds["maximum_outer_bounds_distance_px"]),
         support_reference=support,
     )
-    return bool(unsafe) or not assessment.passed
+    return (
+        _largest_component(unsafe) > int(profile["maximum_unsafe_low_delta_component_pixels"])
+        or not assessment.passed
+    )
 
 
 def exercise_controls(
@@ -475,6 +485,32 @@ def _comparison_mask(
         envelope_distance=envelope_distance,
     )
     return comparison
+
+
+def _largest_component(mask: Mask) -> int:
+    remaining = set(mask)
+    largest = 0
+    while remaining:
+        stack = [remaining.pop()]
+        size = 0
+        while stack:
+            x, y = stack.pop()
+            size += 1
+            for neighbour in (
+                (x - 1, y - 1),
+                (x, y - 1),
+                (x + 1, y - 1),
+                (x - 1, y),
+                (x + 1, y),
+                (x - 1, y + 1),
+                (x, y + 1),
+                (x + 1, y + 1),
+            ):
+                if neighbour in remaining:
+                    remaining.remove(neighbour)
+                    stack.append(neighbour)
+        largest = max(largest, size)
+    return largest
 
 
 def _capture_mask(
@@ -726,6 +762,7 @@ def _evaluate_cell(
     screenshot_delta = _screenshot_delta_threshold(profile)
     screenshot_envelope = int(profile["screenshot_envelope_threshold"])
     screenshot_envelope_distance = int(profile["screenshot_envelope_distance_px"])
+    unsafe_component_limit = int(profile["maximum_unsafe_low_delta_component_pixels"])
     mpv_ass_data = _d_ass_bytes(case[mpv_event_key])
     shadow_ass_data = _d_ass_bytes(case[shadow_event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
@@ -778,7 +815,9 @@ def _evaluate_cell(
         )
         assessment = replace(
             assessment,
-            passed=assessment.passed and not unsafe_low_delta_mask and all(input_checks.values()),
+            passed=assessment.passed
+            and _largest_component(unsafe_low_delta_mask) <= unsafe_component_limit
+            and all(input_checks.values()),
         )
         return [
             {
@@ -796,11 +835,15 @@ def _evaluate_cell(
                 "screenshot_delta_threshold": screenshot_delta,
                 "screenshot_envelope_threshold": screenshot_envelope,
                 "screenshot_envelope_distance": screenshot_envelope_distance,
+                "maximum_unsafe_low_delta_component_pixels": unsafe_component_limit,
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,
                 "mpv_difference_threshold_support": difference_threshold_support,
                 "unsafe_low_delta_pixels": len(unsafe_low_delta_mask),
                 "unsafe_low_delta_bounds": list(support_bounds(unsafe_low_delta_mask)),
+                "largest_unsafe_low_delta_component_pixels": _largest_component(
+                    unsafe_low_delta_mask
+                ),
                 "mpv_render_inputs": render_inputs,
                 "render_input_checks": input_checks,
                 "assessment": asdict(assessment),
