@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -49,6 +50,8 @@ class MaskAssessment:
     passed: bool
     reference_pixels: int
     observed_pixels: int
+    reference_bounds: tuple[int, int, int, int]
+    observed_bounds: tuple[int, int, int, int]
     outer_bounds_equal: bool
     mask_iou: float
     within_maximum_distance: bool
@@ -202,15 +205,28 @@ def assess_masks(
     minimum_iou: float,
     maximum_distance: int,
 ) -> MaskAssessment:
+    reference_bounds = support_bounds(reference)
+    observed_bounds = support_bounds(observed)
     if not reference or not observed:
-        return MaskAssessment(False, len(reference), len(observed), False, 0.0, False)
-    bounds_equal = support_bounds(reference) == support_bounds(observed)
+        return MaskAssessment(
+            False,
+            len(reference),
+            len(observed),
+            reference_bounds,
+            observed_bounds,
+            False,
+            0.0,
+            False,
+        )
+    bounds_equal = reference_bounds == observed_bounds
     overlap = support_iou(reference, observed)
     within_distance = supports_within(reference, observed, maximum_distance)
     return MaskAssessment(
         bounds_equal and overlap >= minimum_iou and within_distance,
         len(reference),
         len(observed),
+        reference_bounds,
+        observed_bounds,
         bounds_equal,
         overlap,
         within_distance,
@@ -297,10 +313,7 @@ def _write_clip(
 ) -> Path:
     from mpv_source_transition import _run
 
-    frame_width, frame_height = profile["frame_size"]
-    storage_width, storage_height = profile["storage_size"]
-    sar_numerator = storage_width * frame_height
-    sar_denominator = storage_height * frame_width
+    source_size, sample_aspect_ratio = _clip_geometry(profile)
     clip = workspace / f"{profile['id']}.mkv"
     _run(
         [
@@ -309,9 +322,9 @@ def _write_clip(
             "-f",
             "lavfi",
             "-i",
-            f"color=c=navy:s={frame_width}x{frame_height}:d=4",
+            f"color=c=navy:s={source_size[0]}x{source_size[1]}:d=4",
             "-vf",
-            f"setsar={sar_numerator}/{sar_denominator}",
+            f"setsar={sample_aspect_ratio}",
             "-c:v",
             "ffv1",
             str(clip),
@@ -320,7 +333,16 @@ def _write_clip(
     return clip
 
 
-def _capture_mask(ipc: Any, workspace: Path, label: str) -> tuple[Mask, tuple[int, int]]:
+def _clip_geometry(profile: dict[str, Any]) -> tuple[tuple[int, int], str]:
+    frame_width, frame_height = profile["frame_size"]
+    storage_width, storage_height = profile["storage_size"]
+    ratio = Fraction(frame_width * storage_height, frame_height * storage_width)
+    return (storage_width, storage_height), f"{ratio.numerator}/{ratio.denominator}"
+
+
+def _capture_mask(
+    ipc: Any, workspace: Path, label: str
+) -> tuple[Mask, tuple[int, int], dict[str, int]]:
     from mpv_source_transition import _wait_for
     from PIL import Image, ImageChops
 
@@ -338,12 +360,36 @@ def _capture_mask(ipc: Any, workspace: Path, label: str) -> tuple[Mask, tuple[in
             raise AssertionError("mpv screenshot dimensions changed")
         difference = ImageChops.difference(video, subtitle)
         width, height = difference.size
-        mask = frozenset(
-            (index % width, index // width)
-            for index, pixel in enumerate(difference.get_flattened_data())
-            if pixel != (0, 0, 0)
+        raw_difference = difference.tobytes()
+        deltas = tuple(
+            max(raw_difference[index : index + 3]) for index in range(0, len(raw_difference), 3)
         )
-        return mask, (width, height)
+        mask = frozenset(
+            (index % width, index // width) for index, delta in enumerate(deltas) if delta
+        )
+        threshold_pixels = {
+            str(threshold): sum(delta >= threshold for delta in deltas)
+            for threshold in (1, 2, 4, 8, 16)
+        }
+        return mask, (width, height), threshold_pixels
+
+
+def _mpv_render_inputs(ipc: Any) -> dict[str, Any]:
+    inputs: dict[str, Any] = {}
+    for name in (
+        "osd-dimensions",
+        "video-out-params",
+        "options/sub-ass-use-video-data",
+        "options/sub-ass-override",
+        "options/sub-ass-scale-with-window",
+        "options/sub-scale",
+        "options/sub-pos",
+    ):
+        reply = ipc.command("get_property", name)
+        if reply.get("error") != "success":
+            raise AssertionError(f"mpv did not expose required render input {name}")
+        inputs[name] = reply.get("data")
+    return inputs
 
 
 class _MpvSession:
@@ -370,6 +416,8 @@ class _MpvSession:
             "--pause",
             "--start=1.5",
             "--sub-ass-override=no",
+            "--sub-ass-use-video-data=all",
+            "--sub-ass-scale-with-window=no",
             "--sub-scale=1",
             "--sub-pos=100",
         ]
@@ -390,7 +438,7 @@ class _MpvSession:
 
     def capture(
         self, ass_path: Path, timestamp_ms: int, label: str
-    ) -> tuple[Mask, tuple[int, int]]:
+    ) -> tuple[Mask, tuple[int, int], dict[str, int], dict[str, Any]]:
         from mpv_source_transition import _track_for_path, _wait_for
 
         reply = self.ipc.command("sub-add", str(ass_path), "select", label, "jpn")
@@ -412,7 +460,8 @@ class _MpvSession:
                 timeout=3.0,
                 message=f"mpv did not render {label}",
             )
-            return _capture_mask(self.ipc, self.workspace, label)
+            mask, size, threshold_pixels = _capture_mask(self.ipc, self.workspace, label)
+            return mask, size, threshold_pixels, _mpv_render_inputs(self.ipc)
         finally:
             reply = self.ipc.command("sub-remove", sid)
             if reply.get("error") != "success":
@@ -465,7 +514,9 @@ def _evaluate_cell(
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
     ass_path.write_bytes(ass_data)
-    mpv_mask, observed_size = session.capture(ass_path, int(case["timestamp_ms"]), label)
+    mpv_mask, observed_size, difference_threshold_pixels, render_inputs = session.capture(
+        ass_path, int(case["timestamp_ms"]), label
+    )
     renderer, result = _shadow_result(
         ass_data,
         fonts,
@@ -499,6 +550,8 @@ def _evaluate_cell(
                 "observed_frame_size": list(observed_size),
                 "frame_size_matches": size_matches,
                 "token_box_count": boxes,
+                "mpv_difference_threshold_pixels": difference_threshold_pixels,
+                "mpv_render_inputs": render_inputs,
                 "assessment": asdict(assessment),
             }
             for source in sources

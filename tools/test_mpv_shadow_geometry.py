@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,6 +75,8 @@ def test_mask_contract_accepts_one_pixel_support_drift() -> None:
     observed = reference | {(5, 2)}
     assessment = assess_masks(reference, observed, minimum_iou=0.8, maximum_distance=1)
     assert not assessment.passed
+    assert assessment.reference_bounds == (0, 0, 5, 5)
+    assert assessment.observed_bounds == (0, 0, 6, 5)
     assert not assessment.outer_bounds_equal
     assert assessment.within_maximum_distance
 
@@ -104,6 +107,36 @@ def test_contract_report_is_publishable_only_after_controls_pass() -> None:
     assert report["matrix_count"] == 360
 
 
+@pytest.mark.parametrize(
+    ("profile", "source_size", "sample_aspect_ratio"),
+    [
+        (
+            {"frame_size": [1280, 720], "storage_size": [960, 720]},
+            (960, 720),
+            "4/3",
+        ),
+        (
+            {"frame_size": [1280, 720], "storage_size": [1280, 960]},
+            (1280, 960),
+            "4/3",
+        ),
+    ],
+)
+def test_clip_geometry_preserves_storage_size_and_display_aspect(
+    profile: dict[str, list[int]], source_size: tuple[int, int], sample_aspect_ratio: str
+) -> None:
+    assert oracle._clip_geometry(profile) == (source_size, sample_aspect_ratio)
+
+
+def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable() -> None:
+    class IPC:
+        def command(self, _command: str, name: str) -> dict[str, str]:
+            return {"error": "property unavailable" if name == "video-out-params" else "success"}
+
+    with pytest.raises(AssertionError, match="video-out-params"):
+        oracle._mpv_render_inputs(IPC())
+
+
 def test_live_runner_emits_every_locked_matrix_cell(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -119,7 +152,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
 
         def capture(
             self, _ass_path: Path, _timestamp_ms: int, _label: str
-        ) -> tuple[frozenset[tuple[int, int]], tuple[int, int]]:
+        ) -> tuple[frozenset[tuple[int, int]], tuple[int, int], dict[str, int], dict[str, object]]:
             sizes = {
                 "baseline-720p": (1280, 720),
                 "resize-480p": (854, 480),
@@ -127,7 +160,20 @@ def test_live_runner_emits_every_locked_matrix_cell(
                 "wide-pixel-aspect": (1280, 720),
                 "tall-pixel-aspect": (1280, 720),
             }
-            return mask, next(size for name, size in sizes.items() if _label.startswith(name))
+            return (
+                mask,
+                next(size for name, size in sizes.items() if _label.startswith(name)),
+                {"1": len(mask), "2": len(mask), "4": len(mask), "8": len(mask), "16": 0},
+                {
+                    "osd-dimensions": {"w": 1280, "h": 720},
+                    "video-out-params": {"w": 1280, "h": 720},
+                    "options/sub-ass-use-video-data": "all",
+                    "options/sub-ass-override": "no",
+                    "options/sub-ass-scale-with-window": False,
+                    "options/sub-scale": 1.0,
+                    "options/sub-pos": 100.0,
+                },
+            )
 
         def close(self) -> str:
             return "fake mpv log"
@@ -156,6 +202,11 @@ def test_live_runner_emits_every_locked_matrix_cell(
     assert report["matrix_passed"] is True
     assert len(report["cases"]) == 360
     assert all(row["frame_size_matches"] for row in report["cases"])
+    assert all(row["mpv_difference_threshold_pixels"]["1"] == len(mask) for row in report["cases"])
+    assert all(
+        row["mpv_render_inputs"]["options/sub-ass-use-video-data"] == "all"
+        for row in report["cases"]
+    )
     assert {
         (row["case_id"], row["source_class"], row["profile_id"], row["contract"])
         for row in report["cases"]
@@ -165,4 +216,36 @@ def test_live_runner_emits_every_locked_matrix_cell(
         for source in manifest["source_classes"]
         for profile in manifest["profiles"]
         for contract in manifest["contracts"]
+    }
+
+
+def test_live_cli_persists_failure_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "failure.json"
+
+    def fail(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("injected live failure")
+
+    monkeypatch.setattr(oracle, "run_live_matrix", fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mpv_shadow_geometry.py",
+            "--manifest",
+            str(MANIFEST),
+            "--repo-root",
+            str(ROOT),
+            "--output",
+            str(output),
+            "--live",
+        ],
+    )
+    with pytest.raises(RuntimeError, match="injected live failure"):
+        oracle.main()
+    assert json.loads(output.read_text(encoding="utf-8")) == {
+        "error": "injected live failure",
+        "matrix_passed": False,
+        "schema": 1,
     }
