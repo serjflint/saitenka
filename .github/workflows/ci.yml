@@ -140,6 +140,20 @@ jobs:
           if (-not $dll) { throw "vcpkg installed no libass DLL" }
           "LIBASSLITE_LIBRARY=$($dll.FullName)" | Out-File $env:GITHUB_ENV -Append
           $bin | Out-File $env:GITHUB_PATH -Append
+      - name: Install Gate B tools (Linux)
+        if: runner.os == 'Linux' && matrix.py == '3.13'
+        run: sudo apt-get install -y mpv ffmpeg
+      - name: Install Gate B tools (macOS)
+        if: runner.os == 'macOS' && matrix.py == '3.13'
+        run: brew install mpv ffmpeg
+      - name: Install Gate B tools (Windows)
+        if: runner.os == 'Windows' && matrix.py == '3.13'
+        shell: pwsh
+        run: |
+          choco install mpvio ffmpeg -y --no-progress
+          $mpv = Get-ChildItem "$env:ChocolateyInstall\lib\mpvio.install\tools" -Filter mpv.exe -File -Recurse | Select-Object -First 1
+          if (-not $mpv) { throw "Chocolatey mpvio installed no mpv.exe" }
+          $mpv.DirectoryName | Out-File $env:GITHUB_PATH -Append
       - name: Build and test
         working-directory: libasslite
         run: |
@@ -164,6 +178,33 @@ jobs:
           path: |
             libasslite/token-matrix.json
             libasslite/token-matrix-libass.log
+          if-no-files-found: warn
+      - name: Run source/transition envelope
+        if: matrix.py == '3.13'
+        id: source-transition
+        working-directory: libasslite
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          set -o pipefail
+          uv run --python ${{ matrix.py }} --with-editable . \
+            --with pysubs2 --with pillow --with fonttools \
+            python ../tools/mpv_source_transition.py \
+            --manifest ../tests/fixtures/mpv_source_transition.json \
+            --output source-transition.json --repo-root .. \
+            2>&1 | tee source-transition.log
+          uv run --python ${{ matrix.py }} --with-editable . \
+            --with pytest --with pytest-timeout --with pillow --with fonttools \
+            pytest -q -m integration ../tools/test_mpv_source_transition.py
+      - name: Upload source/transition evidence
+        if: always() && matrix.py == '3.13'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mpv-source-transition-${{ runner.os }}
+          path: |
+            libasslite/source-transition.json
+            libasslite/source-transition.log
           if-no-files-found: warn
       - name: Verify locked dependency notices
         if: runner.os == 'Linux' && matrix.py == '3.13'

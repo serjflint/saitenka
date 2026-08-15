@@ -1,0 +1,13 @@
+[Script Info]
+Title: Saitenka Gate B generated ASS
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans JP,48,&H0000FF00,&H0000FF00,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,2,24,24,32,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:08.00,Default,Generated,0,0,0,,生成した字幕
