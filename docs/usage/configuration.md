@@ -226,6 +226,14 @@ Most in-player shortcuts are configurable — every key lives under the `[keys]`
 than list them here, see the [Keyboard shortcuts](shortcuts.md) page, which has the full
 rebindable-key table with defaults.
 
+## Experimental mpv-native subtitles
+
+`[subtitle_geometry].native_visible = true` keeps an external authored `.ass` track rendered by mpv
+and uses an optional system `libass` only for hover geometry. Saitenka draws the tooltip and a small
+focus box, not a replacement subtitle raster. Unsupported syntax, missing source bytes, or a provider
+failure leaves the mpv subtitle visible and disables interaction for that cue. Run `saitenka doctor`
+to verify `libasslite` and the selected library; `overlay.example.toml` owns the settings and defaults.
+
 ## Reading profiles (a non-Japanese main language)
 
 A **profile** bundles what's being read — the main/second language codes, the tokenizer strategy, and
