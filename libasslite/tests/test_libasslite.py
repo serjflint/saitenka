@@ -141,6 +141,36 @@ def test_invalid_geometry_is_rejected_before_native_render() -> None:
         ass_renderer.render(1_500, (1280, 720), (1280, -1))
 
 
+@pytest.mark.parametrize("pixel_aspect", [0.0, -1.0, float("inf"), float("nan")])
+def test_invalid_pixel_aspect_is_rejected_before_native_render(pixel_aspect: float) -> None:
+    ass_renderer = renderer()
+
+    with pytest.raises(ValueError, match="pixel_aspect must be finite and positive"):
+        ass_renderer.render(
+            1_500,
+            (1280, 720),
+            (960, 720),
+            pixel_aspect=pixel_aspect,
+        )
+
+
+def test_explicit_pixel_aspect_changes_only_horizontal_geometry() -> None:
+    square = renderer()
+    wide = renderer()
+
+    square_bounds = character_bounds(
+        square.render(1_500, (1280, 720), (960, 720), pixel_aspect=1.0),
+        0x332211,
+    )
+    wide_bounds = character_bounds(
+        wide.render(1_500, (1280, 720), (960, 720), pixel_aspect=4 / 3),
+        0x332211,
+    )
+
+    assert wide_bounds[2] - wide_bounds[0] > square_bounds[2] - square_bounds[0]
+    assert wide_bounds[1::2] == square_bounds[1::2]
+
+
 def test_close_is_idempotent_and_blocks_render() -> None:
     ass_renderer = renderer()
 
