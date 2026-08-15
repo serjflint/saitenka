@@ -77,6 +77,7 @@ def contract_hash(manifest: dict[str, Any]) -> str:
             "contracts",
             "thresholds",
             "required_controls",
+            "required_render_input_checks",
         )
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -130,6 +131,7 @@ def load_manifest(path: Path, *, repo_root: Path) -> dict[str, Any]:
     sources = _validate_ids(manifest.get("source_classes"), denominator, "source")
     contracts = _validate_ids(manifest.get("contracts"), denominator, "contract")
     controls = _validate_ids(manifest.get("required_controls"), denominator, "control")
+    _validate_ids(manifest.get("required_render_input_checks"), denominator, "render_input_check")
     profiles = manifest.get("profiles")
     if not isinstance(profiles, list) or not all(isinstance(item, dict) for item in profiles):
         raise TypeError("geometry profiles must be objects")
@@ -399,7 +401,6 @@ def _mpv_render_inputs(ipc: Any) -> dict[str, Any]:
     for name in (
         "osd-dimensions",
         "video-out-params",
-        "options/sub-ass-use-video-data",
         "options/sub-ass-override",
         "options/sub-ass-scale-with-window",
         "options/sub-scale",
@@ -436,7 +437,6 @@ class _MpvSession:
             "--pause",
             "--start=1.5",
             "--sub-ass-override=no",
-            "--sub-ass-use-video-data=all",
             "--sub-ass-scale-with-window=no",
             "--sub-scale=1",
             "--sub-pos=100",
@@ -533,7 +533,6 @@ def _render_input_checks(
         and not isinstance(video.get("par"), bool)
         and abs(float(video["par"]) - pixel_aspect) <= 1e-6,
         "lossless-444-capture": video.get("pixelformat") == "yuv444p",
-        "ass-video-data": render_inputs["options/sub-ass-use-video-data"] == "all",
         "authored-ass-style": render_inputs["options/sub-ass-override"] in {False, "no"},
         "ass-window-scale-disabled": render_inputs["options/sub-ass-scale-with-window"] is False,
         "subtitle-scale": render_inputs["options/sub-scale"] == 1.0,
@@ -683,6 +682,9 @@ def run_live_matrix(
     expected = int(manifest["denominator"]["matrix_count"])
     if len(reports) != expected:
         raise AssertionError(f"Gate D emitted {len(reports)} matrix rows, expected {expected}")
+    expected_checks = set(manifest["required_render_input_checks"])
+    if any(set(report["render_input_checks"]) != expected_checks for report in reports):
+        raise AssertionError("Gate D render-input checks changed")
     passed = all(report["assessment"]["passed"] for report in reports)
     return {
         **build_contract_report(manifest_path, repo_root),

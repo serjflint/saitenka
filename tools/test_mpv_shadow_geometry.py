@@ -46,6 +46,7 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
     [
         (("thresholds", "minimum_mask_iou"), 0.0, "IoU"),
         (("profiles", 0, "frame_size"), [0, 720], "positive"),
+        (("required_render_input_checks",), [], "render_input_check count"),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -147,7 +148,6 @@ def test_render_input_checks_reject_subsampled_or_wrong_storage_geometry() -> No
             "par": 1.0,
             "pixelformat": "yuv420p",
         },
-        "options/sub-ass-use-video-data": "all",
         "options/sub-ass-override": False,
         "options/sub-ass-scale-with-window": False,
         "options/sub-scale": 1.0,
@@ -218,7 +218,6 @@ def test_live_runner_emits_every_locked_matrix_cell(
                         "par": frame_size[0] * storage_size[1] / frame_size[1] / storage_size[0],
                         "pixelformat": "yuv444p",
                     },
-                    "options/sub-ass-use-video-data": "all",
                     "options/sub-ass-override": False,
                     "options/sub-ass-scale-with-window": False,
                     "options/sub-scale": 1.0,
@@ -257,11 +256,11 @@ def test_live_runner_emits_every_locked_matrix_cell(
         row["mpv_difference_threshold_support"]["1"]["pixels"] == len(mask)
         for row in report["cases"]
     )
+    assert all(all(row["render_input_checks"].values()) for row in report["cases"])
     assert all(
-        row["mpv_render_inputs"]["options/sub-ass-use-video-data"] == "all"
+        set(row["render_input_checks"]) == set(manifest["required_render_input_checks"])
         for row in report["cases"]
     )
-    assert all(all(row["render_input_checks"].values()) for row in report["cases"])
     assert all(
         row["mpv_render_inputs"]["video-out-params"]["par"]
         == pytest.approx(row["expected_pixel_aspect"], abs=1e-6)

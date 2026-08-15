@@ -45,6 +45,17 @@
     "blank-frame",
     "duplicate-layer"
   ],
+  "required_render_input_checks": [
+    "screenshot-frame-size",
+    "video-display-size",
+    "video-storage-size",
+    "video-pixel-aspect",
+    "lossless-444-capture",
+    "authored-ass-style",
+    "ass-window-scale-disabled",
+    "subtitle-scale",
+    "subtitle-position"
+  ],
   "denominator": {
     "case_count": 12,
     "case_key_set_sha256": "2ad971923ec0333f64b7da1e5ad0b2f65056f6b188f9b054cd01c8819e4bca4c",
@@ -56,7 +67,9 @@
     "contract_key_set_sha256": "c1b970bde68e3f9fc69c6972dde0fab6bcfe970205b85f052f1b67a7b8a7235e",
     "control_count": 5,
     "control_key_set_sha256": "9287f16eae7fbd3222bd6abfc9a0d471eb892d751d68ace0f02042481625541d",
+    "render_input_check_count": 9,
+    "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
     "matrix_count": 360,
-    "contract_sha256": "0ef397c6c9cbf6d811d6b52a90875d099c5f6d0b3cd76cf010ccb4c621a1498d"
+    "contract_sha256": "a64b456404eaf6c8e20e0365ad20eb05495fa5d05ff212492fb78297df63490c"
   }
 }
