@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "denominator": {
+    "count": 19,
+    "key_set_sha256": "da0c6eb12bf03f3a7e8a697c0616055e9d07c4db67c11bb91030bca1ea202cd8",
+    "classification_sha256": "1c46e8ba663cc218b9ab4688913f6acd26a2884a294c3e017c957c9597556031",
+    "contract_set_sha256": "88f9f2893b04f3230c48738b5db08ae37186b3de6d6100a823873f9f9c7d480b",
+    "ass_header_sha256": "aa362c21a41a69e23a6b7fccdb7b8ecb9ac9f8500a3921a3350bc486e39aa3c9",
+    "maximum_chebyshev_distance_px": 1
+  },
+  "cases": [
+    {
+      "id": "plain-repeated",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}猫{\\c&H222222&}を見る{\\c&H333333&}猫"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}猫{\\c&H020202&}を見る{\\c&H030303&}猫"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}, {"rgb": "030303", "event_id": "e0", "token_index": 2}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "punctuation",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}猫{\\c&H222222&}、{\\c&H333333&}猫{\\c&H444444&}。"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}猫{\\c&H020202&}、{\\c&H030303&}猫{\\c&H040404&}。"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}, {"rgb": "030303", "event_id": "e0", "token_index": 2}, {"rgb": "040404", "event_id": "e0", "token_index": 3}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "uniform-visible-boundaries",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}猫{\\c&H111111&}を見る{\\c&H111111&}猫"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}猫{\\c&H020202&}を見る{\\c&H030303&}猫"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}, {"rgb": "030303", "event_id": "e0", "token_index": 2}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "mixed-scripts",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}漢字{\\c&H111111&}かな{\\c&H111111&}ABC"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}漢字{\\c&H020202&}かな{\\c&H030303&}ABC"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}, {"rgb": "030303", "event_id": "e0", "token_index": 2}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "primary-color-alpha",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\alpha&H40&\\1c&H111111&}半透明{\\1c&H111111&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\alpha&H40&\\1c&H010101&}半透明{\\1c&H020202&}字幕"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "segmented-token",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "min_max_segments": 2,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}漢{\\b1}字{\\b0}{\\c&H222222&}です"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}漢{\\b1}字{\\b0}{\\c&H020202&}です"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "opaque-border-box",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Box,e0,0,0,0,,{\\c&H111111&}箱付き{\\c&H222222&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Box,e0,0,0,0,,{\\c&H010101&}箱付き{\\c&H020202&}字幕"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "multiline",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "min_rows": 2,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}日本語\\N{\\c&H222222&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}日本語\\N{\\c&H020202&}字幕"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "wrapping",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "min_rows": 2,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,360,360,0,,{\\c&H111111&}これは {\\c&H222222&}長い {\\c&H333333&}日本語 {\\c&H444444&}字幕の {\\c&H555555&}折返し {\\c&H666666&}挙動を {\\c&H777777&}確認する {\\c&H888888&}ための {\\c&H999999&}文章です"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,360,360,0,,{\\c&H010101&}これは {\\c&H020202&}長い {\\c&H030303&}日本語 {\\c&H040404&}字幕の {\\c&H050505&}折返し {\\c&H060606&}挙動を {\\c&H070707&}確認する {\\c&H080808&}ための {\\c&H090909&}文章です"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}, {"rgb": "030303", "event_id": "e0", "token_index": 2}, {"rgb": "040404", "event_id": "e0", "token_index": 3}, {"rgb": "050505", "event_id": "e0", "token_index": 4}, {"rgb": "060606", "event_id": "e0", "token_index": 5}, {"rgb": "070707", "event_id": "e0", "token_index": 6}, {"rgb": "080808", "event_id": "e0", "token_index": 7}, {"rgb": "090909", "event_id": "e0", "token_index": 8}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "fallback-font",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\fnSaitenka Missing Font\\c&H111111&}漢字{\\c&H222222&}かな"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\fnSaitenka Missing Font\\c&H010101&}漢字{\\c&H020202&}かな"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "alignment-margins",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,120,80,90,,{\\an7\\c&H111111&}左上{\\c&H222222&}配置"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,120,80,90,,{\\an7\\c&H010101&}左上{\\c&H020202&}配置"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "simultaneous-events",
+      "expectation": "required-core",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,dialogue,0,0,0,,{\\c&H111111&}会話{\\c&H222222&}本文", "1,0:00:01.00,0:00:03.00,Sign,sign,0,0,0,,{\\pos(960,120)\\c&H333333&}看板{\\c&H444444&}文字"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,dialogue,0,0,0,,{\\c&H010101&}会話{\\c&H020202&}本文", "1,0:00:01.00,0:00:03.00,Sign,sign,0,0,0,,{\\pos(960,120)\\c&H030303&}看板{\\c&H040404&}文字"],
+      "palette": [{"rgb": "010101", "event_id": "dialogue", "token_index": 0}, {"rgb": "020202", "event_id": "dialogue", "token_index": 1}, {"rgb": "030303", "event_id": "sign", "token_index": 0}, {"rgb": "040404", "event_id": "sign", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "ligature-boundary",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\fnTimes New Roman\\c&H111111&}of{\\c&H111111&}fice"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\fnTimes New Roman\\c&H010101&}of{\\c&H020202&}fice"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "bidi-boundary",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}مرحبا{\\c&H111111&} بكم"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}مرحبا{\\c&H020202&} بكم"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "animated-move",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\move(300,600,700,600)\\c&H111111&}動く{\\c&H222222&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\move(300,600,700,600)\\c&H010101&}動く{\\c&H020202&}字幕"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "animated-transform",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\t(\\fscx120)\\c&H111111&}変形{\\c&H222222&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\t(\\fscx120)\\c&H010101&}変形{\\c&H020202&}字幕"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "karaoke",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\k20\\c&H111111&}歌う{\\k20\\c&H222222&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\k20\\c&H010101&}歌う{\\k20\\c&H020202&}字幕"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "token-internal-reset",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H111111&}色{\\r}変更"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\c&H010101&}色{\\r}変更"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}],
+      "reserved_rgb": []
+    },
+    {
+      "id": "drawing-run",
+      "expectation": "fallback-candidate",
+      "timestamp_ms": 1500,
+      "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\p1}m 0 0 l 40 0 40 40 0 40{\\p0\\c&H111111&}文字"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\p1}m 0 0 l 40 0 40 40 0 40{\\p0\\c&H010101&}文字"],
+      "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}],
+      "reserved_rgb": ["ffffff"]
+    }
+  ]
+}
