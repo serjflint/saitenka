@@ -30,7 +30,7 @@
     {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480]},
     {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080]},
     {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720]},
-    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1920, 720]}
+    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480]}
   ],
   "contracts": ["native-fidelity", "interactive-styled"],
   "thresholds": {
@@ -57,6 +57,6 @@
     "control_count": 5,
     "control_key_set_sha256": "9287f16eae7fbd3222bd6abfc9a0d471eb892d751d68ace0f02042481625541d",
     "matrix_count": 360,
-    "contract_sha256": "fa8617b0237cbee49640407e677cbf0315433ee713f4654669cdc12408b0cc58"
+    "contract_sha256": "0ef397c6c9cbf6d811d6b52a90875d099c5f6d0b3cd76cf010ccb4c621a1498d"
   }
 }

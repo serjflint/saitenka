@@ -116,8 +116,8 @@ def test_contract_report_is_publishable_only_after_controls_pass() -> None:
             "4/3",
         ),
         (
-            {"frame_size": [1280, 720], "storage_size": [1920, 720]},
-            (1920, 720),
+            {"frame_size": [1280, 720], "storage_size": [1280, 480]},
+            (1280, 480),
             "2/3",
         ),
     ],
@@ -144,6 +144,7 @@ def test_render_input_checks_reject_subsampled_or_wrong_storage_geometry() -> No
             "h": 720,
             "dw": 1280,
             "dh": 720,
+            "par": 1.0,
             "pixelformat": "yuv420p",
         },
         "options/sub-ass-use-video-data": "all",
@@ -152,9 +153,10 @@ def test_render_input_checks_reject_subsampled_or_wrong_storage_geometry() -> No
         "options/sub-scale": 1.0,
         "options/sub-pos": 100.0,
     }
-    checks = oracle._render_input_checks(inputs, (1280, 720), (1920, 720), (1280, 720))
+    checks = oracle._render_input_checks(inputs, (1280, 720), (1920, 720), (1280, 720), 2 / 3)
     assert checks["lossless-444-capture"] is False
     assert checks["video-storage-size"] is False
+    assert checks["video-pixel-aspect"] is False
     assert not all(checks.values())
 
 
@@ -191,7 +193,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
                 "resize-480p": (854, 480),
                 "retina-1080p": (1920, 1080),
                 "wide-pixel-aspect": (960, 720),
-                "tall-pixel-aspect": (1920, 720),
+                "tall-pixel-aspect": (1280, 480),
             }
             profile_id = next(name for name in sizes if _label.startswith(name))
             frame_size = sizes[profile_id]
@@ -213,6 +215,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
                         "h": storage_size[1],
                         "dw": frame_size[0],
                         "dh": frame_size[1],
+                        "par": frame_size[0] * storage_size[1] / frame_size[1] / storage_size[0],
                         "pixelformat": "yuv444p",
                     },
                     "options/sub-ass-use-video-data": "all",
@@ -259,6 +262,11 @@ def test_live_runner_emits_every_locked_matrix_cell(
         for row in report["cases"]
     )
     assert all(all(row["render_input_checks"].values()) for row in report["cases"])
+    assert all(
+        row["mpv_render_inputs"]["video-out-params"]["par"]
+        == pytest.approx(row["expected_pixel_aspect"], abs=1e-6)
+        for row in report["cases"]
+    )
     assert {
         (row["case_id"], row["source_class"], row["profile_id"], row["contract"])
         for row in report["cases"]

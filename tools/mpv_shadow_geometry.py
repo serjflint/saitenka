@@ -293,6 +293,7 @@ def _shadow_result(
     timestamp_ms: int,
     frame_size: tuple[int, int],
     storage_size: tuple[int, int],
+    pixel_aspect: float,
 ) -> tuple[Any, Any]:
     import libasslite  # noqa: TID251 -- Gate D directly verifies the wrapper boundary.
 
@@ -302,7 +303,12 @@ def _shadow_result(
         [(font.name, font.read_bytes()) for font in fonts],
         library_path=os.environ.get("LIBASSLITE_LIBRARY"),
     )
-    return renderer, renderer.render(timestamp_ms, frame_size, storage_size)
+    return renderer, renderer.render(
+        timestamp_ms,
+        frame_size,
+        storage_size,
+        pixel_aspect=pixel_aspect,
+    )
 
 
 def _write_clip(
@@ -340,6 +346,12 @@ def _clip_geometry(profile: dict[str, Any]) -> tuple[tuple[int, int], str]:
     storage_width, storage_height = profile["storage_size"]
     ratio = Fraction(frame_width * storage_height, frame_height * storage_width)
     return (storage_width, storage_height), f"{ratio.numerator}/{ratio.denominator}"
+
+
+def _pixel_aspect(profile: dict[str, Any]) -> float:
+    frame_width, frame_height = profile["frame_size"]
+    storage_width, storage_height = profile["storage_size"]
+    return float(Fraction(frame_width * storage_height, frame_height * storage_width))
 
 
 def _capture_mask(
@@ -510,12 +522,16 @@ def _render_input_checks(
     frame_size: tuple[int, ...],
     storage_size: tuple[int, ...],
     observed_size: tuple[int, int],
+    pixel_aspect: float,
 ) -> dict[str, bool]:
     video = render_inputs["video-out-params"]
     return {
         "screenshot-frame-size": observed_size == frame_size,
         "video-display-size": (video.get("dw"), video.get("dh")) == frame_size,
         "video-storage-size": (video.get("w"), video.get("h")) == storage_size,
+        "video-pixel-aspect": isinstance(video.get("par"), (int, float))
+        and not isinstance(video.get("par"), bool)
+        and abs(float(video["par"]) - pixel_aspect) <= 1e-6,
         "lossless-444-capture": video.get("pixelformat") == "yuv444p",
         "ass-video-data": render_inputs["options/sub-ass-use-video-data"] == "all",
         "authored-ass-style": render_inputs["options/sub-ass-override"] in {False, "no"},
@@ -538,6 +554,7 @@ def _evaluate_cell(
 ) -> list[dict[str, Any]]:
     frame_size = tuple(profile["frame_size"])
     storage_size = tuple(profile["storage_size"])
+    pixel_aspect = _pixel_aspect(profile)
     ass_data = _d_ass_bytes(case[event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
@@ -551,6 +568,7 @@ def _evaluate_cell(
         int(case["timestamp_ms"]),
         frame_size,
         storage_size,
+        pixel_aspect,
     )
     try:
         shadow_mask = layer_support(result)
@@ -565,7 +583,13 @@ def _evaluate_cell(
             minimum_iou=float(thresholds["minimum_mask_iou"]),
             maximum_distance=int(thresholds["maximum_chebyshev_distance_px"]),
         )
-        input_checks = _render_input_checks(render_inputs, frame_size, storage_size, observed_size)
+        input_checks = _render_input_checks(
+            render_inputs,
+            frame_size,
+            storage_size,
+            observed_size,
+            pixel_aspect,
+        )
         assessment = replace(assessment, passed=assessment.passed and all(input_checks.values()))
         return [
             {
@@ -576,6 +600,7 @@ def _evaluate_cell(
                 "shared_render_sources": list(sources),
                 "expected_frame_size": list(frame_size),
                 "observed_frame_size": list(observed_size),
+                "expected_pixel_aspect": pixel_aspect,
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,
                 "mpv_difference_threshold_support": difference_threshold_support,
