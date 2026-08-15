@@ -56,6 +56,7 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
             -1,
             "component limit",
         ),
+        (("profiles", 0, "maximum_unsafe_low_delta_pixels"), -1, "total limit"),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -390,6 +391,10 @@ def test_live_runner_emits_every_locked_matrix_cell(
     assert all(
         row["largest_unsafe_low_delta_component_pixels"]
         <= row["maximum_unsafe_low_delta_component_pixels"]
+        for row in report["cases"]
+    )
+    assert all(
+        row["unsafe_low_delta_pixels"] <= row["maximum_unsafe_low_delta_pixels"]
         for row in report["cases"]
     )
     assert all(

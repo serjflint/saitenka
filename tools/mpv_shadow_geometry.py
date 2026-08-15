@@ -184,6 +184,9 @@ def _validate_profile(profile: dict[str, Any]) -> None:
         or component_limit < 0
     ):
         raise ValueError("profile unsafe low-delta component limit must be non-negative")
+    total_limit = profile.get("maximum_unsafe_low_delta_pixels")
+    if isinstance(total_limit, bool) or not isinstance(total_limit, int) or total_limit < 0:
+        raise ValueError("profile unsafe low-delta total limit must be non-negative")
 
 
 def _validate_upstream_ids(
@@ -277,12 +280,12 @@ def shifted(mask: Mask, dx: int, dy: int) -> Mask:
 def _profile_filter_rejects_retained_overlay(
     profile: dict[str, Any], thresholds: dict[str, Any]
 ) -> bool:
-    width = 40
+    width = 80
     core = frozenset((x, y) for x in range(5, 15) for y in range(5, 15))
     extra = frozenset((x, y) for x in range(25, 30) for y in range(20, 25))
     envelope_delta = int(profile["screenshot_envelope_threshold"])
     minimum_delta = int(profile["screenshot_delta_threshold"])
-    deltas = bytearray(width * 30)
+    deltas = bytearray(width * 60)
     for x, y in core:
         deltas[y * width + x] = envelope_delta
     for x, y in extra:
@@ -292,11 +295,34 @@ def _profile_filter_rejects_retained_overlay(
             deltas[14 * width + x] = minimum_delta
         for y in range(14, 20):
             deltas[y * width + 24] = minimum_delta
+    coherent_rejected = _filtered_candidate_rejected(
+        profile, thresholds, bytes(deltas), width, core
+    )
+    fragmented = bytearray(width * 60)
+    for x, y in core:
+        fragmented[y * width + x] = envelope_delta
+    for index in range(80):
+        x = 30 + (index % 10) * 3
+        y = 20 + (index // 10) * 3
+        fragmented[y * width + x] = minimum_delta
+    fragmented_rejected = _filtered_candidate_rejected(
+        profile, thresholds, bytes(fragmented), width, core
+    )
+    return coherent_rejected and fragmented_rejected
+
+
+def _filtered_candidate_rejected(
+    profile: dict[str, Any],
+    thresholds: dict[str, Any],
+    deltas: bytes,
+    width: int,
+    core: Mask,
+) -> bool:
     overlap, support, unsafe = _comparison_masks(
-        bytes(deltas),
+        deltas,
         width,
-        minimum_delta=minimum_delta,
-        envelope_delta=envelope_delta,
+        minimum_delta=int(profile["screenshot_delta_threshold"]),
+        envelope_delta=int(profile["screenshot_envelope_threshold"]),
         envelope_distance=int(profile["screenshot_envelope_distance_px"]),
     )
     assessment = assess_masks(
@@ -308,7 +334,8 @@ def _profile_filter_rejects_retained_overlay(
         support_reference=support,
     )
     return (
-        _largest_component(unsafe) > int(profile["maximum_unsafe_low_delta_component_pixels"])
+        len(unsafe) > int(profile["maximum_unsafe_low_delta_pixels"])
+        or _largest_component(unsafe) > int(profile["maximum_unsafe_low_delta_component_pixels"])
         or not assessment.passed
     )
 
@@ -762,6 +789,7 @@ def _evaluate_cell(
     screenshot_delta = _screenshot_delta_threshold(profile)
     screenshot_envelope = int(profile["screenshot_envelope_threshold"])
     screenshot_envelope_distance = int(profile["screenshot_envelope_distance_px"])
+    unsafe_total_limit = int(profile["maximum_unsafe_low_delta_pixels"])
     unsafe_component_limit = int(profile["maximum_unsafe_low_delta_component_pixels"])
     mpv_ass_data = _d_ass_bytes(case[mpv_event_key])
     shadow_ass_data = _d_ass_bytes(case[shadow_event_key])
@@ -816,6 +844,7 @@ def _evaluate_cell(
         assessment = replace(
             assessment,
             passed=assessment.passed
+            and len(unsafe_low_delta_mask) <= unsafe_total_limit
             and _largest_component(unsafe_low_delta_mask) <= unsafe_component_limit
             and all(input_checks.values()),
         )
@@ -835,6 +864,7 @@ def _evaluate_cell(
                 "screenshot_delta_threshold": screenshot_delta,
                 "screenshot_envelope_threshold": screenshot_envelope,
                 "screenshot_envelope_distance": screenshot_envelope_distance,
+                "maximum_unsafe_low_delta_pixels": unsafe_total_limit,
                 "maximum_unsafe_low_delta_component_pixels": unsafe_component_limit,
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,

@@ -26,11 +26,11 @@
     "synthetic-ass-from-text"
   ],
   "profiles": [
-    {"id": "baseline-720p", "frame_size": [1280, 720], "storage_size": [1280, 720], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_component_pixels": 0},
-    {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_component_pixels": 0},
-    {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_component_pixels": 0},
-    {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720], "screenshot_delta_threshold": 8, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1, "maximum_unsafe_low_delta_component_pixels": 4},
-    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480], "screenshot_delta_threshold": 16, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1, "maximum_unsafe_low_delta_component_pixels": 0}
+    {"id": "baseline-720p", "frame_size": [1280, 720], "storage_size": [1280, 720], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0},
+    {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0},
+    {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0},
+    {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720], "screenshot_delta_threshold": 8, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1, "maximum_unsafe_low_delta_pixels": 64, "maximum_unsafe_low_delta_component_pixels": 4},
+    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480], "screenshot_delta_threshold": 16, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0}
   ],
   "contracts": ["native-fidelity", "interactive-styled"],
   "thresholds": {
@@ -71,6 +71,6 @@
     "render_input_check_count": 9,
     "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
     "matrix_count": 360,
-    "contract_sha256": "e0bf5ce14ee3365dcbbb52391451f04e1a37a8bc9c4ac1b54ed4b0a01ae6a219"
+    "contract_sha256": "e1dab65348f79c9e6ef57a1fa415e6f50b4f04ab4bed7eb3a990493d40bdc044"
   }
 }
