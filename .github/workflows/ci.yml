@@ -146,7 +146,25 @@ jobs:
           uv python install ${{ matrix.py }}
           cargo test --locked
           cargo clippy --all-targets -- -D warnings
-          uv run --python ${{ matrix.py }} --with-editable . --with pytest pytest -q tests
+          uv run --python ${{ matrix.py }} --with-editable . --with pytest pytest -q -m 'not integration' tests ../tools/test_libass_token_matrix.py
+      - name: Run token-ID matrix
+        id: token-matrix
+        working-directory: libasslite
+        shell: bash
+        env:
+          LIBASSLITE_FONT_PROVIDER_EVIDENCE: not exposed by public ABI; see token-matrix-libass.log
+        run: |
+          set -o pipefail
+          uv run --python ${{ matrix.py }} --with-editable . python ../tools/libass_token_matrix.py --manifest ../tests/fixtures/libass_token_matrix.json --output token-matrix.json 2>&1 | tee token-matrix-libass.log
+      - name: Upload token-ID matrix evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: libass-token-matrix-${{ runner.os }}-${{ matrix.py }}
+          path: |
+            libasslite/token-matrix.json
+            libasslite/token-matrix-libass.log
+          if-no-files-found: warn
       - name: Verify locked dependency notices
         if: runner.os == 'Linux' && matrix.py == '3.13'
         working-directory: libasslite
