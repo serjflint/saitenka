@@ -221,7 +221,7 @@ jobs:
         working-directory: libasslite
         shell: bash
         env:
-          PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}/tools
+          PYTHONPATH: ${{ github.workspace }}/src
         run: |
           set -o pipefail
           uv run --python ${{ matrix.py }} --with-editable . \
