@@ -1,0 +1,16 @@
+[Script Info]
+Title: Saitenka Gate B external ASS
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans JP Thin,48,&H000000FF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,8,24,24,32,1
+Style: Sign,Noto Sans JP Thin,30,&H0000FFFF,&H0000FFFF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,1,0,5,24,24,24,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:08.00,Default,Narrator,0,0,0,,原稿の字幕
+Dialogue: 1,0:00:00.00,0:00:08.00,Sign,Board,0,0,0,,{\pos(640,360)}門前

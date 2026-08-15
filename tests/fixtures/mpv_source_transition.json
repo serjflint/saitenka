@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "denominator": {
+    "source_count": 4,
+    "source_key_set_sha256": "9f7cd370449d1726c836cb601a1834a63e12c77b8fae5aa91dfcce25d99be965",
+    "render_input_count": 14,
+    "render_input_key_set_sha256": "d2de6f43d11c0501404e92c33d0194cdd6151b79420bdd66238ee410da29a517",
+    "required_control_count": 6,
+    "required_control_key_set_sha256": "7af5563c046a994ec25f0030b52d26f5e81a283ad8663d7f22c48805d8a6ac2e",
+    "contract_sha256": "41d0ec376da9bda5f1a2234b7f54150635195755f9c2771a9d0bc3852d1b28c5"
+  },
+  "sources": [
+    {
+      "id": "external-ass",
+      "kind": "external-ass",
+      "expectation": "supported",
+      "ass": "mpv_source_envelope/external.ass",
+      "ass_sha256": "fc19ec009b086a12a73f672918540d4911050f4d200b7e7b13c772e02d64e72a",
+      "attachments": []
+    },
+    {
+      "id": "embedded-ass-with-font",
+      "kind": "embedded-ass",
+      "expectation": "supported-after-extraction",
+      "ass": "mpv_source_envelope/external.ass",
+      "ass_sha256": "fc19ec009b086a12a73f672918540d4911050f4d200b7e7b13c772e02d64e72a",
+      "attachments": [
+        {
+          "path": "src/saitenka/assets/fonts/NotoSansJP.ttf",
+          "sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-ass-from-text",
+      "kind": "synthetic-text",
+      "expectation": "supported-with-paired-ass",
+      "source": "mpv_source_envelope/synthetic.srt",
+      "source_sha256": "dfc101b29dec075d49a300b963c6a165dd19d94730d4a4d67823fd611ca77553",
+      "ass": "mpv_source_envelope/synthetic.ass",
+      "ass_sha256": "c0d3837bad67de7aca73ed6deefd3e8fcd5d55f435625dd2cf35b5eb7de39d93",
+      "attachments": []
+    },
+    {
+      "id": "remote-source-unavailable",
+      "kind": "remote-stream",
+      "expectation": "native-visible-fallback",
+      "uri": "https://example.invalid/episode.m3u8",
+      "reason": "authored-source-unavailable"
+    }
+  ],
+  "render_inputs": [
+    {"name": "raw-events", "owner": "source-delivery", "required": true},
+    {"name": "style-extradata", "owner": "source-delivery", "required": true},
+    {"name": "font-attachments", "owner": "source-delivery", "required": true},
+    {"name": "frame-size", "owner": "mpv:osd-dimensions", "required": true},
+    {"name": "storage-size", "owner": "mpv:video-out-params", "required": true},
+    {"name": "pixel-aspect", "owner": "mpv:video-out-params/par", "required": true},
+    {"name": "subtitle-position", "owner": "mpv:sub-pos/sub-margin-y", "required": true},
+    {"name": "subtitle-scale", "owner": "mpv:sub-scale", "required": true},
+    {"name": "style-overrides", "owner": "mpv:sub-ass-override/sub-ass-style-overrides", "required": true},
+    {"name": "margin-policy", "owner": "mpv:sub-use-margins/sub-ass-use-video-data", "required": true},
+    {"name": "wrapping-layout", "owner": "mpv:sub-ass-vsfilter-aspect-compat/sub-ass-use-video-data", "required": true},
+    {"name": "libass-version", "owner": "runtime-library", "required": true},
+    {"name": "font-provider", "owner": "libass-log", "required": true},
+    {"name": "font-inventory", "owner": "runtime-filesystem", "required": true}
+  ],
+  "transition": {
+    "generated_ass": "mpv_source_envelope/generated.ass",
+    "generated_ass_sha256": "37aa924b8d898a48211ee4390120824cecc748791540e5b0c9fc22a417104feb",
+    "observed_properties": ["track-list", "sid", "sub-text", "pause"],
+    "candidates": ["live-switch", "paused-only-switch", "native-visible"],
+    "selected_contract": "native-visible",
+    "reason": "public IPC can sample screenshots but has no exact presented-frame callback",
+    "duplicate_minimum_coverage": 0.99,
+    "required_controls": [
+      "wrong-track",
+      "blank-frame",
+      "duplicate-layer",
+      "missing-attachment",
+      "unavailable-source",
+      "generated-file-cleanup"
+    ]
+  }
+}

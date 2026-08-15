@@ -546,7 +546,7 @@ test = { shell = "uv run --extra full pytest -q -n auto -m 'not (slow or integra
 subtitle-test = { shell = "uv run --extra full pytest -q -n auto tests/test_sub_index.py tests/test_sub_index_properties.py tests/test_subtitle_metamorphic.py" }
 # Deterministic unit coverage for the Grow/Sharpen and reporting tools. Explicit path because pytest's
 # package testpaths intentionally stays on the shipped overlay suite.
-loop-tools-test = { shell = "uv run --extra full pytest -q tools" }
+loop-tools-test = { shell = "uv run --extra full pytest -q -m 'not integration' tools" }
 # Independent package surfaces stay runnable without the overlay dependency graph.
 package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-dict/pyproject.toml -m 'not integration' saitenka-dict/tests && uv run --project ankiconnect-client pytest -q -c ankiconnect-client/pyproject.toml ankiconnect-client/tests" }
 # Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
