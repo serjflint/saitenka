@@ -457,6 +457,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         StatsOptions,
         TooltipOptions,
         TranslationOptions,
+        subtitle_geometry_options,
     )
 
     _ko, _tt, _mo, _po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
@@ -520,6 +521,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
             head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
         ),
+        subtitle_geometry=subtitle_geometry_options(cfg),
         prefetch=flags.prefetch,
     )
 

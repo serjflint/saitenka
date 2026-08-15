@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from saitenka import otel_metrics
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.subtitles import render_plain_subtitle, render_subtitle
+from saitenka.app.subtitles import render_focus_box, render_plain_subtitle, render_subtitle
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
@@ -78,3 +78,33 @@ class NullRenderer:
 
     def draw(self, reader: Reader) -> None:
         pass
+
+
+class NativeVisibleRenderer:
+    """Leave authored mpv subtitles visible and draw only the hover focus box."""
+
+    def __init__(self) -> None:
+        self._active = False
+
+    def activate(self, reader: Reader) -> None:
+        reader.ipc.command("set_property", "sub-visibility", True)  # noqa: FBT003
+        self._active = True
+
+    def draw(self, reader: Reader) -> None:
+        if not self._active:
+            self.activate(reader)
+        if reader.hover < 0 or reader.hover >= len(reader.boxes):
+            reader.ov.hide(SUB_ID)
+            return
+        span = reader._hover_span or (reader.hover, reader.hover + 1)
+        selected = [box for box in reader.boxes if span[0] <= box.index < span[1]]
+        if not selected:
+            reader.ov.hide(SUB_ID)
+            return
+        left = min(box.x for box in selected)
+        top = min(box.y for box in selected)
+        right = max(box.x + box.w for box in selected)
+        bottom = max(box.y + box.h for box in selected)
+        pad = 3
+        image = render_focus_box(right - left + 2 * pad, bottom - top + 2 * pad)
+        reader.ov.show(image, left - pad, top - pad, oid=SUB_ID)

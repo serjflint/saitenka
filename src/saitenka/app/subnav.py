@@ -7,6 +7,7 @@ Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating metho
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
@@ -25,6 +26,10 @@ def load_sub_index(reader: Reader, path) -> None:
     if idx is None:
         return
     reader._sub_index = idx
+    native_geometry = getattr(reader, "native_geometry", None)
+    if native_geometry is not None:
+        reader.subtitle_pipeline.invalidate()
+        native_geometry.set_source(Path(path))
     from saitenka.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)
@@ -83,7 +88,11 @@ def sub_nav(reader: Reader, delta: int) -> bool:
         # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
         # before landing on the real target; reconcile below must not mistake that for a correction.
         reader._nav_prev_text = reader.sub_text
-        reader.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
+        reader._geometry_cue_hint = idx.cues[tgt]
+        try:
+            reader.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
+        finally:
+            reader._geometry_cue_hint = None
         reader._nav_idx = tgt
         # Guard the reconcile: mpv's sub-text briefly reads empty (or the pre-nav cue) mid-seek;
         # ignoring that avoids reverting the render before it settles. ~1s covers a slow seek.

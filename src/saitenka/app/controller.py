@@ -25,6 +25,7 @@ from saitenka.app import (
     hover_snapshot,
     mined_store,
     miner_ui,
+    native_subtitles,
     nested_popup,
     popups,
     prefetch,
@@ -99,14 +100,18 @@ from saitenka.app.reader_context import (
     SessionContext,
 )
 from saitenka.app.runtime import CommandRouter, TickPipeline, TickStage
-from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
-from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
+from saitenka.app.subtitle_pipeline import (
+    CurrentSubtitleRenderer,
+    SubtitleGeometryWorker,
+    SubtitleModeCoordinator,
+)
+from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer, SubtitleRenderer
 from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.osd import Overlay
-from saitenka.subtitles import CueIndex
+from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -116,6 +121,7 @@ if TYPE_CHECKING:
     from saitenka.app.render_cache import RenderCache
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.panel import Freq
+    from saitenka.subtitles import GeometryBackend
 
 log = logging.getLogger(__name__)
 
@@ -138,6 +144,10 @@ OBSERVED_PROPS = (
     "pause",
     "secondary-sub-text",
     "sid",
+    "sub-start",
+    "sub-end",
+    "time-pos",
+    "video-out-params",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
 )
 
@@ -263,7 +273,7 @@ class Reader:
     _tip_show_cold = Delegated[bool]("tip", "tip_show_cold")
     _panel_cache = Delegated[OrderedDict]("tip", "panel_cache")
 
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
         ipc: MpvIPC,
         scorer=None,
@@ -272,6 +282,7 @@ class Reader:
         dict_set=None,
         options: ReaderOptions | None = None,
         renderer: SubtitleRenderer | NullRenderer | None = None,
+        geometry_backend: GeometryBackend | None = None,
         profile: Profile | None = None,
         **legacy_kw,
     ):
@@ -290,9 +301,32 @@ class Reader:
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
-        self.subtitle_pipeline = SubtitleModeCoordinator(
-            renderer or SubtitleRenderer()
-        )  # subtitle raster; NullRenderer() = headless
+        current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
+        self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
+        if o.subtitle_geometry.native_visible:
+            if renderer is None:
+                current_renderer = NativeVisibleRenderer()
+            if geometry_backend is None:
+                from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+                library_path = (
+                    Path(o.subtitle_geometry.library_path)
+                    if o.subtitle_geometry.library_path
+                    else None
+                )
+                geometry_backend = LibassGeometryBackend(
+                    library_path=library_path,
+                    renderer_cache_max=o.subtitle_geometry.cache_max,
+                )
+        self.subtitle_pipeline = SubtitleModeCoordinator(current_renderer, geometry_backend)
+        if o.subtitle_geometry.native_visible:
+            self.native_geometry = native_subtitles.NativeSubtitleGeometry(
+                SubtitleGeometryWorker(
+                    self.subtitle_pipeline,
+                    cache_max=o.subtitle_geometry.cache_max,
+                ),
+                lookahead=o.subtitle_geometry.lookahead,
+            )
         self.sub_size_override = o.tooltip.sub_size
         self.bottom_margin_frac = o.tooltip.bottom_margin_frac
         # Alpha (0–255) of the translucent box behind the rendered subtitle; 0 = no box (fully see-through).
@@ -503,6 +537,7 @@ class Reader:
         )
         self.boxes: list = []
         self.sub_origin: tuple[int, int] = (0, 0)
+        self._geometry_cue_hint: Cue | None = None
         self.hover = -1
         self._nudge_pending = (
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
@@ -625,6 +660,8 @@ class Reader:
             self._observed[name] = ev.get("data")
             if name == "sid" and changed:
                 self.subtitle_pipeline.invalidate()
+                if self.native_geometry is not None:
+                    self.native_geometry.set_source(None)
                 subtitle_modes.on_primary_changed(self, ev.get("data"))
 
     def refresh_osd(self) -> bool:
@@ -747,6 +784,9 @@ class Reader:
         # draw the cue PLAIN now; reader_deps re-renders it in place once deps land. A cache hit or a
         # deps-ready miss tokenizes synchronously (fast) and annotates immediately.
         self._sub_pending = norm if self.dict_set is None else None
+        if self.native_geometry is not None:
+            self.boxes = []
+            self.native_geometry.schedule(self)
         self._draw_subtitle()
 
     @staticmethod
@@ -789,6 +829,8 @@ class Reader:
         segmentation into the new profile."""
         self.tokenizer = tokenizer
         self.subtitle_pipeline.invalidate()
+        if self.native_geometry is not None:
+            self.native_geometry.invalidate()
         self.token_cache.clear()
 
     def set_profile_cycle(
@@ -1764,6 +1806,8 @@ class Reader:
         analysis_overlay.apply_results(self)
         sub_picker.update(self)
         sidebar.update(self)
+        if self.native_geometry is not None:
+            self.native_geometry.apply(self)
 
     def _update_interaction(self) -> None:
         self._update_hover()
@@ -2037,7 +2081,10 @@ class Reader:
             th.join(timeout=2.0)
         for th in self.analysis.threads:
             th.join(timeout=2.0)
-        self.subtitle_pipeline.close()
+        if self.native_geometry is not None:
+            self.native_geometry.close()
+        else:
+            self.subtitle_pipeline.close()
         stats_summary = session_stats.finish(self)
         if stats_summary and self.options.stats.summary:
             print(f"[saitenka] session: {stats_summary}")  # noqa: T201  # requested close summary

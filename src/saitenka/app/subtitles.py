@@ -37,6 +37,21 @@ SIDEBAR_STATUS = {
 }
 
 
+def render_focus_box(width: int, height: int) -> Image.Image:
+    """Draw the native-subtitle interaction focus without owning subtitle pixels."""
+    if width <= 0 or height <= 0:
+        raise ValueError("focus box dimensions must be positive")
+    image = Image.new("RGBA", (width, height))
+    ImageDraw.Draw(image).rounded_rectangle(
+        (0, 0, width - 1, height - 1),
+        radius=4,
+        fill=(255, 214, 90, 32),
+        outline=(255, 214, 90, 220),
+        width=2,
+    )
+    return image
+
+
 @dataclass(frozen=True)
 class WordBox:
     index: int  # global (flat) token index

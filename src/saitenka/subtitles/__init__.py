@@ -12,7 +12,9 @@ from saitenka.subtitles.ass import (
     parse_ass_styles,
     rewrite_ass_event,
     serialize_ass_event_line,
+    source_primary_bgr_colors,
 )
+from saitenka.subtitles.ass_geometry import PreparedAssGeometry, prepare_ass_hit_map
 from saitenka.subtitles.document import (
     AnnotatedSubtitleEvent,
     DecodedSubtitleEvent,
@@ -27,6 +29,7 @@ from saitenka.subtitles.document import (
 )
 from saitenka.subtitles.geometry import (
     GeometryBackend,
+    GeometryPaletteEntry,
     GeometryRequest,
     GeometrySnapshot,
     GeometryVariant,
@@ -47,9 +50,11 @@ __all__ = [
     "DecodedSubtitleEvent",
     "DrawingSpan",
     "GeometryBackend",
+    "GeometryPaletteEntry",
     "GeometryRequest",
     "GeometrySnapshot",
     "GeometryVariant",
+    "PreparedAssGeometry",
     "RawSubtitleEvent",
     "RawSubtitleTrack",
     "RawTextSpan",
@@ -68,6 +73,8 @@ __all__ = [
     "parse_ass_styles",
     "parse_cues",
     "parse_srt",
+    "prepare_ass_hit_map",
     "rewrite_ass_event",
     "serialize_ass_event_line",
+    "source_primary_bgr_colors",
 ]

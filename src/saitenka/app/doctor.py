@@ -16,6 +16,7 @@ hermetic in tests (no network, no real files).
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import shutil
@@ -651,6 +652,42 @@ def check_mpv_ipc() -> Check:
     )
 
 
+def check_subtitle_geometry() -> Check:
+    from saitenka.app.config import subtitle_geometry_options
+
+    options = subtitle_geometry_options(load_config())
+    if not options.native_visible:
+        return Check(
+            "subtitle-geometry",
+            "ok",
+            "native-visible subtitle geometry disabled (experimental)",
+            info=True,
+        )
+    probe = b"""[Script Info]\nScriptType: v4.00+\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,probe\n"""
+    try:
+        module = importlib.import_module("libasslite")
+        renderer = module.AssRenderer(
+            probe,
+            library_path=Path(options.library_path) if options.library_path else None,
+        )
+        try:
+            path = renderer.library_path()
+            version = renderer.library_version()
+        finally:
+            renderer.close()
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        return Check(
+            "subtitle-geometry",
+            "warn",
+            f"native-visible geometry unavailable: {error}; mpv subtitles remain visible",
+        )
+    return Check(
+        "subtitle-geometry",
+        "ok",
+        f"native-visible geometry ready — libass ABI 0x{version:08x} ({path})",
+    )
+
+
 def check_plugin() -> Check:
     """The mpv user-script (plugin mode). Absent is fine — plugin mode is opt-in. If installed,
     catch the two ways it silently no-ops on mpv launch:
@@ -1204,6 +1241,7 @@ def run_checks(deck: str | None = None, model: str | None = None) -> Report:
         check_mine_mapping(),
         check_deeplink_id(),
         check_known(),
+        check_subtitle_geometry(),
         check_mpv_ipc(),
         check_mpv_socket(),
         check_plugin(),
