@@ -327,8 +327,11 @@ def test_real_mpv_reports_track_identity_and_events_for_pause_and_playback(tmp_p
     supported = [source for source in MANIFEST["sources"] if source["kind"] != "remote-stream"]
     assert set(deliveries) == {source["id"] for source in supported}
     assert all(
-        deliveries[source["id"]]["input_sha256"] == source["ass_sha256"] for source in supported
+        deliveries[source["id"]]["input_sha256"] == source["ass_sha256"]
+        for source in supported
+        if source["kind"] != "embedded-ass"
     )
+    assert deliveries[embedded.id]["input_sha256"] == embedded.mpv_input_sha256
     assert deliveries[embedded.id]["container_sha256"] == embedded.container_sha256
     assert deliveries[embedded.id]["attachments"] == dict(embedded.attachments)
     assert all(

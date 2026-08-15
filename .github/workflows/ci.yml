@@ -134,7 +134,16 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          vcpkg install libass:x64-windows
+          $installed = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            vcpkg install libass:x64-windows
+            if ($LASTEXITCODE -eq 0) {
+              $installed = $true
+              break
+            }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
+          }
+          if (-not $installed) { throw "vcpkg failed to install libass after 3 attempts" }
           $bin = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin"
           $dll = Get-ChildItem $bin | Where-Object { $_.Name -match '^(lib)?ass(-9)?\.dll$' } | Select-Object -First 1
           if (-not $dll) { throw "vcpkg installed no libass DLL" }
