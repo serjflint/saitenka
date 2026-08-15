@@ -70,7 +70,7 @@ def test_manifest_rejects_weakened_execution_contract(
 
 def test_every_locked_negative_control_proves_the_oracle_can_fail() -> None:
     manifest = load_manifest(MANIFEST, repo_root=ROOT)
-    controls = exercise_controls(manifest["thresholds"])
+    controls = exercise_controls(manifest["thresholds"], manifest["profiles"])
     assert set(controls) == set(manifest["required_controls"])
     assert all(controls.values())
 
@@ -160,13 +160,55 @@ def test_anamorphic_screenshot_comparison_excludes_resampling_fringe() -> None:
 
 def test_comparison_mask_keeps_antialiasing_only_near_high_confidence_envelope() -> None:
     mask = oracle._comparison_mask(
-        bytes((8, 8, 16, 8, 8)),
-        5,
+        bytes((8, 16, 8)),
+        3,
         minimum_delta=8,
         envelope_delta=16,
         envelope_distance=1,
     )
-    assert mask == {(1, 0), (2, 0), (3, 0)}
+    assert mask == {(0, 0), (1, 0), (2, 0)}
+
+
+def test_comparison_masks_report_low_delta_evidence_outside_bounded_fringe() -> None:
+    comparison, support, unsafe = oracle._comparison_masks(
+        bytes((16, 0, 8)),
+        3,
+        minimum_delta=8,
+        envelope_delta=16,
+        envelope_distance=1,
+    )
+    assert comparison == {(0, 0)}
+    assert support == {(0, 0)}
+    assert unsafe == {(2, 0)}
+
+
+def test_comparison_masks_reject_connected_distant_low_delta_evidence() -> None:
+    comparison, _, unsafe = oracle._comparison_masks(
+        bytes((16, 8, 8, 8)),
+        4,
+        minimum_delta=8,
+        envelope_delta=16,
+        envelope_distance=1,
+    )
+    assert comparison == {(0, 0), (1, 0)}
+    assert unsafe == {(2, 0), (3, 0)}
+
+
+def test_mpv_abnormal_exit_is_never_accepted() -> None:
+    with pytest.raises(RuntimeError, match="exited with -11"):
+        oracle._validate_mpv_exit(-11, "crash log")
+
+
+def test_mpv_font_directory_contains_only_selected_fonts(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    selected = source / "selected.ttf"
+    selected.write_bytes(b"selected")
+    (source / "unrelated.ttf").write_bytes(b"unrelated")
+    font_dir = oracle._materialize_fonts(tmp_path, (selected,))
+    assert {path.name: path.read_bytes() for path in font_dir.iterdir()} == {
+        "selected.ttf": b"selected"
+    }
 
 
 def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable() -> None:
@@ -210,6 +252,8 @@ def test_live_runner_emits_every_locked_matrix_cell(
             pass
 
     class Session:
+        captures = 0
+
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
@@ -225,10 +269,12 @@ def test_live_runner_emits_every_locked_matrix_cell(
         ) -> tuple[
             frozenset[tuple[int, int]],
             frozenset[tuple[int, int]],
+            frozenset[tuple[int, int]],
             tuple[int, int],
             dict[str, dict[str, object]],
             dict[str, object],
         ]:
+            type(self).captures += 1
             sizes = {
                 "baseline-720p": (1280, 720),
                 "resize-480p": (854, 480),
@@ -259,6 +305,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
             return (
                 mask,
                 mask,
+                frozenset(),
                 frame_size,
                 {
                     str(threshold): {
@@ -268,7 +315,6 @@ def test_live_runner_emits_every_locked_matrix_cell(
                     for threshold in (1, 2, 4, 8, 16)
                 },
                 {
-                    "osd-dimensions": {"w": 1280, "h": 720},
                     "video-out-params": {
                         "w": storage_size[0],
                         "h": storage_size[1],
@@ -310,6 +356,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
     manifest = load_manifest(MANIFEST, repo_root=ROOT)
     assert report["matrix_passed"] is True
     assert len(report["cases"]) == 360
+    assert Session.captures == 360
     assert all(row["frame_size_matches"] for row in report["cases"])
     assert all(
         row["mpv_difference_threshold_support"]["1"]["pixels"] == len(mask)
@@ -328,6 +375,12 @@ def test_live_runner_emits_every_locked_matrix_cell(
     assert all(
         row["expected_renderer_pixel_aspect"]
         == pytest.approx(row["expected_video_pixel_aspect"], abs=1e-6)
+        for row in report["cases"]
+    )
+    assert all(row["unsafe_low_delta_pixels"] == 0 for row in report["cases"])
+    assert all(
+        (row["mpv_ass_sha256"] == row["shadow_ass_sha256"])
+        is (row["contract"] == "native-fidelity")
         for row in report["cases"]
     )
     assert {(row["profile_id"], row["screenshot_delta_threshold"]) for row in report["cases"]} == {

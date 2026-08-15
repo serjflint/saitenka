@@ -43,7 +43,8 @@
     "retained-overlay",
     "shifted-hit-map",
     "blank-frame",
-    "duplicate-layer"
+    "duplicate-layer",
+    "screenshot-filter"
   ],
   "required_render_input_checks": [
     "screenshot-frame-size",
@@ -65,11 +66,11 @@
     "profile_key_set_sha256": "61fbfc20df06fc897b7634badf3bc5f5fcd3e5733dd7c425eec526f4b732702f",
     "contract_count": 2,
     "contract_key_set_sha256": "c1b970bde68e3f9fc69c6972dde0fab6bcfe970205b85f052f1b67a7b8a7235e",
-    "control_count": 5,
-    "control_key_set_sha256": "9287f16eae7fbd3222bd6abfc9a0d471eb892d751d68ace0f02042481625541d",
+    "control_count": 6,
+    "control_key_set_sha256": "c5e146755c74f97e634f74197a44a194d45094e5f221dd59048144e97ae0a044",
     "render_input_check_count": 9,
     "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
     "matrix_count": 360,
-    "contract_sha256": "2fd8f983dda2cff4518807ca72b1d34fb63ad62adc06e060e3f98ecac6ead6ed"
+    "contract_sha256": "2e2d848d48a97f176843983d1238987dcea278e8fa9c56bab481151375fef7ed"
   }
 }

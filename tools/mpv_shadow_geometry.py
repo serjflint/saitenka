@@ -267,7 +267,45 @@ def shifted(mask: Mask, dx: int, dy: int) -> Mask:
     return frozenset((x + dx, y + dy) for x, y in mask)
 
 
-def exercise_controls(thresholds: dict[str, Any]) -> dict[str, bool]:
+def _profile_filter_rejects_retained_overlay(
+    profile: dict[str, Any], thresholds: dict[str, Any]
+) -> bool:
+    width = 40
+    core = frozenset((x, y) for x in range(5, 15) for y in range(5, 15))
+    extra = frozenset((x, y) for x in range(25, 30) for y in range(20, 25))
+    envelope_delta = int(profile["screenshot_envelope_threshold"])
+    minimum_delta = int(profile["screenshot_delta_threshold"])
+    deltas = bytearray(width * 30)
+    for x, y in core:
+        deltas[y * width + x] = envelope_delta
+    for x, y in extra:
+        deltas[y * width + x] = minimum_delta
+    if minimum_delta < envelope_delta:
+        for x in range(15, 25):
+            deltas[14 * width + x] = minimum_delta
+        for y in range(14, 20):
+            deltas[y * width + 24] = minimum_delta
+    overlap, support, unsafe = _comparison_masks(
+        bytes(deltas),
+        width,
+        minimum_delta=minimum_delta,
+        envelope_delta=envelope_delta,
+        envelope_distance=int(profile["screenshot_envelope_distance_px"]),
+    )
+    assessment = assess_masks(
+        overlap,
+        core,
+        minimum_iou=float(thresholds["minimum_mask_iou"]),
+        maximum_distance=int(thresholds["maximum_chebyshev_distance_px"]),
+        maximum_bounds_distance=int(thresholds["maximum_outer_bounds_distance_px"]),
+        support_reference=support,
+    )
+    return bool(unsafe) or not assessment.passed
+
+
+def exercise_controls(
+    thresholds: dict[str, Any], profiles: Sequence[dict[str, Any]] = ()
+) -> dict[str, bool]:
     reference = frozenset((x, y) for x in range(20, 40) for y in range(10, 30))
     extras = frozenset((x, y) for x in range(60, 70) for y in range(40, 50))
     background = frozenset((x, y) for x in range(80) for y in range(60))
@@ -278,7 +316,7 @@ def exercise_controls(thresholds: dict[str, Any]) -> dict[str, bool]:
         "blank-frame": frozenset(),
         "duplicate-layer": reference | shifted(reference, 30, 0),
     }
-    return {
+    controls = {
         name: not assess_masks(
             reference,
             candidate,
@@ -287,11 +325,15 @@ def exercise_controls(thresholds: dict[str, Any]) -> dict[str, bool]:
         ).passed
         for name, candidate in candidates.items()
     }
+    controls["screenshot-filter"] = bool(profiles) and all(
+        _profile_filter_rejects_retained_overlay(profile, thresholds) for profile in profiles
+    )
+    return controls
 
 
 def build_contract_report(manifest_path: Path, repo_root: Path) -> dict[str, Any]:
     manifest = load_manifest(manifest_path, repo_root=repo_root)
-    controls = exercise_controls(manifest["thresholds"])
+    controls = exercise_controls(manifest["thresholds"], manifest["profiles"])
     required = set(manifest["required_controls"])
     if set(controls) != required or not all(controls.values()):
         raise AssertionError("geometry oracle controls did not all fail")
@@ -388,6 +430,35 @@ def _screenshot_delta_threshold(profile: dict[str, Any]) -> int:
     return int(profile["screenshot_delta_threshold"])
 
 
+def _comparison_masks(
+    deltas: bytes,
+    width: int,
+    *,
+    minimum_delta: int,
+    envelope_delta: int,
+    envelope_distance: int,
+) -> tuple[Mask, Mask, Mask]:
+    low = frozenset(
+        (index % width, index // width)
+        for index, delta in enumerate(deltas)
+        if delta >= minimum_delta
+    )
+    envelope = frozenset(
+        (index % width, index // width)
+        for index, delta in enumerate(deltas)
+        if delta >= envelope_delta
+    )
+    if not envelope:
+        return frozenset(), frozenset(), low
+    permitted = frozenset(
+        (x + dx, y + dy)
+        for x, y in envelope
+        for dx in range(-envelope_distance, envelope_distance + 1)
+        for dy in range(-envelope_distance, envelope_distance + 1)
+    )
+    return low & permitted, envelope, low - permitted
+
+
 def _comparison_mask(
     deltas: bytes,
     width: int,
@@ -396,21 +467,14 @@ def _comparison_mask(
     envelope_delta: int,
     envelope_distance: int,
 ) -> Mask:
-    envelope = frozenset(
-        (index % width, index // width)
-        for index, delta in enumerate(deltas)
-        if delta >= envelope_delta
+    comparison, _, _ = _comparison_masks(
+        deltas,
+        width,
+        minimum_delta=minimum_delta,
+        envelope_delta=envelope_delta,
+        envelope_distance=envelope_distance,
     )
-    if not envelope:
-        return frozenset()
-    left, top, right, bottom = support_bounds(envelope)
-    return frozenset(
-        (index % width, index // width)
-        for index, delta in enumerate(deltas)
-        if delta >= minimum_delta
-        and left - envelope_distance <= index % width < right + envelope_distance
-        and top - envelope_distance <= index // width < bottom + envelope_distance
-    )
+    return comparison
 
 
 def _capture_mask(
@@ -421,7 +485,7 @@ def _capture_mask(
     minimum_delta: int,
     envelope_delta: int,
     envelope_distance: int,
-) -> tuple[Mask, Mask, tuple[int, int], dict[str, dict[str, Any]]]:
+) -> tuple[Mask, Mask, Mask, tuple[int, int], dict[str, dict[str, Any]]]:
     from mpv_source_transition import _wait_for
     from PIL import Image, ImageChops
 
@@ -442,17 +506,12 @@ def _capture_mask(
         red, green, blue = difference.split()
         peak = ImageChops.lighter(red, ImageChops.lighter(green, blue))
         deltas = peak.tobytes()
-        mask = _comparison_mask(
+        mask, support_mask, unsafe_low_delta_mask = _comparison_masks(
             deltas,
             width,
             minimum_delta=minimum_delta,
             envelope_delta=envelope_delta,
             envelope_distance=envelope_distance,
-        )
-        support_mask = frozenset(
-            (index % width, index // width)
-            for index, delta in enumerate(deltas)
-            if delta >= envelope_delta
         )
         histogram = peak.histogram()
         threshold_support = {
@@ -465,13 +524,12 @@ def _capture_mask(
             }
             for threshold in (1, 2, 4, 8, 16)
         }
-        return mask, support_mask, (width, height), threshold_support
+        return mask, support_mask, unsafe_low_delta_mask, (width, height), threshold_support
 
 
 def _mpv_render_inputs(ipc: Any) -> dict[str, Any]:
     inputs: dict[str, Any] = {}
     for name in (
-        "osd-dimensions",
         "video-out-params",
         "options/sub-ass-override",
         "options/sub-ass-scale-with-window",
@@ -514,7 +572,8 @@ class _MpvSession:
             "--sub-pos=100",
         ]
         if fonts:
-            command.append(f"--sub-fonts-dir={fonts[0].parent}")
+            font_dir = _materialize_fonts(workspace, fonts)
+            command.append(f"--sub-fonts-dir={font_dir}")
         command.append(str(clip))
         self.log_path = workspace / f"mpv-{time.monotonic_ns()}.log"
         self.log = self.log_path.open("wb")
@@ -537,7 +596,7 @@ class _MpvSession:
         minimum_delta: int,
         envelope_delta: int,
         envelope_distance: int,
-    ) -> tuple[Mask, Mask, tuple[int, int], dict[str, dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[Mask, Mask, Mask, tuple[int, int], dict[str, dict[str, Any]], dict[str, Any]]:
         from mpv_source_transition import _track_for_path, _wait_for
 
         reply = self.ipc.command("sub-add", str(ass_path), "select", label, "jpn")
@@ -559,7 +618,7 @@ class _MpvSession:
                 timeout=3.0,
                 message=f"mpv did not render {label}",
             )
-            mask, support_mask, size, threshold_support = _capture_mask(
+            mask, support_mask, unsafe_low_delta_mask, size, threshold_support = _capture_mask(
                 self.ipc,
                 self.workspace,
                 label,
@@ -567,7 +626,14 @@ class _MpvSession:
                 envelope_delta=envelope_delta,
                 envelope_distance=envelope_distance,
             )
-            return mask, support_mask, size, threshold_support, _mpv_render_inputs(self.ipc)
+            return (
+                mask,
+                support_mask,
+                unsafe_low_delta_mask,
+                size,
+                threshold_support,
+                _mpv_render_inputs(self.ipc),
+            )
         finally:
             reply = self.ipc.command("sub-remove", sid)
             if reply.get("error") != "success":
@@ -585,13 +651,29 @@ class _MpvSession:
             self.process.wait(timeout=5)
         self.ipc.close()
         self.log.close()
-        return self.log_path.read_text(encoding="utf-8", errors="replace")
+        diagnostic = self.log_path.read_text(encoding="utf-8", errors="replace")
+        _validate_mpv_exit(self.process.returncode, diagnostic)
+        return diagnostic
+
+
+def _validate_mpv_exit(returncode: int | None, diagnostic: str) -> None:
+    if returncode != 0:
+        raise RuntimeError(f"Gate D mpv exited with {returncode}\n{diagnostic}")
+
+
+def _materialize_fonts(workspace: Path, fonts: tuple[Path, ...]) -> Path:
+    font_dir = workspace / f"fonts-{time.monotonic_ns()}"
+    font_dir.mkdir()
+    for font in fonts:
+        (font_dir / font.name).write_bytes(font.read_bytes())
+    return font_dir
 
 
 def _source_groups(repo_root: Path) -> tuple[tuple[tuple[str, ...], tuple[Path, ...]], ...]:
     font = repo_root / "src/saitenka/assets/fonts/NotoSansJP.ttf"
     return (
-        (("external-ass", "synthetic-ass-from-text"), ()),
+        (("external-ass",), ()),
+        (("synthetic-ass-from-text",), ()),
         (("embedded-ass-with-font",), (font,)),
     )
 
@@ -634,7 +716,8 @@ def _evaluate_cell(
     sources: tuple[str, ...],
     fonts: tuple[Path, ...],
     contract: str,
-    event_key: str,
+    mpv_event_key: str,
+    shadow_event_key: str,
     thresholds: dict[str, Any],
 ) -> list[dict[str, Any]]:
     frame_size = tuple(profile["frame_size"])
@@ -643,13 +726,15 @@ def _evaluate_cell(
     screenshot_delta = _screenshot_delta_threshold(profile)
     screenshot_envelope = int(profile["screenshot_envelope_threshold"])
     screenshot_envelope_distance = int(profile["screenshot_envelope_distance_px"])
-    ass_data = _d_ass_bytes(case[event_key])
+    mpv_ass_data = _d_ass_bytes(case[mpv_event_key])
+    shadow_ass_data = _d_ass_bytes(case[shadow_event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
-    ass_path.write_bytes(ass_data)
+    ass_path.write_bytes(mpv_ass_data)
     (
         mpv_mask,
         mpv_support_mask,
+        unsafe_low_delta_mask,
         observed_size,
         difference_threshold_support,
         render_inputs,
@@ -662,7 +747,7 @@ def _evaluate_cell(
         envelope_distance=screenshot_envelope_distance,
     )
     renderer, result = _shadow_result(
-        ass_data,
+        shadow_ass_data,
         fonts,
         int(case["timestamp_ms"]),
         frame_size,
@@ -691,7 +776,10 @@ def _evaluate_cell(
             observed_size,
             video_pixel_aspect,
         )
-        assessment = replace(assessment, passed=assessment.passed and all(input_checks.values()))
+        assessment = replace(
+            assessment,
+            passed=assessment.passed and not unsafe_low_delta_mask and all(input_checks.values()),
+        )
         return [
             {
                 "case_id": case["id"],
@@ -699,6 +787,8 @@ def _evaluate_cell(
                 "profile_id": profile["id"],
                 "contract": contract,
                 "shared_render_sources": list(sources),
+                "mpv_ass_sha256": sha256(mpv_ass_data),
+                "shadow_ass_sha256": sha256(shadow_ass_data),
                 "expected_frame_size": list(frame_size),
                 "observed_frame_size": list(observed_size),
                 "expected_video_pixel_aspect": video_pixel_aspect,
@@ -709,6 +799,8 @@ def _evaluate_cell(
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,
                 "mpv_difference_threshold_support": difference_threshold_support,
+                "unsafe_low_delta_pixels": len(unsafe_low_delta_mask),
+                "unsafe_low_delta_bounds": list(support_bounds(unsafe_low_delta_mask)),
                 "mpv_render_inputs": render_inputs,
                 "render_input_checks": input_checks,
                 "assessment": asdict(assessment),
@@ -734,9 +826,9 @@ def _run_session_matrix(
     reports: list[dict[str, Any]] = []
     try:
         for case in cases:
-            for contract, event_key in (
-                ("native-fidelity", "visible_events"),
-                ("interactive-styled", "id_events"),
+            for contract, mpv_event_key, shadow_event_key in (
+                ("native-fidelity", "visible_events", "visible_events"),
+                ("interactive-styled", "visible_events", "id_events"),
             ):
                 reports.extend(
                     _evaluate_cell(
@@ -747,7 +839,8 @@ def _run_session_matrix(
                         sources,
                         fonts,
                         contract,
-                        event_key,
+                        mpv_event_key,
+                        shadow_event_key,
                         thresholds,
                     )
                 )
