@@ -49,6 +49,7 @@ class RenderResult(Protocol):
 class MaskAssessment:
     passed: bool
     reference_pixels: int
+    support_reference_pixels: int
     observed_pixels: int
     reference_bounds: tuple[int, int, int, int]
     observed_bounds: tuple[int, int, int, int]
@@ -219,13 +220,16 @@ def assess_masks(
     minimum_iou: float,
     maximum_distance: int,
     maximum_bounds_distance: int | None = None,
+    support_reference: Mask | None = None,
 ) -> MaskAssessment:
-    reference_bounds = support_bounds(reference)
+    spatial_reference = reference if support_reference is None else support_reference
+    reference_bounds = support_bounds(spatial_reference)
     observed_bounds = support_bounds(observed)
-    if not reference or not observed:
+    if not reference or not spatial_reference or not observed:
         return MaskAssessment(
             False,
             len(reference),
+            len(spatial_reference),
             len(observed),
             reference_bounds,
             observed_bounds,
@@ -241,10 +245,11 @@ def assess_masks(
         for reference_value, observed_value in zip(reference_bounds, observed_bounds, strict=True)
     )
     overlap = support_iou(reference, observed)
-    within_distance = supports_within(reference, observed, maximum_distance)
+    within_distance = supports_within(spatial_reference, observed, maximum_distance)
     return MaskAssessment(
         bounds_within and overlap >= minimum_iou and within_distance,
         len(reference),
+        len(spatial_reference),
         len(observed),
         reference_bounds,
         observed_bounds,
@@ -417,7 +422,7 @@ def _capture_mask(
     minimum_delta: int,
     envelope_delta: int,
     envelope_distance: int,
-) -> tuple[Mask, tuple[int, int], dict[str, dict[str, Any]]]:
+) -> tuple[Mask, Mask, tuple[int, int], dict[str, dict[str, Any]]]:
     from mpv_source_transition import _wait_for
     from PIL import Image, ImageChops
 
@@ -445,6 +450,11 @@ def _capture_mask(
             envelope_delta=envelope_delta,
             envelope_distance=envelope_distance,
         )
+        support_mask = frozenset(
+            (index % width, index // width)
+            for index, delta in enumerate(deltas)
+            if delta >= envelope_delta
+        )
         histogram = peak.histogram()
         threshold_support = {
             str(threshold): {
@@ -456,7 +466,7 @@ def _capture_mask(
             }
             for threshold in (1, 2, 4, 8, 16)
         }
-        return mask, (width, height), threshold_support
+        return mask, support_mask, (width, height), threshold_support
 
 
 def _mpv_render_inputs(ipc: Any) -> dict[str, Any]:
@@ -528,7 +538,7 @@ class _MpvSession:
         minimum_delta: int,
         envelope_delta: int,
         envelope_distance: int,
-    ) -> tuple[Mask, tuple[int, int], dict[str, dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[Mask, Mask, tuple[int, int], dict[str, dict[str, Any]], dict[str, Any]]:
         from mpv_source_transition import _track_for_path, _wait_for
 
         reply = self.ipc.command("sub-add", str(ass_path), "select", label, "jpn")
@@ -550,7 +560,7 @@ class _MpvSession:
                 timeout=3.0,
                 message=f"mpv did not render {label}",
             )
-            mask, size, threshold_support = _capture_mask(
+            mask, support_mask, size, threshold_support = _capture_mask(
                 self.ipc,
                 self.workspace,
                 label,
@@ -558,7 +568,7 @@ class _MpvSession:
                 envelope_delta=envelope_delta,
                 envelope_distance=envelope_distance,
             )
-            return mask, size, threshold_support, _mpv_render_inputs(self.ipc)
+            return mask, support_mask, size, threshold_support, _mpv_render_inputs(self.ipc)
         finally:
             reply = self.ipc.command("sub-remove", sid)
             if reply.get("error") != "success":
@@ -644,7 +654,13 @@ def _evaluate_cell(
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
     ass_path.write_bytes(ass_data)
-    mpv_mask, observed_size, difference_threshold_support, render_inputs = session.capture(
+    (
+        mpv_mask,
+        mpv_support_mask,
+        observed_size,
+        difference_threshold_support,
+        render_inputs,
+    ) = session.capture(
         ass_path,
         int(case["timestamp_ms"]),
         label,
@@ -673,6 +689,7 @@ def _evaluate_cell(
             minimum_iou=float(thresholds["minimum_mask_iou"]),
             maximum_distance=int(thresholds["maximum_chebyshev_distance_px"]),
             maximum_bounds_distance=int(thresholds["maximum_outer_bounds_distance_px"]),
+            support_reference=mpv_support_mask,
         )
         input_checks = _render_input_checks(
             render_inputs,

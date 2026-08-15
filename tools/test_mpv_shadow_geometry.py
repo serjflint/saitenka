@@ -87,6 +87,22 @@ def test_mask_contract_accepts_one_pixel_support_drift() -> None:
     assert assessment.within_maximum_distance
 
 
+def test_mask_contract_uses_high_confidence_reference_for_spatial_distance() -> None:
+    observed = frozenset((x, 0) for x in range(5))
+    overlap_reference = observed | {(6, 0)}
+    assessment = assess_masks(
+        overlap_reference,
+        observed,
+        minimum_iou=0.8,
+        maximum_distance=1,
+        support_reference=observed,
+    )
+    assert assessment.passed
+    assert assessment.reference_pixels == 6
+    assert assessment.support_reference_pixels == 5
+    assert assessment.within_maximum_distance
+
+
 def test_mask_contract_rejects_two_pixel_shift() -> None:
     reference = frozenset((x, y) for x in range(5) for y in range(5))
     assessment = assess_masks(
@@ -219,6 +235,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
             envelope_distance: int,
         ) -> tuple[
             frozenset[tuple[int, int]],
+            frozenset[tuple[int, int]],
             tuple[int, int],
             dict[str, dict[str, object]],
             dict[str, object],
@@ -244,6 +261,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
             assert envelope_delta == (1 if frame_size == storage_size else 16)
             assert envelope_distance == (0 if frame_size == storage_size else 1)
             return (
+                mask,
                 mask,
                 frame_size,
                 {
