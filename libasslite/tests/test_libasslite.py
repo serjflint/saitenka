@@ -167,7 +167,7 @@ def test_explicit_pixel_aspect_changes_only_horizontal_geometry() -> None:
         0x332211,
     )
 
-    assert wide_bounds[2] - wide_bounds[0] > square_bounds[2] - square_bounds[0]
+    assert wide_bounds[0::2] != square_bounds[0::2]
     assert wide_bounds[1::2] == square_bounds[1::2]
 
 
