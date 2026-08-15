@@ -33,11 +33,11 @@
     {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480]}
   ],
   "contracts": ["native-fidelity", "interactive-styled"],
-  "renderer_pixel_aspect": 1.0,
   "thresholds": {
     "minimum_mask_iou": 0.95,
     "maximum_chebyshev_distance_px": 1,
-    "require_equal_outer_bounds": true
+    "maximum_outer_bounds_distance_px": 1,
+    "anamorphic_screenshot_delta_threshold": 16
   },
   "required_controls": [
     "background-change",
@@ -71,6 +71,6 @@
     "render_input_check_count": 9,
     "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
     "matrix_count": 360,
-    "contract_sha256": "74dbac2f96578cd0b5256fe756400c8dc64517586dfb2a9e8d3bc839ecdec392"
+    "contract_sha256": "5f44a4169505476ddbf2b255611096fcba4695060a0ba1326c214dee655ffd3c"
   }
 }

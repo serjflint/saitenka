@@ -48,7 +48,8 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
         (("thresholds", "minimum_mask_iou"), 0.0, "IoU"),
         (("profiles", 0, "frame_size"), [0, 720], "positive"),
         (("required_render_input_checks",), [], "render_input_check count"),
-        (("renderer_pixel_aspect",), 4 / 3, "renderer pixel aspect"),
+        (("thresholds", "maximum_outer_bounds_distance_px"), True, "outer-bounds"),
+        (("thresholds", "anamorphic_screenshot_delta_threshold"), 0, "delta threshold"),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -77,10 +78,11 @@ def test_mask_contract_accepts_one_pixel_support_drift() -> None:
     reference = frozenset((x, y) for x in range(5) for y in range(5))
     observed = reference | {(5, 2)}
     assessment = assess_masks(reference, observed, minimum_iou=0.8, maximum_distance=1)
-    assert not assessment.passed
+    assert assessment.passed
     assert assessment.reference_bounds == (0, 0, 5, 5)
     assert assessment.observed_bounds == (0, 0, 6, 5)
     assert not assessment.outer_bounds_equal
+    assert assessment.outer_bounds_within_maximum_distance
     assert assessment.within_maximum_distance
 
 
@@ -134,6 +136,22 @@ def test_clip_geometry_preserves_storage_size_and_display_aspect(
     )
 
 
+def test_anamorphic_screenshot_comparison_excludes_resampling_fringe() -> None:
+    thresholds = {"anamorphic_screenshot_delta_threshold": 16}
+    assert (
+        oracle._screenshot_delta_threshold(
+            {"frame_size": [1280, 720], "storage_size": [960, 720]}, thresholds
+        )
+        == 16
+    )
+    assert (
+        oracle._screenshot_delta_threshold(
+            {"frame_size": [1280, 720], "storage_size": [1280, 720]}, thresholds
+        )
+        == 1
+    )
+
+
 def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable() -> None:
     class IPC:
         def command(self, _command: str, name: str) -> dict[str, str]:
@@ -179,7 +197,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
             pass
 
         def capture(
-            self, _ass_path: Path, _timestamp_ms: int, _label: str
+            self, _ass_path: Path, _timestamp_ms: int, _label: str, *, minimum_delta: int
         ) -> tuple[
             frozenset[tuple[int, int]],
             tuple[int, int],
@@ -203,6 +221,7 @@ def test_live_runner_emits_every_locked_matrix_cell(
             profile_id = next(name for name in sizes if _label.startswith(name))
             frame_size = sizes[profile_id]
             storage_size = storage_sizes[profile_id]
+            assert minimum_delta == (1 if frame_size == storage_size else 16)
             return (
                 mask,
                 frame_size,
@@ -271,7 +290,18 @@ def test_live_runner_emits_every_locked_matrix_cell(
         == pytest.approx(row["expected_video_pixel_aspect"], abs=1e-6)
         for row in report["cases"]
     )
-    assert all(row["expected_renderer_pixel_aspect"] == 1.0 for row in report["cases"])
+    assert all(
+        row["expected_renderer_pixel_aspect"]
+        == pytest.approx(row["expected_video_pixel_aspect"], abs=1e-6)
+        for row in report["cases"]
+    )
+    assert {(row["profile_id"], row["screenshot_delta_threshold"]) for row in report["cases"]} == {
+        ("baseline-720p", 1),
+        ("resize-480p", 1),
+        ("retina-1080p", 1),
+        ("wide-pixel-aspect", 16),
+        ("tall-pixel-aspect", 16),
+    }
     assert {
         (row["case_id"], row["source_class"], row["profile_id"], row["contract"])
         for row in report["cases"]

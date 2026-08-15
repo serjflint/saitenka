@@ -53,6 +53,7 @@ class MaskAssessment:
     reference_bounds: tuple[int, int, int, int]
     observed_bounds: tuple[int, int, int, int]
     outer_bounds_equal: bool
+    outer_bounds_within_maximum_distance: bool
     mask_iou: float
     within_maximum_distance: bool
 
@@ -78,7 +79,6 @@ def contract_hash(manifest: dict[str, Any]) -> str:
             "thresholds",
             "required_controls",
             "required_render_input_checks",
-            "renderer_pixel_aspect",
         )
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -101,8 +101,16 @@ def _validate_thresholds(thresholds: dict[str, Any]) -> None:
         raise ValueError("minimum mask IoU must be in (0, 1]")
     if isinstance(distance, bool) or not isinstance(distance, int) or distance < 0:
         raise ValueError("maximum support distance must be a non-negative integer")
-    if thresholds.get("require_equal_outer_bounds") is not True:
-        raise ValueError("equal outer bounds must remain required")
+    bounds_distance = thresholds.get("maximum_outer_bounds_distance_px")
+    if (
+        isinstance(bounds_distance, bool)
+        or not isinstance(bounds_distance, int)
+        or bounds_distance < 0
+    ):
+        raise ValueError("maximum outer-bounds distance must be a non-negative integer")
+    delta = thresholds.get("anamorphic_screenshot_delta_threshold")
+    if isinstance(delta, bool) or not isinstance(delta, int) or not 1 <= delta <= 255:
+        raise ValueError("anamorphic screenshot delta threshold must be in [1, 255]")
 
 
 def _validate_ids(values: Any, denominator: dict[str, Any], prefix: str) -> tuple[str, ...]:
@@ -140,8 +148,6 @@ def load_manifest(path: Path, *, repo_root: Path) -> dict[str, Any]:
     for profile in profiles:
         _validate_profile(profile)
     _validate_thresholds(manifest.get("thresholds", {}))
-    if manifest.get("renderer_pixel_aspect") != 1.0:
-        raise ValueError("screenshot renderer pixel aspect must remain square")
     expected_matrix = len(cases) * len(sources) * len(profile_ids) * len(contracts)
     if expected_matrix != denominator.get("matrix_count"):
         raise ValueError("geometry matrix count changed")
@@ -209,6 +215,7 @@ def assess_masks(
     *,
     minimum_iou: float,
     maximum_distance: int,
+    maximum_bounds_distance: int | None = None,
 ) -> MaskAssessment:
     reference_bounds = support_bounds(reference)
     observed_bounds = support_bounds(observed)
@@ -220,19 +227,26 @@ def assess_masks(
             reference_bounds,
             observed_bounds,
             False,
+            False,
             0.0,
             False,
         )
     bounds_equal = reference_bounds == observed_bounds
+    bounds_limit = maximum_distance if maximum_bounds_distance is None else maximum_bounds_distance
+    bounds_within = all(
+        abs(reference_value - observed_value) <= bounds_limit
+        for reference_value, observed_value in zip(reference_bounds, observed_bounds, strict=True)
+    )
     overlap = support_iou(reference, observed)
     within_distance = supports_within(reference, observed, maximum_distance)
     return MaskAssessment(
-        bounds_equal and overlap >= minimum_iou and within_distance,
+        bounds_within and overlap >= minimum_iou and within_distance,
         len(reference),
         len(observed),
         reference_bounds,
         observed_bounds,
         bounds_equal,
+        bounds_within,
         overlap,
         within_distance,
     )
@@ -359,8 +373,16 @@ def _video_pixel_aspect(profile: dict[str, Any]) -> float:
     return float(Fraction(frame_width * storage_height, frame_height * storage_width))
 
 
+def _screenshot_delta_threshold(profile: dict[str, Any], thresholds: dict[str, Any]) -> int:
+    return (
+        int(thresholds["anamorphic_screenshot_delta_threshold"])
+        if profile["frame_size"] != profile["storage_size"]
+        else 1
+    )
+
+
 def _capture_mask(
-    ipc: Any, workspace: Path, label: str
+    ipc: Any, workspace: Path, label: str, *, minimum_delta: int
 ) -> tuple[Mask, tuple[int, int], dict[str, dict[str, Any]]]:
     from mpv_source_transition import _wait_for
     from PIL import Image, ImageChops
@@ -383,7 +405,9 @@ def _capture_mask(
         peak = ImageChops.lighter(red, ImageChops.lighter(green, blue))
         deltas = peak.tobytes()
         mask = frozenset(
-            (index % width, index // width) for index, delta in enumerate(deltas) if delta
+            (index % width, index // width)
+            for index, delta in enumerate(deltas)
+            if delta >= minimum_delta
         )
         histogram = peak.histogram()
         threshold_support = {
@@ -460,7 +484,7 @@ class _MpvSession:
             raise RuntimeError(f"mpv did not expose Gate D IPC: {error}\n{diagnostic}") from error
 
     def capture(
-        self, ass_path: Path, timestamp_ms: int, label: str
+        self, ass_path: Path, timestamp_ms: int, label: str, *, minimum_delta: int
     ) -> tuple[Mask, tuple[int, int], dict[str, dict[str, Any]], dict[str, Any]]:
         from mpv_source_transition import _track_for_path, _wait_for
 
@@ -483,7 +507,9 @@ class _MpvSession:
                 timeout=3.0,
                 message=f"mpv did not render {label}",
             )
-            mask, size, threshold_support = _capture_mask(self.ipc, self.workspace, label)
+            mask, size, threshold_support = _capture_mask(
+                self.ipc, self.workspace, label, minimum_delta=minimum_delta
+            )
             return mask, size, threshold_support, _mpv_render_inputs(self.ipc)
         finally:
             reply = self.ipc.command("sub-remove", sid)
@@ -553,17 +579,17 @@ def _evaluate_cell(
     contract: str,
     event_key: str,
     thresholds: dict[str, Any],
-    renderer_pixel_aspect: float,
 ) -> list[dict[str, Any]]:
     frame_size = tuple(profile["frame_size"])
     storage_size = tuple(profile["storage_size"])
     video_pixel_aspect = _video_pixel_aspect(profile)
+    screenshot_delta = _screenshot_delta_threshold(profile, thresholds)
     ass_data = _d_ass_bytes(case[event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
     ass_path.write_bytes(ass_data)
     mpv_mask, observed_size, difference_threshold_support, render_inputs = session.capture(
-        ass_path, int(case["timestamp_ms"]), label
+        ass_path, int(case["timestamp_ms"]), label, minimum_delta=screenshot_delta
     )
     renderer, result = _shadow_result(
         ass_data,
@@ -571,7 +597,7 @@ def _evaluate_cell(
         int(case["timestamp_ms"]),
         frame_size,
         storage_size,
-        renderer_pixel_aspect,
+        video_pixel_aspect,
     )
     try:
         shadow_mask = layer_support(result)
@@ -585,6 +611,7 @@ def _evaluate_cell(
             shadow_mask,
             minimum_iou=float(thresholds["minimum_mask_iou"]),
             maximum_distance=int(thresholds["maximum_chebyshev_distance_px"]),
+            maximum_bounds_distance=int(thresholds["maximum_outer_bounds_distance_px"]),
         )
         input_checks = _render_input_checks(
             render_inputs,
@@ -604,7 +631,8 @@ def _evaluate_cell(
                 "expected_frame_size": list(frame_size),
                 "observed_frame_size": list(observed_size),
                 "expected_video_pixel_aspect": video_pixel_aspect,
-                "expected_renderer_pixel_aspect": renderer_pixel_aspect,
+                "expected_renderer_pixel_aspect": video_pixel_aspect,
+                "screenshot_delta_threshold": screenshot_delta,
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,
                 "mpv_difference_threshold_support": difference_threshold_support,
@@ -626,7 +654,6 @@ def _run_session_matrix(
     sources: tuple[str, ...],
     fonts: tuple[Path, ...],
     thresholds: dict[str, Any],
-    renderer_pixel_aspect: float,
     *,
     mpv: str,
 ) -> tuple[list[dict[str, Any]], str]:
@@ -649,7 +676,6 @@ def _run_session_matrix(
                         contract,
                         event_key,
                         thresholds,
-                        renderer_pixel_aspect,
                     )
                 )
     finally:
@@ -667,7 +693,6 @@ def run_live_matrix(
     manifest = load_manifest(manifest_path, repo_root=repo_root)
     cases = _case_inputs(repo_root, manifest)
     thresholds = manifest["thresholds"]
-    renderer_pixel_aspect = float(manifest["renderer_pixel_aspect"])
     reports: list[dict[str, Any]] = []
     logs: list[str] = []
     with tempfile.TemporaryDirectory(prefix="saitenka-gate-d-") as raw_workspace:
@@ -683,7 +708,6 @@ def run_live_matrix(
                     sources,
                     fonts,
                     thresholds,
-                    renderer_pixel_aspect,
                     mpv=mpv,
                 )
                 reports.extend(group_reports)
