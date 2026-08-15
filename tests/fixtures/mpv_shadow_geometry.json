@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "upstream": {
+    "token_manifest": "tests/fixtures/libass_token_matrix.json",
+    "token_manifest_sha256": "ff9787e3af962933c51fcb50d7d70789e9eabd52f74e659b3fe723a29eb401a2",
+    "source_manifest": "tests/fixtures/mpv_source_transition.json",
+    "source_manifest_sha256": "13a65f93feffc3dadbaebf6c4c4f0e07234a0372373635044c89312702940fb2"
+  },
+  "required_case_ids": [
+    "plain-repeated",
+    "punctuation",
+    "uniform-visible-boundaries",
+    "mixed-scripts",
+    "primary-color-alpha",
+    "segmented-token",
+    "opaque-border-box",
+    "multiline",
+    "wrapping",
+    "fallback-font",
+    "alignment-margins",
+    "simultaneous-events"
+  ],
+  "source_classes": [
+    "external-ass",
+    "embedded-ass-with-font",
+    "synthetic-ass-from-text"
+  ],
+  "profiles": [
+    {"id": "baseline-720p", "frame_size": [1280, 720], "storage_size": [1280, 720]},
+    {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480]},
+    {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080]},
+    {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720]},
+    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 960]}
+  ],
+  "contracts": ["native-fidelity", "interactive-styled"],
+  "thresholds": {
+    "minimum_mask_iou": 0.95,
+    "maximum_chebyshev_distance_px": 1,
+    "require_equal_outer_bounds": true
+  },
+  "required_controls": [
+    "background-change",
+    "retained-overlay",
+    "shifted-hit-map",
+    "blank-frame",
+    "duplicate-layer"
+  ],
+  "denominator": {
+    "case_count": 12,
+    "case_key_set_sha256": "2ad971923ec0333f64b7da1e5ad0b2f65056f6b188f9b054cd01c8819e4bca4c",
+    "source_count": 3,
+    "source_key_set_sha256": "b816e32a757d1a53049b7a09ca923d6566c530c3a1ee53ee6f6af6ce9588fcd7",
+    "profile_count": 5,
+    "profile_key_set_sha256": "61fbfc20df06fc897b7634badf3bc5f5fcd3e5733dd7c425eec526f4b732702f",
+    "contract_count": 2,
+    "contract_key_set_sha256": "c1b970bde68e3f9fc69c6972dde0fab6bcfe970205b85f052f1b67a7b8a7235e",
+    "control_count": 5,
+    "control_key_set_sha256": "9287f16eae7fbd3222bd6abfc9a0d471eb892d751d68ace0f02042481625541d",
+    "matrix_count": 360,
+    "contract_sha256": "249e944097ba64d628a57ae82b819bf8eebb1f113dbac5499661d69ecb66dbeb"
+  }
+}
