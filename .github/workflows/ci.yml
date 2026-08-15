@@ -225,7 +225,7 @@ jobs:
         run: |
           set -o pipefail
           uv run --python ${{ matrix.py }} --with-editable . \
-            --with pillow \
+            --with pillow --with fonttools \
             python ../tools/mpv_shadow_geometry.py \
             --manifest ../tests/fixtures/mpv_shadow_geometry.json \
             --repo-root .. --output shadow-geometry.json --live \
