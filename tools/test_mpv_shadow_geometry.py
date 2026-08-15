@@ -116,9 +116,9 @@ def test_contract_report_is_publishable_only_after_controls_pass() -> None:
             "4/3",
         ),
         (
-            {"frame_size": [1280, 720], "storage_size": [1280, 960]},
-            (1280, 960),
-            "4/3",
+            {"frame_size": [1280, 720], "storage_size": [1920, 720]},
+            (1920, 720),
+            "2/3",
         ),
     ],
 )
@@ -137,6 +137,27 @@ def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable()
         oracle._mpv_render_inputs(IPC())
 
 
+def test_render_input_checks_reject_subsampled_or_wrong_storage_geometry() -> None:
+    inputs = {
+        "video-out-params": {
+            "w": 1280,
+            "h": 720,
+            "dw": 1280,
+            "dh": 720,
+            "pixelformat": "yuv420p",
+        },
+        "options/sub-ass-use-video-data": "all",
+        "options/sub-ass-override": False,
+        "options/sub-ass-scale-with-window": False,
+        "options/sub-scale": 1.0,
+        "options/sub-pos": 100.0,
+    }
+    checks = oracle._render_input_checks(inputs, (1280, 720), (1920, 720), (1280, 720))
+    assert checks["lossless-444-capture"] is False
+    assert checks["video-storage-size"] is False
+    assert not all(checks.values())
+
+
 def test_live_runner_emits_every_locked_matrix_cell(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -152,7 +173,12 @@ def test_live_runner_emits_every_locked_matrix_cell(
 
         def capture(
             self, _ass_path: Path, _timestamp_ms: int, _label: str
-        ) -> tuple[frozenset[tuple[int, int]], tuple[int, int], dict[str, int], dict[str, object]]:
+        ) -> tuple[
+            frozenset[tuple[int, int]],
+            tuple[int, int],
+            dict[str, dict[str, object]],
+            dict[str, object],
+        ]:
             sizes = {
                 "baseline-720p": (1280, 720),
                 "resize-480p": (854, 480),
@@ -160,15 +186,37 @@ def test_live_runner_emits_every_locked_matrix_cell(
                 "wide-pixel-aspect": (1280, 720),
                 "tall-pixel-aspect": (1280, 720),
             }
+            storage_sizes = {
+                "baseline-720p": (1280, 720),
+                "resize-480p": (854, 480),
+                "retina-1080p": (1920, 1080),
+                "wide-pixel-aspect": (960, 720),
+                "tall-pixel-aspect": (1920, 720),
+            }
+            profile_id = next(name for name in sizes if _label.startswith(name))
+            frame_size = sizes[profile_id]
+            storage_size = storage_sizes[profile_id]
             return (
                 mask,
-                next(size for name, size in sizes.items() if _label.startswith(name)),
-                {"1": len(mask), "2": len(mask), "4": len(mask), "8": len(mask), "16": 0},
+                frame_size,
+                {
+                    str(threshold): {
+                        "pixels": len(mask) if threshold < 16 else 0,
+                        "bounds": [10, 20, 12, 21] if threshold < 16 else [0, 0, 0, 0],
+                    }
+                    for threshold in (1, 2, 4, 8, 16)
+                },
                 {
                     "osd-dimensions": {"w": 1280, "h": 720},
-                    "video-out-params": {"w": 1280, "h": 720},
+                    "video-out-params": {
+                        "w": storage_size[0],
+                        "h": storage_size[1],
+                        "dw": frame_size[0],
+                        "dh": frame_size[1],
+                        "pixelformat": "yuv444p",
+                    },
                     "options/sub-ass-use-video-data": "all",
-                    "options/sub-ass-override": "no",
+                    "options/sub-ass-override": False,
                     "options/sub-ass-scale-with-window": False,
                     "options/sub-scale": 1.0,
                     "options/sub-pos": 100.0,
@@ -202,11 +250,15 @@ def test_live_runner_emits_every_locked_matrix_cell(
     assert report["matrix_passed"] is True
     assert len(report["cases"]) == 360
     assert all(row["frame_size_matches"] for row in report["cases"])
-    assert all(row["mpv_difference_threshold_pixels"]["1"] == len(mask) for row in report["cases"])
+    assert all(
+        row["mpv_difference_threshold_support"]["1"]["pixels"] == len(mask)
+        for row in report["cases"]
+    )
     assert all(
         row["mpv_render_inputs"]["options/sub-ass-use-video-data"] == "all"
         for row in report["cases"]
     )
+    assert all(all(row["render_input_checks"].values()) for row in report["cases"])
     assert {
         (row["case_id"], row["source_class"], row["profile_id"], row["contract"])
         for row in report["cases"]
