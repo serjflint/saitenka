@@ -50,6 +50,7 @@ def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> N
         (("required_render_input_checks",), [], "render_input_check count"),
         (("thresholds", "maximum_outer_bounds_distance_px"), True, "outer-bounds"),
         (("thresholds", "anamorphic_screenshot_delta_threshold"), 0, "delta threshold"),
+        (("thresholds", "anamorphic_screenshot_envelope_threshold"), 4, "envelope threshold"),
         (("denominator", "matrix_count"), 1, "matrix count"),
     ],
 )
@@ -137,12 +138,12 @@ def test_clip_geometry_preserves_storage_size_and_display_aspect(
 
 
 def test_anamorphic_screenshot_comparison_excludes_resampling_fringe() -> None:
-    thresholds = {"anamorphic_screenshot_delta_threshold": 16}
+    thresholds = {"anamorphic_screenshot_delta_threshold": 8}
     assert (
         oracle._screenshot_delta_threshold(
             {"frame_size": [1280, 720], "storage_size": [960, 720]}, thresholds
         )
-        == 16
+        == 8
     )
     assert (
         oracle._screenshot_delta_threshold(
@@ -150,6 +151,17 @@ def test_anamorphic_screenshot_comparison_excludes_resampling_fringe() -> None:
         )
         == 1
     )
+
+
+def test_comparison_mask_keeps_antialiasing_only_near_high_confidence_envelope() -> None:
+    mask = oracle._comparison_mask(
+        bytes((8, 8, 16, 8, 8)),
+        5,
+        minimum_delta=8,
+        envelope_delta=16,
+        envelope_distance=1,
+    )
+    assert mask == {(1, 0), (2, 0), (3, 0)}
 
 
 def test_mpv_render_inputs_fail_closed_when_a_required_property_is_unavailable() -> None:
@@ -197,7 +209,14 @@ def test_live_runner_emits_every_locked_matrix_cell(
             pass
 
         def capture(
-            self, _ass_path: Path, _timestamp_ms: int, _label: str, *, minimum_delta: int
+            self,
+            _ass_path: Path,
+            _timestamp_ms: int,
+            _label: str,
+            *,
+            minimum_delta: int,
+            envelope_delta: int,
+            envelope_distance: int,
         ) -> tuple[
             frozenset[tuple[int, int]],
             tuple[int, int],
@@ -221,7 +240,9 @@ def test_live_runner_emits_every_locked_matrix_cell(
             profile_id = next(name for name in sizes if _label.startswith(name))
             frame_size = sizes[profile_id]
             storage_size = storage_sizes[profile_id]
-            assert minimum_delta == (1 if frame_size == storage_size else 16)
+            assert minimum_delta == (1 if frame_size == storage_size else 8)
+            assert envelope_delta == (1 if frame_size == storage_size else 16)
+            assert envelope_distance == (0 if frame_size == storage_size else 1)
             return (
                 mask,
                 frame_size,
@@ -299,8 +320,22 @@ def test_live_runner_emits_every_locked_matrix_cell(
         ("baseline-720p", 1),
         ("resize-480p", 1),
         ("retina-1080p", 1),
-        ("wide-pixel-aspect", 16),
-        ("tall-pixel-aspect", 16),
+        ("wide-pixel-aspect", 8),
+        ("tall-pixel-aspect", 8),
+    }
+    assert {
+        (
+            row["profile_id"],
+            row["screenshot_envelope_threshold"],
+            row["screenshot_envelope_distance"],
+        )
+        for row in report["cases"]
+    } == {
+        ("baseline-720p", 1, 0),
+        ("resize-480p", 1, 0),
+        ("retina-1080p", 1, 0),
+        ("wide-pixel-aspect", 16, 1),
+        ("tall-pixel-aspect", 16, 1),
     }
     assert {
         (row["case_id"], row["source_class"], row["profile_id"], row["contract"])

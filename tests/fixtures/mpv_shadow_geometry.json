@@ -37,7 +37,8 @@
     "minimum_mask_iou": 0.95,
     "maximum_chebyshev_distance_px": 1,
     "maximum_outer_bounds_distance_px": 1,
-    "anamorphic_screenshot_delta_threshold": 16
+    "anamorphic_screenshot_delta_threshold": 8,
+    "anamorphic_screenshot_envelope_threshold": 16
   },
   "required_controls": [
     "background-change",
@@ -71,6 +72,6 @@
     "render_input_check_count": 9,
     "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
     "matrix_count": 360,
-    "contract_sha256": "5f44a4169505476ddbf2b255611096fcba4695060a0ba1326c214dee655ffd3c"
+    "contract_sha256": "d9264fcfd8f7476ba83de97822e0d6af5d38d0533ee6dc9bf8570b28cce9f780"
   }
 }

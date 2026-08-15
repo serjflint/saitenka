@@ -109,8 +109,11 @@ def _validate_thresholds(thresholds: dict[str, Any]) -> None:
     ):
         raise ValueError("maximum outer-bounds distance must be a non-negative integer")
     delta = thresholds.get("anamorphic_screenshot_delta_threshold")
+    envelope = thresholds.get("anamorphic_screenshot_envelope_threshold")
     if isinstance(delta, bool) or not isinstance(delta, int) or not 1 <= delta <= 255:
         raise ValueError("anamorphic screenshot delta threshold must be in [1, 255]")
+    if isinstance(envelope, bool) or not isinstance(envelope, int) or not delta <= envelope <= 255:
+        raise ValueError("anamorphic screenshot envelope threshold must be in [delta, 255]")
 
 
 def _validate_ids(values: Any, denominator: dict[str, Any], prefix: str) -> tuple[str, ...]:
@@ -381,8 +384,39 @@ def _screenshot_delta_threshold(profile: dict[str, Any], thresholds: dict[str, A
     )
 
 
+def _comparison_mask(
+    deltas: bytes,
+    width: int,
+    *,
+    minimum_delta: int,
+    envelope_delta: int,
+    envelope_distance: int,
+) -> Mask:
+    envelope = frozenset(
+        (index % width, index // width)
+        for index, delta in enumerate(deltas)
+        if delta >= envelope_delta
+    )
+    if not envelope:
+        return frozenset()
+    left, top, right, bottom = support_bounds(envelope)
+    return frozenset(
+        (index % width, index // width)
+        for index, delta in enumerate(deltas)
+        if delta >= minimum_delta
+        and left - envelope_distance <= index % width < right + envelope_distance
+        and top - envelope_distance <= index // width < bottom + envelope_distance
+    )
+
+
 def _capture_mask(
-    ipc: Any, workspace: Path, label: str, *, minimum_delta: int
+    ipc: Any,
+    workspace: Path,
+    label: str,
+    *,
+    minimum_delta: int,
+    envelope_delta: int,
+    envelope_distance: int,
 ) -> tuple[Mask, tuple[int, int], dict[str, dict[str, Any]]]:
     from mpv_source_transition import _wait_for
     from PIL import Image, ImageChops
@@ -404,10 +438,12 @@ def _capture_mask(
         red, green, blue = difference.split()
         peak = ImageChops.lighter(red, ImageChops.lighter(green, blue))
         deltas = peak.tobytes()
-        mask = frozenset(
-            (index % width, index // width)
-            for index, delta in enumerate(deltas)
-            if delta >= minimum_delta
+        mask = _comparison_mask(
+            deltas,
+            width,
+            minimum_delta=minimum_delta,
+            envelope_delta=envelope_delta,
+            envelope_distance=envelope_distance,
         )
         histogram = peak.histogram()
         threshold_support = {
@@ -484,7 +520,14 @@ class _MpvSession:
             raise RuntimeError(f"mpv did not expose Gate D IPC: {error}\n{diagnostic}") from error
 
     def capture(
-        self, ass_path: Path, timestamp_ms: int, label: str, *, minimum_delta: int
+        self,
+        ass_path: Path,
+        timestamp_ms: int,
+        label: str,
+        *,
+        minimum_delta: int,
+        envelope_delta: int,
+        envelope_distance: int,
     ) -> tuple[Mask, tuple[int, int], dict[str, dict[str, Any]], dict[str, Any]]:
         from mpv_source_transition import _track_for_path, _wait_for
 
@@ -508,7 +551,12 @@ class _MpvSession:
                 message=f"mpv did not render {label}",
             )
             mask, size, threshold_support = _capture_mask(
-                self.ipc, self.workspace, label, minimum_delta=minimum_delta
+                self.ipc,
+                self.workspace,
+                label,
+                minimum_delta=minimum_delta,
+                envelope_delta=envelope_delta,
+                envelope_distance=envelope_distance,
             )
             return mask, size, threshold_support, _mpv_render_inputs(self.ipc)
         finally:
@@ -584,12 +632,25 @@ def _evaluate_cell(
     storage_size = tuple(profile["storage_size"])
     video_pixel_aspect = _video_pixel_aspect(profile)
     screenshot_delta = _screenshot_delta_threshold(profile, thresholds)
+    screenshot_envelope = (
+        int(thresholds["anamorphic_screenshot_envelope_threshold"])
+        if frame_size != storage_size
+        else 1
+    )
+    screenshot_envelope_distance = (
+        int(thresholds["maximum_outer_bounds_distance_px"]) if frame_size != storage_size else 0
+    )
     ass_data = _d_ass_bytes(case[event_key])
     label = f"{profile['id']}-{sources[0]}-{case['id']}-{contract}"
     ass_path = workspace / f"{label}.ass"
     ass_path.write_bytes(ass_data)
     mpv_mask, observed_size, difference_threshold_support, render_inputs = session.capture(
-        ass_path, int(case["timestamp_ms"]), label, minimum_delta=screenshot_delta
+        ass_path,
+        int(case["timestamp_ms"]),
+        label,
+        minimum_delta=screenshot_delta,
+        envelope_delta=screenshot_envelope,
+        envelope_distance=screenshot_envelope_distance,
     )
     renderer, result = _shadow_result(
         ass_data,
@@ -633,6 +694,8 @@ def _evaluate_cell(
                 "expected_video_pixel_aspect": video_pixel_aspect,
                 "expected_renderer_pixel_aspect": video_pixel_aspect,
                 "screenshot_delta_threshold": screenshot_delta,
+                "screenshot_envelope_threshold": screenshot_envelope,
+                "screenshot_envelope_distance": screenshot_envelope_distance,
                 "frame_size_matches": input_checks["screenshot-frame-size"],
                 "token_box_count": boxes,
                 "mpv_difference_threshold_support": difference_threshold_support,
