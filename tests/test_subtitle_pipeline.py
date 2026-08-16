@@ -5,7 +5,12 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from saitenka.app.subtitle_pipeline import SubtitleGeometryWorker, SubtitleModeCoordinator
+from saitenka.app.subtitle_pipeline import (
+    GeometryResolution,
+    GeometryTicket,
+    SubtitleGeometryWorker,
+    SubtitleModeCoordinator,
+)
 from saitenka.subtitles import (
     GeometryRequest,
     GeometrySnapshot,
@@ -89,6 +94,20 @@ class BlockingBackend(FakeGeometryBackend):
         self.entered.set()
         assert self.release.wait(1)
         return super().render(request)
+
+
+class BlockingFailingBackend(BlockingBackend):
+    def render(self, _request: GeometryRequest) -> GeometrySnapshot:
+        self.entered.set()
+        assert self.release.wait(1)
+        raise RuntimeError("font provider unavailable")
+
+
+class ConsumingCoordinator(SubtitleModeCoordinator):
+    def resolve_outcome(self, ticket: GeometryTicket) -> GeometryResolution:
+        outcome = super().resolve_outcome(ticket)
+        self.consume_error()
+        return outcome
 
 
 def request(generation: int, timestamp_ms: int = 1_250) -> GeometryRequest:
@@ -252,6 +271,35 @@ def test_worker_contains_provider_failure_and_stops() -> None:
     assert worker.stats.failures == 1
     assert coordinator.last_error == "font provider unavailable"
 
+    worker.close()
+
+
+def test_worker_drops_provider_failure_invalidated_during_render() -> None:
+    backend = BlockingFailingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator)
+
+    assert worker.submit(request(coordinator.generation))
+    assert backend.entered.wait(1)
+    worker.invalidate()
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert coordinator.last_error is None
+    assert worker.stats.failures == 0
+    assert worker.stats.superseded == 1
+    worker.close()
+
+
+def test_worker_counts_failure_after_error_is_consumed() -> None:
+    coordinator = ConsumingCoordinator(FakeCurrentRenderer(), FailingBackend())
+    worker = SubtitleGeometryWorker(coordinator)
+
+    assert worker.submit(request(coordinator.generation))
+    assert worker.wait_idle()
+
+    assert coordinator.last_error is None
+    assert worker.stats.failures == 1
     worker.close()
 
 

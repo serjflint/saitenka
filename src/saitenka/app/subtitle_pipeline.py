@@ -39,6 +39,12 @@ class GeometryReservation:
 
 
 @dataclass(frozen=True, slots=True)
+class GeometryResolution:
+    snapshot: GeometrySnapshot | None
+    failure_recorded: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class GeometryWorkerStats:
     submitted: int
     superseded: int
@@ -128,21 +134,23 @@ class SubtitleModeCoordinator:
         return self.resolve(ticket)
 
     def resolve(self, ticket: GeometryTicket) -> GeometrySnapshot | None:
+        return self.resolve_outcome(ticket).snapshot
+
+    def resolve_outcome(self, ticket: GeometryTicket) -> GeometryResolution:
         request = ticket.request
         with self._backend_lock:
             with self._state_lock:
                 if self._closed or ticket.sequence != self._request_sequence:
-                    return None
+                    return GeometryResolution(None)
             if self._backend is None:
-                return None
+                return GeometryResolution(None)
             try:
                 result = self._backend.render(request)
             except Exception as error:  # noqa: BLE001 -- an optional provider must fail back to mpv
-                with self._state_lock:
-                    if ticket.sequence == self._request_sequence:
-                        self._last_error = str(error)
-                return None
-        return result if self.publish(ticket, result) else None
+                reservation = GeometryReservation(ticket.sequence, request.generation)
+                return GeometryResolution(None, self.record_error(reservation, error))
+        published = self.publish(ticket, result)
+        return GeometryResolution(result if published else None)
 
     def prepare(self, request: GeometryRequest) -> GeometryTicket | None:
         reservation = self.reserve(request.generation)
@@ -380,11 +388,11 @@ class SubtitleGeometryWorker:
                     self._prefetched.popitem(last=False)
             self._idle()
 
-    def _finish_current(self, *, published: bool) -> None:
+    def _finish_current(self, *, published: bool, failure_recorded: bool = False) -> None:
         with self._condition:
             if published:
                 self._completed += 1
-            elif self._coordinator.last_error is not None:
+            elif failure_recorded:
                 self._failures += 1
             else:
                 self._superseded += 1
@@ -415,10 +423,15 @@ class SubtitleGeometryWorker:
             with self._condition:
                 self._cache_hits += 1
         else:
-            result = self._coordinator.resolve(ticket)
-            published = result is not None
-            if result is not None:
-                self._store(ticket.request, result)
+            outcome = self._coordinator.resolve_outcome(ticket)
+            published = outcome.snapshot is not None
+            if outcome.snapshot is not None:
+                self._store(ticket.request, outcome.snapshot)
+            self._finish_current(
+                published=published,
+                failure_recorded=outcome.failure_recorded,
+            )
+            return
         self._finish_current(published=published)
 
     def _next_work(
