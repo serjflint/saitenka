@@ -270,6 +270,22 @@ def test_file_load_separates_picker_toggle_batches(monkeypatch):
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
 
 
+def test_property_change_does_not_split_startup_picker_presses(monkeypatch):
+    reader, ipc = _reader(path="/v/ep.mkv")
+    reader.configure_sub_picker(_lister([]))
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    ipc.events = [
+        {"event": "client-message", "args": [SUB_PICKER_MSG]},
+        {"event": "property-change", "name": "time-pos", "data": 1.0},
+        {"event": "client-message", "args": [SUB_PICKER_MSG]},
+    ]
+
+    reader._drain_events()
+
+    assert reader.sub_picker.open
+    assert len(_picker_adds(ipc)) == 1
+
+
 @pytest.mark.parametrize(
     ("size", "expected"),
     [(0, "—"), (512, "512 B"), (2048, "2 K"), (3 * 1024 * 1024, "3.0 M")],

@@ -2007,7 +2007,7 @@ class Reader:
         last_client_message: str | None = None
         for ev in self.ipc.drain_events():
             kind = ev.get("event")
-            if kind != "client-message":
+            if kind == "file-loaded":
                 last_client_message = None
             if kind == "property-change":  # observed state — no round-trips
                 self._on_property_change(ev)
