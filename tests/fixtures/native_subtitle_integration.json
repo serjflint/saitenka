@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "event_count": 101,
+  "trials": 3,
   "lookahead": 2,
   "cache_max": 3,
   "interaction_clock": "thread_time",

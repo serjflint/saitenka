@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+
+import native_subtitle_integration_benchmark as benchmark
 import pytest
-from native_subtitle_integration_benchmark import evaluate, load_manifest
+from native_subtitle_integration_benchmark import evaluate, load_manifest, summarize_trials
 
 
 def report() -> dict:
     return {
+        "schema": 1,
         "event_count": 101,
         "interaction_clock": "thread_time",
         "interaction_p99_ms": 1.0,
@@ -39,8 +43,10 @@ def report() -> dict:
 def manifest() -> dict:
     return {
         "event_count": 101,
+        "trials": 3,
         "cache_max": 3,
         "interaction_clock": "thread_time",
+        "presentation_interval_ms": 0.0,
         "budgets": {
             "interaction_cpu_p99_ms": 16.67,
             "interaction_wall_p99_ms": 16.67,
@@ -96,6 +102,128 @@ def test_budget_oracle_rejects_each_regression() -> None:
         mutated = report()
         mutated[field] = value
         assert not evaluate(mutated, manifest()), field
+
+
+def test_trial_oracle_tolerates_one_performance_outlier() -> None:
+    noisy = report()
+    noisy["interaction_p99_ms"] = 16.68
+
+    summary = summarize_trials([report(), noisy, report()], manifest())
+
+    assert summary["integration_budgets_passed"] is True
+    assert summary["performance_passes"] == 2
+
+
+def test_trial_oracle_rejects_two_performance_outliers() -> None:
+    noisy = report()
+    noisy["interaction_p99_ms"] = 16.68
+
+    summary = summarize_trials([noisy, report(), noisy], manifest())
+
+    assert summary["integration_budgets_passed"] is False
+
+
+def test_trial_oracle_rejects_any_functional_failure() -> None:
+    failed = report()
+    failed["failures"] = 1
+
+    summary = summarize_trials([report(), failed, report()], manifest())
+
+    assert summary["integration_budgets_passed"] is False
+    assert summary["all_functional_invariants_passed"] is False
+
+
+@pytest.mark.parametrize("schema", [None, 2])
+def test_trial_oracle_rejects_missing_or_wrong_trial_schema(schema: int | None) -> None:
+    incompatible = report()
+    if schema is None:
+        incompatible.pop("schema")
+    else:
+        incompatible["schema"] = schema
+
+    summary = summarize_trials([report(), incompatible, report()], manifest())
+
+    assert summary["integration_budgets_passed"] is False
+
+
+def test_trial_summary_snapshots_caller_evidence() -> None:
+    reports = [report(), report(), report()]
+    summary = summarize_trials(reports, manifest())
+
+    reports[0]["failures"] = 1
+
+    assert summary["trials"][0]["report"]["failures"] == 0
+    assert summary["integration_budgets_passed"] is True
+
+
+def test_trial_execution_persists_error_evidence(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    class NativePanic(BaseException):
+        pass
+
+    attempts = iter(range(3))
+
+    def run_trial(_manifest: dict, **_kwargs) -> dict:
+        if next(attempts) == 1:
+            raise NativePanic("renderer failed")
+        return report()
+
+    monkeypatch.setattr(benchmark, "run", run_trial)
+    output = tmp_path / "trials.json"
+
+    summary = benchmark.execute_trials(manifest(), None, output)
+    persisted = json.loads(output.read_text(encoding="utf-8"))
+
+    assert summary["integration_budgets_passed"] is False
+    assert persisted["completed_trials"] == 2
+    assert persisted["trials"][1]["status"] == "error"
+    assert persisted["trials"][1]["error_type"] == "NativePanic"
+    assert "renderer failed" in persisted["trials"][1]["traceback"]
+
+
+def test_trial_execution_persists_interrupt_before_reraising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    def interrupt(_manifest: dict, **_kwargs) -> dict:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(benchmark, "run", interrupt)
+    output = tmp_path / "trials.json"
+
+    with pytest.raises(KeyboardInterrupt):
+        benchmark.execute_trials(manifest(), None, output)
+    persisted = json.loads(output.read_text(encoding="utf-8"))
+
+    assert persisted["trials"][0]["status"] == "interrupted"
+    assert persisted["trials"][0]["error_type"] == "KeyboardInterrupt"
+
+
+def test_trial_run_closes_backend_after_mid_trial_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backends = []
+
+    class RecordingBackend(benchmark.LibassGeometryBackend):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            backends.append(self)
+
+    def fail_present(*_args, **_kwargs) -> bool:
+        raise RuntimeError("interaction failed")
+
+    monkeypatch.setattr(benchmark, "LibassGeometryBackend", RecordingBackend)
+    monkeypatch.setattr(benchmark, "_present", fail_present)
+
+    with pytest.raises(RuntimeError, match="interaction failed"):
+        benchmark.run(manifest())
+
+    assert len(backends) == 1
+    assert backends[0].closed is True
+
+
+@pytest.mark.parametrize("trial_count", [1, 2, 4])
+def test_trial_oracle_rejects_unlocked_denominator(trial_count: int) -> None:
+    with pytest.raises(ValueError, match="locked denominator"):
+        summarize_trials([report()] * trial_count, manifest())
 
 
 def test_manifest_lock_rejects_budget_weakening(tmp_path) -> None:
