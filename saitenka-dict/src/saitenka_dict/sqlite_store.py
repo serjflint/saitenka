@@ -76,9 +76,14 @@ _SEARCH_QUERY_ENRICHED = (
     "ORDER BY COALESCE(requested.key, d.import_order), score DESC, e.id LIMIT ?"
 )
 _EXACT_TERMS_QUERY = (
-    "SELECT DISTINCT e.term FROM entries e JOIN dictionaries d ON d.id=e.dict_id "
-    "WHERE e.term IN (SELECT value FROM json_each(?)) "
+    "SELECT requested.value FROM json_each(?) requested "
+    "WHERE EXISTS ("
+    "SELECT 1 FROM dictionaries d "
+    "JOIN keys k ON k.dict_id=d.id AND k.key=requested.value "
+    "JOIN entries e ON e.dict_id=k.dict_id AND e.id=k.id "
+    "WHERE e.term=requested.value "
     "AND (? = '[]' OR d.title IN (SELECT value FROM json_each(?)))"
+    ")"
 )
 _MEDIA_QUERY = (
     "SELECT m.path, m.png FROM media m JOIN dictionaries d ON d.id=m.dict_id "

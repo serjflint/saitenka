@@ -2333,7 +2333,7 @@ dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "saitenka-dict"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "saitenka-dict" }
 
 [package.metadata]
