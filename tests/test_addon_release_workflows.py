@@ -82,6 +82,16 @@ def test_libasslite_bundle_manual_release_is_testpypi_only() -> None:
     assert "repository-url" not in production["steps"][-1]["with"]
 
 
+def test_libasslite_bundle_source_release_has_explicit_repository_context() -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "libasslite-bundle-release.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert workflow["jobs"]["sources"]["env"]["GH_REPO"] == "${{ github.repository }}"
+
+
 def test_libasslite_macos_smoke_uses_runner_homebrew_prefix() -> None:
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "libasslite-release.yml").read_text(encoding="utf-8")
