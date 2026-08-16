@@ -14,8 +14,8 @@ type AssLibrary = c_void;
 type AssRendererHandle = c_void;
 type AssTrack = c_void;
 
-const MIN_LIBASS_VERSION: u32 = 0x01700000;
-const NEXT_UNTESTED_LIBASS_VERSION: u32 = 0x01800000;
+const MIN_LIBASS_VERSION: u32 = 0x01701000;
+const MAX_LIBASS_VERSION: u32 = 0x01705000;
 const LIBRARY_ENV: &str = "LIBASSLITE_LIBRARY";
 
 #[repr(C)]
@@ -139,11 +139,11 @@ fn validate_pixel_aspect(pixel_aspect: Option<f64>) -> PyResult<()> {
 }
 
 fn validate_version(version: u32) -> Result<(), String> {
-    if (MIN_LIBASS_VERSION..NEXT_UNTESTED_LIBASS_VERSION).contains(&version) {
+    if (MIN_LIBASS_VERSION..=MAX_LIBASS_VERSION).contains(&version) {
         Ok(())
     } else {
         Err(format!(
-            "unsupported libass ABI 0x{version:08x}; expected 0.17.x"
+            "unsupported libass ABI 0x{version:08x}; expected 0.17.1 through 0.17.5"
         ))
     }
 }
@@ -466,9 +466,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_only_tested_minor_line() {
-        assert!(validate_version(0x01700000).is_ok());
+    fn accepts_only_tested_patch_range() {
+        assert!(validate_version(0x01701000).is_ok());
         assert!(validate_version(0x01705000).is_ok());
+        assert!(validate_version(0x01700000).is_err());
+        assert!(validate_version(0x01706000).is_err());
         assert!(validate_version(0x01602000).is_err());
         assert!(validate_version(0x01800000).is_err());
     }
