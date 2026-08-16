@@ -61,6 +61,12 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.12.0"
+      - name: Cache vcpkg source downloads
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: .vcpkg/downloads
+          key: >-
+            bundle-vcpkg-downloads-${{ runner.os }}-${{ matrix.triplet }}-${{ env.VCPKG_REF }}-${{ hashFiles('libasslite-bundle/vcpkg.json', 'libasslite-bundle/ports/**', 'libasslite-bundle/triplets/**') }}
       - name: Bootstrap and install native closure (POSIX)
         if: runner.os == 'macOS'
         shell: bash
