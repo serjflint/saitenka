@@ -43,7 +43,7 @@ def manifest() -> dict:
         "interaction_clock": "thread_time",
         "budgets": {
             "interaction_cpu_p99_ms": 16.67,
-            "interaction_wall_safety_ms": 100.0,
+            "interaction_wall_p99_ms": 16.67,
             "interaction_cpu_delta_p99_ms": 2.0,
             "interaction_wall_delta_p99_ms": 16.67,
             "ready_before_presentation_ratio": 0.99,
@@ -56,9 +56,9 @@ def test_budget_oracle_accepts_locked_boundary() -> None:
     assert evaluate(report(), manifest())
 
 
-def test_budget_oracle_allows_host_preemption_below_safety_limit() -> None:
+def test_budget_oracle_accepts_wall_frame_boundary() -> None:
     measured = report()
-    measured["interaction_p99_ms"] = 50.0
+    measured["interaction_p99_ms"] = 16.67
     assert evaluate(measured, manifest())
 
 
@@ -67,7 +67,7 @@ def test_budget_oracle_rejects_each_regression() -> None:
         "event_count": 100,
         "interaction_clock": "wall_time",
         "interaction_cpu_p99_ms": 16.68,
-        "interaction_p99_ms": 100.01,
+        "interaction_p99_ms": 16.68,
         "interaction_cpu_delta_p99_ms": 2.01,
         "interaction_wall_delta_p99_ms": 16.68,
         "ready_before_presentation_ratio": 0.989,

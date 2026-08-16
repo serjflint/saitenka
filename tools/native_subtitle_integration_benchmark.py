@@ -36,7 +36,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "def30698e18be8b4b330c9b847073b281251528f2499638c4b9a4166fc3df66f"
+LOCKED_MANIFEST_SHA256 = "7f43930753eabafb2e30cd6cd7e28b1cffb702e3dcfcbabb7dab3219c11532f3"
 
 
 def load_manifest(path: Path) -> dict:
@@ -77,7 +77,7 @@ def evaluate(report: dict, manifest: dict) -> bool:
         report["event_count"] == manifest["event_count"]
         and report["interaction_clock"] == manifest["interaction_clock"]
         and report["interaction_cpu_p99_ms"] <= budgets["interaction_cpu_p99_ms"]
-        and report["interaction_p99_ms"] <= budgets["interaction_wall_safety_ms"]
+        and report["interaction_p99_ms"] <= budgets["interaction_wall_p99_ms"]
         and report["interaction_cpu_delta_p99_ms"] <= budgets["interaction_cpu_delta_p99_ms"]
         and report["interaction_wall_delta_p99_ms"] <= budgets["interaction_wall_delta_p99_ms"]
         and report["ready_before_presentation_ratio"] >= budgets["ready_before_presentation_ratio"]

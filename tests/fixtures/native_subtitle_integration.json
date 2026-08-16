@@ -7,7 +7,7 @@
   "presentation_interval_ms": 250.0,
   "budgets": {
     "interaction_cpu_p99_ms": 16.67,
-    "interaction_wall_safety_ms": 100.0,
+    "interaction_wall_p99_ms": 16.67,
     "interaction_cpu_delta_p99_ms": 2.0,
     "interaction_wall_delta_p99_ms": 16.67,
     "ready_before_presentation_ratio": 0.99,
