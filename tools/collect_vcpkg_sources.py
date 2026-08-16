@@ -12,13 +12,16 @@ import tarfile
 from pathlib import Path
 
 
-def _files(vcpkg_root: Path, package: Path) -> list[tuple[Path, str]]:
+def _files(vcpkg_root: Path, package: Path, triplet: str) -> list[tuple[Path, str]]:
     sources = json.loads((package / "NATIVE_SOURCES.json").read_text(encoding="utf-8"))
     package_names = sorted({item["name"] for item in sources["packages"]})
     entries = [
         (package / "NATIVE_SOURCES.json", "NATIVE_SOURCES.json"),
         (package / "vcpkg.json", "vcpkg.json"),
     ]
+    triplet_file = package / "triplets" / f"{triplet}.cmake"
+    if triplet_file.is_file():
+        entries.append((triplet_file, f"triplets/{triplet_file.name}"))
     entries.extend(
         (path, f"downloads/{path.name}")
         for path in sorted((vcpkg_root / "downloads").iterdir())
@@ -38,8 +41,33 @@ def _files(vcpkg_root: Path, package: Path) -> list[tuple[Path, str]]:
     return entries
 
 
-def collect(vcpkg_root: Path, package: Path, output: Path) -> None:
-    entries = _files(vcpkg_root, package)
+def _rebuild_script(triplet: str, has_overlay_triplet: bool) -> bytes:
+    overlay = '["--overlay-triplets=triplets"]' if has_overlay_triplet else "[]"
+    return f"""#!/usr/bin/env python3
+import argparse
+import shutil
+import subprocess
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--vcpkg-root", type=Path, required=True)
+parser.add_argument("--install-root", type=Path, required=True)
+args = parser.parse_args()
+downloads = args.vcpkg_root / "downloads"
+downloads.mkdir(parents=True, exist_ok=True)
+for source in Path("downloads").iterdir():
+    shutil.copy2(source, downloads / source.name)
+command = [
+    str(args.vcpkg_root / {('"vcpkg.exe"' if triplet.startswith("x64-windows") else '"vcpkg"')}),
+    "install", "--x-manifest-root=.", "--overlay-ports=ports",
+    "--triplet={triplet}", f"--x-install-root={{args.install_root}}",
+] + {overlay}
+subprocess.run(command, check=True)
+""".encode()
+
+
+def collect(vcpkg_root: Path, package: Path, triplet: str, output: Path) -> None:
+    entries = _files(vcpkg_root, package, triplet)
     checksums = "".join(
         f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {archive}\n" for path, archive in entries
     ).encode()
@@ -60,15 +88,22 @@ def collect(vcpkg_root: Path, package: Path, output: Path) -> None:
         info.size = len(checksums)
         info.mtime = 0
         archive.addfile(info, io.BytesIO(checksums))
+        rebuild = _rebuild_script(triplet, any(name.startswith("triplets/") for _, name in entries))
+        info = tarfile.TarInfo("rebuild.py")
+        info.mode = 0o755
+        info.size = len(rebuild)
+        info.mtime = 0
+        archive.addfile(info, io.BytesIO(rebuild))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--vcpkg-root", type=Path, required=True)
     parser.add_argument("--package", type=Path, required=True)
+    parser.add_argument("--triplet", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    collect(args.vcpkg_root, args.package, args.output)
+    collect(args.vcpkg_root, args.package, args.triplet, args.output)
 
 
 if __name__ == "__main__":

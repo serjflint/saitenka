@@ -50,6 +50,11 @@ def main() -> None:
         raise AssertionError("an invalid explicit path fell back to the bundle")
     del os.environ["LIBASSLITE_LIBRARY"]
 
+    os.environ["LIBASSLITE_LIBRARY"] = str(bundled)
+    explicit_path, _ = render_once()
+    assert os.path.realpath(explicit_path) == os.path.realpath(bundled)
+    del os.environ["LIBASSLITE_LIBRARY"]
+
     os.environ["LIBASSLITE_BUNDLE"] = "0"
     try:
         selected, _ = render_once()

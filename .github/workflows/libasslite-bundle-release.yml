@@ -11,6 +11,7 @@ on:
       - "tools/prepare_libass_bundle.py"
       - "tools/collect_vcpkg_sources.py"
       - "tools/smoke_libasslite_bundle.py"
+      - "tools/verify_bundle_uninstall.py"
       - "tools/verify_macos_bundle.py"
   workflow_dispatch:
 
@@ -27,6 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.12.0"
       - name: Verify package version
         if: startsWith(github.ref, 'refs/tags/libasslite-bundle-v')
         env:
@@ -57,6 +60,8 @@ jobs:
           ref: ${{ env.VCPKG_REF }}
           path: .vcpkg
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.12.0"
       - name: Bootstrap and install native closure (POSIX)
         if: runner.os == 'macOS'
         shell: bash
@@ -90,7 +95,7 @@ jobs:
               .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root=/runner-temp/vcpkg-installed
               .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root=/runner-temp/vcpkg-installed
               "$UV" run --no-project tools/prepare_libass_bundle.py --install-root /runner-temp/vcpkg-installed --triplet ${{ matrix.triplet }} --package libasslite-bundle
-              "$UV" run --no-project tools/collect_vcpkg_sources.py --vcpkg-root .vcpkg --package libasslite-bundle --output corresponding-source-${{ matrix.name }}.tar.gz
+              "$UV" run --no-project tools/collect_vcpkg_sources.py --vcpkg-root .vcpkg --package libasslite-bundle --triplet ${{ matrix.triplet }} --output corresponding-source-${{ matrix.name }}.tar.gz
               "$UV" build --wheel --out-dir dist-a libasslite-bundle
               "$UV" build --wheel --out-dir dist-b libasslite-bundle
               cmp dist-a/*.whl dist-b/*.whl
@@ -104,7 +109,7 @@ jobs:
         shell: bash
         run: |
           uv run --no-project tools/prepare_libass_bundle.py --install-root "$RUNNER_TEMP/vcpkg-installed" --triplet ${{ matrix.triplet }} --package libasslite-bundle
-          uv run --no-project tools/collect_vcpkg_sources.py --vcpkg-root .vcpkg --package libasslite-bundle --output corresponding-source-${{ matrix.name }}.tar.gz
+          uv run --no-project tools/collect_vcpkg_sources.py --vcpkg-root .vcpkg --package libasslite-bundle --triplet ${{ matrix.triplet }} --output corresponding-source-${{ matrix.name }}.tar.gz
       - name: Build reproducibly and retag as a platform wheel
         if: runner.os != 'Linux'
         shell: bash
@@ -153,6 +158,7 @@ jobs:
           fi
           uv pip install --python "$py" "${wrapper[0]}" "${wheel[0]}"
           "$py" "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
+          "$py" "$GITHUB_WORKSPACE/tools/verify_bundle_uninstall.py" snapshot "$RUNNER_TEMP/bundle-install.json"
           echo "BUNDLE_SMOKE_PY=$py" >> "$GITHUB_ENV"
       - name: ASan allocator lifecycle smoke (Linux)
         if: runner.os == 'Linux'
@@ -164,6 +170,7 @@ jobs:
         shell: bash
         run: |
           uv pip uninstall --python "$BUNDLE_SMOKE_PY" libasslite-bundle
+          "$BUNDLE_SMOKE_PY" "$GITHUB_WORKSPACE/tools/verify_bundle_uninstall.py" verify "$RUNNER_TEMP/bundle-install.json"
           "$BUNDLE_SMOKE_PY" -c 'import importlib.util,libasslite; assert importlib.util.find_spec("libasslite_bundle") is None'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -179,6 +186,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.12.0"
       - run: uv build --sdist --out-dir dist libasslite-bundle
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -186,7 +195,7 @@ jobs:
           path: dist/*.tar.gz
 
   publish:
-    needs: [verify-tag, build, sdist]
+    needs: [verify-tag, build, sdist, sources]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
@@ -205,9 +214,8 @@ jobs:
           repository-url: ${{ github.event_name == 'workflow_dispatch' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
           skip-existing: ${{ github.event_name == 'workflow_dispatch' }}
 
-  publish-sources:
+  sources:
     needs: [verify-tag, build]
-    if: startsWith(github.ref, 'refs/tags/libasslite-bundle-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -218,6 +226,7 @@ jobs:
           path: sources
           merge-multiple: true
       - name: Attach corresponding source to the bundle tag
+        if: startsWith(github.ref, 'refs/tags/libasslite-bundle-v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -226,3 +235,8 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes sources/*.tar.gz
           fi
+          mkdir verified-sources
+          gh release download "$GITHUB_REF_NAME" --pattern 'corresponding-source-*.tar.gz' --dir verified-sources
+          for source in sources/*.tar.gz; do
+            cmp "$source" "verified-sources/${source##*/}"
+          done
