@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import importlib
+import time
+from array import array
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
-from saitenka.subtitles.geometry import GeometrySnapshot, Rect, TokenGeometry
+from saitenka import otel_metrics
+from saitenka.subtitles.geometry import MAX_BITMAP_BYTES, GeometrySnapshot, Rect, TokenGeometry
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from saitenka.subtitles.document import SubtitleEventId
     from saitenka.subtitles.geometry import GeometryRequest
 
 
@@ -40,9 +44,12 @@ class NativeRenderer(Protocol):
         pixel_aspect: float,
         margins: tuple[int, int, int, int],
         use_margins: bool,
+        max_bitmap_bytes: int,
     ) -> RenderResult: ...
 
     def close(self) -> None: ...
+
+    def library_version(self) -> int: ...
 
 
 class RendererFactory(Protocol):
@@ -55,17 +62,20 @@ class RendererFactory(Protocol):
     ) -> NativeRenderer: ...
 
 
-@dataclass(frozen=True, slots=True, order=True)
+@dataclass(frozen=True, slots=True)
 class _TokenKey:
+    event_id: SubtitleEventId
     token_index: int
     rgb: int
 
 
 def _collect_layer(
     layer: ImageLayer,
-    palette: dict[int, _TokenKey],
+    palette: dict[int, tuple[int, _TokenKey]],
     reserved: set[int],
-    pixels: dict[_TokenKey, set[tuple[int, int]]],
+    owners: array,
+    frame_size: tuple[int, int],
+    bounds: dict[_TokenKey, list[int]],
     segments: dict[_TokenKey, list[Rect]],
 ) -> None:
     if layer.image_type != 0 or layer.width <= 0 or layer.height <= 0:
@@ -75,42 +85,52 @@ def _collect_layer(
         return
     if rgb not in palette:
         raise ValueError(f"unknown libass character color: {rgb:#08x}")
-    key = palette[rgb]
+    owner, key = palette[rgb]
     if len(layer.bitmap) != layer.width * layer.height:
         raise ValueError("libass character bitmap has an invalid size")
-    points = {
-        (layer.dst_x + offset % layer.width, layer.dst_y + offset // layer.width)
-        for offset, coverage in enumerate(layer.bitmap)
-        if coverage
-    }
-    if points:
-        pixels[key].update(points)
+    frame_width, frame_height = frame_size
+    painted = False
+    for offset, coverage in enumerate(layer.bitmap):
+        if not coverage:
+            continue
+        x = layer.dst_x + offset % layer.width
+        y = layer.dst_y + offset // layer.width
+        if not 0 <= x < frame_width or not 0 <= y < frame_height:
+            raise ValueError("libass character bitmap extends outside the frame")
+        position = y * frame_width + x
+        previous = owners[position]
+        if previous not in {0, owner}:
+            raise ValueError("ambiguous libass token overlap")
+        owners[position] = owner
+        extent = bounds.setdefault(key, [x, y, x + 1, y + 1])
+        extent[0] = min(extent[0], x)
+        extent[1] = min(extent[1], y)
+        extent[2] = max(extent[2], x + 1)
+        extent[3] = max(extent[3], y + 1)
+        painted = True
+    if painted:
         segments[key].append(Rect(layer.dst_x, layer.dst_y, layer.width, layer.height))
 
 
 def _validate_token_pixels(
-    palette: dict[int, _TokenKey], pixels: dict[_TokenKey, set[tuple[int, int]]]
+    palette: dict[int, tuple[int, _TokenKey]], bounds: dict[_TokenKey, list[int]]
 ) -> list[_TokenKey]:
-    missing = set(palette.values()) - set(pixels)
+    def order(item: _TokenKey) -> tuple[int, int]:
+        return item.token_index, item.event_id.source_order
+
+    missing = {key for _owner, key in palette.values()} - set(bounds)
     if missing:
-        raise ValueError(f"missing libass token colors: {sorted(missing)}")
-    ordered = sorted(pixels)
-    for index, left in enumerate(ordered):
-        for right in ordered[index + 1 :]:
-            if pixels[left] & pixels[right]:
-                raise ValueError(f"ambiguous libass token overlap: {left} and {right}")
-    return ordered
+        raise ValueError(f"missing libass token colors: {sorted(missing, key=order)}")
+    return sorted(bounds, key=order)
 
 
-def _token_geometry(
-    key: _TokenKey, points: set[tuple[int, int]], regions: list[Rect]
-) -> TokenGeometry:
-    left = min(x for x, _y in points)
-    top = min(y for _x, y in points)
-    right = max(x for x, _y in points) + 1
-    bottom = max(y for _x, y in points) + 1
+def _token_geometry(key: _TokenKey, extent: list[int], regions: list[Rect]) -> TokenGeometry:
+    left, top, right, bottom = extent
     return TokenGeometry(
-        key.token_index, Rect(left, top, right - left, bottom - top), tuple(regions)
+        key.event_id,
+        key.token_index,
+        Rect(left, top, right - left, bottom - top),
+        tuple(regions),
     )
 
 
@@ -119,14 +139,18 @@ def extract_token_geometry(
     request: GeometryRequest,
 ) -> tuple[TokenGeometry, ...]:
     """Recover every requested token from public character-image layers."""
-    palette = {entry.rgb: _TokenKey(entry.token_index, entry.rgb) for entry in request.palette}
+    palette = {
+        entry.rgb: (index, _TokenKey(entry.event_id, entry.token_index, entry.rgb))
+        for index, entry in enumerate(request.palette, start=1)
+    }
     reserved = set(request.reserved_rgb)
-    pixels: dict[_TokenKey, set[tuple[int, int]]] = defaultdict(set)
+    owners = array("H", [0]) * (request.frame_size[0] * request.frame_size[1])
+    bounds: dict[_TokenKey, list[int]] = {}
     segments: dict[_TokenKey, list[Rect]] = defaultdict(list)
     for layer in result.layers:
-        _collect_layer(layer, palette, reserved, pixels, segments)
-    ordered = _validate_token_pixels(palette, pixels)
-    return tuple(_token_geometry(key, pixels[key], segments[key]) for key in ordered)
+        _collect_layer(layer, palette, reserved, owners, request.frame_size, bounds, segments)
+    ordered = _validate_token_pixels(palette, bounds)
+    return tuple(_token_geometry(key, bounds[key], segments[key]) for key in ordered)
 
 
 class LibassGeometryBackend:
@@ -178,21 +202,41 @@ class LibassGeometryBackend:
             raise RuntimeError("libass geometry backend is closed")
         if not request.palette:
             raise ValueError("hit-map request needs a token palette")
-        result = self._renderer(request).render(
-            request.timestamp_ms,
-            request.frame_size,
-            request.storage_size,
-            pixel_aspect=request.pixel_aspect,
-            margins=request.margins,
-            use_margins=request.use_margins,
-        )
+        renderer = self._renderer(request)
+        with otel_metrics.traced("subtitle_geometry_libass") as span:
+            span.set("provider", "libasslite")
+            span.set("libass_version", f"0x{renderer.library_version():x}")
+            started = time.perf_counter_ns()
+            result = renderer.render(
+                request.timestamp_ms,
+                request.frame_size,
+                request.storage_size,
+                pixel_aspect=request.pixel_aspect,
+                margins=request.margins,
+                use_margins=request.use_margins,
+                max_bitmap_bytes=min(
+                    2 * request.frame_size[0] * request.frame_size[1], MAX_BITMAP_BYTES
+                ),
+            )
+            render_ms = (time.perf_counter_ns() - started) / 1_000_000
+            span.set("render_ms", render_ms)
+            span.set("layer_count", len(result.layers))
+            if otel_metrics.subtitle_geometry_render_ms is not None:
+                otel_metrics.subtitle_geometry_render_ms.record(render_ms)
+            started = time.perf_counter_ns()
+            tokens = extract_token_geometry(result, request)
+            extract_ms = (time.perf_counter_ns() - started) / 1_000_000
+            span.set("extract_ms", extract_ms)
+            span.set("found_tokens", len(tokens))
+            if otel_metrics.subtitle_geometry_extract_ms is not None:
+                otel_metrics.subtitle_geometry_extract_ms.record(extract_ms)
         return GeometrySnapshot(
             request.generation,
             request.track_id,
-            request.event_id,
+            request.frame_id,
             request.timestamp_ms,
             request.variant,
-            extract_token_geometry(result, request),
+            tokens,
         )
 
     def close(self) -> None:

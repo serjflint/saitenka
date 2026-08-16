@@ -217,7 +217,7 @@ fn load_library(explicit: Option<PathBuf>) -> Result<(Library, String), String> 
     ))
 }
 
-unsafe fn copy_bitmap(source: &NativeImage) -> Result<Vec<u8>, &'static str> {
+fn bitmap_len(source: &NativeImage) -> Result<usize, &'static str> {
     if source.w < 0 || source.h < 0 || source.stride < source.w {
         return Err("libass returned invalid image dimensions");
     }
@@ -226,16 +226,19 @@ unsafe fn copy_bitmap(source: &NativeImage) -> Result<Vec<u8>, &'static str> {
     }
     let width = usize::try_from(source.w).map_err(|_| "libass image is too large")?;
     let height = usize::try_from(source.h).map_err(|_| "libass image is too large")?;
-    let stride = usize::try_from(source.stride).map_err(|_| "libass image is too large")?;
-    let packed_len = width
-        .checked_mul(height)
-        .ok_or("libass image is too large")?;
+    width.checked_mul(height).ok_or("libass image is too large")
+}
+
+unsafe fn copy_bitmap(source: &NativeImage, packed_len: usize) -> Result<Vec<u8>, &'static str> {
     if packed_len == 0 {
         return Ok(Vec::new());
     }
     if source.bitmap.is_null() {
         return Err("libass returned a null bitmap");
     }
+    let width = usize::try_from(source.w).map_err(|_| "libass image is too large")?;
+    let height = usize::try_from(source.h).map_err(|_| "libass image is too large")?;
+    let stride = usize::try_from(source.stride).map_err(|_| "libass image is too large")?;
     let mut bitmap = vec![0; packed_len];
     for row in 0..height {
         let offset = row.checked_mul(stride).ok_or("libass image is too large")?;
@@ -358,7 +361,7 @@ impl AssRenderer {
         })
     }
 
-    #[pyo3(signature = (timestamp_ms, frame_size, storage_size, *, pixel_aspect=None, margins=(0, 0, 0, 0), use_margins=false))]
+    #[pyo3(signature = (timestamp_ms, frame_size, storage_size, *, pixel_aspect=None, margins=(0, 0, 0, 0), use_margins=false, max_bitmap_bytes=None))]
     fn render(
         &self,
         py: Python<'_>,
@@ -368,11 +371,15 @@ impl AssRenderer {
         pixel_aspect: Option<f64>,
         margins: (i32, i32, i32, i32),
         use_margins: bool,
+        max_bitmap_bytes: Option<usize>,
     ) -> PyResult<AssRenderResult> {
         validate_size("frame_size", frame_size)?;
         validate_size("storage_size", storage_size)?;
         validate_pixel_aspect(pixel_aspect)?;
         validate_margins(frame_size, margins)?;
+        if max_bitmap_bytes == Some(0) {
+            return Err(PyValueError::new_err("max_bitmap_bytes must be positive"));
+        }
         let (layers, detect_change) = py.detach(|| {
             let mut guard = self
                 .native
@@ -409,9 +416,21 @@ impl AssRenderer {
                 ));
             }
             let mut layers = Vec::new();
+            let mut bitmap_bytes = 0usize;
             while !image.is_null() {
                 let source = unsafe { &*image };
-                let bitmap = unsafe { copy_bitmap(source) }.map_err(PyRuntimeError::new_err)?;
+                let packed_len = bitmap_len(source).map_err(PyRuntimeError::new_err)?;
+                bitmap_bytes = bitmap_bytes
+                    .checked_add(packed_len)
+                    .ok_or_else(|| PyRuntimeError::new_err("libass bitmap size overflow"))?;
+                if max_bitmap_bytes.is_some_and(|limit| bitmap_bytes > limit) {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "libass bitmap budget exceeded: {bitmap_bytes} > {}",
+                        max_bitmap_bytes.unwrap_or_default()
+                    )));
+                }
+                let bitmap =
+                    unsafe { copy_bitmap(source, packed_len) }.map_err(PyRuntimeError::new_err)?;
                 layers.push((
                     source.w,
                     source.h,
@@ -535,7 +554,11 @@ mod tests {
             image_type: 0,
         };
 
-        assert_eq!(unsafe { copy_bitmap(&image) }.unwrap(), Vec::<u8>::new());
+        let packed_len = bitmap_len(&image).unwrap();
+        assert_eq!(
+            unsafe { copy_bitmap(&image, packed_len) }.unwrap(),
+            Vec::<u8>::new()
+        );
     }
 
     #[test]
@@ -553,7 +576,7 @@ mod tests {
         };
 
         assert_eq!(
-            unsafe { copy_bitmap(&image) }.unwrap_err(),
+            bitmap_len(&image).unwrap_err(),
             "libass returned an unknown image type"
         );
     }

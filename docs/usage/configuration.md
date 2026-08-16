@@ -231,9 +231,9 @@ rebindable-key table with defaults.
 `[subtitle_geometry].native_visible = true` keeps an external authored `.ass` track rendered by mpv
 and uses an optional system `libass` only for hover geometry. Saitenka draws the tooltip and a small
 focus box, not a replacement subtitle raster. Unsupported syntax, missing source bytes, or a provider
-failure leaves the mpv subtitle visible; cue-local failures affect one cue, while source or provider
-failures can disable interaction for the track or session. Run `saitenka doctor` to verify `libasslite`
-and the selected library; `overlay.example.toml` owns the settings and defaults.
+failure immediately returns pixel and hit-box ownership to Saitenka's standard renderer, so scanning
+and tooltips remain available. Run `saitenka doctor` to verify `libasslite` and the selected library;
+`overlay.example.toml` owns the settings and defaults.
 Installation choices, the accepted render envelope, attach-mode mpv settings, and fallback diagnostics
 are collected in [Native mpv subtitles](native-subtitles.md). Contributor-facing ownership and
 lifecycle diagrams live in

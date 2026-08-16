@@ -139,6 +139,7 @@ NESTED_ID = OverlayId.NESTED
 # blocking get_property round-trips per 25 ms tick. One initial read seeds pre-observe state.
 OBSERVED_PROPS = (
     "sub-text",
+    "sub-text/ass-full",
     "mouse-pos",
     "osd-dimensions",
     "pause",
@@ -162,6 +163,28 @@ OBSERVED_PROPS = (
     "options/embeddedfonts",
     "options/sub-fonts-dir",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
+)
+_GEOMETRY_PROPS = frozenset(
+    {
+        "sub-text/ass-full",
+        "sub-start",
+        "sub-end",
+        "video-out-params",
+        "osd-dimensions",
+        "options/sub-ass-override",
+        "options/sub-ass-scale-with-window",
+        "options/sub-scale",
+        "options/sub-pos",
+        "options/sub-use-margins",
+        "options/sub-ass-force-margins",
+        "options/sub-ass-video-aspect-override",
+        "options/sub-ass-use-video-data",
+        "options/sub-ass-vsfilter-aspect-compat",
+        "options/sub-ass-style-overrides",
+        "options/sub-font-provider",
+        "options/embeddedfonts",
+        "options/sub-fonts-dir",
+    }
 )
 
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
@@ -524,6 +547,8 @@ class Reader:
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
         self._observed: dict = {}
+        self._geometry_dirty = False
+        self._ass_full_probe_dirty = True
         # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
         # opt-in (never set under attach, so SyncPlay-managed playback never advances). `_eof_handled`
         # makes the eof-reached edge one-shot per file (re-armed when a new file clears eof-reached).
@@ -636,7 +661,10 @@ class Reader:
         events instead of doing blocking round-trips every tick. Main-thread only (IPC)."""
         for i, name in enumerate(OBSERVED_PROPS, 1):
             self.ipc.command("observe_property", i, name)
-            self._observed[name] = self._get(name)  # initial state (pre-observe)
+            reply = self.ipc.command("get_property", name)
+            self._observed[name] = reply.get("data")
+            if name == "sub-text/ass-full" and self.native_geometry is not None:
+                self.native_geometry.observe_ass_full_reply(reply)
         self._observing = True
         # Seed values are the first sign the mpv→client read path works: a None osd-dimensions here
         # (with mpv clearly running) means get_property replies aren't coming back — the pipe read is
@@ -661,6 +689,24 @@ class Reader:
             return self._observed[name]
         return self._get(name)
 
+    def _update_subtitle_geometry_observation(
+        self, name: str, data: object, *, changed: bool
+    ) -> None:
+        if name == "sid" and changed:
+            self._ass_full_probe_dirty = True
+            if self.native_geometry is not None:
+                self.native_geometry.set_source(None, reader=self)
+            else:
+                self.subtitle_pipeline.invalidate()
+            subtitle_modes.on_primary_changed(self, data)
+        elif changed and self.native_geometry is not None and name in _GEOMETRY_PROPS:
+            self._geometry_dirty = True
+        if changed and name == "sub-text":
+            self._ass_full_probe_dirty = True
+        if self._geometry_dirty and not self._observing and self.native_geometry is not None:
+            self._geometry_dirty = False
+            self.native_geometry.refresh(self)
+
     def _on_property_change(self, ev: dict) -> None:
         name = ev.get("name")
         if name:
@@ -671,37 +717,7 @@ class Reader:
                 # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
                 log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
-            if name == "sid" and changed:
-                if self.native_geometry is not None:
-                    self.native_geometry.set_source(None, reader=self)
-                else:
-                    self.subtitle_pipeline.invalidate()
-                subtitle_modes.on_primary_changed(self, ev.get("data"))
-            elif (
-                changed
-                and self.native_geometry is not None
-                and name
-                in {
-                    "sub-start",
-                    "sub-end",
-                    "video-out-params",
-                    "osd-dimensions",
-                    "options/sub-ass-override",
-                    "options/sub-ass-scale-with-window",
-                    "options/sub-scale",
-                    "options/sub-pos",
-                    "options/sub-use-margins",
-                    "options/sub-ass-force-margins",
-                    "options/sub-ass-video-aspect-override",
-                    "options/sub-ass-use-video-data",
-                    "options/sub-ass-vsfilter-aspect-compat",
-                    "options/sub-ass-style-overrides",
-                    "options/sub-font-provider",
-                    "options/embeddedfonts",
-                    "options/sub-fonts-dir",
-                }
-            ):
-                self.native_geometry.refresh(self)
+            self._update_subtitle_geometry_observation(name, ev.get("data"), changed=changed)
 
     def refresh_osd(self) -> bool:
         d = self._prop("osd-dimensions") or {}
@@ -799,6 +815,8 @@ class Reader:
             self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
             self.lines, self.tokens, self.boxes = [], [], []
+            if self.native_geometry is not None:
+                self.native_geometry.mark_empty()
             self.subtitle_pipeline.clear(self)
             self.ov.hide(TIP_ID)
             return
@@ -993,12 +1011,12 @@ class Reader:
         self.boxes = []
         self.subtitle_pipeline.clear(self)
 
-    def _use_legacy_subtitle_renderer(self) -> None:
+    def _use_legacy_subtitle_renderer(self, *, draw: bool = True) -> None:
         renderer = self.subtitle_pipeline.renderer
         if not isinstance(renderer, NativeVisibleRenderer):
             return
         renderer.use_fallback(self)
-        if self.sub_text.strip():
+        if draw and self.sub_text.strip():
             renderer.draw(self)
 
     def _use_native_subtitle_renderer(self) -> bool:
@@ -1873,7 +1891,18 @@ class Reader:
             analysis_overlay.redraw(self)
 
     def _reconcile_subtitles(self) -> None:
+        if self.native_geometry is not None and self._ass_full_probe_dirty:
+            if self.native_geometry.ass_full_capability.value == "unknown":
+                reply = self.ipc.command("get_property", "sub-text/ass-full")
+                self._observed["sub-text/ass-full"] = reply.get("data")
+                self.native_geometry.observe_ass_full_reply(reply)
+            self._ass_full_probe_dirty = False
+        generation = self.subtitle_pipeline.generation
         self._reconcile_sub_text(self._prop("sub-text") or "")
+        if self.native_geometry is not None and self._geometry_dirty:
+            self._geometry_dirty = False
+            if self.subtitle_pipeline.generation == generation:
+                self.native_geometry.refresh(self)
         self._maybe_log_stall()
         self._maybe_clear_startup_hint()
 
@@ -1937,6 +1966,7 @@ class Reader:
     def _on_file_loaded(self) -> None:
         """A new file finished loading — re-slot the overlay onto it (once per distinct file). Skips the
         already-slotted file so the initial load and a redundant file-loaded don't reset stats/subs."""
+        self._ass_full_probe_dirty = True
         if self.reslot_hook is None:
             return
         p = self.current_media_path()

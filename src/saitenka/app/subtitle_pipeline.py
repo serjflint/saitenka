@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka import otel_metrics
+from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
 from saitenka.subtitles.geometry import GeometrySnapshot
 
 if TYPE_CHECKING:
@@ -138,19 +140,30 @@ class SubtitleModeCoordinator:
 
     def resolve_outcome(self, ticket: GeometryTicket) -> GeometryResolution:
         request = ticket.request
-        with self._backend_lock:
-            with self._state_lock:
-                if self._closed or ticket.sequence != self._request_sequence:
+        with otel_metrics.traced("subtitle_geometry_render") as span:
+            span.set("active_events", len(request.frame_id.active_event_ids))
+            span.set("requested_tokens", len(request.palette))
+            span.set("frame_width", request.frame_size[0])
+            span.set("frame_height", request.frame_size[1])
+            with self._backend_lock:
+                with self._state_lock:
+                    if self._closed or ticket.sequence != self._request_sequence:
+                        span.set("outcome", "superseded")
+                        return GeometryResolution(None)
+                if self._backend is None:
+                    span.set("outcome", "unavailable")
                     return GeometryResolution(None)
-            if self._backend is None:
-                return GeometryResolution(None)
-            try:
-                result = self._backend.render(request)
-            except Exception as error:  # noqa: BLE001 -- an optional provider must fail back to mpv
-                reservation = GeometryReservation(ticket.sequence, request.generation)
-                return GeometryResolution(None, self.record_error(reservation, error))
-        published = self.publish(ticket, result)
-        return GeometryResolution(result if published else None)
+                try:
+                    result = self._backend.render(request)
+                except Exception as error:  # noqa: BLE001 -- optional provider boundary
+                    span.set("outcome", "failed")
+                    span.set("error_code", geometry_error_code(error))
+                    reservation = GeometryReservation(ticket.sequence, request.generation)
+                    return GeometryResolution(None, self.record_error(reservation, error))
+            published = self.publish(ticket, result)
+            span.set("outcome", "ready" if published else "superseded")
+            span.set("found_tokens", len(result.tokens))
+            return GeometryResolution(result if published else None)
 
     def prepare(self, request: GeometryRequest) -> GeometryTicket | None:
         reservation = self.reserve(request.generation)
@@ -183,7 +196,7 @@ class SubtitleModeCoordinator:
         if (
             result.generation != request.generation
             or result.track_id != request.track_id
-            or result.event_id != request.event_id
+            or result.frame_id != request.frame_id
             or result.timestamp_ms != request.timestamp_ms
             or result.variant != request.variant
         ):
@@ -267,6 +280,10 @@ class SubtitleGeometryWorker:
         )
         self._thread.start()
 
+    @property
+    def generation(self) -> int:
+        return self._coordinator.generation
+
     def submit(self, request: GeometryRequest) -> bool:
         return self.submit_job(request.generation, lambda: request)
 
@@ -342,7 +359,7 @@ class SubtitleGeometryWorker:
         return GeometrySnapshot(
             request.generation,
             request.track_id,
-            request.event_id,
+            request.frame_id,
             request.timestamp_ms,
             request.variant,
             result.tokens,
@@ -470,13 +487,13 @@ class SubtitleGeometryWorker:
         ready = current is not None and (
             current.generation,
             current.track_id,
-            current.event_id,
+            current.frame_id,
             current.timestamp_ms,
             current.variant,
         ) == (
             request.generation,
             request.track_id,
-            request.event_id,
+            request.frame_id,
             request.timestamp_ms,
             request.variant,
         )

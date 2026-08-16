@@ -28,6 +28,20 @@ class SubtitleEventId:
 
 
 @dataclass(frozen=True, slots=True)
+class SubtitleFrameId:
+    track_id: SubtitleTrackId
+    active_event_ids: tuple[SubtitleEventId, ...]
+
+    def __post_init__(self) -> None:
+        if not self.active_event_ids:
+            raise ValueError("subtitle frame must contain at least one active event")
+        if len(set(self.active_event_ids)) != len(self.active_event_ids):
+            raise ValueError("subtitle frame event identities must be unique")
+        if any(event.track_id != self.track_id for event in self.active_event_ids):
+            raise ValueError("subtitle frame events must belong to its track")
+
+
+@dataclass(frozen=True, slots=True)
 class RawSubtitleEvent:
     identity: SubtitleEventId
     raw_text: str

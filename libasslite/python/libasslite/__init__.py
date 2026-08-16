@@ -58,6 +58,7 @@ class AssRenderer:
         pixel_aspect: float | None = None,
         margins: tuple[int, int, int, int] = (0, 0, 0, 0),
         use_margins: bool = False,
+        max_bitmap_bytes: int | None = None,
     ) -> AssRenderResult:
         return self._native.render(
             timestamp_ms,
@@ -66,6 +67,7 @@ class AssRenderer:
             pixel_aspect=pixel_aspect,
             margins=margins,
             use_margins=use_margins,
+            max_bitmap_bytes=max_bitmap_bytes,
         )
 
     def close(self) -> None:

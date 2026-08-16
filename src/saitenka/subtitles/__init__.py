@@ -14,7 +14,15 @@ from saitenka.subtitles.ass import (
     serialize_ass_event_line,
     source_primary_bgr_colors,
 )
-from saitenka.subtitles.ass_geometry import PreparedAssGeometry, prepare_ass_hit_map
+from saitenka.subtitles.ass_geometry import (
+    MAX_ASS_SOURCE_BYTES,
+    PreparedAssFrame,
+    PreparedAssGeometry,
+    authored_ass_rows_at,
+    canonical_active_ass_rows,
+    prepare_ass_hit_map,
+    prepare_ass_hit_map_frame,
+)
 from saitenka.subtitles.document import (
     AnnotatedSubtitleEvent,
     DecodedSubtitleEvent,
@@ -24,6 +32,7 @@ from saitenka.subtitles.document import (
     RawTextSpan,
     SubtitleAttachment,
     SubtitleEventId,
+    SubtitleFrameId,
     SubtitleTrackId,
     TokenAnnotation,
 )
@@ -41,6 +50,7 @@ from saitenka.subtitles.model import Cue
 from saitenka.subtitles.parsers import parse_ass, parse_cues, parse_srt
 
 __all__ = [
+    "MAX_ASS_SOURCE_BYTES",
     "AnnotatedSubtitleEvent",
     "AssColorRewrite",
     "AssStyle",
@@ -54,6 +64,7 @@ __all__ = [
     "GeometryRequest",
     "GeometrySnapshot",
     "GeometryVariant",
+    "PreparedAssFrame",
     "PreparedAssGeometry",
     "RawSubtitleEvent",
     "RawSubtitleTrack",
@@ -61,12 +72,15 @@ __all__ = [
     "Rect",
     "SubtitleAttachment",
     "SubtitleEventId",
+    "SubtitleFrameId",
     "SubtitleTrackId",
     "TokenAnnotation",
     "TokenColor",
     "TokenGeometry",
     "UnsupportedAssEvent",
     "allocate_token_colors",
+    "authored_ass_rows_at",
+    "canonical_active_ass_rows",
     "decode_ass_event",
     "parse_ass",
     "parse_ass_event_line",
@@ -74,6 +88,7 @@ __all__ = [
     "parse_cues",
     "parse_srt",
     "prepare_ass_hit_map",
+    "prepare_ass_hit_map_frame",
     "rewrite_ass_event",
     "serialize_ass_event_line",
     "source_primary_bgr_colors",

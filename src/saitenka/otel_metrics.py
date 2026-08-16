@@ -43,6 +43,13 @@ sub_seek_duration_ms: Histogram | None = None
 cue_redraw_duration_ms: Histogram | None = None
 subtitle_render_duration_ms: Histogram | None = None
 sub_text_reconcile_duration_ms: Histogram | None = None
+subtitle_geometry_ready_ms: Histogram | None = None
+subtitle_geometry_prepare_ms: Histogram | None = None
+subtitle_geometry_render_ms: Histogram | None = None
+subtitle_geometry_extract_ms: Histogram | None = None
+subtitle_geometry_active_events: Histogram | None = None
+subtitle_geometry_eligible_tokens: Histogram | None = None
+subtitle_geometry_skipped_tokens: Histogram | None = None
 # Scroll-input → redraw-finished chain: wraps controller._scroll_tip end-to-end (banded/blit
 # re-render + OSD upload) for one wheel tick or TIP_UP/DOWN keypress — its duration IS the
 # scroll-to-photon latency a user would feel as stutter.
@@ -107,6 +114,9 @@ mask_atlas_writebacks: Counter | None = (
 crisp_swaps: Counter | None = None
 crisp_stale: Counter | None = None
 subtitle_geometry_fallbacks: Counter | None = None
+subtitle_geometry_decisions: Counter | None = None
+subtitle_geometry_owner_transitions: Counter | None = None
+subtitle_geometry_recoveries: Counter | None = None
 
 # ~one frame at 60Hz. The tail (p95/p99 jank-frame rate), not the mean, is what a user perceives
 # as scroll stutter — see scroll_frame_jank.
@@ -295,6 +305,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global render_duration_ms, upload_duration_ms, hit_test_duration_ms
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
+    global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
+    global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_active_events
+    global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
     global scroll_frame_duration_ms, show_tooltip_duration_ms
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
     global dict_cache_hits, dict_cache_misses, dict_cache_evictions
@@ -307,6 +321,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
     global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
+    global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
+    global subtitle_geometry_recoveries
 
     with _lock:
         _reader = reader
@@ -343,6 +359,38 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             unit="ms",
             description="poll-loop redraw latency for an mpv-driven sub-text change (native "
             "sub-seek / normal cue advance), sibling to sub_seek for the instant-nav path",
+        )
+        subtitle_geometry_ready_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.ready_ms",
+            unit="ms",
+            description="accepted current-frame request to published geometry",
+        )
+        subtitle_geometry_prepare_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.prepare_ms",
+            unit="ms",
+            description="ASS active-frame matching and ID rewrite time",
+        )
+        subtitle_geometry_render_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.render_ms",
+            unit="ms",
+            description="offscreen libass render time",
+        )
+        subtitle_geometry_extract_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.extract_ms",
+            unit="ms",
+            description="ID-layer geometry extraction time",
+        )
+        subtitle_geometry_active_events = meter.create_histogram(
+            "saitenka.subtitle_geometry.active_events",
+            description="authored ASS events in a geometry decision",
+        )
+        subtitle_geometry_eligible_tokens = meter.create_histogram(
+            "saitenka.subtitle_geometry.eligible_tokens",
+            description="interaction-eligible tokens in a geometry decision",
+        )
+        subtitle_geometry_skipped_tokens = meter.create_histogram(
+            "saitenka.subtitle_geometry.skipped_tokens",
+            description="tokens excluded before geometry rendering",
         )
         scroll_frame_duration_ms = meter.create_histogram(
             "saitenka.scroll_frame.duration_ms",
@@ -450,6 +498,18 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_geometry.fallbacks",
             description="native subtitle geometry transitions to the standard renderer",
         )
+        subtitle_geometry_decisions = meter.create_counter(
+            "saitenka.subtitle_geometry.decisions",
+            description="native subtitle geometry state transitions",
+        )
+        subtitle_geometry_owner_transitions = meter.create_counter(
+            "saitenka.subtitle_geometry.owner_transitions",
+            description="subtitle pixel-owner transitions",
+        )
+        subtitle_geometry_recoveries = meter.create_counter(
+            "saitenka.subtitle_geometry.recoveries",
+            description="native geometry recovery after fallback",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -463,6 +523,10 @@ def unregister() -> None:
     global render_duration_ms, upload_duration_ms, hit_test_duration_ms
     global dict_sql_duration_ms, ipc_roundtrip_ms, sub_seek_duration_ms
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
+    global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
+    global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_active_events
+    global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
     global scroll_frame_duration_ms, show_tooltip_duration_ms
     global panel_cache_hits, panel_cache_misses, panel_cache_evictions
     global dict_cache_hits, dict_cache_misses, dict_cache_evictions
@@ -475,6 +539,8 @@ def unregister() -> None:
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
     global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
+    global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
+    global subtitle_geometry_recoveries
 
     with _lock:
         _reader = None
@@ -487,6 +553,13 @@ def unregister() -> None:
         cue_redraw_duration_ms = None
         subtitle_render_duration_ms = None
         sub_text_reconcile_duration_ms = None
+        subtitle_geometry_ready_ms = None
+        subtitle_geometry_prepare_ms = None
+        subtitle_geometry_render_ms = None
+        subtitle_geometry_extract_ms = None
+        subtitle_geometry_active_events = None
+        subtitle_geometry_eligible_tokens = None
+        subtitle_geometry_skipped_tokens = None
         scroll_frame_duration_ms = None
         show_tooltip_duration_ms = None
         panel_cache_hits = None
@@ -524,6 +597,9 @@ def unregister() -> None:
         crisp_swaps = None
         crisp_stale = None
         subtitle_geometry_fallbacks = None
+        subtitle_geometry_decisions = None
+        subtitle_geometry_owner_transitions = None
+        subtitle_geometry_recoveries = None
         prefetch_queue_depth = None
 
 

@@ -124,9 +124,10 @@ authored external .ass
 │
 ├─ visible path ──────> mpv ──> mpv's libass ──> authored subtitle pixels
 │
-└─ interaction path ─> exact event + tokenizer spans
+└─ interaction path ─> exact active frame + tokenizer spans
                        │
-                       ├─ inject a unique color per token into an in-memory copy
+                       ├─ match mpv's active ASS rows to authored events
+                       ├─ inject a unique color per paintable token into an in-memory copy
                        ├─ libasslite ──> selected libass ──> public ASS_Image layers
                        ├─ color pixels ──> TokenGeometry[]
                        └─ identity/generation gate ──> Reader.boxes
@@ -135,14 +136,15 @@ authored external .ass
 ```
 
 This preserves the features Saitenka owns while keeping visible typography as close to mpv as the
-public APIs allow. The geometry request carries the authored event identity, timestamp, frame and
+public APIs allow. The geometry request carries the ordered active-event identities, timestamp, frame and
 storage sizes, pixel aspect, frame margins, authored-ASS margin policy, accepted mpv render profile,
 rewritten ASS bytes, and token palette.
 `LibassGeometryBackend` consumes only that provider-neutral contract and returns copied rectangles;
 native pointers never escape `libasslite`.
 
-The current accepted envelope is deliberately static and narrow. Known unsupported inputs—animated
-or ambiguous ASS, unsupported source encodings, missing source bytes, attached/custom fonts, and
+The current accepted envelope is deliberately static and bounded. Simultaneous static events share
+one frame identity and palette; whitespace/control-only tokens stay in semantic tokenization without
+requiring pixels. Known unsupported inputs—animated or unmatchable ASS, unsupported source encodings, missing source bytes, attached/custom fonts, and
 rejected mpv render settings—atomically return pixel and hit-box ownership to the standard Saitenka
 renderer. Provider failures do the same, preserving scanning and tooltips rather than leaving a visible
 but noninteractive subtitle. Saitenka never displays its ID-colored shadow render. It cannot inspect
@@ -157,20 +159,22 @@ reuse the published boxes, so their 60 FPS interaction target does not imply a 6
 The present static envelope also does not require video-frame-rate geometry updates.
 
 ```text
-mpv/source/profile change
+one drained mpv event batch / source / profile change
           │
           v
-invalidate generation + clear boxes/focus/tooltip
+resolve complete active-frame observation
           │
-          ├─ current cue ──> newest-wins pending slot ─┐
-          └─ next cues ────> bounded lookahead queue ──┤
+          ├─ incomplete/unsupported/failed ──> standard renderer + interaction
+          │
+          └─ complete ──> invalidate generation + current frame ─┐
+                           next frames ─> bounded lookahead queue ─┤
                                                        v
                                          one geometry worker
                                                        │
                               build exact request ──> cache/libass
                                                        │
                                                        v
-                       generation + track + event + time + variant checks
+                       generation + track + frame + time + variant checks
                                                        │
                                       stale ──> discard │ publish ──> tick
                                                        │
@@ -178,12 +182,14 @@ invalidate generation + clear boxes/focus/tooltip
                                       Reader.boxes + native focus overlay
 ```
 
-The worker never reads mpv IPC or mutates visible state. `SubtitleModeCoordinator` owns generation,
+The main loop drains related mpv property changes before making one geometry decision. The worker
+never reads mpv IPC or mutates visible state. `SubtitleModeCoordinator` owns generation,
 request sequencing, result identity, and provider errors. `SubtitleGeometryWorker` owns one current
 slot plus bounded result and prefetch caches; `LibassGeometryBackend` owns the renderer LRU. Lookahead
 is speculative and a miss is safe. Only the main tick installs boxes or clears interaction. Source,
 cue, tokenizer/profile, render-space, and close transitions invalidate the generation, so an in-flight
-result cannot be rebound after its inputs change.
+result cannot be rebound after its inputs change. Source, frame, token, copied-bitmap, and active-row
+ceilings bound native allocation and Python extraction before a result can publish.
 
 ### Optional native packages
 

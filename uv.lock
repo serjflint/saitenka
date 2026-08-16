@@ -948,19 +948,19 @@ wheels = [
 
 [[package]]
 name = "libasslite"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "libasslite" }
 
 [[package]]
 name = "libasslite-bundle"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "libasslite-bundle" }
 dependencies = [
     { name = "libasslite" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "libasslite", specifier = "==0.1.1" }]
+requires-dist = [{ name = "libasslite", specifier = "==0.1.2" }]
 
 [[package]]
 name = "libcst"

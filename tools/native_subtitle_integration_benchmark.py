@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib
 import json
 import platform
 import statistics
@@ -21,8 +22,16 @@ import psutil
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.panel import Definition, Entry
-from saitenka.subtitles import Cue, CueIndex
-from saitenka.subtitles.libass_backend import LibassGeometryBackend
+from saitenka.subtitles import (
+    Cue,
+    CueIndex,
+    GeometryRequest,
+    SubtitleTrackId,
+    TokenAnnotation,
+    prepare_ass_hit_map_frame,
+)
+from saitenka.subtitles.geometry import MAX_BITMAP_BYTES
+from saitenka.subtitles.libass_backend import LibassGeometryBackend, extract_token_geometry
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -41,7 +50,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "9429f9e073c2c429e6a9c181e65626e078786a4182b922183bbfdcf5343fd142"
+LOCKED_MANIFEST_SHA256 = "56cf4eacb9d34de8442c6bbf15b3999b05d4356246d7b2ad37e0710f1ad46ae5"
 
 
 def load_manifest(path: Path) -> dict:
@@ -70,6 +79,75 @@ def _source(count: int) -> tuple[bytes, tuple[tuple[int, int, str], ...]]:
     return (STYLE + events).encode(), cues
 
 
+def _simultaneous_source(count: int) -> tuple[bytes, str, str, tuple[TokenAnnotation, ...]]:
+    rows = []
+    for index in range(count):
+        x = 30 + index % 8 * 150
+        y = 30 + index // 8 * 75
+        rows.append(
+            f"Dialogue: {index},0:00:01.00,0:00:03.00,Default,,0,0,0,,"
+            rf"{{\an7\pos({x},{y})}}猫"
+        )
+    active_rows = "\n".join(rows)
+    text = "\n".join("猫" for _row in rows)
+    annotations = tuple(TokenAnnotation(index, index * 2, index * 2 + 1) for index in range(count))
+    return (STYLE + active_rows + "\n").encode(), active_rows, text, annotations
+
+
+def _frame_workloads(counts: list[int], library_path: Path | None) -> list[dict]:
+    libasslite = importlib.import_module("libasslite")
+    reports = []
+    for count in counts:
+        source, active_rows, text, annotations = _simultaneous_source(count)
+        track_id = SubtitleTrackId(f"simultaneous:{count}")
+        started = time.perf_counter_ns()
+        prepared = prepare_ass_hit_map_frame(
+            source,
+            track_id,
+            active_rows=active_rows,
+            text=text,
+            tokens=annotations,
+        )
+        prepare_ms = (time.perf_counter_ns() - started) / 1_000_000
+        request = GeometryRequest(
+            0,
+            track_id,
+            prepared.frame_id,
+            1_500,
+            (1280, 720),
+            (1280, 720),
+            prepared.ass,
+            palette=prepared.palette,
+            reserved_rgb=prepared.reserved_rgb,
+        )
+        renderer = libasslite.AssRenderer(prepared.ass, library_path=library_path)
+        try:
+            started = time.perf_counter_ns()
+            rendered = renderer.render(
+                request.timestamp_ms,
+                request.frame_size,
+                request.storage_size,
+                max_bitmap_bytes=min(2 * 1280 * 720, MAX_BITMAP_BYTES),
+            )
+            render_ms = (time.perf_counter_ns() - started) / 1_000_000
+            started = time.perf_counter_ns()
+            geometry = extract_token_geometry(rendered, request)
+            extract_ms = (time.perf_counter_ns() - started) / 1_000_000
+        finally:
+            renderer.close()
+        reports.append(
+            {
+                "active_events": count,
+                "eligible_tokens": len(prepared.palette),
+                "found_tokens": len(geometry),
+                "prepare_ms": prepare_ms,
+                "render_ms": render_ms,
+                "extract_ms": extract_ms,
+            }
+        )
+    return reports
+
+
 def _percentile(samples: list[float], quantile: float) -> float:
     assert samples
     ordered = sorted(samples)
@@ -90,6 +168,8 @@ def _performance_passes(report: dict, manifest: dict) -> bool:
 
 
 def _functional_passes(report: dict, manifest: dict) -> bool:
+    workloads = report.get("simultaneous_frame_workloads", [])
+    expected_counts = manifest["simultaneous_event_counts"]
     return bool(
         report.get("schema") == 1
         and report["event_count"] == manifest["event_count"]
@@ -99,10 +179,10 @@ def _functional_passes(report: dict, manifest: dict) -> bool:
         and report["presented"] == manifest["event_count"]
         and report["completed"] == manifest["event_count"]
         and report["geometry_apply_count"] == report["ready_before_presented"]
-        and report["hit_test_count"] == report["geometry_apply_count"]
+        and report["hit_test_count"] == report["presented"]
         and report["focus_draw_count"] == report["geometry_apply_count"]
-        and report["tooltip_open_count"] == report["geometry_apply_count"]
-        and report["tooltip_scroll_count"] == report["geometry_apply_count"]
+        and report["tooltip_open_count"] == report["presented"]
+        and report["tooltip_scroll_count"] == report["presented"]
         and report["failures"] == 0
         and report["last_error"] is None
         and report["superseded"] == 0
@@ -111,6 +191,11 @@ def _functional_passes(report: dict, manifest: dict) -> bool:
         and report["source_clear_hit_count"] == 0
         and report["profile_switch_cache_entries"] == 0
         and report["close_completed"] is True
+        and [item["active_events"] for item in workloads] == expected_counts
+        and all(
+            item["eligible_tokens"] == item["found_tokens"] == item["active_events"]
+            for item in workloads
+        )
     )
 
 
@@ -192,6 +277,7 @@ class _IPC:
         self.commands: list[tuple] = []
         self.props = {
             "sid": 1,
+            "sub-text/ass-full": "",
             "sub-start": 1.0,
             "sub-end": 2.5,
             "time-pos": 1.1,
@@ -203,6 +289,8 @@ class _IPC:
             "options/sub-scale": 1.0,
             "options/sub-pos": 100.0,
             "options/sub-use-margins": True,
+            "options/sub-ass-force-margins": False,
+            "options/sub-ass-video-aspect-override": 0.0,
             "options/sub-ass-use-video-data": "all",
             "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
@@ -316,6 +404,9 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
     )
     process = psutil.Process()
     rss_before = process.memory_info().rss
+    simultaneous_frame_workloads = _frame_workloads(
+        [int(value) for value in manifest["simultaneous_event_counts"]], library_path
+    )
     baseline_ipc = _IPC()
     native_ipc = _IPC()
     with (
@@ -355,6 +446,10 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             for ipc in (baseline_ipc, native_ipc):
                 ipc.props.update(
                     {
+                        "sub-text/ass-full": (
+                            f"Dialogue: 0,{_time(start)},{_time(end)},"
+                            f"Default,,0000,0000,0000,,{text}"
+                        ),
                         "sub-start": start / 1_000,
                         "sub-end": end / 1_000,
                         "time-pos": (start + 1) / 1_000,
@@ -438,6 +533,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "platform": platform.platform(),
         "python": sys.version,
         "event_count": count,
+        "simultaneous_frame_workloads": simultaneous_frame_workloads,
         "interaction_samples_ms": latencies,
         "interaction_cpu_samples_ms": cpu_latencies,
         "interaction_cpu_delta_samples_ms": cpu_deltas,

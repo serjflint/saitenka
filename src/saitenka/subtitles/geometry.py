@@ -9,7 +9,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from saitenka.subtitles.document import SubtitleEventId, SubtitleTrackId
+    from saitenka.subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+
+MAX_FRAME_PIXELS = 16_777_216
+MAX_GEOMETRY_TOKENS = 4_096
+MAX_BITMAP_BYTES = 16 * 1_024 * 1_024
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +31,7 @@ class Rect:
 class TokenGeometry:
     """Geometry for one semantic token; ``bounds`` is the stable UI anchor."""
 
+    event_id: SubtitleEventId
     token_index: int
     bounds: Rect
     regions: tuple[Rect, ...] = ()
@@ -54,6 +59,8 @@ def _validate_render_space(request: GeometryRequest) -> None:
         raise ValueError("geometry timestamp must be non-negative")
     if any(value <= 0 for size in (request.frame_size, request.storage_size) for value in size):
         raise ValueError("geometry frame and storage sizes must be positive")
+    if request.frame_size[0] * request.frame_size[1] > MAX_FRAME_PIXELS:
+        raise ValueError("geometry frame pixel limit exceeded")
     if not math.isfinite(request.pixel_aspect) or request.pixel_aspect <= 0:
         raise ValueError("geometry pixel aspect must be finite and positive")
     if any(isinstance(value, bool) or value < 0 for value in request.margins):
@@ -71,8 +78,11 @@ def _validate_palette(request: GeometryRequest) -> None:
     identities = {(entry.event_id, entry.token_index) for entry in request.palette}
     if len(identities) != len(request.palette):
         raise ValueError("geometry palette token identities must be unique")
-    if any(entry.event_id != request.event_id for entry in request.palette):
-        raise ValueError("geometry palette entries must belong to the requested event")
+    if len(request.palette) > MAX_GEOMETRY_TOKENS:
+        raise ValueError("geometry palette entry limit exceeded")
+    active = set(request.frame_id.active_event_ids)
+    if any(entry.event_id not in active for entry in request.palette):
+        raise ValueError("geometry palette entries must belong to the requested frame")
     reserved = set(request.reserved_rgb)
     if any(isinstance(color, bool) or not 0 <= color <= 0xFFFFFF for color in reserved):
         raise ValueError("reserved geometry colors must be 24-bit RGB")
@@ -93,7 +103,7 @@ def _validate_attachments(request: GeometryRequest) -> None:
 class GeometryRequest:
     generation: int
     track_id: SubtitleTrackId
-    event_id: SubtitleEventId
+    frame_id: SubtitleFrameId
     timestamp_ms: int
     frame_size: tuple[int, int]
     storage_size: tuple[int, int]
@@ -117,7 +127,7 @@ class GeometryRequest:
         digest = hashlib.sha256()
         for value in (
             str(self.track_id),
-            repr(self.event_id),
+            repr(self.frame_id),
             str(self.timestamp_ms),
             repr(self.frame_size),
             repr(self.storage_size),
@@ -143,7 +153,7 @@ class GeometryRequest:
 class GeometrySnapshot:
     generation: int
     track_id: SubtitleTrackId
-    event_id: SubtitleEventId
+    frame_id: SubtitleFrameId
     timestamp_ms: int
     variant: GeometryVariant
     tokens: tuple[TokenGeometry, ...]

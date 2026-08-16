@@ -87,13 +87,18 @@ The geometry runtime is selected independently of mpv's bundled or system libass
 introspect mpv's exact libass build and font environment, so a compatible runtime inside the supported
 envelope can still differ at pixel level; this experimental mode does not claim runtime pixel identity.
 
-Supported cues are static and use the mpv profile above, without attached/custom fonts or
-application-level style overrides. Saitenka mirrors mpv's frame, video storage size, pixel aspect,
-letterbox margins, and authored-ASS margin policy, including Retina windows. Animated or ambiguous
-ASS, token-mapping failures, a missing or non-UTF-8 source, an unsupported font setup, a mismatched
-attach profile, or an unavailable native runtime switch back to the standard Saitenka renderer. The
-log and report record the stable fallback reason; render-profile failures also name the rejected
-values.
+Supported frames are static and use the mpv profile above, without attached/custom fonts or
+application-level style overrides. A frame may contain several simultaneous ASS events: Saitenka
+matches mpv's public `sub-text/ass-full` rows back to the authored source and keeps event identity in
+each hit box. Whitespace and other non-painting tokenizer tokens remain available to the normal text
+pipeline but are not required to produce libass pixels.
+
+Saitenka mirrors mpv's frame, video storage size, pixel aspect, letterbox margins, and authored-ASS
+margin policy, including Retina windows. Animated or unmatchable ASS, token-mapping failures, a
+missing, oversized, or non-UTF-8 source, an unsupported font setup, a mismatched attach profile, or an
+unavailable native runtime immediately switch the current frame back to the standard Saitenka renderer. Property
+changes drained in one mpv poll are evaluated together, so intermediate `sub-start`/`sub-end`/ASS-row
+updates do not cause a transient decision.
 
 Geometry is prepared when the cue or render space changes and for a small lookahead window. Hovering,
 scanning, and scrolling reuse those boxes, so interactive 60 FPS behavior does not require rendering
@@ -104,8 +109,10 @@ the subtitle geometry at 60 FPS.
 - Run `saitenka doctor` first. A missing wrapper/runtime is an installation problem; an unsupported
   render input means mpv is intentionally outside the tested envelope.
 - If `run` works but `attach` does not, compare the attached player's options with the profile above.
-- A native-geometry failure should retain hover through the standard renderer. If it does not, include
-  a `saitenka report` bundle in the bug report; it contains the fallback reason and worker counters.
+- A native-geometry failure should retain interaction through the standard renderer. If it does not,
+  include a `saitenka report` bundle in the bug report. For a quick, text-free diagnosis, run
+  `uv run tools/subtitle_report.py --geometry /path/to/saitenka-report-*.zip`; it shows ownership
+  transitions, capability state, matched event/token counts, skip counts, and bounded error codes.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 
 For the provider contract, shadow-render pipeline, lifecycle guards, and package diagram, see

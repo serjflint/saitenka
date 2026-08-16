@@ -26,6 +26,7 @@ result = renderer.render(
     storage_size=(1920, 1080),
     margins=(98, 99, 0, 0),  # top, bottom, left, right
     use_margins=False,
+    max_bitmap_bytes=16 * 1024 * 1024,
 )
 renderer.close()
 ```
@@ -33,6 +34,8 @@ renderer.close()
 `AssRenderResult.layers` preserves libass list order. Each layer contains a tightly packed `bytes`
 bitmap (`width * height`), placement, `0xRRGGBBAA` color, and public image type. Rendering releases
 Python and is serialized per renderer, making one renderer safe to use from background workers.
+`max_bitmap_bytes` stops traversal before copying a layer that would exceed the aggregate bitmap
+budget; omit it only when the caller owns an equivalent bound.
 
 ## Installing libass
 
