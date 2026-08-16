@@ -11,7 +11,9 @@ logs.
 
 - **Native subtitle interaction now follows mpv subtitle delay.** Positive and negative `sub-delay`
   adjustments use mpv's delay-adjusted subtitle clock for hidden libass geometry instead of briefly or
-  persistently reverting to the legacy renderer.
+  persistently reverting to the legacy renderer. Delay adjustments no longer discard lookahead geometry,
+  and lookahead now follows authored start and end transitions, so upcoming static ASS frames keep their
+  native styling when their prefetched hit map is ready.
 - **Experimental native subtitles no longer disable interaction when geometry is unavailable.**
   Unsupported subtitle sources, display layouts, or provider failures now fall back to Saitenka's
   standard subtitle renderer, preserving scanning, hover focus, and tooltips.

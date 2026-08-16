@@ -166,6 +166,22 @@ def test_geometry_diagnosis_explains_owner_transition_and_skips():
     assert line == "ready: ready (events=2 eligible=7 skipped=4) legacy_to_native"
 
 
+def test_geometry_diagnosis_reports_prefetch_cache_outcome():
+    line = sr._geometry_diagnosis(
+        {
+            "name": "subtitle_geometry_cache",
+            "args": {
+                "outcome": "miss",
+                "cache_hits": 3,
+                "prefetch_cache_entries": 0,
+                "prefetch_dropped": 2,
+            },
+        }
+    )
+
+    assert line == "miss: hits=3 ready=0 dropped=2"
+
+
 def test_geometry_diagnosis_attributes_libass_render_and_extraction_cost():
     line = sr._geometry_diagnosis(
         {

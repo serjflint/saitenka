@@ -52,8 +52,17 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-token-annotation-invalid",
         "subtitle-ass-full-unavailable",
         "subtitle-ass-full-unsupported",
+        "subtitle-geometry-cache-miss",
         "subtitle-observation-pending",
         "subtitle-frame-unsupported",
+    }
+)
+_PENDING_REASONS = frozenset(
+    {
+        "subtitle-ass-full-unavailable",
+        "subtitle-geometry-cache-miss",
+        "subtitle-observation-pending",
+        "subtitle-timing-unavailable",
     }
 )
 
@@ -235,6 +244,7 @@ class NativeSubtitleGeometry:
         self._eligible_tokens = 0
         self._last_decision: tuple[GeometryOutcome, str] | None = None
         self._owner = "legacy"
+        self._legacy_until_geometry_ready = False
         self._submitted_at: tuple[int, float] | None = None
         self._pending_key: tuple[int, str] | None = None
         self._published_key: str | None = None
@@ -329,11 +339,11 @@ class NativeSubtitleGeometry:
         owner: str | None = None,
     ) -> bool:
         decision = (outcome, reason)
-        if decision == self._last_decision:
+        target_owner = owner or ("native" if outcome == GeometryOutcome.READY else "legacy")
+        if decision == self._last_decision and target_owner == self._owner:
             return False
         previous = self._last_decision
         self._last_decision = decision
-        target_owner = owner or ("native" if outcome == GeometryOutcome.READY else "legacy")
         self._record_decision_metrics(outcome, reason, active_events)
         self._trace_decision(outcome, reason, target_owner, error_code, active_events)
         self._transition_owner(target_owner, previous)
@@ -354,16 +364,13 @@ class NativeSubtitleGeometry:
             reason = "geometry-provider-failed"
         outcome = (
             GeometryOutcome.PENDING
-            if reason
-            in {
-                "subtitle-ass-full-unavailable",
-                "subtitle-observation-pending",
-                "subtitle-timing-unavailable",
-            }
+            if reason in _PENDING_REASONS
             else GeometryOutcome.FAILED
             if reason.startswith("geometry-") or reason == "mpv-sub-visibility-rejected"
             else GeometryOutcome.UNSUPPORTED
         )
+        if outcome in {GeometryOutcome.FAILED, GeometryOutcome.UNSUPPORTED}:
+            self._legacy_until_geometry_ready = True
         if not self._set_decision(outcome, reason, error_code=error_code):
             return
         if otel_metrics.subtitle_geometry_fallbacks is not None:
@@ -374,6 +381,7 @@ class NativeSubtitleGeometry:
                 f" detail={diagnostic}" if diagnostic else "")  # fmt: skip
 
     def _set_ready(self, *, active_events: int = 0) -> None:
+        self._legacy_until_geometry_ready = False
         self.fallback_reason = None
         self._set_decision(GeometryOutcome.READY, "ready", active_events=active_events)
 
@@ -389,6 +397,9 @@ class NativeSubtitleGeometry:
     def _fallback_to_legacy(
         self, reader: Reader, reason: str, *, error_code: str | None = None
     ) -> None:
+        if self._legacy_until_geometry_ready and reason in _PENDING_REASONS:
+            reader._use_legacy_subtitle_renderer()
+            return
         self._set_fallback(reason, error_code=error_code)
         reader._use_legacy_subtitle_renderer()
 
@@ -419,6 +430,8 @@ class NativeSubtitleGeometry:
             self.ass_full_capability = AssFullCapability.UNSUPPORTED
 
     def set_source(self, path: Path | None, *, reader: Reader | None = None) -> None:
+        if reader is not None:
+            self._consume_failure(reader)
         self._source_epoch += 1
         self.worker.invalidate()
         self.source_path = None
@@ -452,6 +465,8 @@ class NativeSubtitleGeometry:
                     self.fallback_reason = None
 
     def invalidate(self, reader: Reader | None = None) -> None:
+        if reader is not None:
+            self._consume_failure(reader)
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
@@ -509,6 +524,8 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        if self._legacy_until_geometry_ready:
+            return
         self.fallback_reason = None
         self._set_decision(GeometryOutcome.EMPTY, "empty", owner=self._owner)
 
@@ -688,25 +705,26 @@ class NativeSubtitleGeometry:
         track_id: SubtitleTrackId,
         generation: int,
         render_inputs: _RenderInputs,
+        after_ms: int,
     ) -> None:
         index = reader._sub_index
         if index is None or self.lookahead == 0:
             return
-        current = index.locate(text=reader.sub_text, preferred=reader._nav_idx)
-        if current < 0:
-            return
         source = self._source_bytes
         if source is None:
             return
-        for indexed in index.cues[current + 1 : current + 1 + self.lookahead]:
-            timestamp_ms = round(indexed.start * 1_000) + 1
+        queued_keys: set[str] = set()
+        for boundary in index.boundaries_after(after_ms / 1_000):
+            timestamp_ms = round(boundary * 1_000) + 1
             try:
                 active_rows, text = authored_ass_rows_at(source, track_id, timestamp_ms)
             except (TypeError, ValueError):
                 continue
+            if not active_rows.strip() or not text.strip():
+                continue
             inputs = _CueInputs(
-                round(indexed.start * 1_000),
-                round(indexed.end * 1_000),
+                timestamp_ms,
+                timestamp_ms + 1,
                 timestamp_ms,
                 text,
                 active_rows,
@@ -717,6 +735,10 @@ class NativeSubtitleGeometry:
                 render_inputs.use_margins,
                 render_inputs.profile,
             )
+            key = self._key(path, inputs)
+            if key in queued_keys:
+                continue
+            queued_keys.add(key)
 
             def build(inputs: _CueInputs = inputs) -> GeometryRequest:
                 tokenized = reader._tokenize_cue(reader._cue_norm(inputs.text))
@@ -736,7 +758,9 @@ class NativeSubtitleGeometry:
                     selection.annotations,
                 )
 
-            self.worker.prefetch(self._key(path, inputs), generation, build)
+            self.worker.prefetch(key, generation, build)
+            if len(queued_keys) >= self.lookahead:
+                break
 
     def schedule(self, reader: Reader) -> bool:
         try:
@@ -797,14 +821,6 @@ class NativeSubtitleGeometry:
         if self.ass_full_capability == AssFullCapability.UNSUPPORTED:
             self._fallback_to_legacy(reader, "subtitle-ass-full-unsupported")
             return None
-        active_rows = reader._prop("sub-text/ass-full")
-        if isinstance(active_rows, str):
-            self.ass_full_capability = AssFullCapability.SUPPORTED
-        start = reader._prop("sub-start")
-        end = reader._prop("sub-end")
-        if start is None or end is None:
-            self._fallback_to_legacy(reader, "subtitle-observation-pending")
-            return None
         try:
             render = self._render_inputs(reader)
         except (TypeError, ValueError) as error:
@@ -813,6 +829,14 @@ class NativeSubtitleGeometry:
             reader._use_legacy_subtitle_renderer()
             return None
         self._last_render_inputs = render
+        active_rows = reader._prop("sub-text/ass-full")
+        if isinstance(active_rows, str):
+            self.ass_full_capability = AssFullCapability.SUPPORTED
+        start = reader._prop("sub-start")
+        end = reader._prop("sub-end")
+        if start is None or end is None:
+            self._fallback_to_legacy(reader, "subtitle-observation-pending")
+            return None
         generation = reader.subtitle_pipeline.generation
         track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
         active = self._active_observation(
@@ -853,6 +877,9 @@ class NativeSubtitleGeometry:
             self._pending_key = (inputs.generation, inputs.observation_key)
         self._eligible_tokens = len(cached.palette)
         self.worker.mark_presented(cached)
+        if not reader._use_native_subtitle_renderer():
+            self._fallback_to_legacy(reader, "mpv-sub-visibility-rejected")
+            return True
         self._set_ready(active_events=len(cached.frame_id.active_event_ids))
         self._prefetch(
             reader,
@@ -860,6 +887,7 @@ class NativeSubtitleGeometry:
             inputs.track_id,
             inputs.generation,
             inputs.render,
+            inputs.cue.timestamp_ms,
         )
         return True
 
@@ -869,7 +897,14 @@ class NativeSubtitleGeometry:
         inputs = self._resolve_schedule_inputs(reader)
         if inputs is None:
             return False
-        if self._publish_cached(reader, inputs):
+        with otel_metrics.traced("subtitle_geometry_cache") as span:
+            cache_hit = self._publish_cached(reader, inputs)
+            stats = self.worker.stats
+            span.set("outcome", "hit" if cache_hit else "miss")
+            span.set("cache_hits", stats.cache_hits)
+            span.set("prefetch_dropped", stats.prefetch_dropped)
+            span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
+        if cache_hit:
             return True
         try:
             selection = self._annotations(
@@ -887,6 +922,9 @@ class NativeSubtitleGeometry:
         if not selection.annotations:
             reader.boxes = []
             self.worker.mark_not_ready()
+            if self._legacy_until_geometry_ready:
+                reader._use_legacy_subtitle_renderer()
+                return True
             if reader._use_native_subtitle_renderer():
                 self._published_key = inputs.observation_key
                 self._set_ready()
@@ -909,16 +947,14 @@ class NativeSubtitleGeometry:
                 self._pending_key = (inputs.generation, inputs.observation_key)
             self._submitted_at = (inputs.generation, time.perf_counter())
             self.worker.mark_not_ready()
-            if self._last_decision is None or self._last_decision[0] != GeometryOutcome.FAILED:
-                self._fallback_to_legacy(reader, "subtitle-observation-pending")
-            else:
-                reader._use_legacy_subtitle_renderer()
+            self._fallback_to_legacy(reader, "subtitle-geometry-cache-miss")
             self._prefetch(
                 reader,
                 inputs.path,
                 inputs.track_id,
                 inputs.generation,
                 inputs.render,
+                inputs.cue.timestamp_ms,
             )
         return accepted
 

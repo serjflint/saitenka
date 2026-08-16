@@ -165,6 +165,13 @@ class _WhitespaceTokenizer(_SingleTokenizer):
         ]
 
 
+class _AllSkippableTokenizer(_SingleTokenizer):
+    name = "all-skippable"
+
+    def is_skippable(self, _token):
+        return True
+
+
 def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
@@ -204,6 +211,21 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
     )
     result.close()
     assert backend.closed
+
+
+def test_visible_cue_cache_miss_uses_legacy_until_geometry_is_ready(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+
+    result.set_subtitle("猫を見る")
+
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
+    assert result.native_geometry.status.owner == "legacy"
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result.close()
 
 
 @pytest.mark.parametrize("data", [None, ""])
@@ -321,6 +343,124 @@ def test_provider_failure_preserves_hover_pause_during_renderer_fallback(tmp_pat
     result.close()
 
 
+def test_failed_provider_keeps_legacy_pixels_while_recovery_is_pending(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    backend.error = RuntimeError("font provider unavailable")
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result)
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+    ipc.commands.clear()
+    backend.error = None
+    ipc.props["sub-start"] = None
+    ipc.props["sub-end"] = None
+
+    result.native_geometry.refresh(result)
+
+    assert result.native_geometry.status.owner == "legacy"
+    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    result.close()
+
+
+def test_completed_provider_failure_survives_refresh_before_apply(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("font provider unavailable")
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    ipc.props["sub-start"] = None
+    ipc.props["sub-end"] = None
+    ipc.commands.clear()
+
+    result.native_geometry.refresh(result)
+
+    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
+    assert result.native_geometry.status.owner == "legacy"
+    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert not result.native_geometry.apply(result)
+    result.close()
+
+
+def test_annotation_free_cue_does_not_claim_recovery_from_provider_failure(
+    tmp_path: Path,
+) -> None:
+    result, ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("font provider unavailable")
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+    original_tokenizer = result.tokenizer
+    result.use_tokenizer(_AllSkippableTokenizer())
+    ipc.commands.clear()
+
+    result.set_subtitle("猫を見る")
+
+    assert result.native_geometry.status.owner == "legacy"
+    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
+    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    result.use_tokenizer(original_tokenizer)
+    ipc.commands.clear()
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+    assert result.native_geometry.status.owner == "legacy"
+    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    result.close()
+
+
+def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("font provider unavailable")
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+    ipc.commands.clear()
+
+    result.set_subtitle("")
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+
+    assert result.native_geometry.status.owner == "legacy"
+    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
+    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    result.close()
+
+
+def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Path, caplog) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("font provider unavailable")
+    assert result.native_geometry is not None
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
+        result.set_subtitle("猫を見る")
+        assert result.native_geometry.worker.wait_idle()
+        assert not result.native_geometry.apply(result)
+        result.set_subtitle("")
+        result.set_subtitle("猫を見る")
+        assert result.native_geometry.worker.wait_idle()
+        assert not result.native_geometry.apply(result)
+
+    assert [record.getMessage() for record in caplog.records] == [
+        (
+            "native subtitle geometry uses legacy renderer: "
+            "geometry-provider-failed detail=provider-error"
+        )
+    ]
+    result.close()
+
+
 def test_non_ass_source_uses_legacy_renderer_with_hits(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
@@ -383,7 +523,7 @@ def test_ass_geometry_replaces_legacy_fallback_after_source_switch(tmp_path: Pat
     result.close()
 
 
-def test_next_static_cue_uses_ready_lookahead_without_new_render(tmp_path: Path) -> None:
+def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
@@ -394,6 +534,18 @@ def test_next_static_cue_uses_ready_lookahead_without_new_render(tmp_path: Path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry.worker.wait_idle()
     assert len(backend.requests) == 2
+    assert result.native_geometry.apply(result)
+    result.set_subtitle("")
+    result._observing = True
+    result._observed.update(ipc.props)
+    result._observed.update({"sub-text": "", "sub-start": None, "sub-end": None})
+
+    result._on_property_change({"name": "sub-delay", "data": -6.0})
+    result._reconcile_subtitles()
+
+    assert len(backend.requests) == 2
+    result._observing = False
+    ipc.commands.clear()
     ipc.props.update(
         {
             "sub-text/ass-full": "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,犬も見る",
@@ -405,10 +557,106 @@ def test_next_static_cue_uses_ready_lookahead_without_new_render(tmp_path: Path)
 
     result.set_subtitle("犬も見る")
 
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.native_geometry.apply(result)
     assert len(backend.requests) == 2
     stats = result.native_geometry.worker.stats
     assert (stats.ready_before_presented, stats.presented) == (1, 2)
+    result.close()
+
+
+def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    backend.error = RuntimeError("font provider unavailable")
+    ipc.props["osd-dimensions"] = {"w": 1279, "h": 720}
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+    assert result.native_geometry.status.owner == "legacy"
+    backend.error = None
+    ipc.props.update(
+        {
+            "osd-dimensions": {"w": 1280, "h": 720},
+            "sub-text/ass-full": (
+                "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,犬も見る"
+            ),
+            "sub-start": 4.0,
+            "sub-end": 6.0,
+            "time-pos": 4.2,
+        }
+    )
+    ipc.commands.clear()
+
+    result.set_subtitle("犬も見る")
+
+    assert result.native_geometry.status.owner == "native"
+    assert result.native_geometry.status.fallback_reason is None
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
+    tmp_path: Path,
+) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(
+        ASS.replace(
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る\n".encode(),
+            (
+                "Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,猫を見る\n"
+                "Dialogue: 1,0:00:03.00,0:00:07.00,Default,,0,0,0,,犬も見る\n"
+            ).encode(),
+        )
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result._sub_index = CueIndex((Cue(1.0, 5.0, "猫を見る"), Cue(3.0, 7.0, "犬も見る")))
+    first = "Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0000,0000,0000,,猫を見る"
+    second = "Dialogue: 1,0:00:03.00,0:00:07.00,Default,,0000,0000,0000,,犬も見る"
+    ipc.props.update({"sub-text/ass-full": first, "sub-end": 5.0})
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    assert len(backend.requests) == 3
+    ipc.commands.clear()
+
+    ipc.props.update(
+        {
+            "sub-text/ass-full": f"{first}\n{second}",
+            "sub-start": 1.0,
+            "sub-end": 5.0,
+            "time-pos": 3.2,
+        }
+    )
+    result.set_subtitle("猫を見る\n犬も見る")
+    assert result.native_geometry.apply(result)
+    ipc.props.update(
+        {
+            "sub-text/ass-full": second,
+            "sub-start": 3.0,
+            "sub-end": 7.0,
+            "time-pos": 5.2,
+        }
+    )
+    result.set_subtitle("犬も見る")
+
+    assert result.native_geometry.apply(result)
+    assert len(backend.requests) == 3
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
 
 
@@ -880,6 +1128,23 @@ def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, c
             "detail=sub-scale=1.2, sub-font-provider='fontconfig'"
         )
     ]
+    result.close()
+
+
+def test_pending_timing_does_not_escape_an_unsupported_render_profile(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/sub-scale"] = 1.2
+    ipc.props["sub-start"] = None
+    ipc.props["sub-end"] = None
+
+    result.set_subtitle("猫を見る")
+
+    assert backend.requests == []
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert result.native_geometry.status.owner == "legacy"
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
 
 

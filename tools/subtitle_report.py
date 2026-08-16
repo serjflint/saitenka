@@ -43,6 +43,7 @@ _SUB_SPAN_NAMES = ("subtitle.fetch", "subtitle.reslot", "subtitle.resync")
 _GEOMETRY_SPAN_NAMES = (
     "subtitle_geometry_decision",
     "subtitle_geometry_clock",
+    "subtitle_geometry_cache",
     "subtitle_geometry_prepare",
     "subtitle_geometry_render",
     "subtitle_geometry_libass",
@@ -176,6 +177,9 @@ def extract(events: list[dict]) -> dict:
             "timestamp_ms",
             "session",
             "cpu_ms",
+            "cache_hits",
+            "prefetch_dropped",
+            "prefetch_cache_entries",
         }
     )
 
@@ -230,6 +234,12 @@ def _geometry_diagnosis(span: dict) -> str:
             f"video={args.get('video_time_ms', '?')}ms "
             f"delay={args.get('sub_delay_ms', '?')}ms "
             f"subtitle={args.get('subtitle_time_ms', '?')}ms"
+        )
+    if name == "subtitle_geometry_cache":
+        return (
+            f"{args.get('outcome', '?')}: hits={args.get('cache_hits', '?')} "
+            f"ready={args.get('prefetch_cache_entries', '?')} "
+            f"dropped={args.get('prefetch_dropped', '?')}"
         )
     if name in {"subtitle_geometry_decision", "subtitle_geometry_fallback"}:
         outcome = args.get("outcome", "legacy")

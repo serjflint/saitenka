@@ -170,7 +170,6 @@ _GEOMETRY_PROPS = frozenset(
         "sub-text/ass-full",
         "sub-start",
         "sub-end",
-        "sub-delay",
         "video-out-params",
         "osd-dimensions",
         "options/sub-ass-override",
@@ -701,10 +700,10 @@ class Reader:
             else:
                 self.subtitle_pipeline.invalidate()
             subtitle_modes.on_primary_changed(self, data)
+        elif changed and self.native_geometry is not None and name == "sub-delay":
+            self.native_geometry.record_clock_change(self)
         elif changed and self.native_geometry is not None and name in _GEOMETRY_PROPS:
             self._geometry_dirty = True
-            if name == "sub-delay":
-                self.native_geometry.record_clock_change(self)
         if changed and name == "sub-text":
             self._ass_full_probe_dirty = True
         if self._geometry_dirty and not self._observing and self.native_geometry is not None:
