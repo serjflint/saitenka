@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786868281274,
+  "lastUpdate": 1786869505461,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5975,6 +5975,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.490519,
             "range": "3 replicas; min 1.27296; max 1.62473; MAD 0.134211; worst 1.62473",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0750434093018cbf9dbd482bba09e53ac47b8a41",
+          "message": "Merge pull request #370 from serjflint/codex/document-native-subtitle-architecture\n\ndocs: explain native subtitle architecture",
+          "timestamp": "2026-08-16T11:35:44+03:00",
+          "tree_id": "c9871d4b0e4307b5506235a1c95976133a64f9ca",
+          "url": "https://github.com/serjflint/saitenka/commit/0750434093018cbf9dbd482bba09e53ac47b8a41"
+        },
+        "date": 1786869504565,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.931477,
+            "range": "3 replicas; min 4.19075; max 6.34633; MAD 0.740727",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.914353,
+            "range": "3 replicas; min 5.65628; max 9.1962; MAD 0.281849; worst 9.1962",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.015714,
+            "range": "3 replicas; min 11.9392; max 19.3782; MAD 2.07648",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.095931,
+            "range": "3 replicas; min 12.0795; max 19.6992; MAD 2.01638; worst 19.6992",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 41.638004,
+            "range": "3 replicas; min 23.5122; max 72.6221; MAD 18.1258",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.105866,
+            "range": "3 replicas; min 0.081981; max 0.168254; MAD 0.023885; worst 0.168254",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.42764,
+            "range": "3 replicas; min 43.4309; max 136.601; MAD 0.996708; worst 136.601",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 4.621914,
+            "range": "3 replicas; min 3.77476; max 11.225; MAD 0.847151; worst 11.225",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 3.323948,
+            "range": "3 replicas; min 1.63053; max 65.1455; MAD 1.69342; worst 65.1455",
             "unit": "ms"
           }
         ]
