@@ -36,7 +36,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "95efcacfdab0efefeaf4f1a1f02be0ba7b00889fcb0c8bb7c43e636c7b78e192"
+LOCKED_MANIFEST_SHA256 = "31e3742b38cd34f5be1eb15d72e3f6076fd2cc779d1c5802c15ca4ae32acf4b0"
 
 
 def load_manifest(path: Path) -> dict:
@@ -78,7 +78,8 @@ def evaluate(report: dict, manifest: dict) -> bool:
         and report["interaction_clock"] == manifest["interaction_clock"]
         and report["interaction_cpu_p99_ms"] <= budgets["interaction_cpu_p99_ms"]
         and report["interaction_p99_ms"] <= budgets["interaction_wall_safety_ms"]
-        and report["interaction_delta_p99_ms"] <= budgets["interaction_delta_p99_ms"]
+        and report["interaction_cpu_delta_p99_ms"] <= budgets["interaction_cpu_delta_p99_ms"]
+        and report["interaction_wall_delta_p99_ms"] <= budgets["interaction_wall_delta_p99_ms"]
         and report["ready_before_presentation_ratio"] >= budgets["ready_before_presentation_ratio"]
         and report["retained_rss_growth_mib"] <= budgets["retained_rss_growth_mib"]
         and report["result_cache_entries"] <= manifest["cache_max"]
@@ -227,6 +228,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         cpu_latencies: list[float] = []
         baseline_cpu_latencies: list[float] = []
         cpu_deltas: list[float] = []
+        wall_deltas: list[float] = []
         cadence_misses = 0
         geometry_apply_count = 0
         hit_test_count = 0
@@ -261,7 +263,9 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             cpu_started = time.thread_time_ns()
             applied = _present(native, text, native=True)
             geometry_apply_count += int(applied)
-            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            native_wall = (time.perf_counter_ns() - started) / 1_000_000
+            latencies.append(native_wall)
+            wall_deltas.append(max(0.0, native_wall - baseline_wall))
             native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             cpu_latencies.append(native_cpu)
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
@@ -278,7 +282,9 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             hit_test_count += int(hit)
             focus_draw_count += int(focus)
             tooltip_open_count += int(opened)
-            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            native_wall = (time.perf_counter_ns() - started) / 1_000_000
+            latencies.append(native_wall)
+            wall_deltas.append(max(0.0, native_wall - baseline_wall))
             native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             cpu_latencies.append(native_cpu)
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
@@ -293,7 +299,9 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             cpu_started = time.thread_time_ns()
             scrolled = _scroll_and_close_tooltip(native)
             tooltip_scroll_count += int(scrolled)
-            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            native_wall = (time.perf_counter_ns() - started) / 1_000_000
+            latencies.append(native_wall)
+            wall_deltas.append(max(0.0, native_wall - baseline_wall))
             native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
             cpu_latencies.append(native_cpu)
             cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
@@ -327,13 +335,15 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "interaction_samples_ms": latencies,
         "interaction_cpu_samples_ms": cpu_latencies,
         "interaction_cpu_delta_samples_ms": cpu_deltas,
+        "interaction_wall_delta_samples_ms": wall_deltas,
         "interaction_clock": "thread_time",
         "interaction_p50_ms": statistics.median(latencies),
         "interaction_p99_ms": interaction_p99,
         "interaction_baseline_p99_ms": baseline_p99,
         "interaction_cpu_p99_ms": interaction_cpu_p99,
         "interaction_baseline_cpu_p99_ms": baseline_cpu_p99,
-        "interaction_delta_p99_ms": _percentile(cpu_deltas, 0.99),
+        "interaction_cpu_delta_p99_ms": _percentile(cpu_deltas, 0.99),
+        "interaction_wall_delta_p99_ms": _percentile(wall_deltas, 0.99),
         "ready_before_presentation_ratio": (
             stats.ready_before_presented / stats.presented if stats.presented else 0.0
         ),

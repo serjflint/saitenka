@@ -45,6 +45,15 @@ def test_collect_sources_includes_downloads_ports_and_checksums(tmp_path: Path) 
         assert b"--overlay-triplets=triplets" in rebuild_bytes
         assert b"this x64 build requires nasm on PATH" in rebuild_bytes
 
+    windows_output = tmp_path / "windows-sources.tar.gz"
+    collect(vcpkg, package, "x64-windows", windows_output)
+    with tarfile.open(windows_output) as archive:
+        rebuild = archive.extractfile("rebuild.py")
+        assert rebuild is not None
+        rebuild_bytes = rebuild.read()
+        assert b"vcpkg.exe" in rebuild_bytes
+        assert b"this x64 build requires nasm on PATH" not in rebuild_bytes
+
 
 def test_collect_sources_rejects_binary_cache_without_downloads(tmp_path: Path) -> None:
     vcpkg = tmp_path / "vcpkg"

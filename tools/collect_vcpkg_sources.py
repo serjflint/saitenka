@@ -44,6 +44,12 @@ def _files(vcpkg_root: Path, package: Path, triplet: str) -> list[tuple[Path, st
 
 def _rebuild_script(triplet: str, has_overlay_triplet: bool) -> bytes:
     overlay = '["--overlay-triplets=triplets"]' if has_overlay_triplet else "[]"
+    nasm_guard = (
+        'if shutil.which("nasm") is None:\n'
+        '    raise SystemExit("this x64 build requires nasm on PATH")\n'
+        if triplet.startswith("x64") and not triplet.startswith("x64-windows")
+        else ""
+    )
     return f"""#!/usr/bin/env python3
 import argparse
 import shutil
@@ -54,9 +60,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--vcpkg-root", type=Path, required=True)
 parser.add_argument("--install-root", type=Path, required=True)
 args = parser.parse_args()
-if {triplet.startswith("x64")} and shutil.which("nasm") is None:
-    raise SystemExit("this x64 build requires nasm on PATH")
-downloads = args.vcpkg_root / "downloads"
+{nasm_guard}downloads = args.vcpkg_root / "downloads"
 downloads.mkdir(parents=True, exist_ok=True)
 for source in Path("downloads").iterdir():
     shutil.copy2(source, downloads / source.name)
