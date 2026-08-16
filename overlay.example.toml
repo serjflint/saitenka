@@ -103,7 +103,9 @@
 
 # ── Experimental native-visible subtitle interaction ───────────────────────────────────────────
 # Keeps mpv's authored external ASS raster visible; Saitenka renders only a hidden token-ID shadow
-# for hit boxes plus a lightweight hover outline. Unsupported sources stay visible but non-interactive.
+# for hit boxes plus a lightweight hover outline. The initial supported envelope is UTF-8 ASS with
+# mpv's parity-gated default subtitle settings and no attached/custom fonts or video margins;
+# everything else stays visible but non-interactive.
 # [subtitle_geometry]
 # native_visible = false
 # library_path = "/opt/homebrew/lib/libass.dylib"  # optional system-libass escape hatch

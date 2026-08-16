@@ -234,6 +234,13 @@ focus box, not a replacement subtitle raster. Unsupported syntax, missing source
 failure leaves the mpv subtitle visible and disables interaction for that cue. Run `saitenka doctor`
 to verify `libasslite` and the selected library; `overlay.example.toml` owns the settings and defaults.
 
+Install the separate wrapper with `uv tool install 'saitenka[subtitle-geometry]'`. This first
+experiment accepts UTF-8 external ASS and only the default render envelope proved by the parity gate:
+no mpv ASS overrides/window scaling, scale 1, position 100, no video margins, embedded fonts disabled,
+the automatic native font provider, full video-data forwarding, and no custom subtitle font directory.
+Other encodings, attached/custom fonts, letterboxing, or subtitle style overrides stay visible through
+mpv but are deliberately noninteractive.
+
 ## Reading profiles (a non-Japanese main language)
 
 A **profile** bundles what's being read — the main/second language codes, the tokenizer strategy, and
