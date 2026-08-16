@@ -172,7 +172,7 @@ def test_installed_bundle_supplies_default_library(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("LIBASSLITE_BUNDLE", raising=False)
     monkeypatch.setattr(public_api, "import_module", lambda _name: Bundle)
 
-    assert public_api._bundle_library() == "bundle/libass"
+    assert Path(public_api._bundle_library()) == Path("bundle/libass")
 
 
 def test_invalid_geometry_is_rejected_before_native_render() -> None:
