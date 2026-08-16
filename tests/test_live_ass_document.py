@@ -34,22 +34,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
-@pytest.mark.live
-@pytest.mark.timeout(30)
-def test_decode_ass_matches_mpv_sub_text_for_supported_static_event() -> None:
-    mpv = find_mpv(None)
-    if not mpv:
-        pytest.skip("mpv not found")
-    raw = r"{\an7\alpha&H40&}猫\N犬\h鳥{\b1}を見る{\b0}"
-    identity = SubtitleEventId(SubtitleTrackId("live:ass:1"), 0, 8_000, 0, 0)
-    expected = decode_ass_event(RawSubtitleEvent(identity, raw)).text
+def _observe_mpv_subtitle_properties(
+    mpv: str, event_rows: str, properties: tuple[str, ...]
+) -> dict[str, dict]:
     workspace = Path(tempfile.mkdtemp(prefix="saitenka-ass-live-"))
     clip, _unused_srt = make_clip_and_sub(workspace)
     ass = workspace / "source.ass"
-    ass.write_text(
-        _HEADER + f"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{raw}\n",
-        encoding="utf-8",
-    )
+    ass.write_text(_HEADER + event_rows, encoding="utf-8")
     socket = default_ipc_path(f"ass-{workspace.name[-8:]}")
     process = subprocess.Popen(
         [
@@ -81,11 +72,11 @@ def test_decode_ass_matches_mpv_sub_text_for_supported_static_event() -> None:
                 f"mpv did not expose IPC (returncode={process.returncode}): {stderr}"
             ) from error
         deadline = time.monotonic() + 5
-        observed = ""
-        while time.monotonic() < deadline and not observed:
-            observed = str(ipc.command("get_property", "sub-text").get("data") or "")
+        while time.monotonic() < deadline:
+            if ipc.command("get_property", "sub-text").get("data"):
+                return {name: ipc.command("get_property", name) for name in properties}
             time.sleep(0.02)
-        assert observed == expected
+        raise AssertionError("mpv did not activate the authored ASS event")
     finally:
         if ipc is not None:
             try:
@@ -98,3 +89,43 @@ def test_decode_ass_matches_mpv_sub_text_for_supported_static_event() -> None:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_decode_ass_matches_mpv_sub_text_for_supported_static_event() -> None:
+    mpv = find_mpv(None)
+    if not mpv:
+        pytest.skip("mpv not found")
+    raw = r"{\an7\alpha&H40&}猫\N犬\h鳥{\b1}を見る{\b0}"
+    identity = SubtitleEventId(SubtitleTrackId("live:ass:1"), 0, 8_000, 0, 0)
+    expected = decode_ass_event(RawSubtitleEvent(identity, raw)).text
+    replies = _observe_mpv_subtitle_properties(
+        mpv,
+        f"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{raw}\n",
+        ("sub-text",),
+    )
+    assert replies["sub-text"].get("error") == "success"
+    assert replies["sub-text"].get("data") == expected
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_mpv_ass_full_preserves_simultaneous_event_order_and_metadata() -> None:
+    mpv = find_mpv(None)
+    if not mpv:
+        pytest.skip("mpv not found")
+    rows = (
+        "Dialogue: 0,0:00:00.00,0:00:08.00,Default,dialogue,0,0,0,,猫\n"
+        "Dialogue: 1,0:00:00.50,0:00:07.00,Default,sign,12,34,56,,犬\n"
+    )
+
+    replies = _observe_mpv_subtitle_properties(mpv, rows, ("sub-text", "sub-text/ass-full"))
+
+    assert replies["sub-text"].get("error") == "success"
+    assert replies["sub-text"].get("data") == "猫\n犬"
+    assert replies["sub-text/ass-full"].get("error") == "success"
+    assert replies["sub-text/ass-full"].get("data") == (
+        "Dialogue: 0,0:00:00.00,0:00:08.00,Default,dialogue,0000,0000,0000,,猫\n"
+        "Dialogue: 1,0:00:00.50,0:00:07.00,Default,sign,0012,0034,0056,,犬"
+    )

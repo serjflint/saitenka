@@ -9,9 +9,18 @@ from dirty_equals import IsPartialDict
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.tokenize import Token
-from saitenka.subtitles import Cue, CueIndex, GeometryRequest, GeometrySnapshot, Rect, TokenGeometry
+from saitenka.subtitles import (
+    MAX_ASS_SOURCE_BYTES,
+    Cue,
+    CueIndex,
+    GeometryRequest,
+    GeometrySnapshot,
+    Rect,
+    TokenGeometry,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,6 +55,7 @@ class FakeIPC:
         self.commands: list[tuple] = []
         self.props = {
             "sid": 2,
+            "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
             "sub-start": 1.0,
             "sub-end": 3.0,
             "time-pos": 1.25,
@@ -96,6 +106,7 @@ class FakeBackend:
             raise self.error
         tokens = tuple(
             TokenGeometry(
+                entry.event_id,
                 entry.token_index + self.token_index_offset,
                 Rect(100 + entry.token_index * 60, 600, 50, 40),
             )
@@ -104,7 +115,7 @@ class FakeBackend:
         return GeometrySnapshot(
             request.generation,
             request.track_id,
-            request.event_id,
+            request.frame_id,
             request.timestamp_ms,
             request.variant,
             tokens,
@@ -141,6 +152,16 @@ class _MismatchedTokenizer(_SingleTokenizer):
 
     def tokenize(self, line, *, strip_furigana=True, merge=True):  # noqa: ARG002
         return [Token(surface="different", lemma=line, reading="", pos="名詞", start=0, end=1)]
+
+
+class _WhitespaceTokenizer(_SingleTokenizer):
+    name = "whitespace"
+
+    def tokenize(self, line, *, strip_furigana=True, merge=True):  # noqa: ARG002
+        return [
+            Token(surface=char, lemma=char, reading="", pos="名詞", start=index, end=index + 1)
+            for index, char in enumerate(line)
+        ]
 
 
 def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
@@ -184,6 +205,43 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
     assert backend.closed
 
 
+@pytest.mark.parametrize("data", [None, ""])
+def test_successful_empty_ass_full_reply_proves_mpv_capability(
+    tmp_path: Path, data: object
+) -> None:
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.native_geometry is not None
+
+    result.native_geometry.observe_ass_full_reply({"error": "success", "data": data})
+
+    assert result.native_geometry.ass_full_capability == AssFullCapability.SUPPORTED
+    result.close()
+
+
+def test_temporarily_unavailable_ass_full_reply_remains_retryable(tmp_path: Path) -> None:
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.native_geometry is not None
+
+    result.native_geometry.observe_ass_full_reply({"error": "property unavailable"})
+
+    assert result.native_geometry.ass_full_capability == AssFullCapability.UNKNOWN
+    result.close()
+
+
+def test_missing_ass_full_property_disables_only_native_geometry(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.native_geometry.observe_ass_full_reply({"error": "property not found"})
+
+    result.set_subtitle("猫を見る")
+
+    assert result.native_geometry.ass_full_capability == AssFullCapability.UNSUPPORTED
+    assert result.native_geometry.status.fallback_reason == "subtitle-ass-full-unsupported"
+    assert backend.requests == []
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    result.close()
+
+
 def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
@@ -202,7 +260,7 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     result.close()
 
 
-def test_provider_failure_restores_legacy_renderer_and_hits(tmp_path: Path) -> None:
+def test_missing_source_restores_legacy_renderer_and_hits(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.set_source(tmp_path / "missing.ass")
@@ -211,12 +269,27 @@ def test_provider_failure_restores_legacy_renderer_and_hits(tmp_path: Path) -> N
     assert result.native_geometry.worker.wait_idle()
     result.native_geometry.apply(result)
 
-    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
+    assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
     assert ("set_property", "sub-visibility", False) in ipc.commands
     assert any(command[0] == "overlay-add" for command in ipc.commands)
     result._sub_pending = None
     result._draw_subtitle()
     assert result.boxes
+    result.close()
+
+
+def test_oversized_source_falls_back_before_provider_work(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "oversized.ass"
+    source.write_bytes(b"x" * (MAX_ASS_SOURCE_BYTES + 1))
+    assert result.native_geometry is not None
+
+    result.native_geometry.set_source(source)
+    result.set_subtitle("猫を見る")
+
+    assert result.native_geometry.status.fallback_reason == "subtitle-source-too-large"
+    assert backend.requests == []
+    assert ("set_property", "sub-visibility", False) in ipc.commands
     result.close()
 
 
@@ -313,13 +386,21 @@ def test_next_static_cue_uses_ready_lookahead_without_new_render(tmp_path: Path)
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
-    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
     assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry.worker.wait_idle()
     assert len(backend.requests) == 2
-    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0, "time-pos": 4.2})
+    ipc.props.update(
+        {
+            "sub-text/ass-full": "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,犬も見る",
+            "sub-start": 4.0,
+            "sub-end": 6.0,
+            "time-pos": 4.2,
+        }
+    )
 
     result.set_subtitle("犬も見る")
 
@@ -330,17 +411,45 @@ def test_next_static_cue_uses_ready_lookahead_without_new_render(tmp_path: Path)
     result.close()
 
 
+def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path: Path) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+
+    assert result.native_geometry.apply(result)
+    assert len(backend.requests) == 1
+    assert result.native_geometry.status.fallback_reason is None
+    result.close()
+
+
+def test_geometry_request_uses_observed_frame_timestamp(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["time-pos"] = 2.5
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert backend.requests[0].timestamp_ms == 2_500
+    result.close()
+
+
 def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_path: Path) -> None:
     result, _ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
     result._geometry_cue_hint = Cue(4.0, 6.0, "犬も見る")
 
     result.set_subtitle("犬も見る")
     assert result.native_geometry is not None
     assert result.native_geometry.worker.wait_idle()
 
-    assert backend.requests[0].event_id.start_ms == 4_000
+    assert backend.requests[0].frame_id.active_event_ids[0].start_ms == 4_000
     result.close()
 
 
@@ -351,6 +460,7 @@ def test_source_clear_is_a_generation_boundary_and_restores_legacy_renderer(tmp_
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
     old_generation = result.subtitle_pipeline.generation
+    ipc.commands.clear()
 
     result.native_geometry.set_source(None, reader=result)
 
@@ -358,7 +468,8 @@ def test_source_clear_is_a_generation_boundary_and_restores_legacy_renderer(tmp_
     assert result.subtitle_pipeline.current is None
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
     assert ("set_property", "sub-visibility", False) in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.boxes == []
     assert not result.native_geometry.apply(result)
     result.close()
 
@@ -391,6 +502,59 @@ def test_mismatched_token_annotation_fails_closed(tmp_path: Path) -> None:
     assert result.boxes == []
     assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-token-annotation-invalid"
+    result.close()
+
+
+def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS.replace("猫を見る".encode(), "猫　犬".encode()))
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫　犬"
+    )
+    result.use_tokenizer(_WhitespaceTokenizer())
+
+    result.set_subtitle("猫　犬")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert [entry.token_index for entry in backend.requests[0].palette] == [0, 2]
+    assert result.native_geometry.status.eligible_tokens == 2
+    assert result.native_geometry.status.skipped_tokens == 1
+    assert result.native_geometry.apply(result)
+    assert [box.index for box in result.boxes] == [0, 2]
+    result.close()
+
+
+def test_simultaneous_ass_events_publish_event_aware_hit_geometry(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(
+        ASS.replace(
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る\n".encode(),
+            (
+                "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫\n"
+                "Dialogue: 1,0:00:01.50,0:00:02.50,Default,sign,12,34,56,,犬\n"
+            ).encode(),
+        )
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫\n"
+        "Dialogue: 1,0:00:01.50,0:00:02.50,Default,sign,0012,0034,0056,,犬"
+    )
+
+    result.set_subtitle("猫\n犬")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert [event.source_order for event in backend.requests[0].frame_id.active_event_ids] == [0, 1]
+    assert {entry.event_id.source_order for entry in backend.requests[0].palette} == {0, 1}
+    assert result.native_geometry.apply(result)
+    assert len(result.boxes) == len(backend.requests[0].palette)
     result.close()
 
 
@@ -449,9 +613,8 @@ def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Pat
 
     assert [record.getMessage() for record in caplog.records] == [
         (
-            "native subtitle geometry unavailable; using Saitenka renderer: "
-            "geometry-provider-failed "
-            "(font provider unavailable)"
+            "native subtitle geometry uses legacy renderer: "
+            "geometry-provider-failed detail=provider-error"
         )
     ]
     result.close()
@@ -519,19 +682,99 @@ def test_repeated_text_event_refreshes_geometry_when_timing_changes(tmp_path: Pa
             b"Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n",
         )
     )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
 
-    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0, "time-pos": 4.2})
+    result._observing = True
+    ipc.props.update(
+        {
+            "sub-text": "猫を見る",
+            "sub-text/ass-full": "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,猫を見る",
+            "sub-start": 4.0,
+            "sub-end": 6.0,
+            "time-pos": 4.2,
+        }
+    )
     result._on_property_change({"name": "sub-start", "data": 4.0})
     result._on_property_change({"name": "sub-end", "data": 6.0})
+    assert result.boxes
+
+    result._reconcile_subtitles()
+
     assert result.boxes == []
     assert result.native_geometry.worker.wait_idle()
 
-    assert backend.requests[-1].event_id.start_ms == 4_000
+    assert backend.requests[-1].frame_id.active_event_ids[0].start_ms == 4_000
     assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_split_timing_property_batch_keeps_published_native_interaction(
+    tmp_path: Path,
+) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result._sub_pending = None
+    original_boxes = list(result.boxes)
+    result._observing = True
+    result._observed.update(ipc.props)
+    result._observed["sub-text"] = result.sub_text
+    ipc.commands.clear()
+
+    result._on_property_change({"name": "sub-start", "data": None})
+    result._on_property_change({"name": "sub-end", "data": None})
+    result._reconcile_subtitles()
+
+    assert result.boxes == original_boxes
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.fallback_reason == "subtitle-observation-pending"
+
+    result._on_property_change({"name": "sub-start", "data": 1.0})
+    result._on_property_change({"name": "sub-end", "data": 3.0})
+    result._reconcile_subtitles()
+
+    assert result.boxes == original_boxes
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.fallback_reason is None
+    result.close()
+
+
+def test_incomplete_observation_with_changed_frame_falls_back_immediately(
+    tmp_path: Path,
+) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result._sub_pending = None
+    native_boxes = list(result.boxes)
+    result._observing = True
+    result._observed.update(ipc.props)
+    result._observed["sub-text"] = result.sub_text
+    ipc.commands.clear()
+
+    result._on_property_change(
+        {
+            "name": "sub-text/ass-full",
+            "data": ("Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,猫を見る"),
+        }
+    )
+    result._on_property_change({"name": "sub-start", "data": None})
+    result._on_property_change({"name": "sub-end", "data": None})
+    result._reconcile_subtitles()
+
+    assert result.boxes
+    assert result.boxes != native_boxes
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.fallback_reason == "subtitle-observation-pending"
     result.close()
 
 
@@ -550,9 +793,9 @@ def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, c
     assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
     assert [record.getMessage() for record in caplog.records] == [
         (
-            "native subtitle geometry unavailable; using Saitenka renderer: "
+            "native subtitle geometry uses legacy renderer: "
             "subtitle-render-input-unsupported "
-            "(sub-scale=1.2, sub-font-provider='fontconfig')"
+            "detail=sub-scale=1.2, sub-font-provider='fontconfig'"
         )
     ]
     result.close()
@@ -747,15 +990,21 @@ def test_native_visibility_exception_keeps_legacy_renderer(tmp_path: Path) -> No
 def test_native_visibility_rejection_emits_one_fallback_span(tmp_path: Path, monkeypatch) -> None:
     from saitenka import otel_metrics
 
-    spans: list[tuple[str, dict[str, str]]] = []
-    traced = otel_metrics.traced
+    spans: list[tuple[str, dict[str, object]]] = []
+
+    class RecordingSpan:
+        def __init__(self, attributes: dict[str, object]) -> None:
+            self.attributes = attributes
+
+        def set(self, key: str, value: object) -> None:
+            self.attributes[key] = value
 
     @contextmanager
     def record_span(name: str, **attributes: str):
-        if name == "subtitle_geometry_fallback":
-            spans.append((name, attributes))
-        with traced(name, **attributes) as span:
-            yield span
+        values: dict[str, object] = dict(attributes)
+        if name == "subtitle_geometry_decision":
+            spans.append((name, values))
+        yield RecordingSpan(values)
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
@@ -766,7 +1015,17 @@ def test_native_visibility_rejection_emits_one_fallback_span(tmp_path: Path, mon
 
     assert not result.native_geometry.apply(result)
 
-    assert spans == [("subtitle_geometry_fallback", {"reason": "mpv-sub-visibility-rejected"})]
+    failures = [
+        attributes
+        for name, attributes in spans
+        if name == "subtitle_geometry_decision"
+        and attributes.get("reason") == "mpv-sub-visibility-rejected"
+    ]
+    assert len(failures) == 1
+    assert failures[0] == IsPartialDict(
+        outcome="failed",
+        ass_full_capability="supported",
+    )
     result.close()
 
 

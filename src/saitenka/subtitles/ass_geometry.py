@@ -1,11 +1,14 @@
-"""Prepare one authored ASS event for hidden libass hit-map rendering."""
+"""Prepare authored ASS frames for hidden libass hit-map rendering."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from saitenka.subtitles.ass import (
+    AssStyleCatalog,
     UnsupportedAssEvent,
     allocate_token_colors,
     decode_ass_event,
@@ -15,21 +18,54 @@ from saitenka.subtitles.ass import (
     serialize_ass_event_line,
     source_primary_bgr_colors,
 )
-from saitenka.subtitles.document import AnnotatedSubtitleEvent, RawSubtitleEvent
-from saitenka.subtitles.geometry import GeometryPaletteEntry
+from saitenka.subtitles.document import (
+    AnnotatedSubtitleEvent,
+    RawSubtitleEvent,
+    SubtitleEventId,
+    SubtitleFrameId,
+    SubtitleTrackId,
+    TokenAnnotation,
+)
+from saitenka.subtitles.geometry import MAX_GEOMETRY_TOKENS, GeometryPaletteEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
-    from saitenka.subtitles.document import SubtitleTrackId, TokenAnnotation
+    from saitenka.subtitles.document import DecodedSubtitleEvent
+
+MAX_ACTIVE_EVENTS = 64
+MAX_ACTIVE_ROW_BYTES = 1_048_576
+MAX_ASS_SOURCE_BYTES = 8 * 1_048_576
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedAssGeometry:
+    """Compatibility value for callers that have already proved one active event."""
+
     ass: bytes
     event: AnnotatedSubtitleEvent
     palette: tuple[GeometryPaletteEntry, ...]
     reserved_rgb: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedAssFrame:
+    ass: bytes
+    frame_id: SubtitleFrameId
+    events: tuple[AnnotatedSubtitleEvent, ...]
+    semantic_text: str
+    palette: tuple[GeometryPaletteEntry, ...]
+    reserved_rgb: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedAssSource:
+    lines: tuple[str, ...]
+    indexed_events: tuple[tuple[int, RawSubtitleEvent], ...]
+    catalog: AssStyleCatalog
+    signature_index: Mapping[tuple[object, ...], tuple[RawSubtitleEvent, ...]]
+    reserved_bgr: tuple[int, ...]
+    has_bom: bool
 
 
 def _bgr_to_rgb(color: int) -> int:
@@ -90,6 +126,201 @@ def _authored_events(
     return lines, tuple(parsed)
 
 
+@lru_cache(maxsize=2)
+def _parsed_source(source: bytes, track_id: SubtitleTrackId) -> _ParsedAssSource:
+    if len(source) > MAX_ASS_SOURCE_BYTES:
+        raise UnsupportedAssEvent("subtitle-source-too-large")
+    try:
+        decoded_source = source.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise UnsupportedAssEvent("subtitle-source-encoding-unsupported") from error
+    lines, indexed_events = _authored_events(decoded_source, track_id)
+    catalog = parse_ass_styles(source)
+    raw_events = tuple(event for _index, event in indexed_events)
+    indexed_by_signature: dict[tuple[object, ...], list[RawSubtitleEvent]] = {}
+    for event in raw_events:
+        indexed_by_signature.setdefault(_event_signature(event), []).append(event)
+    return _ParsedAssSource(
+        tuple(lines),
+        indexed_events,
+        catalog,
+        MappingProxyType(
+            {signature: tuple(events) for signature, events in indexed_by_signature.items()}
+        ),
+        source_primary_bgr_colors(catalog, raw_events),
+        source.startswith(b"\xef\xbb\xbf"),
+    )
+
+
+def _event_signature(event: RawSubtitleEvent) -> tuple[object, ...]:
+    identity = event.identity
+    return (
+        identity.start_ms,
+        identity.end_ms,
+        identity.layer,
+        event.style,
+        event.actor,
+        event.effect,
+        event.margins,
+        event.raw_text,
+    )
+
+
+def canonical_active_ass_rows(active_rows: str) -> str:
+    """Normalize mpv/source formatting without weakening the full event metadata contract."""
+    track_id = SubtitleTrackId("canonical")
+    return "\n".join(
+        serialize_ass_event_line(parse_ass_event_line(row, track_id, order))
+        for order, row in enumerate(active_rows.splitlines())
+        if row
+    )
+
+
+def _match_active_events(
+    active_rows: str,
+    track_id: SubtitleTrackId,
+    signature_index: Mapping[tuple[object, ...], tuple[RawSubtitleEvent, ...]],
+) -> tuple[DecodedSubtitleEvent, ...]:
+    encoded_size = len(active_rows.encode("utf-8"))
+    if encoded_size > MAX_ACTIVE_ROW_BYTES:
+        raise UnsupportedAssEvent("active ASS row byte limit exceeded")
+    rows = tuple(row for row in active_rows.splitlines() if row)
+    if not rows:
+        raise UnsupportedAssEvent("mpv reported no active ASS event rows")
+    if len(rows) > MAX_ACTIVE_EVENTS:
+        raise UnsupportedAssEvent("active ASS event limit exceeded")
+    used: set[int] = set()
+    matched: list[DecodedSubtitleEvent] = []
+    for order, row in enumerate(rows):
+        active = parse_ass_event_line(row, track_id, order)
+        signature = _event_signature(active)
+        candidates = [
+            event
+            for event in signature_index.get(signature, ())
+            if event.identity.source_order not in used
+        ]
+        if not candidates:
+            raise UnsupportedAssEvent("active ASS event does not match the authored source")
+        selected = min(candidates, key=lambda event: event.identity.source_order)
+        used.add(selected.identity.source_order)
+        matched.append(decode_ass_event(selected))
+    return tuple(matched)
+
+
+def _partition_tokens(
+    events: tuple[DecodedSubtitleEvent, ...],
+    tokens: Sequence[TokenAnnotation],
+) -> tuple[AnnotatedSubtitleEvent, ...]:
+    remaining = list(tokens)
+    annotated: list[AnnotatedSubtitleEvent] = []
+    offset = 0
+    for event in events:
+        end = offset + len(event.text)
+        local: list[TokenAnnotation] = []
+        while remaining and remaining[0].text_start < end:
+            token = remaining.pop(0)
+            if token.text_start < offset or token.text_end > end:
+                raise ValueError("token annotation extends beyond or crosses an active ASS event")
+            local.append(
+                TokenAnnotation(
+                    token.token_index,
+                    token.text_start - offset,
+                    token.text_end - offset,
+                )
+            )
+        annotated.append(AnnotatedSubtitleEvent(event, tuple(local)))
+        offset = end + 1
+    if remaining:
+        raise ValueError("token annotation extends beyond active ASS events")
+    return tuple(annotated)
+
+
+def _line_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return "\r\n"
+    return "\n" if line.endswith("\n") else ""
+
+
+def authored_ass_rows_at(
+    source: bytes,
+    track_id: SubtitleTrackId,
+    timestamp_ms: int,
+) -> tuple[str, str]:
+    """Canonical active rows and semantic projection for instant navigation before mpv catches up."""
+    indexed_events = _parsed_source(source, track_id).indexed_events
+    active = tuple(
+        event
+        for _index, event in indexed_events
+        if event.identity.start_ms <= timestamp_ms < event.identity.end_ms
+    )
+    if not active:
+        raise UnsupportedAssEvent("authored ASS has no event at the requested timestamp")
+    if len(active) > MAX_ACTIVE_EVENTS:
+        raise UnsupportedAssEvent("active ASS event limit exceeded")
+    rows = "\n".join(serialize_ass_event_line(event) for event in active)
+    if len(rows.encode("utf-8")) > MAX_ACTIVE_ROW_BYTES:
+        raise UnsupportedAssEvent("active ASS row byte limit exceeded")
+    return rows, "\n".join(decode_ass_event(event).text for event in active)
+
+
+def prepare_ass_hit_map_frame(
+    source: bytes,
+    track_id: SubtitleTrackId,
+    *,
+    active_rows: str,
+    text: str,
+    tokens: Sequence[TokenAnnotation],
+) -> PreparedAssFrame:
+    """Rewrite every active authored event reported by mpv and preserve the rest of the document."""
+    if len(tokens) > MAX_GEOMETRY_TOKENS:
+        raise ValueError("geometry palette entry limit exceeded")
+    parsed = _parsed_source(source, track_id)
+    lines = list(parsed.lines)
+    indexed_events = parsed.indexed_events
+    decoded_events = _match_active_events(active_rows, track_id, parsed.signature_index)
+    semantic_text = "\n".join(event.text for event in decoded_events)
+    normalized = text.replace("\r", "").replace("\\N", "\n")
+    if semantic_text != normalized:
+        raise UnsupportedAssEvent("active ASS semantic projection does not match mpv sub-text")
+    annotated = _partition_tokens(decoded_events, tokens)
+    reserved_bgr = parsed.reserved_bgr
+    colors = allocate_token_colors(annotated, reserved_colors=reserved_bgr)
+    colors_by_event: dict[SubtitleEventId, dict[int, int]] = {}
+    for color in colors:
+        colors_by_event.setdefault(color.event_id, {})[color.token_index] = color.bgr
+    line_by_source_order = {event.identity.source_order: index for index, event in indexed_events}
+    for event in annotated:
+        by_index = colors_by_event.get(event.decoded.source.identity, {})
+        rewritten = rewrite_ass_event(
+            event,
+            by_index,
+            parsed.catalog,
+            require_unique=True,
+            reserved_colors=reserved_bgr,
+        )
+        line_index = line_by_source_order[event.decoded.source.identity.source_order]
+        lines[line_index] = serialize_ass_event_line(rewritten.event) + _line_ending(
+            lines[line_index]
+        )
+    encoded = "".join(lines).encode("utf-8")
+    if parsed.has_bom:
+        encoded = b"\xef\xbb\xbf" + encoded
+    frame_id = SubtitleFrameId(
+        track_id, tuple(event.decoded.source.identity for event in annotated)
+    )
+    return PreparedAssFrame(
+        encoded,
+        frame_id,
+        annotated,
+        semantic_text,
+        tuple(
+            GeometryPaletteEntry(item.event_id, item.token_index, _bgr_to_rgb(item.bgr))
+            for item in colors
+        ),
+        tuple(_bgr_to_rgb(color) for color in reserved_bgr),
+    )
+
+
 def prepare_ass_hit_map(
     source: bytes,
     track_id: SubtitleTrackId,
@@ -99,54 +330,24 @@ def prepare_ass_hit_map(
     text: str,
     tokens: Sequence[TokenAnnotation],
 ) -> PreparedAssGeometry:
-    """Rewrite the uniquely matching event and preserve every other document byte."""
-    has_bom = source.startswith(b"\xef\xbb\xbf")
-    try:
-        decoded_source = source.decode("utf-8-sig")
-    except UnicodeDecodeError as error:
-        raise UnsupportedAssEvent("subtitle-source-encoding-unsupported") from error
-    lines, indexed_events = _authored_events(decoded_source, track_id)
-    decoded_events = tuple((index, decode_ass_event(event)) for index, event in indexed_events)
+    """Compatibility wrapper after a caller has proved one uniquely matching authored event."""
+    indexed_events = _parsed_source(source, track_id).indexed_events
     normalized = text.replace("\r", "").replace("\\N", "\n")
+    decoded_events = (decode_ass_event(event) for _index, event in indexed_events)
     matches = [
-        (index, event)
-        for index, event in decoded_events
+        event
+        for event in decoded_events
         if event.source.identity.start_ms == start_ms
         and event.source.identity.end_ms == end_ms
         and event.text == normalized
     ]
     if len(matches) != 1:
         raise UnsupportedAssEvent(f"expected one authored ASS event, found {len(matches)}")
-    line_index, decoded = matches[0]
-    annotated = AnnotatedSubtitleEvent(decoded, tuple(tokens))
-    catalog = parse_ass_styles(source)
-    raw_events = tuple(event for _index, event in indexed_events)
-    reserved_bgr = source_primary_bgr_colors(catalog, raw_events)
-    colors = allocate_token_colors((annotated,), reserved_colors=reserved_bgr)
-    by_index = {item.token_index: item.bgr for item in colors}
-    rewritten = rewrite_ass_event(
-        annotated,
-        by_index,
-        catalog,
-        require_unique=True,
-        reserved_colors=reserved_bgr,
+    frame = prepare_ass_hit_map_frame(
+        source,
+        track_id,
+        active_rows=serialize_ass_event_line(matches[0].source),
+        text=text,
+        tokens=tokens,
     )
-    if lines[line_index].endswith("\r\n"):
-        ending = "\r\n"
-    elif lines[line_index].endswith("\n"):
-        ending = "\n"
-    else:
-        ending = ""
-    lines[line_index] = serialize_ass_event_line(rewritten.event) + ending
-    encoded = "".join(lines).encode("utf-8")
-    if has_bom:
-        encoded = b"\xef\xbb\xbf" + encoded
-    return PreparedAssGeometry(
-        encoded,
-        annotated,
-        tuple(
-            GeometryPaletteEntry(item.event_id, item.token_index, _bgr_to_rgb(item.bgr))
-            for item in colors
-        ),
-        tuple(_bgr_to_rgb(color) for color in reserved_bgr),
-    )
+    return PreparedAssGeometry(frame.ass, frame.events[0], frame.palette, frame.reserved_rgb)

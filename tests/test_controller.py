@@ -350,6 +350,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
         GeometryRequest,
         GeometrySnapshot,
         SubtitleEventId,
+        SubtitleFrameId,
         SubtitleTrackId,
     )
 
@@ -357,12 +358,13 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
         def draw(self, reader: Reader) -> None:
             track_id = SubtitleTrackId("track-1")
             source_order = {"いち": 1, "に": 2}[reader.sub_text]
+            event_id = SubtitleEventId(
+                track_id, source_order * 1_000, source_order * 1_000 + 500, 0, source_order
+            )
             request = GeometryRequest(
                 reader.subtitle_pipeline.generation,
                 track_id,
-                SubtitleEventId(
-                    track_id, source_order * 1_000, source_order * 1_000 + 500, 0, source_order
-                ),
+                SubtitleFrameId(track_id, (event_id,)),
                 source_order * 1_000,
                 reader.osd,
                 reader.osd,
@@ -375,7 +377,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
                 GeometrySnapshot(
                     request.generation,
                     request.track_id,
-                    request.event_id,
+                    request.frame_id,
                     request.timestamp_ms,
                     request.variant,
                     (),
@@ -391,7 +393,7 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
 
     assert r.subtitle_pipeline.current is not None
-    assert r.subtitle_pipeline.current.event_id.source_order == 2
+    assert r.subtitle_pipeline.current.frame_id.active_event_ids[0].source_order == 2
 
 
 def test_sub_nav_prev_and_replay(monkeypatch):
@@ -2350,6 +2352,7 @@ def test_property_change_invalidates_subtitle_geometry():
         GeometryRequest,
         GeometrySnapshot,
         SubtitleEventId,
+        SubtitleFrameId,
         SubtitleTrackId,
     )
 
@@ -2358,7 +2361,7 @@ def test_property_change_invalidates_subtitle_geometry():
             return GeometrySnapshot(
                 request.generation,
                 request.track_id,
-                request.event_id,
+                request.frame_id,
                 request.timestamp_ms,
                 request.variant,
                 (),
@@ -2372,10 +2375,11 @@ def test_property_change_invalidates_subtitle_geometry():
     r.subtitle_pipeline = SubtitleModeCoordinator(NullRenderer(), Backend())
     r.start_observing()
     track_id = SubtitleTrackId("track-1")
+    event_id = SubtitleEventId(track_id, 1_000, 2_000, 0, 2)
     request = GeometryRequest(
         r.subtitle_pipeline.generation,
         track_id,
-        SubtitleEventId(track_id, 1_000, 2_000, 0, 2),
+        SubtitleFrameId(track_id, (event_id,)),
         1_250,
         (1920, 1080),
         (1920, 1080),

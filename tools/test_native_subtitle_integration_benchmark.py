@@ -11,6 +11,17 @@ def report() -> dict:
     return {
         "schema": 1,
         "event_count": 101,
+        "simultaneous_frame_workloads": [
+            {
+                "active_events": count,
+                "eligible_tokens": count,
+                "found_tokens": count,
+                "prepare_ms": 1.0,
+                "render_ms": 1.0,
+                "extract_ms": 1.0,
+            }
+            for count in (1, 2, 4, 64)
+        ],
         "interaction_clock": "thread_time",
         "interaction_p99_ms": 1.0,
         "interaction_cpu_p99_ms": 1.0,
@@ -19,10 +30,10 @@ def report() -> dict:
         "ready_before_presentation_ratio": 100 / 101,
         "ready_before_presented": 100,
         "geometry_apply_count": 100,
-        "hit_test_count": 100,
+        "hit_test_count": 101,
         "focus_draw_count": 100,
-        "tooltip_open_count": 100,
-        "tooltip_scroll_count": 100,
+        "tooltip_open_count": 101,
+        "tooltip_scroll_count": 101,
         "retained_rss_growth_mib": 32.0,
         "result_cache_entries": 3,
         "prefetch_cache_entries": 3,
@@ -43,6 +54,7 @@ def report() -> dict:
 def manifest() -> dict:
     return {
         "event_count": 101,
+        "simultaneous_event_counts": [1, 2, 4, 64],
         "trials": 3,
         "cache_max": 3,
         "interaction_clock": "thread_time",
@@ -102,6 +114,21 @@ def test_budget_oracle_rejects_each_regression() -> None:
         mutated = report()
         mutated[field] = value
         assert not evaluate(mutated, manifest()), field
+
+
+@pytest.mark.parametrize("mutation", ["missing-workload", "lost-token", "extra-workload"])
+def test_frame_workload_oracle_rejects_denominator_and_geometry_loss(mutation: str) -> None:
+    measured = report()
+    if mutation == "missing-workload":
+        measured["simultaneous_frame_workloads"].pop()
+    elif mutation == "lost-token":
+        measured["simultaneous_frame_workloads"][-1]["found_tokens"] -= 1
+    else:
+        extra = dict(measured["simultaneous_frame_workloads"][-1])
+        extra["active_events"] = 65
+        measured["simultaneous_frame_workloads"].append(extra)
+
+    assert not evaluate(measured, manifest())
 
 
 def test_trial_oracle_tolerates_one_performance_outlier() -> None:
@@ -212,6 +239,14 @@ def test_trial_run_closes_backend_after_mid_trial_failure(
 
     monkeypatch.setattr(benchmark, "LibassGeometryBackend", RecordingBackend)
     monkeypatch.setattr(benchmark, "_present", fail_present)
+    monkeypatch.setattr(
+        benchmark,
+        "_frame_workloads",
+        lambda counts, _library_path: [
+            {"active_events": count, "eligible_tokens": count, "found_tokens": count}
+            for count in counts
+        ],
+    )
 
     with pytest.raises(RuntimeError, match="interaction failed"):
         benchmark.run(manifest())

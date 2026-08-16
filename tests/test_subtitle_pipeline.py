@@ -17,6 +17,7 @@ from saitenka.subtitles import (
     GeometryVariant,
     Rect,
     SubtitleEventId,
+    SubtitleFrameId,
     SubtitleTrackId,
     TokenGeometry,
 )
@@ -37,11 +38,12 @@ class FakeGeometryBackend:
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self.closed:
             raise RuntimeError("render after close")
-        token = TokenGeometry(0, Rect(10, 20, 30, 40))
+        event_id = request.frame_id.active_event_ids[0]
+        token = TokenGeometry(event_id, 0, Rect(10, 20, 30, 40))
         return GeometrySnapshot(
             request.generation,
             request.track_id,
-            request.event_id,
+            request.frame_id,
             request.timestamp_ms,
             request.variant,
             (token,),
@@ -59,7 +61,10 @@ class WrongEventBackend(FakeGeometryBackend):
         return GeometrySnapshot(
             result.generation,
             result.track_id,
-            SubtitleEventId(result.track_id, 2_000, 3_000, 0, 3),
+            SubtitleFrameId(
+                result.track_id,
+                (SubtitleEventId(result.track_id, 2_000, 3_000, 0, 3),),
+            ),
             result.timestamp_ms,
             result.variant,
             result.tokens,
@@ -72,7 +77,7 @@ class WrongVariantBackend(FakeGeometryBackend):
         return GeometrySnapshot(
             result.generation,
             result.track_id,
-            result.event_id,
+            result.frame_id,
             result.timestamp_ms,
             GeometryVariant.NATIVE,
             result.tokens,
@@ -112,10 +117,11 @@ class ConsumingCoordinator(SubtitleModeCoordinator):
 
 def request(generation: int, timestamp_ms: int = 1_250) -> GeometryRequest:
     track_id = SubtitleTrackId("track-1")
+    event_id = SubtitleEventId(track_id, 1_000, 2_000, 0, 2)
     return GeometryRequest(
         generation=generation,
         track_id=track_id,
-        event_id=SubtitleEventId(track_id, 1_000, 2_000, 0, 2),
+        frame_id=SubtitleFrameId(track_id, (event_id,)),
         timestamp_ms=timestamp_ms,
         frame_size=(1920, 1080),
         storage_size=(1920, 1080),
