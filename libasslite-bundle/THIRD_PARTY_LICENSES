@@ -1,0 +1,4 @@
+This source tree contains no native binaries. Release wheels replace this file with the
+verbatim copyright files for every installed vcpkg target port before the wheel is built.
+
+The release workflow fails if those notices or the native payload manifest are absent.

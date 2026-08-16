@@ -1,0 +1,9 @@
+{
+  "vcpkg_baseline": "94a541197763a4f449a1b91478df48c0584a6256",
+  "ports": ["libass", "freetype", "fribidi", "harfbuzz", "fontconfig (Linux)"],
+  "libass": {
+    "version": "0.17.5",
+    "source": "https://github.com/libass/libass/releases/tag/0.17.5"
+  },
+  "rebuild": "Use the pinned vcpkg baseline and triplets in .github/workflows/libasslite-bundle-release.yml"
+}
