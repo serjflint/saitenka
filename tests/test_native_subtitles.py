@@ -77,11 +77,18 @@ class FakeBackend:
     def __init__(self) -> None:
         self.requests: list[GeometryRequest] = []
         self.closed = False
+        self.error: Exception | None = None
+        self.token_index_offset = 0
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         self.requests.append(request)
+        if self.error is not None:
+            raise self.error
         tokens = tuple(
-            TokenGeometry(entry.token_index, Rect(100 + entry.token_index * 60, 600, 50, 40))
+            TokenGeometry(
+                entry.token_index + self.token_index_offset,
+                Rect(100 + entry.token_index * 60, 600, 50, 40),
+            )
             for entry in request.palette
         )
         return GeometrySnapshot(
@@ -117,6 +124,13 @@ class _SingleTokenizer:
 
     def phrase_terms(self, _tokens, _index, _has_term):
         return None
+
+
+class _MismatchedTokenizer(_SingleTokenizer):
+    name = "mismatched"
+
+    def tokenize(self, line, *, strip_furigana=True, merge=True):  # noqa: ARG002
+        return [Token(surface="different", lemma=line, reading="", pos="名詞", start=0, end=1)]
 
 
 def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
@@ -183,7 +197,6 @@ def test_provider_failure_keeps_native_track_visible_and_clears_hits(tmp_path: P
     result.native_geometry.apply(result)
 
     assert result.boxes == []
-    assert result.subtitle_pipeline.last_error is not None
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
     assert ("set_property", "sub-visibility", True) in ipc.commands
     result.close()
@@ -267,6 +280,59 @@ def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
     assert len(result.boxes) == len(backend.requests[-1].palette) == 1
+    result.close()
+
+
+def test_mismatched_token_annotation_fails_closed(tmp_path: Path) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    result.use_tokenizer(_MismatchedTokenizer())
+
+    result.set_subtitle("猫を見る")
+
+    assert backend.requests == []
+    assert result.boxes == []
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-token-annotation-invalid"
+    result.close()
+
+
+def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("boom")
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert not result.native_geometry.apply(result)
+    clears = ipc.commands.count(("osd-overlay", 1001, "none", ""))
+    assert not result.native_geometry.apply(result)
+    assert ipc.commands.count(("osd-overlay", 1001, "none", "")) == clears
+
+    result.native_geometry.set_source(None, reader=result)
+    assert result.subtitle_pipeline.last_error is None
+    assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
+    result.close()
+
+
+def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result.hover = 0
+    result._draw_subtitle()
+    focus_index = len(ipc.commands)
+
+    backend.token_index_offset = len(result.tokens)
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result)
+    assert result.native_geometry.worker.wait_idle()
+
+    assert not result.native_geometry.apply(result)
+    assert result.boxes == []
+    assert ("osd-overlay", 1001, "none", "") in ipc.commands[focus_index:]
     result.close()
 
 

@@ -291,7 +291,13 @@ class NativeSubtitleGeometry:
                 (frame_size, storage_size, pixel_aspect, render_profile),
             )
             return True
-        annotations = self._annotations(reader.sub_text, reader.lines, reader.tokens)
+        try:
+            annotations = self._annotations(reader.sub_text, reader.lines, reader.tokens)
+        except ValueError:
+            self.worker.mark_not_ready()
+            self.fallback_reason = "subtitle-token-annotation-invalid"
+            reader._clear_native_interaction()
+            return False
 
         def build() -> GeometryRequest:
             return self._build(path, track_id, generation, cue, annotations)
@@ -312,8 +318,7 @@ class NativeSubtitleGeometry:
     def apply(self, reader: Reader) -> bool:
         snapshot = reader.subtitle_pipeline.current
         if snapshot is None:
-            if reader.subtitle_pipeline.last_error is not None:
-                error = reader.subtitle_pipeline.last_error
+            if (error := reader.subtitle_pipeline.consume_error()) is not None:
                 self.fallback_reason = (
                     error if error.startswith("subtitle-source-") else "geometry-provider-failed"
                 )
@@ -327,7 +332,7 @@ class NativeSubtitleGeometry:
             not 0 <= index < len(reader.tokens) for index in indices
         ):
             self.fallback_reason = "geometry-token-identity-invalid"
-            reader.boxes = []
+            reader._clear_native_interaction()
             return False
         reader.boxes = [
             WordBox(

@@ -106,12 +106,19 @@ class SubtitleModeCoordinator:
         with self._state_lock:
             return self._last_error
 
+    def consume_error(self) -> str | None:
+        with self._state_lock:
+            error = self._last_error
+            self._last_error = None
+            return error
+
     def invalidate(self) -> int:
         with self._state_lock:
             if self._closed:
                 return self._generation
             self._generation += 1
             self._current = None
+            self._last_error = None
             return self._generation
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot | None:
