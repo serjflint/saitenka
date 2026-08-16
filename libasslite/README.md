@@ -4,9 +4,11 @@
 [libass](https://github.com/libass/libass) rendering API. It owns the native library, renderer, and
 track handles and returns copied immutable image layers; no native pointer escapes into Python.
 
-The wheel contains only the wrapper. It loads libass 0.17.x from the host at runtime, so applications
-can use the same system library as mpv. Set `LIBASSLITE_LIBRARY` or pass `library_path=` when automatic
-discovery cannot find it.
+The wheel contains only the wrapper. It loads the parity-tested libass 0.17.1–0.17.5 range from the
+host at runtime, so applications can use the same system library as mpv. Set `LIBASSLITE_LIBRARY` or
+pass `library_path=` when automatic discovery cannot find it. The separately licensed
+`libasslite-bundle` package supplies a self-contained 0.17.5 runtime when installed; an explicit path
+still wins, and `LIBASSLITE_BUNDLE=0` returns to system discovery.
 
 ```python
 from pathlib import Path
@@ -50,4 +52,3 @@ schedule work, cache geometry, or bundle fonts/libass.
 `libasslite` is MIT. Its wheels do not distribute libass, FriBidi, HarfBuzz, FreeType, or a font
 provider; the dynamically loaded system installation keeps its own license and deployment obligations.
 See `NOTICE`.
-

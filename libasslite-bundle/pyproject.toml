@@ -1,0 +1,31 @@
+[project]
+name = "libasslite-bundle"
+version = "0.1.0"
+description = "Optional self-contained libass runtime for libasslite"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE", "NATIVE_SOURCES.json", "THIRD_PARTY_LICENSES"]
+dependencies = ["libasslite==0.1.0"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/libasslite_bundle"]
+artifacts = ["src/libasslite_bundle/.libs/*"]
+
+[tool.hatch.build.hooks.custom]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/libasslite_bundle",
+    "LICENSE",
+    "README.md",
+    "NATIVE_SOURCES.json",
+    "THIRD_PARTY_LICENSES",
+    "hatch_build.py",
+    "build_support.py",
+    "vcpkg.json",
+]

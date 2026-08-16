@@ -78,6 +78,10 @@ def test_wheel_installs_and_assets_load():
         wheel = wheels[0]
         with zipfile.ZipFile(wheel) as archive:
             assert "saitenka/py.typed" in archive.namelist()
+            assert not any(
+                name.casefold().endswith((".dll", ".dylib", ".so")) or ".so." in name.casefold()
+                for name in archive.namelist()
+            ), "the Apache-2.0 Saitenka wheel must not absorb the native bundle"
 
         # 2. install into a throwaway venv (isolated from the source checkout)
         venv = work / "venv"

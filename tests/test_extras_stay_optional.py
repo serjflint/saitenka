@@ -31,6 +31,8 @@ OPTIONAL_MODULES = [
     "jamdict",  # [jmdict] JMdict English fallback
     "jamdict_data",  # [jmdict] its bundled database
     "opentelemetry",  # [telemetry] the OTel SDK
+    "libasslite",  # [subtitle-geometry] system-libass wrapper
+    "libasslite_bundle",  # [subtitle-geometry-bundle] native runtime payload
 ]
 
 # The base install's eager import graph: the CLI surface plus what `run`/`attach` load to play a video.

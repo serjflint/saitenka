@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import libasslite
+import libasslite as public_api
 
 ASS = """[Script Info]
 ScriptType: v4.00+
@@ -129,6 +130,49 @@ def test_explicit_path_does_not_silently_fall_back(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(RuntimeError, match="could not load libass"):
         libasslite.AssRenderer(ASS, library_path=configured.with_name("missing-libass"))
+
+
+def test_explicit_path_wins_over_installed_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    chosen = Path("chosen-libass")
+    monkeypatch.setattr(public_api, "_bundle_library", lambda: "bundled-libass")
+
+    assert public_api._selected_library(chosen) == chosen
+
+
+def test_environment_path_skips_bundle_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LIBASSLITE_LIBRARY", "system-libass")
+    monkeypatch.setattr(
+        public_api,
+        "import_module",
+        lambda _name: pytest.fail("bundle import must not run"),
+    )
+
+    assert public_api._bundle_library() is None
+
+
+def test_bundle_can_be_disabled_without_uninstall(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LIBASSLITE_LIBRARY", raising=False)
+    monkeypatch.setenv("LIBASSLITE_BUNDLE", "off")
+    monkeypatch.setattr(
+        public_api,
+        "import_module",
+        lambda _name: pytest.fail("disabled bundle must not be imported"),
+    )
+
+    assert public_api._bundle_library() is None
+
+
+def test_installed_bundle_supplies_default_library(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Bundle:
+        @staticmethod
+        def library_path() -> Path:
+            return Path("bundle/libass")
+
+    monkeypatch.delenv("LIBASSLITE_LIBRARY", raising=False)
+    monkeypatch.delenv("LIBASSLITE_BUNDLE", raising=False)
+    monkeypatch.setattr(public_api, "import_module", lambda _name: Bundle)
+
+    assert Path(public_api._bundle_library()) == Path("bundle/libass")
 
 
 def test_invalid_geometry_is_rejected_before_native_render() -> None:

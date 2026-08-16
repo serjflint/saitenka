@@ -160,6 +160,19 @@ Before releasing a Saitenka version that pins `saitenka[subtitle-geometry]`, pub
 installs the built Saitenka wheel non-editably with the extra; release-tag smoke repeats the same path
 from PyPI. Never publish Saitenka while its pinned wrapper is unavailable.
 
+`libasslite-bundle` publishes independently through
+`.github/workflows/libasslite-bundle-release.yml`. Publish it only after the pinned `libasslite`
+version exists on PyPI; CI builds the paired wrapper from the same commit and proves automatic discovery.
+The `libasslite-bundle-vX.Y.Z` tag builds the pinned vcpkg dynamic closure on Linux, macOS, and Windows,
+generates exact source/version metadata and verbatim port notices, compares two wheels built from the
+same inputs, repairs loader-relative dependencies, and smoke-loads libass before OIDC publication.
+Register this workflow as the trusted publisher for the separate `libasslite-bundle` project. A source
+archive contains rebuild metadata only; native payloads ship only in platform wheels.
+
+Before a Saitenka release pins `saitenka[subtitle-geometry-bundle]`, publish in this order and wait for
+each artifact to resolve from PyPI: `libasslite`, `libasslite-bundle`, then Saitenka. Never copy bundle
+libraries into the Saitenka wheel.
+
 ## Notes
 
 - **Compare-link footers** in `CHANGELOG.md` need tags to exist. No `v0.2.0` tag was ever cut; to make
