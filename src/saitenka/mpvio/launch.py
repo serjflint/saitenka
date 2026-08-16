@@ -4,12 +4,20 @@ subprocess + IPC handshake is smoke-tested with a fake mpv in ``tests/test_launc
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import os
+
+NATIVE_GEOMETRY_MPV_MIN = (0, 39)
+
+
+def supports_native_geometry_profile(version_output: str) -> bool:
+    match = re.search(r"mpv\s+v?(\d+)\.(\d+)", version_output)
+    return bool(match and tuple(map(int, match.groups())) >= NATIVE_GEOMETRY_MPV_MIN)
 
 
 @dataclass(frozen=True)

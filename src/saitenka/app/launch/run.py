@@ -414,6 +414,27 @@ def _launch_mpv_and_connect(
             file=sys.stderr,
         )
         return None, None
+    if opts.native_visible:
+        from saitenka.mpvio.launch import supports_native_geometry_profile
+
+        try:
+            version = subprocess.run(
+                [mpv_bin, "--version"],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            version = ""
+        if not supports_native_geometry_profile(version):
+            print(
+                "native subtitle geometry needs mpv ≥ 0.39; disable "
+                "subtitle_geometry.native_visible or upgrade mpv",
+                file=sys.stderr,
+            )
+            return None, None
     # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
     sock = default_ipc_path(tmp.name)
     # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
