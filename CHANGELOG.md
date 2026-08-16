@@ -13,7 +13,7 @@ logs.
   survives cue transitions, cache misses, delay changes, unsupported geometry, and provider failures;
   unproved hit boxes disappear and return asynchronously without changing subtitle style. Only a current
   assert-true/readback-false visibility transaction can authorize catastrophic legacy recovery, with
-  bounded retries and text-free ownership telemetry in `subtitle_report.py`.
+  bounded retries and text-free ownership telemetry in `saitenka subtitle-report`.
 - **Native subtitle interaction now follows mpv subtitle delay.** Delay adjustments no longer discard
   lookahead geometry, and lookahead follows authored start and end transitions so upcoming static ASS
   frames can publish their prepared hit maps at presentation time.

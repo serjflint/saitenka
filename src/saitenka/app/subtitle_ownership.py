@@ -194,7 +194,7 @@ def _change_context(
 def _ensure_mode(
     state: OwnershipState, *, verify: bool
 ) -> tuple[OwnershipState, tuple[OwnershipAction, ...]]:
-    unavailable = state.owner == PixelOwner.LEGACY or state.retry_exhausted
+    unavailable = state.owner == PixelOwner.LEGACY or state.retry_exhausted or state.retry_suspended
     already_native = state.native_pixels_established and not verify
     wrong_mode = verify and state.context.mode != OwnershipMode.NATIVE_VISIBLE
     if unavailable or already_native or wrong_mode:
@@ -247,6 +247,14 @@ def _assertion_result(
             owner=PixelOwner.UNKNOWN,
             active_effect_kind=ActionKind.STAGE_LEGACY,
         ), (OwnershipAction(ActionKind.STAGE_LEGACY, state.active_assertion_id, state.context),)
+    if not state.nonempty:
+        return replace(
+            current,
+            owner=PixelOwner.UNKNOWN,
+            active_assertion_id=None,
+            active_effect_kind=None,
+            retry_suspended=True,
+        ), ()
     return _schedule_retry(
         replace(
             current,

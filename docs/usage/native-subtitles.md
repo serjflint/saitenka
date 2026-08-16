@@ -118,10 +118,11 @@ the subtitle geometry at 60 FPS.
 - If `run` works but `attach` does not, compare the attached player's options with the profile above.
 - A native-geometry failure can temporarily remove scanning boxes, but the mpv subtitle style should
   remain stable. A switch to the standard renderer is a catastrophic native-visibility failure; include
-  a `saitenka report` bundle if that occurs unexpectedly. For a quick, text-free diagnosis, run
-  `uv run tools/subtitle_report.py --geometry /path/to/saitenka-report-*.zip`; it shows ownership
-  transactions and retries, capability state, matched event/token counts, skip counts, and bounded error
-  codes.
+  a report bundle if that occurs unexpectedly. Before reproducing, run `saitenka telemetry enable`;
+  after the session, run `saitenka report`, then
+  `saitenka subtitle-report /path/to/saitenka-report-*.zip`. The installed, text-free analyzer shows
+  ownership transactions and retries, capability state, matched event/token counts, skip counts, and
+  bounded error codes.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 
 For the provider contract, shadow-render pipeline, lifecycle guards, and package diagram, see

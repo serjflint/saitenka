@@ -75,7 +75,7 @@ class SubtitleRenderer:
             False,  # noqa: FBT003  # mpv IPC wire value
         )
 
-    def draw(self, reader: Reader) -> None:
+    def draw(self, reader: Reader) -> dict:
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
             # Draw plain for the known/translation track, OR a cue still awaiting a complete
             # tokenization (dictionaries loading): the cue shows at cue time and reader_deps
@@ -118,7 +118,7 @@ class SubtitleRenderer:
             from saitenka.app.loading import clear_startup_hint
 
             clear_startup_hint(reader.ipc)  # overlay is live now → drop mpv's startup breadcrumb
-        reader.ov.show(sr.image, ox, oy, oid=SUB_ID)
+        return reader.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
     def clear(self, reader: Reader) -> None:
         reader.ov.hide(SUB_ID)
@@ -291,9 +291,9 @@ class NativeVisibleRenderer:
     def _stage_legacy(self, reader: Reader, action: OwnershipAction) -> None:
         owner_before = self._state.owner
         try:
-            self._fallback.draw(reader)
-            accepted = self._state.visibility == Visibility.FALSE or self._hide_mpv_subtitles(
-                reader
+            staged = self._reply_accepted(self._fallback.draw(reader))
+            accepted = staged and (
+                self._state.visibility == Visibility.FALSE or self._hide_mpv_subtitles(reader)
             )
         except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
             accepted = False

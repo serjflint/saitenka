@@ -344,6 +344,40 @@ def report(
     return 0
 
 
+def subtitle_report(
+    report_path: Annotated[str, cyclopts.Parameter(help="report zip, directory, or trace JSON")],
+    *,
+    json_out: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name="--json", negative=(), help="emit bounded text-free geometry records as JSON"
+        ),
+    ] = False,
+) -> int:
+    """Explain native subtitle geometry and pixel-ownership decisions from a report bundle."""
+    from pathlib import Path
+
+    from saitenka.app.subtitle_report import geometry_records, load_trace, render_geometry
+
+    source = Path(report_path).expanduser()
+    try:
+        events = load_trace(source)
+    except (OSError, ValueError) as error:
+        print(f"subtitle report unavailable: {error}", file=sys.stderr)
+        return 1
+    if not events:
+        print(
+            "no telemetry trace found; enable telemetry before reproducing the issue",
+            file=sys.stderr,
+        )
+        return 1
+    if json_out:
+        print(json.dumps({"geometry": geometry_records(events)}, ensure_ascii=False, indent=2))
+    else:
+        print(render_geometry(source, events), end="")
+    return 0
+
+
 def register(app: cyclopts.App) -> None:
-    for command in (doctor, telemetry, prewarm, stats, report):
+    for command in (doctor, telemetry, prewarm, stats, report, subtitle_report):
         app.command(command)

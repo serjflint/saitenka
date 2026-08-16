@@ -80,10 +80,14 @@ class FakeIPC:
         }
         self.set_property_error: str | None = None
         self.set_property_exception: Exception | None = None
+        self.overlay_add_error: str | None = None
+        self.get_property_error: str | None = None
 
     def command(self, *args):
         self.commands.append(args)
         if args and args[0] == "get_property":
+            if self.get_property_error is not None:
+                return {"error": self.get_property_error}
             return {"error": "success", "data": self.props.get(args[1])}
         if args and args[0] == "set_property" and self.set_property_exception is not None:
             raise self.set_property_exception
@@ -91,6 +95,8 @@ class FakeIPC:
             return {"error": self.set_property_error}
         if args[:2] == ("set_property", "sub-visibility"):
             self.props["sub-visibility"] = args[2]
+        if args and args[0] == "overlay-add" and self.overlay_add_error is not None:
+            return {"error": self.overlay_add_error}
         return {"error": "success", "data": None}
 
     def close(self) -> None:
@@ -1336,10 +1342,13 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     renderer = NativeVisibleRenderer(clock=lambda: now[0])
     result.subtitle_pipeline.renderer = renderer
     ipc.set_property_error = "disconnected"
+    ipc.get_property_error = "disconnected"
+    result.sub_text = "猫を見る"
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
-        assert renderer.activate(result) is False
+        renderer.cue_changed(result, nonempty=True)
+        assert renderer.ownership_state.owner.value == "unknown"
         renderer.draw(result)
         now[0] = 0.049
         renderer.poll(result)
@@ -1394,6 +1403,31 @@ def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path
     assert result.boxes
     assert any(command[0] == "overlay-add" for command in ipc.commands)
     assert renderer.ownership_state.owner.value == "legacy"
+    result.close()
+
+
+def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    ipc.command(
+        "set_property",
+        "sub-visibility",
+        False,  # noqa: FBT003  # raw mpv IPC wire value
+    )
+    ipc.commands.clear()
+    ipc.set_property_error = "disconnected"
+    ipc.overlay_add_error = "unsupported format"
+
+    result.subtitle_pipeline.activate(result)
+
+    assert renderer.ownership_state.owner.value == "unknown"
+    assert renderer.ownership_state.retry_effect_id is not None
+    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
     result.close()
 
 

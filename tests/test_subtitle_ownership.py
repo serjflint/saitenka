@@ -140,8 +140,38 @@ def test_false_readback_during_empty_interval_cannot_stage_legacy() -> None:
     )
 
     assert state.owner == PixelOwner.UNKNOWN
-    assert result_actions[0].kind == ActionKind.SCHEDULE_RETRY
+    assert state.retry_suspended
+    assert state.retry_attempts_used == 0
+    assert result_actions == ()
     assert all(action.kind != ActionKind.STAGE_LEGACY for action in result_actions)
+
+
+def test_initial_empty_failure_waits_for_first_nonempty_cue_before_spending_retry() -> None:
+    context = OwnershipContext(0, 1, OwnershipMode.NATIVE_VISIBLE, "sid:2")
+    state, actions = reduce_ownership(
+        OwnershipState(), OwnershipEvent(EventKind.MODE_CHANGED, context=context)
+    )
+    state, failure_actions = reduce_ownership(
+        state,
+        OwnershipEvent(
+            EventKind.ASSERTION_RESULT,
+            context=context,
+            effect_id=actions[-1].effect_id,
+            visibility=Visibility.UNKNOWN,
+        ),
+    )
+
+    assert failure_actions == ()
+    assert state.retry_suspended
+    assert state.retry_attempts_used == 0
+
+    state, retry_actions = reduce_ownership(
+        state, OwnershipEvent(EventKind.CUE_CHANGED, nonempty=True)
+    )
+
+    assert not state.retry_suspended
+    assert state.retry_attempts_used == 1
+    assert retry_actions == (OwnershipAction(ActionKind.SCHEDULE_RETRY, 2, context, 50),)
 
 
 def test_initial_false_that_becomes_true_never_stages_legacy() -> None:
