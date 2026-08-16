@@ -84,15 +84,24 @@ jobs:
       - name: Repair Linux loader paths
         if: matrix.repair == 'auditwheel'
         shell: bash
-        run: uvx auditwheel repair --wheel-dir repaired dist-a/*.whl
+        run: |
+          uvx auditwheel repair --wheel-dir repaired-a dist-a/*.whl
+          uvx auditwheel repair --wheel-dir repaired-b dist-b/*.whl
       - name: Repair macOS loader paths
         if: matrix.repair == 'delocate'
         shell: bash
-        run: uvx --from delocate delocate-wheel -w repaired -v dist-a/*.whl
+        run: |
+          uvx --from delocate delocate-wheel -w repaired-a -v dist-a/*.whl
+          uvx --from delocate delocate-wheel -w repaired-b -v dist-b/*.whl
       - name: Repair Windows loader paths
         if: matrix.repair == 'delvewheel'
         shell: pwsh
-        run: uvx delvewheel repair --wheel-dir repaired (Get-ChildItem dist-a/*.whl).FullName
+        run: |
+          uvx delvewheel repair --wheel-dir repaired-a (Get-ChildItem dist-a/*.whl).FullName
+          uvx delvewheel repair --wheel-dir repaired-b (Get-ChildItem dist-b/*.whl).FullName
+      - name: Verify repaired-wheel reproducibility
+        shell: bash
+        run: cmp repaired-a/*.whl repaired-b/*.whl
       - name: Build the paired libasslite wrapper
         shell: bash
         run: |
@@ -102,7 +111,7 @@ jobs:
       - name: Smoke bundle discovery and native ABI
         shell: bash
         run: |
-          wheel=("$GITHUB_WORKSPACE"/repaired/*.whl)
+          wheel=("$GITHUB_WORKSPACE"/repaired-a/*.whl)
           wrapper=("$GITHUB_WORKSPACE"/wrapper-dist/*.whl)
           venv="$RUNNER_TEMP/libasslite-bundle-smoke"
           uv venv --python 3.13 "$venv"
@@ -128,7 +137,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bundle-${{ matrix.name }}
-          path: repaired/*.whl
+          path: repaired-a/*.whl
 
   sdist:
     runs-on: ubuntu-latest
