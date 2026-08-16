@@ -115,7 +115,6 @@ def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
         active, sid = SECOND_LANG, tracks.en_sid
     if sid is not None:
         ipc.command("set_property", "sid", sid)
-        ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
     return SubtitleStartup(tracks, active)
 
 

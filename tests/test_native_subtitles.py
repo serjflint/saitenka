@@ -60,6 +60,7 @@ class FakeIPC:
             "sub-end": 3.0,
             "time-pos": 1.25,
             "sub-delay": 0.0,
+            "sub-visibility": False,
             "pause": True,
             "osd-dimensions": {"w": 1280, "h": 720},
             "video-out-params": {"dw": 1280, "dh": 720, "w": 1280, "h": 720, "par": 1.0},
@@ -88,6 +89,8 @@ class FakeIPC:
             raise self.set_property_exception
         if args and args[0] == "set_property" and self.set_property_error is not None:
             return {"error": self.set_property_error}
+        if args[:2] == ("set_property", "sub-visibility"):
+            self.props["sub-visibility"] = args[2]
         return {"error": "success", "data": None}
 
     def close(self) -> None:
@@ -213,18 +216,21 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
     assert backend.closed
 
 
-def test_visible_cue_cache_miss_uses_legacy_until_geometry_is_ready(tmp_path: Path) -> None:
+def test_visible_cue_cache_miss_keeps_native_pixels_until_geometry_is_ready(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
 
     result.set_subtitle("猫を見る")
 
     assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
-    assert result.native_geometry.status.owner == "legacy"
-    assert ("set_property", "sub-visibility", False) in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.boxes == []
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
+    assert result.boxes
     result.close()
 
 
@@ -260,8 +266,9 @@ def test_missing_ass_full_property_disables_only_native_geometry(tmp_path: Path)
 
     assert result.native_geometry.ass_full_capability == AssFullCapability.UNSUPPORTED
     assert result.native_geometry.status.fallback_reason == "subtitle-ass-full-unsupported"
+    assert result.native_geometry.status.owner == "native"
     assert backend.requests == []
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
 
 
@@ -283,7 +290,27 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     result.close()
 
 
-def test_missing_source_restores_legacy_renderer_and_hits(tmp_path: Path) -> None:
+def test_same_session_reconnect_reasserts_native_and_preserves_restore_baseline(
+    tmp_path: Path,
+) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.props["sub-visibility"] = False
+    ipc.commands.clear()
+
+    renderer.connection_replaced(result)
+
+    assert renderer.ownership_state.owner.value == "native"
+    assert renderer.ownership_state.context.connection_epoch == 1
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    ipc.commands.clear()
+    result.close()
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+
+
+def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.set_source(tmp_path / "missing.ass")
@@ -293,15 +320,16 @@ def test_missing_source_restores_legacy_renderer_and_hits(tmp_path: Path) -> Non
     result.native_geometry.apply(result)
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
-    assert ("set_property", "sub-visibility", False) in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result._sub_pending = None
     result._draw_subtitle()
-    assert result.boxes
+    assert result.boxes == []
     result.close()
 
 
-def test_oversized_source_falls_back_before_provider_work(tmp_path: Path) -> None:
+def test_oversized_source_keeps_native_pixels_before_provider_work(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "oversized.ass"
     source.write_bytes(b"x" * (MAX_ASS_SOURCE_BYTES + 1))
@@ -312,11 +340,12 @@ def test_oversized_source_falls_back_before_provider_work(tmp_path: Path) -> Non
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-too-large"
     assert backend.requests == []
-    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
 
-def test_provider_failure_preserves_hover_pause_during_renderer_fallback(tmp_path: Path) -> None:
+def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -336,14 +365,14 @@ def test_provider_failure_preserves_hover_pause_during_renderer_fallback(tmp_pat
 
     assert ("set_property", "pause", False) not in ipc.commands
     assert result.hover == 0
-    assert result.boxes
-    box = result.boxes[0]
-    assert result._hit(result.sub_origin[0] + box.x + 1, result.sub_origin[1] + box.y + 1) == 0
+    assert result.boxes == []
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result._paused_by_tip = False
     result.close()
 
 
-def test_failed_provider_keeps_legacy_pixels_while_recovery_is_pending(tmp_path: Path) -> None:
+def test_failed_provider_keeps_native_pixels_while_recovery_is_pending(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -362,9 +391,9 @@ def test_failed_provider_keeps_legacy_pixels_while_recovery_is_pending(tmp_path:
 
     result.native_geometry.refresh(result)
 
-    assert result.native_geometry.status.owner == "legacy"
-    assert ("set_property", "sub-visibility", True) not in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
 
 
@@ -381,14 +410,14 @@ def test_completed_provider_failure_survives_refresh_before_apply(tmp_path: Path
     result.native_geometry.refresh(result)
 
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert result.native_geometry.status.owner == "legacy"
-    assert ("set_property", "sub-visibility", True) not in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert not result.native_geometry.apply(result)
     result.close()
 
 
-def test_annotation_free_cue_does_not_claim_recovery_from_provider_failure(
+def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     tmp_path: Path,
 ) -> None:
     result, ipc, backend = reader(tmp_path)
@@ -403,17 +432,18 @@ def test_annotation_free_cue_does_not_claim_recovery_from_provider_failure(
 
     result.set_subtitle("猫を見る")
 
-    assert result.native_geometry.status.owner == "legacy"
-    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert ("set_property", "sub-visibility", True) not in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert result.native_geometry.status.fallback_reason is None
+    assert result.native_geometry.status.geometry_ready is False
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.use_tokenizer(original_tokenizer)
     ipc.commands.clear()
     result.set_subtitle("猫を見る")
     assert result.native_geometry.worker.wait_idle()
     assert not result.native_geometry.apply(result)
-    assert result.native_geometry.status.owner == "legacy"
-    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
 
@@ -431,9 +461,9 @@ def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path)
     assert result.native_geometry.worker.wait_idle()
     assert not result.native_geometry.apply(result)
 
-    assert result.native_geometry.status.owner == "legacy"
+    assert result.native_geometry.status.owner == "native"
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert ("set_property", "sub-visibility", True) not in ipc.commands
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
 
@@ -453,15 +483,12 @@ def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Pa
         assert not result.native_geometry.apply(result)
 
     assert [record.getMessage() for record in caplog.records] == [
-        (
-            "native subtitle geometry uses legacy renderer: "
-            "geometry-provider-failed detail=provider-error"
-        )
+        ("native subtitle interaction unavailable: geometry-provider-failed detail=provider-error")
     ]
     result.close()
 
 
-def test_non_ass_source_uses_legacy_renderer_with_hits(tmp_path: Path) -> None:
+def test_non_ass_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
@@ -470,11 +497,12 @@ def test_non_ass_source_uses_legacy_renderer_with_hits(tmp_path: Path) -> None:
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
     assert backend.requests == []
-    assert ("set_property", "sub-visibility", False) in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result._sub_pending = None
     result._draw_subtitle()
-    assert result.boxes
+    assert result.boxes == []
     result.close()
 
 
@@ -501,14 +529,41 @@ def test_fallback_transition_records_one_bounded_metric(tmp_path: Path) -> None:
         provider.shutdown()
 
 
-def test_ass_geometry_replaces_legacy_fallback_after_source_switch(tmp_path: Path) -> None:
+def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) -> None:
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from saitenka import otel_metrics
+
+    result, ipc, _backend = reader(tmp_path)
+    metric_reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[metric_reader])
+    otel_metrics.register(metric_reader, provider.get_meter("test"))
+    try:
+        ipc.set_property_error = "rejected"
+        result.set_subtitle("猫を見る")
+        result.subtitle_pipeline.activate(result)
+
+        renderer = result.subtitle_pipeline.renderer
+        assert isinstance(renderer, NativeVisibleRenderer)
+        assert renderer.ownership_state.owner.value == "legacy"
+        assert (
+            otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
+        )
+    finally:
+        result.close()
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
     result.set_subtitle("猫を見る")
     result._sub_pending = None
     result._draw_subtitle()
-    assert result.boxes
+    assert result.boxes == []
 
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
@@ -582,7 +637,7 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     result.set_subtitle("猫を見る")
     assert result.native_geometry.worker.wait_idle()
     assert not result.native_geometry.apply(result)
-    assert result.native_geometry.status.owner == "legacy"
+    assert result.native_geometry.status.owner == "native"
     backend.error = None
     ipc.props.update(
         {
@@ -601,7 +656,7 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
 
     assert result.native_geometry.status.owner == "native"
     assert result.native_geometry.status.fallback_reason is None
-    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.native_geometry.apply(result)
     result.close()
@@ -783,7 +838,7 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
     result.close()
 
 
-def test_source_clear_is_a_generation_boundary_and_restores_legacy_renderer(tmp_path: Path) -> None:
+def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -797,7 +852,7 @@ def test_source_clear_is_a_generation_boundary_and_restores_legacy_renderer(tmp_
     assert result.subtitle_pipeline.generation == old_generation + 1
     assert result.subtitle_pipeline.current is None
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
-    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.boxes == []
     assert not result.native_geometry.apply(result)
@@ -888,7 +943,7 @@ def test_simultaneous_ass_events_publish_event_aware_hit_geometry(tmp_path: Path
     result.close()
 
 
-def test_unexpected_geometry_error_restores_legacy_renderer(tmp_path: Path, monkeypatch) -> None:
+def test_unexpected_geometry_error_keeps_native_pixels(tmp_path: Path, monkeypatch) -> None:
     result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
@@ -902,8 +957,9 @@ def test_unexpected_geometry_error_restores_legacy_renderer(tmp_path: Path, monk
 
     assert backend.requests == []
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert result.boxes
-    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert result.native_geometry.status.geometry_ready is False
+    assert result.boxes == []
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     result.close()
 
 
@@ -942,10 +998,7 @@ def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Pat
         result.native_geometry.apply(result)
 
     assert [record.getMessage() for record in caplog.records] == [
-        (
-            "native subtitle geometry uses legacy renderer: "
-            "geometry-provider-failed detail=provider-error"
-        )
+        ("native subtitle interaction unavailable: geometry-provider-failed detail=provider-error")
     ]
     result.close()
 
@@ -1076,7 +1129,7 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     result.close()
 
 
-def test_incomplete_observation_with_changed_frame_falls_back_immediately(
+def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     tmp_path: Path,
 ) -> None:
     result, ipc, _backend = reader(tmp_path)
@@ -1101,9 +1154,10 @@ def test_incomplete_observation_with_changed_frame_falls_back_immediately(
     result._on_property_change({"name": "sub-end", "data": None})
     result._reconcile_subtitles()
 
-    assert result.boxes
-    assert result.boxes != native_boxes
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert native_boxes
+    assert result.boxes == []
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert result.native_geometry.status.fallback_reason == "subtitle-observation-pending"
     result.close()
 
@@ -1123,7 +1177,7 @@ def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, c
     assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
     assert [record.getMessage() for record in caplog.records] == [
         (
-            "native subtitle geometry uses legacy renderer: "
+            "native subtitle interaction unavailable: "
             "subtitle-render-input-unsupported "
             "detail=sub-scale=1.2, sub-font-provider='fontconfig'"
         )
@@ -1142,9 +1196,9 @@ def test_pending_timing_does_not_escape_an_unsupported_render_profile(tmp_path: 
     assert backend.requests == []
     assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
-    assert result.native_geometry.status.owner == "legacy"
-    assert ("set_property", "sub-visibility", False) in ipc.commands
-    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.native_geometry.status.owner == "native"
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     result.close()
 
 
@@ -1278,18 +1332,26 @@ def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
 
 def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, caplog) -> None:
     result, ipc, _backend = reader(tmp_path)
+    now = [0.0]
+    renderer = NativeVisibleRenderer(clock=lambda: now[0])
+    result.subtitle_pipeline.renderer = renderer
     ipc.set_property_error = "disconnected"
-    renderer = result.subtitle_pipeline.renderer
-    assert isinstance(renderer, NativeVisibleRenderer)
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
         assert renderer.activate(result) is False
         renderer.draw(result)
+        now[0] = 0.049
+        renderer.poll(result)
+        assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1
+        now[0] = 0.05
+        renderer.poll(result)
 
-    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 2
+    assert ipc.commands.count(("set_property", "sub-visibility", True)) == 2
+    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert [record.getMessage() for record in caplog.records] == [
-        "mpv rejected subtitle visibility change: disconnected"
+        "mpv rejected subtitle visibility assertion: disconnected"
     ]
     result.close()
 
@@ -1319,7 +1381,7 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     result.close()
 
 
-def test_native_visibility_exception_keeps_legacy_renderer(tmp_path: Path) -> None:
+def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     renderer = result.subtitle_pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
@@ -1331,10 +1393,13 @@ def test_native_visibility_exception_keeps_legacy_renderer(tmp_path: Path) -> No
 
     assert result.boxes
     assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert renderer.ownership_state.owner.value == "legacy"
     result.close()
 
 
-def test_native_visibility_rejection_emits_one_fallback_span(tmp_path: Path, monkeypatch) -> None:
+def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
+    tmp_path: Path, monkeypatch
+) -> None:
     from saitenka import otel_metrics
 
     spans: list[tuple[str, dict[str, object]]] = []
@@ -1360,7 +1425,7 @@ def test_native_visibility_rejection_emits_one_fallback_span(tmp_path: Path, mon
     assert result.native_geometry.worker.wait_idle()
     ipc.set_property_error = "disconnected"
 
-    assert not result.native_geometry.apply(result)
+    assert result.native_geometry.apply(result)
 
     failures = [
         attributes
@@ -1368,11 +1433,10 @@ def test_native_visibility_rejection_emits_one_fallback_span(tmp_path: Path, mon
         if name == "subtitle_geometry_decision"
         and attributes.get("reason") == "mpv-sub-visibility-rejected"
     ]
-    assert len(failures) == 1
-    assert failures[0] == IsPartialDict(
-        outcome="failed",
-        ass_full_capability="supported",
-    )
+    assert failures == []
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    assert renderer.ownership_state.owner.value == "native"
     result.close()
 
 

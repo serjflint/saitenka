@@ -132,6 +132,18 @@ def test_extract_includes_bounded_native_geometry_evidence():
             "ts": 3,
             "args": {"timestamp_ms": 1_250, "subtitle_text": "must not be emitted"},
         },
+        {
+            "name": "subtitle_pixel_ownership",
+            "ph": "X",
+            "ts": 4,
+            "args": {
+                "event": "legacy-stage-result",
+                "owner_before": "unknown",
+                "owner_after": "legacy",
+                "accepted": True,
+                "selection_id": "must not be emitted",
+            },
+        },
     ]
     geometry = sr.extract(events)["geometry"]
     decision = geometry[0]["args"]
@@ -145,6 +157,32 @@ def test_extract_includes_bounded_native_geometry_evidence():
         "subtitle_time_ms": 1_250,
     }
     assert geometry[2]["args"] == {"timestamp_ms": 1_250}
+    assert geometry[3]["args"] == {
+        "event": "legacy-stage-result",
+        "owner_before": "unknown",
+        "owner_after": "legacy",
+        "accepted": True,
+    }
+
+
+def test_ownership_diagnosis_explains_catastrophic_handoff() -> None:
+    line = sr._geometry_diagnosis(
+        {
+            "name": "subtitle_pixel_ownership",
+            "args": {
+                "event": "legacy-stage-result",
+                "owner_before": "unknown",
+                "owner_after": "legacy",
+                "visibility": "false",
+                "retry_attempts": 0,
+                "accepted": True,
+            },
+        }
+    )
+
+    assert line == (
+        "legacy-stage-result: unknown -> legacy visibility=false retries=0 accepted=True"
+    )
 
 
 def test_geometry_diagnosis_explains_owner_transition_and_skips():

@@ -9,18 +9,18 @@ logs.
 
 ### Fixed
 
-- **Native subtitle interaction now follows mpv subtitle delay.** Positive and negative `sub-delay`
-  adjustments use mpv's delay-adjusted subtitle clock for hidden libass geometry instead of briefly or
-  persistently reverting to the legacy renderer. Delay adjustments no longer discard lookahead geometry,
-  and lookahead now follows authored start and end transitions, so upcoming static ASS frames keep their
-  native styling when their prefetched hit map is ready.
-- **Experimental native subtitles no longer disable interaction when geometry is unavailable.**
-  Unsupported subtitle sources, display layouts, or provider failures now fall back to Saitenka's
-  standard subtitle renderer, preserving scanning, hover focus, and tooltips.
+- **Native subtitle styling no longer flashes back to the standard renderer.** mpv pixel ownership now
+  survives cue transitions, cache misses, delay changes, unsupported geometry, and provider failures;
+  unproved hit boxes disappear and return asynchronously without changing subtitle style. Only a current
+  assert-true/readback-false visibility transaction can authorize catastrophic legacy recovery, with
+  bounded retries and text-free ownership telemetry in `subtitle_report.py`.
+- **Native subtitle interaction now follows mpv subtitle delay.** Delay adjustments no longer discard
+  lookahead geometry, and lookahead follows authored start and end transitions so upcoming static ASS
+  frames can publish their prepared hit maps at presentation time.
 - **Native subtitle hit geometry now handles simultaneous ASS events and non-painting tokens.** Active
   rows are matched as one event-aware frame, while whitespace/control-only tokens no longer require
   libass pixels. Related mpv property updates are evaluated as one batch, and bounded diagnostics make
-  native-to-legacy decisions visible in `subtitle_report.py` without recording subtitle text.
+  geometry decisions visible in `subtitle_report.py` without recording subtitle text.
 - **Experimental native subtitle interaction now follows Retina and letterboxed windows.** The hidden
   geometry render mirrors mpv's full frame margins and authored-ASS margin policy instead of rejecting
   any display whose video does not fill the OSD frame.

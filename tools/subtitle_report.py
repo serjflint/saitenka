@@ -48,6 +48,7 @@ _GEOMETRY_SPAN_NAMES = (
     "subtitle_geometry_render",
     "subtitle_geometry_libass",
     "subtitle_geometry_fallback",
+    "subtitle_pixel_ownership",
 )
 
 
@@ -180,6 +181,18 @@ def extract(events: list[dict]) -> dict:
             "cache_hits",
             "prefetch_dropped",
             "prefetch_cache_entries",
+            "event",
+            "mode",
+            "owner_before",
+            "owner_after",
+            "visibility",
+            "connection_epoch",
+            "ownership_epoch",
+            "selection_present",
+            "retry_attempts",
+            "retry_exhausted",
+            "accepted",
+            "effect_id",
         }
     )
 
@@ -227,6 +240,13 @@ def _session(events: list[dict]) -> str | None:
 def _geometry_diagnosis(span: dict) -> str:
     args = span.get("args", {})
     name = span["name"]
+    if name == "subtitle_pixel_ownership":
+        accepted = f" accepted={args['accepted']}" if "accepted" in args else ""
+        return (
+            f"{args.get('event', '?')}: {args.get('owner_before', '?')}"
+            f" -> {args.get('owner_after', '?')} visibility={args.get('visibility', '?')}"
+            f" retries={args.get('retry_attempts', 0)}{accepted}"
+        )
     if name == "subtitle_geometry_clock":
         if args.get("outcome") != "ready":
             return f"{args.get('outcome', '?')}: subtitle clock unavailable"
@@ -295,7 +315,7 @@ def print_geometry(src: Path, events: list[dict], *, nested: bool = False) -> No
     t0 = spans[0].get("ts", 0.0)
     for span in spans:
         tplus = (span.get("ts", t0) - t0) / 1_000_000
-        label = span["name"].removeprefix("subtitle_geometry_")
+        label = span["name"].removeprefix("subtitle_geometry_").removeprefix("subtitle_pixel_")
         print(f"  t+{tplus:7.1f}s  {label:<8} {_geometry_diagnosis(span)}")
     print()
 

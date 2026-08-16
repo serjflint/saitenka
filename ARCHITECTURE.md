@@ -108,7 +108,7 @@ protocol-shaped class from being mistaken for production swappability.
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
 | Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
-| Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; unsupported inputs atomically fall back to the Pillow renderer. |
+| Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
 `saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
@@ -144,10 +144,10 @@ native pointers never escape `libasslite`.
 
 The current accepted envelope is deliberately static and bounded. Simultaneous static events share
 one frame identity and palette; whitespace/control-only tokens stay in semantic tokenization without
-requiring pixels. Known unsupported inputs—animated or unmatchable ASS, unsupported source encodings, missing source bytes, attached/custom fonts, and
-rejected mpv render settings—atomically return pixel and hit-box ownership to the standard Saitenka
-renderer. Provider failures do the same, preserving scanning and tooltips rather than leaving a visible
-but noninteractive subtitle. Saitenka never displays its ID-colored shadow render. It cannot inspect
+requiring pixels. Known unsupported inputs—animated or unmatchable ASS, unsupported source encodings,
+missing source bytes, attached/custom fonts, and rejected mpv render settings—clear unproved hit boxes
+without changing the pixel owner. Provider failures do the same; interaction returns only after a valid
+identity-qualified snapshot publishes. Saitenka never displays its ID-colored shadow render. It cannot inspect
 mpv's exact libass build and font environment, so the separately selected geometry runtime may still
 differ at pixel level inside that envelope; the [user guide](docs/usage/native-subtitles.md#current-supported-envelope)
 documents this experimental limitation.
@@ -164,7 +164,7 @@ one drained mpv event batch / source / profile change
           v
 resolve complete active-frame observation
           │
-          ├─ incomplete/unsupported/failed ──> standard renderer + interaction
+          ├─ incomplete/unsupported/failed ──> mpv pixels + no unproved boxes
           │
           └─ complete ──> invalidate generation + current frame ─┐
                            next frames ─> bounded lookahead queue ─┤
@@ -190,6 +190,14 @@ is speculative and a miss is safe. Only the main tick installs boxes or clears i
 cue, tokenizer/profile, render-space, and close transitions invalidate the generation, so an in-flight
 result cannot be rebound after its inputs change. Source, frame, token, copied-bitmap, and active-row
 ceilings bound native allocation and Python extraction before a result can publish.
+
+Pixel ownership is a separate pure state machine. Selection helpers never write subtitle visibility.
+The ownership executor serializes visibility assertions, legacy staging, retries, overlay suspension,
+and close-time restoration. Once mpv ownership is admitted it survives cue, source, profile, tokenizer,
+render-space, cache, and provider transitions. Legacy pixels can be committed only after a current
+assert-true/readback-false transaction proves native pixels absent for a nonempty selection; unknown
+results retry after 50/250/1000 ms and never authorize a legacy upload. The legacy base is staged before
+that catastrophic commit, so ownership cannot pass through an intentionally blank state.
 
 ### Optional native packages
 
