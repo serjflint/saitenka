@@ -4,6 +4,7 @@ import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+import pytest
 from dirty_equals import IsPartialDict
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
@@ -56,6 +57,8 @@ class FakeIPC:
             "options/sub-scale": 1.0,
             "options/sub-pos": 100.0,
             "options/sub-use-margins": True,
+            "options/sub-ass-force-margins": False,
+            "options/sub-ass-video-aspect-override": 0.0,
             "options/sub-ass-use-video-data": "all",
             "options/sub-ass-vsfilter-aspect-compat": None,
             "options/sub-ass-style-overrides": [],
@@ -578,6 +581,93 @@ def test_mpv_empty_style_override_normalization_is_supported(tmp_path: Path) -> 
 
     assert backend.requests
     assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["osd-dimensions"] = {
+        "w": 3024,
+        "h": 1898,
+        "mt": 98,
+        "mb": 99,
+        "ml": 0,
+        "mr": 0,
+    }
+    ipc.props["video-out-params"] = {
+        "dw": 1920,
+        "dh": 1080,
+        "w": 1920,
+        "h": 1080,
+        "par": 1.0,
+    }
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    request = backend.requests[-1]
+    assert request.frame_size == (3024, 1898)
+    assert request.storage_size == (1920, 1080)
+    assert request.margins == (98, 99, 0, 0)
+    assert request.use_margins is False
+    assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_authored_ass_force_margins_is_forwarded(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/sub-ass-force-margins"] = True
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert backend.requests[-1].use_margins is True
+    result.close()
+
+
+def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+
+    ipc.props["options/sub-ass-force-margins"] = True
+    result._on_property_change({"name": "options/sub-ass-force-margins", "data": True})
+    assert result.native_geometry.worker.wait_idle()
+
+    assert backend.requests[-1].use_margins is True
+    assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_osd_and_video_pixel_aspects_are_composed(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["osd-dimensions"]["par"] = 1.25
+    ipc.props["video-out-params"]["par"] = 1.2
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert backend.requests[-1].pixel_aspect == pytest.approx(1.5)
+    result.close()
+
+
+def test_ass_video_aspect_override_falls_back_with_observed_value(tmp_path: Path, caplog) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/sub-ass-video-aspect-override"] = 1.85
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
+        result.set_subtitle("猫を見る")
+
+    assert backend.requests == []
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert "sub-ass-video-aspect-override=1.85" in caplog.records[-1].getMessage()
     result.close()
 
 

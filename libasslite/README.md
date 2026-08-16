@@ -22,8 +22,10 @@ renderer = libasslite.AssRenderer(
 )
 result = renderer.render(
     timestamp_ms=1_500,
-    frame_size=(1920, 1080),
+    frame_size=(3024, 1898),
     storage_size=(1920, 1080),
+    margins=(98, 99, 0, 0),  # top, bottom, left, right
+    use_margins=False,
 )
 renderer.close()
 ```
@@ -44,8 +46,8 @@ copying it elsewhere; adjacent runtime dependencies must remain discoverable by 
 ## Scope
 
 The package deliberately exposes only in-memory ASS loading, memory fonts, frame/storage geometry,
-rendering, change detection, and copied image layers. It does not parse token spans, control mpv,
-schedule work, cache geometry, or bundle fonts/libass.
+frame margins and margin policy, rendering, change detection, and copied image layers. It does not
+parse token spans, control mpv, schedule work, cache geometry, or bundle fonts/libass.
 
 ## Licensing
 

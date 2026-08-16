@@ -56,12 +56,16 @@ class AssRenderer:
         storage_size: tuple[int, int],
         *,
         pixel_aspect: float | None = None,
+        margins: tuple[int, int, int, int] = (0, 0, 0, 0),
+        use_margins: bool = False,
     ) -> AssRenderResult:
         return self._native.render(
             timestamp_ms,
             frame_size,
             storage_size,
             pixel_aspect=pixel_aspect,
+            margins=margins,
+            use_margins=use_margins,
         )
 
     def close(self) -> None:

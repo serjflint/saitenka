@@ -85,6 +85,7 @@ def build_mpv_argv(
                 "--sub-scale=1",
                 "--sub-pos=100",
                 "--sub-use-margins=yes",
+                "--sub-ass-video-aspect-override=0",
                 "--sub-ass-use-video-data=all",
                 "--sub-ass-style-overrides=",
                 "--sub-font-provider=auto",

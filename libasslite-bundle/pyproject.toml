@@ -1,12 +1,12 @@
 [project]
 name = "libasslite-bundle"
-version = "0.1.0"
+version = "0.1.1"
 description = "Optional self-contained libass runtime for libasslite"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE", "NATIVE_SOURCES.json", "THIRD_PARTY_LICENSES"]
-dependencies = ["libasslite==0.1.0"]
+dependencies = ["libasslite==0.1.1"]
 
 [build-system]
 requires = ["hatchling==1.27.0"]

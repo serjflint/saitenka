@@ -38,6 +38,8 @@ class NativeRenderer(Protocol):
         storage_size: tuple[int, int],
         *,
         pixel_aspect: float,
+        margins: tuple[int, int, int, int],
+        use_margins: bool,
     ) -> RenderResult: ...
 
     def close(self) -> None: ...
@@ -181,6 +183,8 @@ class LibassGeometryBackend:
             request.frame_size,
             request.storage_size,
             pixel_aspect=request.pixel_aspect,
+            margins=request.margins,
+            use_margins=request.use_margins,
         )
         return GeometrySnapshot(
             request.generation,

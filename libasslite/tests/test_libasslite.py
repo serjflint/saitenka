@@ -184,6 +184,25 @@ def test_invalid_geometry_is_rejected_before_native_render() -> None:
     with pytest.raises(ValueError, match="storage_size must be positive"):
         ass_renderer.render(1_500, (1280, 720), (1280, -1))
 
+    with pytest.raises(ValueError, match="margins must be non-negative"):
+        ass_renderer.render(1_500, (1280, 720), (1280, 720), margins=(-1, 0, 0, 0))
+
+    with pytest.raises(ValueError, match="positive video rectangle"):
+        ass_renderer.render(
+            1_500,
+            (1280, 720),
+            (1280, 720),
+            margins=(360, 360, 0, 0),
+        )
+
+    with pytest.raises(ValueError, match="positive video rectangle"):
+        ass_renderer.render(
+            1_500,
+            (1280, 720),
+            (1280, 720),
+            margins=(2_147_483_647, 2_147_483_647, 0, 0),
+        )
+
 
 @pytest.mark.parametrize("pixel_aspect", [0.0, -1.0, float("inf"), float("nan")])
 def test_invalid_pixel_aspect_is_rejected_before_native_render(pixel_aspect: float) -> None:
@@ -213,6 +232,36 @@ def test_explicit_pixel_aspect_changes_only_horizontal_geometry() -> None:
 
     assert wide_bounds[0::2] != square_bounds[0::2]
     assert wide_bounds[1::2] == square_bounds[1::2]
+
+
+def test_use_margins_moves_bottom_aligned_authored_ass_into_video_rectangle() -> None:
+    multiline = ("猫\\N" * 8 + "猫").encode()
+    ass_renderer = renderer(ASS.replace("猫".encode(), multiline))
+
+    ignored = character_bounds(
+        ass_renderer.render(
+            1_500,
+            (1280, 720),
+            (1280, 720),
+            margins=(250, 250, 0, 0),
+            use_margins=False,
+        ),
+        0x332211,
+    )
+    applied = character_bounds(
+        ass_renderer.render(
+            1_500,
+            (1280, 720),
+            (1280, 720),
+            margins=(250, 250, 0, 0),
+            use_margins=True,
+        ),
+        0x332211,
+    )
+
+    assert ignored[1] >= 250
+    assert applied[1] < ignored[1]
+    assert applied[3] == ignored[3]
 
 
 def test_close_is_idempotent_and_blocks_render() -> None:

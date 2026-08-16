@@ -56,6 +56,13 @@ def _validate_render_space(request: GeometryRequest) -> None:
         raise ValueError("geometry frame and storage sizes must be positive")
     if not math.isfinite(request.pixel_aspect) or request.pixel_aspect <= 0:
         raise ValueError("geometry pixel aspect must be finite and positive")
+    if any(isinstance(value, bool) or value < 0 for value in request.margins):
+        raise ValueError("geometry margins must be non-negative integers")
+    top, bottom, left, right = request.margins
+    if top + bottom >= request.frame_size[1] or left + right >= request.frame_size[0]:
+        raise ValueError("geometry margins must leave a positive video rectangle")
+    if not isinstance(request.use_margins, bool):
+        raise TypeError("geometry use_margins must be a bool")
 
 
 def _validate_palette(request: GeometryRequest) -> None:
@@ -93,6 +100,8 @@ class GeometryRequest:
     ass: bytes
     variant: GeometryVariant = GeometryVariant.HIT_MAP
     pixel_aspect: float = 1.0
+    margins: tuple[int, int, int, int] = (0, 0, 0, 0)
+    use_margins: bool = False
     palette: tuple[GeometryPaletteEntry, ...] = ()
     reserved_rgb: tuple[int, ...] = ()
     attachments: tuple[tuple[str, bytes], ...] = ()
@@ -114,6 +123,8 @@ class GeometryRequest:
             repr(self.storage_size),
             self.variant.value,
             repr(self.pixel_aspect),
+            repr(self.margins),
+            repr(self.use_margins),
             repr(self.palette),
             repr(self.reserved_rgb),
             repr(self.render_profile),

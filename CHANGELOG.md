@@ -12,6 +12,9 @@ logs.
 - **Experimental native subtitles no longer disable interaction when geometry is unavailable.**
   Unsupported subtitle sources, display layouts, or provider failures now fall back to Saitenka's
   standard subtitle renderer, preserving scanning, hover focus, and tooltips.
+- **Experimental native subtitle interaction now follows Retina and letterboxed windows.** The hidden
+  geometry render mirrors mpv's full frame margins and authored-ASS margin policy instead of rejecting
+  any display whose video does not fill the OSD frame.
 - **Structured Jitendex entries keep their document shape.** Nested senses, examples, translations,
   cross-references, forms, and attribution now render on separate lines with the dictionary's own list
   markers instead of being glued into one paragraph, including lookups through the semantic

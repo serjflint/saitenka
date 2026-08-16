@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -44,29 +45,28 @@ def _short_repr(value: object, *, limit: int = 80) -> str:
     return rendered if len(rendered) <= limit else f"{rendered[: limit - 3]}..."
 
 
-def _osd_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
+def _frame_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
     return cast(
         "tuple[int, int, int, int]",
         tuple(
-            int(cast("int | float | str", osd.get(name) or 0)) for name in ("ml", "mr", "mt", "mb")
+            int(cast("int | float | str", osd.get(name) or 0)) for name in ("mt", "mb", "ml", "mr")
         ),
     )
 
 
-def _unsupported_render_inputs(
-    frame_size: tuple[int, int],
-    display_size: tuple[object, object],
-    margins: tuple[int, int, int, int],
-    settings: Mapping[str, object],
-) -> tuple[str, ...]:
+def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
     supported = {
-        "display-size": frame_size == display_size,
-        "osd-margins": not any(margins),
         "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
         "sub-scale": settings["sub-scale"] == 1.0,
         "sub-pos": settings["sub-pos"] == 100.0,
         "sub-use-margins": settings["sub-use-margins"] is True,
+        "sub-ass-force-margins": isinstance(settings["sub-ass-force-margins"], bool),
+        "sub-ass-video-aspect-override": settings["sub-ass-video-aspect-override"]
+        in {
+            None,
+            0,
+        },
         "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
         "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
         "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
@@ -75,6 +75,24 @@ def _unsupported_render_inputs(
         "sub-fonts-dir": settings["sub-fonts-dir"] in {None, ""},
     }
     return tuple(name for name, accepted in supported.items() if not accepted)
+
+
+def _validate_frame(frame_size: tuple[int, int], margins: tuple[int, int, int, int]) -> None:
+    if any(value < 0 for value in margins):
+        raise ValueError(f"osd-margins={_short_repr(margins)}")
+    if margins[0] + margins[1] >= frame_size[1] or margins[2] + margins[3] >= frame_size[0]:
+        raise ValueError(f"osd-margins={_short_repr(margins)}")
+
+
+def _pixel_aspect(osd: Mapping[str, object], video: Mapping[str, object]) -> float:
+    osd_par = cast("int | float | str", osd.get("par") or 1.0)
+    video_par = cast("int | float | str", video.get("par") or 1.0)
+    value = float(osd_par) * float(video_par)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(
+            "pixel-aspect=" + _short_repr({"osd": osd.get("par"), "video": video.get("par")})
+        )
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +104,16 @@ class NativeSubtitleStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class _RenderInputs:
+    frame_size: tuple[int, int]
+    storage_size: tuple[int, int]
+    pixel_aspect: float
+    margins: tuple[int, int, int, int]
+    use_margins: bool
+    profile: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _CueInputs:
     start_ms: int
     end_ms: int
@@ -93,6 +121,8 @@ class _CueInputs:
     frame_size: tuple[int, int]
     storage_size: tuple[int, int]
     pixel_aspect: float
+    margins: tuple[int, int, int, int]
+    use_margins: bool
     render_profile: tuple[tuple[str, str], ...]
 
 
@@ -207,6 +237,8 @@ class NativeSubtitleGeometry:
                 cue.frame_size,
                 cue.storage_size,
                 cue.pixel_aspect,
+                cue.margins,
+                cue.use_margins,
                 cue.render_profile,
             )
         )
@@ -236,30 +268,28 @@ class NativeSubtitleGeometry:
             cue.storage_size,
             prepared.ass,
             pixel_aspect=cue.pixel_aspect,
+            margins=cue.margins,
+            use_margins=cue.use_margins,
             render_profile=cue.render_profile,
             palette=prepared.palette,
             reserved_rgb=prepared.reserved_rgb,
         )
 
     @staticmethod
-    def _render_inputs(
-        reader: Reader,
-    ) -> tuple[tuple[int, int], tuple[int, int], float, tuple[tuple[str, str], ...]]:
+    def _render_inputs(reader: Reader) -> _RenderInputs:
         video = reader._prop("video-out-params") or {}
         osd = reader._prop("osd-dimensions") or {}
         frame_size = (int(osd.get("w") or reader.osd[0]), int(osd.get("h") or reader.osd[1]))
         storage_size = (int(video.get("w") or frame_size[0]), int(video.get("h") or frame_size[1]))
-        display_size = (
-            int(video.get("dw") or frame_size[0]),
-            int(video.get("dh") or frame_size[1]),
-        )
-        margins = _osd_margins(osd)
+        margins = _frame_margins(osd)
         settings = {
             "sub-ass-override": reader._prop("options/sub-ass-override"),
             "sub-ass-scale-with-window": reader._prop("options/sub-ass-scale-with-window"),
             "sub-scale": reader._prop("options/sub-scale"),
             "sub-pos": reader._prop("options/sub-pos"),
             "sub-use-margins": reader._prop("options/sub-use-margins"),
+            "sub-ass-force-margins": reader._prop("options/sub-ass-force-margins"),
+            "sub-ass-video-aspect-override": reader._prop("options/sub-ass-video-aspect-override"),
             "sub-ass-use-video-data": reader._prop("options/sub-ass-use-video-data"),
             "sub-ass-vsfilter-aspect-compat": reader._prop(
                 "options/sub-ass-vsfilter-aspect-compat"
@@ -269,18 +299,20 @@ class NativeSubtitleGeometry:
             "embeddedfonts": reader._prop("options/embeddedfonts"),
             "sub-fonts-dir": reader._prop("options/sub-fonts-dir"),
         }
-        unsupported = _unsupported_render_inputs(frame_size, display_size, margins, settings)
+        unsupported = _unsupported_render_inputs(settings)
         if unsupported:
-            observed = {
-                "display-size": {"frame": frame_size, "video": display_size},
-                "osd-margins": margins,
-                **settings,
-            }
             raise ValueError(
-                ", ".join(f"{name}={_short_repr(observed[name])}" for name in unsupported)
+                ", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported)
             )
-        profile = tuple(sorted((name, repr(value)) for name, value in settings.items()))
-        return frame_size, storage_size, float(video.get("par") or 1.0), profile
+        _validate_frame(frame_size, margins)
+        return _RenderInputs(
+            frame_size,
+            storage_size,
+            _pixel_aspect(osd, video),
+            margins,
+            cast("bool", settings["sub-ass-force-margins"]),
+            tuple(sorted((name, repr(value)) for name, value in settings.items())),
+        )
 
     def _prefetch(
         self,
@@ -288,7 +320,7 @@ class NativeSubtitleGeometry:
         path: Path,
         track_id: SubtitleTrackId,
         generation: int,
-        render_inputs: tuple[tuple[int, int], tuple[int, int], float, tuple[tuple[str, str], ...]],
+        render_inputs: _RenderInputs,
     ) -> None:
         index = reader._sub_index
         if index is None or self.lookahead == 0:
@@ -296,16 +328,17 @@ class NativeSubtitleGeometry:
         current = index.locate(text=reader.sub_text, preferred=reader._nav_idx)
         if current < 0:
             return
-        frame_size, storage_size, pixel_aspect, render_profile = render_inputs
         for cue in index.cues[current + 1 : current + 1 + self.lookahead]:
             inputs = _CueInputs(
                 round(cue.start * 1_000),
                 round(cue.end * 1_000),
                 cue.text,
-                frame_size,
-                storage_size,
-                pixel_aspect,
-                render_profile,
+                render_inputs.frame_size,
+                render_inputs.storage_size,
+                render_inputs.pixel_aspect,
+                render_inputs.margins,
+                render_inputs.use_margins,
+                render_inputs.profile,
             )
 
             def build(inputs: _CueInputs = inputs) -> GeometryRequest:
@@ -337,7 +370,7 @@ class NativeSubtitleGeometry:
             self._fallback_to_legacy(reader, "subtitle-timing-unavailable")
             return False
         try:
-            frame_size, storage_size, pixel_aspect, render_profile = self._render_inputs(reader)
+            render_inputs = self._render_inputs(reader)
         except (TypeError, ValueError) as error:
             self.worker.mark_not_ready()
             self._fallback_to_legacy(reader, "subtitle-render-input-unsupported", detail=str(error))
@@ -362,10 +395,12 @@ class NativeSubtitleGeometry:
             round(float(start) * 1_000),
             round(float(end) * 1_000),
             reader.sub_text,
-            frame_size,
-            storage_size,
-            pixel_aspect,
-            render_profile,
+            render_inputs.frame_size,
+            render_inputs.storage_size,
+            render_inputs.pixel_aspect,
+            render_inputs.margins,
+            render_inputs.use_margins,
+            render_inputs.profile,
         )
         key = self._key(path, cue)
         if cached := self.worker.publish_prefetched(key, generation):
@@ -376,7 +411,7 @@ class NativeSubtitleGeometry:
                 path,
                 track_id,
                 generation,
-                (frame_size, storage_size, pixel_aspect, render_profile),
+                render_inputs,
             )
             return True
         try:
@@ -397,7 +432,7 @@ class NativeSubtitleGeometry:
                 path,
                 track_id,
                 generation,
-                (frame_size, storage_size, pixel_aspect, render_profile),
+                render_inputs,
             )
         return accepted
 

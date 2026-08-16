@@ -30,7 +30,12 @@ class Result:
 
 
 def request(
-    *, ass: bytes = b"ass", generation: int = 0, render_profile: tuple[tuple[str, str], ...] = ()
+    *,
+    ass: bytes = b"ass",
+    generation: int = 0,
+    margins: tuple[int, int, int, int] = (0, 0, 0, 0),
+    use_margins: bool = False,
+    render_profile: tuple[tuple[str, str], ...] = (),
 ) -> GeometryRequest:
     track = SubtitleTrackId("track")
     event = SubtitleEventId(track, 1_000, 2_000, 0, 0)
@@ -42,6 +47,8 @@ def request(
         (1280, 720),
         (1280, 720),
         ass,
+        margins=margins,
+        use_margins=use_margins,
         palette=(
             GeometryPaletteEntry(event, 0, 0x010203),
             GeometryPaletteEntry(event, 1, 0x040506),
@@ -89,7 +96,23 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
 
     assert baseline.cache_key() == request(generation=9).cache_key()
     assert baseline.cache_key() != request(ass=b"changed").cache_key()
+    assert baseline.cache_key() != request(margins=(10, 20, 30, 40)).cache_key()
+    assert baseline.cache_key() != request(use_margins=True).cache_key()
     assert baseline.cache_key() != request(render_profile=(("sub-scale", "1.2"),)).cache_key()
+
+
+@pytest.mark.parametrize(
+    "margins",
+    [(-1, 0, 0, 0), (360, 360, 0, 0), (0, 0, 640, 640)],
+)
+def test_request_rejects_invalid_frame_margins(margins: tuple[int, int, int, int]) -> None:
+    with pytest.raises(ValueError, match="margins"):
+        request(margins=margins)
+
+
+def test_request_rejects_non_boolean_margin_policy() -> None:
+    with pytest.raises(TypeError, match="use_margins"):
+        request(use_margins=1)  # type: ignore[arg-type]
 
 
 def test_request_rejects_cross_event_palette() -> None:
@@ -114,8 +137,10 @@ class FakeRenderer:
     def __init__(self, result: Result) -> None:
         self.result = result
         self.closed = False
+        self.calls: list[tuple[tuple, dict]] = []
 
-    def render(self, *_args, **_kwargs) -> Result:
+    def render(self, *args, **kwargs) -> Result:
+        self.calls.append((args, kwargs))
         return self.result
 
     def close(self) -> None:
@@ -147,3 +172,28 @@ def test_backend_bounds_renderer_cache_and_closes_evictions() -> None:
     backend.close()
     backend.close()
     assert created[1].closed
+
+
+def test_backend_forwards_mpv_margin_contract() -> None:
+    native = FakeRenderer(
+        Result(
+            (
+                Layer(1, 1, b"\xff", 0x01020300, 10, 20),
+                Layer(1, 1, b"\xff", 0x04050600, 30, 40),
+            )
+        )
+    )
+    backend = LibassGeometryBackend(renderer_factory=lambda *_args, **_kwargs: native)
+
+    backend.render(request(margins=(98, 99, 0, 0), use_margins=True))
+
+    assert native.calls == [
+        (
+            (1_250, (1280, 720), (1280, 720)),
+            {
+                "pixel_aspect": 1.0,
+                "margins": (98, 99, 0, 0),
+                "use_margins": True,
+            },
+        )
+    ]
