@@ -115,10 +115,16 @@ def test_named_pipe_command_returns_while_reader_is_blocked():  # pragma: no cov
         data, _error = _winapi.ReadFile(handle, 65536)
         command = json.loads(data)
         assert command["command"] == ["get_property", "sub-text"]
+        reply = json.dumps(
+            {
+                "request_id": command["request_id"],
+                "data": "current",
+                "error": "success",
+            }
+        ).encode()
         _winapi.WriteFile(
             handle,
-            b'{"event":"property-change","name":"sub-text","data":"current"}\n'
-            b'{"data":"current","error":"success"}\n',
+            b'{"event":"property-change","name":"sub-text","data":"current"}\n' + reply + b"\n",
         )
         _winapi.CloseHandle(handle)
 
@@ -129,7 +135,9 @@ def test_named_pipe_command_returns_while_reader_is_blocked():  # pragma: no cov
 
     reply = ipc.command("get_property", "sub-text", timeout=2)
 
-    assert reply == {"data": "current", "error": "success"}
+    assert reply["data"] == "current"
+    assert reply["error"] == "success"
+    assert isinstance(reply["request_id"], int)
     assert any(event.get("data") == "current" for event in ipc.drain_events())
     ipc.close()
     thread.join(1)
