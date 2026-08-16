@@ -200,6 +200,7 @@ DEP002 = [
     "saitenka", # self-reference from the `full`/`minimal` convenience extras
     "saitenka-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
     "libasslite",       # optional wrapper loaded dynamically after doctor/runtime selection
+    "libasslite-bundle", # native payload discovered dynamically by the optional wrapper
     "filelock",         # declared ahead of use for the planned Windows mandatory-lock work; not yet
                         # imported. Remove IF that work is dropped.
 ]
