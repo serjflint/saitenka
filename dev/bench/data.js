@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786811435710,
+  "lastUpdate": 1786858350092,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5351,6 +5351,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.39938,
             "range": "3 replicas; min 1.26294; max 37.3486; MAD 0.136441; worst 37.3486",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "65ad1c0ad69e88efe6ce977742ab1f98f7ee2b64",
+          "message": "Merge pull request #358 from serjflint/issue-357\n\nfeat(subtitles): add lossless ASS rewriting",
+          "timestamp": "2026-08-16T08:31:25+03:00",
+          "tree_id": "3387dee19dd84a3ad98a9d5dbbd83bb33ffd4c1f",
+          "url": "https://github.com/serjflint/saitenka/commit/65ad1c0ad69e88efe6ce977742ab1f98f7ee2b64"
+        },
+        "date": 1786858349389,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.333147,
+            "range": "3 replicas; min 6.31818; max 6.34341; MAD 0.010264",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.945928,
+            "range": "3 replicas; min 8.67961; max 9.61564; MAD 0.266316; worst 9.61564",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.201557,
+            "range": "3 replicas; min 17.8114; max 19.2968; MAD 0.390205",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.009478,
+            "range": "3 replicas; min 17.9575; max 19.607; MAD 0.597539; worst 19.607",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 19.592402,
+            "range": "3 replicas; min 15.3521; max 19.6238; MAD 0.031356",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.132978,
+            "range": "3 replicas; min 0.132787; max 0.172872; MAD 0.000191; worst 0.172872",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.085267,
+            "range": "3 replicas; min 38.704; max 42.7381; MAD 0.381242; worst 42.7381",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.442775,
+            "range": "3 replicas; min 2.37511; max 2.93835; MAD 0.067661; worst 2.93835",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.128419,
+            "range": "3 replicas; min 1.11627; max 1.24522; MAD 0.012149; worst 1.24522",
             "unit": "ms"
           }
         ]
