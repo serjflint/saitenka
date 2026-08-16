@@ -8,23 +8,20 @@ import json
 import platform
 import statistics
 import sys
+import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import psutil
 
-from saitenka.app.subtitle_pipeline import (
-    SubtitleGeometryWorker,
-    SubtitleModeCoordinator,
-)
-from saitenka.app.subtitle_render import NullRenderer
-from saitenka.subtitles import (
-    GeometryRequest,
-    SubtitleTrackId,
-    TokenAnnotation,
-    prepare_ass_hit_map,
-)
+from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+from saitenka.app.controller import Reader
+from saitenka.subtitles import Cue, CueIndex
 from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+if TYPE_CHECKING:
+    from saitenka.mpvio.ipc import MpvIPC
 
 STYLE = """[Script Info]
 ScriptType: v4.00+
@@ -38,7 +35,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "bfd821e3fc22fe976b6027ce0ff8dbd4e0198c484d0f9bede0d6d0e9b5f94429"
+LOCKED_MANIFEST_SHA256 = "f027eb59b6013d000a1dc36e8d2d0b1f72a7561eee40325686b2168d22000b5e"
 
 
 def load_manifest(path: Path) -> dict:
@@ -83,75 +80,146 @@ def evaluate(report: dict, manifest: dict) -> bool:
         and report["retained_rss_growth_mib"] <= budgets["retained_rss_growth_mib"]
         and report["result_cache_entries"] <= manifest["cache_max"]
         and report["prefetch_cache_entries"] <= manifest["cache_max"]
+        and report["presented"] == manifest["event_count"]
+        and report["completed"] == manifest["event_count"]
+        and report["failures"] == 0
+        and report["last_error"] is None
+        and report["superseded"] == 0
+        and report["prefetch_dropped"] == 0
+        and report["cadence_misses"] == 0
+        and report["source_clear_current"] is False
+        and report["source_clear_hit_count"] == 0
+        and report["profile_switch_cache_entries"] == 0
+        and report["close_completed"] is True
     )
+
+
+class _IPC:
+    def __init__(self) -> None:
+        self.props = {
+            "sid": 1,
+            "sub-start": 1.0,
+            "sub-end": 2.5,
+            "time-pos": 1.1,
+            "pause": True,
+            "osd-dimensions": {"w": 1280, "h": 720},
+            "video-out-params": {"dw": 1280, "dh": 720, "w": 1280, "h": 720, "par": 1.0},
+            "options/sub-ass-override": "no",
+            "options/sub-ass-scale-with-window": False,
+            "options/sub-scale": 1.0,
+            "options/sub-pos": 100.0,
+            "options/sub-use-margins": True,
+            "options/sub-ass-use-video-data": "all",
+            "options/sub-ass-vsfilter-aspect-compat": None,
+            "options/sub-ass-style-overrides": [],
+            "options/sub-font-provider": "auto",
+            "options/embeddedfonts": False,
+            "options/sub-fonts-dir": "",
+        }
+
+    def command(self, *args):
+        if args and args[0] == "get_property":
+            return {"error": "success", "data": self.props.get(args[1])}
+        return {"error": "success", "data": None}
+
+    def close(self) -> None:
+        pass
+
+
+def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> Reader:
+    geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
+    return Reader(
+        cast("MpvIPC", ipc),
+        options=ReaderOptions(subtitle_geometry=geometry, prefetch=False),
+        renderer=None,
+        geometry_backend=backend,
+    )
+
+
+def _present(reader: Reader, text: str, *, native: bool) -> None:
+    reader.set_subtitle(text)
+    if native:
+        assert reader.native_geometry is not None
+        reader.native_geometry.apply(reader)
+
+
+def _focus(reader: Reader) -> None:
+    if reader.boxes:
+        reader.hover = 0
+        reader._draw_subtitle()
+        reader.hover = -1
 
 
 def run(manifest: dict, *, library_path: Path | None = None) -> dict:
     count = int(manifest["event_count"])
     source, cues = _source(count)
-    track_id = SubtitleTrackId("integration-benchmark")
     backend = LibassGeometryBackend(
         library_path=library_path,
         renderer_cache_max=int(manifest["cache_max"]),
     )
-    coordinator = SubtitleModeCoordinator(NullRenderer(), backend)
-    worker = SubtitleGeometryWorker(coordinator, cache_max=int(manifest["cache_max"]))
     process = psutil.Process()
     rss_before = process.memory_info().rss
-
-    def builder(index: int, generation: int):
-        start, end, text = cues[index]
-
-        def build() -> GeometryRequest:
-            prepared = prepare_ass_hit_map(
-                source,
-                track_id,
-                start_ms=start,
-                end_ms=end,
-                text=text,
-                tokens=(TokenAnnotation(0, 0, len(text)),),
+    with tempfile.TemporaryDirectory(prefix="saitenka-stage-f-") as raw_workspace:
+        source_path = Path(raw_workspace) / "integration.ass"
+        source_path.write_bytes(source)
+        baseline_ipc = _IPC()
+        native_ipc = _IPC()
+        baseline = _reader(baseline_ipc)
+        native = _reader(native_ipc, backend=backend)
+        assert native.native_geometry is not None
+        native.native_geometry.set_source(source_path, reader=native)
+        index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
+        native._sub_index = index
+        latencies: list[float] = []
+        baseline_latencies: list[float] = []
+        cadence_misses = 0
+        interval_ns = int(manifest["presentation_interval_ms"] * 1_000_000)
+        deadline = time.perf_counter_ns()
+        for cue_index, (start, end, text) in enumerate(cues):
+            deadline += interval_ns if cue_index else 0
+            remaining = deadline - time.perf_counter_ns()
+            if remaining > 0:
+                time.sleep(remaining / 1_000_000_000)
+            elif -remaining > interval_ns:
+                cadence_misses += 1
+            for ipc in (baseline_ipc, native_ipc):
+                ipc.props.update(
+                    {
+                        "sub-start": start / 1_000,
+                        "sub-end": end / 1_000,
+                        "time-pos": (start + 1) / 1_000,
+                    }
+                )
+            started = time.perf_counter_ns()
+            _present(baseline, text, native=False)
+            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            _present(native, text, native=True)
+            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            _focus(baseline)
+            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            _focus(native)
+            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+        assert native.native_geometry.worker.wait_idle(timeout=30)
+        stats = native.native_geometry.worker.stats
+        last_error = native.subtitle_pipeline.last_error
+        rss_retained = process.memory_info().rss
+        native.use_tokenizer(native.tokenizer)
+        profile_switch_cache_entries = sum(
+            (
+                native.native_geometry.worker.stats.result_cache_entries,
+                native.native_geometry.worker.stats.prefetch_cache_entries,
             )
-            return GeometryRequest(
-                generation,
-                track_id,
-                prepared.event.decoded.source.identity,
-                start + 1,
-                (1280, 720),
-                (1280, 720),
-                prepared.ass,
-                palette=prepared.palette,
-                reserved_rgb=prepared.reserved_rgb,
-            )
-
-        return build
-
-    latencies = []
-    baseline_latencies = []
-    first_generation = coordinator.generation
-    assert worker.submit_job(first_generation, builder(0, first_generation))
-    worker.mark_not_ready()
-    assert worker.wait_idle(timeout=30)
-    for index in range(1, min(count, 1 + int(manifest["lookahead"]))):
-        key = f"cue:{index}"
-        assert worker.prefetch(key, coordinator.generation, builder(index, coordinator.generation))
-    assert worker.wait_idle(timeout=30)
-    for index in range(1, count):
-        baseline_started = time.perf_counter_ns()
-        baseline_latencies.append((time.perf_counter_ns() - baseline_started) / 1_000_000)
-        generation = coordinator.invalidate()
-        started = time.perf_counter_ns()
-        request = worker.publish_prefetched(f"cue:{index}", generation)
-        latencies.append((time.perf_counter_ns() - started) / 1_000_000)
-        assert request is not None
-        assert worker.mark_presented(request)
-        future = index + int(manifest["lookahead"])
-        if future < count:
-            assert worker.prefetch(f"cue:{future}", generation, builder(future, generation))
-            assert worker.wait_idle(timeout=30)
-    stats = worker.stats
-    rss_retained = process.memory_info().rss
-    worker.invalidate_cache()
-    rss_after_profile_switch = process.memory_info().rss
+        )
+        rss_after_profile_switch = process.memory_info().rss
+        native.native_geometry.set_source(None, reader=native)
+        source_clear_current = native.subtitle_pipeline.current is not None
+        source_clear_hit_count = len(native.boxes)
+        baseline.close()
+        native.close()
+    close_completed = backend.closed
     baseline_p99 = _percentile(baseline_latencies, 0.99)
     interaction_p99 = _percentile(latencies, 0.99)
     report = {
@@ -170,9 +238,18 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "submitted": stats.submitted,
         "completed": stats.completed,
         "prefetched": stats.prefetched,
+        "superseded": stats.superseded,
+        "failures": stats.failures,
+        "last_error": last_error,
         "prefetch_dropped": stats.prefetch_dropped,
+        "presented": stats.presented,
+        "cadence_misses": cadence_misses,
         "result_cache_entries": stats.result_cache_entries,
         "prefetch_cache_entries": stats.prefetch_cache_entries,
+        "profile_switch_cache_entries": profile_switch_cache_entries,
+        "source_clear_current": source_clear_current,
+        "source_clear_hit_count": source_clear_hit_count,
+        "close_completed": close_completed,
         "rss_before_bytes": rss_before,
         "rss_retained_bytes": rss_retained,
         "rss_after_profile_switch_bytes": rss_after_profile_switch,
@@ -183,7 +260,6 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         / 1024,
     }
     report["integration_budgets_passed"] = evaluate(report, manifest)
-    worker.close()
     report["rss_after_close_bytes"] = process.memory_info().rss
     return report
 

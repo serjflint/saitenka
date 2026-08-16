@@ -13,6 +13,17 @@ def report() -> dict:
         "retained_rss_growth_mib": 32.0,
         "result_cache_entries": 3,
         "prefetch_cache_entries": 3,
+        "presented": 101,
+        "completed": 101,
+        "failures": 0,
+        "last_error": None,
+        "superseded": 0,
+        "prefetch_dropped": 0,
+        "cadence_misses": 0,
+        "source_clear_current": False,
+        "source_clear_hit_count": 0,
+        "profile_switch_cache_entries": 0,
+        "close_completed": True,
     }
 
 
@@ -42,6 +53,16 @@ def test_budget_oracle_rejects_each_regression() -> None:
         "retained_rss_growth_mib": 256.01,
         "result_cache_entries": 4,
         "prefetch_cache_entries": 4,
+        "presented": 100,
+        "completed": 100,
+        "failures": 1,
+        "superseded": 1,
+        "prefetch_dropped": 1,
+        "cadence_misses": 1,
+        "source_clear_current": True,
+        "source_clear_hit_count": 1,
+        "profile_switch_cache_entries": 1,
+        "close_completed": False,
     }
     for field, value in controls.items():
         mutated = report()
