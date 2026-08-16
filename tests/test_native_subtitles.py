@@ -59,6 +59,7 @@ class FakeIPC:
             "sub-start": 1.0,
             "sub-end": 3.0,
             "time-pos": 1.25,
+            "sub-delay": 0.0,
             "pause": True,
             "osd-dimensions": {"w": 1280, "h": 720},
             "video-out-params": {"dw": 1280, "dh": 720, "w": 1280, "h": 720, "par": 1.0},
@@ -425,15 +426,96 @@ def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path
     result.close()
 
 
-def test_geometry_request_uses_observed_frame_timestamp(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("time_pos", "sub_delay", "expected_timestamp_ms"),
+    [
+        (11.25, 10.0, 1_250),
+        (1.25, -6.0, 7_250),
+        (None, 10.0, 1_000),
+        (None, -6.0, 1_000),
+    ],
+)
+def test_geometry_request_uses_delay_adjusted_subtitle_timestamp(
+    tmp_path: Path,
+    time_pos: float | None,
+    sub_delay: float,
+    expected_timestamp_ms: int,
+) -> None:
     result, ipc, backend = reader(tmp_path)
-    ipc.props["time-pos"] = 2.5
+    ipc.props["time-pos"] = time_pos
+    ipc.props["sub-delay"] = sub_delay
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
     assert result.native_geometry.worker.wait_idle()
 
-    assert backend.requests[0].timestamp_ms == 2_500
+    assert backend.requests[0].timestamp_ms == expected_timestamp_ms
+    result.close()
+
+
+def test_sub_delay_property_event_records_the_derived_subtitle_clock(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from saitenka import otel_metrics
+
+    captured: list[dict[str, object]] = []
+
+    class RecordingSpan:
+        def set(self, key: str, value: object) -> None:
+            captured[-1][key] = value
+
+    @contextmanager
+    def record_span(name: str, **attributes: str):
+        if name == "subtitle_geometry_clock":
+            captured.append(dict(attributes))
+        yield RecordingSpan()
+
+    monkeypatch.setattr(otel_metrics, "traced", record_span)
+    result, ipc, _backend = reader(tmp_path)
+    result._observing = True
+    result._observed.update(ipc.props)
+    result._observed["time-pos"] = 11.25
+
+    result._on_property_change({"name": "sub-delay", "data": 10.0})
+
+    assert captured == [
+        {
+            "outcome": "ready",
+            "video_time_ms": 11_250,
+            "sub_delay_ms": 10_000,
+            "subtitle_time_ms": 1_250,
+        }
+    ]
+    result.close()
+
+
+def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from saitenka import otel_metrics
+
+    captured: list[dict[str, object]] = []
+
+    class RecordingSpan:
+        def set(self, key: str, value: object) -> None:
+            captured[-1][key] = value
+
+    @contextmanager
+    def record_span(name: str, **attributes: str):
+        if name == "subtitle_geometry_clock":
+            captured.append(dict(attributes))
+        yield RecordingSpan()
+
+    monkeypatch.setattr(otel_metrics, "traced", record_span)
+    result, ipc, _backend = reader(tmp_path)
+    result._observing = True
+    result._observed.update(ipc.props)
+    result._observed["time-pos"] = None
+    result._observed["sub-start"] = None
+
+    result._on_property_change({"name": "sub-delay", "data": 10.0})
+
+    assert captured == [{"outcome": "invalid"}]
     result.close()
 
 

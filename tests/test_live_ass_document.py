@@ -35,7 +35,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def _observe_mpv_subtitle_properties(
-    mpv: str, event_rows: str, properties: tuple[str, ...]
+    mpv: str,
+    event_rows: str,
+    properties: tuple[str, ...],
+    *,
+    start: float = 1.0,
+    sub_delay: float = 0.0,
 ) -> dict[str, dict]:
     workspace = Path(tempfile.mkdtemp(prefix="saitenka-ass-live-"))
     clip, _unused_srt = make_clip_and_sub(workspace)
@@ -50,7 +55,8 @@ def _observe_mpv_subtitle_properties(
             "--ao=null",
             "--keep-open=yes",
             "--pause",
-            "--start=1",
+            f"--start={start}",
+            f"--sub-delay={sub_delay}",
             "--no-config",
             f"--sub-file={ass}",
             str(clip),
@@ -129,3 +135,26 @@ def test_mpv_ass_full_preserves_simultaneous_event_order_and_metadata() -> None:
         "Dialogue: 0,0:00:00.00,0:00:08.00,Default,dialogue,0000,0000,0000,,猫\n"
         "Dialogue: 1,0:00:00.50,0:00:07.00,Default,sign,0012,0034,0056,,犬"
     )
+
+
+@pytest.mark.parametrize(("start", "sub_delay"), [(1.5, 0.5), (0.5, -0.5)])
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_mpv_selects_active_ass_rows_on_the_delay_adjusted_subtitle_clock(
+    start: float, sub_delay: float
+) -> None:
+    mpv = find_mpv(None)
+    if not mpv:
+        pytest.skip("mpv not found")
+    replies = _observe_mpv_subtitle_properties(
+        mpv,
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫\n",
+        ("time-pos", "sub-delay", "sub-text/ass-full"),
+        start=start,
+        sub_delay=sub_delay,
+    )
+
+    video_time = float(replies["time-pos"]["data"])
+    observed_delay = float(replies["sub-delay"]["data"])
+    assert 1.0 <= video_time - observed_delay < 3.0
+    assert replies["sub-text/ass-full"]["data"].endswith("猫")

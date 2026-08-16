@@ -148,6 +148,25 @@ def _pixel_aspect(osd: Mapping[str, object], video: Mapping[str, object]) -> flo
     return value
 
 
+def _subtitle_clock(reader: Reader, fallback: float | None) -> tuple[float, float, float, int]:
+    raw_time = reader._prop("time-pos")
+    raw_delay = reader._prop("sub-delay")
+    sub_delay = 0.0 if raw_delay is None else float(raw_delay)
+    if raw_time is None:
+        if fallback is None:
+            raise ValueError("subtitle clock is unavailable")
+        subtitle_time = fallback
+        video_time = subtitle_time + sub_delay
+    else:
+        video_time = float(raw_time)
+        subtitle_time = video_time - sub_delay
+    if not all(math.isfinite(value) for value in (video_time, sub_delay, subtitle_time)):
+        raise ValueError("subtitle clock must be finite")
+    if subtitle_time < 0:
+        raise ValueError("subtitle clock must be non-negative")
+    return video_time, sub_delay, subtitle_time, round(subtitle_time * 1_000)
+
+
 @dataclass(frozen=True, slots=True)
 class NativeSubtitleStatus:
     enabled: bool
@@ -460,6 +479,29 @@ class NativeSubtitleGeometry:
         if reader.sub_text.strip():
             self.schedule(reader)
 
+    @staticmethod
+    def record_clock_change(reader: Reader) -> None:
+        with otel_metrics.traced("subtitle_geometry_clock") as span:
+            try:
+                raw_start = reader._prop("sub-start")
+                video_time, sub_delay, subtitle_time, _timestamp_ms = _subtitle_clock(
+                    reader, None if raw_start is None else float(raw_start)
+                )
+            except (TypeError, ValueError):
+                span.set("outcome", "invalid")
+                log.info("mpv sub-delay changed; subtitle clock is temporarily unavailable")
+                return
+            span.set("outcome", "ready")
+            span.set("video_time_ms", round(video_time * 1_000))
+            span.set("sub_delay_ms", round(sub_delay * 1_000))
+            span.set("subtitle_time_ms", round(subtitle_time * 1_000))
+            log.info(
+                "mpv sub-delay changed: video=%+.3fs delay=%+.3fs subtitle=%+.3fs",
+                video_time,
+                sub_delay,
+                subtitle_time,
+            )
+
     def mark_empty(self) -> None:
         self._last_snapshot = None
         self._pending_key = None
@@ -564,6 +606,7 @@ class NativeSubtitleGeometry:
         with otel_metrics.traced("subtitle_geometry_prepare") as span:
             span.set("observed_rows", len(cue.active_rows.splitlines()))
             span.set("eligible_tokens", len(annotations))
+            span.set("timestamp_ms", cue.timestamp_ms)
             started = time.perf_counter_ns()
             try:
                 prepared = prepare_ass_hit_map_frame(
@@ -728,18 +771,22 @@ class NativeSubtitleGeometry:
         if not isinstance(active_rows, str) or not active_rows.strip():
             self._fallback_to_legacy(reader, "subtitle-ass-full-unavailable")
             return None
+        try:
+            _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(reader, start)
+        except (TypeError, ValueError):
+            self._fallback_to_legacy(reader, "subtitle-timing-unavailable")
+            return None
         if reader._sub_index is not None:
             position = reader._sub_index.locate(
                 text=reader.sub_text,
                 sub_start=start,
-                time_pos=float(reader._prop("time-pos") or start),
+                time_pos=subtitle_time,
                 preferred=reader._nav_idx,
             )
             if position >= 0:
                 indexed = reader._sub_index.cues[position]
                 if indexed.text == reader.sub_text:
                     start, end = indexed.start, indexed.end
-        timestamp_ms = round(float(reader._prop("time-pos") or start) * 1_000)
         return start, end, timestamp_ms, active_rows
 
     def _resolve_schedule_inputs(self, reader: Reader) -> _ScheduleInputs | None:

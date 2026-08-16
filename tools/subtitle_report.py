@@ -42,6 +42,7 @@ import trace_report as tr
 _SUB_SPAN_NAMES = ("subtitle.fetch", "subtitle.reslot", "subtitle.resync")
 _GEOMETRY_SPAN_NAMES = (
     "subtitle_geometry_decision",
+    "subtitle_geometry_clock",
     "subtitle_geometry_prepare",
     "subtitle_geometry_render",
     "subtitle_geometry_libass",
@@ -169,6 +170,10 @@ def extract(events: list[dict]) -> dict:
             "prepare_ms",
             "render_ms",
             "extract_ms",
+            "video_time_ms",
+            "sub_delay_ms",
+            "subtitle_time_ms",
+            "timestamp_ms",
             "session",
             "cpu_ms",
         }
@@ -218,6 +223,14 @@ def _session(events: list[dict]) -> str | None:
 def _geometry_diagnosis(span: dict) -> str:
     args = span.get("args", {})
     name = span["name"]
+    if name == "subtitle_geometry_clock":
+        if args.get("outcome") != "ready":
+            return f"{args.get('outcome', '?')}: subtitle clock unavailable"
+        return (
+            f"video={args.get('video_time_ms', '?')}ms "
+            f"delay={args.get('sub_delay_ms', '?')}ms "
+            f"subtitle={args.get('subtitle_time_ms', '?')}ms"
+        )
     if name in {"subtitle_geometry_decision", "subtitle_geometry_fallback"}:
         outcome = args.get("outcome", "legacy")
         reason = args.get("reason", "unknown")
@@ -238,6 +251,7 @@ def _geometry_diagnosis(span: dict) -> str:
     if name == "subtitle_geometry_libass":
         return (
             f"provider={args.get('provider', '?')} libass={args.get('libass_version', '?')} "
+            f"at={args.get('timestamp_ms', '?')}ms "
             f"layers={args.get('layer_count', '?')} tokens={args.get('found_tokens', '?')} "
             f"render={args.get('render_ms', '?')}ms extract={args.get('extract_ms', '?')}ms"
         )
