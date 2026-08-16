@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786858523397,
+  "lastUpdate": 1786861442916,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5741,6 +5741,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.535546,
             "range": "3 replicas; min 1.12753; max 1.59937; MAD 0.063826; worst 1.59937",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "75487cab368bf8e9f4a1fc90343d8cfc1d304f5b",
+          "message": "Merge pull request #367 from serjflint/codex/testpypi-addon-publishers\n\nci: add TestPyPI dry-runs for addon packages",
+          "timestamp": "2026-08-16T09:23:19+03:00",
+          "tree_id": "dbb5a8324188fa67287ef625ead7deaf55cf49ab",
+          "url": "https://github.com/serjflint/saitenka/commit/75487cab368bf8e9f4a1fc90343d8cfc1d304f5b"
+        },
+        "date": 1786861441699,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.331886,
+            "range": "3 replicas; min 6.32036; max 6.34835; MAD 0.011524",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.905371,
+            "range": "3 replicas; min 8.84031; max 9.30748; MAD 0.065058; worst 9.30748",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 17.743409,
+            "range": "3 replicas; min 17.6033; max 19.3357; MAD 0.140074",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 17.868183,
+            "range": "3 replicas; min 17.723; max 19.5132; MAD 0.145148; worst 19.5132",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 16.866485,
+            "range": "3 replicas; min 16.7751; max 24.1461; MAD 0.091406",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.13309,
+            "range": "3 replicas; min 0.130513; max 0.169978; MAD 0.002577; worst 0.169978",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 38.341387,
+            "range": "3 replicas; min 38.1988; max 43.532; MAD 0.142575; worst 43.532",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.383528,
+            "range": "3 replicas; min 2.29189; max 3.24303; MAD 0.091634; worst 3.24303",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.388329,
+            "range": "3 replicas; min 1.05465; max 1.62092; MAD 0.232593; worst 1.62092",
             "unit": "ms"
           }
         ]
