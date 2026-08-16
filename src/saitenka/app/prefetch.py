@@ -751,6 +751,9 @@ def warm_episode_tokens(reader: Reader) -> None:
     if not reader.prefetch or reader.dict_set is None or idx is None or reader._warmed_index is idx:
         return
     reader._warmed_index = idx
+    if reader._annotation_async:
+        reader._start_episode_annotation(idx)
+        return
     threading.Thread(
         target=lambda: _warm_episode_loop(reader, idx), name="saitenka-episode-warm", daemon=True
     ).start()

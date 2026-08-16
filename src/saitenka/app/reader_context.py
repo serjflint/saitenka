@@ -92,6 +92,7 @@ class EpisodeContext:
         self.nav_idx = -1  # last cue index jumped to (chaining hint; -1 = unknown)
         self.sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
         self.nav_prev_text = ""  # cue text showing right before a nav render (reconcile)
+        self.nav_provisional_cue_counted = False
         # durable per-session recorder (app/session_stats.py); None until stats start on file load
         self.session_recorder: SessionRecorder | None = None
 

@@ -17,24 +17,26 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
     - [`use`](#saitenka-profile-use)
     - [`remove`](#saitenka-profile-remove)
 - [`run`](#saitenka-run)
+- [`attach`](#saitenka-attach)
+- [`import`](#saitenka-import)
+- [`import-settings`](#saitenka-import-settings)
+- [`import-dictionaries`](#saitenka-import-dictionaries)
 - [`doctor`](#saitenka-doctor)
 - [`telemetry`](#saitenka-telemetry)
 - [`prewarm`](#saitenka-prewarm)
 - [`stats`](#saitenka-stats)
+- [`report`](#saitenka-report)
+- [`subtitle-report`](#saitenka-subtitle-report)
+- [`trace-report`](#saitenka-trace-report)
 - [`config`](#saitenka-config)
-- [`import`](#saitenka-import)
 - [`set-jimaku-key`](#saitenka-set-jimaku-key)
 - [`jimaku-check`](#saitenka-jimaku-check)
-- [`import-settings`](#saitenka-import-settings)
-- [`import-dictionaries`](#saitenka-import-dictionaries)
 - [`install-plugin`](#saitenka-install-plugin)
 - [`uninstall-plugin`](#saitenka-uninstall-plugin)
 - [`update`](#saitenka-update)
 - [`reinstall`](#saitenka-reinstall)
 - [`uninstall`](#saitenka-uninstall)
-- [`report`](#saitenka-report)
 - [`setup`](#saitenka-setup)
-- [`attach`](#saitenka-attach)
 
 **Commands**:
 
@@ -54,7 +56,9 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 * [`set-jimaku-key`](#saitenka-set-jimaku-key): Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 * [`setup`](#saitenka-setup): One-command setup (alias: ``install``): inventory → install mpv+ffmpeg → doctor → init → import → plugin. Re-run any time to reconfigure — it's resumable and confirm-first.
 * [`stats`](#saitenka-stats): Show local immersion-session history.
+* [`subtitle-report`](#saitenka-subtitle-report): Explain native subtitle geometry and pixel-ownership decisions from a report bundle.
 * [`telemetry`](#saitenka-telemetry): Turn runtime telemetry on or off without hand-editing overlay.toml.
+* [`trace-report`](#saitenka-trace-report): Explain startup readiness and cue-annotation latency from a report bundle.
 * [`uninstall`](#saitenka-uninstall): Delete saitenka's config, dictionaries, cache/logs, crash reports and mpv plugin. Leaves mpv and ffmpeg installed. Does NOT remove the saitenka binary itself — the last line tells you how.
 * [`uninstall-plugin`](#saitenka-uninstall-plugin): Remove the saitenka.lua mpv user-script (backs it up first).
 * [`update`](#saitenka-update): Update saitenka to the latest, keeping your extras (wraps ``uv tool upgrade``, which preserves the recorded extras/constraints). On Windows a running tool can't replace its own venv, so this prints the command to run in a fresh shell; ``--now`` hands off to a detached updater that waits for this process to exit. To CHANGE extras or install from GitHub, use ``reinstall`` instead.
@@ -234,6 +238,84 @@ Play a video with Japanese subs; hover a word → Yomitan-like dictionary toolti
 * `--layout-engine`: tooltip block-geometry backend: 'default' (pure-Python) or 'taffy' (the optional taffylite Rust flexbox engine — needs `pip install 'saitenka[layout-engine]'`; byte-identical output, falls back to default if the wheel is absent)  *[choices: default, taffy]*  *[default: default]*
 * `--mpv-arg`: extra raw mpv flag (repeatable; SubMiner-style passthrough). Wins over our own defaults (force-window/keep-open/slang/sub-visibility/osd-level/start) — mpv is last-flag-wins — but never over --input-ipc-server/--log-file/the anti-duplicate script-opts marker, which we always set last
 
+## saitenka attach
+
+```console
+saitenka attach [OPTIONS] [ARGS]
+```
+
+Attach to an already-running mpv's IPC socket instead of launching mpv.
+
+mpv accepts multiple concurrent IPC clients, so we JOIN a socket shared with
+mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
+subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
+
+**Parameters**:
+
+* `SOCKET, --socket`:
+* `--config`:
+* `--slang`: preferred (JP) sub languages, priority order  *[default: ja,jpn,jp]*
+* `--sub-file`: external subtitle file to add + select
+* `--jimaku`: fetch JP subs from jimaku.cc when none present  *[default: False]*
+* `--jimaku-force`: force jimaku.cc subs AHEAD of the embedded JP track (for mistimed/wrong baked-in subs); falls back to the embedded track if the fetch fails. Implies --jimaku  *[default: False]*
+* `--jimaku-key`: jimaku.cc API key (else $JIMAKU_API_KEY)
+* `--jimaku-title`: override the title parsed from the filename
+* `--episode`: override the episode parsed from the filename
+* `--resync, --no-resync`: resync jimaku subs (default: on)  *[default: True]*
+* `--profile`: active reading profile name ([profiles.<name>] in the config)
+
+## saitenka import
+
+```console
+saitenka import [OPTIONS] PATHS
+```
+
+Import Yomitan dictionary .zip files into the consolidated database (built once) and register them in the config by title.
+
+Accepts individual ``.zip`` files and/or directories to scan for them. Each is classified by content
+(definition / frequency / pitch) and imported into ``data_dir()/dictionaries.sqlite``. The source
+zips are read **in place** — no copy is kept — so you can delete or move them afterwards.
+
+**Parameters**:
+
+* `PATHS, --paths, --empty-paths`: Yomitan dictionary .zip files and/or folders of them  **[required]**
+* `--yes`: write the config without prompting  *[default: False]*
+
+## saitenka import-settings
+
+```console
+saitenka import-settings [OPTIONS] [ARGS]
+```
+
+Apply a Yomitan SETTINGS export (dictionary order + options) to your overlay config.
+
+Reads the small Yomitan → Settings → Backup → Export Settings file and matches its dictionary
+titles against the ``.zip`` files under ``--scan-dir``. For a full Yomitan DATABASE backup (the
+multi-GB export), use ``import-dictionaries`` instead — it unpacks that into ``.zip`` dicts.
+(Alias: ``import-settings``.)
+
+**Parameters**:
+
+* `SETTINGS, --settings`:
+* `--scan-dir`: dir holding your Yomitan dictionary .zip files (repeatable; opt-in — no personal folder is scanned unless you name it). Titles are matched against these dirs.
+* `--yes`: write the config without prompting  *[default: False]*
+
+## saitenka import-dictionaries
+
+```console
+saitenka import-dictionaries [OPTIONS] EXPORT
+```
+
+Import a Yomitan DATABASE backup (the multi-GB dexie JSON export) directly into the consolidated database. Streamed — never full-loaded. The per-dictionary zips are reconstructed into a TEMP dir, imported, then discarded (no persistent zip copies are kept).
+
+This is for when you DON'T have the dictionary .zip files. If you already have them, use
+``import`` / ``import-settings`` (faster, no unpacking).
+
+**Parameters**:
+
+* `EXPORT, --export`:   **[required]**
+* `--yes`: write the config without prompting  *[default: False]*
+
 ## saitenka doctor
 
 ```console
@@ -302,6 +384,45 @@ Show local immersion-session history.
 
 * `LIMIT, --limit`: number of recent sessions to show  *[default: 20]*
 
+## saitenka report
+
+```console
+saitenka report [OPTIONS]
+```
+
+Bundle diagnostics (doctor + versions + config + mpv.conf + plugin lua + log) into a single timestamped zip for bug reports. Local-only, never uploaded; secrets are redacted.
+
+**Parameters**:
+
+* `--out`: directory to write the zip into (default: the data dir's reports/)
+* `--no-log`: exclude the overlay log (may contain video filenames / mined sentences)  *[default: False]*
+
+## saitenka subtitle-report
+
+```console
+saitenka subtitle-report [OPTIONS] REPORT-PATH
+```
+
+Explain native subtitle geometry and pixel-ownership decisions from a report bundle.
+
+**Parameters**:
+
+* `REPORT-PATH, --report-path`: report zip, directory, or trace JSON  **[required]**
+* `--json`: emit bounded text-free geometry records as JSON  *[default: False]*
+
+## saitenka trace-report
+
+```console
+saitenka trace-report [OPTIONS] REPORT-PATH
+```
+
+Explain startup readiness and cue-annotation latency from a report bundle.
+
+**Parameters**:
+
+* `REPORT-PATH, --report-path`: report zip, directory, or trace JSON  **[required]**
+* `--json`: emit bounded text-free startup records as JSON  *[default: False]*
+
 ## saitenka config
 
 ```console
@@ -312,23 +433,6 @@ Interactively edit ``overlay.toml``: pick a section → an option → a typed fi
 
 Offers the current value (or the built-in default) and round-trips through tomlkit, so every other
 key + comment survives. On a non-tty it writes nothing (the prompts return their defaults).
-
-## saitenka import
-
-```console
-saitenka import [OPTIONS] PATHS
-```
-
-Import Yomitan dictionary .zip files into the consolidated database (built once) and register them in the config by title.
-
-Accepts individual ``.zip`` files and/or directories to scan for them. Each is classified by content
-(definition / frequency / pitch) and imported into ``data_dir()/dictionaries.sqlite``. The source
-zips are read **in place** — no copy is kept — so you can delete or move them afterwards.
-
-**Parameters**:
-
-* `PATHS, --paths, --empty-paths`: Yomitan dictionary .zip files and/or folders of them  **[required]**
-* `--yes`: write the config without prompting  *[default: False]*
 
 ## saitenka set-jimaku-key
 
@@ -363,41 +467,6 @@ Diagnose jimaku without launching a video: resolve the key and run a test search
 **Parameters**:
 
 * `QUERY, --query`: anime title to test-search  *[default: Spy x Family]*
-
-## saitenka import-settings
-
-```console
-saitenka import-settings [OPTIONS] [ARGS]
-```
-
-Apply a Yomitan SETTINGS export (dictionary order + options) to your overlay config.
-
-Reads the small Yomitan → Settings → Backup → Export Settings file and matches its dictionary
-titles against the ``.zip`` files under ``--scan-dir``. For a full Yomitan DATABASE backup (the
-multi-GB export), use ``import-dictionaries`` instead — it unpacks that into ``.zip`` dicts.
-(Alias: ``import-settings``.)
-
-**Parameters**:
-
-* `SETTINGS, --settings`: 
-* `--scan-dir`: dir holding your Yomitan dictionary .zip files (repeatable; opt-in — no personal folder is scanned unless you name it). Titles are matched against these dirs.
-* `--yes`: write the config without prompting  *[default: False]*
-
-## saitenka import-dictionaries
-
-```console
-saitenka import-dictionaries [OPTIONS] EXPORT
-```
-
-Import a Yomitan DATABASE backup (the multi-GB dexie JSON export) directly into the consolidated database. Streamed — never full-loaded. The per-dictionary zips are reconstructed into a TEMP dir, imported, then discarded (no persistent zip copies are kept).
-
-This is for when you DON'T have the dictionary .zip files. If you already have them, use
-``import`` / ``import-settings`` (faster, no unpacking).
-
-**Parameters**:
-
-* `EXPORT, --export`:   **[required]**
-* `--yes`: write the config without prompting  *[default: False]*
 
 ## saitenka install-plugin
 
@@ -455,19 +524,6 @@ Delete saitenka's config, dictionaries, cache/logs, crash reports and mpv plugin
 * `--yes`: don't prompt; delete without confirming  *[default: False]*
 * `--keep-dicts`: keep the (expensive) dictionary DB; remove everything else  *[default: False]*
 
-## saitenka report
-
-```console
-saitenka report [OPTIONS]
-```
-
-Bundle diagnostics (doctor + versions + config + mpv.conf + plugin lua + log) into a single timestamped zip for bug reports. Local-only, never uploaded; secrets are redacted.
-
-**Parameters**:
-
-* `--out`: directory to write the zip into (default: the data dir's reports/)
-* `--no-log`: exclude the overlay log (may contain video filenames / mined sentences)  *[default: False]*
-
 ## saitenka setup
 
 ```console
@@ -480,29 +536,3 @@ One-command setup (alias: ``install``): inventory → install mpv+ffmpeg → doc
 
 * `--yes`: answer yes to every prompt  *[default: False]*
 * `--dry-run`: show what would happen, change nothing  *[default: False]*
-
-## saitenka attach
-
-```console
-saitenka attach [OPTIONS] [ARGS]
-```
-
-Attach to an already-running mpv's IPC socket instead of launching mpv.
-
-mpv accepts multiple concurrent IPC clients, so we JOIN a socket shared with
-mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
-subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
-
-**Parameters**:
-
-* `SOCKET, --socket`: 
-* `--config`: 
-* `--slang`: preferred (JP) sub languages, priority order  *[default: ja,jpn,jp]*
-* `--sub-file`: external subtitle file to add + select
-* `--jimaku`: fetch JP subs from jimaku.cc when none present  *[default: False]*
-* `--jimaku-force`: force jimaku.cc subs AHEAD of the embedded JP track (for mistimed/wrong baked-in subs); falls back to the embedded track if the fetch fails. Implies --jimaku  *[default: False]*
-* `--jimaku-key`: jimaku.cc API key (else $JIMAKU_API_KEY)
-* `--jimaku-title`: override the title parsed from the filename
-* `--episode`: override the episode parsed from the filename
-* `--resync, --no-resync`: resync jimaku subs (default: on)  *[default: True]*
-* `--profile`: active reading profile name ([profiles.<name>] in the config)

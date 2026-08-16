@@ -216,6 +216,30 @@ def test_command_reply_returns_amid_interleaved_events(make_link):
     assert any(e.get("name") == "mouse-pos" for e in _drain_until(link.ipc))
 
 
+def test_async_command_replies_are_correlated_when_they_arrive_out_of_order(make_link):
+    link = make_link()
+    first = link.ipc.command_async("show-text", "starting", 30000)
+    second = link.ipc.command_async("show-text", "", 1)
+    sent_first = link.next_command()
+    sent_second = link.next_command()
+
+    link.push(
+        json.dumps(
+            {"request_id": sent_second["request_id"], "error": "success", "data": "clear"}
+        ).encode()
+        + b"\n"
+    )
+    link.push(
+        json.dumps(
+            {"request_id": sent_first["request_id"], "error": "success", "data": "show"}
+        ).encode()
+        + b"\n"
+    )
+
+    assert first.future.result(timeout=2)["data"] == "show"
+    assert second.future.result(timeout=2)["data"] == "clear"
+
+
 def test_second_attached_client_independently_sees_events(make_link):
     """REGRESSION (run-vs-attach): a second client attached to mpv must independently receive its own
     events. Two clients, each on its own transport, each drains what its server side pushed — neither
@@ -237,3 +261,47 @@ def test_close_unblocks_reader_and_command_reports_disconnect(make_link):
     with pytest.raises(OSError):
         link.ipc.pump()
     assert link.ipc.command("get_property", "anything").get("error") == "disconnected"
+
+
+@pytest.mark.timeout(5)
+def test_close_serializes_with_an_inflight_async_write():
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingTransport:
+        closed = False
+
+        def write(self, _data: bytes) -> None:
+            entered.set()
+            assert release.wait(2)
+            if self.closed:
+                raise OSError("closed during write")
+
+        def close(self) -> None:
+            self.closed = True
+
+    ipc = MpvIPC("unused")
+    transport = BlockingTransport()
+    ipc._transport = transport
+    submitted = []
+    errors = []
+
+    def submit() -> None:
+        try:
+            submitted.append(ipc.command_async("show-text", "starting", 30000))
+        except Exception as error:  # noqa: BLE001  # preserve any thread failure for the main-thread assertion
+            errors.append(error)
+
+    command_thread = threading.Thread(target=submit)
+    command_thread.start()
+    assert entered.wait(1)
+    close_thread = threading.Thread(target=ipc.close)
+    close_thread.start()
+    release.set()
+    command_thread.join(2)
+    close_thread.join(2)
+
+    assert not command_thread.is_alive() and not close_thread.is_alive()
+    assert errors == []
+    assert submitted[0].future.result(timeout=1) == {"error": "disconnected"}
+    assert transport.closed is True

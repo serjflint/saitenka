@@ -86,7 +86,11 @@ class SubtitleRenderer:
                 0,
                 reader.sub_bg_opacity,
             )  # configurable box alpha (0 = fully transparent)
-            if reader.subtitle_language == SECOND_LANG or reader._sub_pending is not None:
+            if (
+                reader.subtitle_language == SECOND_LANG
+                or reader._sub_pending is not None
+                or reader._annotation_degraded
+            ):
                 sr = render_plain_subtitle(
                     reader.sub_text, reader.osd[0], size=reader.sub_size, background=background
                 )
@@ -115,9 +119,6 @@ class SubtitleRenderer:
             log.info(
                 "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
             )
-            from saitenka.app.loading import clear_startup_hint
-
-            clear_startup_hint(reader.ipc)  # overlay is live now → drop mpv's startup breadcrumb
         return reader.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
     def clear(self, reader: Reader) -> None:

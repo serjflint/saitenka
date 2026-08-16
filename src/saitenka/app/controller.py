@@ -16,11 +16,15 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from concurrent.futures import Future
+
 from saitenka import otel_metrics
 from saitenka.app import (
     analysis_overlay,
     backlog,
     card_preview,
+    cue_annotation,
     help_overlay,
     hover_snapshot,
     mined_store,
@@ -118,6 +122,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.card_preview import PreviewData
     from saitenka.app.dictionary import DictionarySet
+    from saitenka.app.loading import StartupHintLease
     from saitenka.app.render_cache import RenderCache
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.panel import Freq
@@ -187,6 +192,32 @@ _GEOMETRY_PROPS = frozenset(
         "options/sub-fonts-dir",
     }
 )
+_CUE_IDENTITY_PROPS = frozenset({"sub-text", "sub-start", "sub-end", "sid"})
+_CUE_INDEPENDENT_MESSAGES = frozenset(
+    {
+        HELP_TOGGLE_MSG,
+        HELP_PREV_MSG,
+        HELP_NEXT_MSG,
+        HELP_CLOSE_MSG,
+        OVERLAY_TOGGLE_MSG,
+        SUBTITLE_LANGUAGE_MSG,
+        SUBTITLE_MARK_JP_MSG,
+        SUBTITLE_RETRY_MSG,
+        PROFILE_CYCLE_MSG,
+        HOVER_PAUSE_MSG,
+        SIDEBAR_MSG,
+        SUB_PICKER_MSG,
+        ANALYSIS_MSG,
+        ANNOTATION_MSG,
+        PREVIEW_CLOSE_MSG,
+        SCROLL_UP_MSG,
+        SCROLL_DOWN_MSG,
+        TIP_CLOSE_MSG,
+        TIP_UP_MSG,
+        TIP_DOWN_MSG,
+        SUB_ANCHOR_MSG,
+    }
+)
 
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
@@ -237,6 +268,7 @@ class Reader:
     _nav_idx = Delegated[int]("episode", "nav_idx")
     _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
     _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
+    _nav_provisional_cue_counted = Delegated[bool]("episode", "nav_provisional_cue_counted")
     _session_recorder = Delegated[session_stats.SessionRecorder | None](
         "episode", "session_recorder"
     )
@@ -321,6 +353,8 @@ class Reader:
         renderer: SubtitleRenderer | NullRenderer | None = None,
         geometry_backend: GeometryBackend | None = None,
         profile: Profile | None = None,
+        startup_hint_lease: StartupHintLease | None = None,
+        tokenizer_warm: Future[None] | None = None,
         **legacy_kw,
     ):
         """``options`` is the canonical grouped-knobs object (see app/config.py; a new knob is one
@@ -337,6 +371,8 @@ class Reader:
         self.interaction = InteractionContext()  # hover/tooltip/reveal-scoped state
         self.ui_scale = max(0.75, min(2.0, float(o.panels.scale)))
         self.ipc = ipc
+        self._startup_hint_lease = startup_hint_lease
+        self._interactive_ready = False
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
         current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
@@ -491,6 +527,19 @@ class Reader:
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
         # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
         self.token_cache = TokenCache(o.perf.token_cache_max)
+        # Interactive run/attach enables this lazily when async dependencies are wired. Keeping the
+        # worker lazy avoids creating a thread for pure render/tests and the synchronous demo seam.
+        self._annotation: cue_annotation.CueAnnotationCoordinator | None = None
+        self._tokenizer_warm = tokenizer_warm
+        self._annotation_async = False
+        self._dependencies_settled = True
+        self._dependency_generation = 0
+        self._annotation_source_epoch = 0
+        self._current_cue_identity: cue_annotation.CueIdentity | None = None
+        self._cue_retired = True
+        self._cue_identity_ever_installed = False
+        self._annotation_episode_index: CueIndex | None = None
+        self._annotation_episode_cursor = 0
         # Active reading profile (#254) — the identity layer (main/second language codes + tokenizer
         # name), held as swappable state for a live switch (D8). Distinct from the subtitle *role*
         # sentinels the primary/secondary state machine compares. Default = today's JP profile.
@@ -563,13 +612,13 @@ class Reader:
         self.osd = (1280, 720)
         # subtitle state (populated by set_subtitle; initialised for the live run() path)
         self._first_sub_logged = False  # gates the one-time "first subtitle drawn" info log
-        self._startup_hint_cleared = False  # gates the one-time mpv-OSD "saitenka starting…" clear
         self.sub_text = ""
         self.lines: list[list[Token]] = []
         self.tokens: list[Token] = []
         # Normalized source of a cue drawn PLAIN because its annotation can't complete yet (dicts
         # loading); reader_deps re-renders it annotated once deps land. None = drawn annotated.
         self._sub_pending: str | None = None
+        self._annotation_degraded = False
         self._warmed_index: CueIndex | None = (
             None  # sub index whose cues the episode warm has run for
         )
@@ -655,14 +704,18 @@ class Reader:
     def _get(self, prop):
         return self.ipc.command("get_property", prop).get("data")
 
-    def start_observing(self) -> None:
+    def start_observing(self, *, connection_replaced: bool = False) -> None:
         """Register ``observe_property`` for the hot-path properties and seed their initial values
         with ONE get_property each. After this, the poll loop consumes buffered ``property-change``
         events instead of doing blocking round-trips every tick. Main-thread only (IPC)."""
         for i, name in enumerate(OBSERVED_PROPS, 1):
             self.ipc.command("observe_property", i, name)
             reply = self.ipc.command("get_property", name)
-            self._observed[name] = reply.get("data")
+            data = reply.get("data")
+            if connection_replaced:
+                self._on_property_change({"event": "property-change", "name": name, "data": data})
+            else:
+                self._observed[name] = data
             if name == "sub-text/ass-full" and self.native_geometry is not None:
                 self.native_geometry.observe_ass_full_reply(reply)
         self._observing = True
@@ -719,7 +772,33 @@ class Reader:
                 # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
                 log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
+            if (
+                changed
+                and name in _CUE_IDENTITY_PROPS
+                and self._identity_change_is_usable(name, ev)
+            ):
+                self._retire_cue_identity(name)
             self._update_subtitle_geometry_observation(name, ev.get("data"), changed=changed)
+
+    def _identity_change_is_usable(self, name: str, ev: dict) -> bool:
+        if name not in {"sub-start", "sub-end"}:
+            return True
+        data = ev.get("data")
+        identity = self._current_cue_identity
+        if data is None or identity is None:
+            return False
+        installed = identity.observed_start if name == "sub-start" else identity.observed_end
+        return data != installed
+
+    def _retire_cue_identity(self, reason: str) -> None:
+        if self._cue_retired:
+            return
+        log.debug("cue interaction retired: %s", reason)
+        self._cue_retired = True
+        self._current_cue_identity = None
+        self._teardown_tip()
+        self.hover = -1
+        self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
 
     def refresh_osd(self) -> bool:
         d = self._prop("osd-dimensions") or {}
@@ -788,7 +867,15 @@ class Reader:
             self._paused_by_tip = False
         self._sync_auto_translation()
 
-    def set_subtitle(self, text: str) -> None:
+    def set_subtitle(
+        self,
+        text: str,
+        *,
+        revise_session_cue: bool = False,
+        provisional_navigation: bool = False,
+    ) -> None:
+        if provisional_navigation:
+            self._nav_provisional_cue_counted = False
         # Per-cue breadcrumb (low frequency): correlates mpv's sub-text change with the overlay draw +
         # paused-state in the report — the mpv-log-vs-overlay-log gap the paused-OSD bug lives in.
         log.debug("sub-text change: %d chars, paused=%s", len(text.strip()), self._prop("pause"))
@@ -797,9 +884,19 @@ class Reader:
         # (Alt+←/→/↓) path, or of "sub_text_reconcile" for an mpv-driven change (native sub-seek /
         # normal cue advance) — either way, its duration IS the "seek command → drawn" latency.
         with otel_metrics.instrumented(otel_metrics.cue_redraw_duration_ms, "cue_redraw"):
-            self._set_subtitle_inner(text)
+            self._set_subtitle_inner(
+                text,
+                revise_session_cue=revise_session_cue,
+                provisional_navigation=provisional_navigation,
+            )
 
-    def _set_subtitle_inner(self, text: str) -> None:
+    def _set_subtitle_inner(
+        self,
+        text: str,
+        *,
+        revise_session_cue: bool = False,
+        provisional_navigation: bool = False,
+    ) -> None:
         self.subtitle_pipeline.invalidate()
         self.subtitle_pipeline.cue_changed(self, nonempty=bool(text.strip()))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
@@ -812,7 +909,10 @@ class Reader:
         self.hover = -1
         self._annotation_hover = False
         self.sub_text = text
+        self._cue_retired = True
+        self._current_cue_identity = None
         self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
+        self._annotation_degraded = False
         self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
         with otel_metrics.traced("hide_preview"):
             self._hide_preview()  # a new cue → dismiss the last card preview
@@ -823,23 +923,36 @@ class Reader:
             self.subtitle_pipeline.clear(self)
             self.ov.hide(TIP_ID)
             return
-        if self._session_recorder is not None:
-            self._session_recorder.record_cue(
-                (
-                    self.subtitle_language,
-                    self._prop("sub-start"),
-                    self._prop("sub-end"),
-                    text,
-                )
-            )
+        self._record_session_cue(
+            text,
+            revise=revise_session_cue,
+            provisional_navigation=provisional_navigation,
+        )
         if self.subtitle_language == SECOND_LANG:
             self.lines, self.tokens, self.styles = [], [], None
+            self.boxes = []
+            self._current_cue_identity = self._annotation_identity(self._cue_norm(text))
+            self._cue_retired = False
+            self._cue_identity_ever_installed = True
             self._draw_subtitle()
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = self._cue_norm(text)
         cached = self.token_cache.get(norm)
-        self._apply_tokenized_cue(cached if cached is not None else self._tokenize_cue(norm))
+        self._current_cue_identity = self._annotation_identity(norm)
+        self._cue_retired = False
+        self._cue_identity_ever_installed = True
+        if cached is not None:
+            self._apply_tokenized_cue(cached)
+        elif self._annotation_async:
+            self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
+            self._sub_pending = norm
+            if self._dependencies_settled:
+                self._schedule_current_annotation(norm)
+            self._draw_subtitle()
+            return
+        else:
+            self._apply_tokenized_cue(self._tokenize_cue(norm))
         # A cue must appear at its cue time even when annotation isn't ready. While the dictionaries
         # are still loading the tokenization can't be complete (no compound merge, no coloring), so
         # draw the cue PLAIN now; reader_deps re-renders it in place once deps land. A cache hit or a
@@ -850,6 +963,157 @@ class Reader:
             self.native_geometry.schedule(self)
         self._draw_subtitle()
 
+    def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
+        recorder = self._session_recorder
+        if recorder is None:
+            return
+        identity = (
+            self.subtitle_language,
+            self._prop("sub-start"),
+            self._prop("sub-end"),
+            text,
+        )
+        if revise:
+            recorder.revise_cue(identity)
+            return
+        counted = recorder.record_cue(identity)
+        if provisional_navigation:
+            self._nav_provisional_cue_counted = counted
+
+    def _enable_async_annotation(self) -> None:
+        self._annotation_async = True
+        self._dependencies_settled = False
+        if self._annotation is None:
+            self._annotation = cue_annotation.CueAnnotationCoordinator(
+                cache_max=self.options.perf.token_cache_max,
+                tokenizer_warm=self._tokenizer_warm,
+            )
+
+    def prepare_subtitle_blocking(self, text: str) -> None:
+        """Prepare a demo/screenshot cue through the annotation worker before capture."""
+        self._annotation_async = True
+        self._dependencies_settled = True
+        if self._annotation is None:
+            self._annotation = cue_annotation.CueAnnotationCoordinator(
+                cache_max=self.options.perf.token_cache_max,
+                tokenizer_warm=self._tokenizer_warm,
+            )
+        norm = self._cue_norm(text)
+        cue = self._annotation.resolve(
+            self._annotation_key(norm),
+            self._annotation_inputs(norm),
+            priority=cue_annotation.AnnotationPriority.CURRENT,
+        )
+        self.token_cache.put(norm, cue)
+        self.set_subtitle(text)
+
+    def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
+        return cue_annotation.CueIdentity(
+            self._annotation_source_epoch,
+            self._prop("sid"),
+            self.subtitle_language,
+            norm,
+            self._prop("sub-start"),
+            self._prop("sub-end"),
+            self._nav_idx if self._nav_idx >= 0 else None,
+        )
+
+    def _annotation_key(self, norm: str) -> cue_annotation.AnnotationWorkKey:
+        identity = self._annotation_identity(norm)
+        return cue_annotation.AnnotationWorkKey(
+            norm,
+            identity.source_epoch,
+            identity.track_identity,
+            identity.subtitle_role,
+            self.token_cache.generation,
+            self._dependency_generation,
+        )
+
+    def _annotation_inputs(self, norm: str) -> cue_annotation.AnnotationInputs:
+        return cue_annotation.AnnotationInputs(
+            norm,
+            self.tokenizer,
+            getattr(self.dict_set, "terms_exist", None),
+            self.scorer,
+            len(getattr(self.dict_set, "dicts", ())),
+        )
+
+    def _schedule_current_annotation(self, norm: str) -> None:
+        if self._annotation is None or self.subtitle_language == SECOND_LANG:
+            return
+        identity = self._annotation_identity(norm)
+        self._current_cue_identity = identity
+        cached = self._annotation.submit(
+            self._annotation_key(norm),
+            self._annotation_inputs(norm),
+            priority=cue_annotation.AnnotationPriority.CURRENT,
+            waiter=identity,
+        )
+        if cached is not None:
+            self._publish_annotation(cached, identity)
+
+    def _dependencies_changed(self) -> None:
+        self._dependency_generation += 1
+        self._dependencies_settled = True
+        self._annotation_degraded = False
+        self.token_cache.clear()
+        if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
+            return
+        self._teardown_tip()
+        self.hover = -1
+        self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
+        norm = self._cue_norm(self.sub_text)
+        self._sub_pending = norm
+        if self.native_geometry is not None:
+            self.native_geometry.invalidate(self)
+        self._schedule_current_annotation(norm)
+        self._draw_subtitle()
+
+    def _publish_annotation(self, cue: TokenizedCue, identity: cue_annotation.CueIdentity) -> bool:
+        if (
+            self._cue_retired
+            or identity != self._current_cue_identity
+            or identity.normalized_text != self._sub_pending
+        ):
+            return False
+        self.token_cache.put(identity.normalized_text, cue)
+        self._apply_tokenized_cue(cue)
+        self._sub_pending = None
+        self._annotation_degraded = False
+        if self.native_geometry is not None:
+            self.native_geometry.schedule(self)
+        self._draw_subtitle()
+        return True
+
+    def _apply_annotation_results(self) -> None:
+        if self._annotation is None:
+            return
+        for result in self._annotation.drain():
+            with otel_metrics.traced("cue_annotation", phase="publish") as span:
+                span.set("queue_wait_ms", round(result.queue_wait_ms, 3))
+                span.set("work_ms", round(result.work_ms, 3))
+                if result.error is not None or result.cue is None or result.identity is None:
+                    if (
+                        result.identity is not None
+                        and result.identity == self._current_cue_identity
+                        and result.key == self._annotation_key(result.identity.normalized_text)
+                    ):
+                        self._sub_pending = None
+                        self._annotation_degraded = True
+                        log.warning("cue annotation unavailable; keeping plain subtitles")
+                    span.set("outcome", "failed")
+                    span.set("failure", "annotation-error")
+                    continue
+                if result.key != self._annotation_key(result.identity.normalized_text):
+                    span.set("outcome", "stale-generation")
+                    continue
+                span.set(
+                    "outcome",
+                    "published"
+                    if self._publish_annotation(result.cue, result.identity)
+                    else "stale-cue",
+                )
+
     @staticmethod
     def _cue_norm(text: str) -> str:
         """The token-cache key for a cue: mpv's sub-text with ASS/CR line breaks normalized to \\n.
@@ -859,6 +1123,26 @@ class Reader:
     def warm_episode_tokens(self) -> None:
         """Kick off the background full-episode token warm (no-op without prefetch + a dict + index)."""
         prefetch.warm_episode_tokens(self)
+
+    def _start_episode_annotation(self, index: CueIndex) -> None:
+        self._annotation_episode_index = index
+        self._annotation_episode_cursor = 0
+        self._feed_episode_annotation()
+
+    def _feed_episode_annotation(self) -> None:
+        coordinator = self._annotation
+        index = self._annotation_episode_index
+        if coordinator is None or index is None or self._sub_index is not index:
+            return
+        while coordinator.pending_count() < 4 and self._annotation_episode_cursor < len(index.cues):
+            cue = index.cues[self._annotation_episode_cursor]
+            self._annotation_episode_cursor += 1
+            norm = self._cue_norm(cue.text)
+            coordinator.submit(
+                self._annotation_key(norm),
+                self._annotation_inputs(norm),
+                priority=cue_annotation.AnnotationPriority.EPISODE,
+            )
 
     def _tokenize_cue(self, norm: str, *, generation: int | None = None) -> TokenizedCue:
         """Tokenize + compound-merge + score one normalized cue into a :class:`TokenizedCue`, memoizing
@@ -998,6 +1282,16 @@ class Reader:
         path without its teardown/recording side effects. No-op when nothing's shown or the secondary
         (English) track is up (which never tokenizes)."""
         if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
+            return
+        if self._annotation_async:
+            self._retire_cue_identity("profile")
+            norm = self._cue_norm(self.sub_text)
+            self._current_cue_identity = self._annotation_identity(norm)
+            self._cue_retired = False
+            self._sub_pending = norm
+            self._annotation_degraded = False
+            self._schedule_current_annotation(norm)
+            self._draw_subtitle()
             return
         self._apply_tokenized_cue(self._tokenize_cue(self._cue_norm(self.sub_text)))
         if self.native_geometry is not None:
@@ -1849,7 +2143,8 @@ class Reader:
                 TIP_DOWN_MSG: scroll(1),
                 TIP_CLOSE_MSG: action("_tip_close_or_back"),
                 SUB_ANCHOR_MSG: action("_anchor_subtitles"),
-            }
+            },
+            cue_independent=_CUE_INDEPENDENT_MESSAGES,
         )
 
     def _handle(self, msg: str) -> None:
@@ -1859,6 +2154,13 @@ class Reader:
         # no-ops (a handler-side reason). Debug so it doesn't flood at info.
         log.debug("script-message: %s", msg)
         if self._help_open and msg not in HELP_MESSAGES:
+            return
+        if (
+            self.commands.requires_cue(msg)
+            and self._cue_retired
+            and self._cue_identity_ever_installed
+        ):
+            log.debug("script-message ignored while cue identity is retired: %s", msg)
             return
         self.commands.dispatch(msg)
 
@@ -1898,10 +2200,10 @@ class Reader:
             if self.subtitle_pipeline.generation == generation:
                 self.native_geometry.refresh(self)
         self._maybe_log_stall()
-        self._maybe_clear_startup_hint()
 
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
+        self._apply_annotation_results()
         self._apply_pending_anki_seed()
         tooltip.apply_engaged_results(self)
         tooltip.apply_pending_crisp(self, self._tip_view)
@@ -1915,6 +2217,7 @@ class Reader:
         self.subtitle_pipeline.poll_ownership(self)
 
     def _update_interaction(self) -> None:
+        self._feed_episode_annotation()
         self._update_hover()
         self._sync_mouse_capture()
         self._update_prefetch()
@@ -1967,6 +2270,8 @@ class Reader:
         p = self.current_media_path()
         if p is None or p == self._slotted_path:
             return
+        self._annotation_source_epoch += 1
+        self._retire_cue_identity("file-loaded")
         self._slotted_path = p
         self.reslot_hook(p)
 
@@ -1984,8 +2289,14 @@ class Reader:
                 surfaces.route_scroll(
                     self, scroll_steps
                 )  # topmost surface claims it; tooltip is terminal
-            self.tick_pipeline.run()
+            first_tick = not self._interactive_ready
+            if first_tick:
+                with otel_metrics.traced("startup.first_tick"):
+                    self.tick_pipeline.run(traced_prefix="startup.first_tick")
+            else:
+                self.tick_pipeline.run()
             self._schedule_paused_nudge(ops_before)
+            self._mark_interactive_ready()
             return True
         except (OSError, ValueError):
             return False
@@ -2040,19 +2351,23 @@ class Reader:
         elif oid == TIP_ID:
             self._render_tip_view()
 
-    def _maybe_clear_startup_hint(self) -> None:
-        """Drop mpv's "saitenka starting…" OSD breadcrumb the instant OUR overlay can draw (osd-dimensions
-        resolved) — NOT on the first subtitle cue, which a sub-less OP can delay ~30s (the hint's ceiling),
-        leaving a "still starting" impression long after the overlay is live. From here our own surface
-        owns feedback: the spinner while deps load, cues when they appear, nothing when idle."""
-        if self._startup_hint_cleared:
+    def _mark_interactive_ready(self) -> None:
+        if self._interactive_ready:
             return
-        if self._prop("osd-dimensions") in (None, {}):
-            return  # overlay can't place anything yet → keep mpv's breadcrumb until it can
-        self._startup_hint_cleared = True
-        from saitenka.app.loading import clear_startup_hint
-
-        clear_startup_hint(self.ipc)
+        if self._observing and self._observed.get("osd-dimensions") in (None, {}):
+            return
+        self._interactive_ready = True
+        connected_at = getattr(self.ipc, "connected_at", None)
+        with otel_metrics.traced(
+            "startup.interactive_ready",
+            cue_pending=str(self._sub_pending is not None).lower(),
+            deps_pending=str(not self._dependencies_settled).lower(),
+            hint_owned=str(self._startup_hint_lease is not None).lower(),
+        ) as span:
+            if connected_at is not None:
+                span.set("since_ipc_ms", round((time.monotonic() - connected_at) * 1_000, 3))
+            if self._startup_hint_lease is not None:
+                self._startup_hint_lease.mark_ready()
 
     def _apply_pending_deps_or_spinner(self) -> None:
         """Progressive startup: inject background-loaded deps (once), else animate the spinner."""
@@ -2159,17 +2474,22 @@ class Reader:
             on=True
         )  # this IS the render loop — native rasterisation must run on a worker
         interval = interval if interval is not None else self.poll_interval
-        self.refresh_osd()
-        # Re-register observers after an IPC reconnect (mpv.net drops the pipe mid-session; a fresh
-        # connection has forgotten every observe_property) — runs on the IPC thread inside pump().
-        self.ipc.on_reconnect = self._on_ipc_reconnect
-        self.start_observing()  # event-driven property reads from here on
-        self._register_keybinds()
-        self._seed_mined()
-        self.start_prefetch()
-        self._enable_mask_atlas()  # load a prebuilt glyph mask atlas (bg) if one exists — #149 Tier-1
-        session_stats.start(self)
-        telemetry.set_gauge_provider(self._telemetry_gauges)  # no-op unless telemetry is configured
+        with otel_metrics.traced("startup.reader_setup"):
+            self.refresh_osd()
+            # Re-register observers after an IPC reconnect (mpv.net drops the pipe mid-session; a fresh
+            # connection has forgotten every observe_property) — runs on the IPC thread inside pump().
+            self.ipc.on_reconnect = self._on_ipc_reconnect
+            with otel_metrics.traced("startup.reader_setup.observers"):
+                self.start_observing()  # event-driven property reads from here on
+            with otel_metrics.traced("startup.reader_setup.keybinds"):
+                self._register_keybinds()
+            self._seed_mined()
+            self.start_prefetch()
+            self._enable_mask_atlas()  # load a prebuilt glyph mask atlas (bg) if one exists — #149 Tier-1
+            session_stats.start(self)
+            telemetry.set_gauge_provider(
+                self._telemetry_gauges
+            )  # no-op unless telemetry is configured
         # In run/attach the deps (and thus prefetch workers) load ASYNC — dict_set is still None here,
         # so start_prefetch above was a no-op and the worker count is 0. Defer the banner to when
         # prefetch actually starts (apply_deps → _announce_runtime); only announce now on the sync path
@@ -2182,8 +2502,11 @@ class Reader:
             time.sleep(interval)
 
     def _on_ipc_reconnect(self) -> None:
-        self.start_observing()
+        self.start_observing(connection_replaced=True)
+        self._on_file_loaded()
         self.subtitle_pipeline.connection_replaced(self)
+        if self._startup_hint_lease is not None:
+            self._startup_hint_lease.connection_replaced()
 
     def close(self) -> None:
         import shutil
@@ -2191,6 +2514,8 @@ class Reader:
         self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
+        if self._annotation is not None:
+            self._annotation.close(timeout=2.0)
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         for th in self._subtitle_fetch_threads:

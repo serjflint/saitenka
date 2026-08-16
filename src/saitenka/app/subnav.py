@@ -25,6 +25,8 @@ def load_sub_index(reader: Reader, path) -> None:
     idx = load_index(path)
     if idx is None:
         return
+    reader._annotation_source_epoch += 1
+    reader._retire_cue_identity("subtitle-index")
     reader._sub_index = idx
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:
@@ -89,7 +91,10 @@ def sub_nav(reader: Reader, delta: int) -> bool:
         reader._nav_prev_text = reader.sub_text
         reader._geometry_cue_hint = idx.cues[tgt]
         try:
-            reader.set_subtitle(idx.cues[tgt].text)  # instant overlay render (also resets _nav_idx)
+            reader.set_subtitle(
+                idx.cues[tgt].text,
+                provisional_navigation=True,
+            )  # instant overlay render (also resets _nav_idx)
         finally:
             reader._geometry_cue_hint = None
         reader._nav_idx = tgt
@@ -108,10 +113,13 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
     Naively adopting either would flash the wrong text and — worse — silently reset ``_nav_idx``
     (any ``set_subtitle`` call does), breaking next/next/next chaining even though the render was
     already correct. Swallow both within the settle window."""
-    if text == reader.sub_text:
+    if text == reader.sub_text and not reader._cue_retired:
         return
+    identity_reinstall = text == reader.sub_text and reader._cue_retired
     within_settle = time.monotonic() < reader._sub_settle_until
-    if within_settle and (not text.strip() or text == reader._nav_prev_text):
+    if within_settle and (
+        not text.strip() or (text == reader._nav_prev_text and not identity_reinstall)
+    ):
         return
     # Only spans an actual cue change (guarded above), not every poll tick — sibling to sub_nav's
     # "sub_seek" span, but for changes mpv itself drove (native sub-seek key bound in the lua
@@ -122,5 +130,12 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
     with otel_metrics.instrumented(
         otel_metrics.sub_text_reconcile_duration_ms, "sub_text_reconcile"
     ):
-        reader.set_subtitle(text)
+        nav_idx = reader._nav_idx
+        if identity_reinstall and within_settle and reader._nav_provisional_cue_counted:
+            reader.set_subtitle(text, revise_session_cue=True)
+        else:
+            reader.set_subtitle(text)
+        reader._nav_provisional_cue_counted = False
+        if identity_reinstall:
+            reader._nav_idx = nav_idx
     reader._sub_settle_until = 0.0

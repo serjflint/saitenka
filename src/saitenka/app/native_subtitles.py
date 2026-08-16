@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
 from saitenka import otel_metrics
+from saitenka.app import cue_annotation
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryOutcome,
     geometry_error_code,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_pipeline import SubtitleGeometryWorker
+    from saitenka.app.token_cache import TokenizedCue
     from saitenka.app.tokenize import Token
     from saitenka.subtitles.geometry import GeometrySnapshot
 
@@ -114,6 +116,18 @@ def _frame_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
             int(cast("int | float | str", osd.get(name) or 0)) for name in ("mt", "mb", "ml", "mr")
         ),
     )
+
+
+def _lookahead_tokenized(reader: Reader, text: str) -> TokenizedCue:
+    norm = reader._cue_norm(text)
+    coordinator = reader._annotation
+    if reader._annotation_async and coordinator is not None:
+        return coordinator.resolve(
+            reader._annotation_key(norm),
+            reader._annotation_inputs(norm),
+            priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
+        )
+    return reader._tokenize_cue(norm)
 
 
 def _unsupported_render_inputs(settings: Mapping[str, object]) -> tuple[str, ...]:
@@ -783,7 +797,7 @@ class NativeSubtitleGeometry:
             queued_keys.add(key)
 
             def build(inputs: _CueInputs = inputs) -> GeometryRequest:
-                tokenized = reader._tokenize_cue(reader._cue_norm(inputs.text))
+                tokenized = _lookahead_tokenized(reader, inputs.text)
                 selection = self._annotations(
                     inputs.text,
                     tokenized.lines,

@@ -98,6 +98,20 @@ def test_recorder_records_episode_identity():
     assert recorder.snapshot.title_match == "nippon sangoku"
 
 
+def test_recorder_revision_updates_dedup_identity_without_counting_another_cue():
+    recorder = SessionRecorder(
+        "/anime/Show 01.mkv",
+        clock=lambda: 0.0,
+        wall_clock=lambda: 0.0,
+        writer=FakeWriter(),
+    )
+    recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
+
+    recorder.revise_cue(("jp", 3.0, 4.0, "字幕"))
+
+    assert recorder.snapshot.cue_count == 1
+
+
 def test_episode_identity_round_trips_through_store(tmp_path):
     path = tmp_path / "sessions.sqlite"
     store = SessionStore(path)

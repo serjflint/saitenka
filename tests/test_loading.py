@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
+
+import pytest
+
 from saitenka.app.loading import SPINNER, loading_image
+from saitenka.mpvio.ipc import IPCRequest
 
 
 def test_loading_image_renders_a_visible_frame():
@@ -97,21 +102,141 @@ def test_clear_startup_hint_empties_the_osd_text():
     assert ("show-text", "", 1) in ipc.commands
 
 
-def test_first_subtitle_draw_clears_the_startup_hint():
-    # The overlay is live once the first cue draws → the breadcrumb must be cleared exactly then.
+def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness():
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.loading import show_startup_hint
+
+    ipc = FakeIPC()
+    r = Reader(ipc, startup_hint_lease=show_startup_hint(ipc))
+    r.ov = _RecOv()
+    r.subtitle_language = "en"  # plain path → no dict/tokenize deps needed to raster a cue
+    r.set_subtitle("hello")
+    assert r._first_sub_logged
+    assert ("show-text", "", 1) not in ipc.commands
+
+    r._mark_interactive_ready()
+    assert ipc.commands.count(("show-text", "", 1)) == 1
+
+
+@pytest.mark.parametrize("unavailable", [None, {}])
+def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.loading import show_startup_hint
+
+    ipc = FakeIPC()
+    r = Reader(ipc, startup_hint_lease=show_startup_hint(ipc))
+    r._observing = True
+    r._observed["osd-dimensions"] = unavailable
+
+    r._mark_interactive_ready()
+    assert ("show-text", "", 1) not in ipc.commands
+
+    r._observed["osd-dimensions"] = {"w": 1920, "h": 1080}
+    r._mark_interactive_ready()
+    assert ipc.commands.count(("show-text", "", 1)) == 1
+
+
+class _AsyncIPC:
+    def __init__(self):
+        self.commands: list[tuple] = []
+        self.requests: list[IPCRequest] = []
+
+    def command_async(self, *args):
+        request = IPCRequest(len(self.requests), 0, Future())
+        self.commands.append(args)
+        self.requests.append(request)
+        return request
+
+
+def test_late_show_acceptance_after_ready_clears_exactly_once():
+    from saitenka.app.loading import HintOutcome, show_startup_hint
+
+    ipc = _AsyncIPC()
+    lease = show_startup_hint(ipc)
+    assert lease is not None
+    lease.mark_ready()
+    assert lease.outcome is HintOutcome.PENDING
+    assert ipc.commands == [("show-text", "saitenka starting...", 30000)]
+
+    ipc.requests[0].future.set_result({"error": "success"})
+    lease.mark_ready()
+
+    assert lease.outcome is HintOutcome.ACCEPTED
+    assert ipc.commands.count(("show-text", "", 1)) == 1
+
+
+def test_late_show_rejection_never_authorizes_clear():
+    from saitenka.app.loading import HintOutcome, show_startup_hint
+
+    ipc = _AsyncIPC()
+    lease = show_startup_hint(ipc)
+    assert lease is not None
+    lease.mark_ready()
+    ipc.requests[0].future.set_result({"error": "property unavailable"})
+
+    assert lease.outcome is HintOutcome.REJECTED
+    assert ("show-text", "", 1) not in ipc.commands
+
+
+def test_lost_show_reply_clears_only_after_a_live_reconnection():
+    from saitenka.app.loading import HintOutcome, show_startup_hint
+
+    ipc = _AsyncIPC()
+    lease = show_startup_hint(ipc)
+    assert lease is not None
+    lease.mark_ready()
+    ipc.requests[0].future.set_result({"error": "disconnected"})
+
+    assert lease.outcome is HintOutcome.UNKNOWN
+    assert ("show-text", "", 1) not in ipc.commands
+
+    lease.connection_replaced()
+    lease.connection_replaced()
+    assert ipc.commands.count(("show-text", "", 1)) == 1
+
+
+def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
+    from saitenka.app.loading import show_startup_hint
+
+    ipc = _AsyncIPC()
+    lease = show_startup_hint(ipc)
+    assert lease is not None
+    ipc.requests[0].future.set_result({"error": "success"})
+    lease.mark_ready()
+    ipc.requests[1].future.set_result({"error": "disconnected"})
+
+    lease.connection_replaced()
+    assert ipc.commands.count(("show-text", "", 1)) == 2
+
+    ipc.requests[2].future.set_result({"error": "success"})
+    lease.connection_replaced()
+    assert ipc.commands.count(("show-text", "", 1)) == 2
+
+
+def test_reader_reconnect_notifies_the_startup_hint_lease(monkeypatch):
     from util import FakeIPC
 
     from saitenka.app.controller import Reader
 
-    r = Reader(FakeIPC())
-    r.ov = _RecOv()
-    r.subtitle_language = "en"  # plain path → no dict/tokenize deps needed to raster a cue
-    assert not r._first_sub_logged
-    r.set_subtitle("hello")  # first cue draws → hint cleared exactly here
-    assert r._first_sub_logged
-    assert ("show-text", "", 1) in r.ipc.commands
-    r.set_subtitle("world")  # a second cue must NOT re-clear (one-shot)
-    assert r.ipc.commands.count(("show-text", "", 1)) == 1
+    class Lease:
+        replaced = False
+
+        def connection_replaced(self) -> None:
+            self.replaced = True
+
+    lease = Lease()
+    reader = Reader(FakeIPC(), startup_hint_lease=lease)
+    monkeypatch.setattr(reader, "start_observing", lambda **_kwargs: None)
+    monkeypatch.setattr(reader, "_on_file_loaded", lambda: None)
+    monkeypatch.setattr(reader.subtitle_pipeline, "connection_replaced", lambda _reader: None)
+
+    reader._on_ipc_reconnect()
+
+    assert lease.replaced is True
 
 
 def test_apply_deps_stops_the_spinner():

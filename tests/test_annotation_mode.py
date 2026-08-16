@@ -3,6 +3,7 @@
 import pytest
 from PIL import Image
 
+from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer
@@ -171,6 +172,16 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
         ["annotations: hover-only"],
     )
     assert not any(command[0] in {"set_property", "seek", "sub-seek"} for command in ipc.commands)
+
+
+def test_toggle_remains_available_while_cue_identity_is_retired():
+    reader = Reader(FakeIPC(), renderer=NullRenderer())
+    reader._cue_identity_ever_installed = True
+    reader._cue_retired = True
+
+    reader._handle(ANNOTATION_MSG)
+
+    assert reader.annotation_mode == "hover"
 
 
 def test_annotation_key_is_configurable():

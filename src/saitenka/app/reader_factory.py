@@ -6,8 +6,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future
+
     from saitenka.app.config import ReaderOptions
     from saitenka.app.controller import Reader
+    from saitenka.app.loading import StartupHintLease
     from saitenka.app.profiles import Profile
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.mpvio.ipc import MpvIPC
@@ -28,6 +31,8 @@ def create_reader(
     options: ReaderOptions | None = None,
     renderer: SubtitleRenderer | NullRenderer | None = None,
     profile: Profile | None = None,
+    startup_hint_lease: StartupHintLease | None = None,
+    tokenizer_warm: Future[None] | None = None,
 ) -> Reader:
     from saitenka.app.controller import Reader
 
@@ -41,4 +46,6 @@ def create_reader(
         options=options,
         renderer=renderer,
         profile=profile,
+        startup_hint_lease=startup_hint_lease,
+        tokenizer_warm=tokenizer_warm,
     )
