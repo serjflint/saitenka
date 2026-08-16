@@ -136,7 +136,7 @@ def test_legacy_rehandoff_requires_a_new_transaction() -> None:
 
     assert pending.owner == PixelOwner.UNKNOWN
     assert pending.visibility == Visibility.UNKNOWN
-    assert actions == (OwnershipAction(ActionKind.STAGE_LEGACY, 1, state.context),)
+    assert actions == (OwnershipAction(ActionKind.RESTAGE_LEGACY, 1, state.context),)
 
 
 def test_false_readback_during_empty_interval_cannot_stage_legacy() -> None:

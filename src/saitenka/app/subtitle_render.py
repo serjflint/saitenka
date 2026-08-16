@@ -310,13 +310,18 @@ class NativeVisibleRenderer:
         )
         self._visibility = False if accepted else None
         self._native_ready = False
+        is_rehandoff = action.kind == ActionKind.RESTAGE_LEGACY
         self._trace_ownership(
-            "legacy-stage-result",
+            "legacy-rehandoff-result" if is_rehandoff else "legacy-stage-result",
             owner_before=owner_before,
             accepted=accepted,
             effect_id=action.effect_id,
         )
-        if accepted and self._state.context.mode == OwnershipMode.NATIVE_VISIBLE:
+        if (
+            accepted
+            and not is_rehandoff
+            and self._state.context.mode == OwnershipMode.NATIVE_VISIBLE
+        ):
             self._record_catastrophic_fallback()
         self._execute(reader, followups)
 
@@ -344,7 +349,7 @@ class NativeVisibleRenderer:
                 self._fallback.clear(reader)
             elif action.kind == ActionKind.CLEAR_INTERACTION:
                 self._hide_focus(reader)
-            elif action.kind == ActionKind.STAGE_LEGACY:
+            elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
                 self._stage_legacy(reader, action)
             elif action.kind == ActionKind.SHOW_MPV:
                 reader.ipc.command(

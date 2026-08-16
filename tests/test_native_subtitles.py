@@ -556,6 +556,14 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
         assert (
             otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
         )
+        ipc.set_property_error = None
+        renderer.suspend_for_overlay(result)
+        renderer.resume_after_overlay(result)
+
+        assert renderer.ownership_state.owner.value == "legacy"
+        assert (
+            otel_metrics.snapshot()["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
+        )
     finally:
         result.close()
         otel_metrics.unregister()

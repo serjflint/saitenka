@@ -58,6 +58,7 @@ class EventKind(StrEnum):
 class ActionKind(StrEnum):
     ASSERT_NATIVE_VISIBILITY = "assert-native-visibility"
     STAGE_LEGACY = "stage-legacy"
+    RESTAGE_LEGACY = "restage-legacy"
     CLEAR_LEGACY = "clear-legacy"
     CLEAR_INTERACTION = "clear-interaction"
     SHOW_MPV = "show-mpv"
@@ -141,14 +142,16 @@ def _schedule_retry(state: OwnershipState) -> tuple[OwnershipState, tuple[Owners
     return new_state, (OwnershipAction(ActionKind.SCHEDULE_RETRY, effect_id, state.context, delay),)
 
 
-def _request_legacy(state: OwnershipState) -> tuple[OwnershipState, tuple[OwnershipAction, ...]]:
+def _request_legacy(
+    state: OwnershipState, *, action_kind: ActionKind = ActionKind.STAGE_LEGACY
+) -> tuple[OwnershipState, tuple[OwnershipAction, ...]]:
     effect_id = state.next_effect_id
     return replace(
         state,
         next_effect_id=effect_id + 1,
         active_assertion_id=effect_id,
-        active_effect_kind=ActionKind.STAGE_LEGACY,
-    ), (OwnershipAction(ActionKind.STAGE_LEGACY, effect_id, state.context),)
+        active_effect_kind=action_kind,
+    ), (OwnershipAction(action_kind, effect_id, state.context),)
 
 
 def _start_mode(state: OwnershipState) -> tuple[OwnershipState, tuple[OwnershipAction, ...]]:
@@ -272,7 +275,7 @@ def _legacy_stage_result(
     if (
         event.context != state.context
         or event.effect_id != state.active_assertion_id
-        or state.active_effect_kind != ActionKind.STAGE_LEGACY
+        or state.active_effect_kind not in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}
     ):
         return state, ()
     current = replace(state, active_assertion_id=None, active_effect_kind=None)
@@ -326,7 +329,10 @@ def _retry_due(state: OwnershipState, event: OwnershipEvent) -> OwnershipResult:
 def _legacy_rehandoff(state: OwnershipState, _event: OwnershipEvent) -> OwnershipResult:
     if state.owner != PixelOwner.LEGACY:
         return state, ()
-    return _request_legacy(replace(state, owner=PixelOwner.UNKNOWN, visibility=Visibility.UNKNOWN))
+    return _request_legacy(
+        replace(state, owner=PixelOwner.UNKNOWN, visibility=Visibility.UNKNOWN),
+        action_kind=ActionKind.RESTAGE_LEGACY,
+    )
 
 
 _OPEN_HANDLERS: dict[EventKind, EventHandler] = {
