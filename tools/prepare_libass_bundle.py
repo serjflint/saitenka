@@ -17,7 +17,14 @@ def _dynamic_library(path: Path) -> bool:
 
 def _primary(paths: list[Path]) -> Path:
     by_name = {path.name.casefold(): path for path in paths}
-    for name in ("libass.so.9", "libass.dylib", "ass.dll", "libass.dll", "libass-9.dll"):
+    for name in (
+        "libass.so.9",
+        "libass.dylib",
+        "ass.dll",
+        "ass-9.dll",
+        "libass.dll",
+        "libass-9.dll",
+    ):
         if name in by_name:
             return by_name[name]
     raise RuntimeError(f"could not identify canonical libass library in {paths}")

@@ -66,6 +66,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          if [[ "${{ matrix.triplet }}" == x64-* ]]; then brew install nasm; fi
           .vcpkg/bootstrap-vcpkg.sh -disableMetrics
           .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
           .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
@@ -88,7 +89,7 @@ jobs:
             -w /work \
             "${{ matrix.image }}" \
             bash -euxo pipefail -c '
-              dnf install -y git zip unzip tar pkgconfig autoconf autoconf-archive automake libtool
+              dnf install -y git zip unzip tar pkgconfig autoconf autoconf-archive automake libtool nasm
               /opt/python/cp313-cp313/bin/python -m pip install uv==0.12.0
               UV=/opt/python/cp313-cp313/bin/uv
               .vcpkg/bootstrap-vcpkg.sh -disableMetrics

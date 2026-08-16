@@ -54,6 +54,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--vcpkg-root", type=Path, required=True)
 parser.add_argument("--install-root", type=Path, required=True)
 args = parser.parse_args()
+if {triplet.startswith("x64")} and shutil.which("nasm") is None:
+    raise SystemExit("this x64 build requires nasm on PATH")
 downloads = args.vcpkg_root / "downloads"
 downloads.mkdir(parents=True, exist_ok=True)
 for source in Path("downloads").iterdir():

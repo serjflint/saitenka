@@ -41,7 +41,9 @@ def test_collect_sources_includes_downloads_ports_and_checksums(tmp_path: Path) 
         assert "SHA256SUMS" in names
         rebuild = archive.extractfile("rebuild.py")
         assert rebuild is not None
-        assert b"--overlay-triplets=triplets" in rebuild.read()
+        rebuild_bytes = rebuild.read()
+        assert b"--overlay-triplets=triplets" in rebuild_bytes
+        assert b"this x64 build requires nasm on PATH" in rebuild_bytes
 
 
 def test_collect_sources_rejects_binary_cache_without_downloads(tmp_path: Path) -> None:
@@ -92,7 +94,8 @@ def test_bundle_build_locks_provider_and_linux_build_tools() -> None:
     port = (ROOT / "libasslite-bundle/ports/libass/portfile.cmake").read_text(encoding="utf-8")
 
     assert workflow.count("--overlay-ports=libasslite-bundle/ports") == 6
-    assert "autoconf autoconf-archive automake libtool" in workflow
+    assert "autoconf autoconf-archive automake libtool nasm" in workflow
+    assert "brew install nasm" in workflow
     assert "-Dfontconfig=disabled -Dcoretext=enabled" in port
     assert "-Dfontconfig=disabled -Ddirectwrite=enabled" in port
     assert "-Dfontconfig=enabled" in port

@@ -70,6 +70,24 @@ def test_prepare_rejects_static_only_install(tmp_path: Path) -> None:
         prepare(root, "x64-linux-dynamic", package)
 
 
+def test_prepare_recognizes_vcpkg_windows_libass_name(tmp_path: Path) -> None:
+    root, package = _install(tmp_path)
+    windows = root / "x64-windows"
+    (windows / "bin").mkdir(parents=True)
+    (windows / "share" / "libass").mkdir(parents=True)
+    (windows / "bin" / "ass-9.dll").write_bytes(b"ass")
+    (windows / "bin" / "fribidi-0.dll").write_bytes(b"fribidi")
+    (windows / "share" / "libass" / "copyright").write_text("ISC", encoding="utf-8")
+    status = root / "vcpkg" / "status"
+    status.write_text(
+        "Package: libass\nVersion: 0.17.5\nArchitecture: x64-windows\n",
+        encoding="utf-8",
+    )
+    manifest = prepare(root, "x64-windows", package)
+
+    assert manifest["library"] == ".libs/ass-9.dll"
+
+
 def test_bundle_wheel_hook_rejects_source_only_payload() -> None:
     spec = importlib.util.spec_from_file_location("bundle_hatch_build", HOOK_PATH)
     assert spec is not None and spec.loader is not None

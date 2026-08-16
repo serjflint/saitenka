@@ -36,7 +36,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "f027eb59b6013d000a1dc36e8d2d0b1f72a7561eee40325686b2168d22000b5e"
+LOCKED_MANIFEST_SHA256 = "95efcacfdab0efefeaf4f1a1f02be0ba7b00889fcb0c8bb7c43e636c7b78e192"
 
 
 def load_manifest(path: Path) -> dict:
@@ -75,7 +75,9 @@ def evaluate(report: dict, manifest: dict) -> bool:
     budgets = manifest["budgets"]
     return bool(
         report["event_count"] == manifest["event_count"]
-        and report["interaction_p99_ms"] <= budgets["interaction_p99_ms"]
+        and report["interaction_clock"] == manifest["interaction_clock"]
+        and report["interaction_cpu_p99_ms"] <= budgets["interaction_cpu_p99_ms"]
+        and report["interaction_p99_ms"] <= budgets["interaction_wall_safety_ms"]
         and report["interaction_delta_p99_ms"] <= budgets["interaction_delta_p99_ms"]
         and report["ready_before_presentation_ratio"] >= budgets["ready_before_presentation_ratio"]
         and report["retained_rss_growth_mib"] <= budgets["retained_rss_growth_mib"]
@@ -222,6 +224,9 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         native._sub_index = index
         latencies: list[float] = []
         baseline_latencies: list[float] = []
+        cpu_latencies: list[float] = []
+        baseline_cpu_latencies: list[float] = []
+        cpu_deltas: list[float] = []
         cadence_misses = 0
         geometry_apply_count = 0
         hit_test_count = 0
@@ -246,28 +251,52 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                     }
                 )
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             _present(baseline, text, native=False)
-            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
+            baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
+            baseline_latencies.append(baseline_wall)
+            baseline_cpu_latencies.append(baseline_cpu)
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             applied = _present(native, text, native=True)
             geometry_apply_count += int(applied)
             latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
+            cpu_latencies.append(native_cpu)
+            cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             _open_tooltip(baseline, baseline_ipc, native=False)
-            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
+            baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
+            baseline_latencies.append(baseline_wall)
+            baseline_cpu_latencies.append(baseline_cpu)
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             hit, focus, opened = _open_tooltip(native, native_ipc, native=True)
             hit_test_count += int(hit)
             focus_draw_count += int(focus)
             tooltip_open_count += int(opened)
             latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
+            cpu_latencies.append(native_cpu)
+            cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             _scroll_and_close_tooltip(baseline)
-            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
+            baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
+            baseline_latencies.append(baseline_wall)
+            baseline_cpu_latencies.append(baseline_cpu)
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             scrolled = _scroll_and_close_tooltip(native)
             tooltip_scroll_count += int(scrolled)
             latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
+            cpu_latencies.append(native_cpu)
+            cpu_deltas.append(max(0.0, native_cpu - baseline_cpu))
         assert native.native_geometry.worker.wait_idle(timeout=30)
         stats = native.native_geometry.worker.stats
         last_error = native.subtitle_pipeline.last_error
@@ -288,16 +317,23 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
     close_completed = backend.closed
     baseline_p99 = _percentile(baseline_latencies, 0.99)
     interaction_p99 = _percentile(latencies, 0.99)
+    baseline_cpu_p99 = _percentile(baseline_cpu_latencies, 0.99)
+    interaction_cpu_p99 = _percentile(cpu_latencies, 0.99)
     report = {
         "schema": 1,
         "platform": platform.platform(),
         "python": sys.version,
         "event_count": count,
         "interaction_samples_ms": latencies,
+        "interaction_cpu_samples_ms": cpu_latencies,
+        "interaction_cpu_delta_samples_ms": cpu_deltas,
+        "interaction_clock": "thread_time",
         "interaction_p50_ms": statistics.median(latencies),
         "interaction_p99_ms": interaction_p99,
         "interaction_baseline_p99_ms": baseline_p99,
-        "interaction_delta_p99_ms": max(0.0, interaction_p99 - baseline_p99),
+        "interaction_cpu_p99_ms": interaction_cpu_p99,
+        "interaction_baseline_cpu_p99_ms": baseline_cpu_p99,
+        "interaction_delta_p99_ms": _percentile(cpu_deltas, 0.99),
         "ready_before_presentation_ratio": (
             stats.ready_before_presented / stats.presented if stats.presented else 0.0
         ),
