@@ -45,13 +45,13 @@ def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, encoding="utf-8", errors="replace", capture_output=True, **kw)
 
 
-def _build_wheel() -> Path:
+def _build_wheel(*, subtitle_geometry: bool) -> Path:
     dist = OVERLAY / "dist"
-    for project in (
-        OVERLAY / "saitenka-dict",
-        OVERLAY / "ankiconnect-client",
-        OVERLAY,
-    ):
+    projects = [OVERLAY / "saitenka-dict", OVERLAY / "ankiconnect-client"]
+    if subtitle_geometry:
+        projects.append(OVERLAY / "libasslite")
+    projects.append(OVERLAY)
+    for project in projects:
         out = _run(["uv", "build", "--wheel", "--out-dir", str(dist)], cwd=project)
         if out.returncode != 0:
             sys.exit(f"uv build failed for {project.name}:\n{out.stdout}\n{out.stderr}")
@@ -61,16 +61,18 @@ def _build_wheel() -> Path:
     return wheels[-1]
 
 
-def _install(source: str) -> None:
+def _install(source: str, *, subtitle_geometry: bool) -> None:
+    extras = "full,subtitle-geometry" if subtitle_geometry else "full"
+    wheel: Path | None = None
     if source == "pypi":
-        spec = "saitenka[full]"
+        spec = f"saitenka[{extras}]"
     else:
-        wheel = _build_wheel()
+        wheel = _build_wheel(subtitle_geometry=subtitle_geometry)
         # PEP 508 direct reference: install the LOCAL wheel with the [full] extras (deinflect / jmdict /
         # telemetry resolve from the index as normal deps). `as_uri()` yields a valid file URL on Windows too.
-        spec = f"saitenka[full] @ {wheel.as_uri()}"
+        spec = f"saitenka[{extras}] @ {wheel.as_uri()}"
     command = ["uv", "tool", "install", "--reinstall"]
-    if source == "wheel":
+    if wheel is not None:
         command.extend(("--find-links", str(wheel.parent)))
     out = _run([*command, spec])
     if out.returncode != 0:
@@ -132,6 +134,7 @@ def _check_doctor(exe: Path, expect_ok: list[str]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--source", choices=("wheel", "pypi"), default="wheel")
+    ap.add_argument("--subtitle-geometry", action="store_true")
     ap.add_argument(
         "--expect-tools",
         nargs="*",
@@ -141,7 +144,7 @@ def main() -> None:
     )
     a = ap.parse_args()
 
-    _install(a.source)
+    _install(a.source, subtitle_geometry=a.subtitle_geometry)
     exe = _resolve_exe()
     print(f"installed entrypoint: {exe}")
     _check_help(exe)

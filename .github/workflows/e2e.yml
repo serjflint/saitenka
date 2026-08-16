@@ -307,6 +307,7 @@ jobs:
         run: >-
           uv run poe install-smoke
           --source ${{ startsWith(github.ref, 'refs/tags/v') && 'pypi' || 'wheel' }}
+          --subtitle-geometry
           ${{ runner.os == 'Linux' && '--expect-tools mpv ffmpeg' || '' }}
 
   windows-regressions:

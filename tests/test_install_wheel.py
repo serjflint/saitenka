@@ -52,6 +52,7 @@ def test_wheel_installs_and_assets_load():
         for project in (
             dictionary_project,
             PROJECT / "ankiconnect-client",
+            PROJECT / "libasslite",
             PROJECT,
         ):
             build_kind = [] if project == dictionary_project else ["--wheel"]
@@ -91,7 +92,7 @@ def test_wheel_installs_and_assets_load():
                 str(py),
                 "--find-links",
                 str(dist),
-                str(wheel),
+                f"saitenka[subtitle-geometry] @ {wheel.as_uri()}",
             ],
             check=True,
             capture_output=True,
@@ -115,6 +116,7 @@ def test_wheel_installs_and_assets_load():
             "assert asset('wordlists','jlpt.zip').exists();"
             "assert asset('saitenka.lua').exists();"
             "import saitenka.subtitles;"
+            "import libasslite;"
             "assert files('saitenka').joinpath('py.typed').is_file();"
             "pkg=files('saitenka_dict');"
             "assert importlib.util.find_spec('oracle') is None;"

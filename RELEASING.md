@@ -155,8 +155,10 @@ font/shaping dependencies remain external runtime components.
 - **One-time setup:** register `libasslite-release.yml` as the trusted publisher for the
   `libasslite` project on PyPI and TestPyPI before the first publish.
 
-Publishing the binding does not enable Saitenka's libass geometry provider. That separately reviewed
-adapter remains gated by #350's correctness and performance evidence.
+Before releasing a Saitenka version that pins `saitenka[subtitle-geometry]`, publish that exact
+`libasslite` version first and wait for it to resolve from PyPI. The cross-platform install-smoke then
+installs the built Saitenka wheel non-editably with the extra; release-tag smoke repeats the same path
+from PyPI. Never publish Saitenka while its pinned wrapper is unavailable.
 
 ## Notes
 
