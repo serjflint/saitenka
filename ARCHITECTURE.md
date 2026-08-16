@@ -75,6 +75,9 @@ internal modules with explicit dependency contracts, not independently published
 - **`../libasslite/`** — an independently versioned experimental PyO3 binding for copied libass image
   layers. It dynamically loads libass 0.17.x and is loaded only by the opt-in subtitle-geometry
   adapter; the default Saitenka package and Pillow path do not require it.
+- **`../libasslite-bundle/`** — an optional platform wheel containing libass and its native runtime
+  closure. It is discovered by `libasslite`, not imported by Saitenka, and stays outside the
+  Apache-2.0 core distribution with its own notices and corresponding-source archives.
 - **`app/known_cache.py`** — the disposable known-word cache in `anki-known.sqlite`; dictionary imports
   and schema rebuilds no longer own Anki-derived state.
 
@@ -109,6 +112,97 @@ protocol-shaped class from being mistaken for production swappability.
 
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
 `saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
+
+## Native-visible subtitle architecture
+
+The experimental mode changes **who owns subtitle pixels**, not the tokenizer, lookup, tooltip, or
+mining pipeline. mpv continues to render the authored external ASS track. Saitenka shadow-renders a
+color-annotated copy off screen only to recover token geometry; that copy is never displayed.
+
+```text
+authored external .ass
+│
+├─ visible path ──────> mpv ──> mpv's libass ──> authored subtitle pixels
+│
+└─ interaction path ─> exact event + tokenizer spans
+                       │
+                       ├─ inject a unique color per token into an in-memory copy
+                       ├─ libasslite ──> selected libass ──> public ASS_Image layers
+                       ├─ color pixels ──> TokenGeometry[]
+                       └─ identity/generation gate ──> Reader.boxes
+                                                      ├─ hover focus box
+                                                      └─ normal lookup/tooltip/mining path
+```
+
+This preserves the features Saitenka owns while keeping visible typography as close to mpv as the
+public APIs allow. The geometry request carries the authored event identity, timestamp, frame and
+storage sizes, pixel aspect, accepted mpv render profile, rewritten ASS bytes, and token palette.
+`LibassGeometryBackend` consumes only that provider-neutral contract and returns copied rectangles;
+native pointers never escape `libasslite`.
+
+The current accepted envelope is deliberately static and narrow. Known unsupported inputs—animated
+or ambiguous ASS, unsupported source encodings, missing source bytes, attached/custom fonts, and
+rejected mpv render settings—remain visible through mpv but noninteractive. A provider failure has the
+same result. Saitenka never replaces a valid native subtitle with its shadow render. It cannot inspect
+mpv's exact libass build and font environment, so the separately selected geometry runtime may still
+differ at pixel level inside that envelope; the [user guide](docs/usage/native-subtitles.md#current-supported-envelope)
+documents this experimental limitation.
+
+### Lifecycle, lookahead, and stale-result rejection
+
+Geometry is produced on cue or render-space changes, not on hover. Hover focus and tooltip scrolling
+reuse the published boxes, so their 60 FPS interaction target does not imply a 60 FPS libass render.
+The present static envelope also does not require video-frame-rate geometry updates.
+
+```text
+mpv/source/profile change
+          │
+          v
+invalidate generation + clear boxes/focus/tooltip
+          │
+          ├─ current cue ──> newest-wins pending slot ─┐
+          └─ next cues ────> bounded lookahead queue ──┤
+                                                       v
+                                         one geometry worker
+                                                       │
+                              build exact request ──> cache/libass
+                                                       │
+                                                       v
+                       generation + track + event + time + variant checks
+                                                       │
+                                      stale ──> discard │ publish ──> tick
+                                                       │
+                                                       v
+                                      Reader.boxes + native focus overlay
+```
+
+The worker never reads mpv IPC or mutates visible state. `SubtitleModeCoordinator` owns generation,
+request sequencing, result identity, and provider errors. `SubtitleGeometryWorker` owns one current
+slot plus bounded result and prefetch caches; `LibassGeometryBackend` owns the renderer LRU. Lookahead
+is speculative and a miss is safe. Only the main tick installs boxes or clears interaction. Source,
+cue, tokenizer/profile, render-space, and close transitions invalidate the generation, so an in-flight
+result cannot be rebound after its inputs change.
+
+### Optional native packages
+
+The binding and native closure are separate so users can prefer the libass already installed for mpv
+without forcing native binaries into the core wheel.
+
+```text
+saitenka (Apache-2.0 core)
+└─ optional subtitle-geometry extra
+   └─ libasslite (MIT PyO3 wrapper)
+      └─ selected libass runtime
+
+optional subtitle-geometry-bundle extra
+└─ installs both libasslite and libasslite-bundle
+   └─ self-contained platform-specific native closure + notices
+```
+
+The wrapper targets the public libass API and serializes each renderer while releasing Python during
+rendering. The bundle is convenience, not a second implementation: both routes feed the same
+`GeometryBackend`, parity gates, lifecycle, caches, and fail-closed behavior. The user guide owns the
+exact [runtime precedence and supported platforms](docs/usage/native-subtitles.md#install-the-native-runtime).
 
 ## Work before playback
 

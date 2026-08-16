@@ -13,7 +13,8 @@ Per the "simplest tool first, escalate on limits" rule: Pillow is the simplest t
 rasterize styled CJK text + custom ruby positioning, and mpv's `overlay-add` IPC command can push
 a rendered RGBA image straight into mpv's own OSD surface — airspace-safe, no GL/FFI. We nail the
 **visual design** here (matching the real 読む popup) before escalating to Rust + cosmic-text +
-the libmpv render API if/when Pillow hits a wall.
+the libmpv render API if/when Pillow hits a wall. The optional PyO3/libass subtitle-geometry path is
+separate: it recovers hit boxes for mpv-rendered ASS and does not rasterize dictionary panels.
 
 ## Layout
 
@@ -49,8 +50,9 @@ Responsiveness KPIs, targets, and the saved baseline live in
 ## Bolt to mpv (the airspace-safe cure)
 
 The panel is pushed into mpv's **own OSD surface** via the `overlay-add` JSON-IPC command — one
-surface, no second window, so it survives fullscreen (the Electron overlay bug can't recur). No GL,
-no FFI, no Rust.
+surface, no second window, so it survives fullscreen (the Electron overlay bug can't recur). The
+panel path needs no GL or FFI; the optional native-visible subtitle mode uses FFI only for offscreen
+geometry.
 
 ```bash
 # play a file and show the 読む panel top-left; press 'f' in mpv to test fullscreen
@@ -68,6 +70,9 @@ The default reader hides native subs and draws a SubMiner-style subtitle with pe
 opt-in native-visible experiment instead leaves authored external ASS rendering with mpv/libass and
 derives hit boxes on a bounded background worker; Pillow remains authoritative by default. On hover,
 the reader looks the word up and draws its tooltip in mpv's OSD surface.
+
+The visible-vs-shadow ownership, stale-result guards, lookahead caches, and optional package boundary
+are diagrammed in [Native-visible subtitle architecture](architecture.md#native-visible-subtitle-architecture).
 
 ```bash
 uv run python examples/mpv_reader.py video.mkv --sub-file jp.srt   # hover words with the mouse

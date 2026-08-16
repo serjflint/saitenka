@@ -231,33 +231,13 @@ rebindable-key table with defaults.
 `[subtitle_geometry].native_visible = true` keeps an external authored `.ass` track rendered by mpv
 and uses an optional system `libass` only for hover geometry. Saitenka draws the tooltip and a small
 focus box, not a replacement subtitle raster. Unsupported syntax, missing source bytes, or a provider
-failure leaves the mpv subtitle visible and disables interaction for that cue. Run `saitenka doctor`
-to verify `libasslite` and the selected library; `overlay.example.toml` owns the settings and defaults.
-
-Install the system-library wrapper with `uv tool install 'saitenka[subtitle-geometry]'`, or use
-`saitenka[subtitle-geometry-bundle]` for the separate self-contained native runtime. An explicit
-`LIBASSLITE_LIBRARY` path always wins; `LIBASSLITE_BUNDLE=0` skips an installed bundle and restores
-system discovery. This first experiment accepts UTF-8 external ASS and only the render envelope proved by the parity gate: no mpv
-ASS overrides/window scaling, scale 1, position 100, no video margins, embedded fonts disabled, the
-automatic native font provider, full video-data forwarding, and no custom subtitle font directory.
-`saitenka run` sets that profile when the mode is enabled. For `saitenka attach`, set the equivalent
-mpv options yourself; a mismatched running player reports `subtitle-render-input-unsupported` and
-keeps its native subtitle visible without interaction.
-
-```conf
-sub-ass-override=no
-sub-ass-scale-with-window=no
-sub-scale=1
-sub-pos=100
-sub-use-margins=yes
-sub-ass-use-video-data=all
-sub-ass-style-overrides=
-sub-font-provider=auto
-embeddedfonts=no
-sub-fonts-dir=
-```
-Other encodings, attached/custom fonts, letterboxing, or subtitle style overrides stay visible through
-mpv but are deliberately noninteractive.
+failure leaves the mpv subtitle visible; cue-local failures affect one cue, while source or provider
+failures can disable interaction for the track or session. Run `saitenka doctor` to verify `libasslite`
+and the selected library; `overlay.example.toml` owns the settings and defaults.
+Installation choices, the accepted render envelope, attach-mode mpv settings, and fallback diagnostics
+are collected in [Native mpv subtitles](native-subtitles.md). Contributor-facing ownership and
+lifecycle diagrams live in
+[Native-visible subtitle architecture](../contributing/architecture.md#native-visible-subtitle-architecture).
 
 ## Reading profiles (a non-Japanese main language)
 

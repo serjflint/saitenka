@@ -69,12 +69,14 @@ Apache-2.0 — see [LICENSING.md](https://github.com/serjflint/saitenka/blob/mai
 | `deinflect` | the 🧩 inflection-chain display (Yomitan-derived) | **GPL-3.0** |
 | `images` | inline dictionary images, incl. SVG gaiji (resvglite) | Apache-2.0 |
 | `layout-engine` | optional Rust flexbox tooltip layout backend (taffylite) | Apache-2.0 |
+| [`subtitle-geometry`](../usage/native-subtitles.md) | experimental mpv-native ASS interaction through a system libass | Apache-2.0 core + MIT wrapper |
+| [`subtitle-geometry-bundle`](../usage/native-subtitles.md) | the same mode with a self-contained native runtime | Separate native notices |
 | `telemetry` | OpenTelemetry spans/metrics for performance observability | Apache-2.0 |
 | `linux-keyring` | Linux Secret Service storage for the jimaku key on Python 3.15+ | Apache-2.0 |
 | `full` | `deinflect` + `jmdict` + `telemetry` | **GPL-3.0** |
 
-`images`, `layout-engine`, and `linux-keyring` stay explicit — add them alongside `full`, e.g.
-`uv tool install "saitenka[full,images]"`.
+`images`, `layout-engine`, both `subtitle-geometry` extras, and `linux-keyring` stay explicit — add
+them alongside `full`, e.g. `uv tool install "saitenka[full,images]"`.
 
 Mining prefers *your* dictionaries, so `jmdict` is only a fallback. On Linux, Python 3.13/3.14 install
 Secret Service support by default; Python 3.15+ uses `JIMAKU_API_KEY` or an owner-only

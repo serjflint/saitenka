@@ -82,6 +82,7 @@ nav:
       - Quickstart: start/quickstart.md
   - Usage:
       - Features: usage/features.md
+      - Native mpv subtitles: usage/native-subtitles.md
       - Keyboard shortcuts: usage/shortcuts.md
       - Configuration: usage/configuration.md
       - CLI reference: usage/cli.md

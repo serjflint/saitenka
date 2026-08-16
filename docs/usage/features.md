@@ -38,6 +38,11 @@ saitenka run episode.mkv --color \
 The learning and young colors live under `[palette]` in your config; see
 [configuration](configuration.md).
 
+!!! info "Prefer the subtitle's authored styling?"
+    The experimental [native mpv subtitle mode](native-subtitles.md) leaves an external ASS track
+    rendered by mpv while retaining scanning, tooltips, and mining. It trades Saitenka's per-word
+    subtitle colors for the source's typography.
+
 ## Hover → multi-dictionary tooltip
 
 Move the mouse over any word and a Yomitan-style tooltip opens above it. Each word has its

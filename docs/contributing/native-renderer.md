@@ -1,5 +1,9 @@
 # Future cosmic-text raster backend
 
+This is a possible future backend for Saitenka's dictionary-panel rasterization. It is not the
+native-visible subtitle geometry path: `libasslite` delegates authored ASS layout to libass and returns
+offscreen image layers only for hit-box extraction.
+
 When Saitenka needs a native rasterizer, it should land as a PyO3 extension implementing
 `saitenka.raster.protocol.RasterBackend` with [cosmic-text](https://github.com/pop-os/cosmic-text)
 for shaping, layout, and rasterization. The extension module name and source location are intentionally
