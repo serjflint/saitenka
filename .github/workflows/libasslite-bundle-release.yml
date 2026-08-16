@@ -50,7 +50,6 @@ jobs:
           - {name: linux-x86_64, runner: ubuntu-latest, triplet: x64-linux-dynamic, tag: manylinux_2_28_x86_64, repair: auditwheel, image: "quay.io/pypa/manylinux_2_28_x86_64@sha256:0c87ccb5996dab6c3b7612ee4fda7b80c4ab3c44a86c2541e4a872afdf4f131b"}
           - {name: linux-aarch64, runner: ubuntu-24.04-arm, triplet: arm64-linux-dynamic, tag: manylinux_2_28_aarch64, repair: auditwheel, image: "quay.io/pypa/manylinux_2_28_aarch64@sha256:561427136aabf3787bffb294b3515748241e0962d1527ae28bea1e076bfb9d99"}
           - {name: macos-arm64, runner: macos-14, triplet: arm64-osx-saitenka, tag: macosx_11_0_arm64, repair: delocate, target: "11.0"}
-          - {name: macos-x86_64, runner: macos-15-intel, triplet: x64-osx-saitenka, tag: macosx_10_15_x86_64, repair: delocate, target: "10.15"}
           - {name: windows-x86_64, runner: windows-latest, triplet: x64-windows, tag: win_amd64, repair: delvewheel}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +65,6 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          if [[ "${{ matrix.triplet }}" == x64-* ]]; then brew install nasm; fi
           .vcpkg/bootstrap-vcpkg.sh -disableMetrics
           .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
           .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
