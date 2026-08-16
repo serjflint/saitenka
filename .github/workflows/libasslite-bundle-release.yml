@@ -1,0 +1,139 @@
+name: libasslite bundle release
+
+on:
+  push:
+    tags: ["libasslite-bundle-v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/libasslite-bundle-release.yml"
+      - "libasslite-bundle/**"
+      - "libasslite/**"
+      - "tools/prepare_libass_bundle.py"
+      - "tools/smoke_libasslite_bundle.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_REF: 94a541197763a4f449a1b91478df48c0584a6256
+  SOURCE_DATE_EPOCH: "1759752000"
+
+jobs:
+  build:
+    name: bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: linux-x86_64, runner: ubuntu-latest, triplet: x64-linux-dynamic, tag: linux_x86_64, repair: auditwheel}
+          - {name: linux-aarch64, runner: ubuntu-24.04-arm, triplet: arm64-linux-dynamic, tag: linux_aarch64, repair: auditwheel}
+          - {name: macos-arm64, runner: macos-14, triplet: arm64-osx, tag: macosx_11_0_arm64, repair: delocate}
+          - {name: macos-x86_64, runner: macos-15-intel, triplet: x64-osx, tag: macosx_10_15_x86_64, repair: delocate}
+          - {name: windows-x86_64, runner: windows-latest, triplet: x64-windows, tag: win_amd64, repair: delvewheel}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ env.VCPKG_REF }}
+          path: .vcpkg
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Bootstrap and install native closure (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          .vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
+      - name: Bootstrap and install native closure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          .vcpkg/vcpkg.exe install --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root="$env:RUNNER_TEMP/vcpkg-installed"
+      - name: Stage payload and dependency notices
+        shell: bash
+        run: >-
+          uv run --no-project tools/prepare_libass_bundle.py
+          --install-root "$RUNNER_TEMP/vcpkg-installed"
+          --triplet ${{ matrix.triplet }}
+          --package libasslite-bundle
+      - name: Build reproducibly and retag as a platform wheel
+        shell: bash
+        run: |
+          export LIBASSLITE_BUNDLE_WHEEL_TAG=py3-none-${{ matrix.tag }}
+          uv build --wheel --out-dir dist-a libasslite-bundle
+          uv build --wheel --out-dir dist-b libasslite-bundle
+          cmp dist-a/*.whl dist-b/*.whl
+      - name: Repair Linux loader paths
+        if: matrix.repair == 'auditwheel'
+        shell: bash
+        run: uvx auditwheel repair --wheel-dir repaired dist-a/*.whl
+      - name: Repair macOS loader paths
+        if: matrix.repair == 'delocate'
+        shell: bash
+        run: uvx delocate-wheel -w repaired -v dist-a/*.whl
+      - name: Repair Windows loader paths
+        if: matrix.repair == 'delvewheel'
+        shell: pwsh
+        run: uvx delvewheel repair --wheel-dir repaired (Get-ChildItem dist-a/*.whl).FullName
+      - name: Build the paired libasslite wrapper
+        shell: bash
+        run: |
+          uv python install 3.13
+          uv run --python 3.13 --no-project --with maturin maturin build \
+            --manifest-path libasslite/Cargo.toml --release --locked --out wrapper-dist -i python
+      - name: Smoke bundle discovery and native ABI
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          wheel=("$GITHUB_WORKSPACE"/repaired/*.whl)
+          wrapper=("$GITHUB_WORKSPACE"/wrapper-dist/*.whl)
+          uv run --python 3.13 --no-project --with "${wheel[0]}" --with "${wrapper[0]}" python "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
+          uv run --python 3.13 --no-project --with "${wrapper[0]}" python -c 'import importlib.util; assert importlib.util.find_spec("libasslite_bundle") is None'
+      - name: ASan allocator lifecycle smoke (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          wheel=("$GITHUB_WORKSPACE"/repaired/*.whl)
+          wrapper=("$GITHUB_WORKSPACE"/wrapper-dist/*.whl)
+          LD_PRELOAD="$(cc -print-file-name=libasan.so)" ASAN_OPTIONS=detect_leaks=0 \
+            uv run --python 3.13 --no-project --with "${wheel[0]}" --with "${wrapper[0]}" \
+            python "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-${{ matrix.name }}
+          path: repaired/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - run: uv build --sdist --out-dir dist libasslite-bundle
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bundle-sdist
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [build, sdist]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'testpypi' || 'pypi' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          repository-url: ${{ github.event_name == 'workflow_dispatch' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          skip-existing: ${{ github.event_name == 'workflow_dispatch' }}

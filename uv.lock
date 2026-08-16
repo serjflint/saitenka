@@ -952,6 +952,17 @@ version = "0.1.0"
 source = { editable = "libasslite" }
 
 [[package]]
+name = "libasslite-bundle"
+version = "0.1.0"
+source = { editable = "libasslite-bundle" }
+dependencies = [
+    { name = "libasslite" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "libasslite", specifier = "==0.1.0" }]
+
+[[package]]
 name = "libcst"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2168,6 +2179,10 @@ linux-keyring = [
 subtitle-geometry = [
     { name = "libasslite" },
 ]
+subtitle-geometry-bundle = [
+    { name = "libasslite" },
+    { name = "libasslite-bundle" },
+]
 telemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
@@ -2237,6 +2252,7 @@ requires-dist = [
     { name = "keyring", marker = "python_full_version < '3.15' or sys_platform != 'linux'", specifier = ">=25.7.0" },
     { name = "keyring", marker = "sys_platform == 'linux' and extra == 'linux-keyring'", specifier = ">=25.7.0" },
     { name = "libasslite", marker = "extra == 'subtitle-geometry'", editable = "libasslite" },
+    { name = "libasslite-bundle", marker = "extra == 'subtitle-geometry-bundle'", editable = "libasslite-bundle" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.44.0" },
@@ -2250,6 +2266,7 @@ requires-dist = [
     { name = "rich", specifier = ">=14.0" },
     { name = "saitenka", extras = ["deinflect"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["jmdict"], marker = "extra == 'full'" },
+    { name = "saitenka", extras = ["subtitle-geometry"], marker = "extra == 'subtitle-geometry-bundle'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "deinflect" },
     { name = "saitenka-dict", editable = "saitenka-dict" },
@@ -2259,7 +2276,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect", "layout-engine", "images", "subtitle-geometry", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
+provides-extras = ["deinflect", "layout-engine", "images", "subtitle-geometry", "subtitle-geometry-bundle", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
 [package.metadata.requires-dev]
 codemod = [{ name = "libcst", specifier = ">=1.8.6" }]
