@@ -57,7 +57,8 @@ def prepare(install_root: Path, triplet: str, package: Path) -> dict[str, object
     for copyright_file in sorted((installed / "share").glob("*/copyright")):
         port = copyright_file.parent.name
         notices.append(
-            f"===== {port} =====\n{copyright_file.read_text(errors='replace').rstrip()}\n"
+            f"===== {port} =====\n"
+            f"{copyright_file.read_text(encoding='utf-8', errors='replace').rstrip()}\n"
         )
     if not notices:
         raise RuntimeError("vcpkg installation contains no dependency notices")
