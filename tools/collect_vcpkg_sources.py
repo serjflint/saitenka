@@ -28,7 +28,8 @@ def _files(vcpkg_root: Path, package: Path, triplet: str) -> list[tuple[Path, st
         if path.is_file()
     )
     for name in package_names:
-        port = vcpkg_root / "ports" / name
+        overlay_port = package / "ports" / name
+        port = overlay_port if overlay_port.is_dir() else vcpkg_root / "ports" / name
         if not port.is_dir():
             raise RuntimeError(f"missing vcpkg port recipe: {name}")
         entries.extend(

@@ -67,15 +67,15 @@ jobs:
         shell: bash
         run: |
           .vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
-          .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
+          .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
+          .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --overlay-triplets=libasslite-bundle/triplets --triplet=${{ matrix.triplet }} --x-install-root="$RUNNER_TEMP/vcpkg-installed"
       - name: Bootstrap and install native closure (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           .vcpkg/bootstrap-vcpkg.bat -disableMetrics
-          .vcpkg/vcpkg.exe install --only-downloads --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root="$env:RUNNER_TEMP/vcpkg-installed"
-          .vcpkg/vcpkg.exe install --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root="$env:RUNNER_TEMP/vcpkg-installed"
+          .vcpkg/vcpkg.exe install --only-downloads --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --triplet=${{ matrix.triplet }} --x-install-root="$env:RUNNER_TEMP/vcpkg-installed"
+          .vcpkg/vcpkg.exe install --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --triplet=${{ matrix.triplet }} --x-install-root="$env:RUNNER_TEMP/vcpkg-installed"
       - name: Build and repair inside pinned manylinux
         if: runner.os == 'Linux'
         shell: bash
@@ -88,12 +88,12 @@ jobs:
             -w /work \
             "${{ matrix.image }}" \
             bash -euxo pipefail -c '
-              dnf install -y git zip unzip tar pkgconfig
+              dnf install -y git zip unzip tar pkgconfig autoconf autoconf-archive automake libtool
               /opt/python/cp313-cp313/bin/python -m pip install uv==0.12.0
               UV=/opt/python/cp313-cp313/bin/uv
               .vcpkg/bootstrap-vcpkg.sh -disableMetrics
-              .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root=/runner-temp/vcpkg-installed
-              .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --triplet=${{ matrix.triplet }} --x-install-root=/runner-temp/vcpkg-installed
+              .vcpkg/vcpkg install --only-downloads --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --triplet=${{ matrix.triplet }} --x-install-root=/runner-temp/vcpkg-installed
+              .vcpkg/vcpkg install --x-manifest-root=libasslite-bundle --overlay-ports=libasslite-bundle/ports --triplet=${{ matrix.triplet }} --x-install-root=/runner-temp/vcpkg-installed
               "$UV" run --no-project tools/prepare_libass_bundle.py --install-root /runner-temp/vcpkg-installed --triplet ${{ matrix.triplet }} --package libasslite-bundle
               "$UV" run --no-project tools/collect_vcpkg_sources.py --vcpkg-root .vcpkg --package libasslite-bundle --triplet ${{ matrix.triplet }} --output corresponding-source-${{ matrix.name }}.tar.gz
               "$UV" build --wheel --out-dir dist-a libasslite-bundle

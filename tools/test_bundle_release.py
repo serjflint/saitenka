@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import tarfile
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from collect_vcpkg_sources import collect
 from verify_bundle_uninstall import verify
 from verify_macos_bundle import parse_minos, parse_target
 
-if TYPE_CHECKING:
-    from pathlib import Path
+ROOT = Path(__file__).parents[1]
 
 
 def test_collect_sources_includes_downloads_ports_and_checksums(tmp_path: Path) -> None:
@@ -58,6 +57,45 @@ def test_collect_sources_rejects_binary_cache_without_downloads(tmp_path: Path) 
 
     with pytest.raises(RuntimeError, match="downloads are empty"):
         collect(vcpkg, package, "x64-linux-dynamic", tmp_path / "sources.tar.gz")
+
+
+def test_collect_sources_prefers_the_build_overlay_port(tmp_path: Path) -> None:
+    vcpkg = tmp_path / "vcpkg"
+    (vcpkg / "downloads").mkdir(parents=True)
+    (vcpkg / "downloads" / "libass.tar.gz").write_bytes(b"source")
+    (vcpkg / "ports" / "libass").mkdir(parents=True)
+    (vcpkg / "ports" / "libass" / "portfile.cmake").write_text("ambient provider", encoding="utf-8")
+    package = tmp_path / "package"
+    (package / "ports" / "libass").mkdir(parents=True)
+    (package / "ports" / "libass" / "portfile.cmake").write_text(
+        "explicit provider", encoding="utf-8"
+    )
+    (package / "vcpkg.json").write_text("{}", encoding="utf-8")
+    (package / "NATIVE_SOURCES.json").write_text(
+        json.dumps({"packages": [{"name": "libass", "version": "0.17.5"}]}),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "sources.tar.gz"
+    collect(vcpkg, package, "x64-linux-dynamic", output)
+
+    with tarfile.open(output) as archive:
+        recipe = archive.extractfile("ports/libass/portfile.cmake")
+        assert recipe is not None
+        assert recipe.read() == b"explicit provider"
+
+
+def test_bundle_build_locks_provider_and_linux_build_tools() -> None:
+    workflow = (ROOT / ".github/workflows/libasslite-bundle-release.yml").read_text(
+        encoding="utf-8"
+    )
+    port = (ROOT / "libasslite-bundle/ports/libass/portfile.cmake").read_text(encoding="utf-8")
+
+    assert workflow.count("--overlay-ports=libasslite-bundle/ports") == 6
+    assert "autoconf autoconf-archive automake libtool" in workflow
+    assert "-Dfontconfig=disabled -Dcoretext=enabled" in port
+    assert "-Dfontconfig=disabled -Ddirectwrite=enabled" in port
+    assert "-Dfontconfig=enabled" in port
 
 
 def test_parse_macos_minimum_version() -> None:
