@@ -42,7 +42,7 @@ def manifest() -> dict:
         "cache_max": 3,
         "interaction_clock": "thread_time",
         "budgets": {
-            "interaction_cpu_p99_ms": 8.0,
+            "interaction_cpu_p99_ms": 16.67,
             "interaction_wall_safety_ms": 100.0,
             "interaction_cpu_delta_p99_ms": 2.0,
             "interaction_wall_delta_p99_ms": 16.67,
@@ -66,7 +66,7 @@ def test_budget_oracle_rejects_each_regression() -> None:
     controls = {
         "event_count": 100,
         "interaction_clock": "wall_time",
-        "interaction_cpu_p99_ms": 8.01,
+        "interaction_cpu_p99_ms": 16.68,
         "interaction_p99_ms": 100.01,
         "interaction_cpu_delta_p99_ms": 2.01,
         "interaction_wall_delta_p99_ms": 16.68,

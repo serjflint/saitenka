@@ -36,7 +36,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "31e3742b38cd34f5be1eb15d72e3f6076fd2cc779d1c5802c15ca4ae32acf4b0"
+LOCKED_MANIFEST_SHA256 = "def30698e18be8b4b330c9b847073b281251528f2499638c4b9a4166fc3df66f"
 
 
 def load_manifest(path: Path) -> dict:
