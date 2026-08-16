@@ -195,12 +195,14 @@ jobs:
           name: bundle-sdist
           path: dist/*.tar.gz
 
-  publish:
+  testpypi:
+    name: Publish to TestPyPI (dry-run)
     needs: [verify-tag, build, sdist, sources]
-    if: startsWith(github.ref, 'refs/tags/libasslite-bundle-v')
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
-      name: pypi
+      name: testpypi
+      url: https://test.pypi.org/p/libasslite-bundle
     permissions:
       id-token: write
     steps:
@@ -209,7 +211,31 @@ jobs:
           pattern: bundle-*
           path: dist
           merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    name: Publish to PyPI
+    needs: [verify-tag, build, sdist, sources]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/libasslite-bundle-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/libasslite-bundle
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
 

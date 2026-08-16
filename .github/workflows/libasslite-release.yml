@@ -126,7 +126,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libass9 fonts-noto-cjk
       - name: Install libass (macOS)
         if: runner.os == 'macOS'
-        run: brew install libass
+        run: |
+          brew install libass
+          echo "LIBASSLITE_LIBRARY=$(brew --prefix libass)/lib/libass.dylib" >> "$GITHUB_ENV"
       - name: Install libass (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
