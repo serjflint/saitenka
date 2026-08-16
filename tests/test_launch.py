@@ -84,6 +84,7 @@ def test_native_visible_launch_locks_the_proved_mpv_profile_before_user_override
         "--sub-scale=1",
         "--sub-pos=100",
         "--sub-use-margins=yes",
+        "--sub-ass-video-aspect-override=0",
         "--sub-ass-use-video-data=all",
         "--sub-ass-style-overrides=",
         "--sub-font-provider=auto",

@@ -67,6 +67,9 @@ sub-ass-scale-with-window=no
 sub-scale=1
 sub-pos=100
 sub-use-margins=yes
+# Either value is supported; Saitenka mirrors the observed authored-ASS policy.
+sub-ass-force-margins=no
+sub-ass-video-aspect-override=0
 sub-ass-use-video-data=all
 sub-ass-style-overrides=
 sub-font-provider=auto
@@ -84,11 +87,13 @@ The geometry runtime is selected independently of mpv's bundled or system libass
 introspect mpv's exact libass build and font environment, so a compatible runtime inside the supported
 envelope can still differ at pixel level; this experimental mode does not claim runtime pixel identity.
 
-Supported cues are static and use the mpv profile above, with no video margins, attached/custom fonts,
-or application-level style overrides. Animated or ambiguous ASS, token-mapping failures, a missing or
-non-UTF-8 source, letterboxing, an unsupported font setup, a mismatched attach profile, or an unavailable
-native runtime switch back to the standard Saitenka renderer. The log and report record the stable
-fallback reason; render-profile failures also name the rejected values.
+Supported cues are static and use the mpv profile above, without attached/custom fonts or
+application-level style overrides. Saitenka mirrors mpv's frame, video storage size, pixel aspect,
+letterbox margins, and authored-ASS margin policy, including Retina windows. Animated or ambiguous
+ASS, token-mapping failures, a missing or non-UTF-8 source, an unsupported font setup, a mismatched
+attach profile, or an unavailable native runtime switch back to the standard Saitenka renderer. The
+log and report record the stable fallback reason; render-profile failures also name the rejected
+values.
 
 Geometry is prepared when the cue or render space changes and for a small lookahead window. Hovering,
 scanning, and scrolling reuse those boxes, so interactive 60 FPS behavior does not require rendering

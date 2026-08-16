@@ -49,6 +49,8 @@ type SetFonts = unsafe extern "C" fn(
     c_int,
 );
 type SetSize = unsafe extern "C" fn(*mut AssRendererHandle, c_int, c_int);
+type SetMargins = unsafe extern "C" fn(*mut AssRendererHandle, c_int, c_int, c_int, c_int);
+type SetUseMargins = unsafe extern "C" fn(*mut AssRendererHandle, c_int);
 type SetPixelAspect = unsafe extern "C" fn(*mut AssRendererHandle, f64);
 type RenderFrame = unsafe extern "C" fn(
     *mut AssRendererHandle,
@@ -64,6 +66,8 @@ struct Api {
     free_track: FreeTrack,
     set_frame_size: SetSize,
     set_storage_size: SetSize,
+    set_margins: SetMargins,
+    set_use_margins: SetUseMargins,
     set_pixel_aspect: SetPixelAspect,
     render_frame: RenderFrame,
 }
@@ -133,6 +137,24 @@ fn validate_pixel_aspect(pixel_aspect: Option<f64>) -> PyResult<()> {
     if pixel_aspect.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(PyValueError::new_err(
             "pixel_aspect must be finite and positive",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_margins(frame_size: (i32, i32), margins: (i32, i32, i32, i32)) -> PyResult<()> {
+    let (top, bottom, left, right) = margins;
+    if [top, bottom, left, right]
+        .into_iter()
+        .any(|value| value < 0)
+    {
+        return Err(PyValueError::new_err("margins must be non-negative"));
+    }
+    if i64::from(top) + i64::from(bottom) >= i64::from(frame_size.1)
+        || i64::from(left) + i64::from(right) >= i64::from(frame_size.0)
+    {
+        return Err(PyValueError::new_err(
+            "margins must leave a positive video rectangle",
         ));
     }
     Ok(())
@@ -262,6 +284,10 @@ fn open_native(
         load_symbol(&library, b"ass_set_frame_size\0").map_err(PyRuntimeError::new_err)?;
     let set_storage_size: SetSize =
         load_symbol(&library, b"ass_set_storage_size\0").map_err(PyRuntimeError::new_err)?;
+    let set_margins: SetMargins =
+        load_symbol(&library, b"ass_set_margins\0").map_err(PyRuntimeError::new_err)?;
+    let set_use_margins: SetUseMargins =
+        load_symbol(&library, b"ass_set_use_margins\0").map_err(PyRuntimeError::new_err)?;
     let set_pixel_aspect: SetPixelAspect =
         load_symbol(&library, b"ass_set_pixel_aspect\0").map_err(PyRuntimeError::new_err)?;
     let render_frame: RenderFrame =
@@ -305,6 +331,8 @@ fn open_native(
             free_track,
             set_frame_size,
             set_storage_size,
+            set_margins,
+            set_use_margins,
             set_pixel_aspect,
             render_frame,
         },
@@ -330,7 +358,7 @@ impl AssRenderer {
         })
     }
 
-    #[pyo3(signature = (timestamp_ms, frame_size, storage_size, *, pixel_aspect=None))]
+    #[pyo3(signature = (timestamp_ms, frame_size, storage_size, *, pixel_aspect=None, margins=(0, 0, 0, 0), use_margins=false))]
     fn render(
         &self,
         py: Python<'_>,
@@ -338,10 +366,13 @@ impl AssRenderer {
         frame_size: (i32, i32),
         storage_size: (i32, i32),
         pixel_aspect: Option<f64>,
+        margins: (i32, i32, i32, i32),
+        use_margins: bool,
     ) -> PyResult<AssRenderResult> {
         validate_size("frame_size", frame_size)?;
         validate_size("storage_size", storage_size)?;
         validate_pixel_aspect(pixel_aspect)?;
+        validate_margins(frame_size, margins)?;
         let (layers, detect_change) = py.detach(|| {
             let mut guard = self
                 .native
@@ -353,6 +384,14 @@ impl AssRenderer {
             unsafe {
                 (native.api.set_frame_size)(native.renderer, frame_size.0, frame_size.1);
                 (native.api.set_storage_size)(native.renderer, storage_size.0, storage_size.1);
+                (native.api.set_margins)(
+                    native.renderer,
+                    margins.0,
+                    margins.1,
+                    margins.2,
+                    margins.3,
+                );
+                (native.api.set_use_margins)(native.renderer, i32::from(use_margins));
                 (native.api.set_pixel_aspect)(native.renderer, pixel_aspect.unwrap_or(0.0));
             }
             let mut detect_change = 0;

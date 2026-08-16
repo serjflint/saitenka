@@ -136,7 +136,8 @@ authored external .ass
 
 This preserves the features Saitenka owns while keeping visible typography as close to mpv as the
 public APIs allow. The geometry request carries the authored event identity, timestamp, frame and
-storage sizes, pixel aspect, accepted mpv render profile, rewritten ASS bytes, and token palette.
+storage sizes, pixel aspect, frame margins, authored-ASS margin policy, accepted mpv render profile,
+rewritten ASS bytes, and token palette.
 `LibassGeometryBackend` consumes only that provider-neutral contract and returns copied rectangles;
 native pointers never escape `libasslite`.
 

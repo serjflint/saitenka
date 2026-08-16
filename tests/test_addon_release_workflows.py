@@ -1,3 +1,5 @@
+import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,25 @@ CACHE_ACTION = "actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae"  # v5.0.
 
 def _named_step(workflow: dict, job: str, name: str) -> dict:
     return next(step for step in workflow["jobs"][job]["steps"] if step.get("name") == name)
+
+
+def test_libasslite_release_versions_stay_coherent() -> None:
+    wrapper = tomllib.loads((ROOT / "libasslite" / "pyproject.toml").read_text())
+    bundle = tomllib.loads((ROOT / "libasslite-bundle" / "pyproject.toml").read_text())
+    root = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    vcpkg = json.loads((ROOT / "libasslite-bundle" / "vcpkg.json").read_text())
+    wrapper_version = wrapper["project"]["version"]
+    bundle_version = bundle["project"]["version"]
+
+    assert bundle["project"]["dependencies"] == [f"libasslite=={wrapper_version}"]
+    assert vcpkg["version-string"] == bundle_version
+    assert root["project"]["optional-dependencies"]["subtitle-geometry"] == [
+        f"libasslite=={wrapper_version}"
+    ]
+    assert root["project"]["optional-dependencies"]["subtitle-geometry-bundle"] == [
+        "saitenka[subtitle-geometry]",
+        f"libasslite-bundle=={bundle_version}",
+    ]
 
 
 @pytest.mark.parametrize(
