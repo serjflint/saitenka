@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 from saitenka_dict import KanjiQuery, SearchQuery, SqliteDictionaryStore, TermQuery, Translator
+from saitenka_dict.sqlite_store import _EXACT_TERMS_QUERY
 
 
 def make_legacy_db(path):
@@ -79,6 +80,76 @@ def test_cached_tag_provenance_belongs_to_each_result_record(tmp_path):
 
     assert first.definitions[0].tags[0].source.record_id == 1
     assert second.definitions[0].tags[0].source.record_id == 2
+
+
+def test_exact_terms_requires_a_term_key_in_the_selected_dictionary(tmp_path):
+    path = tmp_path / "dictionary.sqlite"
+    make_legacy_db(path)
+    connection = sqlite3.connect(path)
+    connection.execute("INSERT INTO dictionaries VALUES (2, 'Other', 1)")
+    connection.execute(
+        "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (2, 1, "詠む", "よむ", json.dumps(["to compose"]), "", 1456361),
+    )
+    connection.executemany(
+        "INSERT INTO keys VALUES (?, ?, ?)",
+        [(2, "詠む", 1), (2, "よむ", 1), (2, "詠む", 1)],
+    )
+    connection.commit()
+    connection.close()
+    translator = Translator(SqliteDictionaryStore(path))
+
+    assert translator.exact_terms(("読む", "よむ", "詠む", "読む")) == frozenset({"読む", "詠む"})
+    assert translator.exact_terms(("読む", "詠む"), ("Core",)) == frozenset({"読む"})
+    assert translator.exact_terms(("読む", "詠む"), ("Other",)) == frozenset({"詠む"})
+    assert translator.exact_terms(("", "不存在")) == frozenset()
+
+
+def test_exact_terms_uses_committed_key_index_for_both_schema_layouts(tmp_path):
+    for columns in ("dict_id, key", "key, dict_id"):
+        path = tmp_path / f"dictionary-{columns[0]}.sqlite"
+        connection = sqlite3.connect(path)
+        connection.executescript(
+            f"""
+            CREATE TABLE dictionaries(
+              id INTEGER PRIMARY KEY, title TEXT UNIQUE NOT NULL, import_order INTEGER NOT NULL
+            );
+            CREATE TABLE entries(
+              dict_id INTEGER NOT NULL, id INTEGER NOT NULL, term TEXT NOT NULL,
+              PRIMARY KEY(dict_id, id)
+            );
+            CREATE TABLE keys(dict_id INTEGER NOT NULL, key TEXT NOT NULL, id INTEGER NOT NULL);
+            CREATE INDEX idx_keys ON keys({columns});
+            """
+        )
+        connection.execute("INSERT INTO dictionaries VALUES (1, 'Core', 0)")
+        connection.executemany(
+            "INSERT INTO entries VALUES (?, ?, ?)",
+            [(1, number, f"term-{number}") for number in range(1, 1002)],
+        )
+        connection.executemany(
+            "INSERT INTO keys VALUES (?, ?, ?)",
+            [(1, f"term-{number}", number) for number in range(1, 1002)],
+        )
+        connection.execute("INSERT INTO entries VALUES (1, 1002, '読む')")
+        connection.execute("INSERT INTO keys VALUES (1, '読む', 1002)")
+        connection.execute("ANALYZE")
+        connection.execute("PRAGMA automatic_index=OFF")
+        details = [
+            row[3]
+            for row in connection.execute(
+                f"EXPLAIN QUERY PLAN {_EXACT_TERMS_QUERY}",
+                (json.dumps(["読む"]), json.dumps(["Core"]), json.dumps(["Core"])),
+            )
+        ]
+        connection.close()
+
+        assert any("USING INDEX idx_keys" in detail for detail in details)
+        assert not any(
+            marker in detail
+            for detail in details
+            for marker in ("SCAN k", "SCAN e", "AUTOMATIC", "TEMP B-TREE")
+        )
 
 
 def test_decoded_entry_cache_honors_configured_limit(tmp_path):
