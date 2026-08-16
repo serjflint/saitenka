@@ -4,6 +4,11 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
+CACHE_ACTION = "actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae"  # v5.0.5
+
+
+def _named_step(workflow: dict, job: str, name: str) -> dict:
+    return next(step for step in workflow["jobs"][job]["steps"] if step.get("name") == name)
 
 
 @pytest.mark.parametrize(
@@ -144,4 +149,66 @@ def test_libasslite_releases_allow_only_supported_macos_arm64() -> None:
             "repair": "delocate",
             "target": "11.0",
         }
+    ]
+
+
+def test_bundle_release_caches_only_pinned_source_downloads() -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "libasslite-bundle-release.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cache = _named_step(workflow, "build", "Cache vcpkg source downloads")
+
+    assert cache["uses"] == CACHE_ACTION
+    assert cache["with"] == {
+        "path": ".vcpkg/downloads",
+        "key": (
+            "bundle-vcpkg-downloads-${{ runner.os }}-${{ matrix.triplet }}-"
+            "${{ env.VCPKG_REF }}-${{ hashFiles('libasslite-bundle/vcpkg.json', "
+            "'libasslite-bundle/ports/**', 'libasslite-bundle/triplets/**') }}"
+        ),
+    }
+
+
+def test_windows_libass_jobs_cache_downloads_by_allowlisted_vcpkg_revision() -> None:
+    observed = []
+    for workflow_name, job in [("ci.yml", "libasslite"), ("libasslite-release.yml", "smoke")]:
+        workflow = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+        )
+        revision = _named_step(workflow, job, "Resolve hosted vcpkg revision")
+        cache = _named_step(workflow, job, "Cache vcpkg source downloads")
+        observed.append(
+            {
+                "workflow": workflow_name,
+                "downloads_env": workflow["jobs"][job]["env"]["VCPKG_DOWNLOADS"],
+                "downloads_initialized": "New-Item -ItemType Directory -Force" in revision["run"],
+                "revision_if": revision["if"],
+                "revision_allowlisted": "^[0-9a-f]{40}$" in revision["run"],
+                "cache_if": cache["if"],
+                "cache_action": cache["uses"],
+                "cache_inputs": cache["with"],
+            }
+        )
+
+    expected = {
+        "downloads_env": "${{ runner.temp }}/vcpkg-downloads",
+        "downloads_initialized": True,
+        "revision_if": "runner.os == 'Windows'",
+        "revision_allowlisted": True,
+        "cache_if": "runner.os == 'Windows'",
+        "cache_action": CACHE_ACTION,
+        "cache_inputs": {
+            "path": "${{ runner.temp }}/vcpkg-downloads",
+            "key": (
+                "vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-"
+                "${{ steps.vcpkg-revision.outputs.revision }}"
+            ),
+        },
+    }
+    assert observed == [
+        {"workflow": "ci.yml", **expected},
+        {"workflow": "libasslite-release.yml", **expected},
     ]

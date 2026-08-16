@@ -114,6 +114,8 @@ jobs:
   libasslite:
     name: libasslite (${{ matrix.os }}, ${{ matrix.py }})
     runs-on: ${{ matrix.os }}
+    env:
+      VCPKG_DOWNLOADS: ${{ runner.temp }}/vcpkg-downloads
     strategy:
       fail-fast: false
       matrix:
@@ -124,6 +126,23 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
+      - name: Resolve hosted vcpkg revision
+        id: vcpkg-revision
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:VCPKG_DOWNLOADS" | Out-Null
+          $revision = (git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "vcpkg revision is not a lowercase Git SHA"
+          }
+          "revision=$revision" | Out-File $env:GITHUB_OUTPUT -Append
+      - name: Cache vcpkg source downloads
+        if: runner.os == 'Windows'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ runner.temp }}/vcpkg-downloads
+          key: vcpkg-downloads-${{ runner.os }}-${{ runner.arch }}-${{ steps.vcpkg-revision.outputs.revision }}
       - name: Install libass (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libass9 fonts-noto-cjk
