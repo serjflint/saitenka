@@ -240,6 +240,8 @@ jobs:
   sources:
     needs: [verify-tag, build]
     runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
     permissions:
       contents: write
     steps:
