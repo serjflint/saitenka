@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "denominator": {
+    "case_count": 4,
+    "contract_sha256": "610606e6552a131c44191569bb39ac4729304c677bce0b288a4d526c5f2e8a8b"
+  },
+  "budgets": {
+    "warm_samples": 1000,
+    "cold_process_starts": 30,
+    "cold_geometry_p95_us": 100000,
+    "static_render_p99_us": 50000,
+    "cadence_fps": 24,
+    "cadence_duration_ms": 2000,
+    "cadence_min_unique_frames": 24,
+    "cadence_max_skipped_frames": 0
+  },
+  "cases": [
+    {
+      "id": "plain-static",
+      "timestamp_ms": 1500,
+      "events": [
+        {
+          "interaction": "primary",
+          "line": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,dialogue,0,0,0,,日本語の字幕を読む。"
+        }
+      ]
+    },
+    {
+      "id": "multiline-static",
+      "timestamp_ms": 1500,
+      "events": [
+        {
+          "interaction": "primary",
+          "line": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,dialogue,0,0,0,,最初の行です。\\N次の行も読みます。"
+        }
+      ]
+    },
+    {
+      "id": "source-marked-auxiliary",
+      "timestamp_ms": 1500,
+      "events": [
+        {
+          "interaction": "primary",
+          "line": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,dialogue,0,0,0,,日本語を勉強する。"
+        },
+        {
+          "interaction": "source-marked-auxiliary",
+          "line": "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,reading,0,0,0,,{\\pos(640,560)}にほんご"
+        }
+      ]
+    },
+    {
+      "id": "ambiguous-positioned-text",
+      "timestamp_ms": 1500,
+      "events": [
+        {
+          "interaction": "ambiguous-disabled",
+          "line": "Dialogue: 1,0:00:01.00,0:00:03.00,Sign,unknown,0,0,0,,{\\pos(640,120)}東京都"
+        }
+      ]
+    }
+  ],
+  "animated": {
+    "timestamp_ms": 1000,
+    "line": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,animated,0,0,0,,{\\move(300,600,900,600)}動く字幕"
+  }
+}
