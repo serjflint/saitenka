@@ -254,6 +254,22 @@ def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
     assert reader.sub_picker.open
 
 
+def test_file_load_separates_picker_toggle_batches(monkeypatch):
+    reader, ipc = _reader(path="/v/ep.mkv")
+    reader.configure_sub_picker(_lister([]))
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    ipc.events = [
+        {"event": "client-message", "args": [SUB_PICKER_MSG]},
+        {"event": "file-loaded"},
+        {"event": "client-message", "args": [SUB_PICKER_MSG]},
+    ]
+
+    reader._drain_events()
+
+    assert not reader.sub_picker.open
+    assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
+
+
 @pytest.mark.parametrize(
     ("size", "expected"),
     [(0, "—"), (512, "512 B"), (2048, "2 K"), (3 * 1024 * 1024, "3.0 M")],
