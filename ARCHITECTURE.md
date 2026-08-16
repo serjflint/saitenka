@@ -108,7 +108,7 @@ protocol-shaped class from being mistaken for production swappability.
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
 | Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
-| Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; Pillow is the default and unsupported sources fail closed. |
+| Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; unsupported inputs atomically fall back to the Pillow renderer. |
 
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
 `saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
@@ -142,8 +142,9 @@ native pointers never escape `libasslite`.
 
 The current accepted envelope is deliberately static and narrow. Known unsupported inputs—animated
 or ambiguous ASS, unsupported source encodings, missing source bytes, attached/custom fonts, and
-rejected mpv render settings—remain visible through mpv but noninteractive. A provider failure has the
-same result. Saitenka never replaces a valid native subtitle with its shadow render. It cannot inspect
+rejected mpv render settings—atomically return pixel and hit-box ownership to the standard Saitenka
+renderer. Provider failures do the same, preserving scanning and tooltips rather than leaving a visible
+but noninteractive subtitle. Saitenka never displays its ID-colored shadow render. It cannot inspect
 mpv's exact libass build and font environment, so the separately selected geometry runtime may still
 differ at pixel level inside that envelope; the [user guide](docs/usage/native-subtitles.md#current-supported-envelope)
 documents this experimental limitation.
