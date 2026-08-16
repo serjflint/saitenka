@@ -79,7 +79,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y mpv xvfb
 
-      # `poe smoke-live` = SAITENKA_LIVE=1 PYTHON_GIL=0 pytest -p no:xdist tests/test_live_mpv.py.
+      # `poe smoke-live` exercises the real mpv interaction and ASS-decoding differential tests.
       # The live test is selected by that env-gated skipif + path, not a marker, so target it the same
       # way the local task does rather than a `-m` expression (which would match zero tests).
       - name: GUI tier (Linux/Xvfb, real mpv)
