@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786858414034,
+  "lastUpdate": 1786858504019,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5585,6 +5585,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.421696,
             "range": "3 replicas; min 1.20098; max 2.6383; MAD 0.220718; worst 2.6383",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8cc21f8a37c8a81fc9a2d9ef741fe72d9330b81d",
+          "message": "Merge pull request #364 from serjflint/issue-363\n\nfeat(subtitles): add opt-in native libass geometry",
+          "timestamp": "2026-08-16T08:33:35+03:00",
+          "tree_id": "02c1f859c6bacc03e1d5fff051a86a05f8bd7da2",
+          "url": "https://github.com/serjflint/saitenka/commit/8cc21f8a37c8a81fc9a2d9ef741fe72d9330b81d"
+        },
+        "date": 1786858502938,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.371059,
+            "range": "3 replicas; min 6.27234; max 6.54763; MAD 0.098718",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.980205,
+            "range": "3 replicas; min 8.63164; max 9.57856; MAD 0.348566; worst 9.57856",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 19.524247,
+            "range": "3 replicas; min 17.6685; max 19.7655; MAD 0.241287",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.695138,
+            "range": "3 replicas; min 17.9622; max 20.0322; MAD 0.337075; worst 20.0322",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 18.070327,
+            "range": "3 replicas; min 16.4253; max 19.6229; MAD 1.55253",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.164257,
+            "range": "3 replicas; min 0.132005; max 0.174418; MAD 0.010161; worst 0.174418",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 42.236024,
+            "range": "3 replicas; min 38.7326; max 142.801; MAD 3.50338; worst 142.801",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.890902,
+            "range": "3 replicas; min 2.286; max 3.28649; MAD 0.39559; worst 3.28649",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.24706,
+            "range": "3 replicas; min 1.06113; max 1.39404; MAD 0.146978; worst 1.39404",
             "unit": "ms"
           }
         ]
