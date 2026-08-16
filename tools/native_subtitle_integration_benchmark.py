@@ -17,6 +17,7 @@ import psutil
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.panel import Definition, Entry
 from saitenka.subtitles import Cue, CueIndex
 from saitenka.subtitles.libass_backend import LibassGeometryBackend
 
@@ -56,7 +57,7 @@ def _time(milliseconds: int) -> str:
 
 
 def _source(count: int) -> tuple[bytes, tuple[tuple[int, int, str], ...]]:
-    cues = tuple((1_000 + i * 2_000, 2_500 + i * 2_000, f"語{i:03d}") for i in range(count))
+    cues = tuple((1_000 + i * 2_000, 2_500 + i * 2_000, f"語 {i:03d}") for i in range(count))
     events = "".join(
         f"Dialogue: 0,{_time(start)},{_time(end)},Default,,0,0,0,,{text}\n"
         for start, end, text in cues
@@ -82,6 +83,11 @@ def evaluate(report: dict, manifest: dict) -> bool:
         and report["prefetch_cache_entries"] <= manifest["cache_max"]
         and report["presented"] == manifest["event_count"]
         and report["completed"] == manifest["event_count"]
+        and report["geometry_apply_count"] == report["ready_before_presented"]
+        and report["hit_test_count"] == report["geometry_apply_count"]
+        and report["focus_draw_count"] == report["geometry_apply_count"]
+        and report["tooltip_open_count"] == report["geometry_apply_count"]
+        and report["tooltip_scroll_count"] == report["geometry_apply_count"]
         and report["failures"] == 0
         and report["last_error"] is None
         and report["superseded"] == 0
@@ -96,6 +102,7 @@ def evaluate(report: dict, manifest: dict) -> bool:
 
 class _IPC:
     def __init__(self) -> None:
+        self.commands: list[tuple] = []
         self.props = {
             "sid": 1,
             "sub-start": 1.0,
@@ -118,6 +125,7 @@ class _IPC:
         }
 
     def command(self, *args):
+        self.commands.append(args)
         if args and args[0] == "get_property":
             return {"error": "success", "data": self.props.get(args[1])}
         return {"error": "success", "data": None}
@@ -136,18 +144,58 @@ def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> Reade
     )
 
 
-def _present(reader: Reader, text: str, *, native: bool) -> None:
+class _TallDictionary:
+    def entry_for(self, token, inflected=None, *, extra_terms=()):  # noqa: ARG002
+        return Entry(
+            headword=[token.surface],
+            reading=token.reading or token.surface,
+            defs=[Definition("辞書", [("定義\n" * 20).rstrip()])],
+        )
+
+    def has_term(self, *_forms):
+        return False
+
+
+def _present(reader: Reader, text: str, *, native: bool) -> bool:
     reader.set_subtitle(text)
     if native:
         assert reader.native_geometry is not None
-        reader.native_geometry.apply(reader)
+        return reader.native_geometry.apply(reader)
+    return bool(reader.boxes)
 
 
-def _focus(reader: Reader) -> None:
-    if reader.boxes:
-        reader.hover = 0
-        reader._draw_subtitle()
-        reader.hover = -1
+def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, bool, bool]:
+    if not reader.boxes:
+        return False, False, False
+    box = reader.boxes[0]
+    ox, oy = reader.sub_origin
+    hit = reader._hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
+    before = len(ipc.commands)
+    reader.hover = box.index
+    reader._draw_subtitle()
+    commands = ipc.commands[before:]
+    focus = (
+        any(command[:3] == ("osd-overlay", 1_001, "ass-events") for command in commands)
+        if native
+        else True
+    )
+    reader._show_tooltip(box.index)
+    opened = reader._tip_state is not None
+    return hit, focus, opened
+
+
+def _scroll_and_close_tooltip(reader: Reader) -> bool:
+    opened = reader._tip_state is not None
+    reader._scroll_tip(1)
+    scrolled = (
+        opened
+        and reader._scrolled_this_tick
+        and reader._tip_state is not None
+        and reader._tip_scroll > 0
+    )
+    reader._teardown_tip()
+    reader.hover = -1
+    return scrolled
 
 
 def run(manifest: dict, *, library_path: Path | None = None) -> dict:
@@ -166,6 +214,8 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         native_ipc = _IPC()
         baseline = _reader(baseline_ipc)
         native = _reader(native_ipc, backend=backend)
+        baseline.dict_set = _TallDictionary()
+        native.dict_set = _TallDictionary()
         assert native.native_geometry is not None
         native.native_geometry.set_source(source_path, reader=native)
         index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
@@ -173,6 +223,11 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         latencies: list[float] = []
         baseline_latencies: list[float] = []
         cadence_misses = 0
+        geometry_apply_count = 0
+        hit_test_count = 0
+        focus_draw_count = 0
+        tooltip_open_count = 0
+        tooltip_scroll_count = 0
         interval_ns = int(manifest["presentation_interval_ms"] * 1_000_000)
         deadline = time.perf_counter_ns()
         for cue_index, (start, end, text) in enumerate(cues):
@@ -194,13 +249,24 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             _present(baseline, text, native=False)
             baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
             started = time.perf_counter_ns()
-            _present(native, text, native=True)
+            applied = _present(native, text, native=True)
+            geometry_apply_count += int(applied)
             latencies.append((time.perf_counter_ns() - started) / 1_000_000)
             started = time.perf_counter_ns()
-            _focus(baseline)
+            _open_tooltip(baseline, baseline_ipc, native=False)
             baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
             started = time.perf_counter_ns()
-            _focus(native)
+            hit, focus, opened = _open_tooltip(native, native_ipc, native=True)
+            hit_test_count += int(hit)
+            focus_draw_count += int(focus)
+            tooltip_open_count += int(opened)
+            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            _scroll_and_close_tooltip(baseline)
+            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            scrolled = _scroll_and_close_tooltip(native)
+            tooltip_scroll_count += int(scrolled)
             latencies.append((time.perf_counter_ns() - started) / 1_000_000)
         assert native.native_geometry.worker.wait_idle(timeout=30)
         stats = native.native_geometry.worker.stats
@@ -235,6 +301,12 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "ready_before_presentation_ratio": (
             stats.ready_before_presented / stats.presented if stats.presented else 0.0
         ),
+        "ready_before_presented": stats.ready_before_presented,
+        "geometry_apply_count": geometry_apply_count,
+        "hit_test_count": hit_test_count,
+        "focus_draw_count": focus_draw_count,
+        "tooltip_open_count": tooltip_open_count,
+        "tooltip_scroll_count": tooltip_scroll_count,
         "submitted": stats.submitted,
         "completed": stats.completed,
         "prefetched": stats.prefetched,
