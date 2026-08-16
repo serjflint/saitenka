@@ -526,6 +526,8 @@ def apply_deps(reader: Reader, deps: dict) -> None:
 
     analysis_overlay.on_vocabulary_changed(reader)
     if reader.sub_text:  # re-tokenise + re-score the CURRENT cue so coloring appears now
+        if reader.native_geometry is not None:
+            reader.native_geometry.invalidate(reader)
         reader.set_subtitle(reader.sub_text)
     if reader.anki is not None:
         # Backfill ⊕→✓ from past mining once Anki answers — off the critical path so a not-yet-up

@@ -1,0 +1,353 @@
+"""Post-integration evidence for the opt-in native-visible geometry path."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import platform
+import statistics
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+
+import psutil
+
+from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+from saitenka.app.controller import Reader
+from saitenka.panel import Definition, Entry
+from saitenka.subtitles import Cue, CueIndex
+from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+if TYPE_CHECKING:
+    from saitenka.mpvio.ipc import MpvIPC
+
+STYLE = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,1,2,10,10,30,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+LOCKED_MANIFEST_SHA256 = "f027eb59b6013d000a1dc36e8d2d0b1f72a7561eee40325686b2168d22000b5e"
+
+
+def load_manifest(path: Path) -> dict:
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != LOCKED_MANIFEST_SHA256:
+        raise ValueError("native subtitle integration manifest changed without re-locking")
+    manifest = json.loads(data)
+    if manifest.get("schema") != 1:
+        raise ValueError("unsupported native subtitle integration manifest schema")
+    return manifest
+
+
+def _time(milliseconds: int) -> str:
+    seconds, milliseconds = divmod(milliseconds, 1_000)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}.{milliseconds // 10:02d}"
+
+
+def _source(count: int) -> tuple[bytes, tuple[tuple[int, int, str], ...]]:
+    cues = tuple((1_000 + i * 2_000, 2_500 + i * 2_000, f"語 {i:03d}") for i in range(count))
+    events = "".join(
+        f"Dialogue: 0,{_time(start)},{_time(end)},Default,,0,0,0,,{text}\n"
+        for start, end, text in cues
+    )
+    return (STYLE + events).encode(), cues
+
+
+def _percentile(samples: list[float], quantile: float) -> float:
+    assert samples
+    ordered = sorted(samples)
+    return ordered[min(len(ordered) - 1, max(0, round((len(ordered) - 1) * quantile)))]
+
+
+def evaluate(report: dict, manifest: dict) -> bool:
+    budgets = manifest["budgets"]
+    return bool(
+        report["event_count"] == manifest["event_count"]
+        and report["interaction_p99_ms"] <= budgets["interaction_p99_ms"]
+        and report["interaction_delta_p99_ms"] <= budgets["interaction_delta_p99_ms"]
+        and report["ready_before_presentation_ratio"] >= budgets["ready_before_presentation_ratio"]
+        and report["retained_rss_growth_mib"] <= budgets["retained_rss_growth_mib"]
+        and report["result_cache_entries"] <= manifest["cache_max"]
+        and report["prefetch_cache_entries"] <= manifest["cache_max"]
+        and report["presented"] == manifest["event_count"]
+        and report["completed"] == manifest["event_count"]
+        and report["geometry_apply_count"] == report["ready_before_presented"]
+        and report["hit_test_count"] == report["geometry_apply_count"]
+        and report["focus_draw_count"] == report["geometry_apply_count"]
+        and report["tooltip_open_count"] == report["geometry_apply_count"]
+        and report["tooltip_scroll_count"] == report["geometry_apply_count"]
+        and report["failures"] == 0
+        and report["last_error"] is None
+        and report["superseded"] == 0
+        and report["prefetch_dropped"] == 0
+        and report["cadence_misses"] == 0
+        and report["source_clear_current"] is False
+        and report["source_clear_hit_count"] == 0
+        and report["profile_switch_cache_entries"] == 0
+        and report["close_completed"] is True
+    )
+
+
+class _IPC:
+    def __init__(self) -> None:
+        self.commands: list[tuple] = []
+        self.props = {
+            "sid": 1,
+            "sub-start": 1.0,
+            "sub-end": 2.5,
+            "time-pos": 1.1,
+            "pause": True,
+            "osd-dimensions": {"w": 1280, "h": 720},
+            "video-out-params": {"dw": 1280, "dh": 720, "w": 1280, "h": 720, "par": 1.0},
+            "options/sub-ass-override": "no",
+            "options/sub-ass-scale-with-window": False,
+            "options/sub-scale": 1.0,
+            "options/sub-pos": 100.0,
+            "options/sub-use-margins": True,
+            "options/sub-ass-use-video-data": "all",
+            "options/sub-ass-vsfilter-aspect-compat": None,
+            "options/sub-ass-style-overrides": [],
+            "options/sub-font-provider": "auto",
+            "options/embeddedfonts": False,
+            "options/sub-fonts-dir": "",
+        }
+
+    def command(self, *args):
+        self.commands.append(args)
+        if args and args[0] == "get_property":
+            return {"error": "success", "data": self.props.get(args[1])}
+        return {"error": "success", "data": None}
+
+    def close(self) -> None:
+        pass
+
+
+def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> Reader:
+    geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
+    return Reader(
+        cast("MpvIPC", ipc),
+        options=ReaderOptions(subtitle_geometry=geometry, prefetch=False),
+        renderer=None,
+        geometry_backend=backend,
+    )
+
+
+class _TallDictionary:
+    def entry_for(self, token, inflected=None, *, extra_terms=()):  # noqa: ARG002
+        return Entry(
+            headword=[token.surface],
+            reading=token.reading or token.surface,
+            defs=[Definition("辞書", [("定義\n" * 20).rstrip()])],
+        )
+
+    def has_term(self, *_forms):
+        return False
+
+
+def _present(reader: Reader, text: str, *, native: bool) -> bool:
+    reader.set_subtitle(text)
+    if native:
+        assert reader.native_geometry is not None
+        return reader.native_geometry.apply(reader)
+    return bool(reader.boxes)
+
+
+def _open_tooltip(reader: Reader, ipc: _IPC, *, native: bool) -> tuple[bool, bool, bool]:
+    if not reader.boxes:
+        return False, False, False
+    box = reader.boxes[0]
+    ox, oy = reader.sub_origin
+    hit = reader._hit(ox + box.x + box.w / 2, oy + box.y + box.h / 2) == box.index
+    before = len(ipc.commands)
+    reader.hover = box.index
+    reader._draw_subtitle()
+    commands = ipc.commands[before:]
+    focus = (
+        any(command[:3] == ("osd-overlay", 1_001, "ass-events") for command in commands)
+        if native
+        else True
+    )
+    reader._show_tooltip(box.index)
+    opened = reader._tip_state is not None
+    return hit, focus, opened
+
+
+def _scroll_and_close_tooltip(reader: Reader) -> bool:
+    opened = reader._tip_state is not None
+    reader._scroll_tip(1)
+    scrolled = (
+        opened
+        and reader._scrolled_this_tick
+        and reader._tip_state is not None
+        and reader._tip_scroll > 0
+    )
+    reader._teardown_tip()
+    reader.hover = -1
+    return scrolled
+
+
+def run(manifest: dict, *, library_path: Path | None = None) -> dict:
+    count = int(manifest["event_count"])
+    source, cues = _source(count)
+    backend = LibassGeometryBackend(
+        library_path=library_path,
+        renderer_cache_max=int(manifest["cache_max"]),
+    )
+    process = psutil.Process()
+    rss_before = process.memory_info().rss
+    with tempfile.TemporaryDirectory(prefix="saitenka-stage-f-") as raw_workspace:
+        source_path = Path(raw_workspace) / "integration.ass"
+        source_path.write_bytes(source)
+        baseline_ipc = _IPC()
+        native_ipc = _IPC()
+        baseline = _reader(baseline_ipc)
+        native = _reader(native_ipc, backend=backend)
+        baseline.dict_set = _TallDictionary()
+        native.dict_set = _TallDictionary()
+        assert native.native_geometry is not None
+        native.native_geometry.set_source(source_path, reader=native)
+        index = CueIndex([Cue(start / 1_000, end / 1_000, text) for start, end, text in cues])
+        native._sub_index = index
+        latencies: list[float] = []
+        baseline_latencies: list[float] = []
+        cadence_misses = 0
+        geometry_apply_count = 0
+        hit_test_count = 0
+        focus_draw_count = 0
+        tooltip_open_count = 0
+        tooltip_scroll_count = 0
+        interval_ns = int(manifest["presentation_interval_ms"] * 1_000_000)
+        deadline = time.perf_counter_ns()
+        for cue_index, (start, end, text) in enumerate(cues):
+            deadline += interval_ns if cue_index else 0
+            remaining = deadline - time.perf_counter_ns()
+            if remaining > 0:
+                time.sleep(remaining / 1_000_000_000)
+            elif -remaining > interval_ns:
+                cadence_misses += 1
+            for ipc in (baseline_ipc, native_ipc):
+                ipc.props.update(
+                    {
+                        "sub-start": start / 1_000,
+                        "sub-end": end / 1_000,
+                        "time-pos": (start + 1) / 1_000,
+                    }
+                )
+            started = time.perf_counter_ns()
+            _present(baseline, text, native=False)
+            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            applied = _present(native, text, native=True)
+            geometry_apply_count += int(applied)
+            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            _open_tooltip(baseline, baseline_ipc, native=False)
+            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            hit, focus, opened = _open_tooltip(native, native_ipc, native=True)
+            hit_test_count += int(hit)
+            focus_draw_count += int(focus)
+            tooltip_open_count += int(opened)
+            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            _scroll_and_close_tooltip(baseline)
+            baseline_latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+            started = time.perf_counter_ns()
+            scrolled = _scroll_and_close_tooltip(native)
+            tooltip_scroll_count += int(scrolled)
+            latencies.append((time.perf_counter_ns() - started) / 1_000_000)
+        assert native.native_geometry.worker.wait_idle(timeout=30)
+        stats = native.native_geometry.worker.stats
+        last_error = native.subtitle_pipeline.last_error
+        rss_retained = process.memory_info().rss
+        native.use_tokenizer(native.tokenizer)
+        profile_switch_cache_entries = sum(
+            (
+                native.native_geometry.worker.stats.result_cache_entries,
+                native.native_geometry.worker.stats.prefetch_cache_entries,
+            )
+        )
+        rss_after_profile_switch = process.memory_info().rss
+        native.native_geometry.set_source(None, reader=native)
+        source_clear_current = native.subtitle_pipeline.current is not None
+        source_clear_hit_count = len(native.boxes)
+        baseline.close()
+        native.close()
+    close_completed = backend.closed
+    baseline_p99 = _percentile(baseline_latencies, 0.99)
+    interaction_p99 = _percentile(latencies, 0.99)
+    report = {
+        "schema": 1,
+        "platform": platform.platform(),
+        "python": sys.version,
+        "event_count": count,
+        "interaction_samples_ms": latencies,
+        "interaction_p50_ms": statistics.median(latencies),
+        "interaction_p99_ms": interaction_p99,
+        "interaction_baseline_p99_ms": baseline_p99,
+        "interaction_delta_p99_ms": max(0.0, interaction_p99 - baseline_p99),
+        "ready_before_presentation_ratio": (
+            stats.ready_before_presented / stats.presented if stats.presented else 0.0
+        ),
+        "ready_before_presented": stats.ready_before_presented,
+        "geometry_apply_count": geometry_apply_count,
+        "hit_test_count": hit_test_count,
+        "focus_draw_count": focus_draw_count,
+        "tooltip_open_count": tooltip_open_count,
+        "tooltip_scroll_count": tooltip_scroll_count,
+        "submitted": stats.submitted,
+        "completed": stats.completed,
+        "prefetched": stats.prefetched,
+        "superseded": stats.superseded,
+        "failures": stats.failures,
+        "last_error": last_error,
+        "prefetch_dropped": stats.prefetch_dropped,
+        "presented": stats.presented,
+        "cadence_misses": cadence_misses,
+        "result_cache_entries": stats.result_cache_entries,
+        "prefetch_cache_entries": stats.prefetch_cache_entries,
+        "profile_switch_cache_entries": profile_switch_cache_entries,
+        "source_clear_current": source_clear_current,
+        "source_clear_hit_count": source_clear_hit_count,
+        "close_completed": close_completed,
+        "rss_before_bytes": rss_before,
+        "rss_retained_bytes": rss_retained,
+        "rss_after_profile_switch_bytes": rss_after_profile_switch,
+        "retained_rss_growth_mib": max(
+            0, rss_retained - rss_before, rss_after_profile_switch - rss_before
+        )
+        / 1024
+        / 1024,
+    }
+    report["integration_budgets_passed"] = evaluate(report, manifest)
+    report["rss_after_close_bytes"] = process.memory_info().rss
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--library-path", type=Path)
+    args = parser.parse_args()
+    manifest = load_manifest(args.manifest)
+    report = run(manifest, library_path=args.library_path)
+    args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    return 0 if report["integration_budgets_passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

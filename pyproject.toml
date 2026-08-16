@@ -53,6 +53,9 @@ layout-engine = ["taffylite>=0.1.0"]
 # LICENSING.md), kept OUT of `full` so the default install stays Apache-clean and pure-Python. Without
 # it, import stores no media and the renderer falls back to ▢ — fully additive.
 images = ["resvglite>=0.2.0"]
+# Native-visible ASS interaction. The wrapper stays separate from the Apache-2.0 core package and
+# runtime-loads either an explicit or system libass.
+subtitle-geometry = ["libasslite==0.1.0"]
 # JMdict English fallback (JMdict via jamdict). Used for hover tooltips when NO user dictionary is
 # configured, and as the mined-card gloss source when a word isn't in your dicts. Optional so the
 # default install never builds jamdict-data — an unmaintained, wheel-less sdist that fails to build
@@ -95,6 +98,7 @@ saitenka = "saitenka.app.cli:main"
 saitenka-deinflect = { path = "deinflect", editable = true }
 ankiconnect-client = { path = "ankiconnect-client", editable = true }
 saitenka-dict = { path = "saitenka-dict", editable = true }
+libasslite = { path = "libasslite", editable = true }
 
 [tool.uv]
 # Store the default project env in uv's managed cache (~/.cache/uv/environments-v2) and leave a
@@ -190,6 +194,7 @@ DEP002 = [
     "jamdict-data-fix", # Windows drop-in for jamdict-data (never imported)
     "saitenka", # self-reference from the `full`/`minimal` convenience extras
     "saitenka-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
+    "libasslite",       # optional wrapper loaded dynamically after doctor/runtime selection
     "filelock",         # declared ahead of use for the planned Windows mandatory-lock work; not yet
                         # imported. Remove IF that work is dropped.
 ]

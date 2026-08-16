@@ -64,9 +64,10 @@ A real mpv-window screenshot proving the composite is at `tests/artifacts/mpv_li
 
 ## MVP reader — subtitles + hover tooltip
 
-`examples/mpv_reader.py` is the working MVP: mpv plays a video, we hide its native subs and draw our
-own SubMiner-style subtitle (with per-word hitboxes), poll the mouse, and on **hover** look the word up
-(fugashi lemma → JMdict via jamdict) and draw a Yomitan-like tooltip — all in mpv's OSD surface.
+The default reader hides native subs and draws a SubMiner-style subtitle with per-word hitboxes. The
+opt-in native-visible experiment instead leaves authored external ASS rendering with mpv/libass and
+derives hit boxes on a bounded background worker; Pillow remains authoritative by default. On hover,
+the reader looks the word up and draws its tooltip in mpv's OSD surface.
 
 ```bash
 uv run python examples/mpv_reader.py video.mkv --sub-file jp.srt   # hover words with the mouse

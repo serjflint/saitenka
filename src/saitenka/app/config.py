@@ -310,6 +310,24 @@ class PerfOptions:
     )
 
 
+@dataclass(frozen=True)
+class SubtitleGeometryOptions:
+    """Opt-in native-visible subtitle interaction backed by shadow libass geometry."""
+
+    native_visible: bool = field(
+        default=False,
+        metadata={"help": "Keep mpv subtitles visible and derive hover geometry with libass."},
+    )
+    library_path: str | None = field(
+        default=None,
+        metadata={"help": "Optional explicit path to the system libass library."},
+    )
+    cache_max: int = field(default=3, metadata={"help": "Current/lookahead geometry cache bound."})
+    lookahead: int = field(
+        default=2, metadata={"help": "Static authored ASS cues to render ahead."}
+    )
+
+
 # Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).
 _OPTION_GROUPS: dict[str, str] = {
     **{f.name: "keys" for f in fields(KeyOptions)},
@@ -318,6 +336,7 @@ _OPTION_GROUPS: dict[str, str] = {
     **{f.name: "translation" for f in fields(TranslationOptions)},
     **{f.name: "panels" for f in fields(PanelOptions)},
     **{f.name: "perf" for f in fields(PerfOptions)},
+    **{f.name: "subtitle_geometry" for f in fields(SubtitleGeometryOptions)},
 }
 
 
@@ -332,6 +351,7 @@ class ReaderOptions:
     stats: StatsOptions = StatsOptions()
     panels: PanelOptions = PanelOptions()
     perf: PerfOptions = PerfOptions()
+    subtitle_geometry: SubtitleGeometryOptions = SubtitleGeometryOptions()
     prefetch: bool = True
     resync: bool = True  # auto-resync jimaku-sourced subs via alass/ffsubsync
     overlay_id_base: int = 1  # shift physical mpv overlay ids to coexist with other scripts
@@ -346,7 +366,7 @@ class ReaderOptions:
             self.stats,
             self.panels,
         )
-        perf = self.perf
+        perf, subtitle_geometry = self.perf, self.subtitle_geometry
         prefetch, resync, overlay_id_base = self.prefetch, self.resync, self.overlay_id_base
         for name, value in kw.items():
             group = _OPTION_GROUPS.get(name)
@@ -368,6 +388,8 @@ class ReaderOptions:
                 panels = replace(panels, **{name: value})
             elif group == "perf":
                 perf = replace(perf, **{name: value})
+            elif group == "subtitle_geometry":
+                subtitle_geometry = replace(subtitle_geometry, **{name: value})
             else:
                 raise TypeError(f"unknown Reader option: {name!r}")
         return ReaderOptions(
@@ -375,6 +397,7 @@ class ReaderOptions:
             tooltip=tooltip,
             mining=mining,
             perf=perf,
+            subtitle_geometry=subtitle_geometry,
             translation=translation,
             stats=stats,
             panels=panels,
@@ -382,6 +405,32 @@ class ReaderOptions:
             resync=resync,
             overlay_id_base=overlay_id_base,
         )
+
+
+def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
+    raw = cfg.get("subtitle_geometry")
+    if raw is not None and not isinstance(raw, dict):
+        raise TypeError("subtitle_geometry must be a table")
+    values = raw or {}
+    defaults = SubtitleGeometryOptions()
+    native_visible = values.get("native_visible", defaults.native_visible)
+    if not isinstance(native_visible, bool):
+        raise TypeError("subtitle_geometry.native_visible must be a boolean")
+    cache_max = values.get("cache_max", defaults.cache_max)
+    if isinstance(cache_max, bool) or not isinstance(cache_max, int) or cache_max <= 0:
+        raise ValueError("subtitle_geometry.cache_max must be a positive integer")
+    library_path = values.get("library_path", defaults.library_path)
+    if library_path is not None and not isinstance(library_path, str):
+        raise ValueError("subtitle_geometry.library_path must be a string")
+    lookahead = values.get("lookahead", defaults.lookahead)
+    if isinstance(lookahead, bool) or not isinstance(lookahead, int) or lookahead < 0:
+        raise ValueError("subtitle_geometry.lookahead must be a non-negative integer")
+    return SubtitleGeometryOptions(
+        native_visible=native_visible,
+        library_path=library_path,
+        cache_max=cache_max,
+        lookahead=lookahead,
+    )
 
 
 def resolve_resync_timeout(cfg: dict | None = None) -> int:

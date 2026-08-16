@@ -14,11 +14,23 @@ from pathlib import Path
 import pytest
 
 from saitenka.mpvio.ipc import MpvIPC
-from saitenka.mpvio.launch import MpvLaunchOptions, build_mpv_argv
+from saitenka.mpvio.launch import (
+    MpvLaunchOptions,
+    build_mpv_argv,
+    supports_native_geometry_profile,
+)
 
 FAKE_MPV = Path(__file__).resolve().parent / "fake_mpv.py"
 
-_OPT_FIELDS = ("slang", "start", "screenshot", "use_config", "fullscreen", "extra_args")
+_OPT_FIELDS = (
+    "slang",
+    "start",
+    "screenshot",
+    "use_config",
+    "fullscreen",
+    "native_visible",
+    "extra_args",
+)
 
 
 def _argv(**over) -> list[str]:
@@ -61,6 +73,33 @@ def test_centering_never_touches_vertical_position():
 def test_screenshot_pauses_on_the_first_frame():
     argv = _argv(screenshot=True)
     assert "--pause" in argv and "--loop-file=inf" not in argv
+
+
+def test_native_visible_launch_locks_the_proved_mpv_profile_before_user_overrides():
+    argv = _argv(native_visible=True, extra_args=["--sub-scale=1.2"])
+
+    required = {
+        "--sub-ass-override=no",
+        "--sub-ass-scale-with-window=no",
+        "--sub-scale=1",
+        "--sub-pos=100",
+        "--sub-use-margins=yes",
+        "--sub-ass-use-video-data=all",
+        "--sub-ass-style-overrides=",
+        "--sub-font-provider=auto",
+        "--embeddedfonts=no",
+        "--sub-fonts-dir=",
+        "--sub-visibility=yes",
+    }
+    assert required <= set(argv)
+    assert argv.index("--sub-scale=1") < argv.index("--sub-scale=1.2")
+
+
+def test_native_geometry_mpv_version_floor() -> None:
+    assert supports_native_geometry_profile("mpv v0.39.0")
+    assert supports_native_geometry_profile("mpv 0.41.0")
+    assert not supports_native_geometry_profile("mpv v0.38.0")
+    assert not supports_native_geometry_profile("mpv.net")
 
 
 def test_subtitle_files_inserted_before_the_video_arg():

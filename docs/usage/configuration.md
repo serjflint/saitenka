@@ -226,6 +226,37 @@ Most in-player shortcuts are configurable — every key lives under the `[keys]`
 than list them here, see the [Keyboard shortcuts](shortcuts.md) page, which has the full
 rebindable-key table with defaults.
 
+## Experimental mpv-native subtitles
+
+`[subtitle_geometry].native_visible = true` keeps an external authored `.ass` track rendered by mpv
+and uses an optional system `libass` only for hover geometry. Saitenka draws the tooltip and a small
+focus box, not a replacement subtitle raster. Unsupported syntax, missing source bytes, or a provider
+failure leaves the mpv subtitle visible and disables interaction for that cue. Run `saitenka doctor`
+to verify `libasslite` and the selected library; `overlay.example.toml` owns the settings and defaults.
+
+Install the separate wrapper with `uv tool install 'saitenka[subtitle-geometry]'`. This first
+experiment accepts UTF-8 external ASS and only the render envelope proved by the parity gate: no mpv
+ASS overrides/window scaling, scale 1, position 100, no video margins, embedded fonts disabled, the
+automatic native font provider, full video-data forwarding, and no custom subtitle font directory.
+`saitenka run` sets that profile when the mode is enabled. For `saitenka attach`, set the equivalent
+mpv options yourself; a mismatched running player reports `subtitle-render-input-unsupported` and
+keeps its native subtitle visible without interaction.
+
+```conf
+sub-ass-override=no
+sub-ass-scale-with-window=no
+sub-scale=1
+sub-pos=100
+sub-use-margins=yes
+sub-ass-use-video-data=all
+sub-ass-style-overrides=
+sub-font-provider=auto
+embeddedfonts=no
+sub-fonts-dir=
+```
+Other encodings, attached/custom fonts, letterboxing, or subtitle style overrides stay visible through
+mpv but are deliberately noninteractive.
+
 ## Reading profiles (a non-Japanese main language)
 
 A **profile** bundles what's being read — the main/second language codes, the tokenizer strategy, and

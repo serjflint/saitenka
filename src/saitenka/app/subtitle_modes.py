@@ -124,6 +124,7 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.en_sid = startup.tracks.en_sid
     reader.subtitle_language = startup.active or MAIN_LANG
     reader.subtitle_slang = slang
+    reader.subtitle_pipeline.activate(reader)
     if reader._get("secondary-sid") not in {None, False, "no"}:
         reader.ipc.command("set_property", "secondary-sid", "no")
     # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),

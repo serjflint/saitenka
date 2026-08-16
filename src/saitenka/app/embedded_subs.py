@@ -78,6 +78,9 @@ def build_sub_index_for_current_track(reader: Reader) -> None:
     (app/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
     source. Fail-soft throughout: no selected track / no video path / extraction failure just
     leaves ``_sub_index`` unset."""
+    native_geometry = getattr(reader, "native_geometry", None)
+    if native_geometry is not None:
+        native_geometry.set_source(None, reader=reader)
     track = _selected_sub_track(reader.ipc)
     if track is None:
         return

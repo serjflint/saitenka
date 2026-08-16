@@ -15,7 +15,7 @@ from typing import Literal
 
 from saitenka.app import session_stats
 from saitenka.app import subselect as _subselect
-from saitenka.app.config import config_path, load_config
+from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.jimaku import parse_filename
@@ -414,6 +414,27 @@ def _launch_mpv_and_connect(
             file=sys.stderr,
         )
         return None, None
+    if opts.native_visible:
+        from saitenka.mpvio.launch import supports_native_geometry_profile
+
+        try:
+            version = subprocess.run(
+                [mpv_bin, "--version"],
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            version = ""
+        if not supports_native_geometry_profile(version):
+            print(
+                "native subtitle geometry needs mpv ≥ 0.39; disable "
+                "subtitle_geometry.native_visible or upgrade mpv",
+                file=sys.stderr,
+            )
+            return None, None
     # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
     sock = default_ipc_path(tmp.name)
     # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
@@ -457,6 +478,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         StatsOptions,
         TooltipOptions,
         TranslationOptions,
+        subtitle_geometry_options,
     )
 
     _ko, _tt, _mo, _po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
@@ -520,6 +542,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", _po.head_prefetch_lookahead),
             head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", _po.head_prefetch_queue_max),
         ),
+        subtitle_geometry=subtitle_geometry_options(cfg),
         prefetch=flags.prefetch,
     )
 
@@ -1056,6 +1079,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             screenshot=bool(screenshot),
             use_config=use_config,
             fullscreen=fullscreen,
+            native_visible=subtitle_geometry_options(cfg).native_visible,
             extra_args=mpv_arg,
         ),
         sub_path=sub_path,

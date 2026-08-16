@@ -510,3 +510,19 @@ def allocate_token_colors(
                 raise ValueError("token color palette exhausted") from error
             allocated.append(TokenColor(*key, color))
     return tuple(allocated)
+
+
+def source_primary_bgr_colors(
+    catalog: AssStyleCatalog,
+    events: Iterable[RawSubtitleEvent],
+) -> tuple[int, ...]:
+    """All authored primary colors that character layers may legitimately use."""
+    colors = {int(style.primary_color, 16) & 0xFFFFFF for style in catalog.styles}
+    for event in events:
+        for block in _blocks(event.raw_text):
+            for command in _COLOR_STATE.finditer(block.content):
+                if not command.group("color_command"):
+                    continue
+                explicit = command.group("color")
+                colors.add((int(explicit, 16) if explicit else 0) & 0xFFFFFF)
+    return tuple(sorted(colors))

@@ -27,6 +27,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         ReaderOptions,
         StatsOptions,
         TranslationOptions,
+        subtitle_geometry_options,
     )
 
     ko, tt, mo, po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
@@ -89,6 +90,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
             head_prefetch_lookahead=cfg.get("head_prefetch_lookahead", po.head_prefetch_lookahead),
             head_prefetch_queue_max=cfg.get("head_prefetch_queue_max", po.head_prefetch_queue_max),
         ),
+        subtitle_geometry=subtitle_geometry_options(cfg),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
     )
 
