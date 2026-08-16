@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786861442916,
+  "lastUpdate": 1786864724609,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -5819,6 +5819,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.388329,
             "range": "3 replicas; min 1.05465; max 1.62092; MAD 0.232593; worst 1.62092",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f80179039f1c614982ea9d5944ae3836cf2cfef7",
+          "message": "Merge pull request #368 from serjflint/codex/testpypi-libasslite-bundle\n\nci: validate libasslite TestPyPI releases",
+          "timestamp": "2026-08-16T10:16:30+03:00",
+          "tree_id": "cac593c4c55cc7366e790ac68302dc0aa4a84601",
+          "url": "https://github.com/serjflint/saitenka/commit/f80179039f1c614982ea9d5944ae3836cf2cfef7"
+        },
+        "date": 1786864723843,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.300008,
+            "range": "3 replicas; min 4.97154; max 6.35716; MAD 0.057149",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.615634,
+            "range": "3 replicas; min 7.39913; max 12.6447; MAD 1.2165; worst 12.6447",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 19.310058,
+            "range": "3 replicas; min 14.2683; max 19.6571; MAD 0.347032",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.661764,
+            "range": "3 replicas; min 15.5853; max 21.7185; MAD 2.05673; worst 21.7185",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 22.188456,
+            "range": "3 replicas; min 21.1925; max 23.0778; MAD 0.889309",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.165778,
+            "range": "3 replicas; min 0.094436; max 0.206817; MAD 0.041039; worst 0.206817",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.070202,
+            "range": "3 replicas; min 38.8146; max 166.037; MAD 4.2556; worst 166.037",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.784506,
+            "range": "3 replicas; min 2.62209; max 3.02436; MAD 0.162418; worst 3.02436",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.424438,
+            "range": "3 replicas; min 1.3568; max 1.55006; MAD 0.067639; worst 1.55006",
             "unit": "ms"
           }
         ]
