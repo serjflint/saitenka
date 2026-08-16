@@ -107,6 +107,23 @@ def test_geometry_oracle_detects_layout_change() -> None:
     assert geometry_signature(baseline_result) != geometry_signature(changed_result)
 
 
+def test_full_width_space_produces_no_requested_character_layer() -> None:
+    spacing = ASS.replace(
+        b"{\\c&H112233&}\xe7\x8c\xab{\\c&H445566&}\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b{\\c&H778899&}\xe7\x8c\xab",
+        b"{\\c&H010101&}\xe7\x8c\xab{\\c&H020202&}\xe3\x80\x80{\\c&H030303&}\xe7\x8a\xac",
+    )
+    ass_renderer = renderer(spacing)
+
+    result = ass_renderer.render(1_500, (1280, 720), (1280, 720))
+    character_colors = {
+        layer.color >> 8 for layer in result.layers if layer.image_type == 0 and any(layer.bitmap)
+    }
+
+    assert 0x010101 in character_colors
+    assert 0x030303 in character_colors
+    assert 0x020202 not in character_colors
+
+
 def test_one_renderer_serializes_cross_thread_calls() -> None:
     ass_renderer = renderer()
 
@@ -193,6 +210,32 @@ def test_invalid_geometry_is_rejected_before_native_render() -> None:
             (1280, 720),
             (1280, 720),
             margins=(360, 360, 0, 0),
+        )
+
+    with pytest.raises(ValueError, match="max_bitmap_bytes must be positive"):
+        ass_renderer.render(1_500, (1280, 720), (1280, 720), max_bitmap_bytes=0)
+
+
+def test_bitmap_budget_is_exact_and_checked_before_returning_layers() -> None:
+    ass_renderer = renderer()
+    baseline = ass_renderer.render(1_500, (1280, 720), (1280, 720))
+    bitmap_bytes = sum(len(layer.bitmap) for layer in baseline.layers)
+    assert bitmap_bytes > 1
+
+    accepted = ass_renderer.render(
+        1_500,
+        (1280, 720),
+        (1280, 720),
+        max_bitmap_bytes=bitmap_bytes,
+    )
+    assert sum(len(layer.bitmap) for layer in accepted.layers) == bitmap_bytes
+
+    with pytest.raises(RuntimeError, match="bitmap budget exceeded"):
+        ass_renderer.render(
+            1_500,
+            (1280, 720),
+            (1280, 720),
+            max_bitmap_bytes=bitmap_bytes - 1,
         )
 
     with pytest.raises(ValueError, match="positive video rectangle"):
