@@ -22,12 +22,13 @@ def _install(tmp_path: Path) -> tuple[Path, Path]:
     (target / "share" / "fribidi").mkdir(parents=True)
     (target / "lib" / "libass.so.9").write_bytes(b"ass")
     (target / "lib" / "libfribidi.so.0").write_bytes(b"fribidi")
-    (target / "share" / "libass" / "copyright").write_text("ISC notice")
-    (target / "share" / "fribidi" / "copyright").write_text("LGPL notice")
+    (target / "share" / "libass" / "copyright").write_text("ISC notice", encoding="utf-8")
+    (target / "share" / "fribidi" / "copyright").write_text("LGPL notice", encoding="utf-8")
     (root / "vcpkg").mkdir()
     (root / "vcpkg" / "status").write_text(
         "Package: fribidi\nVersion: 1.0.16\nArchitecture: x64-linux-dynamic\n\n"
-        "Package: libass\nVersion: 0.17.5\nArchitecture: x64-linux-dynamic\n"
+        "Package: libass\nVersion: 0.17.5\nArchitecture: x64-linux-dynamic\n",
+        encoding="utf-8",
     )
     package = tmp_path / "package"
     (package / "src" / "libasslite_bundle").mkdir(parents=True)
@@ -42,13 +43,17 @@ def test_prepare_copies_closure_and_verbatim_notices(tmp_path: Path) -> None:
     assert manifest["library"] == ".libs/libass.so.9"
     assert manifest["files"] == ["libass.so.9", "libfribidi.so.0"]
     assert (
-        json.loads((package / "src" / "libasslite_bundle" / "native-manifest.json").read_text())
+        json.loads(
+            (package / "src" / "libasslite_bundle" / "native-manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
         == manifest
     )
-    notices = (package / "THIRD_PARTY_LICENSES").read_text()
+    notices = (package / "THIRD_PARTY_LICENSES").read_text(encoding="utf-8")
     assert "ISC notice" in notices
     assert "LGPL notice" in notices
-    sources = json.loads((package / "NATIVE_SOURCES.json").read_text())
+    sources = json.loads((package / "NATIVE_SOURCES.json").read_text(encoding="utf-8"))
     assert sources["packages"] == [
         {"name": "fribidi", "version": "1.0.16"},
         {"name": "libass", "version": "0.17.5"},
