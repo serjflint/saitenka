@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from prepare_libass_bundle import prepare
 
 HOOK_PATH = Path(__file__).parents[1] / "libasslite-bundle" / "build_support.py"
+BUNDLE_INIT_PATH = (
+    Path(__file__).parents[1] / "libasslite-bundle" / "src" / "libasslite_bundle" / "__init__.py"
+)
 
 
 def _install(tmp_path: Path) -> tuple[Path, Path]:
@@ -86,6 +91,29 @@ def test_prepare_recognizes_vcpkg_windows_libass_name(tmp_path: Path) -> None:
     manifest = prepare(root, "x64-windows", package)
 
     assert manifest["library"] == ".libs/ass-9.dll"
+
+
+def test_windows_dependency_directory_is_registered_once_and_retained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = importlib.util.spec_from_file_location("bundle_runtime", BUNDLE_INIT_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    handles: list[object] = []
+
+    def add_dll_directory(path: str) -> object:
+        assert path == os.fspath(tmp_path)
+        handle = object()
+        handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(module, "_WINDOWS", True)
+    monkeypatch.setattr(module, "_add_dll_directory", add_dll_directory)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(module._register_dependency_directory, [tmp_path] * 64))
+
+    assert handles == [module._DLL_DIRECTORY_HANDLES[os.fspath(tmp_path)]]
 
 
 def test_bundle_wheel_hook_rejects_source_only_payload() -> None:
