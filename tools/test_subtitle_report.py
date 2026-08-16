@@ -100,6 +100,78 @@ def test_extract_is_text_free_and_carries_fingerprints():
     )  # ids stripped — only the timing vectors remain
 
 
+def test_extract_includes_bounded_native_geometry_evidence():
+    events = [
+        {
+            "name": "subtitle_geometry_decision",
+            "ph": "X",
+            "ts": 1,
+            "args": {
+                "outcome": "failed",
+                "reason": "geometry-provider-failed",
+                "error_code": "missing-token-colors",
+                "eligible_tokens": 4,
+                "subtitle_text": "must not be emitted",
+                "span_id": "abc",
+            },
+        }
+    ]
+    out = sr.extract(events)["geometry"][0]["args"]
+    assert out["error_code"] == "missing-token-colors"
+    assert out["eligible_tokens"] == 4
+    assert "span_id" not in out
+
+
+def test_geometry_diagnosis_explains_owner_transition_and_skips():
+    line = sr._geometry_diagnosis(
+        {
+            "name": "subtitle_geometry_decision",
+            "args": {
+                "outcome": "ready",
+                "reason": "ready",
+                "active_events": 2,
+                "eligible_tokens": 7,
+                "skipped_whitespace": 1,
+                "skipped_tokenizer": 2,
+                "skipped_unpaintable": 1,
+                "owner_transition": "legacy_to_native",
+            },
+        }
+    )
+    assert line == "ready: ready (events=2 eligible=7 skipped=4) legacy_to_native"
+
+
+def test_geometry_diagnosis_attributes_libass_render_and_extraction_cost():
+    line = sr._geometry_diagnosis(
+        {
+            "name": "subtitle_geometry_libass",
+            "args": {
+                "provider": "libasslite",
+                "libass_version": "0x1705000",
+                "layer_count": 12,
+                "found_tokens": 7,
+                "render_ms": 2.5,
+                "extract_ms": 0.8,
+            },
+        }
+    )
+
+    assert line == (
+        "provider=libasslite libass=0x1705000 layers=12 tokens=7 render=2.5ms extract=0.8ms"
+    )
+
+
+def test_geometry_report_uses_trace_microseconds_for_elapsed_seconds(capsys):
+    events = [
+        {"name": "subtitle_geometry_decision", "ph": "X", "ts": 1_000_000, "args": {}},
+        {"name": "subtitle_geometry_render", "ph": "X", "ts": 2_000_000, "args": {}},
+    ]
+
+    sr.print_geometry(Path("report.zip"), events)
+
+    assert "t+    1.0s  render" in capsys.readouterr().out
+
+
 def test_subtitle_spans_are_sorted_and_filtered():
     events = [
         _resync(3000),

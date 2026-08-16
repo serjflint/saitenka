@@ -45,6 +45,32 @@ def test_snapshot_reports_histogram_percentiles():
 
 
 @pytest.mark.usefixtures("registered")
+def test_native_geometry_decision_instruments_are_bounded_pull_metrics():
+    otel_metrics.subtitle_geometry_decisions.add(1, {"outcome": "ready", "reason": "ready"})
+    otel_metrics.subtitle_geometry_owner_transitions.add(1, {"transition": "legacy_to_native"})
+    otel_metrics.subtitle_geometry_recoveries.add(1, {"reason": "provider-error"})
+    otel_metrics.subtitle_geometry_active_events.record(2)
+    otel_metrics.subtitle_geometry_eligible_tokens.record(7)
+    otel_metrics.subtitle_geometry_skipped_tokens.record(3)
+    otel_metrics.subtitle_geometry_ready_ms.record(4.5)
+    otel_metrics.subtitle_geometry_prepare_ms.record(1.5)
+    otel_metrics.subtitle_geometry_render_ms.record(2.5)
+    otel_metrics.subtitle_geometry_extract_ms.record(0.5)
+
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.subtitle_geometry.decisions"]["value"] == 1
+    assert snap["saitenka.subtitle_geometry.owner_transitions"]["value"] == 1
+    assert snap["saitenka.subtitle_geometry.recoveries"]["value"] == 1
+    assert snap["saitenka.subtitle_geometry.active_events"]["max"] == 2
+    assert snap["saitenka.subtitle_geometry.eligible_tokens"]["max"] == 7
+    assert snap["saitenka.subtitle_geometry.skipped_tokens"]["max"] == 3
+    assert snap["saitenka.subtitle_geometry.ready_ms"]["max"] == 4.5
+    assert snap["saitenka.subtitle_geometry.prepare_ms"]["max"] == 1.5
+    assert snap["saitenka.subtitle_geometry.render_ms"]["max"] == 2.5
+    assert snap["saitenka.subtitle_geometry.extract_ms"]["max"] == 0.5
+
+
+@pytest.mark.usefixtures("registered")
 def test_instrumented_emit_span_false_still_records_histogram():
     # The sampled path (emit_span=False) drops the trace span but must still record the histogram —
     # the percentile is what survives, so aggregate SQL/IPC cost stays visible even when unsampled.

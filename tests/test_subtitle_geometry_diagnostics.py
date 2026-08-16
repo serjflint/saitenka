@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import pytest
+
+from saitenka.app.subtitle_geometry_diagnostics import (
+    GeometryErrorCode,
+    geometry_failure_reason,
+)
+
+
+@pytest.mark.parametrize(
+    ("detail", "code"),
+    [
+        ("active ASS event limit exceeded", GeometryErrorCode.ACTIVE_EVENT_BUDGET),
+        ("active ASS row byte limit exceeded", GeometryErrorCode.ACTIVE_ROW_BUDGET),
+        ("active ASS event does not match", GeometryErrorCode.ACTIVE_EVENT_MISMATCH),
+        ("semantic projection differs", GeometryErrorCode.SEMANTIC_MISMATCH),
+        ("bitmap budget exceeded", GeometryErrorCode.BITMAP_BUDGET),
+        ("frame pixel limit exceeded", GeometryErrorCode.FRAME_BUDGET),
+        (
+            "geometry frame and storage sizes must be positive",
+            GeometryErrorCode.INVALID_RENDER_SPACE,
+        ),
+        ("palette entry limit exceeded", GeometryErrorCode.PALETTE_BUDGET),
+        ("token annotation extends beyond text", GeometryErrorCode.ANNOTATION_MAPPING),
+    ],
+)
+def test_contract_and_resource_errors_are_bounded_unsupported_decisions(
+    detail: str, code: GeometryErrorCode
+) -> None:
+    assert geometry_failure_reason(ValueError(detail)) == ("subtitle-frame-unsupported", code)
+
+
+@pytest.mark.parametrize(
+    ("detail", "code"),
+    [
+        ("missing libass token colors", GeometryErrorCode.MISSING_PALETTE_PIXELS),
+        ("ambiguous libass token overlap", GeometryErrorCode.OVERLAPPING_PALETTE_PIXELS),
+        ("private subtitle text and /a/path", GeometryErrorCode.PROVIDER),
+    ],
+)
+def test_provider_failures_export_only_registered_error_codes(
+    detail: str, code: GeometryErrorCode
+) -> None:
+    assert geometry_failure_reason(RuntimeError(detail)) == ("geometry-provider-failed", code)

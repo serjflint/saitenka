@@ -4,10 +4,8 @@
 # ///
 """Distil the SUBTITLE-PIPELINE story out of one or more `saitenka report` bundles.
 
-Where `trace_report.py` is the perf/rendering view, this is the subtitle-timing view: it pulls the
-`subtitle.fetch` / `subtitle.reslot` / `subtitle.resync` spans (and the matching `overlay.log` lines)
-and turns each into a one-line diagnosis — which release was picked, which track the re-slot selected,
-and whether a resync actually moved the cues onto the embedded reference or shipped a silent no-op.
+Where `trace_report.py` is the perf/rendering view, this is the subtitle view: it explains subtitle
+fetch/resync and native-geometry ownership, preparation, and rendering decisions.
 
 The `subtitle.resync` spans carry TEXT-FREE integer cue fingerprints (`src_cue_ms` / `out_cue_ms` /
 `ref_cue_ms`), so `--json` emits exactly the vectors needed to seed an offline, copyright-free
@@ -15,6 +13,7 @@ regression test from a real failure — one record per resync. Pass any number o
 unzipped dirs (or a bare `trace.json`):
 
     uv run tools/subtitle_report.py ~/.local/share/saitenka/reports/saitenka-report-*.zip
+    uv run tools/subtitle_report.py --geometry ~/.local/share/saitenka/reports/latest.zip
     uv run tools/subtitle_report.py --json report-A.zip report-B.zip > seeds.json
 
 There's also a REPRODUCE mode: point it at a local episode + its cached sub (a file, or the subtitles
@@ -41,11 +40,24 @@ import itertools
 import trace_report as tr
 
 _SUB_SPAN_NAMES = ("subtitle.fetch", "subtitle.reslot", "subtitle.resync")
+_GEOMETRY_SPAN_NAMES = (
+    "subtitle_geometry_decision",
+    "subtitle_geometry_prepare",
+    "subtitle_geometry_render",
+    "subtitle_geometry_libass",
+    "subtitle_geometry_fallback",
+)
 
 
 def subtitle_spans(events: list[dict]) -> list[dict]:
     """Every complete (ph==X) subtitle-pipeline span, in start-time order."""
     spans = [e for e in events if e.get("ph") == "X" and e.get("name") in _SUB_SPAN_NAMES]
+    return sorted(spans, key=lambda s: s.get("ts", 0.0))
+
+
+def geometry_spans(events: list[dict]) -> list[dict]:
+    """Native-geometry decision/work spans in start-time order."""
+    spans = [e for e in events if e.get("ph") == "X" and e.get("name") in _GEOMETRY_SPAN_NAMES]
     return sorted(spans, key=lambda s: s.get("ts", 0.0))
 
 
@@ -126,10 +138,51 @@ def extract(events: list[dict]) -> dict:
         a.pop("thread.id", None)
         return {"name": s["name"], "ts": s.get("ts"), "args": a}
 
+    geometry_fields = frozenset(
+        {
+            "outcome",
+            "reason",
+            "error_code",
+            "ass_full_capability",
+            "active_events",
+            "observed_rows",
+            "matched_events",
+            "eligible_tokens",
+            "requested_tokens",
+            "found_tokens",
+            "skipped_whitespace",
+            "skipped_tokenizer",
+            "skipped_unpaintable",
+            "frame_width",
+            "frame_height",
+            "storage_width",
+            "storage_height",
+            "pixel_aspect",
+            "margins",
+            "generation",
+            "source_epoch",
+            "source_class",
+            "owner_transition",
+            "provider",
+            "libass_version",
+            "layer_count",
+            "prepare_ms",
+            "render_ms",
+            "extract_ms",
+            "session",
+            "cpu_ms",
+        }
+    )
+
+    def geometry_record(s: dict) -> dict:
+        args = {key: value for key, value in s.get("args", {}).items() if key in geometry_fields}
+        return {"name": s["name"], "ts": s.get("ts"), "args": args}
+
     return {
         "fetches": [record(s) for s in spans if s["name"] == "subtitle.fetch"],
         "reslots": [record(s) for s in spans if s["name"] == "subtitle.reslot"],
         "resyncs": [record(s) for s in spans if s["name"] == "subtitle.resync"],
+        "geometry": [geometry_record(s) for s in geometry_spans(events)],
     }
 
 
@@ -162,6 +215,67 @@ def _session(events: list[dict]) -> str | None:
     return None
 
 
+def _geometry_diagnosis(span: dict) -> str:
+    args = span.get("args", {})
+    name = span["name"]
+    if name in {"subtitle_geometry_decision", "subtitle_geometry_fallback"}:
+        outcome = args.get("outcome", "legacy")
+        reason = args.get("reason", "unknown")
+        counts = (
+            f"events={args.get('active_events', 0)} "
+            f"eligible={args.get('eligible_tokens', 0)} "
+            f"skipped={sum(int(args.get(k, 0)) for k in ('skipped_whitespace', 'skipped_tokenizer', 'skipped_unpaintable'))}"
+        )
+        extra = f" error={args['error_code']}" if args.get("error_code") else ""
+        transition = f" {args['owner_transition']}" if args.get("owner_transition") else ""
+        return f"{outcome}: {reason} ({counts}){extra}{transition}"
+    if name == "subtitle_geometry_prepare":
+        return (
+            f"{args.get('outcome', '?')}: observed={args.get('observed_rows', '?')} "
+            f"matched={args.get('matched_events', '?')} eligible={args.get('eligible_tokens', '?')}"
+            + (f" error={args['error_code']}" if args.get("error_code") else "")
+        )
+    if name == "subtitle_geometry_libass":
+        return (
+            f"provider={args.get('provider', '?')} libass={args.get('libass_version', '?')} "
+            f"layers={args.get('layer_count', '?')} tokens={args.get('found_tokens', '?')} "
+            f"render={args.get('render_ms', '?')}ms extract={args.get('extract_ms', '?')}ms"
+        )
+    return (
+        f"{args.get('outcome', '?')}: events={args.get('active_events', '?')} "
+        f"tokens={args.get('found_tokens', 0)}/{args.get('requested_tokens', '?')} "
+        f"frame={args.get('frame_width', '?')}x{args.get('frame_height', '?')}"
+        + (f" error={args['error_code']}" if args.get("error_code") else "")
+    )
+
+
+def print_geometry(src: Path, events: list[dict], *, nested: bool = False) -> None:
+    spans = geometry_spans(events)
+    heading = "##" if nested else "#"
+    print(f"{heading} native subtitle geometry" + ("" if nested else f" — {src.name}"))
+    if not spans:
+        print("  (no native-geometry spans — telemetry may predate this diagnostic contract)\n")
+        return
+    decisions = [
+        s
+        for s in spans
+        if s["name"] in {"subtitle_geometry_decision", "subtitle_geometry_fallback"}
+    ]
+    current = decisions[-1].get("args", {}) if decisions else {}
+    print(
+        f"  current={current.get('outcome', '?')} reason={current.get('reason', '?')} · "
+        f"{len(decisions)} decision(s), {sum(s['name'] == 'subtitle_geometry_prepare' for s in spans)} prepare, "
+        f"{sum(s['name'] == 'subtitle_geometry_render' for s in spans)} request, "
+        f"{sum(s['name'] == 'subtitle_geometry_libass' for s in spans)} libass\n"
+    )
+    t0 = spans[0].get("ts", 0.0)
+    for span in spans:
+        tplus = (span.get("ts", t0) - t0) / 1_000_000
+        label = span["name"].removeprefix("subtitle_geometry_")
+        print(f"  t+{tplus:7.1f}s  {label:<8} {_geometry_diagnosis(span)}")
+    print()
+
+
 def print_report(src: Path, events: list[dict], log: list[dict]) -> None:
     spans = subtitle_spans(events)
     resyncs = [s for s in spans if s["name"] == "subtitle.resync"]
@@ -172,6 +286,7 @@ def print_report(src: Path, events: list[dict], log: list[dict]) -> None:
     fetches = sum(s["name"] == "subtitle.fetch" for s in spans)
     reslots = sum(s["name"] == "subtitle.reslot" for s in spans)
     print(f"  {fetches} fetch · {reslots} reslot · {len(resyncs)} resync span(s)\n")
+    print_geometry(src, events, nested=True)
 
     if not spans:
         print("  (no subtitle.* spans — was telemetry enabled for this session?)\n")
@@ -182,7 +297,7 @@ def print_report(src: Path, events: list[dict], log: list[dict]) -> None:
         for s in spans:
             label = s["name"].split(".", 1)[1]
             line = _DIAGNOSE[s["name"]](s.get("args", {}))
-            tplus = (s["ts"] - t0) / 1000
+            tplus = (s["ts"] - t0) / 1_000_000
             print(f"  t+{tplus:7.1f}s  {label:<7} {line}")
             if s["name"] == "subtitle.resync":
                 d = deltas.get(id(s))
@@ -301,6 +416,8 @@ def main() -> None:
                     help="reproduce mode: the cached subtitle FILE, or the subtitles cache DIR to match by video name")  # fmt: skip
     ap.add_argument("--json", action="store_true",
                     help="emit the TEXT-FREE fingerprint records (seed for a regression test) instead of a report")  # fmt: skip
+    ap.add_argument("--geometry", action="store_true",
+                    help="show only native subtitle geometry decisions and render evidence")  # fmt: skip
     args = ap.parse_args()
 
     # Reproduce mode: --video + --sub re-run the real aligner locally (fixture-builder / verifier).
@@ -335,7 +452,10 @@ def main() -> None:
         if not events:
             print(f"# {report.name}: no telemetry/trace.json found\n")
             continue
-        print_report(report, events, log)
+        if args.geometry:
+            print_geometry(report, events)
+        else:
+            print_report(report, events, log)
 
 
 if __name__ == "__main__":
