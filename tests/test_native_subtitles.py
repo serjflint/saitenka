@@ -10,6 +10,7 @@ from dirty_equals import IsPartialDict
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.native_subtitles import AssFullCapability
+from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.tokenize import Token
 from saitenka.subtitles import (
@@ -940,11 +941,33 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     result.set_subtitle("猫　犬")
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
+    ipc.commands.clear()
 
     result.set_hover(2)
 
     assert result.hover == 2
     assert result._tip_state is not None
+    focus = [
+        command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
+    ]
+    assert len(focus) == 1
+    assert focus[0][3] != ""
+    result.close()
+
+
+def test_missing_native_anchor_rearms_hover_and_preserves_kanji_cycle(tmp_path: Path) -> None:
+    result, _ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫")
+    result.hover = 0
+    result.dict_set = object()
+
+    result._show_tooltip(0)
+
+    assert result.hover == -1
+    assert result._tip_state is None
+    result.hover = 0
+    kanji_current(result)
+    assert result._kanji_index == 0
     result.close()
 
 

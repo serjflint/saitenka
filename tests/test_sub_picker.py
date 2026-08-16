@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from saitenka.app import sub_picker, subtitle_modes
-from saitenka.app.bindings import SUB_PICKER_MSG
+from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subselect import SubtitleCandidate
@@ -235,6 +235,23 @@ def test_queued_picker_presses_open_once_after_startup(monkeypatch):
 
     assert reader.sub_picker.open
     assert len(_picker_adds(ipc)) == 1
+
+
+def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):
+    reader, ipc = _reader(path="/v/ep.mkv")
+    reader.configure_sub_picker(_lister([]))
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _r, _v: None)
+    reader._help_open = True
+    ipc.events = [
+        {"event": "client-message", "args": [SUB_PICKER_MSG]},
+        {"event": "client-message", "args": [HELP_CLOSE_MSG]},
+        {"event": "client-message", "args": [SUB_PICKER_MSG]},
+    ]
+
+    reader._drain_events()
+
+    assert not reader._help_open
+    assert reader.sub_picker.open
 
 
 @pytest.mark.parametrize(
