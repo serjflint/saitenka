@@ -15,7 +15,7 @@ from typing import Literal
 
 from saitenka.app import session_stats
 from saitenka.app import subselect as _subselect
-from saitenka.app.config import config_path, load_config
+from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.jimaku import parse_filename
@@ -1058,6 +1058,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             screenshot=bool(screenshot),
             use_config=use_config,
             fullscreen=fullscreen,
+            native_visible=subtitle_geometry_options(cfg).native_visible,
             extra_args=mpv_arg,
         ),
         sub_path=sub_path,

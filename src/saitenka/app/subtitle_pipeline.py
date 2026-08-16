@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 class CurrentSubtitleRenderer(Protocol):
     def draw(self, reader: Reader) -> None: ...
 
+    def clear(self, reader: Reader) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class GeometryTicket:
@@ -80,6 +82,9 @@ class SubtitleModeCoordinator:
 
     def draw_current(self, reader: Reader) -> None:
         self._renderer.draw(reader)
+
+    def clear(self, reader: Reader) -> None:
+        self._renderer.clear(reader)
 
     def activate(self, reader: Reader) -> None:
         activate = getattr(self._renderer, "activate", None)

@@ -23,6 +23,7 @@ class MpvLaunchOptions:
     screenshot: bool = False
     use_config: bool = True
     fullscreen: bool = False
+    native_visible: bool = False
     extra_args: list[str] | None = None
 
 
@@ -68,6 +69,22 @@ def build_mpv_argv(
         # freezes instead of closing, and #100 auto-advance can see eof-reached). Screenshot mode wants
         # the FIRST frame held, so it pauses up front instead.
         cmd.append("--pause")
+    if opts.native_visible:
+        cmd.extend(
+            (
+                "--sub-ass-override=no",
+                "--sub-ass-scale-with-window=no",
+                "--sub-scale=1",
+                "--sub-pos=100",
+                "--sub-use-margins=yes",
+                "--sub-ass-use-video-data=all",
+                "--sub-ass-style-overrides=",
+                "--sub-font-provider=auto",
+                "--embeddedfonts=no",
+                "--sub-fonts-dir=",
+                "--sub-visibility=yes",
+            )
+        )
     cmd.extend(opts.extra_args or [])
     cmd.extend(
         [

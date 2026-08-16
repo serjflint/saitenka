@@ -795,7 +795,7 @@ class Reader:
             self._hide_preview()  # a new cue → dismiss the last card preview
         if not text.strip():
             self.lines, self.tokens, self.boxes = [], [], []
-            self.ov.hide(SUB_ID)
+            self.subtitle_pipeline.clear(self)
             self.ov.hide(TIP_ID)
             return
         if self._session_recorder is not None:
@@ -865,7 +865,7 @@ class Reader:
         segmentation into the new profile."""
         self.tokenizer = tokenizer
         if self.native_geometry is not None:
-            self.native_geometry.invalidate()
+            self.native_geometry.invalidate(self)
         else:
             self.subtitle_pipeline.invalidate()
         self.token_cache.clear()
@@ -975,10 +975,19 @@ class Reader:
         if not self.sub_text.strip() or self.subtitle_language == SECOND_LANG:
             return
         self._apply_tokenized_cue(self._tokenize_cue(self._cue_norm(self.sub_text)))
+        if self.native_geometry is not None:
+            self.native_geometry.refresh(self)
         self._draw_subtitle()
 
     def _draw_subtitle(self) -> None:
         self.subtitle_pipeline.draw_current(self)
+
+    def _clear_native_interaction(self) -> None:
+        self._teardown_tip()
+        self.hover = -1
+        self._hover_span = None
+        self.boxes = []
+        self.subtitle_pipeline.clear(self)
 
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
@@ -2119,6 +2128,7 @@ class Reader:
         for th in self.analysis.threads:
             th.join(timeout=2.0)
         if self.native_geometry is not None:
+            self.subtitle_pipeline.clear(self)
             self.native_geometry.close()
         else:
             self.subtitle_pipeline.close()

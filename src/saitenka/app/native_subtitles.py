@@ -63,7 +63,7 @@ class NativeSubtitleGeometry:
         self.source_path = None
         self._last_snapshot = None
         if reader is not None:
-            reader.boxes = []
+            reader._clear_native_interaction()
         if path is None:
             self.fallback_reason = "subtitle-source-unavailable"
         elif path.suffix.casefold() != ".ass":
@@ -72,13 +72,14 @@ class NativeSubtitleGeometry:
             self.source_path = path
             self.fallback_reason = None
 
-    def invalidate(self) -> None:
+    def invalidate(self, reader: Reader | None = None) -> None:
         self._last_snapshot = None
         self.worker.invalidate()
+        if reader is not None:
+            reader._clear_native_interaction()
 
     def refresh(self, reader: Reader) -> None:
-        self.invalidate()
-        reader.boxes = []
+        self.invalidate(reader)
         if reader.sub_text.strip():
             self.schedule(reader)
 
@@ -251,7 +252,7 @@ class NativeSubtitleGeometry:
         except (TypeError, ValueError):
             self.worker.mark_not_ready()
             self.fallback_reason = "subtitle-render-input-unsupported"
-            reader.boxes = []
+            reader._clear_native_interaction()
             return False
         generation = reader.subtitle_pipeline.generation
         track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
@@ -316,7 +317,7 @@ class NativeSubtitleGeometry:
                 self.fallback_reason = (
                     error if error.startswith("subtitle-source-") else "geometry-provider-failed"
                 )
-                reader.boxes = []
+                reader._clear_native_interaction()
             return False
         if snapshot is self._last_snapshot:
             return False

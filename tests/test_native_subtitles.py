@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NativeVisibleRenderer
+from saitenka.app.tokenize import Token
 from saitenka.subtitles import Cue, CueIndex, GeometryRequest, GeometrySnapshot, Rect, TokenGeometry
 
 if TYPE_CHECKING:
@@ -94,6 +95,28 @@ class FakeBackend:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _SingleTokenizer:
+    name = "single"
+
+    def tokenize(self, line, *, strip_furigana=True, merge=True):  # noqa: ARG002
+        return [Token(surface=line, lemma=line, reading="", pos="名詞", start=0, end=len(line))]
+
+    def is_content(self, _token):
+        return True
+
+    def is_skippable(self, token):
+        return not token.surface.strip()
+
+    def query_token(self, _query):
+        return None
+
+    def inflected_in(self, tokens, index):
+        return tokens[index].surface
+
+    def phrase_terms(self, _tokens, _index, _has_term):
+        return None
 
 
 def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
@@ -212,7 +235,7 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
 
 
 def test_source_clear_is_a_generation_boundary_and_clears_hits(tmp_path: Path) -> None:
-    result, _ipc, _backend = reader(tmp_path)
+    result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
     assert result.native_geometry.worker.wait_idle()
@@ -224,8 +247,57 @@ def test_source_clear_is_a_generation_boundary_and_clears_hits(tmp_path: Path) -
     assert result.subtitle_pipeline.generation == old_generation + 1
     assert result.subtitle_pipeline.current is None
     assert result.boxes == []
+    assert ipc.commands[-1] == ("osd-overlay", 1001, "none", "")
     assert not result.native_geometry.apply(result)
     result.close()
+
+
+def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    assert len(result.boxes) > 1
+
+    result.use_tokenizer(_SingleTokenizer())
+    result._retokenize_current_cue()
+
+    assert result.boxes == []
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    assert len(result.boxes) == len(backend.requests[-1].palette) == 1
+    result.close()
+
+
+def test_empty_cue_removes_visible_native_focus(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result.hover = 0
+    result._draw_subtitle()
+
+    result.set_subtitle("")
+
+    assert result.boxes == []
+    assert ("osd-overlay", 1001, "none", "") in ipc.commands
+    result.close()
+
+
+def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result.hover = 0
+    result._draw_subtitle()
+
+    result.close()
+
+    assert ("osd-overlay", 1001, "none", "") in ipc.commands
 
 
 def test_repeated_text_event_refreshes_geometry_when_timing_changes(tmp_path: Path) -> None:

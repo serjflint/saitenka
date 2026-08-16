@@ -73,11 +73,17 @@ class SubtitleRenderer:
             clear_startup_hint(reader.ipc)  # overlay is live now → drop mpv's startup breadcrumb
         reader.ov.show(sr.image, ox, oy, oid=SUB_ID)
 
+    def clear(self, reader: Reader) -> None:
+        reader.ov.hide(SUB_ID)
+
 
 class NullRenderer:
     """No-op draw strategy: run the reader's hover/nav/prefetch logic without rasterizing."""
 
     def draw(self, reader: Reader) -> None:
+        pass
+
+    def clear(self, reader: Reader) -> None:
         pass
 
 
@@ -125,6 +131,9 @@ class NativeVisibleRenderer:
             reader.osd[1],
             1,
         )
+
+    def clear(self, reader: Reader) -> None:
+        self._hide_focus(reader)
 
     @staticmethod
     def _hide_focus(reader: Reader) -> None:
