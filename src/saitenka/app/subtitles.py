@@ -49,6 +49,11 @@ class WordBox:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
 
 
+def box_for_token(boxes: list[WordBox], token_index: int) -> WordBox | None:
+    """Return the interaction box identified by its token index."""
+    return next((box for box in boxes if box.index == token_index), None)
+
+
 @dataclass
 class SubtitleRender:
     image: Image.Image

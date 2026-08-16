@@ -25,6 +25,7 @@ from saitenka.app.nested_popup import TIP_GAP
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
 from saitenka.app.popups import Panel, PopupView
+from saitenka.app.subtitles import box_for_token
 from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
 
 if TYPE_CHECKING:
@@ -219,7 +220,8 @@ def set_hover(reader: Reader, index: int) -> None:
         return
     resolve_hover(reader, index)  # sets _hover_terms/_hover_span BEFORE the draw highlights it
     reader._draw_subtitle()
-    show_tooltip(reader, index)
+    if not show_tooltip(reader, index):
+        return
     if reader._session_recorder is not None:
         reader._session_recorder.record_lookup()
     reader._sync_auto_translation()  # hovering a word → auto-reveal the translation
@@ -721,7 +723,7 @@ def panel_cache_setdefault(reader: Reader, key: PanelKey, st: Panel) -> Panel:
 # --- showing / placing / rendering the base tooltip ---------------------------------------------
 
 
-def show_tooltip(reader: Reader, index: int) -> None:
+def show_tooltip(reader: Reader, index: int) -> bool:
     # "tooltip_show" is the end-to-end hover→drawn span (symmetric with scroll_frame/sub_seek); the
     # perf ring buffer stays for doctor/crashlog. Metrics recorded outside the spans so the kind
     # label (cold vs warm) — only known after impl builds/hits the panel — can split the histogram.
@@ -730,17 +732,21 @@ def show_tooltip(reader: Reader, index: int) -> None:
         otel_metrics.traced("tooltip_show", layout_backend=reader.layout_engine) as span,
         timed("show_tooltip"),
     ):
-        show_tooltip_impl(reader, index)
+        shown = show_tooltip_impl(reader, index)
         # Attribute a slow (usually cold) hover: whether it was a panel build vs a cache hit, the word
         # length + panel height (a tall multi-dict entry is the coldest), and bands rastered on the
         # first paint. All low-cardinality — no raw word surface. Sort spans by dur → read the why.
-        st = reader._tip_state
-        span.set("cold", reader._tip_show_cold)
-        span.set("chars", len(reader.tokens[index].surface))
-        if st is not None:
-            span.set("full_h", st.full_height)
-            span.set("bands", st.last_frame_rasters)
-    _record_show_metrics(reader, (time.perf_counter() - start) * 1000.0)
+        span.set("anchored", shown)
+        if shown:
+            st = reader._tip_state
+            span.set("cold", reader._tip_show_cold)
+            span.set("chars", len(reader.tokens[index].surface))
+            if st is not None:
+                span.set("full_h", st.full_height)
+                span.set("bands", st.last_frame_rasters)
+    if shown:
+        _record_show_metrics(reader, (time.perf_counter() - start) * 1000.0)
+    return shown
 
 
 def _record_show_metrics(reader: Reader, elapsed_ms: float) -> None:
@@ -760,11 +766,19 @@ def _record_show_metrics(reader: Reader, elapsed_ms: float) -> None:
         otel_metrics.cold_first_paint_overshoot.add(1)
 
 
-def show_tooltip_impl(reader: Reader, index: int) -> None:
+def show_tooltip_impl(reader: Reader, index: int) -> bool:
     reader._hide_nested()  # switching the base word drops any stale scan popup
     reader._tip_nav = []  # a newly hovered word abandons any link-navigation back-history
     reader._kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = reader.tokens[index]
+    b = box_for_token(reader.boxes, index)
+    if b is None:
+        log.debug("tooltip anchor disappeared for token index %d", index)
+        reader.hover = -1
+        reader._hover_terms = ()
+        reader._hover_span = None
+        reader._teardown_tip()
+        return False
     inflected = reader._inflected_surface(index)
     cap = reader._tip_cap()
     # Freeze the frame FIRST — before the (main-thread) panel build + compose — so a hover pauses
@@ -784,7 +798,6 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     key = panel_key(reader, tok, inflected, mined=mined, phrase=phrase)
     reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
     ox, oy = reader.sub_origin
-    b = reader.boxes[index]
     wx, wy = ox + b.x, oy + b.y
 
     # Direct paint (#149): a COLD pathological hover the persistent cache has → place by the cached
@@ -801,7 +814,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     # nothing to compose it, so fall through to a synchronous build.
     if reader._tip_show_cold and not painted and prefetch.workers_running(reader):
         prefetch.request_engaged_render(reader, tok, inflected, key, mined=mined, phrase=phrase)
-        return
+        return True
 
     st = panel_for(reader, tok, inflected, min_h=cap, mined=mined, extra_terms=phrase)
     # Direct-paint hit built a fresh interactive panel — seed its first viewport from tier-2 (RAM inflate,
@@ -838,6 +851,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     prefetch.request_render_ahead(
         reader, reader._tip_view, 1
     )  # warm the current native viewport off the main thread
+    return True
 
 
 def place_panel(

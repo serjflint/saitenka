@@ -16,6 +16,7 @@ from saitenka.app import prefetch
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import Panel, PopupView
 from saitenka.app.prefetch import cap_for
+from saitenka.app.subtitles import box_for_token
 from saitenka.model import is_ideograph
 from saitenka.panel import panel_rows
 
@@ -244,9 +245,11 @@ def kanji_current(reader: Reader) -> None:
         reader._toast("no kanji in this word", "warn", 1.2)
         return
     ch = chars[reader._kanji_index % len(chars)]
-    reader._kanji_index += 1
     ox, oy = reader.sub_origin
-    b = reader.boxes[reader.hover]
+    b = box_for_token(reader.boxes, reader.hover)
+    if b is None:
+        return
+    reader._kanji_index += 1
     open_kanji(reader, ch, ox + b.x, oy + b.y, b.h)
 
 

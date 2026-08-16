@@ -27,7 +27,7 @@ from saitenka.app.subtitle_ownership import (
     Visibility,
     reduce_ownership,
 )
-from saitenka.app.subtitles import render_plain_subtitle, render_subtitle
+from saitenka.app.subtitles import box_for_token, render_plain_subtitle, render_subtitle
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -469,7 +469,7 @@ class NativeVisibleRenderer:
             return
         if not self.activate(reader):
             return
-        if reader.hover < 0 or reader.hover >= len(reader.boxes):
+        if reader.hover < 0 or box_for_token(reader.boxes, reader.hover) is None:
             self._hide_focus(reader)
             return
         span = reader._hover_span or (reader.hover, reader.hover + 1)

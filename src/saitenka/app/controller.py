@@ -2004,8 +2004,11 @@ class Reader:
     def _drain_events(self) -> int:
         """Consume this tick's mpv events; returns the net scroll delta (coalesced, not yet applied)."""
         scroll_steps = 0
+        last_client_message: str | None = None
         for ev in self.ipc.drain_events():
             kind = ev.get("event")
+            if kind == "file-loaded":
+                last_client_message = None
             if kind == "property-change":  # observed state — no round-trips
                 self._on_property_change(ev)
             elif kind == "file-loaded":  # #100: re-slot the overlay onto the newly loaded file
@@ -2016,8 +2019,11 @@ class Reader:
                     scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
                 elif msg == SCROLL_DOWN_MSG:
                     scroll_steps += 1
+                elif msg == SUB_PICKER_MSG and last_client_message == SUB_PICKER_MSG:
+                    log.debug("script-message: %s (coalesced in current IPC batch)", msg)
                 else:
                     self._handle(msg)
+                last_client_message = msg
         return scroll_steps
 
     def _expire_toast(self) -> None:
