@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import defaultdict
+from itertools import islice
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from saitenka.subtitles.model import Cue
 
 
@@ -23,9 +27,16 @@ class CueIndex:
         for position, cue in enumerate(self.cues):
             by_text[_normalize(cue.text)].append(position)
         self._by_text = dict(by_text)
+        self._boundaries = tuple(
+            sorted({point for cue in self.cues for point in (cue.start, cue.end)})
+        )
 
     def __len__(self) -> int:
         return len(self.cues)
+
+    def boundaries_after(self, timestamp: float) -> Iterator[float]:
+        """Return authored visibility-change times strictly after ``timestamp``."""
+        return islice(self._boundaries, bisect_right(self._boundaries, timestamp), None)
 
     def _at(self, timestamp: float) -> int | None:
         return next(

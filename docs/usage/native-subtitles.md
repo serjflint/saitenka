@@ -12,9 +12,10 @@ the same authored ASS cue
    └─ click/scan ──> the usual tooltip and mining features
 ```
 
-Saitenka does not draw a second subtitle over mpv's while native geometry is valid. If source,
-render-profile, or provider validation fails, it hides mpv's subtitle layer and restores the standard
-Saitenka renderer, preserving scanning, tooltips, and mining instead of approximating hit boxes.
+Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
+Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv
+subtitle visible, clears unproved hit boxes, and restores interaction asynchronously when a valid result
+arrives. It does not flash the differently styled standard renderer between cues.
 
 ## Install the native runtime
 
@@ -96,9 +97,15 @@ pipeline but are not required to produce libass pixels.
 Saitenka mirrors mpv's frame, video storage size, pixel aspect, letterbox margins, and authored-ASS
 margin policy, including Retina windows. Animated or unmatchable ASS, token-mapping failures, a
 missing, oversized, or non-UTF-8 source, an unsupported font setup, a mismatched attach profile, or an
-unavailable native runtime immediately switch the current frame back to the standard Saitenka renderer. Property
-changes drained in one mpv poll are evaluated together, so intermediate `sub-start`/`sub-end`/ASS-row
-updates do not cause a transient decision.
+unavailable native runtime make that frame noninteractive while mpv keeps rendering it. Property changes
+drained in one mpv poll are evaluated together, so intermediate `sub-start`/`sub-end`/ASS-row updates do
+not cause a transient pixel-owner decision.
+
+The standard renderer is catastrophic recovery, not geometry fallback. Saitenka uses it only after a
+current visibility transaction tries to show mpv subtitles and reads back `sub-visibility=false` for a
+nonempty selection. A rejected set without that current false readback, or a timed-out, stale, or
+unreadable readback, leaves ownership unknown and uses a bounded retry instead of risking duplicate
+subtitle pixels.
 
 Geometry is prepared when the cue or render space changes and for a small lookahead window. Hovering,
 scanning, and scrolling reuse those boxes, so interactive 60 FPS behavior does not require rendering
@@ -109,10 +116,13 @@ the subtitle geometry at 60 FPS.
 - Run `saitenka doctor` first. A missing wrapper/runtime is an installation problem; an unsupported
   render input means mpv is intentionally outside the tested envelope.
 - If `run` works but `attach` does not, compare the attached player's options with the profile above.
-- A native-geometry failure should retain interaction through the standard renderer. If it does not,
-  include a `saitenka report` bundle in the bug report. For a quick, text-free diagnosis, run
-  `uv run tools/subtitle_report.py --geometry /path/to/saitenka-report-*.zip`; it shows ownership
-  transitions, capability state, matched event/token counts, skip counts, and bounded error codes.
+- A native-geometry failure can temporarily remove scanning boxes, but the mpv subtitle style should
+  remain stable. A switch to the standard renderer is a catastrophic native-visibility failure; include
+  a report bundle if that occurs unexpectedly. Before reproducing, run `saitenka telemetry enable`;
+  after the session, run `saitenka report`, then pass the exact printed path to
+  `saitenka subtitle-report /path/to/saitenka-report-20260816-181525.zip`. The installed, text-free analyzer shows
+  ownership transactions and retries, capability state, matched event/token counts, skip counts, and
+  bounded error codes.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 
 For the provider contract, shadow-render pipeline, lifecycle guards, and package diagram, see

@@ -49,6 +49,8 @@ def test_native_geometry_decision_instruments_are_bounded_pull_metrics():
     otel_metrics.subtitle_geometry_decisions.add(1, {"outcome": "ready", "reason": "ready"})
     otel_metrics.subtitle_geometry_owner_transitions.add(1, {"transition": "legacy_to_native"})
     otel_metrics.subtitle_geometry_recoveries.add(1, {"reason": "provider-error"})
+    otel_metrics.subtitle_pixel_catastrophic_fallbacks.add(1)
+    otel_metrics.subtitle_pixel_retry_exhausted.add(1)
     otel_metrics.subtitle_geometry_active_events.record(2)
     otel_metrics.subtitle_geometry_eligible_tokens.record(7)
     otel_metrics.subtitle_geometry_skipped_tokens.record(3)
@@ -61,6 +63,8 @@ def test_native_geometry_decision_instruments_are_bounded_pull_metrics():
     assert snap["saitenka.subtitle_geometry.decisions"]["value"] == 1
     assert snap["saitenka.subtitle_geometry.owner_transitions"]["value"] == 1
     assert snap["saitenka.subtitle_geometry.recoveries"]["value"] == 1
+    assert snap["saitenka.subtitle_pixels.catastrophic_fallbacks"]["value"] == 1
+    assert snap["saitenka.subtitle_pixels.retry_exhausted"]["value"] == 1
     assert snap["saitenka.subtitle_geometry.active_events"]["max"] == 2
     assert snap["saitenka.subtitle_geometry.eligible_tokens"]["max"] == 7
     assert snap["saitenka.subtitle_geometry.skipped_tokens"]["max"] == 3

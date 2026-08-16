@@ -39,26 +39,26 @@ import itertools
 
 import trace_report as tr
 
-_SUB_SPAN_NAMES = ("subtitle.fetch", "subtitle.reslot", "subtitle.resync")
-_GEOMETRY_SPAN_NAMES = (
-    "subtitle_geometry_decision",
-    "subtitle_geometry_clock",
-    "subtitle_geometry_prepare",
-    "subtitle_geometry_render",
-    "subtitle_geometry_libass",
-    "subtitle_geometry_fallback",
+from saitenka.app.subtitle_report import (
+    geometry_diagnosis,
+    geometry_records,
+    render_geometry,
 )
+
+_SUB_SPAN_NAMES = ("subtitle.fetch", "subtitle.reslot", "subtitle.resync")
+
+
+def print_geometry(source: Path, events: list[dict], *, nested: bool = False) -> None:
+    print(render_geometry(source, events, nested=nested), end="")
+
+
+def _geometry_diagnosis(span: dict) -> str:
+    return geometry_diagnosis(span)
 
 
 def subtitle_spans(events: list[dict]) -> list[dict]:
     """Every complete (ph==X) subtitle-pipeline span, in start-time order."""
     spans = [e for e in events if e.get("ph") == "X" and e.get("name") in _SUB_SPAN_NAMES]
-    return sorted(spans, key=lambda s: s.get("ts", 0.0))
-
-
-def geometry_spans(events: list[dict]) -> list[dict]:
-    """Native-geometry decision/work spans in start-time order."""
-    spans = [e for e in events if e.get("ph") == "X" and e.get("name") in _GEOMETRY_SPAN_NAMES]
     return sorted(spans, key=lambda s: s.get("ts", 0.0))
 
 
@@ -139,55 +139,11 @@ def extract(events: list[dict]) -> dict:
         a.pop("thread.id", None)
         return {"name": s["name"], "ts": s.get("ts"), "args": a}
 
-    geometry_fields = frozenset(
-        {
-            "outcome",
-            "reason",
-            "error_code",
-            "ass_full_capability",
-            "active_events",
-            "observed_rows",
-            "matched_events",
-            "eligible_tokens",
-            "requested_tokens",
-            "found_tokens",
-            "skipped_whitespace",
-            "skipped_tokenizer",
-            "skipped_unpaintable",
-            "frame_width",
-            "frame_height",
-            "storage_width",
-            "storage_height",
-            "pixel_aspect",
-            "margins",
-            "generation",
-            "source_epoch",
-            "source_class",
-            "owner_transition",
-            "provider",
-            "libass_version",
-            "layer_count",
-            "prepare_ms",
-            "render_ms",
-            "extract_ms",
-            "video_time_ms",
-            "sub_delay_ms",
-            "subtitle_time_ms",
-            "timestamp_ms",
-            "session",
-            "cpu_ms",
-        }
-    )
-
-    def geometry_record(s: dict) -> dict:
-        args = {key: value for key, value in s.get("args", {}).items() if key in geometry_fields}
-        return {"name": s["name"], "ts": s.get("ts"), "args": args}
-
     return {
         "fetches": [record(s) for s in spans if s["name"] == "subtitle.fetch"],
         "reslots": [record(s) for s in spans if s["name"] == "subtitle.reslot"],
         "resyncs": [record(s) for s in spans if s["name"] == "subtitle.resync"],
-        "geometry": [geometry_record(s) for s in geometry_spans(events)],
+        "geometry": geometry_records(events),
     }
 
 
@@ -218,76 +174,6 @@ def _session(events: list[dict]) -> str | None:
         if sid:
             return str(sid)
     return None
-
-
-def _geometry_diagnosis(span: dict) -> str:
-    args = span.get("args", {})
-    name = span["name"]
-    if name == "subtitle_geometry_clock":
-        if args.get("outcome") != "ready":
-            return f"{args.get('outcome', '?')}: subtitle clock unavailable"
-        return (
-            f"video={args.get('video_time_ms', '?')}ms "
-            f"delay={args.get('sub_delay_ms', '?')}ms "
-            f"subtitle={args.get('subtitle_time_ms', '?')}ms"
-        )
-    if name in {"subtitle_geometry_decision", "subtitle_geometry_fallback"}:
-        outcome = args.get("outcome", "legacy")
-        reason = args.get("reason", "unknown")
-        counts = (
-            f"events={args.get('active_events', 0)} "
-            f"eligible={args.get('eligible_tokens', 0)} "
-            f"skipped={sum(int(args.get(k, 0)) for k in ('skipped_whitespace', 'skipped_tokenizer', 'skipped_unpaintable'))}"
-        )
-        extra = f" error={args['error_code']}" if args.get("error_code") else ""
-        transition = f" {args['owner_transition']}" if args.get("owner_transition") else ""
-        return f"{outcome}: {reason} ({counts}){extra}{transition}"
-    if name == "subtitle_geometry_prepare":
-        return (
-            f"{args.get('outcome', '?')}: observed={args.get('observed_rows', '?')} "
-            f"matched={args.get('matched_events', '?')} eligible={args.get('eligible_tokens', '?')}"
-            + (f" error={args['error_code']}" if args.get("error_code") else "")
-        )
-    if name == "subtitle_geometry_libass":
-        return (
-            f"provider={args.get('provider', '?')} libass={args.get('libass_version', '?')} "
-            f"at={args.get('timestamp_ms', '?')}ms "
-            f"layers={args.get('layer_count', '?')} tokens={args.get('found_tokens', '?')} "
-            f"render={args.get('render_ms', '?')}ms extract={args.get('extract_ms', '?')}ms"
-        )
-    return (
-        f"{args.get('outcome', '?')}: events={args.get('active_events', '?')} "
-        f"tokens={args.get('found_tokens', 0)}/{args.get('requested_tokens', '?')} "
-        f"frame={args.get('frame_width', '?')}x{args.get('frame_height', '?')}"
-        + (f" error={args['error_code']}" if args.get("error_code") else "")
-    )
-
-
-def print_geometry(src: Path, events: list[dict], *, nested: bool = False) -> None:
-    spans = geometry_spans(events)
-    heading = "##" if nested else "#"
-    print(f"{heading} native subtitle geometry" + ("" if nested else f" — {src.name}"))
-    if not spans:
-        print("  (no native-geometry spans — telemetry may predate this diagnostic contract)\n")
-        return
-    decisions = [
-        s
-        for s in spans
-        if s["name"] in {"subtitle_geometry_decision", "subtitle_geometry_fallback"}
-    ]
-    current = decisions[-1].get("args", {}) if decisions else {}
-    print(
-        f"  current={current.get('outcome', '?')} reason={current.get('reason', '?')} · "
-        f"{len(decisions)} decision(s), {sum(s['name'] == 'subtitle_geometry_prepare' for s in spans)} prepare, "
-        f"{sum(s['name'] == 'subtitle_geometry_render' for s in spans)} request, "
-        f"{sum(s['name'] == 'subtitle_geometry_libass' for s in spans)} libass\n"
-    )
-    t0 = spans[0].get("ts", 0.0)
-    for span in spans:
-        tplus = (span.get("ts", t0) - t0) / 1_000_000
-        label = span["name"].removeprefix("subtitle_geometry_")
-        print(f"  t+{tplus:7.1f}s  {label:<8} {_geometry_diagnosis(span)}")
-    print()
 
 
 def print_report(src: Path, events: list[dict], log: list[dict]) -> None:

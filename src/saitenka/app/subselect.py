@@ -527,8 +527,9 @@ def fetch_jimaku(
     episode: int | None = None,
     resync: bool = True,
 ) -> tuple[bool, str]:
-    """Fetch JP subs from jimaku.cc for the attached mpv's current file, add + select them, and hide
-    mpv's native rendering. Returns ``(ok, status)`` so callers can fall back on failure. Usable
+    """Fetch JP subs from jimaku.cc for the attached mpv's current file and select them.
+
+    Returns ``(ok, status)`` so callers can fall back on failure. Usable
     standalone as the runtime "force jimaku" action (a keybind can call this mid-playback)."""
     video = ipc.command("get_property", "path").get("data")
     if not video:
@@ -543,7 +544,6 @@ def fetch_jimaku(
     if sub_path is None:
         return False, status
     _add_and_select(ipc, sub_path)
-    ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
     return True, status
 
 
@@ -551,12 +551,11 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
     """Make Japanese subtitles active on an attached mpv, mirroring ``run``'s precedence:
     explicit file > existing JP track > jimaku fetch. ``jimaku_force`` flips jimaku AHEAD of the
     embedded track (for files whose baked-in JP subs are mistimed/wrong), falling back to the embedded
-    track only if the fetch fails. Hides mpv's native sub rendering whenever it takes control. Returns
-    a human-readable status line for the CLI to print. (``opts.tsukihime`` is a deferred-fetch provider
-    choice handled by the caller, not here.)"""
+    track only if the fetch fails. Subtitle selection is visibility-neutral; the renderer ownership
+    executor performs any handoff. Returns a human-readable status line for the CLI to print.
+    (``opts.tsukihime`` is a deferred-fetch provider choice handled by the caller, not here.)"""
     if opts.sub_file:
         _add_and_select(ipc, Path(opts.sub_file).expanduser())
-        ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
         return f"using sub file {Path(opts.sub_file).name}"
 
     if opts.jimaku and opts.jimaku_force:
@@ -573,7 +572,6 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
 
     sid = select_sub_track(ipc, opts.slang)
     if sid is not None:
-        ipc.command("set_property", "sub-visibility", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
         return f"selected JP subtitle track sid={sid}"
 
     if not opts.jimaku:

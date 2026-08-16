@@ -149,6 +149,12 @@ def test_locate_text_beats_stale_time():
     assert idx.locate(text="また\nあした", time_pos=2.0, preferred=2) == 2
 
 
+def test_visibility_boundaries_are_unique_sorted_and_strictly_future():
+    idx = CueIndex([Cue(1.0, 5.0, "a"), Cue(3.0, 7.0, "b"), Cue(7.0, 8.0, "c")])
+
+    assert tuple(idx.boundaries_after(3.0)) == (5.0, 7.0, 8.0)
+
+
 # --- target: stepping prev/replay/next ---------------------------------------------------------
 
 

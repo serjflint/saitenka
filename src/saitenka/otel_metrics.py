@@ -117,6 +117,8 @@ subtitle_geometry_fallbacks: Counter | None = None
 subtitle_geometry_decisions: Counter | None = None
 subtitle_geometry_owner_transitions: Counter | None = None
 subtitle_geometry_recoveries: Counter | None = None
+subtitle_pixel_catastrophic_fallbacks: Counter | None = None
+subtitle_pixel_retry_exhausted: Counter | None = None
 
 # ~one frame at 60Hz. The tail (p95/p99 jank-frame rate), not the mean, is what a user perceives
 # as scroll stutter — see scroll_frame_jank.
@@ -323,6 +325,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
+    global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
 
     with _lock:
         _reader = reader
@@ -510,6 +513,14 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_geometry.recoveries",
             description="native geometry recovery after fallback",
         )
+        subtitle_pixel_catastrophic_fallbacks = meter.create_counter(
+            "saitenka.subtitle_pixels.catastrophic_fallbacks",
+            description="proved native-pixel failures committed to legacy subtitle pixels",
+        )
+        subtitle_pixel_retry_exhausted = meter.create_counter(
+            "saitenka.subtitle_pixels.retry_exhausted",
+            description="native subtitle visibility retries exhausted without a proved owner",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -541,6 +552,7 @@ def unregister() -> None:
     global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
+    global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
 
     with _lock:
         _reader = None
@@ -600,6 +612,8 @@ def unregister() -> None:
         subtitle_geometry_decisions = None
         subtitle_geometry_owner_transitions = None
         subtitle_geometry_recoveries = None
+        subtitle_pixel_catastrophic_fallbacks = None
+        subtitle_pixel_retry_exhausted = None
         prefetch_queue_depth = None
 
 

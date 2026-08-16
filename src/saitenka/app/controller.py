@@ -170,7 +170,6 @@ _GEOMETRY_PROPS = frozenset(
         "sub-text/ass-full",
         "sub-start",
         "sub-end",
-        "sub-delay",
         "video-out-params",
         "osd-dimensions",
         "options/sub-ass-override",
@@ -527,7 +526,6 @@ class Reader:
         # word up (a tooltip is shown), not for every line you already understand.
         self.auto_translate = o.translation.auto_translate
         self._last_announced_sid: int | None = None
-        self._overlay_mpv_state: dict[str, object] | None = None
         self.sidebar = sidebar.SidebarState()
         self.sub_picker = sub_picker.PickerState()
         self._sub_picker_lister: Callable[[str], tuple] | None = None
@@ -701,10 +699,10 @@ class Reader:
             else:
                 self.subtitle_pipeline.invalidate()
             subtitle_modes.on_primary_changed(self, data)
+        elif changed and self.native_geometry is not None and name == "sub-delay":
+            self.native_geometry.record_clock_change(self)
         elif changed and self.native_geometry is not None and name in _GEOMETRY_PROPS:
             self._geometry_dirty = True
-            if name == "sub-delay":
-                self.native_geometry.record_clock_change(self)
         if changed and name == "sub-text":
             self._ass_full_probe_dirty = True
         if self._geometry_dirty and not self._observing and self.native_geometry is not None:
@@ -803,6 +801,7 @@ class Reader:
 
     def _set_subtitle_inner(self, text: str) -> None:
         self.subtitle_pipeline.invalidate()
+        self.subtitle_pipeline.cue_changed(self, nonempty=bool(text.strip()))
         # Tear down the hover stack via the shared path BEFORE mutating sub_text/hover so that
         # TIP_ID/NESTED_ID are hidden, _tip_rect/_tip_state/_tip_key/_nest are reset, and any
         # _paused_by_tip is released.  We cannot rely on set_hover(-1) here because its
@@ -1007,6 +1006,8 @@ class Reader:
 
     def _draw_subtitle(self) -> None:
         self.subtitle_pipeline.draw_current(self)
+        if self.native_geometry is not None:
+            self.native_geometry.sync_pixel_owner(self)
 
     def _clear_native_interaction(self) -> None:
         self._teardown_tip()
@@ -1015,13 +1016,13 @@ class Reader:
         self.boxes = []
         self.subtitle_pipeline.clear(self)
 
-    def _use_legacy_subtitle_renderer(self, *, draw: bool = True) -> None:
+    def _degrade_native_subtitle_geometry(self) -> None:
         renderer = self.subtitle_pipeline.renderer
-        if not isinstance(renderer, NativeVisibleRenderer):
-            return
-        renderer.use_fallback(self)
-        if draw and self.sub_text.strip():
-            renderer.draw(self)
+        ownership = getattr(renderer, "ownership_state", None)
+        owner = getattr(getattr(ownership, "owner", None), "value", None)
+        if owner != "legacy":
+            self.boxes = []
+        self.subtitle_pipeline.geometry_degraded(self)
 
     def _use_native_subtitle_renderer(self) -> bool:
         renderer = self.subtitle_pipeline.renderer
@@ -1669,25 +1670,14 @@ class Reader:
 
     def toggle_overlay(self) -> None:
         if self.ov.visible:
-            # Only sub-visibility toggles: the overlay renders subs, so hiding it must reveal mpv's own
-            # again. osd-level is left alone (stays at 1) so mpv's native OSD messages — e.g. the
-            # repeatable z/Z/x sub-delay keys — give feedback whether or not the overlay is up.
-            self._overlay_mpv_state = {"sub-visibility": self._get("sub-visibility")}
             self.hover = -1
             self._teardown_tip()
             self.ov.set_visible(visible=False)
             subtitle_modes.release_secondary(self)
-            self.ipc.command(
-                "set_property",
-                "sub-visibility",
-                True,  # noqa: FBT003  # mpv IPC wire value
-            )
+            self.subtitle_pipeline.suspend_for_overlay(self)
             return
-        for name, value in (self._overlay_mpv_state or {}).items():
-            if value is not None:
-                self.ipc.command("set_property", name, value)
-        self._overlay_mpv_state = None
         self.ov.set_visible(visible=True)
+        self.subtitle_pipeline.resume_after_overlay(self)
         if self._translation_visible():
             self._setup_secondary()
             self._draw_translation()
@@ -1922,6 +1912,7 @@ class Reader:
         sidebar.update(self)
         if self.native_geometry is not None:
             self.native_geometry.apply(self)
+        self.subtitle_pipeline.poll_ownership(self)
 
     def _update_interaction(self) -> None:
         self._update_hover()
@@ -2165,7 +2156,7 @@ class Reader:
         self.refresh_osd()
         # Re-register observers after an IPC reconnect (mpv.net drops the pipe mid-session; a fresh
         # connection has forgotten every observe_property) — runs on the IPC thread inside pump().
-        self.ipc.on_reconnect = self.start_observing
+        self.ipc.on_reconnect = self._on_ipc_reconnect
         self.start_observing()  # event-driven property reads from here on
         self._register_keybinds()
         self._seed_mined()
@@ -2184,6 +2175,10 @@ class Reader:
         while self.poll_once():
             time.sleep(interval)
 
+    def _on_ipc_reconnect(self) -> None:
+        self.start_observing()
+        self.subtitle_pipeline.connection_replaced(self)
+
     def close(self) -> None:
         import shutil
 
@@ -2197,9 +2192,11 @@ class Reader:
         for th in self.analysis.threads:
             th.join(timeout=2.0)
         if self.native_geometry is not None:
+            self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.clear(self)
             self.native_geometry.close()
         else:
+            self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.close()
         stats_summary = session_stats.finish(self)
         if stats_summary and self.options.stats.summary:

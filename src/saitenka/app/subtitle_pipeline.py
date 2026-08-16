@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class CurrentSubtitleRenderer(Protocol):
-    def draw(self, reader: Reader) -> None: ...
+    def draw(self, reader: Reader) -> object: ...
 
     def clear(self, reader: Reader) -> None: ...
 
@@ -95,9 +95,46 @@ class SubtitleModeCoordinator:
         self._renderer.clear(reader)
 
     def activate(self, reader: Reader) -> None:
-        activate = getattr(self._renderer, "activate", None)
+        activate = getattr(self._renderer, "reassert", None) or getattr(
+            self._renderer, "activate", None
+        )
         if activate is not None and activate(reader) is False:
             self._renderer.draw(reader)
+
+    def geometry_degraded(self, reader: Reader) -> None:
+        degrade = getattr(self._renderer, "degrade_geometry", None)
+        if degrade is not None:
+            degrade(reader)
+
+    def cue_changed(self, reader: Reader, *, nonempty: bool) -> None:
+        changed = getattr(self._renderer, "cue_changed", None)
+        if changed is not None:
+            changed(reader, nonempty=nonempty)
+
+    def poll_ownership(self, reader: Reader) -> None:
+        poll = getattr(self._renderer, "poll", None)
+        if poll is not None:
+            poll(reader)
+
+    def deactivate(self, reader: Reader) -> None:
+        deactivate = getattr(self._renderer, "deactivate", None)
+        if deactivate is not None:
+            deactivate(reader)
+
+    def suspend_for_overlay(self, reader: Reader) -> None:
+        suspend = getattr(self._renderer, "suspend_for_overlay", None)
+        if suspend is not None:
+            suspend(reader)
+
+    def resume_after_overlay(self, reader: Reader) -> None:
+        resume = getattr(self._renderer, "resume_after_overlay", None)
+        if resume is not None:
+            resume(reader)
+
+    def connection_replaced(self, reader: Reader) -> None:
+        replaced = getattr(self._renderer, "connection_replaced", None)
+        if replaced is not None:
+            replaced(reader)
 
     @property
     def generation(self) -> int:

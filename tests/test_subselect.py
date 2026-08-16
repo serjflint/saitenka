@@ -52,7 +52,7 @@ def test_ensure_selects_jp_and_hides_native_subs():
     ipc = FakeIPC(tracks=[EN, JP])
     msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(slang="ja,jpn,jp"))
     assert "sid=2" in msg
-    assert ipc.sets("sub-visibility") == [False]  # overlay draws its own
+    assert ipc.sets("sub-visibility") == []  # ownership is decided after Reader exists
 
 
 def test_ensure_no_jp_without_jimaku_reports_gap():
