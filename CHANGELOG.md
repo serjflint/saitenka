@@ -12,6 +12,10 @@ logs.
 - **Experimental native subtitles no longer disable interaction when geometry is unavailable.**
   Unsupported subtitle sources, display layouts, or provider failures now fall back to Saitenka's
   standard subtitle renderer, preserving scanning, hover focus, and tooltips.
+- **Native subtitle hit geometry now handles simultaneous ASS events and non-painting tokens.** Active
+  rows are matched as one event-aware frame, while whitespace/control-only tokens no longer require
+  libass pixels. Related mpv property updates are evaluated as one batch, and bounded diagnostics make
+  native-to-legacy decisions visible in `subtitle_report.py` without recording subtitle text.
 - **Experimental native subtitle interaction now follows Retina and letterboxed windows.** The hidden
   geometry render mirrors mpv's full frame margins and authored-ASS margin policy instead of rejecting
   any display whose video does not fill the OSD frame.
