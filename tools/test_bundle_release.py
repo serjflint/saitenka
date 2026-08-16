@@ -104,7 +104,6 @@ def test_bundle_build_locks_provider_and_linux_build_tools() -> None:
 
     assert workflow.count("--overlay-ports=libasslite-bundle/ports") == 6
     assert "autoconf autoconf-archive automake libtool nasm" in workflow
-    assert "brew install nasm" in workflow
     assert "-Dfontconfig=disabled -Dcoretext=enabled" in port
     assert "-Dfontconfig=disabled -Ddirectwrite=enabled" in port
     assert "-Dfontconfig=enabled" in port

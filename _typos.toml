@@ -19,6 +19,7 @@ unparseable = "unparseable"   # valid variant of "unparsable"; used in our error
 entrie = "entrie"             # deliberate `entrie(s)` pluralisation in CLI output
 mis = "mis"                   # appears in compounds/prefixes, not a standalone typo
 certifi = "certifi"           # the package name, not "certify"
+delocate = "delocate"         # the macOS wheel-repair tool, not "delicate"
 PN = "PN"                     # proper-noun pos tag / notation, not "ON"
 Hime = "Hime"                 # TsukiHime — a subtitle source's proper name, not "Him"
 BA = "BA"                     # UAX #14 Line_Break class code (Break After), used in render.linebreak
