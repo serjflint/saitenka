@@ -114,12 +114,37 @@ def test_extract_includes_bounded_native_geometry_evidence():
                 "subtitle_text": "must not be emitted",
                 "span_id": "abc",
             },
-        }
+        },
+        {
+            "name": "subtitle_geometry_clock",
+            "ph": "X",
+            "ts": 2,
+            "args": {
+                "outcome": "ready",
+                "video_time_ms": 11_250,
+                "sub_delay_ms": 10_000,
+                "subtitle_time_ms": 1_250,
+            },
+        },
+        {
+            "name": "subtitle_geometry_libass",
+            "ph": "X",
+            "ts": 3,
+            "args": {"timestamp_ms": 1_250, "subtitle_text": "must not be emitted"},
+        },
     ]
-    out = sr.extract(events)["geometry"][0]["args"]
-    assert out["error_code"] == "missing-token-colors"
-    assert out["eligible_tokens"] == 4
-    assert "span_id" not in out
+    geometry = sr.extract(events)["geometry"]
+    decision = geometry[0]["args"]
+    assert decision["error_code"] == "missing-token-colors"
+    assert decision["eligible_tokens"] == 4
+    assert "span_id" not in decision
+    assert geometry[1]["args"] == {
+        "outcome": "ready",
+        "video_time_ms": 11_250,
+        "sub_delay_ms": 10_000,
+        "subtitle_time_ms": 1_250,
+    }
+    assert geometry[2]["args"] == {"timestamp_ms": 1_250}
 
 
 def test_geometry_diagnosis_explains_owner_transition_and_skips():
@@ -150,15 +175,32 @@ def test_geometry_diagnosis_attributes_libass_render_and_extraction_cost():
                 "libass_version": "0x1705000",
                 "layer_count": 12,
                 "found_tokens": 7,
+                "timestamp_ms": 1_250,
                 "render_ms": 2.5,
                 "extract_ms": 0.8,
             },
         }
     )
-
     assert line == (
-        "provider=libasslite libass=0x1705000 layers=12 tokens=7 render=2.5ms extract=0.8ms"
+        "provider=libasslite libass=0x1705000 at=1250ms layers=12 tokens=7 "
+        "render=2.5ms extract=0.8ms"
     )
+
+
+def test_geometry_diagnosis_reports_delay_adjusted_subtitle_clock():
+    line = sr._geometry_diagnosis(
+        {
+            "name": "subtitle_geometry_clock",
+            "args": {
+                "outcome": "ready",
+                "video_time_ms": 11_250,
+                "sub_delay_ms": 10_000,
+                "subtitle_time_ms": 1_250,
+            },
+        }
+    )
+
+    assert line == "video=11250ms delay=10000ms subtitle=1250ms"
 
 
 def test_geometry_report_uses_trace_microseconds_for_elapsed_seconds(capsys):

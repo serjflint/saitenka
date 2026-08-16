@@ -206,6 +206,7 @@ class LibassGeometryBackend:
         with otel_metrics.traced("subtitle_geometry_libass") as span:
             span.set("provider", "libasslite")
             span.set("libass_version", f"0x{renderer.library_version():x}")
+            span.set("timestamp_ms", request.timestamp_ms)
             started = time.perf_counter_ns()
             result = renderer.render(
                 request.timestamp_ms,

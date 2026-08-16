@@ -2304,7 +2304,14 @@ def test_start_observing_registers_and_seeds_initial_state():
     r = Reader(ipc)
     r.start_observing()
     observed = {c[2] for c in ipc.commands if c and c[0] == "observe_property"}
-    assert {"sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text"} <= observed
+    assert {
+        "sub-text",
+        "mouse-pos",
+        "osd-dimensions",
+        "pause",
+        "secondary-sub-text",
+        "sub-delay",
+    } <= observed
     # initial state was read once at startup
     assert r._prop("pause") is True
     assert r._prop("sub-text") == "字幕"
