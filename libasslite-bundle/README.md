@@ -9,4 +9,6 @@ return to system discovery without uninstalling it.
 
 Release wheels are built from the vcpkg baseline in `NATIVE_SOURCES.json`, repaired for relative native
 dependency lookup, and carry the installed ports' verbatim copyright files in `THIRD_PARTY_LICENSES`.
-The sdist is rebuild metadata only and deliberately contains no native payload.
+Each release tag also carries a per-platform corresponding-source archive containing the exact vcpkg
+downloads and port patches used for that wheel. The sdist is rebuild metadata only and deliberately
+contains no native payload.

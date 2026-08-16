@@ -41,9 +41,13 @@ def main() -> None:
     assert {version for _, version in results} == {0x01705000}
     assert {os.path.realpath(path) for path, _ in results} == {os.path.realpath(bundled)}
 
-    os.environ["LIBASSLITE_LIBRARY"] = str(bundled)
-    explicit_path, _ = render_once()
-    assert os.path.realpath(explicit_path) == os.path.realpath(bundled)
+    os.environ["LIBASSLITE_LIBRARY"] = str(bundled.with_name("missing-libass"))
+    try:
+        render_once()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("an invalid explicit path fell back to the bundle")
     del os.environ["LIBASSLITE_LIBRARY"]
 
     os.environ["LIBASSLITE_BUNDLE"] = "0"
