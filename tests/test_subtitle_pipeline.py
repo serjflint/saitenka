@@ -79,6 +79,18 @@ class FailingBackend(FakeGeometryBackend):
         raise RuntimeError("font provider unavailable")
 
 
+class BlockingBackend(FakeGeometryBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def render(self, request: GeometryRequest) -> GeometrySnapshot:
+        self.entered.set()
+        assert self.release.wait(1)
+        return super().render(request)
+
+
 def request(generation: int, timestamp_ms: int = 1_250) -> GeometryRequest:
     track_id = SubtitleTrackId("track-1")
     return GeometryRequest(
@@ -317,6 +329,24 @@ def test_worker_prefetch_publishes_synchronously_after_generation_change() -> No
     assert coordinator.current is not None
     assert coordinator.current.timestamp_ms == 1_300
     assert worker.stats.prefetched == 1
+    worker.close()
+
+
+def test_worker_drops_prefetch_invalidated_during_backend_render() -> None:
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    future = request(coordinator.generation, 1_300)
+
+    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert backend.entered.wait(1)
+    worker.invalidate()
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert worker.publish_prefetched("future", coordinator.generation) is None
+    assert coordinator.current is None
+    assert worker.stats.prefetch_dropped == 1
     worker.close()
 
 

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.subtitles import Cue, CueIndex, GeometryRequest, GeometrySnapshot, Rect, TokenGeometry
 
 if TYPE_CHECKING:
@@ -43,12 +44,29 @@ class FakeIPC:
             "sub-end": 3.0,
             "time-pos": 1.25,
             "pause": True,
+            "osd-dimensions": {"w": 1280, "h": 720},
             "video-out-params": {"dw": 1280, "dh": 720, "w": 1280, "h": 720, "par": 1.0},
+            "options/sub-ass-override": "no",
+            "options/sub-ass-scale-with-window": False,
+            "options/sub-scale": 1.0,
+            "options/sub-pos": 100.0,
+            "options/sub-use-margins": True,
+            "options/sub-ass-use-video-data": "all",
+            "options/sub-ass-vsfilter-aspect-compat": None,
+            "options/sub-ass-style-overrides": [],
+            "options/sub-font-provider": "auto",
+            "options/embeddedfonts": False,
+            "options/sub-fonts-dir": "",
         }
+        self.set_property_error: str | None = None
 
     def command(self, *args):
         self.commands.append(args)
-        return {"data": self.props.get(args[1]) if args and args[0] == "get_property" else None}
+        if args and args[0] == "get_property":
+            return {"error": "success", "data": self.props.get(args[1])}
+        if args and args[0] == "set_property" and self.set_property_error is not None:
+            return {"error": self.set_property_error}
+        return {"error": "success", "data": None}
 
     def close(self) -> None:
         pass
@@ -103,6 +121,13 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
 
     assert backend.requests
     assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    result.hover = 0
+    result._draw_subtitle()
+    focus = [
+        command for command in ipc.commands if command[:3] == ("osd-overlay", 1001, "ass-events")
+    ]
+    assert len(focus) == 1
+    assert focus[0][4:6] == (1280, 720)
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert not any(command and command[0] in {"sub-add", "sub-remove"} for command in ipc.commands)
     assert not any(
@@ -183,4 +208,101 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
     assert result.native_geometry.worker.wait_idle()
 
     assert backend.requests[0].event_id.start_ms == 4_000
+    result.close()
+
+
+def test_source_clear_is_a_generation_boundary_and_clears_hits(tmp_path: Path) -> None:
+    result, _ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    old_generation = result.subtitle_pipeline.generation
+
+    result.native_geometry.set_source(None, reader=result)
+
+    assert result.subtitle_pipeline.generation == old_generation + 1
+    assert result.subtitle_pipeline.current is None
+    assert result.boxes == []
+    assert not result.native_geometry.apply(result)
+    result.close()
+
+
+def test_repeated_text_event_refreshes_geometry_when_timing_changes(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(
+        ASS.replace(
+            b"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n",
+            b"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n"
+            b"Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n",
+        )
+    )
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+
+    ipc.props.update({"sub-start": 4.0, "sub-end": 6.0, "time-pos": 4.2})
+    result._on_property_change({"name": "sub-start", "data": 4.0})
+    result._on_property_change({"name": "sub-end", "data": 6.0})
+    assert result.boxes == []
+    assert result.native_geometry.worker.wait_idle()
+
+    assert backend.requests[-1].event_id.start_ms == 4_000
+    assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_custom_mpv_subtitle_settings_fail_closed(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/sub-scale"] = 1.2
+
+    result.set_subtitle("猫を見る")
+
+    assert backend.requests == []
+    assert result.boxes == []
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    result.close()
+
+
+def test_custom_mpv_font_provider_fails_closed(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/sub-font-provider"] = "fontconfig"
+
+    result.set_subtitle("猫を見る")
+
+    assert backend.requests == []
+    assert result.boxes == []
+    assert result.native_geometry is not None
+    assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    result.close()
+
+
+def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
+    result, _ipc, _backend = reader(tmp_path)
+    source = tmp_path / "legacy.ass"
+    source.write_bytes(ASS + b"\xff")
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source, reader=result)
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+    result.native_geometry.apply(result)
+
+    assert result.native_geometry.status.fallback_reason == "subtitle-source-encoding-unsupported"
+    result.close()
+
+
+def test_native_visibility_retries_after_mpv_rejects_activation(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    ipc.set_property_error = "disconnected"
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+
+    assert renderer.activate(result) is False
+    renderer.draw(result)
+
+    assert ipc.commands.count(("set_property", "sub-visibility", True)) == 2
     result.close()

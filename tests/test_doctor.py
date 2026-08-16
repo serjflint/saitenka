@@ -78,6 +78,22 @@ def test_subtitle_geometry_check_reports_optional_provider_failure(monkeypatch):
     assert "mpv subtitles remain visible" in check.detail
 
 
+@pytest.mark.parametrize(
+    ("value", "detail"),
+    [
+        ({"native_visible": "false"}, "must be a boolean"),
+        ({"native_visible": True, "cache_max": 0}, "positive integer"),
+    ],
+)
+def test_subtitle_geometry_check_reports_invalid_config(monkeypatch, value, detail):
+    monkeypatch.setattr(doc, "load_config", lambda: {"subtitle_geometry": value})
+
+    check = doc.check_subtitle_geometry()
+
+    assert check.status == "warn"
+    assert detail in check.detail
+
+
 def test_mpv_check_mpvnet_unparseable_version(monkeypatch):
     # mpv.net's --version string doesn't match the `mpv vX.Y` regex; treat a responding binary as
     # present (warn), not missing.

@@ -101,7 +101,10 @@ def prepare_ass_hit_map(
 ) -> PreparedAssGeometry:
     """Rewrite the uniquely matching event and preserve every other document byte."""
     has_bom = source.startswith(b"\xef\xbb\xbf")
-    decoded_source = source.decode("utf-8-sig")
+    try:
+        decoded_source = source.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise UnsupportedAssEvent("subtitle-source-encoding-unsupported") from error
     lines, indexed_events = _authored_events(decoded_source, track_id)
     decoded_events = tuple((index, decode_ass_event(event)) for index, event in indexed_events)
     normalized = text.replace("\r", "").replace("\\N", "\n")

@@ -36,6 +36,7 @@ class _CueInputs:
     frame_size: tuple[int, int]
     storage_size: tuple[int, int]
     pixel_aspect: float
+    render_profile: tuple[tuple[str, str], ...]
 
 
 class NativeSubtitleGeometry:
@@ -57,10 +58,12 @@ class NativeSubtitleGeometry:
             geometry_ready=self._last_snapshot is not None,
         )
 
-    def set_source(self, path: Path | None) -> None:
-        self.worker.invalidate_cache()
+    def set_source(self, path: Path | None, *, reader: Reader | None = None) -> None:
+        self.worker.invalidate()
         self.source_path = None
         self._last_snapshot = None
+        if reader is not None:
+            reader.boxes = []
         if path is None:
             self.fallback_reason = "subtitle-source-unavailable"
         elif path.suffix.casefold() != ".ass":
@@ -71,7 +74,13 @@ class NativeSubtitleGeometry:
 
     def invalidate(self) -> None:
         self._last_snapshot = None
-        self.worker.invalidate_cache()
+        self.worker.invalidate()
+
+    def refresh(self, reader: Reader) -> None:
+        self.invalidate()
+        reader.boxes = []
+        if reader.sub_text.strip():
+            self.schedule(reader)
 
     @staticmethod
     def _annotations(text: str, lines, tokens) -> tuple[TokenAnnotation, ...]:
@@ -113,6 +122,7 @@ class NativeSubtitleGeometry:
                 cue.frame_size,
                 cue.storage_size,
                 cue.pixel_aspect,
+                cue.render_profile,
             )
         )
 
@@ -141,16 +151,58 @@ class NativeSubtitleGeometry:
             cue.storage_size,
             prepared.ass,
             pixel_aspect=cue.pixel_aspect,
+            render_profile=cue.render_profile,
             palette=prepared.palette,
             reserved_rgb=prepared.reserved_rgb,
         )
 
     @staticmethod
-    def _render_inputs(reader: Reader) -> tuple[tuple[int, int], tuple[int, int], float]:
+    def _render_inputs(
+        reader: Reader,
+    ) -> tuple[tuple[int, int], tuple[int, int], float, tuple[tuple[str, str], ...]]:
         video = reader._prop("video-out-params") or {}
-        frame_size = (int(video.get("dw") or reader.osd[0]), int(video.get("dh") or reader.osd[1]))
+        osd = reader._prop("osd-dimensions") or {}
+        frame_size = (int(osd.get("w") or reader.osd[0]), int(osd.get("h") or reader.osd[1]))
         storage_size = (int(video.get("w") or frame_size[0]), int(video.get("h") or frame_size[1]))
-        return frame_size, storage_size, float(video.get("par") or 1.0)
+        display_size = (
+            int(video.get("dw") or frame_size[0]),
+            int(video.get("dh") or frame_size[1]),
+        )
+        margins = tuple(int(osd.get(name) or 0) for name in ("ml", "mr", "mt", "mb"))
+        settings = {
+            "sub-ass-override": reader._prop("options/sub-ass-override"),
+            "sub-ass-scale-with-window": reader._prop("options/sub-ass-scale-with-window"),
+            "sub-scale": reader._prop("options/sub-scale"),
+            "sub-pos": reader._prop("options/sub-pos"),
+            "sub-use-margins": reader._prop("options/sub-use-margins"),
+            "sub-ass-use-video-data": reader._prop("options/sub-ass-use-video-data"),
+            "sub-ass-vsfilter-aspect-compat": reader._prop(
+                "options/sub-ass-vsfilter-aspect-compat"
+            ),
+            "sub-ass-style-overrides": reader._prop("options/sub-ass-style-overrides"),
+            "sub-font-provider": reader._prop("options/sub-font-provider"),
+            "embeddedfonts": reader._prop("options/embeddedfonts"),
+            "sub-fonts-dir": reader._prop("options/sub-fonts-dir"),
+        }
+        supported = (
+            frame_size == display_size
+            and not any(margins)
+            and settings["sub-ass-override"] in {False, "no"}
+            and settings["sub-ass-scale-with-window"] is False
+            and settings["sub-scale"] == 1.0
+            and settings["sub-pos"] == 100.0
+            and settings["sub-use-margins"] is True
+            and settings["sub-ass-use-video-data"] == "all"
+            and settings["sub-ass-vsfilter-aspect-compat"] is None
+            and settings["sub-ass-style-overrides"] in (None, "", (), [])
+            and settings["sub-font-provider"] == "auto"
+            and settings["embeddedfonts"] is False
+            and settings["sub-fonts-dir"] in {None, ""}
+        )
+        if not supported:
+            raise ValueError("subtitle-render-input-unsupported")
+        profile = tuple(sorted((name, repr(value)) for name, value in settings.items()))
+        return frame_size, storage_size, float(video.get("par") or 1.0), profile
 
     def _prefetch(
         self,
@@ -158,7 +210,7 @@ class NativeSubtitleGeometry:
         path: Path,
         track_id: SubtitleTrackId,
         generation: int,
-        render_inputs: tuple[tuple[int, int], tuple[int, int], float],
+        render_inputs: tuple[tuple[int, int], tuple[int, int], float, tuple[tuple[str, str], ...]],
     ) -> None:
         index = reader._sub_index
         if index is None or self.lookahead == 0:
@@ -166,7 +218,7 @@ class NativeSubtitleGeometry:
         current = index.locate(text=reader.sub_text, preferred=reader._nav_idx)
         if current < 0:
             return
-        frame_size, storage_size, pixel_aspect = render_inputs
+        frame_size, storage_size, pixel_aspect, render_profile = render_inputs
         for cue in index.cues[current + 1 : current + 1 + self.lookahead]:
             inputs = _CueInputs(
                 round(cue.start * 1_000),
@@ -175,6 +227,7 @@ class NativeSubtitleGeometry:
                 frame_size,
                 storage_size,
                 pixel_aspect,
+                render_profile,
             )
 
             def build(inputs: _CueInputs = inputs) -> GeometryRequest:
@@ -193,7 +246,13 @@ class NativeSubtitleGeometry:
         if start is None or end is None:
             self.fallback_reason = "subtitle-timing-unavailable"
             return False
-        frame_size, storage_size, pixel_aspect = self._render_inputs(reader)
+        try:
+            frame_size, storage_size, pixel_aspect, render_profile = self._render_inputs(reader)
+        except (TypeError, ValueError):
+            self.worker.mark_not_ready()
+            self.fallback_reason = "subtitle-render-input-unsupported"
+            reader.boxes = []
+            return False
         generation = reader.subtitle_pipeline.generation
         track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
         hint = reader._geometry_cue_hint
@@ -217,13 +276,18 @@ class NativeSubtitleGeometry:
             frame_size,
             storage_size,
             pixel_aspect,
+            render_profile,
         )
         key = self._key(path, cue)
         if cached := self.worker.publish_prefetched(key, generation):
             self.worker.mark_presented(cached)
             self.fallback_reason = None
             self._prefetch(
-                reader, path, track_id, generation, (frame_size, storage_size, pixel_aspect)
+                reader,
+                path,
+                track_id,
+                generation,
+                (frame_size, storage_size, pixel_aspect, render_profile),
             )
             return True
         annotations = self._annotations(reader.sub_text, reader.lines, reader.tokens)
@@ -240,7 +304,7 @@ class NativeSubtitleGeometry:
                 path,
                 track_id,
                 generation,
-                (frame_size, storage_size, pixel_aspect),
+                (frame_size, storage_size, pixel_aspect, render_profile),
             )
         return accepted
 
@@ -248,7 +312,10 @@ class NativeSubtitleGeometry:
         snapshot = reader.subtitle_pipeline.current
         if snapshot is None:
             if reader.subtitle_pipeline.last_error is not None:
-                self.fallback_reason = "geometry-provider-failed"
+                error = reader.subtitle_pipeline.last_error
+                self.fallback_reason = (
+                    error if error.startswith("subtitle-source-") else "geometry-provider-failed"
+                )
                 reader.boxes = []
             return False
         if snapshot is self._last_snapshot:

@@ -947,6 +947,11 @@ wheels = [
 ]
 
 [[package]]
+name = "libasslite"
+version = "0.1.0"
+source = { editable = "libasslite" }
+
+[[package]]
 name = "libcst"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2160,6 +2165,9 @@ layout-engine = [
 linux-keyring = [
     { name = "keyring", marker = "sys_platform == 'linux'" },
 ]
+subtitle-geometry = [
+    { name = "libasslite" },
+]
 telemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
@@ -2228,6 +2236,7 @@ requires-dist = [
     { name = "jamdict-data-fix", marker = "sys_platform == 'win32' and extra == 'jmdict'", specifier = ">=1.5.1a2" },
     { name = "keyring", marker = "python_full_version < '3.15' or sys_platform != 'linux'", specifier = ">=25.7.0" },
     { name = "keyring", marker = "sys_platform == 'linux' and extra == 'linux-keyring'", specifier = ">=25.7.0" },
+    { name = "libasslite", marker = "extra == 'subtitle-geometry'", editable = "libasslite" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.44.0" },
@@ -2250,7 +2259,7 @@ requires-dist = [
     { name = "tomlkit", specifier = ">=0.15.1" },
     { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
-provides-extras = ["deinflect", "layout-engine", "images", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
+provides-extras = ["deinflect", "layout-engine", "images", "subtitle-geometry", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
 [package.metadata.requires-dev]
 codemod = [{ name = "libcst", specifier = ">=1.8.6" }]

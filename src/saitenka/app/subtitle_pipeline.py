@@ -307,6 +307,11 @@ class SubtitleGeometryWorker:
             self._prefetched.clear()
             self._prefetch_pending.clear()
 
+    def invalidate(self) -> int:
+        generation = self._coordinator.invalidate()
+        self.invalidate_cache()
+        return generation
+
     def _cached(self, request: GeometryRequest) -> GeometrySnapshot | None:
         key = request.cache_key()
         with self._condition:
@@ -352,7 +357,7 @@ class SubtitleGeometryWorker:
             return
         result = self._coordinator.render_prefetch(request)
         with self._condition:
-            if result is None:
+            if result is None or generation != self._coordinator.generation:
                 self._prefetch_dropped += 1
             else:
                 self._prefetched.pop(key, None)

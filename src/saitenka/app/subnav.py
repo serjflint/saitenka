@@ -28,8 +28,7 @@ def load_sub_index(reader: Reader, path) -> None:
     reader._sub_index = idx
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:
-        reader.subtitle_pipeline.invalidate()
-        native_geometry.set_source(Path(path))
+        native_geometry.set_source(Path(path), reader=reader)
     from saitenka.app import analysis_overlay
 
     analysis_overlay.on_index_changed(reader)

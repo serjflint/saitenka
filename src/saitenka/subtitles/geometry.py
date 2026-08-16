@@ -77,6 +77,9 @@ def _validate_attachments(request: GeometryRequest) -> None:
     names = [name for name, _data in request.attachments]
     if any(not name or "\x00" in name for name in names) or len(names) != len(set(names)):
         raise ValueError("geometry attachment names must be non-empty and unique")
+    profile_names = [name for name, _value in request.render_profile]
+    if any(not name for name in profile_names) or len(profile_names) != len(set(profile_names)):
+        raise ValueError("geometry render profile names must be non-empty and unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +96,7 @@ class GeometryRequest:
     palette: tuple[GeometryPaletteEntry, ...] = ()
     reserved_rgb: tuple[int, ...] = ()
     attachments: tuple[tuple[str, bytes], ...] = ()
+    render_profile: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -112,6 +116,7 @@ class GeometryRequest:
             repr(self.pixel_aspect),
             repr(self.palette),
             repr(self.reserved_rgb),
+            repr(self.render_profile),
         ):
             digest.update(value.encode())
             digest.update(b"\0")

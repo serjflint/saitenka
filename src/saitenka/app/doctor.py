@@ -655,7 +655,10 @@ def check_mpv_ipc() -> Check:
 def check_subtitle_geometry() -> Check:
     from saitenka.app.config import subtitle_geometry_options
 
-    options = subtitle_geometry_options(load_config())
+    try:
+        options = subtitle_geometry_options(load_config())
+    except (TypeError, ValueError) as error:
+        return Check("subtitle-geometry", "warn", f"invalid subtitle geometry config: {error}")
     if not options.native_visible:
         return Check(
             "subtitle-geometry",

@@ -409,8 +409,13 @@ class ReaderOptions:
 
 def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     raw = cfg.get("subtitle_geometry")
-    values = raw if isinstance(raw, dict) else {}
+    if raw is not None and not isinstance(raw, dict):
+        raise TypeError("subtitle_geometry must be a table")
+    values = raw or {}
     defaults = SubtitleGeometryOptions()
+    native_visible = values.get("native_visible", defaults.native_visible)
+    if not isinstance(native_visible, bool):
+        raise TypeError("subtitle_geometry.native_visible must be a boolean")
     cache_max = values.get("cache_max", defaults.cache_max)
     if isinstance(cache_max, bool) or not isinstance(cache_max, int) or cache_max <= 0:
         raise ValueError("subtitle_geometry.cache_max must be a positive integer")
@@ -421,7 +426,7 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     if isinstance(lookahead, bool) or not isinstance(lookahead, int) or lookahead < 0:
         raise ValueError("subtitle_geometry.lookahead must be a non-negative integer")
     return SubtitleGeometryOptions(
-        native_visible=bool(values.get("native_visible", defaults.native_visible)),
+        native_visible=native_visible,
         library_path=library_path,
         cache_max=cache_max,
         lookahead=lookahead,

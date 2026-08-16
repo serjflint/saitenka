@@ -29,7 +29,9 @@ class Result:
     layers: tuple[Layer, ...]
 
 
-def request(*, ass: bytes = b"ass", generation: int = 0) -> GeometryRequest:
+def request(
+    *, ass: bytes = b"ass", generation: int = 0, render_profile: tuple[tuple[str, str], ...] = ()
+) -> GeometryRequest:
     track = SubtitleTrackId("track")
     event = SubtitleEventId(track, 1_000, 2_000, 0, 0)
     return GeometryRequest(
@@ -46,6 +48,7 @@ def request(*, ass: bytes = b"ass", generation: int = 0) -> GeometryRequest:
         ),
         reserved_rgb=(0xFFFFFF,),
         attachments=(("font.ttf", b"font"),),
+        render_profile=render_profile,
     )
 
 
@@ -86,6 +89,7 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
 
     assert baseline.cache_key() == request(generation=9).cache_key()
     assert baseline.cache_key() != request(ass=b"changed").cache_key()
+    assert baseline.cache_key() != request(render_profile=(("sub-scale", "1.2"),)).cache_key()
 
 
 def test_request_rejects_cross_event_palette() -> None:

@@ -148,6 +148,17 @@ OBSERVED_PROPS = (
     "sub-end",
     "time-pos",
     "video-out-params",
+    "options/sub-ass-override",
+    "options/sub-ass-scale-with-window",
+    "options/sub-scale",
+    "options/sub-pos",
+    "options/sub-use-margins",
+    "options/sub-ass-use-video-data",
+    "options/sub-ass-vsfilter-aspect-compat",
+    "options/sub-ass-style-overrides",
+    "options/sub-font-provider",
+    "options/embeddedfonts",
+    "options/sub-fonts-dir",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
 )
 
@@ -659,17 +670,42 @@ class Reader:
                 log.debug("mpv pause -> %s", ev.get("data"))
             self._observed[name] = ev.get("data")
             if name == "sid" and changed:
-                self.subtitle_pipeline.invalidate()
                 if self.native_geometry is not None:
-                    self.native_geometry.set_source(None)
+                    self.native_geometry.set_source(None, reader=self)
+                else:
+                    self.subtitle_pipeline.invalidate()
                 subtitle_modes.on_primary_changed(self, ev.get("data"))
+            elif (
+                changed
+                and self.native_geometry is not None
+                and name
+                in {
+                    "sub-start",
+                    "sub-end",
+                    "video-out-params",
+                    "osd-dimensions",
+                    "options/sub-ass-override",
+                    "options/sub-ass-scale-with-window",
+                    "options/sub-scale",
+                    "options/sub-pos",
+                    "options/sub-use-margins",
+                    "options/sub-ass-use-video-data",
+                    "options/sub-ass-vsfilter-aspect-compat",
+                    "options/sub-ass-style-overrides",
+                    "options/sub-font-provider",
+                    "options/embeddedfonts",
+                    "options/sub-fonts-dir",
+                }
+            ):
+                self.native_geometry.refresh(self)
 
     def refresh_osd(self) -> bool:
         d = self._prop("osd-dimensions") or {}
         w, h = int(d.get("w") or self.osd[0]), int(d.get("h") or self.osd[1])
         if (w, h) != self.osd and w > 0 and h > 0:
             self.osd = (w, h)
-            self.subtitle_pipeline.invalidate()
+            if self.native_geometry is None:
+                self.subtitle_pipeline.invalidate()
             self._probe_display_sources("osd-change", d)
             return True
         return False
@@ -828,9 +864,10 @@ class Reader:
         cached tokenizations are strategy-specific, so a stale entry would leak the old language's
         segmentation into the new profile."""
         self.tokenizer = tokenizer
-        self.subtitle_pipeline.invalidate()
         if self.native_geometry is not None:
             self.native_geometry.invalidate()
+        else:
+            self.subtitle_pipeline.invalidate()
         self.token_cache.clear()
 
     def set_profile_cycle(

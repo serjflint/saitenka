@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from saitenka import otel_metrics
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.subtitles import render_focus_box, render_plain_subtitle, render_subtitle
+from saitenka.app.subtitles import render_plain_subtitle, render_subtitle
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("saitenka.app.subtitle_render")
 
 SUB_ID = OverlayId.SUB
+NATIVE_FOCUS_ID = 1_001
 
 
 class SubtitleRenderer:
@@ -86,25 +87,45 @@ class NativeVisibleRenderer:
     def __init__(self) -> None:
         self._active = False
 
-    def activate(self, reader: Reader) -> None:
-        reader.ipc.command("set_property", "sub-visibility", True)  # noqa: FBT003
-        self._active = True
+    def activate(self, reader: Reader) -> bool:
+        reply = reader.ipc.command("set_property", "sub-visibility", True)  # noqa: FBT003
+        self._active = not isinstance(reply, dict) or reply.get("error") in {None, "success"}
+        return self._active
 
     def draw(self, reader: Reader) -> None:
-        if not self._active:
-            self.activate(reader)
+        if not self._active and not self.activate(reader):
+            self._hide_focus(reader)
+            return
         if reader.hover < 0 or reader.hover >= len(reader.boxes):
-            reader.ov.hide(SUB_ID)
+            self._hide_focus(reader)
             return
         span = reader._hover_span or (reader.hover, reader.hover + 1)
         selected = [box for box in reader.boxes if span[0] <= box.index < span[1]]
         if not selected:
-            reader.ov.hide(SUB_ID)
+            self._hide_focus(reader)
             return
         left = min(box.x for box in selected)
         top = min(box.y for box in selected)
         right = max(box.x + box.w for box in selected)
         bottom = max(box.y + box.h for box in selected)
         pad = 3
-        image = render_focus_box(right - left + 2 * pad, bottom - top + 2 * pad)
-        reader.ov.show(image, left - pad, top - pad, oid=SUB_ID)
+        width = right - left + 2 * pad
+        height = bottom - top + 2 * pad
+        drawing = (
+            rf"{{\an7\pos({left - pad},{top - pad})\bord2\shad0"
+            rf"\1c&H5AD6FF&\1a&HDF&\3c&H5AD6FF&\3a&H23&\p1}}"
+            f"m 0 0 l {width} 0 l {width} {height} l 0 {height}"
+        )
+        reader.ipc.command(
+            "osd-overlay",
+            NATIVE_FOCUS_ID,
+            "ass-events",
+            drawing,
+            reader.osd[0],
+            reader.osd[1],
+            1,
+        )
+
+    @staticmethod
+    def _hide_focus(reader: Reader) -> None:
+        reader.ipc.command("osd-overlay", NATIVE_FOCUS_ID, "none", "")

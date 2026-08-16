@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka.subtitles.geometry import GeometrySnapshot, Rect, TokenGeometry
 
@@ -145,11 +145,15 @@ class LibassGeometryBackend:
         self._renderers: OrderedDict[str, NativeRenderer] = OrderedDict()
         self._closed = False
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     def _new_renderer(self, request: GeometryRequest) -> NativeRenderer:
         factory = self._factory
         if factory is None:
             module = importlib.import_module("libasslite")
-            factory = module.AssRenderer
+            factory = cast("RendererFactory", module.AssRenderer)
         return factory(
             request.ass,
             fonts=list(request.attachments),
