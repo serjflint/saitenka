@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786886356824,
+  "lastUpdate": 1786892856384,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -6365,6 +6365,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.794784,
             "range": "3 replicas; min 1.26297; max 2.38352; MAD 0.531814; worst 2.38352",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f273d5a37dd137708b4b9914acfbb0f1dabfaa0c",
+          "message": "Merge pull request #381 from serjflint/codex/native-sub-delay\n\nfix(subtitles): honor mpv delay in native geometry",
+          "timestamp": "2026-08-16T20:06:42+05:00",
+          "tree_id": "cd89e89c4d9a4080222b849433504e454e828085",
+          "url": "https://github.com/serjflint/saitenka/commit/f273d5a37dd137708b4b9914acfbb0f1dabfaa0c"
+        },
+        "date": 1786892855618,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.316567,
+            "range": "3 replicas; min 5.78731; max 6.32601; MAD 0.009439",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.776333,
+            "range": "3 replicas; min 8.65226; max 9.62393; MAD 0.124073; worst 9.62393",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 17.954289,
+            "range": "3 replicas; min 16.5153; max 19.3437; MAD 1.38944",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.171085,
+            "range": "3 replicas; min 17.2349; max 19.6326; MAD 0.936184; worst 19.6326",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 21.260922,
+            "range": "3 replicas; min 20.7999; max 24.8299; MAD 0.461",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.13228,
+            "range": "3 replicas; min 0.111155; max 0.167064; MAD 0.021125; worst 0.167064",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 42.835403,
+            "range": "3 replicas; min 39.3991; max 200.718; MAD 3.4363; worst 200.718",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 10.551649,
+            "range": "3 replicas; min 2.951; max 29.8258; MAD 7.60065; worst 29.8258",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.516648,
+            "range": "3 replicas; min 1.27064; max 1.56605; MAD 0.049403; worst 1.56605",
             "unit": "ms"
           }
         ]
