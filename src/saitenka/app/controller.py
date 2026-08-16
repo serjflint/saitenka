@@ -2004,6 +2004,7 @@ class Reader:
     def _drain_events(self) -> int:
         """Consume this tick's mpv events; returns the net scroll delta (coalesced, not yet applied)."""
         scroll_steps = 0
+        picker_handled = False
         for ev in self.ipc.drain_events():
             kind = ev.get("event")
             if kind == "property-change":  # observed state — no round-trips
@@ -2016,8 +2017,11 @@ class Reader:
                     scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
                 elif msg == SCROLL_DOWN_MSG:
                     scroll_steps += 1
+                elif msg == SUB_PICKER_MSG and picker_handled:
+                    log.debug("script-message: %s (coalesced in current IPC batch)", msg)
                 else:
                     self._handle(msg)
+                    picker_handled = picker_handled or msg == SUB_PICKER_MSG
         return scroll_steps
 
     def _expire_toast(self) -> None:

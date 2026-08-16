@@ -927,6 +927,27 @@ def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path
     result.close()
 
 
+def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS.replace("猫を見る".encode(), "猫　犬".encode()))
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫　犬"
+    )
+    result.use_tokenizer(_WhitespaceTokenizer())
+    result.set_subtitle("猫　犬")
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+
+    result.set_hover(2)
+
+    assert result.hover == 2
+    assert result._tip_state is not None
+    result.close()
+
+
 def test_simultaneous_ass_events_publish_event_aware_hit_geometry(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"

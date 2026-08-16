@@ -25,6 +25,7 @@ from saitenka.app.nested_popup import TIP_GAP
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
 from saitenka.app.popups import Panel, PopupView
+from saitenka.app.subtitles import box_for_token
 from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
 
 if TYPE_CHECKING:
@@ -765,6 +766,10 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     reader._tip_nav = []  # a newly hovered word abandons any link-navigation back-history
     reader._kanji_index = 0  # a new word restarts the `k` kanji cycle
     tok = reader.tokens[index]
+    b = box_for_token(reader.boxes, index)
+    if b is None:
+        log.debug("tooltip anchor disappeared for token index %d", index)
+        return
     inflected = reader._inflected_surface(index)
     cap = reader._tip_cap()
     # Freeze the frame FIRST — before the (main-thread) panel build + compose — so a hover pauses
@@ -784,7 +789,6 @@ def show_tooltip_impl(reader: Reader, index: int) -> None:
     key = panel_key(reader, tok, inflected, mined=mined, phrase=phrase)
     reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
     ox, oy = reader.sub_origin
-    b = reader.boxes[index]
     wx, wy = ox + b.x, oy + b.y
 
     # Direct paint (#149): a COLD pathological hover the persistent cache has → place by the cached

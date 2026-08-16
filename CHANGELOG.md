@@ -9,6 +9,10 @@ logs.
 
 ### Fixed
 
+- **Native subtitle scanning no longer crashes on sparse hit boxes.** Tooltip and kanji anchors now
+  resolve the box by token identity when punctuation or whitespace has no interactive geometry.
+- **Queued subtitle-picker shortcuts no longer cancel each other during startup.** Repeated Ctrl+J
+  messages buffered in one IPC batch coalesce into one visible picker transition.
 - **Native subtitle styling no longer flashes back to the standard renderer.** mpv pixel ownership now
   survives cue transitions, cache misses, delay changes, unsupported geometry, and provider failures;
   unproved hit boxes disappear and return asynchronously without changing subtitle style. Only a current
