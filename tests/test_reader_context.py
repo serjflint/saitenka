@@ -36,11 +36,18 @@ class FakeIPC:
 def test_episode_context_defaults_are_the_no_episode_state():
     ctx = EpisodeContext()
     assert (ctx.subtitle.jp_sid, ctx.subtitle.en_sid, ctx.subtitle.language) == (None, None, "jp")
-    assert (ctx.sub_index, ctx.nav_idx, ctx.sub_settle_until, ctx.nav_prev_text) == (
+    assert (
+        ctx.sub_index,
+        ctx.nav_idx,
+        ctx.sub_settle_until,
+        ctx.nav_prev_text,
+        ctx.nav_provisional_cue_counted,
+    ) == (
         None,
         -1,
         0.0,
         "",
+        False,
     )
 
 

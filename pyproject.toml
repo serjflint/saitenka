@@ -7,7 +7,7 @@ license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is
 requires-python = ">=3.13"
 dependencies = [
     "ankiconnect-client>=0.1.0",
-    "saitenka-dict>=0.1.0",
+    "saitenka-dict>=0.1.1",
     "pillow>=11.0",
     "fonttools>=4.55",
     "numpy>=2.0",

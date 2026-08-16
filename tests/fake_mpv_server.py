@@ -60,7 +60,11 @@ class FakeMpvServer:
                     continue
                 req = json.loads(line.decode())
                 cmd = req.get("command", [])
-                reply = {"error": "success", "data": None}
+                reply = {
+                    "request_id": req.get("request_id"),
+                    "error": "success",
+                    "data": None,
+                }
                 if cmd and cmd[0] == "get_property":
                     reply["data"] = self.props.get(cmd[1])
                 conn.sendall(json.dumps(reply).encode() + b"\n")

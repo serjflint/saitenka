@@ -9,6 +9,7 @@ from dirty_equals import IsPartialDict
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
+from saitenka.app.cue_annotation import AnnotationPriority
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_render import NativeVisibleRenderer
@@ -744,6 +745,44 @@ def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path
     result.close()
 
 
+def test_native_lookahead_uses_the_single_annotation_coordinator(
+    tmp_path: Path, monkeypatch
+) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(
+        ASS.replace(
+            b"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n",
+            b"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,\xe7\x8c\xab\xe3\x82\x92\xe8\xa6\x8b\xe3\x82\x8b\n"
+            b"Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,\xe7\x8a\xac\n",
+        )
+    )
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(source)
+    result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
+    result._enable_async_annotation()
+    result._dependencies_settled = True
+    monkeypatch.setattr(
+        result,
+        "_tokenize_cue",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("second annotator used")),
+    )
+
+    result.set_subtitle("猫を見る")
+    assert result._annotation is not None
+    norm = result._cue_norm(result.sub_text)
+    result._annotation.resolve(
+        result._annotation_key(norm),
+        result._annotation_inputs(norm),
+        priority=AnnotationPriority.CURRENT,
+    )
+    result._apply_annotation_results()
+    assert result.native_geometry.worker.wait_idle()
+
+    assert any(request.timestamp_ms == 4_001 for request in backend.requests)
+    result.close()
+
+
 @pytest.mark.parametrize(
     ("time_pos", "sub_delay", "expected_timestamp_ms"),
     [
@@ -1113,7 +1152,7 @@ def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
 
 
-def test_repeated_text_event_refreshes_geometry_when_timing_changes(tmp_path: Path) -> None:
+def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(
@@ -1142,7 +1181,7 @@ def test_repeated_text_event_refreshes_geometry_when_timing_changes(tmp_path: Pa
     )
     result._on_property_change({"name": "sub-start", "data": 4.0})
     result._on_property_change({"name": "sub-end", "data": 6.0})
-    assert result.boxes
+    assert result.boxes == []
 
     result._reconcile_subtitles()
 

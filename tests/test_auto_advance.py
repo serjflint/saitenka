@@ -7,6 +7,7 @@ from __future__ import annotations
 from saitenka.app import session_stats, subselect
 from saitenka.app.controller import Reader
 from saitenka.app.launch import run as cli_run
+from saitenka.app.subtitle_render import NullRenderer
 
 
 class FakeIPC:
@@ -178,6 +179,24 @@ def test_on_file_loaded_reslots_once_per_distinct_file(tmp_path):
     reader._on_file_loaded()  # a new file → re-slot
     reader._on_file_loaded()  # same file again → no re-slot
     assert seen == [tmp_path / "Show 02.mkv"]
+
+
+def test_reconnect_reslots_file_changed_while_disconnected(tmp_path):
+    ipc = FakeIPC()
+    first = tmp_path / "Show 01.mkv"
+    second = tmp_path / "Show 02.mkv"
+    ipc.props.update({"path": str(first), "sub-text": "同じ字幕"})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+    reader.set_subtitle("同じ字幕")
+    seen = []
+    reader.install_reslot_hook(seen.append, initial=first)
+    ipc.props["path"] = str(second)
+
+    reader._on_ipc_reconnect()
+
+    assert seen == [second]
+    assert reader._cue_retired is True
 
 
 def test_on_file_loaded_reslots_same_basename_from_a_different_parent(tmp_path):

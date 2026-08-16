@@ -451,12 +451,9 @@ def warm_tokenizer(tokenizer: str = "unidic") -> None:
     an isolated same-conditions timing) — mutual, too: it slowed the DAG's own tasks down as much as
     they slowed it.
 
-    The run and attach launchers spawn this on its OWN thread, as early as possible — ideally
-    before mpv even launches, so it overlaps mpv's own launch/connect dead time instead of sitting
-    on the critical path. This is a race, not a guarantee: if mpv comes up unusually fast, the real
-    first subtitle line's own ``tokenize()`` call could still overlap this one. In every session
-    observed so far mpv's own startup comfortably outlasts this call, so the race resolves in our
-    favor in practice.
+    Run and attach start this on its own thread before mpv launch. The annotation coordinator retains
+    the completion handle and serializes the first real tokenization after it, so startup overlap cannot
+    turn into concurrent initialization.
 
     ``tokenizer`` is the active profile's tokenizer name (#254). The warm cost being amortised here is
     fugashi-specific, so a non-``unidic`` strategy is a no-op — nothing to prime ahead of mpv."""
@@ -466,6 +463,26 @@ def warm_tokenizer(tokenizer: str = "unidic") -> None:
         from saitenka.app.tokenize import tokenize
 
         tokenize(" ")
+
+
+def begin_tokenizer_warm(tokenizer: str = "unidic") -> Future[None]:
+    """Start tokenizer initialization and retain its completion for annotation serialization."""
+    future: Future[None] = Future()
+
+    def _run() -> None:
+        try:
+            warm_tokenizer(tokenizer)
+        except Exception as error:  # noqa: BLE001  # becomes a bounded annotation failure
+            future.set_exception(error)
+        else:
+            future.set_result(None)
+
+    threading.Thread(
+        target=_run,
+        name="saitenka-tokenizer-warm",
+        daemon=True,
+    ).start()
+    return future
 
 
 def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
@@ -510,6 +527,7 @@ def load_deps_async(
 
     Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
     reader._loading = True
+    reader._enable_async_annotation()
     fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
     fut.add_done_callback(lambda f: setattr(reader, "_pending_deps", f.result()))
 
@@ -525,10 +543,7 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     from saitenka.app import analysis_overlay
 
     analysis_overlay.on_vocabulary_changed(reader)
-    if reader.sub_text:  # re-tokenise + re-score the CURRENT cue so coloring appears now
-        if reader.native_geometry is not None:
-            reader.native_geometry.invalidate(reader)
-        reader.set_subtitle(reader.sub_text)
+    reader._dependencies_changed()
     if reader.anki is not None:
         # Backfill ⊕→✓ from past mining once Anki answers — off the critical path so a not-yet-up
         # (auto-launched) Anki never stalls startup; the watcher flips it on when Anki comes up.

@@ -113,6 +113,42 @@ protocol-shaped class from being mistaken for production swappability.
 `render/`, `subtitles/`, and `panel/` are internal package boundaries in the Saitenka distribution.
 `saitenka-dict`, `ankiconnect-client`, and experimental native add-ons are independently published.
 
+## Interactive startup and cue annotation
+
+Dependency construction already runs outside the reader loop. Publication swaps the completed
+collaborators on the tick thread, then sends cue annotation to one priority worker; it never performs
+tokenizer, dictionary, or scorer work inline. The work key identifies reusable semantics, while a
+separate cue waiter carries timing and presentation identity, so the same computation can serve a
+newer current cue without allowing an old result to restore stale interaction.
+
+```text
+dependency loader ──> publish collaborators ──> annotation generation
+                                                │
+cue change ──> retire tokens/boxes ──> plain or mpv-authored pixels
+                                                │
+             CURRENT ────────────────┐          │
+             LOOKAHEAD ──────────────┼─> one annotation worker
+             EPISODE ────────────────┘          │
+                                                v
+                                  identity-qualified result
+                                    │                 │
+                                  stale             current
+                                    │                 │
+                                 discard      tokens/styles/boxes
+```
+
+The early tokenizer warm has a retained completion handle. The annotation worker waits for it before
+its first tokenizer call, preventing two concurrent initializations; demo and screenshot sessions use
+the same coordinator but deliberately wait before hovering or capturing. Native subtitle geometry
+lookahead also resolves tokenization through this worker rather than creating another annotation path.
+
+Startup readiness is independent of cue readiness. `run` owns an asynchronous mpv breadcrumb request;
+`attach` owns none. After observers and key bindings are installed, the first successful full poll marks
+the session interactive and submits at most one correlated asynchronous clear. Request IDs route late or
+out-of-order mpv replies to their own futures, so cosmetic OSD feedback cannot stall or poison a later
+command. `saitenka trace-report` summarizes these phases and annotation queue/work time from the normal
+report bundle using a text-free field allow-list.
+
 ## Native-visible subtitle architecture
 
 The experimental mode changes **who owns subtitle pixels**, not the tokenizer, lookup, tooltip, or

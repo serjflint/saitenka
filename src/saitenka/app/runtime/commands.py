@@ -15,8 +15,14 @@ class CommandRouter:
     shortcut. Handlers are already bound to their narrow owner; the router never receives a Reader.
     """
 
-    def __init__(self, handlers: Mapping[str, Callable[[], None]] | None = None) -> None:
+    def __init__(
+        self,
+        handlers: Mapping[str, Callable[[], None]] | None = None,
+        *,
+        cue_independent: frozenset[str] = frozenset(),
+    ) -> None:
         self._handlers: dict[str, Callable[[], None]] = {}
+        self._cue_independent = cue_independent
         for name, handler in (handlers or {}).items():
             self.register(name, handler)
 
@@ -34,3 +40,6 @@ class CommandRouter:
 
     def names(self) -> frozenset[str]:
         return frozenset(self._handlers)
+
+    def requires_cue(self, name: str) -> bool:
+        return name in self._handlers and name not in self._cue_independent

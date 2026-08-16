@@ -125,14 +125,24 @@ def test_pump_reconnects_after_a_dropped_pipe_and_replays_observers():
     replays: list = []
     ipc.on_reconnect = lambda: replays.append(True)
     ipc._transport = _ScriptedTransport()  # immediate EOF = dropped pipe
+    ipc._events.append({"event": "property-change", "name": "sub-text", "data": "stale"})
     ipc._start_reader()
     assert ipc._closed.wait(1.0)  # reader saw EOF
     ipc._dial = lambda _path, _timeout: UnixSocketTransport(a)
     left_before = ipc._reconnects_left
 
     def serve_probe() -> None:
-        _recv_line(b)  # the get_property pid liveness probe
-        b.sendall(b'{"error":"success","data":4242}\n')  # a live mpv answers
+        command = _recv_line(b)  # the get_property pid liveness probe
+        b.sendall(
+            json.dumps(
+                {
+                    "request_id": command["request_id"],
+                    "error": "success",
+                    "data": 4242,
+                }
+            ).encode()
+            + b"\n"
+        )  # a live mpv answers
 
     th = threading.Thread(target=serve_probe)
     th.start()
@@ -141,8 +151,192 @@ def test_pump_reconnects_after_a_dropped_pipe_and_replays_observers():
 
     assert replays == [True]  # observers replayed after the live reconnect
     assert ipc._reconnects_left == left_before - 1
+    assert ipc.drain_events() == []
     ipc.close()
     b.close()
+
+
+@pytest.mark.timeout(5)
+def test_reader_from_old_epoch_cannot_close_the_replacement_connection():
+    class StubbornTransport:
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def read(self, _size: int) -> bytes:
+            self.entered.set()
+            if not self.release.wait(4):
+                raise TimeoutError("test did not release the old reader")
+            return b""
+
+        def write(self, _data: bytes) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    old = StubbornTransport()
+    a, b = socket.socketpair()
+    b.settimeout(3.0)
+    ipc = MpvIPC("unused")
+    ipc._transport = old
+    ipc._start_reader()
+    old_reader = ipc._reader
+    if old_reader is None:  # pragma: no cover - _start_reader always installs it
+        pytest.fail("reader thread was not installed")
+    assert old.entered.wait(1)
+    ipc._closed.set()
+    ipc._dial = lambda _path, _timeout: UnixSocketTransport(a)
+
+    def serve_probe() -> None:
+        command = _recv_line(b)
+        b.sendall(
+            json.dumps(
+                {"request_id": command["request_id"], "error": "success", "data": 1}
+            ).encode()
+            + b"\n"
+        )
+
+    probe = threading.Thread(target=serve_probe)
+    probe.start()
+    ipc.pump()
+    probe.join(2)
+
+    old.release.set()
+    old_reader.join(2)
+    assert not old_reader.is_alive()
+
+    followup = ipc.command_async("get_property", "pid")
+    followup_command = _recv_line(b)
+    b.sendall(
+        json.dumps(
+            {"request_id": followup_command["request_id"], "error": "success", "data": 2}
+        ).encode()
+        + b"\n"
+    )
+    assert followup.future.result(timeout=1)["data"] == 2
+
+    ipc.close()
+    b.close()
+
+
+@pytest.mark.timeout(5)
+def test_close_wins_over_an_inflight_reconnect_dial():
+    dial_started = threading.Event()
+    release_dial = threading.Event()
+    replacement = _ScriptedTransport([b"{}\n"])
+    ipc = MpvIPC("unused")
+    ipc._transport = _ScriptedTransport()
+    ipc._start_reader()
+    assert ipc._closed.wait(1)
+
+    def dial(_path: str, _timeout: float):
+        dial_started.set()
+        if not release_dial.wait(3):
+            raise TimeoutError("test did not release reconnect dial")
+        return replacement
+
+    ipc._dial = dial
+    outcomes = []
+
+    def reconnect() -> None:
+        try:
+            ipc.pump()
+        except OSError:
+            outcomes.append("disconnected")
+
+    thread = threading.Thread(target=reconnect)
+    thread.start()
+    assert dial_started.wait(1)
+    ipc.close()
+    release_dial.set()
+    thread.join(2)
+
+    assert outcomes == ["disconnected"]
+    assert replacement.closed is True
+    assert ipc._transport is None and ipc._closed.is_set()
+
+
+@pytest.mark.timeout(5)
+def test_command_submitted_during_reconnect_cannot_cross_connection_epochs():
+    class GateLock:
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def __enter__(self):
+            self.entered.set()
+            if not self.release.wait(3):
+                raise TimeoutError("test did not release reconnect publication")
+
+        def __exit__(self, *_exc) -> None:
+            pass
+
+    class ReplyingTransport:
+        def __init__(self) -> None:
+            self.commands: list[list] = []
+            self.replies: list[bytes] = []
+            self.ready = threading.Event()
+            self.closed = False
+
+        def write(self, data: bytes) -> None:
+            message = json.loads(data)
+            self.commands.append(message["command"])
+            if message["command"] == ["get_property", "pid"]:
+                self.replies.append(
+                    json.dumps(
+                        {"request_id": message["request_id"], "error": "success", "data": 1}
+                    ).encode()
+                    + b"\n"
+                )
+                self.ready.set()
+
+        def read(self, _size: int) -> bytes:
+            self.ready.wait(3)
+            if self.closed:
+                return b""
+            self.ready.clear()
+            return self.replies.pop(0)
+
+        def close(self) -> None:
+            self.closed = True
+            self.ready.set()
+
+    gate = GateLock()
+    replacement = ReplyingTransport()
+    ipc = MpvIPC("unused")
+    ipc._transport = _ScriptedTransport()
+    ipc._start_reader()
+    assert ipc._closed.wait(1)
+    ipc._events_lock = gate
+    ipc._dial = lambda _path, _timeout: replacement
+    reconnected = []
+
+    def reconnect() -> None:
+        ipc.pump()
+        reconnected.append(True)
+
+    reconnect_thread = threading.Thread(target=reconnect)
+    reconnect_thread.start()
+    assert gate.entered.wait(1)
+
+    submitted = []
+    submit_thread = threading.Thread(
+        target=lambda: submitted.append(ipc.command_async("show-text", "late", 1))
+    )
+    submit_thread.start()
+    deadline = time.monotonic() + 1
+    while not submitted and not ipc._pending and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert submitted or ipc._pending
+    gate.release.set()
+    submit_thread.join(2)
+    reconnect_thread.join(2)
+
+    assert submitted[0].future.result(timeout=1) == {"error": "disconnected"}
+    assert replacement.commands == [["get_property", "pid"]]
+    assert reconnected == [True]
+    ipc.close()
 
 
 def test_pump_gives_up_when_a_redial_connects_but_never_replies():
@@ -196,8 +390,8 @@ def test_pump_gives_up_when_redial_keeps_failing():
 
 def test_stale_late_reply_does_not_answer_the_next_command():
     """REGRESSION shape: a command times out, then mpv's late reply for it finally arrives. The NEXT
-    command must not be handed that stale reply — ``command()``'s pre-write drain (ipc.py) exists
-    exactly to prevent this LIFO-style misattribution, but it was never exercised over a real transport."""
+    command must not be handed that stale reply: request IDs make the late reply unaddressable after
+    its timed-out pending request was removed."""
     a, b = socket.socketpair()
     ipc = MpvIPC("unused")
     ipc._transport = UnixSocketTransport(a)
@@ -219,11 +413,13 @@ def test_stale_late_reply_does_not_answer_the_next_command():
         assert cmd1_holder["cmd"]["command"] == ["get_property", "sub-start"]
 
         # the stale reply for cmd1 shows up late
+        bytes_before = ipc._bytes_read
         b.sendall(b'{"request_id":0,"error":"success","data":"STALE"}\n')
         deadline = time.monotonic() + 2.0
-        while ipc._replies.qsize() == 0 and time.monotonic() < deadline:
+        while ipc._bytes_read == bytes_before and time.monotonic() < deadline:
             time.sleep(0.005)
-        assert ipc._replies.qsize() == 1  # confirm it actually landed before cmd2 runs
+        assert ipc._bytes_read > bytes_before
+        assert 0 not in ipc._pending
 
         cmd2_holder: dict = {}
 

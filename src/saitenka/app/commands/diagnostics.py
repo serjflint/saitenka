@@ -378,6 +378,37 @@ def subtitle_report(
     return 0
 
 
+def trace_report(
+    report_path: Annotated[str, cyclopts.Parameter(help="report zip, directory, or trace JSON")],
+    *,
+    json_out: Annotated[
+        bool,
+        cyclopts.Parameter(
+            name="--json", negative=(), help="emit bounded text-free startup records as JSON"
+        ),
+    ] = False,
+) -> int:
+    """Explain startup readiness and cue-annotation latency from a report bundle."""
+    from pathlib import Path
+
+    from saitenka.app.trace_report import load_startup_trace, render_startup, startup_json
+
+    source = Path(report_path).expanduser()
+    try:
+        events = load_startup_trace(source)
+    except (OSError, ValueError) as error:
+        print(f"trace report unavailable: {error}", file=sys.stderr)
+        return 1
+    if not events:
+        print(
+            "no telemetry trace found; enable telemetry before reproducing the issue",
+            file=sys.stderr,
+        )
+        return 1
+    print(startup_json(events) if json_out else render_startup(source, events), end="")
+    return 0
+
+
 def register(app: cyclopts.App) -> None:
-    for command in (doctor, telemetry, prewarm, stats, report, subtitle_report):
+    for command in (doctor, telemetry, prewarm, stats, report, subtitle_report, trace_report):
         app.command(command)

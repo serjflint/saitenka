@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import Future
+
+import pytest
 from util import FakeIPC
 
+from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
+from saitenka.app.subtitle_render import NullRenderer
+from saitenka.app.tokenize import Token
+from saitenka.mpvio.ipc import IPCRequest
 
 
 def test_reader_starts_without_deps():
@@ -80,25 +89,66 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     assert prefetch.prefetch_worker_count(fake_reader(0)) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
-def test_startup_hint_clears_when_overlay_live_not_on_first_cue():
-    # Regression: mpv's "saitenka starting…" OSD breadcrumb must clear the moment the overlay can draw
-    # (osd-dimensions resolved), NOT wait for the first subtitle cue — a sub-less OP (no dialogue for
-    # ~30s) otherwise leaves it up long after startup finished, reading as a hang.
-    ipc = FakeIPC()
-    r = Reader(ipc)
+def test_owned_startup_hint_clears_after_the_first_completed_poll():
+    from saitenka.app.loading import show_startup_hint
 
-    r._maybe_clear_startup_hint()  # osd-dimensions unresolved → overlay can't place anything yet → keep it
-    assert r._startup_hint_cleared is False
+    ipc = FakeIPC()
+    lease = show_startup_hint(ipc)
+    r = Reader(ipc, startup_hint_lease=lease)
     assert ("show-text", "", 1) not in ipc.commands
 
-    ipc.props["osd-dimensions"] = {"w": 1920, "h": 1080}
-    r._maybe_clear_startup_hint()  # overlay is live → clear now, no subtitle required
-    assert r._startup_hint_cleared is True
-    assert ("show-text", "", 1) in ipc.commands  # empty 1ms show-text == clear_startup_hint
+    assert r.poll_once() is True
+    assert r._interactive_ready is True
+    assert ("show-text", "", 1) in ipc.commands
 
     before = ipc.commands.count(("show-text", "", 1))
-    r._maybe_clear_startup_hint()  # one-shot — never clears twice
+    r.poll_once()
     assert ipc.commands.count(("show-text", "", 1)) == before
+
+
+def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeypatch):
+    from saitenka.app.loading import show_startup_hint
+
+    ipc = FakeIPC()
+    reader = Reader(ipc, startup_hint_lease=show_startup_hint(ipc))
+    clear = ("show-text", "", 1)
+    observed = []
+    monkeypatch.setattr(
+        reader,
+        "toggle_sub_picker",
+        lambda: observed.append(clear in ipc.commands),
+    )
+    ipc.events.append({"event": "client-message", "args": [SUB_PICKER_MSG]})
+
+    assert reader.poll_once() is True
+    assert observed == [False]
+    assert clear in ipc.commands
+
+
+def test_unanswered_async_clear_does_not_delay_the_next_poll():
+    from saitenka.app.loading import show_startup_hint
+
+    class _AsyncFakeIPC(FakeIPC):
+        def __init__(self):
+            super().__init__()
+            self.requests: list[IPCRequest] = []
+
+        def command_async(self, *args):
+            request = IPCRequest(len(self.requests), 0, Future())
+            self.commands.append(args)
+            self.requests.append(request)
+            return request
+
+    ipc = _AsyncFakeIPC()
+    lease = show_startup_hint(ipc)
+    assert lease is not None
+    ipc.requests[0].future.set_result({"error": "success"})
+    reader = Reader(ipc, startup_hint_lease=lease)
+
+    assert reader.poll_once() is True
+    assert ("show-text", "", 1) in ipc.commands
+    assert ipc.requests[-1].future.done() is False
+    assert reader.poll_once() is True
 
 
 def test_load_deps_async_marks_loading(monkeypatch):
@@ -108,3 +158,63 @@ def test_load_deps_async_marks_loading(monkeypatch):
     r = Reader(FakeIPC())
     r.load_deps_async({})
     assert r._loading is True  # spinner shows until the poll loop injects
+
+
+@pytest.mark.timeout(5)
+def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkeypatch):
+    class _Tokenizer:
+        name = "test"
+
+        def tokenize(self, line, **_kwargs):
+            return [Token(line, line, line, "名詞", 0, len(line))]
+
+        def merge_dict_compounds(self, tokens, exists):
+            exists(tuple(token.surface for token in tokens))
+            return tokens
+
+    class _BlockingDictionary:
+        def __init__(self):
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.finished = threading.Event()
+            self.thread_id = None
+
+        def terms_exist(self, _forms):
+            self.thread_id = threading.get_ident()
+            self.started.set()
+            assert self.release.wait(2)
+            self.finished.set()
+            return set()
+
+    ipc = FakeIPC()
+    ipc.props.update({"sub-text": "猫", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc)
+    reader.renderer = NullRenderer()
+    reader.tokenizer = _Tokenizer()
+    reader._enable_async_annotation()
+    reader.set_subtitle("猫")
+    dictionary = _BlockingDictionary()
+    dispatched = []
+    monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
+
+    reader._apply_deps({"dict_set": dictionary})
+    assert dictionary.started.wait(1)
+    ipc.events.append({"event": "client-message", "args": [SUB_PICKER_MSG]})
+
+    assert reader.poll_once() is True
+    assert dispatched == [True]
+    assert reader.tokens == [] and reader._sub_pending == "猫"
+    assert dictionary.thread_id != threading.get_ident()
+
+    dictionary.release.set()
+    assert dictionary.finished.wait(1)
+    deadline = time.monotonic() + 1
+    while not reader.tokens and time.monotonic() < deadline:
+        reader.poll_once()
+        time.sleep(0.001)
+    try:
+        assert [token.surface for token in reader.tokens] == ["猫"]
+        assert reader._sub_pending is None
+    finally:
+        dictionary.release.set()
+        reader.close()

@@ -8,6 +8,9 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 
 from __future__ import annotations
 
+import time
+
+import pytest
 from PIL import Image
 from util import FakeIPC
 
@@ -156,3 +159,37 @@ def test_renderer_draws_plain_while_a_cue_is_pending(monkeypatch):
     reader._draw_subtitle()
 
     assert drew == ["plain", "annotated"]
+
+
+@pytest.mark.timeout(5)
+def test_annotation_failure_keeps_plain_subtitle_on_later_redraw(monkeypatch):
+    reader = _reader(dict_set=_ExistsDS())
+    reader.renderer = SubtitleRenderer()
+    drew: list[str] = []
+    stub = SubtitleRender(Image.new("RGBA", (20, 10)), [])
+    monkeypatch.setattr(
+        "saitenka.app.subtitle_render.render_plain_subtitle",
+        lambda *_a, **_k: drew.append("plain") or stub,
+    )
+    monkeypatch.setattr(
+        "saitenka.app.subtitle_render.render_subtitle",
+        lambda *_a, **_k: drew.append("annotated") or stub,
+    )
+
+    class FailingTokenizer:
+        def tokenize(self, _line: str):
+            raise ValueError("broken tokenizer")
+
+    reader.tokenizer = FailingTokenizer()
+    reader._enable_async_annotation()
+    reader._dependencies_settled = True
+    reader.set_subtitle("猫")
+    deadline = time.monotonic() + 2
+    while not reader._annotation_degraded and time.monotonic() < deadline:
+        reader._apply_annotation_results()
+        time.sleep(0.001)
+
+    reader._draw_subtitle()
+    reader.close()
+
+    assert drew == ["plain", "plain"]

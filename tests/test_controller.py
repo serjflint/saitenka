@@ -574,13 +574,91 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
     ipc.props["sub-start"] = 1.0
     r._handle(_msg_for(ipc, "Alt+RIGHT"))
     assert r.sub_text == "に" and r.hover_view().nav_idx == 1  # rendered target, chaining hint set
+    r._retire_cue_identity("sub-start")  # seek timing landed after the instant target render
     r._reconcile_sub_text("いち")  # mpv transiently re-reports the pre-nav cue mid-seek
     assert r.sub_text == "に"  # swallowed — no revert flash
     assert r.hover_view().nav_idx == 1  # and, unlike a real set_subtitle call, chaining survives
-    r._reconcile_sub_text("に")  # mpv settles on the matching (already-rendered) cue
+    r._reconcile_sub_text("に")  # mpv settles; identity is reinstalled with the landed timing
     assert (
-        r.sub_text == "に" and r.hover_view().nav_idx == 1
-    )  # a no-op match — still doesn't reset the hint
+        r.sub_text == "に" and r.hover_view().nav_idx == 1 and not r._cue_retired
+    )  # the settled cue is interactive without losing the chaining hint
+
+
+def test_settle_guard_reinstalls_retired_identity_for_same_text():
+    ipc = FakeIPC()
+    ipc.props.update({"sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.set_subtitle("同じ字幕")
+    reader._nav_prev_text = "同じ字幕"
+    reader._nav_idx = 1
+    reader._sub_settle_until = time.monotonic() + 1.0
+    reader._retire_cue_identity("sub-start")
+
+    reader._reconcile_sub_text("同じ字幕")
+
+    assert reader._cue_retired is False
+    assert reader._current_cue_identity is not None
+    assert reader.hover_view().nav_idx == 1
+
+
+def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch):
+    from saitenka.app.session_stats import SessionRecorder
+
+    class Writer:
+        def submit(self, _snapshot) -> None:
+            pass
+
+        def close(self, _timeout=2.0) -> None:
+            pass
+
+    reader, ipc = _reader_with_index(monkeypatch)
+    reader._session_recorder = SessionRecorder(
+        "/anime/Show 01.mkv",
+        clock=lambda: 0.0,
+        wall_clock=lambda: 0.0,
+        writer=Writer(),
+    )
+    reader.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    reader._handle(_msg_for(ipc, "Alt+RIGHT"))
+    count_after_instant_render = reader._session_recorder.snapshot.cue_count
+    reader._retire_cue_identity("sub-start")
+
+    reader._reconcile_sub_text("に")
+
+    assert reader._session_recorder.snapshot.cue_count == count_after_instant_render
+
+
+def test_identical_text_navigation_counts_the_landed_cue():
+    from saitenka.app.session_stats import SessionRecorder
+    from saitenka.subtitles import Cue, CueIndex
+
+    class Writer:
+        def submit(self, _snapshot) -> None:
+            pass
+
+        def close(self, _timeout=2.0) -> None:
+            pass
+
+    ipc = FakeIPC()
+    ipc.props.update({"sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader._sub_index = CueIndex([Cue(1.0, 2.0, "同じ"), Cue(3.0, 4.0, "同じ")])
+    reader._session_recorder = SessionRecorder(
+        "/anime/Show 01.mkv",
+        clock=lambda: 0.0,
+        wall_clock=lambda: 0.0,
+        writer=Writer(),
+    )
+    reader.set_subtitle("同じ")
+    reader._sub_nav(1)
+    assert reader._session_recorder.snapshot.cue_count == 1
+    ipc.props.update({"sub-start": 3.0, "sub-end": 4.0})
+    reader._retire_cue_identity("sub-start")
+
+    reader._reconcile_sub_text("同じ")
+
+    assert reader._session_recorder.snapshot.cue_count == 2
 
 
 def test_reader_has_subtitle_state_before_any_cue():
@@ -2349,6 +2427,92 @@ def test_property_change_event_drives_subtitle_update(monkeypatch):
     ipc.set_prop("sub-text", "新しい字幕")
     r.poll_once()
     assert seen == ["新しい字幕"]  # the buffered event drove the update, no get_property
+
+
+def test_cue_change_retires_interaction_before_later_command_in_same_batch(monkeypatch):
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props.update({"sub-text": "古い字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+    reader.set_subtitle("古い字幕")
+    copied = []
+    monkeypatch.setattr(reader, "copy_line", lambda: copied.append(reader.sub_text))
+    ipc.events.extend(
+        (
+            {"event": "property-change", "name": "sub-text", "data": "新しい字幕"},
+            {"event": "client-message", "args": [C.COPY_LINE_MSG]},
+        )
+    )
+
+    reader._drain_events()
+
+    assert copied == []
+    assert reader._cue_retired is True
+    assert reader.tokens == [] and reader.boxes == []
+
+    reader._reconcile_subtitles()
+    assert reader.sub_text == "新しい字幕"
+    assert reader._cue_retired is False
+
+
+def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props.update({"sub-text": "古い字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+    reader.set_subtitle("古い字幕")
+    navigated = []
+    monkeypatch.setattr(reader, "_sub_nav", lambda delta: navigated.append(delta))
+    ipc.events.extend(
+        (
+            {"event": "property-change", "name": "sub-text", "data": "新しい字幕"},
+            {"event": "client-message", "args": [C.SUB_NEXT_MSG]},
+        )
+    )
+
+    reader._drain_events()
+
+    assert navigated == []
+    assert reader._cue_retired is True
+
+
+def test_same_text_with_new_timing_installs_a_new_cue_identity():
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props.update({"sub-text": "同じ字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+    reader.set_subtitle("同じ字幕")
+    previous = reader._current_cue_identity
+
+    ipc.set_prop("sub-start", 3.0)
+    reader.poll_once()
+
+    assert reader._cue_retired is False
+    assert reader._current_cue_identity != previous
+    assert reader._current_cue_identity.observed_start == 3.0
+
+
+@pytest.mark.parametrize(("name", "value"), [("sid", 2), ("sub-start", 3.0), ("sub-end", 4.0)])
+def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, value):
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props.update({"sub-text": "同じ字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+    reader.set_subtitle("同じ字幕")
+    ipc.props[name] = value
+
+    reader._on_ipc_reconnect()
+
+    assert reader._cue_retired is True
+    assert reader.tokens == [] and reader.boxes == []
 
 
 def test_property_change_invalidates_subtitle_geometry():

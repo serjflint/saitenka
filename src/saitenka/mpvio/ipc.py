@@ -3,7 +3,7 @@
 Transport model (matches every working mpv client — SubMiner's ``net.Socket`` + ``on('data')``,
 mpv_websocket's async reader, iwalton3/python-mpv-jsonipc's ``WindowsSocket`` thread): a **background
 reader thread** does blocking reads on whichever transport is open and routes each JSON line —
-``event`` messages to a thread-safe list, command replies to a single-flight reply channel. This is
+``event`` messages to a thread-safe list, command replies to request-ID-correlated futures. This is
 identical on Unix and Windows, so there is no ``select`` (Unix-only) / ``PeekNamedPipe`` (Windows-only)
 split: the earlier single-threaded ``pump()`` was a NO-OP on the Windows named pipe, so nothing ever
 read it in steady state and hover/mining/quit-detection were all dead even though attach "succeeded".
@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import sys
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,10 +67,6 @@ def default_ipc_path(unique: str) -> str:
     return str(Path(tempfile.gettempdir()) / f"saitenka-{unique}.sock")
 
 
-# Sentinel pushed onto the reply channel when the reader thread sees EOF, so a waiting command()
-# unblocks with a disconnect result instead of hanging.
-_DISCONNECT = object()
-
 # Bounded auto-reconnect budget (per process). mpv.net drops its IPC named pipe mid-session (a
 # transient WinError 109 that vanilla mpv doesn't emit); re-dialing the SAME endpoint recovers it
 # without the user relaunching. A total cap so a genuinely-gone mpv (quit) still exits after a burst
@@ -82,22 +80,35 @@ _MAX_RECONNECTS = 30
 _RECONNECT_PROBE_S = 2.0
 
 
+@dataclass(frozen=True, slots=True)
+class IPCRequest:
+    request_id: int
+    connection_epoch: int
+    future: Future[dict]
+
+
 class MpvIPC:
     """Connect to an mpv ``--input-ipc-server`` and send commands, reading JSON replies.
 
-    Reads run on a daemon reader thread started by :meth:`connect`; ``command`` is single-flight
-    (called only from the main/IPC thread, as the controller does), so one reply channel suffices."""
+    Reads run on a daemon reader thread started by :meth:`connect`; replies resolve only the future
+    registered for their request ID, so asynchronous cosmetic commands cannot poison later calls."""
 
     def __init__(self, path: str):
         self.path = normalize_ipc_path(path)
         self._transport: Transport | None = None  # set by connect() (or injected in tests)
         self._buf = b""  # reader-thread-only accumulation buffer
+        self._feed_lock = threading.Lock()
         self._bytes_read = (
             0  # total bytes the reader thread got from mpv (0 = never read → pipe dead)
         )
         self._events: list[dict] = []  # async events (property-change, client-message, …)
         self._events_lock = threading.Lock()
-        self._replies: queue.Queue = queue.Queue(maxsize=1)  # single-flight command replies
+        self._pending: dict[int, tuple[int, Future[dict]]] = {}
+        self._pending_lock = threading.Lock()
+        self._write_lock = threading.Lock()
+        self._next_request_id = 0
+        self._connection_epoch = 0
+        self.connected_at: float | None = None
         self._closed = threading.Event()
         self._reader: threading.Thread | None = None
         self._dial: Callable[[str, float], Transport] | None = (
@@ -122,6 +133,7 @@ class MpvIPC:
         while time.monotonic() < deadline:
             try:
                 self._transport = dial(self.path, timeout)
+                self.connected_at = time.monotonic()
                 self._start_reader()
                 log.info(
                     "mpv IPC connected via %s at %s",
@@ -136,16 +148,23 @@ class MpvIPC:
 
     def _start_reader(self) -> None:
         """Spawn the background reader (also called by tests that inject a transport)."""
-        self._reader = threading.Thread(target=self._read_loop, name="mpv-ipc-reader", daemon=True)
+        transport = self._transport
+        assert transport is not None
+        closed = self._closed
+        epoch = self._connection_epoch
+        self._reader = threading.Thread(
+            target=self._read_loop,
+            args=(transport, closed, epoch),
+            name="mpv-ipc-reader",
+            daemon=True,
+        )
         self._reader.start()
 
     # --- reader thread ------------------------------------------------------------------------
-    def _read_loop(self) -> None:
+    def _read_loop(self, transport: Transport, closed: threading.Event, epoch: int) -> None:
         first = True
         try:
-            transport = self._transport
-            assert transport is not None  # connect()/injection set it before the reader ran
-            while not self._closed.is_set():
+            while not closed.is_set():
                 chunk = transport.read(65536)
                 if not chunk:
                     log.info(
@@ -157,19 +176,22 @@ class MpvIPC:
                     log.info("mpv IPC reader: first data from mpv (%d byte(s))", len(chunk))
                     first = False
                 self._bytes_read += len(chunk)
-                self._feed(chunk)
+                self._feed(chunk, connection_epoch=epoch)
         except OSError as e:
             log.warning("mpv IPC reader: read failed (%s) — treating as disconnect", e)
         finally:
-            self._closed.set()
-            try:  # unblock a command() waiting on a reply
-                self._replies.put_nowait(_DISCONNECT)
-            except queue.Full:
-                pass
+            closed.set()
+            self._fail_pending({"error": "disconnected"}, epoch=epoch)
 
-    def _feed(self, chunk: bytes) -> None:
+    def _feed(self, chunk: bytes, *, connection_epoch: int | None = None) -> None:
         """Accumulate bytes, split complete JSON lines, route events vs replies. Reader-thread only
         (except tests, which drive it directly to exercise parsing without a real transport)."""
+        with self._feed_lock:
+            if connection_epoch is not None and connection_epoch != self._connection_epoch:
+                return
+            self._feed_current(chunk)
+
+    def _feed_current(self, chunk: bytes) -> None:
         self._buf += chunk
         while b"\n" in self._buf:
             line, _, self._buf = self._buf.partition(b"\n")
@@ -179,48 +201,72 @@ class MpvIPC:
                 msg = json.loads(line.decode())
             except (ValueError, UnicodeDecodeError):
                 continue  # never let a garbled line kill the reader
-            if "event" in msg:
-                with self._events_lock:
-                    self._events.append(msg)
-            else:  # a command reply (single-flight, so at most one is awaited)
-                try:
-                    self._replies.put_nowait(msg)
-                except queue.Full:  # a stray/late reply — replace so the newest wins
-                    try:
-                        self._replies.get_nowait()
-                        self._replies.put_nowait(msg)
-                    except (queue.Empty, queue.Full):
-                        pass
+            self._route_message(msg)
+
+    def _route_message(self, msg: dict) -> None:
+        if "event" in msg:
+            with self._events_lock:
+                self._events.append(msg)
+            return
+        request_id = msg.get("request_id")
+        if not isinstance(request_id, int):
+            log.debug("mpv IPC: reply without integer request_id dropped")
+            return
+        with self._pending_lock:
+            pending = self._pending.pop(request_id, None)
+        if pending is None:
+            log.debug("mpv IPC: late/unknown reply %d dropped", request_id)
+            return
+        _epoch, future = pending
+        if not future.done():
+            future.set_result(msg)
 
     # --- io -----------------------------------------------------------------------------------
     def _write(self, data: bytes) -> None:
-        assert self._transport is not None  # connect()/injection set it
-        self._transport.write(data)
+        with self._write_lock:
+            transport = self._transport
+            if self._closed.is_set() or transport is None:
+                raise OSError("mpv IPC disconnected")
+            transport.write(data)
+
+    def command_async(self, *args) -> IPCRequest:
+        """Submit a correlated command without waiting for its reply."""
+        future: Future[dict] = Future()
+        with self._pending_lock:
+            request_id = self._next_request_id
+            self._next_request_id += 1
+            epoch = self._connection_epoch
+            if self._closed.is_set():
+                future.set_result({"error": "disconnected"})
+                return IPCRequest(request_id, epoch, future)
+            self._pending[request_id] = (epoch, future)
+        cmd = args[0] if args else "?"
+        try:
+            self._write(
+                json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
+            )
+        except OSError as error:
+            log.warning("mpv IPC: write failed for %r (%s) — disconnected", cmd, error)
+            with self._pending_lock:
+                self._pending.pop(request_id, None)
+            if not future.done():
+                future.set_result({"error": "disconnected"})
+            self._closed.set()
+        return IPCRequest(request_id, epoch, future)
 
     def command(self, *args, timeout: float | None = None) -> dict:
-        """Send a command array and return the first non-event reply (or an error dict)."""
-        if self._closed.is_set():
-            return {"error": "disconnected"}
+        """Send a correlated command and wait only for its own reply."""
         # Metrics only (timed, not instrumented) — this runs on effectively every poll tick, and a
         # span per call would flood trace.json for no visualization benefit at that frequency.
         with otel_metrics.timed(otel_metrics.ipc_roundtrip_ms):
-            # Clear any stale reply left by a previously timed-out command (single-flight otherwise).
-            try:
-                while True:
-                    self._replies.get_nowait()
-            except queue.Empty:
-                pass
             cmd = args[0] if args else "?"
-            try:
-                self._write(json.dumps({"command": list(args)}).encode() + b"\n")
-            except OSError as e:
-                log.warning("mpv IPC: write failed for %r (%s) — disconnected", cmd, e)
-                self._closed.set()
-                return {"error": "disconnected"}
+            request = self.command_async(*args)
             wait = timeout if timeout is not None else 10.0
             try:
-                msg = self._replies.get(timeout=wait)
-            except queue.Empty:
+                return request.future.result(timeout=wait)
+            except FutureTimeoutError:
+                with self._pending_lock:
+                    self._pending.pop(request.request_id, None)
                 # No reply in `wait`s — on Windows this is the tell-tale of a dead pipe read
                 # direction: writes land but mpv's replies/events never come back (bytes_read=0).
                 log.warning(
@@ -230,7 +276,32 @@ class MpvIPC:
                     self._bytes_read,
                 )
                 return {"error": "timeout"}
-            return {"error": "disconnected"} if msg is _DISCONNECT else msg
+
+    def _pop_pending(self, epoch: int | None = None) -> list[Future[dict]]:
+        with self._pending_lock:
+            if epoch is None:
+                pending, self._pending = self._pending, {}
+            else:
+                pending = {
+                    request_id: item
+                    for request_id, item in self._pending.items()
+                    if item[0] == epoch
+                }
+                self._pending = {
+                    request_id: item
+                    for request_id, item in self._pending.items()
+                    if item[0] != epoch
+                }
+        return [future for _pending_epoch, future in pending.values()]
+
+    @staticmethod
+    def _resolve_pending(futures: list[Future[dict]], result: dict) -> None:
+        for future in futures:
+            if not future.done():
+                future.set_result(dict(result))
+
+    def _fail_pending(self, result: dict, *, epoch: int | None = None) -> None:
+        self._resolve_pending(self._pop_pending(epoch), result)
 
     def pump(self) -> None:
         """Surface a disconnect so the poll loop stops. The reader thread does the actual socket
@@ -250,19 +321,77 @@ class MpvIPC:
         observers. Bounded by ``_reconnects_left`` so a quit mpv (dials keep failing) still exits."""
         if self._dial is None or self._reconnects_left <= 0:
             return False
-        if self._reader is not None and self._reader.is_alive():
-            self._reader.join(timeout=1.0)  # the dropped-pipe reader has set _closed and is exiting
+        self._detach_for_reconnect()
         self._reconnects_left -= 1
+        transport = self._dial_replacement()
+        if transport is None:
+            return False
+        installed, retired = self._install_replacement(transport)
+        if not installed:
+            return False
+        self._resolve_pending(retired, {"error": "disconnected"})
+        if not self._replacement_is_live():
+            return False
+        log.warning(
+            "mpv IPC: reconnected to %s after a dropped pipe (%d reconnect(s) left)",
+            self.path,
+            self._reconnects_left,
+        )
+        if self.on_reconnect is not None:
+            self.on_reconnect()  # controller re-issues observe_property (lost on the new connection)
+        return True
+
+    @staticmethod
+    def _close_transport(transport: Transport) -> None:
         try:
-            transport = self._dial(self.path, 1.0)
+            transport.close()
+        except OSError:
+            pass
+
+    def _detach_for_reconnect(self) -> None:
+        with self._write_lock:
+            old_transport, self._transport = self._transport, None
+        if old_transport is not None:
+            self._close_transport(old_transport)
+        if self._reader is not None and self._reader.is_alive():
+            self._reader.join(timeout=1.0)
+
+    def _dial_replacement(self) -> Transport | None:
+        assert self._dial is not None
+        try:
+            return self._dial(self.path, 1.0)
         except (OSError, FileNotFoundError) as e:
             log.info("mpv IPC reconnect: %s unavailable (%s) — mpv has quit", self.path, e)
-            return False
-        self._transport = transport
-        self._buf = b""
-        self._replies = queue.Queue(maxsize=1)
-        self._closed = threading.Event()  # fresh gate for the new reader (old one has exited)
-        self._start_reader()
+            return None
+
+    def _install_replacement(self, transport: Transport) -> tuple[bool, list[Future[dict]]]:
+        with self._write_lock:
+            if self._intentional:
+                self._close_transport(transport)
+                return False, []
+            with self._feed_lock:
+                self._buf = b""
+                with self._pending_lock:
+                    retired_epoch = self._connection_epoch
+                    self._connection_epoch += 1
+                    retired = [
+                        future
+                        for pending_epoch, future in self._pending.values()
+                        if pending_epoch == retired_epoch
+                    ]
+                    self._pending = {
+                        request_id: item
+                        for request_id, item in self._pending.items()
+                        if item[0] != retired_epoch
+                    }
+            with self._events_lock:
+                self._events = []
+            self._transport = transport
+            self._closed = threading.Event()
+            self._start_reader()
+        return True, retired
+
+    def _replacement_is_live(self) -> bool:
         # Liveness gate: a re-dial that connects to a QUIT mpv (self-launched run-mode exit, or an
         # external mpv that closed) can accept the socket yet never reply. Probe once — our sentinels
         # ("disconnected"/"timeout") mean gone, so bail and let pump() raise; ANY real mpv reply (even
@@ -276,13 +405,6 @@ class MpvIPC:
             )
             self._closed.set()
             return False
-        log.warning(
-            "mpv IPC: reconnected to %s after a dropped pipe (%d reconnect(s) left)",
-            self.path,
-            self._reconnects_left,
-        )
-        if self.on_reconnect is not None:
-            self.on_reconnect()  # controller re-issues observe_property (lost on the new connection)
         return True
 
     def drain_events(self) -> list[dict]:
@@ -292,14 +414,18 @@ class MpvIPC:
         return evs
 
     def close(self) -> None:
-        self._intentional = True  # a real shutdown, not a dropped pipe — pump() must not reconnect
-        self._closed.set()
-        if self._transport is not None:
+        with self._write_lock:
+            self._intentional = (
+                True  # a real shutdown, not a dropped pipe — never publish a re-dial
+            )
+            self._closed.set()
+            transport, self._transport = self._transport, None
+        self._fail_pending({"error": "disconnected"})
+        if transport is not None:
             try:
-                self._transport.close()  # unblocks the reader thread's blocking read → it exits
+                transport.close()  # unblocks the reader thread's blocking read → it exits
             except OSError:
                 pass
-            self._transport = None
         # Join the reader so shutdown doesn't race a still-running thread (bounded — the closed
         # transport makes the blocking read return promptly).
         if self._reader is not None and self._reader.is_alive():

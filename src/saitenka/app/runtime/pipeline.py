@@ -27,9 +27,15 @@ class TickPipeline:
             duplicate = next(name for name in names if names.count(name) > 1)
             raise ValueError(f"tick stage already registered: {duplicate}")
 
-    def run(self) -> None:
+    def run(self, *, traced_prefix: str | None = None) -> None:
         for stage in self._stages:
-            stage.run()
+            if traced_prefix is None:
+                stage.run()
+            else:
+                from saitenka import otel_metrics
+
+                with otel_metrics.traced(f"{traced_prefix}.{stage.name}"):
+                    stage.run()
 
     def names(self) -> tuple[str, ...]:
         return tuple(stage.name for stage in self._stages)

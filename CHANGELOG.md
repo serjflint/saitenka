@@ -9,6 +9,11 @@ logs.
 
 ### Fixed
 
+- **Startup remains interactive while dictionaries and cue annotations finish.** Publishing loaded
+  dependencies no longer runs tokenization, dictionary attestation, or scoring on the mpv event-loop
+  thread. Current cues preempt episode warming, stale results cannot restore old hit boxes, and the
+  owned `saitenka starting...` breadcrumb clears only after a complete operable poll. Correlated IPC
+  replies and `saitenka trace-report` make the startup critical path diagnosable without subtitle text.
 - **Native subtitle scanning no longer crashes on sparse hit boxes.** Tooltip and kanji anchors now
   resolve the box by token identity when punctuation or whitespace has no interactive geometry.
 - **Queued subtitle-picker shortcuts no longer cancel each other during startup.** Repeated Ctrl+J

@@ -136,6 +136,10 @@ imported dictionaries, and surfaces recent errors from the log. If something sti
 `saitenka report` and attach the bundle to a [GitHub issue](https://github.com/serjflint/saitenka/issues).
 Per-command flags and diagnostics are in the [CLI reference](../usage/cli.md).
 
+For a slow or unresponsive startup, enable telemetry before reproducing, create the report after the
+session ends, then run `saitenka trace-report PATH_PRINTED_BY_REPORT`. It separates mpv connection,
+reader setup, the first poll, annotation queueing, and dictionary work without printing subtitle text.
+
 ---
 
 **Next:** [Quickstart](quickstart.md) — from a fresh install to your first mined card.

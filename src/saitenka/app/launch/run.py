@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from saitenka import otel_metrics
 from saitenka.app import session_stats
 from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config, subtitle_geometry_options
@@ -401,7 +402,7 @@ def _launch_mpv_and_connect(
     sub_path,
     en_sub_path,
 ) -> tuple:
-    """Find + launch mpv and connect its IPC socket. Returns ``(None, None)`` (having already
+    """Find + launch mpv and connect its IPC socket. Returns ``(None, None, None)`` (having already
     printed the reason) when mpv can't be found or its IPC never comes up."""
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
@@ -413,7 +414,7 @@ def _launch_mpv_and_connect(
             "`brew install mpv`), or set `mpv_path` in overlay.toml. Run `saitenka doctor`.",
             file=sys.stderr,
         )
-        return None, None
+        return None, None, None
     if opts.native_visible:
         from saitenka.mpvio.launch import supports_native_geometry_profile
 
@@ -434,7 +435,7 @@ def _launch_mpv_and_connect(
                 "subtitle_geometry.native_visible or upgrade mpv",
                 file=sys.stderr,
             )
-            return None, None
+            return None, None, None
     # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
     sock = default_ipc_path(tmp.name)
     # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
@@ -450,22 +451,22 @@ def _launch_mpv_and_connect(
     print(f"[saitenka] session {session_id()} — quote this when reporting a bug")
     print("launching:", " ".join(cmd))
     log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
-    proc = subprocess.Popen(cmd)
+    with otel_metrics.traced("startup.mpv_connect"):
+        proc = subprocess.Popen(cmd)
+        try:
+            ipc = MpvIPC(sock).connect(timeout=15)
+        except TimeoutError as e:
+            print("mpv IPC unreachable:", e, file=sys.stderr)
+            from saitenka.app.procutil import kill_process_tree
 
-    try:
-        ipc = MpvIPC(sock).connect(timeout=15)
-    except TimeoutError as e:
-        print("mpv IPC unreachable:", e, file=sys.stderr)
-        from saitenka.app.procutil import kill_process_tree
-
-        kill_process_tree(proc)
-        return None, None
+            kill_process_tree(proc)
+            return None, None, None
     # Immediate feedback for the file-load wait: our overlay isn't built yet and the next steps block
     # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
     from saitenka.app.loading import show_startup_hint
 
-    show_startup_hint(ipc, screenshot=opts.screenshot)
-    return proc, ipc
+    startup_hint_lease = show_startup_hint(ipc, screenshot=opts.screenshot)
+    return proc, ipc, startup_hint_lease
 
 
 def _build_run_options(cfg: dict, flags: RunFlags):
@@ -905,7 +906,7 @@ def _execute_reader_session(
         time.sleep(0.8)
         text = _wait_for_subtitle_text(reader, ipc, video)
         print("sub-text:", repr(text))
-        reader.set_subtitle(text)
+        reader.prepare_subtitle_blocking(text)
         target = demo.demo_word or "読む"
         idx = next((i for i, t in enumerate(reader.tokens) if target in t.surface), None)
         if idx is None:
@@ -914,6 +915,7 @@ def _execute_reader_session(
             )
         print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
         reader.set_hover(idx)
+        reader._mark_interactive_ready()
         _run_demo_actions(reader, ipc, demo)
     else:
         print(
@@ -974,7 +976,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     profile: str | None = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
-    from saitenka.app.reader_deps import begin_deps_build, warm_tokenizer
+    from saitenka.app.reader_deps import begin_deps_build, begin_tokenizer_warm
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift.
@@ -995,12 +997,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     # tokenize() call (see warm_tokenizer's docstring) overlaps mpv's own launch/connect dead time
     # instead of landing on the critical path later. Pre-warm the ACTIVE profile's tokenizer (a no-op
     # for a non-unidic strategy, whose warm cost isn't fugashi's).
-    threading.Thread(
-        target=warm_tokenizer,
-        args=(active_profile.tokenizer,),
-        name="saitenka-tokenizer-warm",
-        daemon=True,
-    ).start()
+    tokenizer_warm = begin_tokenizer_warm(active_profile.tokenizer)
 
     # A bare positional that isn't a real file (and isn't a URL) is almost always a mistyped or unknown
     # SUBCOMMAND landing on the default `run` shape — e.g. `saitenka install`. Don't hand it to
@@ -1069,7 +1066,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
     )
 
-    proc, ipc = _launch_mpv_and_connect(
+    proc, ipc, startup_hint_lease = _launch_mpv_and_connect(
         cfg,
         tmp,
         video_path,
@@ -1090,7 +1087,8 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     from saitenka.app.subtitle_modes import select_initial
 
-    subtitle_startup = select_initial(ipc, slang)
+    with otel_metrics.traced("startup.subtitle_selection"):
+        subtitle_startup = select_initial(ipc, slang)
 
     opts = _build_run_options(
         cfg,
@@ -1115,34 +1113,43 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     # scorer / mining collaborators PRESENT synchronously — build them inline. The interactive path
     # builds them in the BACKGROUND (progressive startup): plain subs draw now, a spinner runs, and
     # coloring/tooltips/mining land in place once loaded.
-    if demo_word or screenshot:
-        scorer, anki, mine_conf, dict_set = _build_deps()
-        from saitenka.app.reader_factory import ReaderServices, create_reader
+    with otel_metrics.traced("startup.reader_create"):
+        if demo_word or screenshot:
+            scorer, anki, mine_conf, dict_set = _build_deps()
+            from saitenka.app.reader_factory import ReaderServices, create_reader
 
-        reader = create_reader(
-            ipc,
-            services=ReaderServices(scorer, anki, mine_conf, dict_set),
-            options=opts,
-            profile=active_profile,
-        )
+            reader = create_reader(
+                ipc,
+                services=ReaderServices(scorer, anki, mine_conf, dict_set),
+                options=opts,
+                profile=active_profile,
+                startup_hint_lease=startup_hint_lease,
+                tokenizer_warm=tokenizer_warm,
+            )
+        else:
+            from saitenka.app.reader_factory import create_reader
+
+            reader = create_reader(
+                ipc,
+                options=opts,
+                profile=active_profile,
+                startup_hint_lease=startup_hint_lease,
+                tokenizer_warm=tokenizer_warm,
+            )
         reader.set_profile_cycle(
             profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
         )
-    else:
-        from saitenka.app.reader_factory import create_reader
-
-        reader = create_reader(ipc, options=opts, profile=active_profile)
-        reader.set_profile_cycle(
-            profile_cycle, _dict_scoper_for(cfg, profile_cycle), base_slang=ident.base_slang
-        )
+    if not (demo_word or screenshot):
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
         # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
-        build_sub_index_for_current_track(reader)
+        with otel_metrics.traced("startup.subtitle_index"):
+            build_sub_index_for_current_track(reader)
         reader.load_deps_async(
             cfg, prebuilt=deps_future
         )  # the build has been running since pre-launch
 
-    reader.configure_subtitle_mode(subtitle_startup, slang=slang)
+    with otel_metrics.traced("startup.subtitle_mode_configure"):
+        reader.configure_subtitle_mode(subtitle_startup, slang=slang)
     _start_run_provider_fetch(
         reader,
         cfg,

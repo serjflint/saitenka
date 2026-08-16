@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 import sys
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import cyclopts
 
+from saitenka import otel_metrics
 from saitenka.app.config import TooltipOptions, load_config
 from saitenka.app.embedded_subs import build_sub_index_for_current_track
 from saitenka.app.subselect import ProviderConfig
@@ -99,8 +99,10 @@ def _finish_attach_subtitle_startup(
     reader, ipc, startup, cfg: ProviderConfig, *, fetch_in_background: tuple[str, ...]
 ) -> None:
     if startup is not None:
-        reader.configure_subtitle_mode(startup, slang=cfg.slang)
-    build_sub_index_for_current_track(reader)
+        with otel_metrics.traced("startup.subtitle_mode_configure"):
+            reader.configure_subtitle_mode(startup, slang=cfg.slang)
+    with otel_metrics.traced("startup.subtitle_index"):
+        build_sub_index_for_current_track(reader)
     from saitenka.app.subselect import configure_providers, provider_fetch_factory
 
     configure_providers(reader, cfg)  # shared with run: manual re-sync retry + Ctrl+J source picker
@@ -230,8 +232,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     mpv_websocket/animecards rather than take it over. On attach we actively select the Japanese
     subtitle track (the user's mpv may prefer English), fetching from jimaku when asked.
     """
+    from saitenka.app.launch.run import setup_session_telemetry
     from saitenka.app.profiles import resolve_launch_identity
-    from saitenka.app.reader_deps import warm_tokenizer
+    from saitenka.app.reader_deps import begin_tokenizer_warm
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
@@ -247,17 +250,10 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of
     # landing on the critical path later. Warms the ACTIVE profile's tokenizer (no-op for non-unidic).
-    threading.Thread(
-        target=warm_tokenizer,
-        args=(active_profile.tokenizer,),
-        name="saitenka-tokenizer-warm",
-        daemon=True,
-    ).start()
-
-    from saitenka.app.launch.run import setup_session_telemetry
+    setup_session_telemetry(cfg)  # capture is per reader session, not global (see cli.main note)
+    tokenizer_warm = begin_tokenizer_warm(active_profile.tokenizer)
     from saitenka.mpvio.ipc import MpvIPC, default_attach_ipc_path
 
-    setup_session_telemetry(cfg)  # capture is per reader session, not global (see cli.main note)
     sock = socket or cfg.get("mpv_socket") or default_attach_ipc_path()
     if not sock:
         print(
@@ -277,11 +273,12 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         print(msg, file=sys.stderr, flush=True)
         return 0
 
-    try:
-        ipc = MpvIPC(sock).connect(timeout=15)
-    except TimeoutError as e:
-        print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
-        return 2
+    with otel_metrics.traced("startup.mpv_connect"):
+        try:
+            ipc = MpvIPC(sock).connect(timeout=15)
+        except TimeoutError as e:
+            print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
+            return 2
 
     from saitenka.app.subselect import AttachSubtitleOptions, prepare_attach_startup
     from saitenka.app.subtitle_providers import enabled_providers_for
@@ -305,21 +302,22 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     subtitle_startup = None
     fetch_jimaku_in_background: tuple[str, ...] = ()
     try:
-        subtitle_startup, status, fetch_jimaku_in_background = prepare_attach_startup(
-            ipc,
-            AttachSubtitleOptions(
-                slang=slang,
-                sub_file=sub_file,
-                jimaku=jimaku,
-                jimaku_force=jimaku_force,
-                jimaku_key=jimaku_key,
-                jimaku_title=jimaku_title,
-                tsukihime=bool(th.get("enabled", False)),
-                episode=episode,
-                resync=resync,
-                language=active_profile.langs.main,
-            ),
-        )
+        with otel_metrics.traced("startup.subtitle_selection"):
+            subtitle_startup, status, fetch_jimaku_in_background = prepare_attach_startup(
+                ipc,
+                AttachSubtitleOptions(
+                    slang=slang,
+                    sub_file=sub_file,
+                    jimaku=jimaku,
+                    jimaku_force=jimaku_force,
+                    jimaku_key=jimaku_key,
+                    jimaku_title=jimaku_title,
+                    tsukihime=bool(th.get("enabled", False)),
+                    episode=episode,
+                    resync=resync,
+                    language=active_profile.langs.main,
+                ),
+            )
         log.info("attach subs: %s", status)  # plugin mode is detached — the log is the only sink
         print("subs:", status, flush=True)
     except Exception as e:  # never let sub selection block the attach
@@ -338,7 +336,13 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     opts = _build_attach_options(cfg, mine=mc)
     from saitenka.app.reader_factory import create_reader
 
-    reader = create_reader(ipc, options=opts, profile=active_profile)
+    with otel_metrics.traced("startup.reader_create"):
+        reader = create_reader(
+            ipc,
+            options=opts,
+            profile=active_profile,
+            tokenizer_warm=tokenizer_warm,
+        )
     from saitenka.app.reader_deps import make_dict_scoper
 
     reader.set_profile_cycle(

@@ -289,11 +289,16 @@ class SessionRecorder:
                 self.writer.submit(self.snapshot)
                 self._last_persist = now
 
-    def record_cue(self, identity: tuple[object, ...]) -> None:
+    def record_cue(self, identity: tuple[object, ...]) -> bool:
         if identity == self._last_cue:
-            return
+            return False
         self._last_cue = identity
         self._publish(cue_count=self.snapshot.cue_count + 1)
+        return True
+
+    def revise_cue(self, identity: tuple[object, ...]) -> None:
+        """Replace the provisional identity of the most recently counted cue."""
+        self._last_cue = identity
 
     def record_lookup(self) -> None:
         self._publish(lookup_count=self.snapshot.lookup_count + 1)
