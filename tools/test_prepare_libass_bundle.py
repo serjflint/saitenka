@@ -100,20 +100,39 @@ def test_windows_dependency_directory_is_registered_once_and_retained(
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    handles: list[object] = []
+    directory_handles: list[object] = []
+    loaded: list[str] = []
 
     def add_dll_directory(path: str) -> object:
         assert path == os.fspath(tmp_path)
         handle = object()
-        handles.append(handle)
+        directory_handles.append(handle)
         return handle
+
+    def load_dll(path: str) -> object:
+        loaded.append(Path(path).name)
+        if Path(path).name == "harfbuzz.dll" and "freetype.dll" not in loaded:
+            raise OSError("dependency not ready")
+        return object()
 
     monkeypatch.setattr(module, "_WINDOWS", True)
     monkeypatch.setattr(module, "_add_dll_directory", add_dll_directory)
+    monkeypatch.setattr(module, "_load_dll", load_dll)
     with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(module._register_dependency_directory, [tmp_path] * 64))
+        list(
+            pool.map(
+                lambda _: module._activate_windows_closure(
+                    tmp_path,
+                    ("ass-9.dll", "harfbuzz.dll", "freetype.dll"),
+                    "ass-9.dll",
+                ),
+                range(64),
+            )
+        )
 
-    assert handles == [module._DLL_DIRECTORY_HANDLES[os.fspath(tmp_path)]]
+    assert len(directory_handles) == 1
+    assert loaded == ["harfbuzz.dll", "freetype.dll", "harfbuzz.dll", "ass-9.dll"]
+    assert len(module._DLL_DIRECTORY_HANDLES[os.fspath(tmp_path)]) == 4
 
 
 def test_bundle_wheel_hook_rejects_source_only_payload() -> None:
