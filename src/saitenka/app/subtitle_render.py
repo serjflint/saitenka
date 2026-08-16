@@ -519,8 +519,10 @@ class NativeVisibleRenderer:
 
     def resume_after_overlay(self, reader: Reader) -> None:
         if self._state.owner == PixelOwner.LEGACY:
-            self._fallback.draw(reader)
-            self._hide_mpv_subtitles(reader)
+            self._state, actions = reduce_ownership(
+                self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)
+            )
+            self._execute(reader, actions)
             return
         self.reassert(reader)
 

@@ -1431,6 +1431,28 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     result.close()
 
 
+def test_rejected_legacy_rehandoff_keeps_mpv_visible_and_retries(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.set_property_exception = OSError("pipe closed")
+    result.set_subtitle("猫を見る")
+    result._sub_pending = None
+    result._draw_subtitle()
+    assert renderer.ownership_state.owner.value == "legacy"
+    ipc.set_property_exception = None
+    renderer.suspend_for_overlay(result)
+    ipc.commands.clear()
+    ipc.overlay_add_error = "unsupported format"
+
+    renderer.resume_after_overlay(result)
+
+    assert renderer.ownership_state.owner.value == "unknown"
+    assert renderer.ownership_state.retry_effect_id is not None
+    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0
+    result.close()
+
+
 def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
     tmp_path: Path, monkeypatch
 ) -> None:

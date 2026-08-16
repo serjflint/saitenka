@@ -124,6 +124,21 @@ def test_failed_legacy_stage_rolls_back_to_bounded_retry() -> None:
     assert retry[0].delay_ms == 50
 
 
+def test_legacy_rehandoff_requires_a_new_transaction() -> None:
+    state = OwnershipState(
+        context=OwnershipContext(0, 1, OwnershipMode.NATIVE_VISIBLE, "sid:2"),
+        owner=PixelOwner.LEGACY,
+        visibility=Visibility.FALSE,
+        nonempty=True,
+    )
+
+    pending, actions = reduce_ownership(state, OwnershipEvent(EventKind.LEGACY_REHANDOFF))
+
+    assert pending.owner == PixelOwner.UNKNOWN
+    assert pending.visibility == Visibility.UNKNOWN
+    assert actions == (OwnershipAction(ActionKind.STAGE_LEGACY, 1, state.context),)
+
+
 def test_false_readback_during_empty_interval_cannot_stage_legacy() -> None:
     context = OwnershipContext(0, 1, OwnershipMode.NATIVE_VISIBLE, "sid:2")
     state, actions = reduce_ownership(

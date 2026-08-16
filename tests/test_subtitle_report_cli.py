@@ -52,6 +52,17 @@ def test_installed_subtitle_report_command_requires_prior_telemetry(tmp_path: Pa
     assert "enable telemetry before reproducing" in capsys.readouterr().err
 
 
+def test_installed_subtitle_report_command_rejects_malformed_archive(
+    tmp_path: Path, capsys
+) -> None:
+    malformed = tmp_path / "broken.zip"
+    malformed.write_text("not a zip", encoding="utf-8")
+
+    assert subtitle_report(str(malformed)) == 1
+
+    assert "not a valid report archive" in capsys.readouterr().err
+
+
 def test_geometry_records_are_text_free(tmp_path: Path) -> None:
     records = geometry_records(load_trace(_trace(tmp_path / "trace.json")))
 

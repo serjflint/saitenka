@@ -97,7 +97,10 @@ def load_trace(source: Path) -> list[dict]:
     if source.is_file() and source.suffix == ".json":
         raw = source.read_text(encoding="utf-8", errors="replace")
     else:
-        raw = _read_member(source, "telemetry/trace.json") or _read_member(source, "trace.json")
+        try:
+            raw = _read_member(source, "telemetry/trace.json") or _read_member(source, "trace.json")
+        except zipfile.BadZipFile as error:
+            raise ValueError(f"not a valid report archive: {source}") from error
     if raw is None:
         return []
     document = json.loads(raw)

@@ -48,6 +48,7 @@ class EventKind(StrEnum):
     ASSERTION_RESULT = "assertion-result"
     LEGACY_STAGE_RESULT = "legacy-stage-result"
     RETRY_DUE = "retry-due"
+    LEGACY_REHANDOFF = "legacy-rehandoff"
     MODE_CHANGED = "mode-changed"
     CONNECTION_REPLACED = "connection-replaced"
     CLOSE_REQUESTED = "close-requested"
@@ -322,6 +323,12 @@ def _retry_due(state: OwnershipState, event: OwnershipEvent) -> OwnershipResult:
     return _start_mode(replace(state, retry_effect_id=None))
 
 
+def _legacy_rehandoff(state: OwnershipState, _event: OwnershipEvent) -> OwnershipResult:
+    if state.owner != PixelOwner.LEGACY:
+        return state, ()
+    return _request_legacy(replace(state, owner=PixelOwner.UNKNOWN, visibility=Visibility.UNKNOWN))
+
+
 _OPEN_HANDLERS: dict[EventKind, EventHandler] = {
     EventKind.CLOSE_REQUESTED: _close_requested,
     EventKind.ENSURE_MODE: _ensure_mode_event,
@@ -332,6 +339,7 @@ _OPEN_HANDLERS: dict[EventKind, EventHandler] = {
     EventKind.ASSERTION_RESULT: _assertion_result,
     EventKind.LEGACY_STAGE_RESULT: _legacy_stage_result,
     EventKind.RETRY_DUE: _retry_due,
+    EventKind.LEGACY_REHANDOFF: _legacy_rehandoff,
 }
 
 _CONTEXT_EVENTS = frozenset(
