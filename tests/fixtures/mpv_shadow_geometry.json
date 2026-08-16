@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "upstream": {
+    "token_manifest": "tests/fixtures/libass_token_matrix.json",
+    "token_manifest_sha256": "ff9787e3af962933c51fcb50d7d70789e9eabd52f74e659b3fe723a29eb401a2",
+    "source_manifest": "tests/fixtures/mpv_source_transition.json",
+    "source_manifest_sha256": "13a65f93feffc3dadbaebf6c4c4f0e07234a0372373635044c89312702940fb2"
+  },
+  "required_case_ids": [
+    "plain-repeated",
+    "punctuation",
+    "uniform-visible-boundaries",
+    "mixed-scripts",
+    "primary-color-alpha",
+    "segmented-token",
+    "opaque-border-box",
+    "multiline",
+    "wrapping",
+    "fallback-font",
+    "alignment-margins",
+    "simultaneous-events"
+  ],
+  "source_classes": [
+    "external-ass",
+    "embedded-ass-with-font",
+    "synthetic-ass-from-text"
+  ],
+  "profiles": [
+    {"id": "baseline-720p", "frame_size": [1280, 720], "storage_size": [1280, 720], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0},
+    {"id": "resize-480p", "frame_size": [854, 480], "storage_size": [854, 480], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0},
+    {"id": "retina-1080p", "frame_size": [1920, 1080], "storage_size": [1920, 1080], "screenshot_delta_threshold": 1, "screenshot_envelope_threshold": 1, "screenshot_envelope_distance_px": 0, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0},
+    {"id": "wide-pixel-aspect", "frame_size": [1280, 720], "storage_size": [960, 720], "screenshot_delta_threshold": 8, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1, "maximum_unsafe_low_delta_pixels": 64, "maximum_unsafe_low_delta_component_pixels": 23},
+    {"id": "tall-pixel-aspect", "frame_size": [1280, 720], "storage_size": [1280, 480], "screenshot_delta_threshold": 16, "screenshot_envelope_threshold": 16, "screenshot_envelope_distance_px": 1, "maximum_unsafe_low_delta_pixels": 0, "maximum_unsafe_low_delta_component_pixels": 0}
+  ],
+  "contracts": ["native-fidelity", "interactive-styled"],
+  "thresholds": {
+    "minimum_mask_iou": 0.95,
+    "maximum_chebyshev_distance_px": 1,
+    "maximum_outer_bounds_distance_px": 1
+  },
+  "required_controls": [
+    "background-change",
+    "retained-overlay",
+    "shifted-hit-map",
+    "blank-frame",
+    "duplicate-layer",
+    "screenshot-filter"
+  ],
+  "required_render_input_checks": [
+    "screenshot-frame-size",
+    "video-display-size",
+    "video-storage-size",
+    "video-pixel-aspect",
+    "lossless-444-capture",
+    "authored-ass-style",
+    "ass-window-scale-disabled",
+    "subtitle-scale",
+    "subtitle-position"
+  ],
+  "denominator": {
+    "case_count": 12,
+    "case_key_set_sha256": "2ad971923ec0333f64b7da1e5ad0b2f65056f6b188f9b054cd01c8819e4bca4c",
+    "source_count": 3,
+    "source_key_set_sha256": "b816e32a757d1a53049b7a09ca923d6566c530c3a1ee53ee6f6af6ce9588fcd7",
+    "profile_count": 5,
+    "profile_key_set_sha256": "61fbfc20df06fc897b7634badf3bc5f5fcd3e5733dd7c425eec526f4b732702f",
+    "contract_count": 2,
+    "contract_key_set_sha256": "c1b970bde68e3f9fc69c6972dde0fab6bcfe970205b85f052f1b67a7b8a7235e",
+    "control_count": 6,
+    "control_key_set_sha256": "c5e146755c74f97e634f74197a44a194d45094e5f221dd59048144e97ae0a044",
+    "render_input_check_count": 9,
+    "render_input_check_key_set_sha256": "adefa3fc066a39eb5f0bc5242c37f4c1ac44bf865aa5ccc5b325a095d7eee87d",
+    "matrix_count": 360,
+    "contract_sha256": "a386f2d3fb8111d3a302172244b3d233c115153c2e08f3545ea9e01b45f9cb2e"
+  }
+}

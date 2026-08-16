@@ -49,6 +49,7 @@ type SetFonts = unsafe extern "C" fn(
     c_int,
 );
 type SetSize = unsafe extern "C" fn(*mut AssRendererHandle, c_int, c_int);
+type SetPixelAspect = unsafe extern "C" fn(*mut AssRendererHandle, f64);
 type RenderFrame = unsafe extern "C" fn(
     *mut AssRendererHandle,
     *mut AssTrack,
@@ -63,6 +64,7 @@ struct Api {
     free_track: FreeTrack,
     set_frame_size: SetSize,
     set_storage_size: SetSize,
+    set_pixel_aspect: SetPixelAspect,
     render_frame: RenderFrame,
 }
 
@@ -123,6 +125,15 @@ fn load_symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, String> {
 fn validate_size(name: &str, size: (i32, i32)) -> PyResult<()> {
     if size.0 <= 0 || size.1 <= 0 {
         return Err(PyValueError::new_err(format!("{name} must be positive")));
+    }
+    Ok(())
+}
+
+fn validate_pixel_aspect(pixel_aspect: Option<f64>) -> PyResult<()> {
+    if pixel_aspect.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(PyValueError::new_err(
+            "pixel_aspect must be finite and positive",
+        ));
     }
     Ok(())
 }
@@ -251,6 +262,8 @@ fn open_native(
         load_symbol(&library, b"ass_set_frame_size\0").map_err(PyRuntimeError::new_err)?;
     let set_storage_size: SetSize =
         load_symbol(&library, b"ass_set_storage_size\0").map_err(PyRuntimeError::new_err)?;
+    let set_pixel_aspect: SetPixelAspect =
+        load_symbol(&library, b"ass_set_pixel_aspect\0").map_err(PyRuntimeError::new_err)?;
     let render_frame: RenderFrame =
         load_symbol(&library, b"ass_render_frame\0").map_err(PyRuntimeError::new_err)?;
     let version = unsafe { library_version() } as u32;
@@ -292,6 +305,7 @@ fn open_native(
             free_track,
             set_frame_size,
             set_storage_size,
+            set_pixel_aspect,
             render_frame,
         },
         library_handle,
@@ -316,15 +330,18 @@ impl AssRenderer {
         })
     }
 
+    #[pyo3(signature = (timestamp_ms, frame_size, storage_size, *, pixel_aspect=None))]
     fn render(
         &self,
         py: Python<'_>,
         timestamp_ms: i64,
         frame_size: (i32, i32),
         storage_size: (i32, i32),
+        pixel_aspect: Option<f64>,
     ) -> PyResult<AssRenderResult> {
         validate_size("frame_size", frame_size)?;
         validate_size("storage_size", storage_size)?;
+        validate_pixel_aspect(pixel_aspect)?;
         let (layers, detect_change) = py.detach(|| {
             let mut guard = self
                 .native
@@ -336,6 +353,7 @@ impl AssRenderer {
             unsafe {
                 (native.api.set_frame_size)(native.renderer, frame_size.0, frame_size.1);
                 (native.api.set_storage_size)(native.renderer, storage_size.0, storage_size.1);
+                (native.api.set_pixel_aspect)(native.renderer, pixel_aspect.unwrap_or(0.0));
             }
             let mut detect_change = 0;
             let mut image = unsafe {
