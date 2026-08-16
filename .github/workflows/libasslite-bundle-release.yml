@@ -20,6 +20,21 @@ env:
   SOURCE_DATE_EPOCH: "1759752000"
 
 jobs:
+  verify-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Verify package version
+        if: startsWith(github.ref, 'refs/tags/libasslite-bundle-v')
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: >-
+          uv run --no-project python -c 'import os,tomllib,pathlib;
+          expected=os.environ["RELEASE_VERSION"].removeprefix("libasslite-bundle-v");
+          actual=tomllib.loads(pathlib.Path("libasslite-bundle/pyproject.toml").read_text())["project"]["version"];
+          assert actual == expected, (actual, expected)'
+
   build:
     name: bundle (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
@@ -73,7 +88,7 @@ jobs:
       - name: Repair macOS loader paths
         if: matrix.repair == 'delocate'
         shell: bash
-        run: uvx delocate-wheel -w repaired -v dist-a/*.whl
+        run: uvx --from delocate delocate-wheel -w repaired -v dist-a/*.whl
       - name: Repair Windows loader paths
         if: matrix.repair == 'delvewheel'
         shell: pwsh
@@ -86,22 +101,30 @@ jobs:
             --manifest-path libasslite/Cargo.toml --release --locked --out wrapper-dist -i python
       - name: Smoke bundle discovery and native ABI
         shell: bash
-        working-directory: ${{ runner.temp }}
         run: |
           wheel=("$GITHUB_WORKSPACE"/repaired/*.whl)
           wrapper=("$GITHUB_WORKSPACE"/wrapper-dist/*.whl)
-          uv run --python 3.13 --no-project --with "${wheel[0]}" --with "${wrapper[0]}" python "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
-          uv run --python 3.13 --no-project --with "${wrapper[0]}" python -c 'import importlib.util; assert importlib.util.find_spec("libasslite_bundle") is None'
+          venv="$RUNNER_TEMP/libasslite-bundle-smoke"
+          uv venv --python 3.13 "$venv"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            py="$venv/Scripts/python.exe"
+          else
+            py="$venv/bin/python"
+          fi
+          uv pip install --python "$py" "${wrapper[0]}" "${wheel[0]}"
+          "$py" "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
+          echo "BUNDLE_SMOKE_PY=$py" >> "$GITHUB_ENV"
       - name: ASan allocator lifecycle smoke (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        working-directory: ${{ runner.temp }}
         run: |
-          wheel=("$GITHUB_WORKSPACE"/repaired/*.whl)
-          wrapper=("$GITHUB_WORKSPACE"/wrapper-dist/*.whl)
           LD_PRELOAD="$(cc -print-file-name=libasan.so)" ASAN_OPTIONS=detect_leaks=0 \
-            uv run --python 3.13 --no-project --with "${wheel[0]}" --with "${wrapper[0]}" \
-            python "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
+            "$BUNDLE_SMOKE_PY" "$GITHUB_WORKSPACE/tools/smoke_libasslite_bundle.py"
+      - name: Prove bundle uninstall ownership
+        shell: bash
+        run: |
+          uv pip uninstall --python "$BUNDLE_SMOKE_PY" libasslite-bundle
+          "$BUNDLE_SMOKE_PY" -c 'import importlib.util,libasslite; assert importlib.util.find_spec("libasslite_bundle") is None'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bundle-${{ matrix.name }}
@@ -119,7 +142,7 @@ jobs:
           path: dist/*.tar.gz
 
   publish:
-    needs: [build, sdist]
+    needs: [verify-tag, build, sdist]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
