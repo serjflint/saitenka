@@ -9,6 +9,9 @@ logs.
 
 ### Fixed
 
+- **Experimental native subtitles no longer disable interaction when geometry is unavailable.**
+  Unsupported subtitle sources, display layouts, or provider failures now fall back to Saitenka's
+  standard subtitle renderer, preserving scanning, hover focus, and tooltips.
 - **Structured Jitendex entries keep their document shape.** Nested senses, examples, translations,
   cross-references, forms, and attribution now render on separate lines with the dictionary's own list
   markers instead of being glued into one paragraph, including lookups through the semantic

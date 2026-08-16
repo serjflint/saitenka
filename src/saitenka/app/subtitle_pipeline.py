@@ -94,8 +94,8 @@ class SubtitleModeCoordinator:
 
     def activate(self, reader: Reader) -> None:
         activate = getattr(self._renderer, "activate", None)
-        if activate is not None:
-            activate(reader)
+        if activate is not None and activate(reader) is False:
+            self._renderer.draw(reader)
 
     @property
     def generation(self) -> int:

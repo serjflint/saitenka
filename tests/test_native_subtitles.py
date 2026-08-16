@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
+
+from dirty_equals import IsPartialDict
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
@@ -60,11 +64,14 @@ class FakeIPC:
             "options/sub-fonts-dir": "",
         }
         self.set_property_error: str | None = None
+        self.set_property_exception: Exception | None = None
 
     def command(self, *args):
         self.commands.append(args)
         if args and args[0] == "get_property":
             return {"error": "success", "data": self.props.get(args[1])}
+        if args and args[0] == "set_property" and self.set_property_exception is not None:
+            raise self.set_property_exception
         if args and args[0] == "set_property" and self.set_property_error is not None:
             return {"error": self.set_property_error}
         return {"error": "success", "data": None}
@@ -176,6 +183,11 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
 
 def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    ipc.commands.clear()
 
     result.subtitle_pipeline.activate(result)
     result.subtitle_pipeline.activate(result)
@@ -187,7 +199,7 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     result.close()
 
 
-def test_provider_failure_keeps_native_track_visible_and_clears_hits(tmp_path: Path) -> None:
+def test_provider_failure_restores_legacy_renderer_and_hits(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     assert result.native_geometry is not None
     result.native_geometry.set_source(tmp_path / "missing.ass")
@@ -196,19 +208,101 @@ def test_provider_failure_keeps_native_track_visible_and_clears_hits(tmp_path: P
     assert result.native_geometry.worker.wait_idle()
     result.native_geometry.apply(result)
 
-    assert result.boxes == []
     assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
-    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    result._sub_pending = None
+    result._draw_subtitle()
+    assert result.boxes
     result.close()
 
 
-def test_non_ass_source_has_stable_fallback_reason(tmp_path: Path) -> None:
-    result, _ipc, _backend = reader(tmp_path)
+def test_provider_failure_preserves_hover_pause_during_renderer_fallback(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result._sub_pending = None
+    result.hover = 0
+    result._paused_by_tip = True
+    ipc.commands.clear()
+    backend.error = RuntimeError("font provider unavailable")
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+
+    assert result.native_geometry.schedule(result)
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+
+    assert ("set_property", "pause", False) not in ipc.commands
+    assert result.hover == 0
+    assert result.boxes
+    box = result.boxes[0]
+    assert result._hit(result.sub_origin[0] + box.x + 1, result.sub_origin[1] + box.y + 1) == 0
+    result._paused_by_tip = False
+    result.close()
+
+
+def test_non_ass_source_uses_legacy_renderer_with_hits(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
 
-    result.native_geometry.set_source(tmp_path / "episode.srt")
+    result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
+    result.set_subtitle("猫を見る")
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-not-authored-ass"
+    assert backend.requests == []
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    result._sub_pending = None
+    result._draw_subtitle()
+    assert result.boxes
+    result.close()
+
+
+def test_fallback_transition_records_one_bounded_metric(tmp_path: Path) -> None:
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from saitenka import otel_metrics
+
+    result, _ipc, _backend = reader(tmp_path)
+    metric_reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[metric_reader])
+    otel_metrics.register(metric_reader, provider.get_meter("test"))
+    try:
+        assert result.native_geometry is not None
+        source = tmp_path / "episode.srt"
+        result.native_geometry.set_source(source, reader=result)
+        result.native_geometry.set_source(source, reader=result)
+
+        assert otel_metrics.snapshot()["saitenka.subtitle_geometry.fallbacks"]["value"] == 1
+    finally:
+        result.close()
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_ass_geometry_replaces_legacy_fallback_after_source_switch(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.native_geometry.set_source(tmp_path / "episode.srt", reader=result)
+    result.set_subtitle("猫を見る")
+    result._sub_pending = None
+    result._draw_subtitle()
+    assert result.boxes
+
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS)
+    result.native_geometry.set_source(source, reader=result)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry.worker.wait_idle()
+
+    assert result.native_geometry.apply(result)
+    assert backend.requests
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert result.native_geometry.status.fallback_reason is None
     result.close()
 
 
@@ -247,7 +341,7 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
     result.close()
 
 
-def test_source_clear_is_a_generation_boundary_and_clears_hits(tmp_path: Path) -> None:
+def test_source_clear_is_a_generation_boundary_and_restores_legacy_renderer(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
@@ -259,8 +353,9 @@ def test_source_clear_is_a_generation_boundary_and_clears_hits(tmp_path: Path) -
 
     assert result.subtitle_pipeline.generation == old_generation + 1
     assert result.subtitle_pipeline.current is None
-    assert result.boxes == []
-    assert ipc.commands[-1] == ("osd-overlay", 1001, "none", "")
+    assert ("osd-overlay", 1001, "none", "") in ipc.commands
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
     assert not result.native_geometry.apply(result)
     result.close()
 
@@ -296,6 +391,25 @@ def test_mismatched_token_annotation_fails_closed(tmp_path: Path) -> None:
     result.close()
 
 
+def test_unexpected_geometry_error_restores_legacy_renderer(tmp_path: Path, monkeypatch) -> None:
+    result, ipc, backend = reader(tmp_path)
+    assert result.native_geometry is not None
+
+    def fail_render_inputs(_reader):
+        raise RuntimeError("unexpected profile failure")
+
+    monkeypatch.setattr(result.native_geometry, "_render_inputs", fail_render_inputs)
+    result.set_subtitle("猫を見る")
+    result._sub_pending = None
+    result._draw_subtitle()
+
+    assert backend.requests == []
+    assert result.native_geometry.status.fallback_reason == "geometry-provider-failed"
+    assert result.boxes
+    assert ("set_property", "sub-visibility", False) in ipc.commands
+    result.close()
+
+
 def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("boom")
@@ -311,6 +425,32 @@ def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: 
     result.native_geometry.set_source(None, reader=result)
     assert result.subtitle_pipeline.last_error is None
     assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
+    result.close()
+
+
+def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Path, caplog) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("font provider unavailable")
+    assert result.native_geometry is not None
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
+        result.set_subtitle("猫を見る")
+        assert result.native_geometry.worker.wait_idle()
+        result.native_geometry.apply(result)
+        result.subtitle_pipeline.invalidate()
+        result.native_geometry.worker.invalidate_cache()
+        assert result.native_geometry.schedule(result)
+        assert result.native_geometry.worker.wait_idle()
+        result.native_geometry.apply(result)
+
+    assert [record.getMessage() for record in caplog.records] == [
+        (
+            "native subtitle geometry unavailable; using Saitenka renderer: "
+            "geometry-provider-failed "
+            "(font provider unavailable)"
+        )
+    ]
     result.close()
 
 
@@ -392,16 +532,26 @@ def test_repeated_text_event_refreshes_geometry_when_timing_changes(tmp_path: Pa
     result.close()
 
 
-def test_custom_mpv_subtitle_settings_fail_closed(tmp_path: Path) -> None:
+def test_custom_mpv_subtitle_settings_report_mismatched_inputs(tmp_path: Path, caplog) -> None:
     result, ipc, backend = reader(tmp_path)
     ipc.props["options/sub-scale"] = 1.2
+    ipc.props["options/sub-font-provider"] = "fontconfig"
+    caplog.clear()
 
-    result.set_subtitle("猫を見る")
+    with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
+        result.set_subtitle("猫を見る")
 
     assert backend.requests == []
     assert result.boxes == []
     assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    assert [record.getMessage() for record in caplog.records] == [
+        (
+            "native subtitle geometry unavailable; using Saitenka renderer: "
+            "subtitle-render-input-unsupported "
+            "(sub-scale=1.2, sub-font-provider='fontconfig')"
+        )
+    ]
     result.close()
 
 
@@ -415,6 +565,19 @@ def test_custom_mpv_font_provider_fails_closed(tmp_path: Path) -> None:
     assert result.boxes == []
     assert result.native_geometry is not None
     assert result.native_geometry.status.fallback_reason == "subtitle-render-input-unsupported"
+    result.close()
+
+
+def test_mpv_empty_style_override_normalization_is_supported(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    ipc.props["options/sub-ass-style-overrides"] = [""]
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+
+    assert backend.requests
+    assert result.native_geometry.apply(result)
     result.close()
 
 
@@ -433,14 +596,105 @@ def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
     result.close()
 
 
-def test_native_visibility_retries_after_mpv_rejects_activation(tmp_path: Path) -> None:
+def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, caplog) -> None:
     result, ipc, _backend = reader(tmp_path)
     ipc.set_property_error = "disconnected"
     renderer = result.subtitle_pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
+    caplog.clear()
 
-    assert renderer.activate(result) is False
-    renderer.draw(result)
+    with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
+        assert renderer.activate(result) is False
+        renderer.draw(result)
 
-    assert ipc.commands.count(("set_property", "sub-visibility", True)) == 2
+    assert ipc.commands.count(("set_property", "sub-visibility", False)) == 2
+    assert [record.getMessage() for record in caplog.records] == [
+        "mpv rejected subtitle visibility change: disconnected"
+    ]
+    result.close()
+
+
+def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    result._sub_pending = None
+    ipc.command(
+        "set_property",
+        "sub-visibility",
+        False,  # noqa: FBT003  # raw mpv IPC wire value
+    )
+    ipc.commands.clear()
+    ipc.set_property_error = "disconnected"
+
+    result.subtitle_pipeline.activate(result)
+
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    assert result.boxes
+    box = result.boxes[0]
+    assert result._hit(result.sub_origin[0] + box.x + 1, result.sub_origin[1] + box.y + 1) == 0
+    result.close()
+
+
+def test_native_visibility_exception_keeps_legacy_renderer(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(tmp_path)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    ipc.set_property_exception = OSError("pipe closed")
+
+    result.set_subtitle("猫を見る")
+    result._sub_pending = None
+    result._draw_subtitle()
+
+    assert result.boxes
+    assert any(command[0] == "overlay-add" for command in ipc.commands)
+    result.close()
+
+
+def test_native_visibility_rejection_emits_one_fallback_span(tmp_path: Path, monkeypatch) -> None:
+    from saitenka import otel_metrics
+
+    spans: list[tuple[str, dict[str, str]]] = []
+    traced = otel_metrics.traced
+
+    @contextmanager
+    def record_span(name: str, **attributes: str):
+        if name == "subtitle_geometry_fallback":
+            spans.append((name, attributes))
+        with traced(name, **attributes) as span:
+            yield span
+
+    monkeypatch.setattr(otel_metrics, "traced", record_span)
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    ipc.set_property_error = "disconnected"
+
+    assert not result.native_geometry.apply(result)
+
+    assert spans == [("subtitle_geometry_fallback", {"reason": "mpv-sub-visibility-rejected"})]
+    result.close()
+
+
+def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> None:
+    result, _ipc, backend = reader(tmp_path)
+    backend.error = RuntimeError("font provider unavailable")
+
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    result.native_geometry.apply(result)
+
+    assert result._telemetry_gauges() == IsPartialDict(
+        **{
+            "subtitle_geometry.submitted": 1.0,
+            "subtitle_geometry.completed": 0.0,
+            "subtitle_geometry.failures": 1.0,
+            "subtitle_geometry.presented": 1.0,
+        }
+    )
     result.close()

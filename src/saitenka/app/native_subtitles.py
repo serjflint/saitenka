@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from saitenka import otel_metrics
 from saitenka.app.subtitles import WordBox
 from saitenka.subtitles import (
     GeometryRequest,
@@ -14,10 +16,65 @@ from saitenka.subtitles import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_pipeline import SubtitleGeometryWorker
+
+log = logging.getLogger(__name__)
+
+_FALLBACK_REASONS = frozenset(
+    {
+        "geometry-provider-failed",
+        "geometry-token-identity-invalid",
+        "mpv-sub-visibility-rejected",
+        "subtitle-render-input-unsupported",
+        "subtitle-source-encoding-unsupported",
+        "subtitle-source-not-authored-ass",
+        "subtitle-source-unavailable",
+        "subtitle-timing-unavailable",
+        "subtitle-token-annotation-invalid",
+    }
+)
+
+
+def _short_repr(value: object, *, limit: int = 80) -> str:
+    rendered = repr(value)
+    return rendered if len(rendered) <= limit else f"{rendered[: limit - 3]}..."
+
+
+def _osd_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
+    return cast(
+        "tuple[int, int, int, int]",
+        tuple(
+            int(cast("int | float | str", osd.get(name) or 0)) for name in ("ml", "mr", "mt", "mb")
+        ),
+    )
+
+
+def _unsupported_render_inputs(
+    frame_size: tuple[int, int],
+    display_size: tuple[object, object],
+    margins: tuple[int, int, int, int],
+    settings: Mapping[str, object],
+) -> tuple[str, ...]:
+    supported = {
+        "display-size": frame_size == display_size,
+        "osd-margins": not any(margins),
+        "sub-ass-override": settings["sub-ass-override"] in {False, "no"},
+        "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
+        "sub-scale": settings["sub-scale"] == 1.0,
+        "sub-pos": settings["sub-pos"] == 100.0,
+        "sub-use-margins": settings["sub-use-margins"] is True,
+        "sub-ass-use-video-data": settings["sub-ass-use-video-data"] == "all",
+        "sub-ass-vsfilter-aspect-compat": settings["sub-ass-vsfilter-aspect-compat"] is None,
+        "sub-ass-style-overrides": settings["sub-ass-style-overrides"] in (None, "", (), [], [""]),
+        "sub-font-provider": settings["sub-font-provider"] == "auto",
+        "embeddedfonts": settings["embeddedfonts"] is False,
+        "sub-fonts-dir": settings["sub-fonts-dir"] in {None, ""},
+    }
+    return tuple(name for name, accepted in supported.items() if not accepted)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +106,32 @@ class NativeSubtitleGeometry:
         self.fallback_reason: str | None = "subtitle-source-unavailable"
         self._last_snapshot: object | None = None
 
+    def _set_fallback(self, reason: str | None, *, detail: str | None = None) -> None:
+        if reason == self.fallback_reason:
+            return
+        self.fallback_reason = reason
+        if reason is None:
+            return
+        telemetry_reason = reason if reason in _FALLBACK_REASONS else "other"
+        if otel_metrics.subtitle_geometry_fallbacks is not None:
+            otel_metrics.subtitle_geometry_fallbacks.add(1, {"reason": telemetry_reason})
+        with otel_metrics.traced("subtitle_geometry_fallback", reason=telemetry_reason):
+            pass
+        suffix = f" ({detail})" if detail else ""
+        level = logging.WARNING if reason == "geometry-provider-failed" else logging.INFO
+        log.log(
+            level,
+            "native subtitle geometry unavailable; using Saitenka renderer: %s%s",
+            reason,
+            suffix,
+        )
+
+    def _fallback_to_legacy(
+        self, reader: Reader, reason: str, *, detail: str | None = None
+    ) -> None:
+        self._set_fallback(reason, detail=detail)
+        reader._use_legacy_subtitle_renderer()
+
     @property
     def status(self) -> NativeSubtitleStatus:
         return NativeSubtitleStatus(
@@ -64,13 +147,14 @@ class NativeSubtitleGeometry:
         self._last_snapshot = None
         if reader is not None:
             reader._clear_native_interaction()
+            reader._use_legacy_subtitle_renderer()
         if path is None:
-            self.fallback_reason = "subtitle-source-unavailable"
+            self._set_fallback("subtitle-source-unavailable")
         elif path.suffix.casefold() != ".ass":
-            self.fallback_reason = "subtitle-source-not-authored-ass"
+            self._set_fallback("subtitle-source-not-authored-ass")
         else:
             self.source_path = path
-            self.fallback_reason = None
+            self._set_fallback(None)
 
     def invalidate(self, reader: Reader | None = None) -> None:
         self._last_snapshot = None
@@ -169,7 +253,7 @@ class NativeSubtitleGeometry:
             int(video.get("dw") or frame_size[0]),
             int(video.get("dh") or frame_size[1]),
         )
-        margins = tuple(int(osd.get(name) or 0) for name in ("ml", "mr", "mt", "mb"))
+        margins = _osd_margins(osd)
         settings = {
             "sub-ass-override": reader._prop("options/sub-ass-override"),
             "sub-ass-scale-with-window": reader._prop("options/sub-ass-scale-with-window"),
@@ -185,23 +269,16 @@ class NativeSubtitleGeometry:
             "embeddedfonts": reader._prop("options/embeddedfonts"),
             "sub-fonts-dir": reader._prop("options/sub-fonts-dir"),
         }
-        supported = (
-            frame_size == display_size
-            and not any(margins)
-            and settings["sub-ass-override"] in {False, "no"}
-            and settings["sub-ass-scale-with-window"] is False
-            and settings["sub-scale"] == 1.0
-            and settings["sub-pos"] == 100.0
-            and settings["sub-use-margins"] is True
-            and settings["sub-ass-use-video-data"] == "all"
-            and settings["sub-ass-vsfilter-aspect-compat"] is None
-            and settings["sub-ass-style-overrides"] in (None, "", (), [])
-            and settings["sub-font-provider"] == "auto"
-            and settings["embeddedfonts"] is False
-            and settings["sub-fonts-dir"] in {None, ""}
-        )
-        if not supported:
-            raise ValueError("subtitle-render-input-unsupported")
+        unsupported = _unsupported_render_inputs(frame_size, display_size, margins, settings)
+        if unsupported:
+            observed = {
+                "display-size": {"frame": frame_size, "video": display_size},
+                "osd-margins": margins,
+                **settings,
+            }
+            raise ValueError(
+                ", ".join(f"{name}={_short_repr(observed[name])}" for name in unsupported)
+            )
         profile = tuple(sorted((name, repr(value)) for name, value in settings.items()))
         return frame_size, storage_size, float(video.get("par") or 1.0), profile
 
@@ -239,20 +316,31 @@ class NativeSubtitleGeometry:
             self.worker.prefetch(self._key(path, inputs), generation, build)
 
     def schedule(self, reader: Reader) -> bool:
+        try:
+            return self._schedule(reader)
+        except Exception as error:  # noqa: BLE001  # optional provider must restore legacy rendering
+            self.worker.mark_not_ready()
+            self._fallback_to_legacy(
+                reader,
+                "geometry-provider-failed",
+                detail=f"{type(error).__name__}: {error}",
+            )
+            return False
+
+    def _schedule(self, reader: Reader) -> bool:
         path = self.source_path
         if path is None or not reader.sub_text.strip() or not reader.tokens:
             return False
         start = reader._prop("sub-start")
         end = reader._prop("sub-end")
         if start is None or end is None:
-            self.fallback_reason = "subtitle-timing-unavailable"
+            self._fallback_to_legacy(reader, "subtitle-timing-unavailable")
             return False
         try:
             frame_size, storage_size, pixel_aspect, render_profile = self._render_inputs(reader)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as error:
             self.worker.mark_not_ready()
-            self.fallback_reason = "subtitle-render-input-unsupported"
-            reader._clear_native_interaction()
+            self._fallback_to_legacy(reader, "subtitle-render-input-unsupported", detail=str(error))
             return False
         generation = reader.subtitle_pipeline.generation
         track_id = SubtitleTrackId(f"sid:{reader._prop('sid')}:{path.resolve()}")
@@ -282,7 +370,7 @@ class NativeSubtitleGeometry:
         key = self._key(path, cue)
         if cached := self.worker.publish_prefetched(key, generation):
             self.worker.mark_presented(cached)
-            self.fallback_reason = None
+            self._set_fallback(None)
             self._prefetch(
                 reader,
                 path,
@@ -295,8 +383,7 @@ class NativeSubtitleGeometry:
             annotations = self._annotations(reader.sub_text, reader.lines, reader.tokens)
         except ValueError:
             self.worker.mark_not_ready()
-            self.fallback_reason = "subtitle-token-annotation-invalid"
-            reader._clear_native_interaction()
+            self._fallback_to_legacy(reader, "subtitle-token-annotation-invalid")
             return False
 
         def build() -> GeometryRequest:
@@ -305,7 +392,6 @@ class NativeSubtitleGeometry:
         accepted = self.worker.submit_job(generation, build)
         if accepted:
             self.worker.mark_not_ready()
-            self.fallback_reason = None
             self._prefetch(
                 reader,
                 path,
@@ -316,13 +402,28 @@ class NativeSubtitleGeometry:
         return accepted
 
     def apply(self, reader: Reader) -> bool:
+        try:
+            return self._apply(reader)
+        except Exception as error:  # noqa: BLE001  # optional provider must restore legacy rendering
+            self._fallback_to_legacy(
+                reader,
+                "geometry-provider-failed",
+                detail=f"{type(error).__name__}: {error}",
+            )
+            return False
+
+    def _apply(self, reader: Reader) -> bool:
         snapshot = reader.subtitle_pipeline.current
         if snapshot is None:
             if (error := reader.subtitle_pipeline.consume_error()) is not None:
-                self.fallback_reason = (
+                reason = (
                     error if error.startswith("subtitle-source-") else "geometry-provider-failed"
                 )
-                reader._clear_native_interaction()
+                self._fallback_to_legacy(
+                    reader,
+                    reason,
+                    detail=error if reason == "geometry-provider-failed" else None,
+                )
             return False
         if snapshot is self._last_snapshot:
             return False
@@ -331,8 +432,7 @@ class NativeSubtitleGeometry:
         if len(indices) != len(set(indices)) or any(
             not 0 <= index < len(reader.tokens) for index in indices
         ):
-            self.fallback_reason = "geometry-token-identity-invalid"
-            reader._clear_native_interaction()
+            self._fallback_to_legacy(reader, "geometry-token-identity-invalid")
             return False
         reader.boxes = [
             WordBox(
@@ -346,7 +446,11 @@ class NativeSubtitleGeometry:
         ]
         reader.sub_origin = (0, 0)
         self._last_snapshot = snapshot
-        self.fallback_reason = None
+        if not reader._use_native_subtitle_renderer():
+            self._set_fallback("mpv-sub-visibility-rejected")
+            reader._use_legacy_subtitle_renderer()
+            return False
+        self._set_fallback(None)
         reader._draw_subtitle()
         return True
 

@@ -12,8 +12,9 @@ the same authored ASS cue
    └─ click/scan ──> the usual tooltip and mining features
 ```
 
-Saitenka does not draw a second subtitle over mpv's. Known inputs outside the parity-tested envelope
-leave the native subtitle visible and disable interaction instead of approximating hit boxes.
+Saitenka does not draw a second subtitle over mpv's while native geometry is valid. If source,
+render-profile, or provider validation fails, it hides mpv's subtitle layer and restores the standard
+Saitenka renderer, preserving scanning, tooltips, and mining instead of approximating hit boxes.
 
 ## Install the native runtime
 
@@ -84,10 +85,10 @@ introspect mpv's exact libass build and font environment, so a compatible runtim
 envelope can still differ at pixel level; this experimental mode does not claim runtime pixel identity.
 
 Supported cues are static and use the mpv profile above, with no video margins, attached/custom fonts,
-or application-level style overrides. Animated or ambiguous ASS and token-mapping failures disable
-interaction only for the affected cue. A missing or non-UTF-8 source, letterboxing, an unsupported
-font setup, a mismatched attach profile, or an unavailable native runtime disables interaction for the
-track or session. In both cases normal playback and mpv subtitle rendering continue.
+or application-level style overrides. Animated or ambiguous ASS, token-mapping failures, a missing or
+non-UTF-8 source, letterboxing, an unsupported font setup, a mismatched attach profile, or an unavailable
+native runtime switch back to the standard Saitenka renderer. The log and report record the stable
+fallback reason; render-profile failures also name the rejected values.
 
 Geometry is prepared when the cue or render space changes and for a small lookahead window. Hovering,
 scanning, and scrolling reuse those boxes, so interactive 60 FPS behavior does not require rendering
@@ -98,8 +99,8 @@ the subtitle geometry at 60 FPS.
 - Run `saitenka doctor` first. A missing wrapper/runtime is an installation problem; an unsupported
   render input means mpv is intentionally outside the tested envelope.
 - If `run` works but `attach` does not, compare the attached player's options with the profile above.
-- If one cue loses hover while the subtitle remains visible, its ASS syntax or token mapping failed
-  closed. Switching back to the default renderer does not require removing either native package.
+- A native-geometry failure should retain hover through the standard renderer. If it does not, include
+  a `saitenka report` bundle in the bug report; it contains the fallback reason and worker counters.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 
 For the provider contract, shadow-render pipeline, lifecycle guards, and package diagram, see

@@ -88,18 +88,57 @@ class NullRenderer:
 
 
 class NativeVisibleRenderer:
-    """Leave authored mpv subtitles visible and draw only the hover focus box."""
+    """Use mpv pixels only while matching interaction geometry is available."""
 
-    def __init__(self) -> None:
-        self._active = False
+    def __init__(self, fallback: SubtitleRenderer | None = None) -> None:
+        self._fallback = fallback or SubtitleRenderer()
+        self._native_ready = False
+        self._visibility: bool | None = None
+        self._activation_failure_reported = False
 
     def activate(self, reader: Reader) -> bool:
-        reply = reader.ipc.command("set_property", "sub-visibility", True)  # noqa: FBT003
-        self._active = not isinstance(reply, dict) or reply.get("error") in {None, "success"}
-        return self._active
+        visible = self._native_ready
+        try:
+            reply = reader.ipc.command("set_property", "sub-visibility", visible)
+        except Exception as error:  # noqa: BLE001  # optional renderer must restore legacy drawing
+            reply = {"error": f"{type(error).__name__}: {error}"}
+        accepted = not isinstance(reply, dict) or reply.get("error") in {None, "success"}
+        if accepted:
+            self._visibility = visible
+            self._activation_failure_reported = False
+        else:
+            self._visibility = None
+            if visible:
+                self._native_ready = False
+            if not self._activation_failure_reported:
+                self._activation_failure_reported = True
+                failure = reply.get("error") if isinstance(reply, dict) else "unknown"
+                log.warning("mpv rejected subtitle visibility change: %s", failure)
+        return accepted
+
+    def use_fallback(self, reader: Reader) -> None:
+        self._native_ready = False
+        self._hide_focus(reader)
+        if self._visibility is not False:
+            self.activate(reader)
+
+    def use_native(self, reader: Reader) -> bool:
+        self._fallback.clear(reader)
+        self._native_ready = True
+        if self.activate(reader):
+            return True
+        self._native_ready = False
+        return False
 
     def draw(self, reader: Reader) -> None:
-        if not self._active and not self.activate(reader):
+        if not self._native_ready:
+            if self._visibility is not False:
+                self.activate(reader)
+            self._fallback.draw(reader)
+            return
+        if self._visibility is not True and not self.activate(reader):
+            self._native_ready = False
+            self._fallback.draw(reader)
             self._hide_focus(reader)
             return
         if reader.hover < 0 or reader.hover >= len(reader.boxes):
@@ -134,6 +173,7 @@ class NativeVisibleRenderer:
 
     def clear(self, reader: Reader) -> None:
         self._hide_focus(reader)
+        self._fallback.clear(reader)
 
     @staticmethod
     def _hide_focus(reader: Reader) -> None:

@@ -989,6 +989,18 @@ class Reader:
         self.boxes = []
         self.subtitle_pipeline.clear(self)
 
+    def _use_legacy_subtitle_renderer(self) -> None:
+        renderer = self.subtitle_pipeline.renderer
+        if not isinstance(renderer, NativeVisibleRenderer):
+            return
+        renderer.use_fallback(self)
+        if self.sub_text.strip():
+            renderer.draw(self)
+
+    def _use_native_subtitle_renderer(self) -> bool:
+        renderer = self.subtitle_pipeline.renderer
+        return not isinstance(renderer, NativeVisibleRenderer) or renderer.use_native(self)
+
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
         ox, oy = self.sub_origin
@@ -1299,11 +1311,30 @@ class Reader:
             panel_n = len(self._panel_cache)
             panel_bytes = sum(st.retained_nbytes for st in self._panel_cache.values())
         dict_n = self.dict_set.decoded_entry_count() if self.dict_set is not None else 0
-        return {
+        gauges = {
             "panel_cache.size": float(panel_n),
             "panel_cache.bytes": float(panel_bytes),
             "dict_cache.size": float(dict_n),
         }
+        if self.native_geometry is not None:
+            stats = self.native_geometry.worker.stats
+            gauges.update(
+                {
+                    "subtitle_geometry.submitted": float(stats.submitted),
+                    "subtitle_geometry.superseded": float(stats.superseded),
+                    "subtitle_geometry.completed": float(stats.completed),
+                    "subtitle_geometry.cache_hits": float(stats.cache_hits),
+                    "subtitle_geometry.failures": float(stats.failures),
+                    "subtitle_geometry.ready_before_presented": float(stats.ready_before_presented),
+                    "subtitle_geometry.presented": float(stats.presented),
+                    "subtitle_geometry.max_submit_us": float(stats.max_submit_us),
+                    "subtitle_geometry.prefetched": float(stats.prefetched),
+                    "subtitle_geometry.prefetch_dropped": float(stats.prefetch_dropped),
+                    "subtitle_geometry.result_cache_entries": float(stats.result_cache_entries),
+                    "subtitle_geometry.prefetch_cache_entries": float(stats.prefetch_cache_entries),
+                }
+            )
+        return gauges
 
     def _cap_for(self, frac: float) -> int:
         return prefetch.cap_for(self, frac)

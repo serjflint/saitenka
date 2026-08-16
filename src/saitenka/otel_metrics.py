@@ -106,6 +106,7 @@ mask_atlas_writebacks: Counter | None = (
 # finished after the user switched word / scrolled, so it was discarded (idle work that didn't pay off).
 crisp_swaps: Counter | None = None
 crisp_stale: Counter | None = None
+subtitle_geometry_fallbacks: Counter | None = None
 
 # ~one frame at 60Hz. The tail (p95/p99 jank-frame rate), not the mean, is what a user perceives
 # as scroll stutter — see scroll_frame_jank.
@@ -305,7 +306,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
-    global crisp_swaps, crisp_stale
+    global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
 
     with _lock:
         _reader = reader
@@ -445,6 +446,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.crisp.stale",
             description="native re-renders discarded (word switched/scrolled)",
         )
+        subtitle_geometry_fallbacks = meter.create_counter(
+            "saitenka.subtitle_geometry.fallbacks",
+            description="native subtitle geometry transitions to the standard renderer",
+        )
         prefetch_queue_depth = meter.create_up_down_counter("saitenka.prefetch.queue_depth")
         meter.create_observable_gauge(
             "saitenka.runtime.gil_enabled",
@@ -469,7 +474,7 @@ def unregister() -> None:
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
-    global crisp_swaps, crisp_stale
+    global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
 
     with _lock:
         _reader = None
@@ -518,6 +523,7 @@ def unregister() -> None:
         mask_atlas_writebacks = None
         crisp_swaps = None
         crisp_stale = None
+        subtitle_geometry_fallbacks = None
         prefetch_queue_depth = None
 
 
