@@ -452,12 +452,20 @@ class Reader:
         # Interactive sessions publish this optional subprocess probe later; deterministic
         # demo/screenshot assembly supplies it synchronously through ReaderServices.
         self._tts_ok = bool(tts_ok)
-        from saitenka.app.capabilities import CapabilityProbe
+        from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
+
+        self._capability_submit = configure_runtime_jobs(ipc)
 
         self._tts_capability = (
             None
             if tts_ok is not None
-            else CapabilityProbe(tts_available, name="tts", ttl=3_600.0, retry=60.0)
+            else CapabilityProbe(
+                tts_available,
+                name="tts",
+                ttl=3_600.0,
+                retry=60.0,
+                submit=self._capability_submit,
+            )
         )
         self._anki_capability: CapabilityProbe | None = None
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
@@ -2314,11 +2322,10 @@ class Reader:
 
     def _apply_capabilities(self) -> None:
         if self._tts_capability is not None:
-            if self._tts_capability.apply():
+            if self._tts_capability.value is not None:
                 self._tts_ok = bool(self._tts_capability.value)
             self._tts_capability.request()
         if self._anki_capability is not None:
-            self._anki_capability.apply()
             if self._anki_capability.value:
                 self._request_mined_seed()
             self._anki_capability.request()

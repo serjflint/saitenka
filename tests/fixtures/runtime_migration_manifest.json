@@ -282,10 +282,6 @@
     ],
     [
       "passive-result-drain",
-      "src/saitenka/app/capabilities.py::CapabilityProbe.apply"
-    ],
-    [
-      "passive-result-drain",
       "src/saitenka/app/controller.py::Reader._apply_pending_mined_seed"
     ],
     [

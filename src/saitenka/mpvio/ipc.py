@@ -45,6 +45,10 @@ if TYPE_CHECKING:
 
         def cancel_timer(self, timer: str) -> bool: ...
 
+        def register_job_lane(self, name: str, policy, handler) -> None: ...
+
+        def submit_job(self, **kwargs) -> bool: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -538,6 +542,19 @@ class MpvIPC:
         if gateway is None:
             return False
         return gateway.cancel_timer(timer)
+
+    def register_runtime_job_lane(self, name: str, policy, handler) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.register_job_lane(name, policy, handler)
+        return True
+
+    def submit_runtime_job(self, **kwargs) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.submit_job(**kwargs)
 
     def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         gateway = self._runtime_gateway

@@ -15,6 +15,7 @@ from saitenka.runtime.effects import (
     Owner,
     ScheduleTimer,
     SendMpvCommand,
+    SubmitJob,
 )
 from saitenka.runtime.events import EffectFinished, EventOrigin
 from saitenka.runtime.timers import TimerScheduler
@@ -38,6 +39,10 @@ class TerminalRouter(Protocol):
     def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None: ...
 
 
+class JobAdapter(Protocol):
+    def dispatch(self, effect: SubmitJob) -> bool: ...
+
+
 class LegacyRuntimeBridge:
     """Drive typed command/deadline effects from the legacy Reader turn."""
 
@@ -47,18 +52,61 @@ class LegacyRuntimeBridge:
         command_adapter: CommandAdapter,
         router: TerminalRouter,
         *,
+        job_adapter: JobAdapter | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._mailbox = mailbox
         self._command_adapter = command_adapter
+        self._job_adapter = job_adapter
         self._clock = clock
         self._lock = threading.Lock()
         self._next_effect = 0
         self._callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._timer_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
+        self._job_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._deadlines = DeadlineRegistry()
         self._timers = TimerScheduler()
         router.install_runtime_bridge(self)
+
+    def submit_job(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool:
+        effect_id = self._allocate_one()
+        effect = SubmitJob(effect_id, owner, identity, lane, request)
+        if self._job_adapter is None or not self._mailbox.reserve_terminal(effect_id):
+            on_finished(
+                EffectFinished(
+                    effect_id,
+                    owner,
+                    identity,
+                    EffectOutcome.REJECTED,
+                    error=EffectError.OVERLOADED,
+                )
+            )
+            return False
+        with self._lock:
+            self._job_callbacks[effect_id] = on_finished
+        if self._job_adapter.dispatch(effect):
+            return True
+        with self._lock:
+            self._job_callbacks.pop(effect_id, None)
+        self._mailbox.cancel_reservation(effect_id)
+        on_finished(
+            EffectFinished(
+                effect_id,
+                owner,
+                identity,
+                EffectOutcome.REJECTED,
+                error=EffectError.OVERLOADED,
+            )
+        )
+        return False
 
     @property
     def connection_epoch(self) -> int:
@@ -192,6 +240,11 @@ class LegacyRuntimeBridge:
             timer_callback = self._timer_callbacks.pop(completion.effect_id, None)
         if timer_callback is not None:
             timer_callback(completion)
+            return
+        with self._lock:
+            job_callback = self._job_callbacks.pop(completion.effect_id, None)
+        if job_callback is not None:
+            job_callback(completion)
             return
         expire = None
         with self._lock:
