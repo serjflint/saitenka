@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786948607166,
+  "lastUpdate": 1786948671652,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -7503,6 +7503,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 48.820454,
             "range": "3 replicas; min 47.5145; max 49.496; MAD 0.675532",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "0551068f550609736f1e1d8abcb6e2db2fee560a",
+          "message": "test(ipc): correlate Windows pipe reply (#386)",
+          "timestamp": "2026-08-17T00:01:17Z",
+          "url": "https://github.com/serjflint/saitenka/commit/0551068f550609736f1e1d8abcb6e2db2fee560a"
+        },
+        "date": 1786948670435,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 193.435604,
+            "range": "3 replicas; min 126.946; max 290.216; MAD 66.4894",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 52.62871,
+            "range": "3 replicas; min 47.2249; max 116.596; MAD 5.40386",
             "unit": "ms"
           }
         ]
