@@ -11,12 +11,15 @@ silently reverting to scale 1.0 (the help/stats/sidebar regression) would have t
 from __future__ import annotations
 
 import contextlib
+import threading
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from saitenka import otel_metrics
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.mpvio.ipc import MpvIPC
 from saitenka.mpvio.osd import Overlay
 
 
@@ -108,3 +111,112 @@ def test_a_bare_int_oid_falls_back_to_its_digits(monkeypatch):
     spans = _record_spans(monkeypatch)
     Overlay(_FakeIPC()).show(Image.new("RGBA", (10, 10)), oid=7)
     assert _uploads(spans)[0]["oid"] == "7"
+
+
+@pytest.mark.timeout(5)
+def test_interaction_presenter_keeps_submission_nonblocking_and_publishes_newest(monkeypatch):
+    ipc = MpvIPC("unused")
+    ov = Overlay(ipc)
+    entered = threading.Event()
+    release = threading.Event()
+    newest_painted = threading.Event()
+    calls: list[int] = []
+
+    def blocked_show(bgra, _x=0, _y=0, oid=0):
+        del oid
+        value = int(bgra[0, 0, 0])
+        calls.append(value)
+        if value == 1:
+            entered.set()
+            release.wait(2)
+        else:
+            newest_painted.set()
+        return {"error": "success"}
+
+    monkeypatch.setattr(ov, "show_bgra", blocked_show)
+    try:
+        ov.show_bgra_interactive(np.full((1, 1, 4), 1, dtype=np.uint8), oid=OverlayId.TIP)
+        assert entered.wait(1)
+
+        submitted = threading.Event()
+
+        def submit_newest() -> None:
+            ov.show_bgra_interactive(np.full((1, 1, 4), 2, dtype=np.uint8), oid=OverlayId.TIP)
+            submitted.set()
+
+        submitter = threading.Thread(target=submit_newest)
+        submitter.start()
+        assert submitted.wait(1)
+        release.set()
+        assert newest_painted.wait(1)
+        submitter.join(1)
+        assert calls == [1, 2]
+    finally:
+        release.set()
+        ov.close()
+        ipc.close()
+
+
+@pytest.mark.timeout(5)
+def test_interaction_presenter_survives_a_failed_paint(monkeypatch):
+    ipc = MpvIPC("unused")
+    ov = Overlay(ipc)
+    failed = threading.Event()
+    recovered = threading.Event()
+
+    def flaky_show(bgra, _x=0, _y=0, oid=0):
+        del oid
+        if int(bgra[0, 0, 0]) == 1:
+            raise OSError("paint failed")
+        recovered.set()
+        return {"error": "success"}
+
+    monkeypatch.setattr(ov, "show_bgra", flaky_show)
+    try:
+        ov.show_bgra_interactive(
+            np.full((1, 1, 4), 1, dtype=np.uint8),
+            oid=OverlayId.TIP,
+            on_presented=lambda result: failed.set() if result["error"] == "failed" else None,
+        )
+        assert failed.wait(1)
+        ov.show_bgra_interactive(np.full((1, 1, 4), 2, dtype=np.uint8), oid=OverlayId.TIP)
+        assert recovered.wait(1)
+    finally:
+        ov.close()
+        ipc.close()
+
+
+@pytest.mark.timeout(5)
+def test_visibility_off_removes_an_inflight_interaction_paint(monkeypatch):
+    ipc = MpvIPC("unused")
+    ov = Overlay(ipc)
+    entered = threading.Event()
+    release = threading.Event()
+    removed = threading.Event()
+    commands: list[tuple] = []
+
+    def blocked_show(_bgra, _x=0, _y=0, oid=0):
+        commands.append(("overlay-add", oid))
+        entered.set()
+        release.wait(2)
+        return {"error": "success"}
+
+    def command(*args, **_kwargs):
+        commands.append(args)
+        if args[0] == "overlay-remove":
+            removed.set()
+        return {"error": "success"}
+
+    monkeypatch.setattr(ov, "show_bgra", blocked_show)
+    monkeypatch.setattr(ipc, "command", command)
+    try:
+        ov.show_bgra_interactive(np.zeros((1, 1, 4), dtype=np.uint8), oid=OverlayId.TIP)
+        assert entered.wait(1)
+        ov.set_visible(visible=False)
+        release.set()
+        assert removed.wait(1)
+        assert commands[-1][0] == "overlay-remove"
+    finally:
+        release.set()
+        ov.close()
+        ipc.close()

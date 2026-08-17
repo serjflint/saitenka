@@ -514,7 +514,7 @@ def test_non_ass_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     result.close()
 
 
-def test_fallback_transition_records_one_bounded_metric(tmp_path: Path) -> None:
+def test_unsupported_transition_is_not_counted_as_provider_failure(tmp_path: Path) -> None:
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
@@ -530,7 +530,8 @@ def test_fallback_transition_records_one_bounded_metric(tmp_path: Path) -> None:
         result.native_geometry.set_source(source, reader=result)
         result.native_geometry.set_source(source, reader=result)
 
-        assert otel_metrics.snapshot()["saitenka.subtitle_geometry.fallbacks"]["value"] == 1
+        failures = otel_metrics.snapshot().get("saitenka.subtitle_geometry.failures")
+        assert failures is None or failures["value"] == 0
     finally:
         result.close()
         otel_metrics.unregister()

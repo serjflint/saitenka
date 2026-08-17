@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.commands.diagnostics import trace_report
 from saitenka.app.subtitle_report import load_trace
-from saitenka.app.trace_report import startup_json, startup_records
+from saitenka.app.trace_report import latency_summary, startup_json, startup_records
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -83,6 +83,111 @@ def test_json_report_caps_records_and_reports_the_dropped_count() -> None:
     assert report["dropped"] == 44
 
 
+def test_json_report_reserves_a_tail_for_late_interactions() -> None:
+    events = [
+        {"name": "cue_annotation", "ph": "X", "ts": index, "dur": 1, "args": {}}
+        for index in range(300)
+    ]
+    events.append(
+        {
+            "name": "tooltip_request",
+            "ph": "X",
+            "ts": 301,
+            "dur": 1,
+            "args": {"outcome": "failed", "latency_ms": 9.0},
+        }
+    )
+
+    report = json.loads(startup_json(events))
+
+    assert len(report["startup"]) == 256
+    assert report["startup"][-1]["name"] == "tooltip_request"
+    assert report["interaction_latency"]["tooltip_request"]["outcomes"] == {"failed": 1}
+
+
+def test_sampled_interactions_cannot_evict_terminal_outcomes() -> None:
+    events = [
+        {
+            "name": "tooltip_request",
+            "ph": "X",
+            "ts": 1,
+            "dur": 1,
+            "args": {"outcome": "failed", "latency_ms": 9.0},
+        }
+    ] + [
+        {"name": "hover_transition", "ph": "X", "ts": index + 2, "dur": 1, "args": {}}
+        for index in range(100)
+    ]
+
+    report = json.loads(startup_json(events))
+
+    assert report["interaction_latency"]["tooltip_request"]["outcomes"] == {"failed": 1}
+
+
+def test_report_keeps_scroll_and_geometry_provenance() -> None:
+    events = [
+        {
+            "name": "scroll_frame",
+            "ph": "X",
+            "ts": 1,
+            "dur": 2_000,
+            "args": {"bands": 2, "full_h": 500, "scale": "2.0", "crisp_miss": "cold"},
+        },
+        {
+            "name": "subtitle_geometry_cache",
+            "ph": "X",
+            "ts": 2,
+            "dur": 1_000,
+            "args": {"outcome": "miss", "reason": "not-prefetched", "cache_hits": 4},
+        },
+    ] + [
+        {"name": "hover_transition", "ph": "X", "ts": index + 3, "dur": 1, "args": {}}
+        for index in range(100)
+    ]
+
+    report = json.loads(startup_json(events))
+
+    assert report["startup"][0]["args"]["crisp_miss"] == "cold"
+    geometry = report["interaction_latency"]["subtitle_geometry_cache"]
+    assert geometry["outcomes"] == {"miss": 1}
+    assert geometry["reasons"] == {"not-prefetched": 1}
+
+
+def test_scroll_frames_cannot_evict_geometry_provenance() -> None:
+    events = [
+        {
+            "name": "subtitle_geometry_cache",
+            "ph": "X",
+            "ts": 1,
+            "dur": 1_000,
+            "args": {"outcome": "miss", "reason": "not-prefetched"},
+        }
+    ] + [
+        {"name": "scroll_frame", "ph": "X", "ts": index + 2, "dur": 1, "args": {}}
+        for index in range(40)
+    ]
+
+    report = json.loads(startup_json(events))
+
+    geometry = report["interaction_latency"]["subtitle_geometry_cache"]
+    assert geometry["reasons"] == {"not-prefetched": 1}
+
+
+def test_interaction_summary_attributes_tail_and_terminal_outcomes() -> None:
+    records = [
+        {"name": "hover_target_lookup", "duration_ms": value, "args": {}}
+        for value in (0.1, 0.2, 4.0)
+    ] + [
+        {"name": "tooltip_request", "duration_ms": 12.0, "args": {"outcome": "painted"}},
+        {"name": "tooltip_request", "duration_ms": 3.0, "args": {"outcome": "superseded"}},
+    ]
+
+    summary = latency_summary(records)
+
+    assert summary["hover_target_lookup"]["max_ms"] == 4.0
+    assert summary["tooltip_request"]["outcomes"] == {"painted": 1, "superseded": 1}
+
+
 def test_installed_trace_report_drops_malformed_records_and_values(tmp_path: Path, capsys) -> None:
     trace = tmp_path / "malformed.json"
     trace.write_text(
@@ -112,6 +217,23 @@ def test_installed_trace_report_drops_malformed_records_and_values(tmp_path: Pat
     report = json.loads(capsys.readouterr().out)
     assert report["total"] == 1
     assert report["startup"][0]["args"] == {"priority": "current"}
+
+
+def test_interaction_summary_ignores_non_numeric_latency() -> None:
+    events = [
+        {
+            "name": "tooltip_request",
+            "ph": "X",
+            "ts": 1,
+            "dur": 2_000,
+            "args": {"outcome": "failed", "latency_ms": "invalid"},
+        }
+    ]
+
+    report = json.loads(startup_json(events))
+
+    assert report["interaction_latency"]["tooltip_request"]["max_ms"] == 2.0
+    assert "latency_ms" not in report["startup"][0]["args"]
 
 
 def test_startup_records_bound_numeric_arguments() -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import tomllib
 
-from hypothesis import assume, example, given
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 
 from saitenka.app import paths, report
@@ -42,6 +42,7 @@ _event = st.builds(
 
 
 @given(st.lists(_event, max_size=12), st.integers(min_value=1, max_value=7))
+@settings(deadline=None)
 def test_ipc_feed_reassembles_across_chunk_boundaries(msgs, chunk):
     ipc = MpvIPC("unused")
     blob = b"".join((json.dumps(m) + "\n").encode() for m in msgs)

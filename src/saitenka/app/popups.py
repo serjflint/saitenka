@@ -196,6 +196,9 @@ class Panel:
         cheap crisp compose. The blit paints soft on a cold viewport and upgrades once this goes true."""
         return self.windowed.native_viewport_warm(scroll, view_h, scale)
 
+    def viewport_warm(self, scroll: int, view_h: int) -> bool:
+        return self.windowed.viewport_warm(scroll, view_h)
+
     def render_ahead(
         self, scroll: int, view_h: int, *, direction: int, should_cancel, scale: float = 1.0
     ) -> int:
@@ -230,6 +233,9 @@ class PopupView:
         self.xy: tuple[int, int] = (0, 0)
         self.view_h = 0
         self.scroll = 0
+        self.desired_scroll = 0
+        self.job_id: int | None = None
+        self.job_kind = "tooltip"
         self.rect: tuple[int, int, int, int] | None = None  # screen rect, for hit-testing
         self.hide_at = 0.0
         self.crisp_miss = ""  # last blit's soft-fallback reason ("" = composited crisp) — telemetry

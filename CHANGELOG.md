@@ -9,6 +9,11 @@ logs.
 
 ### Fixed
 
+- **Hovering and tooltip scrolling no longer wait on optional services or mpv IPC.** Phrase/mining
+  metadata, Anki and TTS capability checks, tooltip raster preparation, file staging, and transport
+  writes now run behind bounded session workers. Rapid hover and wheel input is newest-wins, while
+  visible-paint acknowledgements and geometry provenance make delayed interaction diagnosable with
+  `saitenka trace-report`.
 - **Startup remains interactive while dictionaries and cue annotations finish.** Publishing loaded
   dependencies no longer runs tokenization, dictionary attestation, or scoring on the mpv event-loop
   thread. Current cues preempt episode warming, stale results cannot restore old hit boxes, and the

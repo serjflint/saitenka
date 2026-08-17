@@ -1116,11 +1116,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     with otel_metrics.traced("startup.reader_create"):
         if demo_word or screenshot:
             scorer, anki, mine_conf, dict_set = _build_deps()
+            from saitenka.app.media import tts_available
             from saitenka.app.reader_factory import ReaderServices, create_reader
 
             reader = create_reader(
                 ipc,
-                services=ReaderServices(scorer, anki, mine_conf, dict_set),
+                services=ReaderServices(scorer, anki, mine_conf, dict_set, tts_available()),
                 options=opts,
                 profile=active_profile,
                 startup_hint_lease=startup_hint_lease,

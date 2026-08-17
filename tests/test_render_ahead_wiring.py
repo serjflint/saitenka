@@ -5,7 +5,10 @@ worker actually warms a real panel."""
 
 from __future__ import annotations
 
-from saitenka.app import prefetch
+import contextlib
+
+from saitenka import otel_metrics
+from saitenka.app import prefetch, tooltip
 from saitenka.app.config import ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.popups import Panel
@@ -44,6 +47,7 @@ def _reader() -> Reader:
     r = Reader(_FakeIPC(), options=ReaderOptions(prefetch=True))
     r._tip_view_h = 300
     r._tip_scroll = 120
+    r._tip_view.desired_scroll = 120
     return r
 
 
@@ -60,13 +64,14 @@ def test_scroll_records_the_newest_request_only():
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
     prefetch.request_render_ahead(r, r._tip_view, 1)
     r._tip_scroll = 999
+    r._tip_view.desired_scroll = 999
     prefetch.request_render_ahead(r, r._tip_view, -1)
     req = r._render_ahead_req
     assert req is not None
     assert (req.scroll, req.view_h, req.direction) == (999, 300, -1)  # newest scroll won
 
 
-def test_no_request_without_a_tooltip_or_when_prefetch_off():
+def test_engaged_request_survives_disabled_speculative_prefetch():
     r = _reader()
     r._tip_state = None
     prefetch.request_render_ahead(r, r._tip_view, 1)
@@ -75,7 +80,7 @@ def test_no_request_without_a_tooltip_or_when_prefetch_off():
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]
     r.prefetch = False
     prefetch.request_render_ahead(r, r._tip_view, 1)
-    assert r._render_ahead_req is None
+    assert r._render_ahead_req is not None
 
 
 def test_worker_drains_the_slot_and_warms_off_thread():
@@ -128,3 +133,52 @@ def test_worker_actually_warms_a_real_panel():
     prefetch._try_render_ahead(r)
 
     assert r._tip_state.windowed.cached_blocks > 0  # blocks warmed without any viewport() call
+
+
+def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
+    class BrokenPanel(_RecordingPanel):
+        def render_ahead(self, *_args, **_kwargs):
+            raise RuntimeError("broken band")
+
+    spans = []
+
+    @contextlib.contextmanager
+    def traced(name, **attrs):
+        spans.append((name, attrs))
+        yield None
+
+    monkeypatch.setattr(otel_metrics, "traced", traced)
+    r = _reader()
+    panel = BrokenPanel()
+    r._tip_state = panel  # type: ignore[assignment]
+    r._tip_view.job_id = r._interaction_jobs.begin("scroll")
+    prefetch.request_render_ahead(r, r._tip_view, 1)
+
+    assert prefetch._try_render_ahead(r)
+    tooltip.apply_render_ahead_failures(r)
+
+    assert r._tip_view.desired_scroll == r._tip_view.scroll
+    assert spans[-1][0] == "scroll_request"
+    assert spans[-1][1]["outcome"] == "failed"
+
+
+def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> None:
+    r = _reader()
+    panel = _RecordingPanel()
+    r._tip_state = panel  # type: ignore[assignment]
+    r._tip_view.desired_scroll = 100
+    old_job = r._interaction_jobs.begin("scroll")
+    r._tip_view.job_id = old_job
+    prefetch.request_render_ahead(r, r._tip_view, -1)
+
+    r._tip_view.desired_scroll = 200
+    r._tip_view.job_id = r._interaction_jobs.begin("scroll")
+    r._tip_view.desired_scroll = 100
+    current_job = r._interaction_jobs.begin("scroll")
+    r._tip_view.job_id = current_job
+    r._render_ahead_failures.put((r._prefetch_gen, panel, 100, old_job))
+
+    tooltip.apply_render_ahead_failures(r)
+
+    assert r._tip_view.desired_scroll == 100
+    assert r._tip_view.job_id == current_job

@@ -32,15 +32,10 @@ log = logging.getLogger(__name__)
 _DEPS_DAG_WIDTH = 4
 
 
-_ANKI_WATCH_S = 60.0  # background watcher's patience for an auto-launched Anki to answer
-
-
 def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -> None:
     """If mining or Anki-backed coloring is configured and AnkiConnect isn't up, launch Anki
-    fire-and-forget and warn — never block startup on the poll. A background watcher (see
-    :func:`_spawn_anki_seed_watcher`) backfills mining once Anki answers, so the up-to-20s launch poll
-    stays off the dict/coloring critical path (it used to gate the whole dep build → apply_deps → the
-    'dictionaries loaded' feedback by the full wait). ``on_unreachable(*, launched)`` lets an
+    fire-and-forget and warn — never block startup on the poll. The session capability probe later
+    backfills mining once Anki answers. ``on_unreachable(*, launched)`` lets an
     interactive caller (``run``) print a console note — ``launched`` is False when Anki couldn't even
     be started (not found / launch failed), a distinct warning — in addition to the log-only warning
     (``attach`` is detached, so it passes no callback)."""
@@ -51,7 +46,7 @@ def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -
     with otel_metrics.traced("anki_ensure_running"):
         if anki_reachable():
             return
-        launched = launch_anki()  # fire-and-forget; the seed watcher polls for it to come up
+        launched = launch_anki()
         if launched:
             log.warning("Anki not reachable — launching it; mining/coloring enables once it's up")
         else:  # couldn't find the Anki binary or the launch itself failed — it won't come up on its own
@@ -61,33 +56,6 @@ def _maybe_start_anki(mc: dict, known_cfg, *, mine: bool, on_unreachable=None) -
             )
         if on_unreachable is not None:
             on_unreachable(launched=launched)
-
-
-def _anki_seed_watch(reader: Reader) -> None:
-    """Wait for AnkiConnect to answer, then flag the reader to backfill the mined ⊕→✓ set on its next
-    poll tick (:meth:`Reader._apply_pending_anki_seed`). Instant when Anki is already up; otherwise
-    polls the just-launched Anki up to ``_ANKI_WATCH_S`` and logs a console warning on timeout. The
-    seed itself must run on the main thread, so this only sets the cross-thread flag."""
-    from saitenka.app.anki import anki_reachable, wait_until_anki_up
-
-    if anki_reachable():
-        reader._pending_anki_seed = True
-        return
-    if wait_until_anki_up(wait=_ANKI_WATCH_S):
-        log.info("Anki is up — mining enabled")
-        reader._pending_anki_seed = True
-    else:
-        log.warning(
-            "Anki didn't come up within %.0fs — mining stays off until you start it", _ANKI_WATCH_S
-        )
-
-
-def _spawn_anki_seed_watcher(reader: Reader) -> None:
-    """Fire-and-forget the Anki seed watcher on a daemon thread so it never holds up the poll loop or
-    shutdown."""
-    threading.Thread(
-        target=_anki_seed_watch, args=(reader,), name="saitenka-anki-seed", daemon=True
-    ).start()
 
 
 def _build_dict_set(
@@ -536,18 +504,34 @@ def apply_deps(reader: Reader, deps: dict) -> None:
     """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
     reader._loading = False
     reader.ov.hide(OverlayId.LOADING)
+    if reader._anki_capability is not None:
+        reader._anki_capability.close()
+    reader._mined_seed_generation += 1
+    reader._mined_seed_inflight = False
+    reader._mined_seed_done = False
+    reader._mined_seed_failures = 0
+    reader._mined_seed_next_due = 0.0
     reader.scorer = deps.get("scorer")
     reader.anki = deps.get("anki")
     reader.mine_cfg = deps.get("mine_cfg")
     reader.dict_set = deps.get("dict_set")
+    if reader.anki is not None:
+        from saitenka.app.anki import anki_reachable
+        from saitenka.app.capabilities import CapabilityProbe
+
+        reader._anki_capability = CapabilityProbe(
+            lambda: anki_reachable(timeout=reader.anki_ping_timeout),
+            name="anki",
+            ttl=reader.anki_ok_ttl,
+            retry=min(reader.anki_ok_ttl, 1.0),
+            timeout=max(reader.anki_ping_timeout * 2, 0.1),
+            max_retry=max(reader.anki_ok_ttl, 8.0),
+        )
+        reader._anki_capability.request(force=True)
     from saitenka.app import analysis_overlay
 
     analysis_overlay.on_vocabulary_changed(reader)
     reader._dependencies_changed()
-    if reader.anki is not None:
-        # Backfill ⊕→✓ from past mining once Anki answers — off the critical path so a not-yet-up
-        # (auto-launched) Anki never stalls startup; the watcher flips it on when Anki comes up.
-        _spawn_anki_seed_watcher(reader)
     reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
     reader.warm_episode_tokens()  # deps arrived after the index built → warm the episode's cues now
     reader._announce_runtime()  # workers are up now — print the banner with the real count (once)

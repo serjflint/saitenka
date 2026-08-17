@@ -8,6 +8,7 @@ later behind this same adapter — the walker is already there.)
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -68,7 +69,9 @@ def furigana(surface: str, reading: str):
     return nodes or [surface]
 
 
-@lru_cache(maxsize=1)
+_jamdict_local = threading.local()
+
+
 def _jam():
     # jamdict is the OPTIONAL `jmdict` extra (see pyproject) — this import raises ImportError when it
     # isn't installed. Every caller goes through _lookup() inside a `try/except Exception`, so the
@@ -76,7 +79,11 @@ def _jam():
     # except: the missing-jamdict path depends on it.
     from jamdict import Jamdict
 
-    return Jamdict()
+    instance = getattr(_jamdict_local, "instance", None)
+    if instance is None:
+        instance = Jamdict()
+        _jamdict_local.instance = instance
+    return instance
 
 
 def _lookup(word: str):

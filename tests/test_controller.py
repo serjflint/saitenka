@@ -2,6 +2,7 @@
 
 import functools
 import time
+from types import SimpleNamespace
 
 import pytest
 from hypothesis import given, settings
@@ -561,6 +562,34 @@ def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     r._sub_settle_until = 0.0  # window already expired
     r._reconcile_sub_text("")
     assert r.sub_text == ""
+
+
+def test_repeated_empty_observation_is_idempotent(monkeypatch):
+    """One cue-to-gap transition clears interaction; stable empty polls do no more work."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from saitenka import otel_metrics
+
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("に")
+    metric_reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[metric_reader])
+    otel_metrics.register(metric_reader, provider.get_meter("test"))
+    try:
+        r._reconcile_sub_text("")
+        commands_after_transition = tuple(ipc.commands)
+        for _ in range(1_000):
+            r._reconcile_sub_text("")
+
+        snap = otel_metrics.snapshot()
+        assert r.sub_text == "" and r._cue_retired is True
+        assert tuple(ipc.commands) == commands_after_transition
+        assert snap["saitenka.sub_text_reconcile.duration_ms"]["count"] == 1
+        assert snap["saitenka.cue_redraw.duration_ms"]["count"] == 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
 
 
 def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
@@ -1145,6 +1174,8 @@ def test_header_add_button_click_mines_hovered_word(monkeypatch):
     ipc = FakeIPC()
     r = _tall_reader(ipc)
     r.anki = object()  # mining available → ⊕ drawn and hit-testable
+    r._anki_capability = SimpleNamespace(value=True, request=lambda: False)
+    r._tts_ok = True
     r.hover = 0
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
@@ -1178,6 +1209,7 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
 
     ipc = FakeIPC()
     r = _tall_reader(ipc)
+    r._tts_ok = True
     r.hover = 0
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r._show_tooltip(0)
@@ -1464,6 +1496,8 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     r.anki = object()
+    r._anki_capability = SimpleNamespace(value=True, request=lambda: False)
+    r._tts_ok = True
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
