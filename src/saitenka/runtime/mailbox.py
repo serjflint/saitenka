@@ -9,7 +9,15 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from saitenka.runtime.events import EffectFinished, EventEnvelope, EventOrigin
+from saitenka.runtime.events import (
+    CloseRequested,
+    ConnectionLost,
+    EffectFinished,
+    EventEnvelope,
+    EventOrigin,
+    RawMpvEvent,
+    UserCommand,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,6 +43,8 @@ class MailboxSnapshot:
     terminal: int
     terminal_reserved: int
     terminal_enqueued: int
+    close_requested: bool
+    connection_lost: bool
     closed: bool
 
 
@@ -63,6 +73,8 @@ class SessionMailbox:
         self._next_sequence = 0
         self._terminal_reservations: set[EffectId] = set()
         self._terminal_enqueued: set[EffectId] = set()
+        self._close_latch: EventEnvelope | None = None
+        self._connection_lost: EventEnvelope | None = None
         self._closed = False
         self._condition = threading.Condition()
 
@@ -80,6 +92,24 @@ class SessionMailbox:
             raise TypeError("effect completions must use publish_terminal")
         with self._condition:
             envelope = self._envelope_locked(payload, origin, connection_epoch)
+            if isinstance(payload, CloseRequested):
+                if self._close_latch is not None:
+                    return self._close_latch
+                self._close_latch = envelope
+                self._condition.notify()
+                return envelope
+            if isinstance(payload, ConnectionLost):
+                current = self._connection_lost
+                current_payload = None if current is None else current.payload
+                if (
+                    not isinstance(current_payload, ConnectionLost)
+                    or payload.connection_epoch > current_payload.connection_epoch
+                ):
+                    self._connection_lost = envelope
+                    self._condition.notify()
+                    return envelope
+                assert current is not None
+                return current
             self._publish_locked(envelope, traffic)
             return envelope
 
@@ -92,6 +122,8 @@ class SessionMailbox:
                 terminal=len(self._queues[TrafficClass.TERMINAL]),
                 terminal_reserved=len(self._terminal_reservations),
                 terminal_enqueued=len(self._terminal_enqueued),
+                close_requested=self._close_latch is not None,
+                connection_lost=self._connection_lost is not None,
                 closed=self._closed,
             )
 
@@ -137,12 +169,22 @@ class SessionMailbox:
             )
             return self._pop_next_locked()
 
-    def drain_ready(self, *, start: EventEnvelope | None = None) -> tuple[EventEnvelope, ...]:
+    def receive_ready(
+        self,
+        *,
+        limit: int = 64,
+        start: EventEnvelope | None = None,
+    ) -> tuple[EventEnvelope, ...]:
+        if limit <= 0:
+            raise ValueError("mailbox receive limit must be positive")
         items = [] if start is None else [start]
         with self._condition:
-            while envelope := self._pop_next_locked():
+            while len(items) < limit and (envelope := self._pop_next_locked()):
                 items.append(envelope)
-        return tuple(items)
+        return self._coalesce(tuple(items))
+
+    def drain_ready(self, *, start: EventEnvelope | None = None) -> tuple[EventEnvelope, ...]:
+        return self.receive_ready(start=start)
 
     def retire_terminal(self, effect_id: EffectId) -> bool:
         with self._condition:
@@ -188,14 +230,48 @@ class SessionMailbox:
         return EventEnvelope(sequence, self._clock(), origin, connection_epoch, payload)
 
     def _has_events_locked(self) -> bool:
-        return any(self._queues.values())
+        return (
+            self._close_latch is not None
+            or self._connection_lost is not None
+            or any(self._queues.values())
+        )
 
     def _pop_next_locked(self) -> EventEnvelope | None:
+        if self._close_latch is not None:
+            envelope = self._close_latch
+            self._close_latch = None
+            return envelope
         heads = [queue[0] for queue in self._queues.values() if queue]
+        if self._connection_lost is not None:
+            heads.append(self._connection_lost)
         if not heads:
             return None
         selected = min(heads, key=lambda envelope: envelope.sequence)
+        if selected is self._connection_lost:
+            self._connection_lost = None
+            return selected
         for queue in self._queues.values():
             if queue and queue[0] is selected:
                 return queue.popleft()
         raise AssertionError("selected mailbox event disappeared")
+
+    @staticmethod
+    def _coalesce(items: tuple[EventEnvelope, ...]) -> tuple[EventEnvelope, ...]:
+        result: list[EventEnvelope] = []
+        for envelope in items:
+            if result and SessionMailbox._may_coalesce(result[-1], envelope):
+                result[-1] = envelope
+            else:
+                result.append(envelope)
+        return tuple(result)
+
+    @staticmethod
+    def _may_coalesce(previous: EventEnvelope, current: EventEnvelope) -> bool:
+        if previous.connection_epoch != current.connection_epoch:
+            return False
+        left, right = previous.payload, current.payload
+        if isinstance(left, RawMpvEvent) and isinstance(right, RawMpvEvent):
+            return left.name == right.name == "mouse-pos"
+        if isinstance(left, UserCommand) and isinstance(right, UserCommand):
+            return left.name == right.name and left.name in {"scroll-up", "scroll-down"}
+        return False

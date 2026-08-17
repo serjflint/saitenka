@@ -69,7 +69,35 @@ class ScheduleTimer:
             raise ValueError("timer deadline must be finite and non-negative")
 
 
+@dataclass(frozen=True, slots=True)
+class EffectDeadline:
+    target_effect_id: EffectId
+    due_at: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.due_at) or self.due_at < 0:
+            raise ValueError("effect deadline must be finite and non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class CancelEffect:
+    target_effect_id: EffectId
+    owner: Owner
+    identity: object
+
+
+@dataclass(frozen=True, slots=True)
+class ExpireEffect:
+    target_effect_id: EffectId
+    deadline: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.deadline) or self.deadline < 0:
+            raise ValueError("effect deadline must be finite and non-negative")
+
+
 type AsyncEffect = SubmitJob | ScheduleTimer
+type CoreControl = CancelEffect | ExpireEffect
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,4 +112,4 @@ class StopSession:
     reason: str
 
 
-type Effect = AsyncEffect | EmitDiagnostic | StopSession
+type Effect = AsyncEffect | CoreControl | EmitDiagnostic | StopSession
