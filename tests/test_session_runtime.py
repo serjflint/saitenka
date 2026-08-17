@@ -293,6 +293,25 @@ def test_closed_mailbox_rejects_an_outstanding_terminal_reservation() -> None:
     assert mailbox.snapshot.terminal_reserved == 0
 
 
+def test_closed_mailbox_rejects_reserved_lifecycle_signals() -> None:
+    mailbox = SessionMailbox()
+    mailbox.close()
+
+    for payload in (CloseRequested(), ConnectionLost(1)):
+        try:
+            mailbox.publish(
+                payload,
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=1,
+            )
+        except MailboxFull as error:
+            assert str(error) == "mailbox is closed"
+        else:  # pragma: no cover - closed lifecycle contract
+            raise AssertionError("closed mailbox accepted lifecycle work")
+    assert mailbox.receive(timeout=0) is None
+
+
 def test_named_timer_fires_once_and_cancel_is_terminal() -> None:
     scheduler = TimerScheduler()
     first = ScheduleTimer(EffectId(1), Owner.INTERACTION, "hover:1", "hover-dwell", 5.0)

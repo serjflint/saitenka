@@ -91,6 +91,8 @@ class SessionMailbox:
         if isinstance(payload, EffectFinished):
             raise TypeError("effect completions must use publish_terminal")
         with self._condition:
+            if self._closed:
+                raise MailboxFull("mailbox is closed")
             envelope = self._envelope_locked(payload, origin, connection_epoch)
             if isinstance(payload, CloseRequested):
                 if self._close_latch is not None:

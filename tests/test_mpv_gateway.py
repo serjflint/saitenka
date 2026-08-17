@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import threading
 from concurrent.futures import Future
 
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime import (
+    ConnectionReplaced,
     EffectError,
     EffectFinished,
     EffectId,
@@ -47,6 +49,25 @@ class FakeIPC:
     def publish(self, message: dict, epoch: int = 0) -> None:
         assert self.event_sink is not None
         self.event_sink(message, epoch)
+
+
+class ImmediateEventTransport:
+    def __init__(self) -> None:
+        self._sent = False
+        self._closed = threading.Event()
+
+    def read(self, _size: int) -> bytes:
+        if not self._sent:
+            self._sent = True
+            return b'{"event":"file-loaded"}\n'
+        self._closed.wait(1)
+        return b""
+
+    def write(self, _data: bytes) -> None:
+        pass
+
+    def close(self) -> None:
+        self._closed.set()
 
 
 def command(effect_id: int, *, deadline: float = 5.0) -> SendMpvCommand:
@@ -94,6 +115,24 @@ def test_gateway_preserves_events_buffered_before_installation() -> None:
     MpvGateway(ipc, SessionMailbox())
 
     assert ipc.drain_events() == [event]
+    ipc.close()
+
+
+def test_replacement_epoch_is_published_before_its_first_wire_event() -> None:
+    mailbox = SessionMailbox()
+    ipc = MpvIPC("unused")
+    MpvGateway(ipc, mailbox)
+
+    installed, _retired = ipc._install_replacement(ImmediateEventTransport())
+
+    assert installed
+    first = mailbox.receive(timeout=1)
+    second = mailbox.receive(timeout=1)
+    assert first is not None and first.payload == ConnectionReplaced(1)
+    assert second is not None and second.payload == RawMpvEvent(
+        "file-loaded", {"event": "file-loaded"}
+    )
+    assert first.sequence < second.sequence
     ipc.close()
 
 

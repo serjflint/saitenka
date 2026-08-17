@@ -439,10 +439,10 @@ class MpvIPC:
                 self._events = []
             self._transport = transport
             self._closed = threading.Event()
+            sink = self._connection_sink
+            if sink is not None:
+                sink("replaced", self._connection_epoch)
             self._start_reader()
-        sink = self._connection_sink
-        if sink is not None:
-            sink("replaced", self._connection_epoch)
         return True, retired
 
     def _replacement_is_live(self) -> bool:
