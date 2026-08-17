@@ -138,7 +138,8 @@ Per-command flags and diagnostics are in the [CLI reference](../usage/cli.md).
 
 For a slow or unresponsive startup, enable telemetry before reproducing, create the report after the
 session ends, then run `saitenka trace-report PATH_PRINTED_BY_REPORT`. It separates mpv connection,
-reader setup, the first poll, annotation queueing, and dictionary work without printing subtitle text.
+reader setup, the first poll, annotation queueing, dictionary work, hover lookup, tooltip paint, and
+scroll latency without printing subtitle text.
 
 ---
 

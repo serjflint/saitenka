@@ -292,6 +292,7 @@ class Reader:
         "prefetch_state", "render_ahead_req"
     )
     _render_ahead_lock = Delegated[threading.Lock]("prefetch_state", "render_ahead_lock")
+    _render_ahead_failures = Delegated[queue.SimpleQueue]("prefetch_state", "render_ahead_failures")
     _engaged_req = Delegated[prefetch.EngagedHoverReq | None]("prefetch_state", "engaged_req")
     _engaged_lock = Delegated[threading.Lock]("prefetch_state", "engaged_lock")
     _engaged_results = Delegated[queue.Queue]("prefetch_state", "engaged_results")
@@ -355,6 +356,7 @@ class Reader:
         profile: Profile | None = None,
         startup_hint_lease: StartupHintLease | None = None,
         tokenizer_warm: Future[None] | None = None,
+        tts_ok: bool | None = None,  # noqa: FBT001 -- tri-state capability snapshot
         **legacy_kw,
     ):
         """``options`` is the canonical grouped-knobs object (see app/config.py; a new knob is one
@@ -412,9 +414,22 @@ class Reader:
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         self._pending_deps: dict | None = None
-        # Set by reader_deps' background Anki watcher when AnkiConnect answers → the poll loop backfills
-        # the mined set on the main thread (a not-yet-up Anki must not stall the dep/coloring startup).
-        self._pending_anki_seed = False
+        self._mined_seed_results: queue.SimpleQueue[tuple[int, set[str] | None]] = (
+            queue.SimpleQueue()
+        )
+        self._mined_seed_generation = 0
+        self._mined_seed_inflight = False
+        self._mined_seed_done = False
+        self._mined_seed_failures = 0
+        self._mined_seed_next_due = 0.0
+        self._mined_generation = 0
+        from saitenka.app.hover_metadata import InteractionMetadataActor
+        from saitenka.app.interaction_jobs import InteractionJobs
+
+        self._interaction_jobs = InteractionJobs()
+        self._interaction_metadata = InteractionMetadataActor()
+        self._hover_mined = False
+        self._hover_group_mined: tuple[bool, ...] = ()
         self._loading = False
         self._load_frame = 0
         self._load_next = 0.0
@@ -438,9 +453,17 @@ class Reader:
         self.hover_pause_key = o.keys.hover_pause_key
         self.play_audio = o.mining.play_audio
         self.show_preview = o.mining.show_preview  # auto-pop the card-preview panel after a mine
-        # 🔊 TTS button is drawn only when the OS has a Japanese voice — else it silently does nothing.
-        # Computed once (voices don't change mid-session; tts_available is itself cached).
-        self._tts_ok = tts_available()
+        # Interactive sessions publish this optional subprocess probe later; deterministic
+        # demo/screenshot assembly supplies it synchronously through ReaderServices.
+        self._tts_ok = bool(tts_ok)
+        from saitenka.app.capabilities import CapabilityProbe
+
+        self._tts_capability = (
+            None
+            if tts_ok is not None
+            else CapabilityProbe(tts_available, name="tts", ttl=3_600.0, retry=60.0)
+        )
+        self._anki_capability: CapabilityProbe | None = None
         # subtitle navigation keys (configurable; defaults match SUB_NAV_DEFAULTS)
         self.sub_prev_key = o.keys.sub_prev_key  # Alt+LEFT  → sub-seek -1 (previous line)
         self.sub_next_key = o.keys.sub_next_key  # Alt+RIGHT → sub-seek  1 (next line)
@@ -850,7 +873,9 @@ class Reader:
         a cue change while a tooltip is showing always clears it via the real path — avoiding the
         early-return in set_hover (index == self.hover) that would otherwise short-circuit teardown
         when hover is already -1 but the tip is still on screen."""
-        self.ov.hide(TIP_ID)
+        self._interaction_jobs.cancel_all()
+        hide = getattr(self.ov, "hide_interactive", self.ov.hide)
+        hide(TIP_ID)
         self._hide_nested()
         self._tip_rect = None
         self._tip_state = None
@@ -863,7 +888,8 @@ class Reader:
         self._kanji_index = 0
         self._unbind_tip_keys()
         if self._paused_by_tip:
-            self.ipc.command("set_property", "pause", False)  # noqa: FBT003  # mpv IPC passthrough — args ARE mpv's command wire format
+            submit = getattr(self.ipc, "command_async", self.ipc.command)
+            submit("set_property", "pause", False)  # noqa: FBT003
             self._paused_by_tip = False
         self._sync_auto_translation()
 
@@ -921,7 +947,8 @@ class Reader:
             if self.native_geometry is not None:
                 self.native_geometry.mark_empty()
             self.subtitle_pipeline.clear(self)
-            self.ov.hide(TIP_ID)
+            hide = getattr(self.ov, "hide_interactive", self.ov.hide)
+            hide(TIP_ID)
             return
         self._record_session_cue(
             text,
@@ -1403,9 +1430,22 @@ class Reader:
         surfaces.route_click(self, mp.get("x", -1), mp.get("y", -1))
 
     def _panel_key(
-        self, tok, inflected, *, mined: bool = False, phrase: tuple[str, ...] = ()
+        self,
+        tok,
+        inflected,
+        *,
+        mined: bool = False,
+        phrase: tuple[str, ...] = (),
+        group_mined: tuple[bool, ...] | None = None,
     ) -> tooltip.PanelKey:
-        return tooltip.panel_key(self, tok, inflected, mined=mined, phrase=phrase)
+        return tooltip.panel_key(
+            self,
+            tok,
+            inflected,
+            mined=mined,
+            phrase=phrase,
+            group_mined=group_mined,
+        )
 
     def _is_mined(self, tok) -> bool:
         return tooltip.is_mined(self, tok)
@@ -1435,9 +1475,17 @@ class Reader:
         mined: bool | None = None,
         nested: bool = False,
         extra_terms: tuple[str, ...] = (),
+        group_mined: tuple[bool, ...] | None = None,
     ):
         return tooltip.panel_for(
-            self, tok, inflected, min_h, mined=mined, nested=nested, extra_terms=extra_terms
+            self,
+            tok,
+            inflected,
+            min_h,
+            mined=mined,
+            nested=nested,
+            extra_terms=extra_terms,
+            group_mined=group_mined,
         )
 
     def _panel_cache_setdefault(self, key, st) -> Panel:
@@ -1682,7 +1730,8 @@ class Reader:
         if self._help_open:
             return
         for binding in active_bindings(self, "tooltip"):
-            self.ipc.command("keybind", binding.key, f"script-message {binding.spec.message}")
+            submit = getattr(self.ipc, "command_async", self.ipc.command)
+            submit("keybind", binding.key, f"script-message {binding.spec.message}")
 
     def _unbind_tip_keys(self) -> None:
         """Neutralise the tooltip keys so a leaked bind can't fire ``tab-prev``/etc. when no tooltip is
@@ -1696,9 +1745,8 @@ class Reader:
         if self._help_open:
             return
         for binding in active_bindings(self, "tooltip"):
-            self.ipc.command(
-                "keybind", binding.key, "ignore"
-            )  # valid no-op; "" would be rejected by mpv
+            submit = getattr(self.ipc, "command_async", self.ipc.command)
+            submit("keybind", binding.key, "ignore")
 
     def _define_mouse_section(self) -> None:
         """Define (once) the FORCED mpv section for the ``mouse``-scoped bindings; once enabled it
@@ -2203,9 +2251,14 @@ class Reader:
 
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
+        self._apply_capabilities()
         self._apply_annotation_results()
-        self._apply_pending_anki_seed()
+        self._apply_pending_mined_seed()
         tooltip.apply_engaged_results(self)
+        tooltip.apply_hover_metadata(self)
+        tooltip.apply_render_ahead_failures(self)
+        tooltip.apply_pending_scroll(self, self._tip_view)
+        tooltip.apply_pending_scroll(self, self._nest)
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
         subtitle_modes.apply_fetch_results(self)
@@ -2215,6 +2268,57 @@ class Reader:
         if self.native_geometry is not None:
             self.native_geometry.apply(self)
         self.subtitle_pipeline.poll_ownership(self)
+
+    def _apply_capabilities(self) -> None:
+        if self._tts_capability is not None:
+            if self._tts_capability.apply():
+                self._tts_ok = bool(self._tts_capability.value)
+            self._tts_capability.request()
+        if self._anki_capability is not None:
+            self._anki_capability.apply()
+            if self._anki_capability.value:
+                self._request_mined_seed()
+            self._anki_capability.request()
+
+    def _request_mined_seed(self) -> None:
+        if (
+            self._mined_seed_inflight
+            or self._mined_seed_done
+            or time.monotonic() < self._mined_seed_next_due
+            or self.anki is None
+            or self.mine_cfg is None
+        ):
+            return
+        self._mined_seed_inflight = True
+        generation = self._mined_seed_generation
+        anki, mine_cfg = self.anki, self.mine_cfg
+
+        def run() -> None:
+            values = self._miner.mined_expressions(anki, mine_cfg)
+            self._mined_seed_results.put((generation, values))
+
+        threading.Thread(target=run, name="saitenka-anki-seed", daemon=True).start()
+
+    def _apply_pending_mined_seed(self) -> None:
+        while True:
+            try:
+                generation, values = self._mined_seed_results.get_nowait()
+            except queue.Empty:
+                return
+            if generation != self._mined_seed_generation or self._stop.is_set():
+                continue
+            self._mined_seed_inflight = False
+            if values is None:
+                self._mined_seed_failures += 1
+                self._mined_seed_next_due = time.monotonic() + min(
+                    8.0, 0.25 * (2 ** (self._mined_seed_failures - 1))
+                )
+                continue
+            self._mined_seed_done = True
+            self._mined_seed_failures = 0
+            before = len(self._mined)
+            self._mined.update(values)
+            self._mined_generation += int(len(self._mined) != before)
 
     def _update_interaction(self) -> None:
         self._feed_episode_annotation()
@@ -2377,12 +2481,6 @@ class Reader:
         elif self._loading:
             self._draw_loading()
 
-    def _apply_pending_anki_seed(self) -> None:
-        """Main-thread hand-off from reader_deps' Anki watcher: backfill the mined set once Anki is up."""
-        if self._pending_anki_seed:
-            self._pending_anki_seed = False
-            self._seed_mined()
-
     def _schedule_paused_nudge(self, ops_before: int) -> None:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
         presents it (mpv #8172; see Overlay.repaint). Only when paused: playing frames present on
@@ -2427,7 +2525,9 @@ class Reader:
             )
 
     def _seed_mined(self) -> None:
+        before = len(self._mined)
         self._miner.seed_mined()
+        self._mined_generation += int(len(self._mined) != before)
 
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     def load_sub_index(self, path) -> None:
@@ -2511,6 +2611,13 @@ class Reader:
     def close(self) -> None:
         import shutil
 
+        if self._tts_capability is not None:
+            self._tts_capability.close()
+        if self._anki_capability is not None:
+            self._anki_capability.close()
+        self._mined_seed_generation += 1
+        self._interaction_jobs.cancel_all()
+        self._interaction_metadata.close()
         self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free

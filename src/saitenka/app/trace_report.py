@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import zipfile
+from collections import deque
 from typing import TYPE_CHECKING
 
 from saitenka.app.subtitle_report import load_trace
@@ -26,6 +27,13 @@ _SPAN_NAMES = frozenset(
         "startup.hint",
         "cue_annotation",
         "dictionary_attestation",
+        "hover_target_lookup",
+        "hover_transition",
+        "tooltip_show",
+        "tooltip_request",
+        "scroll_frame",
+        "scroll_request",
+        "subtitle_geometry_cache",
     }
 )
 _FIELDS = frozenset(
@@ -49,9 +57,32 @@ _FIELDS = frozenset(
         "since_ipc_ms",
         "cpu_ms",
         "failure",
+        "region",
+        "box_count",
+        "cue_state",
+        "changed",
+        "anchored",
+        "cold",
+        "bands",
+        "full_h",
+        "layout_backend",
+        "job_id",
+        "latency_ms",
+        "scale",
+        "crisp_miss",
+        "reason",
+        "cache_hits",
+        "prefetch_dropped",
+        "prefetch_cache_entries",
     }
 )
 _MAX_RECORDS = 256
+_TERMINAL_RECORDS = 64
+_SAMPLED_INTERACTION_RECORDS = 32
+_PROVENANCE_RECORDS_PER_NAME = 16
+_TERMINAL_NAMES = frozenset({"tooltip_request", "scroll_request"})
+_SAMPLED_INTERACTION_NAMES = frozenset({"hover_target_lookup", "hover_transition", "tooltip_show"})
+_PROVENANCE_NAMES = frozenset({"scroll_frame", "subtitle_geometry_cache"})
 _MAX_TRACE_BYTES = 64 * 1024 * 1024
 _MAX_STRING_CHARS = 128
 _MAX_ABS_NUMBER = 1e18
@@ -77,14 +108,39 @@ def _safe_args(value: object) -> dict:
             continue
         if isinstance(field, str) and len(field) > _MAX_STRING_CHARS:
             continue
+        if key == "latency_ms" and _safe_number(field) is None:
+            continue
         if not isinstance(field, (str, bool)) and _safe_number(field) is None:
             continue
         result[key] = field
     return result
 
 
+def _retain_record(
+    name: str,
+    record: dict,
+    records: list[dict],
+    terminals: deque[dict],
+    samples: deque[dict],
+    provenance: dict[str, deque[dict]],
+) -> None:
+    if name in _TERMINAL_NAMES:
+        terminals.append(record)
+    elif name in _PROVENANCE_NAMES:
+        provenance[name].append(record)
+    elif name in _SAMPLED_INTERACTION_NAMES:
+        samples.append(record)
+    elif len(records) < _MAX_RECORDS:
+        records.append(record)
+
+
 def _startup_records(events: Sequence[object]) -> tuple[list[dict], int]:
     records: list[dict] = []
+    terminals: deque[dict] = deque(maxlen=_TERMINAL_RECORDS)
+    samples: deque[dict] = deque(maxlen=_SAMPLED_INTERACTION_RECORDS)
+    provenance: dict[str, deque[dict]] = {
+        name: deque(maxlen=_PROVENANCE_RECORDS_PER_NAME) for name in _PROVENANCE_NAMES
+    }
     total = 0
     for event in events:
         if not isinstance(event, dict):
@@ -104,15 +160,21 @@ def _startup_records(events: Sequence[object]) -> tuple[list[dict], int]:
         ):
             continue
         total += 1
-        if len(records) >= _MAX_RECORDS:
-            continue
-        records.append(
-            {
-                "name": name,
-                "ts": timestamp,
-                "duration_ms": round(float(duration) / 1_000, 3),
-                "args": _safe_args(event.get("args", {})),
-            }
+        record = {
+            "name": name,
+            "ts": timestamp,
+            "duration_ms": round(float(duration) / 1_000, 3),
+            "args": _safe_args(event.get("args", {})),
+        }
+        _retain_record(name, record, records, terminals, samples, provenance)
+    provenance_records = [record for retained in provenance.values() for record in retained]
+    interaction_count = len(terminals) + len(provenance_records) + len(samples)
+    if interaction_count:
+        records = (
+            records[: _MAX_RECORDS - interaction_count]
+            + list(samples)
+            + provenance_records
+            + list(terminals)
         )
     return sorted(records, key=lambda record: record["ts"]), total
 
@@ -120,6 +182,51 @@ def _startup_records(events: Sequence[object]) -> tuple[list[dict], int]:
 def startup_records(events: Sequence[object]) -> list[dict]:
     records, _total = _startup_records(events)
     return records
+
+
+def _percentile(values: Sequence[float], fraction: float) -> float:
+    index = max(0, math.ceil(fraction * len(values)) - 1)
+    return round(values[index], 3)
+
+
+def _string_counts(records: Sequence[dict], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        value = record["args"].get(key)
+        if isinstance(value, str):
+            counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def latency_summary(records: Sequence[dict]) -> dict[str, dict]:
+    """Bounded phase percentiles and terminal outcomes for interactive diagnosis."""
+    summary: dict[str, dict] = {}
+    for name in (
+        "hover_target_lookup",
+        "hover_transition",
+        "tooltip_show",
+        "tooltip_request",
+        "scroll_request",
+        "scroll_frame",
+        "subtitle_geometry_cache",
+    ):
+        selected = [record for record in records if record["name"] == name]
+        values = sorted(
+            float(record["args"].get("latency_ms", record["duration_ms"])) for record in selected
+        )
+        if not values:
+            continue
+
+        summary[name] = {
+            "count": len(values),
+            "p50_ms": _percentile(values, 0.50),
+            "p95_ms": _percentile(values, 0.95),
+            "p99_ms": _percentile(values, 0.99),
+            "max_ms": round(values[-1], 3),
+            "outcomes": _string_counts(selected, "outcome"),
+            "reasons": _string_counts(selected, "reason"),
+        }
+    return summary
 
 
 def render_startup(source: Path, events: list[dict]) -> str:
@@ -138,6 +245,15 @@ def render_startup(source: Path, events: list[dict]) -> str:
     for record in ranked[:12]:
         attrs = " ".join(f"{key}={value}" for key, value in sorted(record["args"].items()))
         lines.append(f"  {record['duration_ms']:9.3f} ms  {record['name']} {attrs}".rstrip())
+    phases = latency_summary(records)
+    if phases:
+        lines.append("interaction latency:")
+        for name, values in phases.items():
+            lines.append(
+                f"  {name}: n={values['count']} p50={values['p50_ms']} ms "
+                f"p95={values['p95_ms']} ms p99={values['p99_ms']} ms "
+                f"max={values['max_ms']} ms outcomes={values['outcomes']}"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -181,7 +297,12 @@ def load_startup_trace(source: Path) -> list[dict]:
 def startup_json(events: Sequence[object]) -> str:
     records, total = _startup_records(events)
     return json.dumps(
-        {"startup": records, "total": total, "dropped": total - len(records)},
+        {
+            "startup": records,
+            "interaction_latency": latency_summary(records),
+            "total": total,
+            "dropped": total - len(records),
+        },
         ensure_ascii=False,
         indent=2,
     )

@@ -47,6 +47,12 @@ class GeometryResolution:
 
 
 @dataclass(frozen=True, slots=True)
+class GeometryPrefetchResolution:
+    snapshot: GeometrySnapshot | None
+    error: Exception | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class GeometryWorkerStats:
     submitted: int
     superseded: int
@@ -262,16 +268,19 @@ class SubtitleModeCoordinator:
             return True
 
     def render_prefetch(self, request: GeometryRequest) -> GeometrySnapshot | None:
+        return self.render_prefetch_outcome(request).snapshot
+
+    def render_prefetch_outcome(self, request: GeometryRequest) -> GeometryPrefetchResolution:
         with self._backend_lock:
             with self._state_lock:
                 if self._closed or request.generation != self._generation:
-                    return None
+                    return GeometryPrefetchResolution(None)
             if self._backend is None:
-                return None
+                return GeometryPrefetchResolution(None)
             try:
-                return self._backend.render(request)
-            except Exception:  # noqa: BLE001 -- speculative work never changes visible state
-                return None
+                return GeometryPrefetchResolution(self._backend.render(request))
+            except Exception as error:  # noqa: BLE001 -- caller decides whether work has a waiter
+                return GeometryPrefetchResolution(None, error)
 
     def close(self) -> None:
         with self._state_lock:
@@ -295,9 +304,14 @@ class SubtitleGeometryWorker:
         self._cache_max = cache_max
         self._cache: OrderedDict[str, GeometrySnapshot] = OrderedDict()
         self._condition = threading.Condition()
-        self._pending: tuple[GeometryReservation, GeometryRequestBuilder] | None = None
+        self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
         self._prefetch_pending: OrderedDict[str, tuple[int, GeometryRequestBuilder]] = OrderedDict()
         self._prefetched: OrderedDict[str, tuple[GeometryRequest, GeometrySnapshot]] = OrderedDict()
+        self._prefetch_inflight_key: str | None = None
+        self._prefetch_waiters: dict[str, GeometryReservation] = {}
+        self._provenance: OrderedDict[str, str] = OrderedDict()
+        self._history_lossy = False
+        self._epoch_cause: str | None = None
         self._busy = False
         self._closed = False
         self._submitted = 0
@@ -324,7 +338,13 @@ class SubtitleGeometryWorker:
     def submit(self, request: GeometryRequest) -> bool:
         return self.submit_job(request.generation, lambda: request)
 
-    def submit_job(self, generation: int, build: GeometryRequestBuilder) -> bool:
+    def submit_job(
+        self,
+        generation: int,
+        build: GeometryRequestBuilder,
+        *,
+        work_key: str | None = None,
+    ) -> bool:
         started = time.perf_counter_ns()
         reservation = self._coordinator.reserve(generation)
         if reservation is None:
@@ -333,9 +353,25 @@ class SubtitleGeometryWorker:
             if self._closed:
                 return False
             self._submitted += 1
+            if work_key is not None and work_key in self._prefetch_pending:
+                self._prefetch_pending.pop(work_key)
+                if self._pending is not None:
+                    self._superseded += 1
+                self._pending = (reservation, build, work_key)
+                self._condition.notify()
+                elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
+                self._max_submit_us = max(self._max_submit_us, elapsed_us)
+                return True
+            if work_key is not None and work_key == self._prefetch_inflight_key:
+                if work_key in self._prefetch_waiters:
+                    self._superseded += 1
+                self._prefetch_waiters[work_key] = reservation
+                elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
+                self._max_submit_us = max(self._max_submit_us, elapsed_us)
+                return True
             if self._pending is not None:
                 self._superseded += 1
-            self._pending = (reservation, build)
+            self._pending = (reservation, build, work_key)
             self._condition.notify()
             elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
             self._max_submit_us = max(self._max_submit_us, elapsed_us)
@@ -350,10 +386,30 @@ class SubtitleGeometryWorker:
             self._prefetch_pending.pop(key, None)
             self._prefetch_pending[key] = (generation, build)
             while len(self._prefetch_pending) > self._cache_max:
-                self._prefetch_pending.popitem(last=False)
+                dropped, _item = self._prefetch_pending.popitem(last=False)
                 self._prefetch_dropped += 1
+                self._remember_provenance(dropped, "prefetch-superseded")
             self._condition.notify()
             return True
+
+    def _remember_provenance(self, key: str, reason: str) -> None:
+        self._provenance.pop(key, None)
+        self._provenance[key] = reason
+        while len(self._provenance) > self._cache_max:
+            self._provenance.popitem(last=False)
+            self._history_lossy = True
+
+    def prefetch_miss_reason(self, key: str) -> str:
+        with self._condition:
+            if key in self._prefetch_pending or key == self._prefetch_inflight_key:
+                return "prefetch-pending"
+            recent = self._provenance.get(key)
+            if recent is not None:
+                return recent
+            if self._epoch_cause is not None:
+                cause, self._epoch_cause = self._epoch_cause, None
+                return cause
+            return "provenance-unknown" if self._history_lossy else "first-seen"
 
     def publish_prefetched(self, key: str, generation: int) -> GeometryRequest | None:
         reservation = self._coordinator.reserve(generation)
@@ -375,15 +431,21 @@ class SubtitleGeometryWorker:
             self._completed += 1
         return rebound_request
 
-    def invalidate_cache(self) -> None:
+    def invalidate_cache(self, *, cause: str | None = None) -> None:
         with self._condition:
+            self._superseded += len(self._prefetch_waiters)
             self._cache.clear()
             self._prefetched.clear()
             self._prefetch_pending.clear()
+            self._prefetch_waiters.clear()
+            self._prefetch_inflight_key = None
+            self._provenance.clear()
+            self._history_lossy = False
+            self._epoch_cause = cause
 
-    def invalidate(self) -> int:
+    def invalidate(self, *, cause: str | None = None) -> int:
         generation = self._coordinator.invalidate()
-        self.invalidate_cache()
+        self.invalidate_cache(cause=cause)
         return generation
 
     def _cached(self, request: GeometryRequest) -> GeometrySnapshot | None:
@@ -414,33 +476,89 @@ class SubtitleGeometryWorker:
         self._busy = False
         self._condition.notify_all()
 
-    def _drop_prefetch(self) -> None:
+    def _drop_prefetch(self, key: str, error: Exception | None = None) -> None:
         with self._condition:
+            waiter = self._prefetch_waiters.pop(key, None)
+            self._prefetch_inflight_key = None
             self._prefetch_dropped += 1
+        failure_recorded = bool(
+            waiter is not None
+            and error is not None
+            and self._coordinator.record_error(waiter, error)
+        )
+        with self._condition:
+            if waiter is not None:
+                if failure_recorded:
+                    self._failures += 1
+                else:
+                    self._superseded += 1
             self._idle()
 
     def _process_prefetch(self, item: tuple[str, tuple[int, GeometryRequestBuilder]]) -> None:
         key, (generation, build) = item
         try:
             request = build()
-        except Exception:  # noqa: BLE001 -- speculative failure is only a cache miss
-            self._drop_prefetch()
+        except Exception as error:  # noqa: BLE001 -- a promoted waiter turns this into a failure
+            self._drop_prefetch(key, error)
             return
         if generation != self._coordinator.generation:
-            self._drop_prefetch()
+            self._drop_prefetch(key)
             return
-        result = self._coordinator.render_prefetch(request)
+        outcome = self._coordinator.render_prefetch_outcome(request)
+        waiter = self._cache_prefetch_outcome(key, generation, request, outcome.snapshot)
+        published, failure_recorded = self._resolve_prefetch_waiter(waiter, request, outcome)
         with self._condition:
+            if waiter is not None:
+                if published:
+                    self._completed += 1
+                    self._cache_hits += 1
+                elif failure_recorded:
+                    self._failures += 1
+                else:
+                    self._superseded += 1
+            self._idle()
+
+    def _cache_prefetch_outcome(
+        self,
+        key: str,
+        generation: int,
+        request: GeometryRequest,
+        result: GeometrySnapshot | None,
+    ) -> GeometryReservation | None:
+        with self._condition:
+            waiter = self._prefetch_waiters.pop(key, None)
+            self._prefetch_inflight_key = None
             if result is None or generation != self._coordinator.generation:
                 self._prefetch_dropped += 1
-            else:
-                self._prefetched.pop(key, None)
-                self._prefetched[key] = (request, result)
-                self._store(request, result)
-                self._prefetched_count += 1
-                while len(self._prefetched) > self._cache_max:
-                    self._prefetched.popitem(last=False)
-            self._idle()
+                return waiter
+            self._prefetched.pop(key, None)
+            self._prefetched[key] = (request, result)
+            self._store(request, result)
+            self._prefetched_count += 1
+            while len(self._prefetched) > self._cache_max:
+                evicted, _cached = self._prefetched.popitem(last=False)
+                self._remember_provenance(evicted, "evicted")
+            return waiter
+
+    def _resolve_prefetch_waiter(
+        self,
+        waiter: GeometryReservation | None,
+        request: GeometryRequest,
+        outcome: GeometryPrefetchResolution,
+    ) -> tuple[bool, bool]:
+        if waiter is None:
+            return False, False
+        if outcome.error is not None:
+            return False, self._coordinator.record_error(waiter, outcome.error)
+        if outcome.snapshot is None:
+            return False, False
+        rebound_request = dataclass_replace(request, generation=waiter.generation)
+        rebound_result = dataclass_replace(outcome.snapshot, generation=waiter.generation)
+        ticket = self._coordinator.bind(waiter, rebound_request)
+        return (
+            ticket is not None and self._coordinator.publish(ticket, rebound_result),
+            False,
+        )
 
     def _finish_current(self, *, published: bool, failure_recorded: bool = False) -> None:
         with self._condition:
@@ -460,8 +578,10 @@ class SubtitleGeometryWorker:
                 self._superseded += 1
             self._idle()
 
-    def _process_current(self, item: tuple[GeometryReservation, GeometryRequestBuilder]) -> None:
-        reservation, build = item
+    def _process_current(
+        self, item: tuple[GeometryReservation, GeometryRequestBuilder, str | None]
+    ) -> None:
+        reservation, build, _work_key = item
         try:
             request = build()
         except Exception as error:  # noqa: BLE001 -- source preparation is optional
@@ -491,7 +611,7 @@ class SubtitleGeometryWorker:
     def _next_work(
         self,
     ) -> tuple[
-        tuple[GeometryReservation, GeometryRequestBuilder] | None,
+        tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None,
         tuple[str, tuple[int, GeometryRequestBuilder]] | None,
     ]:
         with self._condition:
@@ -505,6 +625,7 @@ class SubtitleGeometryWorker:
                 prefetch = None
             else:
                 prefetch = self._prefetch_pending.popitem(last=False)
+                self._prefetch_inflight_key = prefetch[0]
             self._busy = True
             return pending, prefetch
 
@@ -580,6 +701,8 @@ class SubtitleGeometryWorker:
             self._closed = True
             self._pending = None
             self._prefetch_pending.clear()
+            self._prefetch_waiters.clear()
+            self._prefetch_inflight_key = None
             self._prefetched.clear()
             self._cache.clear()
             self._condition.notify_all()

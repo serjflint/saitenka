@@ -809,6 +809,25 @@ class WindowedPanel:
                         return False
             return True
 
+    def viewport_warm(self, scroll: int, view_h: int) -> bool:
+        """True when a 1x viewport can be assembled without rasterizing a band."""
+        with self._lock:
+            if scroll == 0 and self._first_view is not None:
+                cached_h, _overscan, _array = self._first_view
+                if cached_h == view_h:
+                    return True
+            table = self._offsets.estimated_table()
+            start, end = table.visible_range(scroll, view_h, 0)
+            lo, hi = scroll, scroll + view_h
+            for i in range(start, end):
+                if not self._offsets.known(i):
+                    return False
+                row_top = table.starts[i]
+                for band, y0, y1 in self._row_band_spans(i):
+                    if row_top + y1 > lo and row_top + y0 < hi and (i, band) not in self._blocks:
+                        return False
+            return True
+
     def _scaled_placements(self, v: _NativeView, *, warm_only: bool):
         """Yield ``(i, span, cb, band_top)`` for every visible native band, placed by CUMULATIVE device
         height within each row (seam-exact). Shared by the BGRA and RGBA compositors so their geometry

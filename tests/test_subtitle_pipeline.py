@@ -404,6 +404,85 @@ def test_worker_drops_prefetch_invalidated_during_backend_render() -> None:
     worker.close()
 
 
+def test_worker_attaches_current_waiter_to_inflight_prefetch() -> None:
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    future = request(coordinator.generation, 1_300)
+
+    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert backend.entered.wait(1)
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: future,
+        work_key="future",
+    )
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert coordinator.current is not None
+    assert coordinator.current.timestamp_ms == 1_300
+    assert worker.stats.completed == 1
+    assert worker.stats.prefetched == 1
+    worker.close()
+
+
+def test_worker_promotes_queued_prefetch_without_running_its_builder() -> None:
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    entered = threading.Event()
+    release = threading.Event()
+    prefetch_builds = 0
+
+    def blocked_current() -> GeometryRequest:
+        entered.set()
+        assert release.wait(1)
+        return request(coordinator.generation, 1_200)
+
+    def speculative() -> GeometryRequest:
+        nonlocal prefetch_builds
+        prefetch_builds += 1
+        return request(coordinator.generation, 1_300)
+
+    assert worker.submit_job(coordinator.generation, blocked_current)
+    assert entered.wait(1)
+    assert worker.prefetch("future", coordinator.generation, speculative)
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 1_300),
+        work_key="future",
+    )
+    release.set()
+    assert worker.wait_idle()
+
+    assert prefetch_builds == 0
+    assert coordinator.current is not None
+    assert coordinator.current.timestamp_ms == 1_300
+    worker.close()
+
+
+def test_worker_reports_failure_from_inflight_prefetch_with_current_waiter() -> None:
+    backend = BlockingFailingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    future = request(coordinator.generation, 1_300)
+
+    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert backend.entered.wait(1)
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: future,
+        work_key="future",
+    )
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert coordinator.current is None
+    assert coordinator.last_error == "font provider unavailable"
+    assert worker.stats.failures == 1
+    worker.close()
+
+
 def test_worker_bounds_prefetch_queue_and_records_drop() -> None:
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=1)
@@ -423,4 +502,41 @@ def test_worker_bounds_prefetch_queue_and_records_drop() -> None:
     assert worker.wait_idle()
 
     assert worker.stats.prefetch_dropped == 1
+    worker.close()
+
+
+def test_worker_reports_loss_aware_prefetch_miss_provenance() -> None:
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=1)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking() -> GeometryRequest:
+        entered.set()
+        assert release.wait(1)
+        return request(coordinator.generation, 1_200)
+
+    assert worker.submit_job(coordinator.generation, blocking)
+    assert entered.wait(1)
+    assert worker.prefetch("oldest", coordinator.generation, lambda: request(0, 1_300))
+    assert worker.prefetch("middle", coordinator.generation, lambda: request(0, 1_400))
+    assert worker.prefetch("newest", coordinator.generation, lambda: request(0, 1_500))
+
+    assert worker.prefetch_miss_reason("newest") == "prefetch-pending"
+    assert worker.prefetch_miss_reason("oldest") == "provenance-unknown"
+    assert worker.prefetch_miss_reason("never-seen") == "provenance-unknown"
+    release.set()
+    assert worker.wait_idle()
+    worker.close()
+
+
+def test_new_epoch_reports_its_invalidation_cause_once() -> None:
+    worker = SubtitleGeometryWorker(
+        SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend()), cache_max=2
+    )
+    worker.invalidate(cause="source-changed")
+
+    assert worker.prefetch_miss_reason("first-new-key") == "source-changed"
+    assert worker.prefetch_miss_reason("second-new-key") == "first-seen"
+
     worker.close()

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses as _dc
 import logging
+import queue
 import time
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -53,6 +54,7 @@ class PanelKey(NamedTuple):
     width: int
     anki_ok: bool  # is Anki reachable now → is the ⊕ button drawn (rechecked per show, ~3s TTL)
     mined: bool  # is the word already in the deck → its ⊕ shows ✓ (tests read this by name)
+    tts_ok: bool = False
     # Per-stacked-entry mined state (aligned to cards_for order): flips a group's ⊕→✓ and, as part of
     # the key, rebuilds the panel when one stacked entry gets mined. () for single-entry words.
     group_mined: tuple[bool, ...] = ()
@@ -70,14 +72,10 @@ def update_hover(reader: Reader) -> None:
     word *inside* the tooltip opens a nested scan popup."""
 
     with timed("hover_hit_test"):
-        # Sampled, not every tick: this runs at poll cadence (~40Hz), and an OTel histogram
-        # .record() call costs real cycles unlike perf.timed's plain deque append above.
+        # Sampled, not every tick: this runs at poll cadence (~40Hz).
         reader._hit_test_tick = (reader._hit_test_tick + 1) % _HIT_TEST_SAMPLE_EVERY
-        if otel_metrics.hit_test_duration_ms is not None and reader._hit_test_tick == 0:
-            # instrumented() (span + histogram) only on the sampled tick — a span every tick
-            # would flood the trace at poll cadence for no visualization benefit.
-            with otel_metrics.instrumented(otel_metrics.hit_test_duration_ms, "hit_test"):
-                update_hover_impl(reader)
+        if reader._hit_test_tick == 0:
+            update_hover_instrumented(reader)
         else:
             update_hover_impl(reader)
 
@@ -189,6 +187,45 @@ def update_hover_impl(reader: Reader) -> None:
     _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
 
 
+def update_hover_instrumented(reader: Reader) -> None:
+    """Sampled split between pure target lookup and transition/tooltip work."""
+    mp = reader._prop("mouse-pos") or {}
+    inside = bool(mp.get("hover"))
+    reader._mouse_in = inside
+    mx, my = mp.get("x", -1), mp.get("y", -1)
+    reader._last_mouse = (mx, my)
+    with otel_metrics.traced("hover_target_lookup") as lookup:
+        over_word, over_tip, over_nest = _hover_targets(reader, mx, my, inside=inside)
+        lookup.set(
+            "region",
+            "nested"
+            if over_nest
+            else "base"
+            if over_tip
+            else "subtitle"
+            if over_word >= 0
+            else "none",
+        )
+        lookup.set("token_count", min(len(reader.tokens), 64))
+        lookup.set("box_count", min(len(reader.boxes), 64))
+    with otel_metrics.traced("hover_transition") as transition:
+        previous = reader.hover
+        reader.set_annotation_hover(revealed=over_word >= 0)
+        _update_nested_hover(reader, mx, my, over_tip=over_tip, over_nest=over_nest)
+        _update_word_hover(reader, over_word, over_tip=over_tip, over_nest=over_nest)
+        transition.set("changed", previous != reader.hover)
+        transition.set(
+            "cue_state",
+            "empty"
+            if not reader.sub_text.strip()
+            else "retired"
+            if reader._cue_retired
+            else "pending"
+            if reader._sub_pending is not None
+            else "ready",
+        )
+
+
 def resolve_hover(reader: Reader, index: int) -> None:
     """Set the hovered word's stacked phrase terms + highlight span. Multi-token dictionary terms
     starting at ``index`` (数ある over 数) are looked up as extra terms on the hovered word, so the
@@ -206,6 +243,72 @@ def resolve_hover(reader: Reader, index: int) -> None:
             terms, span = tuple(term_list), (start, end)
     reader._hover_terms = terms
     reader._hover_span = span
+    reader._hover_mined = is_mined(reader, reader.tokens[index])
+    reader._hover_group_mined = group_mined_of(reader, reader.tokens[index], extra_terms=terms)
+
+
+def _request_hover_metadata(reader: Reader, index: int) -> None:
+    from saitenka.app.hover_metadata import HoverMetadataKey, HoverMetadataRequest
+
+    reader._interaction_metadata.submit(
+        HoverMetadataRequest(
+            HoverMetadataKey(
+                reader._prefetch_gen,
+                reader._dependency_generation,
+                reader._mined_generation,
+                reader._current_cue_identity,
+                index,
+                reader._tip_view.job_id,
+            ),
+            reader.tokenizer.name,
+            tuple(reader.tokens),
+            reader.dict_set,
+            frozenset(reader._mined),
+        )
+    )
+
+
+def apply_hover_metadata(reader: Reader) -> None:
+    from saitenka.app.hover_metadata import HoverMetadata
+
+    for result in reader._interaction_metadata.drain():
+        if not isinstance(result, HoverMetadata):
+            nested_popup.apply_nested_metadata(reader, result)
+            continue
+        key = result.key
+        current = (
+            reader._prefetch_gen,
+            reader._dependency_generation,
+            reader._mined_generation,
+            reader._current_cue_identity,
+            reader.hover,
+            reader._tip_view.job_id,
+        )
+        expected = (
+            key.generation,
+            key.dependency_generation,
+            key.mined_generation,
+            key.cue_identity,
+            key.index,
+            key.job_id,
+        )
+        if current != expected:
+            same_target = current[:2] + current[3:] == expected[:2] + expected[3:]
+            if same_target:
+                _request_hover_metadata(reader, key.index)
+            continue
+        if result.error:
+            reader._interaction_jobs.finish("tooltip", "failed")
+            continue
+        reader._hover_terms = result.phrase_terms
+        reader._hover_span = result.phrase_span
+        reader._hover_mined = result.mined
+        reader._hover_group_mined = result.group_mined
+        reader._draw_subtitle()
+        if show_tooltip(reader, key.index):
+            if reader._session_recorder is not None:
+                reader._session_recorder.record_lookup()
+            reader._sync_auto_translation()
 
 
 def set_hover(reader: Reader, index: int) -> None:
@@ -215,10 +318,28 @@ def set_hover(reader: Reader, index: int) -> None:
     if index < 0:
         reader._hover_terms = ()
         reader._hover_span = None
+        reader._hover_mined = False
+        reader._hover_group_mined = ()
         reader._draw_subtitle()
         reader._teardown_tip()  # hide OverlayId.TIP/OverlayId.NESTED, reset all state, release pause
         return
-    resolve_hover(reader, index)  # sets _hover_terms/_hover_span BEFORE the draw highlights it
+    reader._tip_view.job_id = reader._interaction_jobs.begin("tooltip")
+    reader._tip_view.job_kind = "tooltip"
+    if prefetch.workers_running(reader):
+        # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
+        # until the replacement paints, but stale nested/open results can no longer attach to it.
+        reader._hide_nested()
+        reader._tip_nav = []
+        reader._tip_state = None
+        reader._tip_rect = None
+        reader._hover_terms = ()
+        reader._hover_span = None
+        reader._hover_mined = False
+        reader._hover_group_mined = ()
+        reader._draw_subtitle()
+        _request_hover_metadata(reader, index)
+        return
+    resolve_hover(reader, index)  # deterministic demo/test path
     reader._draw_subtitle()
     if not show_tooltip(reader, index):
         return
@@ -457,6 +578,7 @@ def panel_key(
     *,
     mined: bool = False,
     phrase: tuple[str, ...] = (),
+    group_mined: tuple[bool, ...] | None = None,
 ) -> PanelKey:
     # anki_ok is live (rebuilds the cached panel when Anki opens/closes; stable within its ~3s TTL).
     # ``phrase`` is the word's stacked multi-token terms — the base word's, or a nested scan's
@@ -469,7 +591,10 @@ def panel_key(
         reader.tip_width,
         anki_ok(reader),
         mined,
-        group_mined_of(reader=reader, tok=tok, extra_terms=phrase),
+        reader._tts_ok,
+        group_mined_of(reader=reader, tok=tok, extra_terms=phrase)
+        if group_mined is None
+        else group_mined,
         # the stacked phrase terms are part of the base panel's identity (数 alone vs 数 under 数ある)
         phrase,
     )
@@ -509,17 +634,11 @@ def anki_ok(reader: Reader) -> bool:
     seconds so rapid hovers don't ping repeatedly. False when mining isn't configured at all."""
     if reader.anki is None:
         return False
-    now = time.monotonic()
-    ts, ok = reader._anki_cache
-    if now - ts < reader.anki_ok_ttl:
-        return ok
-    from saitenka.app.anki import anki_reachable
-
-    ok = anki_reachable(
-        timeout=reader.anki_ping_timeout
-    )  # resolves host/key from config; 0 retries
-    reader._anki_cache = (now, ok)
-    return ok
+    capability = reader._anki_capability
+    if capability is None:
+        return False
+    capability.request()
+    return bool(capability.value)
 
 
 def _darken(rgba, f: float = JLPT_DARKEN):
@@ -679,6 +798,7 @@ def panel_for(
     mined: bool | None = None,
     nested: bool = False,
     extra_terms: tuple[str, ...] = (),
+    group_mined: tuple[bool, ...] | None = None,
 ) -> Panel:
     """The memoised :class:`Panel` for a token: warm + measure the head that fills ``min_h`` px now;
     the windowed engine composites the rest on scroll. Re-hovering is instant and scrolling is cheap.
@@ -692,7 +812,14 @@ def panel_for(
     Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
     if mined is None:
         mined = is_mined(reader, tok)
-    key = panel_key(reader, tok, inflected, mined=mined, phrase=extra_terms)
+    key = panel_key(
+        reader,
+        tok,
+        inflected,
+        mined=mined,
+        phrase=extra_terms,
+        group_mined=group_mined,
+    )
     st = _panel_cache_get(
         reader, key, tok, inflected, mined=mined, nested=nested, extra_terms=extra_terms
     )
@@ -737,6 +864,16 @@ def show_tooltip(reader: Reader, index: int) -> bool:
         # length + panel height (a tall multi-dict entry is the coldest), and bands rastered on the
         # first paint. All low-cardinality — no raw word surface. Sort spans by dur → read the why.
         span.set("anchored", shown)
+        span.set(
+            "outcome",
+            "unanchored"
+            if not shown
+            else "deferred-worker"
+            if reader._tip_state is None
+            else "painted-precomposed"
+            if reader._tip_show_cold
+            else "painted-cache",
+        )
         if shown:
             st = reader._tip_state
             span.set("cold", reader._tip_show_cold)
@@ -777,6 +914,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         reader.hover = -1
         reader._hover_terms = ()
         reader._hover_span = None
+        reader._interaction_jobs.finish("tooltip", "failed")
         reader._teardown_tip()
         return False
     inflected = reader._inflected_surface(index)
@@ -786,16 +924,23 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
     # cost stays attributable; the round-trips are ~5ms, negligible vs the build/compose it now precedes.
     with otel_metrics.traced("pause_ipc"):
         if reader.pause_on_tooltip and not reader._paused_by_tip and not reader._prop("pause"):
-            reader.ipc.command("set_property", "pause", True)  # noqa: FBT003  # mpv IPC passthrough
+            submit = getattr(reader.ipc, "command_async", reader.ipc.command)
+            submit("set_property", "pause", True)  # noqa: FBT003
             reader._paused_by_tip = True
     # Viewport-first: warm + measure only the head that fills the viewport now (placement); the
     # windowed engine composites the rest on scroll with overscan look-ahead.
     # jamdict card_for on the main thread (not worker-safe) — untraced until now; a suspect for the
     # tooltip_show self-time under --mine, where reader._mined is populated so this actually looks up.
-    with otel_metrics.traced("mined"):
-        mined = is_mined(reader, tok)
+    mined = reader._hover_mined
     phrase = reader._hover_terms
-    key = panel_key(reader, tok, inflected, mined=mined, phrase=phrase)
+    key = panel_key(
+        reader,
+        tok,
+        inflected,
+        mined=mined,
+        phrase=phrase,
+        group_mined=reader._hover_group_mined,
+    )
     reader._tip_show_cold = key not in reader._panel_cache  # cold = a panel build, not a cache hit
     ox, oy = reader.sub_origin
     wx, wy = ox + b.x, oy + b.y
@@ -816,7 +961,15 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         prefetch.request_engaged_render(reader, tok, inflected, key, mined=mined, phrase=phrase)
         return True
 
-    st = panel_for(reader, tok, inflected, min_h=cap, mined=mined, extra_terms=phrase)
+    st = panel_for(
+        reader,
+        tok,
+        inflected,
+        min_h=cap,
+        mined=mined,
+        extra_terms=phrase,
+        group_mined=reader._hover_group_mined,
+    )
     # Direct-paint hit built a fresh interactive panel — seed its first viewport from tier-2 (RAM inflate,
     # no disk on the main thread) so scrolling back to 0 later re-blits warm.
     if reader._tip_show_cold and st.windowed.first_view is None:
@@ -834,6 +987,7 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
 
     if not painted:
         reader._tip_scroll = 0
+        reader._tip_view.desired_scroll = 0
         # Safe area: keep clear of the OSC/window header at the top and the controls/edge at the bottom,
         # so the tooltip never spills under the window chrome. It scrolls, so we cap the height rather
         # than trying to fit the whole (very tall) entry. full_height is the windowed engine's estimate,
@@ -904,6 +1058,7 @@ def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: f
         otel_metrics.render_cache_hits.add(1)  # cold hover served straight from disk (the #149 win)
     full_h = loaded.full_h
     reader._tip_scroll = 0
+    reader._tip_view.desired_scroll = 0
     reader._tip_view_h = min(full_h, cap)
     xy = place_panel(reader, loaded.array.shape[1], wx, wy, wh, reader._tip_view_h)
     reader._tip_xy = xy
@@ -972,7 +1127,17 @@ def decorate_and_upload(
 
         view = scale_bgra(view, s)
     tx, ty = xy
-    reader.ov.show_bgra(view, tx, ty, oid=oid)
+    popup = reader._nest if oid == OverlayId.NESTED else reader._tip_view
+    kind = popup.job_kind
+    job_id = popup.job_id
+
+    def presented(result: dict) -> None:
+        if job_id is None:
+            return
+        outcome = "painted" if result.get("error") in {None, "success"} else "failed"
+        reader._interaction_jobs.finish(kind, outcome, job_id=job_id)
+
+    reader.ov.show_bgra_interactive(view, tx, ty, oid=oid, on_presented=presented)
     return (tx, ty, view.shape[1], view.shape[0])
 
 
@@ -1015,9 +1180,15 @@ def apply_engaged_results(reader: Reader) -> None:
     handed-back ``(gen, key, nested, tail)``: skip if stale (seek / line change), then dispatch to the
     base tooltip or the nested scan popup. Each re-derives the CURRENT target and compares keys (the
     analysis-overlay guard, so a stale word can never flash) before the now-warm show."""
-    for gen, key, nested, tail in prefetch.drain_engaged_results(reader):
+    for gen, key, nested, tail, succeeded, job_id in prefetch.drain_engaged_results(reader):
         if gen != reader._prefetch_gen:
             continue  # stale (seek / line change)
+        if not succeeded:
+            reader._interaction_jobs.finish("tooltip", "failed", job_id=job_id)
+            continue
+        popup = reader._nest if nested else reader._tip_view
+        if popup.job_id != job_id:
+            continue
         if nested:
             _apply_engaged_nested(reader, tail)
         else:
@@ -1059,24 +1230,16 @@ def _apply_engaged_nav(reader: Reader, gen: int, origin: int, st: Panel | None) 
     _install_navigated(reader, st)
 
 
-def _apply_engaged_base(reader: Reader, key: tuple) -> None:
-    """Show the base tooltip for a composed cold-miss head, iff the user is still on that word (gen guard
-    already passed; recompute the hover's key and compare). A panel-cache hit → no main-thread raster."""
+def _apply_engaged_base(reader: Reader, _key: tuple) -> None:
+    """Re-enter the current hover after a composed cold-miss head (generation already checked)."""
     if reader._tip_state is not None:
         return  # a warm hover raced ahead — a tooltip is already up
     i = reader.hover
     if not (0 <= i < len(reader.tokens)):
         return  # not hovering a word anymore
-    tok = reader.tokens[i]
-    cur = panel_key(
-        reader,
-        tok,
-        reader._inflected_surface(i),
-        mined=is_mined(reader, tok),
-        phrase=reader._hover_terms,
-    )
-    if tuple(cur) == tuple(key):
-        show_tooltip(reader, i)  # warm now (worker cached the panel) → shows without a cold raster
+    # Capability state is part of PanelKey and may publish while the worker is composing.  Re-entering
+    # the regular path on a mismatch queues the current key instead of stranding the accepted hover.
+    show_tooltip(reader, i)
 
 
 def _apply_engaged_nested(reader: Reader, tail: str) -> None:
@@ -1089,7 +1252,20 @@ def _apply_engaged_nested(reader: Reader, tail: str) -> None:
     sb = scan_hit(reader, *reader._last_mouse)
     if sb is None or sb.text != tail:
         return  # cursor left the inner word — never flash a stale nested popup
-    nested_popup.show_nested(reader, sb)
+    key, token = reader._nest.key, reader._nest.token
+    if key is None or token is None or key not in reader._panel_cache:
+        return
+    sx, sy = reader._tip_xy
+    anchor = nested_popup.Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
+    nested_popup.place_nested(
+        reader,
+        reader._panel_cache[key],
+        key,
+        token,
+        token.surface,
+        anchor,
+        tail,
+    )
 
 
 def apply_pending_crisp(reader: Reader, view: PopupView) -> None:
@@ -1191,6 +1367,7 @@ def _restore_tip_view(reader: Reader, view: tuple) -> None:
         reader._tip_tok,
         reader._tip_inflected,
     ) = view
+    reader._tip_view.desired_scroll = reader._tip_scroll
 
 
 def _navigated_panel(reader: Reader, query: str) -> Panel | None:
@@ -1262,6 +1439,7 @@ def _install_navigated(reader: Reader, st: Panel) -> None:
     reader._tip_tok = reader._tip_inflected = None
     reader._hover_reading = st.reading
     reader._tip_scroll = 0
+    reader._tip_view.desired_scroll = 0
     reader._tip_view_h = min(st.full_height, reader._tip_cap())
     render_tip_view(reader)
 
@@ -1285,14 +1463,54 @@ def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
     if st is None:
         return False
     maxs = max(0, st.full_height - view.view_h)
-    ns = min(maxs, max(0, view.scroll + delta))
-    if ns == view.scroll:
+    ns = min(maxs, max(0, view.desired_scroll + delta))
+    if ns == view.desired_scroll:
         return False
-    view.scroll = ns
+    view.job_id = reader._interaction_jobs.begin("scroll")
+    view.job_kind = "scroll"
+    view.desired_scroll = ns
     view.hide_at = 0.0  # scrolling counts as interacting → keep this popup up
-    render_view(reader, view)  # composites native (crisp) at hi-dpi, soft below the threshold
     prefetch.request_render_ahead(reader, view, 1 if delta > 0 else -1)
+    if not prefetch.workers_running(reader):
+        view.scroll = ns
+        render_view(reader, view)
+        return True
+    if st.viewport_warm(ns, min(view.view_h, st.full_height)):
+        view.scroll = ns
+        render_view(reader, view)
     return True
+
+
+def apply_pending_scroll(reader: Reader, view: PopupView) -> None:
+    """Publish the newest desired viewport once its raw bands are fully warm."""
+    st = view.state
+    if st is None or view.desired_scroll == view.scroll:
+        return
+    view_h = min(view.view_h, st.full_height)
+    if not st.viewport_warm(view.desired_scroll, view_h):
+        return
+    view.scroll = view.desired_scroll
+    render_view(reader, view)
+
+
+def apply_render_ahead_failures(reader: Reader) -> None:
+    """Retire failed scroll warms without leaving a viewport pending forever."""
+    while True:
+        try:
+            gen, panel, desired_scroll, job_id = reader._render_ahead_failures.get_nowait()
+        except queue.Empty:
+            return
+        if gen != reader._prefetch_gen:
+            continue
+        for view in (reader._tip_view, reader._nest):
+            if (
+                view.state is panel
+                and view.desired_scroll == desired_scroll
+                and view.job_id == job_id
+            ):
+                view.desired_scroll = view.scroll
+                reader._interaction_jobs.finish("scroll", "failed", job_id=job_id)
+                break
 
 
 def scroll_tip(reader: Reader, delta: int) -> None:

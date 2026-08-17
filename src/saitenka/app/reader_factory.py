@@ -22,6 +22,7 @@ class ReaderServices:
     anki: object | None = None
     mining: object | None = None
     dictionaries: object | None = None
+    tts: bool | None = None
 
 
 def create_reader(
@@ -43,6 +44,7 @@ def create_reader(
         anki=resolved.anki,
         mine_cfg=resolved.mining,
         dict_set=resolved.dictionaries,
+        tts_ok=resolved.tts,
         options=options,
         renderer=renderer,
         profile=profile,

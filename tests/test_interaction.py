@@ -85,7 +85,7 @@ def test_hover_composite_is_traced_under_tooltip_show(monkeypatch):
     assert "tip_compose" in names  # the composite is now attributable
     assert "tooltip_show" in names  # and shares the hover's synchronous span stack
     assert "measure" in names  # the head walk+wrap, split out of tooltip_show self-time
-    assert "mined" in names  # the jamdict card_for lookup, likewise
+    assert "mined" not in names  # card lookup belongs to the metadata worker, not this event span
     assert "pause_ipc" in names  # the pause-on-hover mpv round-trips, likewise
 
 

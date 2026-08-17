@@ -109,7 +109,9 @@ subtitle pixels.
 
 Geometry is prepared when the cue or render space changes and for a small lookahead window. Hovering,
 scanning, and scrolling reuse those boxes, so interactive 60 FPS behavior does not require rendering
-the subtitle geometry at 60 FPS.
+the subtitle geometry at 60 FPS. Tooltip metadata, raster preparation, and mpv publication are also
+session-owned background work; rapid pointer or wheel input replaces older pending intent instead of
+blocking the player event loop.
 
 ## Troubleshooting
 
@@ -123,6 +125,9 @@ the subtitle geometry at 60 FPS.
   `saitenka subtitle-report /path/to/saitenka-report-20260816-181525.zip`. The installed, text-free analyzer shows
   ownership transactions and retries, capability state, matched event/token counts, skip counts, and
   bounded error codes.
+- For responsive subtitles but a delayed tooltip or scroll, run `saitenka trace-report` on that same
+  report path. Its hover, tooltip, and scroll summaries distinguish target lookup, preparation, visible
+  paint, supersession, cancellation, and failure without recording the hovered text.
 - Set `native_visible = false` to restore Saitenka's default redrawn, FSRS-colored subtitle.
 
 For the provider contract, shadow-render pipeline, lifecycle guards, and package diagram, see

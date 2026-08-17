@@ -113,7 +113,9 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
     Naively adopting either would flash the wrong text and — worse — silently reset ``_nav_idx``
     (any ``set_subtitle`` call does), breaking next/next/next chaining even though the render was
     already correct. Swallow both within the settle window."""
-    if text == reader.sub_text and not reader._cue_retired:
+    # Empty is a stable retired state: the first transition already cleared every interaction
+    # surface, so reinstalling the same empty observation would only repeat teardown every poll.
+    if text == reader.sub_text and (not reader._cue_retired or not text.strip()):
         return
     identity_reinstall = text == reader.sub_text and reader._cue_retired
     within_settle = time.monotonic() < reader._sub_settle_until

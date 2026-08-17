@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from concurrent.futures import Future
@@ -9,6 +10,7 @@ from concurrent.futures import Future
 import pytest
 from util import FakeIPC
 
+from saitenka import otel_metrics
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer
@@ -36,21 +38,77 @@ def test_apply_deps_injects_and_stops_loading():
     assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
 
 
-def test_pending_anki_seed_backfills_on_the_next_tick(monkeypatch):
-    """reader_deps' Anki watcher hands off via _pending_anki_seed; the poll loop must backfill the mined
-    set on the main thread exactly once, and an unset flag is a no-op."""
+def test_mined_seed_result_publishes_once_on_the_next_tick():
     r = Reader(FakeIPC())
-    seeded = []
-    monkeypatch.setattr(r, "_seed_mined", lambda: seeded.append(True))
+    r._mined_seed_inflight = True
+    r._mined_seed_results.put((r._mined_seed_generation, {"猫"}))
 
-    r._apply_pending_anki_seed()  # flag unset → nothing happens
-    assert seeded == []
+    r._apply_pending_mined_seed()
+    r._apply_pending_mined_seed()
 
-    r._pending_anki_seed = True
-    r._apply_pending_anki_seed()
-    r._apply_pending_anki_seed()  # flag cleared after the first → seeds exactly once
-    assert seeded == [True]
-    assert r._pending_anki_seed is False
+    assert r._mined == {"猫"}
+    assert r._mined_generation == 1
+    assert r._mined_seed_inflight is False
+
+
+def test_mined_seed_result_from_replaced_dependencies_is_rejected():
+    r = Reader(FakeIPC())
+    r._mined_seed_results.put((r._mined_seed_generation, {"古い"}))
+    r._mined_seed_generation += 1
+
+    r._apply_pending_mined_seed()
+
+    assert r._mined == set()
+    assert r._mined_generation == 0
+
+
+def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
+    r = Reader(FakeIPC())
+    r.anki = object()
+    r.mine_cfg = object()
+    attempts = 0
+    completed = threading.Event()
+
+    def fetch(_anki, _cfg):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            completed.set()
+            return None
+        completed.set()
+        return {"猫"}
+
+    monkeypatch.setattr(r._miner, "mined_expressions", fetch)
+    r._request_mined_seed()
+    assert completed.wait(1)
+    r._apply_pending_mined_seed()
+    assert r._mined == set()
+
+    completed.clear()
+    r._mined_seed_next_due = 0.0
+    r._request_mined_seed()
+    assert completed.wait(1)
+    r._apply_pending_mined_seed()
+
+    assert attempts == 2 and r._mined == {"猫"}
+
+
+def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
+    spans = []
+
+    @contextlib.contextmanager
+    def traced(name, **attrs):
+        spans.append((name, attrs))
+        yield None
+
+    monkeypatch.setattr(otel_metrics, "traced", traced)
+    r = Reader(FakeIPC())
+    r._interaction_jobs.begin("tooltip")
+
+    r.close()
+
+    assert spans[-1][0] == "tooltip_request"
+    assert spans[-1][1]["outcome"] == "cancelled"
 
 
 def test_runtime_banner_reports_real_worker_count_after_async_deps(capsys, monkeypatch):

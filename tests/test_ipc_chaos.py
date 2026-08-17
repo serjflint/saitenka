@@ -69,6 +69,92 @@ def test_broken_pipe_on_first_write_marks_disconnected_not_hang():
         b.close()
 
 
+def test_async_submission_does_not_wait_for_a_blocked_transport_write():
+    class BlockedWriteTransport:
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def write(self, _data: bytes) -> None:
+            self.entered.set()
+            self.release.wait(2)
+
+        def read(self, _n: int) -> bytes:
+            self.release.wait(2)
+            return b""
+
+        def close(self) -> None:
+            self.release.set()
+
+    transport = BlockedWriteTransport()
+    ipc = MpvIPC("unused")
+    ipc._transport = transport
+    ipc._start_reader()
+    try:
+        started = time.monotonic()
+        request = ipc.command_async("show-text", "hover", 1)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 0.05
+        assert transport.entered.wait(1)
+        assert not request.future.done()
+    finally:
+        transport.release.set()
+        ipc.close()
+
+
+@pytest.mark.timeout(5)
+def test_retired_write_failure_cannot_close_the_replacement_connection():
+    class BlockingFailureTransport:
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def write(self, _data: bytes) -> None:
+            self.entered.set()
+            self.release.wait(2)
+            raise BrokenPipeError("retired pipe")
+
+        def read(self, _n: int) -> bytes:
+            self.release.wait(2)
+            return b""
+
+        def close(self) -> None:
+            pass
+
+    class StableTransport:
+        def __init__(self) -> None:
+            self.release = threading.Event()
+
+        def write(self, _data: bytes) -> None:
+            pass
+
+        def read(self, _n: int) -> bytes:
+            self.release.wait(2)
+            return b""
+
+        def close(self) -> None:
+            self.release.set()
+
+    old = BlockingFailureTransport()
+    replacement = StableTransport()
+    ipc = MpvIPC("unused")
+    ipc._transport = old
+    ipc._start_reader()
+    request = ipc.command_async("show-text", "old", 1)
+    assert old.entered.wait(1)
+
+    installed, retired = ipc._install_replacement(replacement)
+    assert installed
+    ipc._resolve_pending(retired, {"error": "disconnected"})
+    replacement_closed = ipc._closed
+    old.release.set()
+    assert request.future.result(timeout=1) == {"error": "disconnected"}
+    assert not replacement_closed.wait(0.05)
+
+    ipc.close()
+
+
 def test_write_failure_mid_conversation_marks_disconnected():
     """The pipe can break AFTER a prior command already succeeded (mpv quitting mid-session). The next
     write must surface a clean disconnect, not raise out of ``command()`` or hang."""

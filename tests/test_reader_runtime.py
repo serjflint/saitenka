@@ -56,7 +56,9 @@ def test_tick_pipeline_rejects_ambiguous_duplicate_phase():
 
 
 def test_composition_threads_grouped_optional_services():
-    services = ReaderServices(scorer="score", anki="anki", mining="mine", dictionaries="dict")
+    services = ReaderServices(
+        scorer="score", anki="anki", mining="mine", dictionaries="dict", tts=True
+    )
 
     reader = create_reader(FakeIPC(), services=services)
 
@@ -66,3 +68,4 @@ def test_composition_threads_grouped_optional_services():
         "mine",
         "dict",
     )
+    assert reader._tts_ok is True

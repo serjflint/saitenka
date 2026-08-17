@@ -419,8 +419,11 @@ class NativeSubtitleGeometry:
             return
         if outcome == GeometryOutcome.FAILED:
             self._failure_diagnostic = diagnostic_key
-        if otel_metrics.subtitle_geometry_fallbacks is not None:
-            otel_metrics.subtitle_geometry_fallbacks.add(1, {"reason": reason})
+        if (
+            outcome == GeometryOutcome.FAILED
+            and otel_metrics.subtitle_geometry_failures is not None
+        ):
+            otel_metrics.subtitle_geometry_failures.add(1, {"reason": reason})
         level = logging.WARNING if outcome == GeometryOutcome.FAILED else logging.INFO
         diagnostic = error_code or log_detail
         log.log(
@@ -490,7 +493,7 @@ class NativeSubtitleGeometry:
         if reader is not None:
             self._consume_failure(reader)
         self._source_epoch += 1
-        self.worker.invalidate()
+        self.worker.invalidate(cause="source-changed")
         self.source_path = None
         self._source_bytes = None
         self._last_snapshot = None
@@ -522,14 +525,19 @@ class NativeSubtitleGeometry:
                     self.source_path = path
                     self.fallback_reason = None
 
-    def invalidate(self, reader: Reader | None = None) -> None:
+    def invalidate(
+        self,
+        reader: Reader | None = None,
+        *,
+        cause: str = "render-input-changed",
+    ) -> None:
         if reader is not None:
             self._consume_failure(reader)
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
-        self.worker.invalidate()
+        self.worker.invalidate(cause=cause)
         if reader is not None:
             reader._clear_native_interaction()
 
@@ -957,6 +965,8 @@ class NativeSubtitleGeometry:
             cache_hit = self._publish_cached(reader, inputs)
             stats = self.worker.stats
             span.set("outcome", "hit" if cache_hit else "miss")
+            if not cache_hit:
+                span.set("reason", self.worker.prefetch_miss_reason(inputs.key))
             span.set("cache_hits", stats.cache_hits)
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
@@ -994,7 +1004,7 @@ class NativeSubtitleGeometry:
                 selection.annotations,
             )
 
-        accepted = self.worker.submit_job(inputs.generation, build)
+        accepted = self.worker.submit_job(inputs.generation, build, work_key=inputs.key)
         if accepted:
             if inputs.observation_key is not None:
                 self._pending_key = (inputs.generation, inputs.observation_key)

@@ -52,6 +52,24 @@ def show_nested(reader: Reader, sb) -> None:
     """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
     Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
     popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
+    if prefetch.workers_running(reader):
+        from saitenka.app.hover_metadata import NestedMetadataKey, NestedMetadataRequest
+
+        reader._interaction_metadata.submit(
+            NestedMetadataRequest(
+                NestedMetadataKey(
+                    reader._prefetch_gen,
+                    reader._dependency_generation,
+                    reader._mined_generation,
+                    id(reader._tip_state),
+                    sb.text,
+                ),
+                reader.tokenizer.name,
+                reader.dict_set,
+                frozenset(reader._mined),
+            )
+        )
+        return
     tokens = reader.tokenizer.tokenize(sb.text)
     tok = tokens[0] if tokens else None
     if tok is None or reader.tokenizer.is_skippable(tok):
@@ -71,6 +89,35 @@ def show_nested(reader: Reader, sb) -> None:
     open_nested(reader, tok, tok.surface, anchor, tail=sb.text, extra_terms=extra, defer=True)
 
 
+def apply_nested_metadata(reader: Reader, result) -> None:
+    key = result.key
+    if (
+        result.error
+        or result.token is None
+        or key.generation != reader._prefetch_gen
+        or key.dependency_generation != reader._dependency_generation
+        or key.mined_generation != reader._mined_generation
+        or key.tooltip_origin != id(reader._tip_state)
+    ):
+        return
+    sb = reader._scan_hit(*reader._last_mouse)
+    if sb is None or sb.text != key.tail:
+        return
+    sx, sy = reader._tip_xy
+    anchor = Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
+    open_nested(
+        reader,
+        result.token,
+        result.token.surface,
+        anchor,
+        tail=key.tail,
+        extra_terms=result.phrase_terms,
+        mined=result.mined,
+        group_mined=result.group_mined,
+        defer=True,
+    )
+
+
 def _phrase_extra_terms(reader: Reader, tokens) -> tuple[str, ...]:
     """Longest-first multi-token dict terms starting at the scanned tail's first token (index 0), via
     the same ``phrase_terms`` seam the base tooltip uses. Empty when the dict set has no phrase probe."""
@@ -81,7 +128,7 @@ def _phrase_extra_terms(reader: Reader, tokens) -> tuple[str, ...]:
     return tuple(got[0]) if got is not None else ()
 
 
-def open_nested(
+def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosses this seam
     reader: Reader,
     tok,
     inflected,
@@ -90,6 +137,8 @@ def open_nested(
     extra_terms: tuple[str, ...] = (),
     *,
     defer: bool = False,
+    mined: bool | None = None,
+    group_mined: tuple[bool, ...] | None = None,
 ) -> None:
     """Build the nested popup for ``tok`` and anchor it above/below the on-screen box ``anchor``. Shared
     by scan-hover and a clicked cross-reference link. ``extra_terms`` are the longest-match phrases
@@ -99,9 +148,21 @@ def open_nested(
     top-priority off-thread compose and show NOTHING — the tick (``apply_engaged_results``) re-derives the
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
-    mined = reader._is_mined(tok)
-    key = reader._panel_key(tok, inflected, mined=mined, phrase=extra_terms)
+    if mined is None:
+        mined = reader._is_mined(tok)
+    key = reader._panel_key(
+        tok,
+        inflected,
+        mined=mined,
+        phrase=extra_terms,
+        group_mined=group_mined,
+    )
     if defer and key not in reader._panel_cache and prefetch.workers_running(reader):
+        # Retain the identity-qualified presentation inputs while the engaged worker warms this key.
+        reader._nest.key = key
+        reader._nest.token = tok
+        reader._nest.word = tok.surface
+        reader._nest.tail = tail or tok.surface
         prefetch.request_engaged_render(
             reader,
             tok,
@@ -114,7 +175,13 @@ def open_nested(
         )
         return
     st = reader._panel_for(
-        tok, inflected, min_h=reader._tip_cap(), mined=mined, nested=True, extra_terms=extra_terms
+        tok,
+        inflected,
+        min_h=reader._tip_cap(),
+        mined=mined,
+        nested=True,
+        extra_terms=extra_terms,
+        group_mined=group_mined,
     )
     place_nested(reader, st, key, tok, tok.surface, anchor, tail)
 
@@ -126,6 +193,7 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
     reader._nest.token, reader._nest.word = token, word
     reader._nest.tail = tail
     reader._nest.scroll = 0
+    reader._nest.desired_scroll = 0
     reader._nest.view_h = nested_view_h(reader, st.full_height, anchor.wy)
     reader._nest.xy = reader._place_panel(
         st.width, anchor.wx, anchor.wy, anchor.wh, reader._nest.view_h
@@ -283,5 +351,5 @@ def click_kanji_fallback(reader: Reader, x: float, y: float) -> None:
 
 def hide_nested(reader: Reader) -> None:
     if reader._nest.state is not None or reader._nest.rect is not None:
-        reader.ov.hide(OverlayId.NESTED)
+        reader.ov.hide_interactive(OverlayId.NESTED)
     reader._nest = PopupView(OverlayId.NESTED)

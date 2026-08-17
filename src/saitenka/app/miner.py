@@ -418,21 +418,27 @@ class Miner:
         except AnkiError as e:
             r._toast(f"bulk failed: {e}", "err")
 
-    def seed_mined(self) -> None:
-        """Pre-load already-mined expressions from the mining deck, so a word mined in a past
-        session shows ✓ (not ⊕) from the first hover. Best-effort."""
-        r = self.r
-        if not r.anki or not r.mine_cfg:
-            return
+    @staticmethod
+    def mined_expressions(anki, mine_cfg) -> set[str] | None:
+        """Fetch the mining deck's expressions without mutating Reader state."""
         from saitenka.app.miner_ui import _strip_tags
 
-        fieldname = r.mine_cfg.expression_field() or "Expression"
+        if not anki or not mine_cfg:
+            return set()
+        fieldname = mine_cfg.expression_field() or "Expression"
+        expressions: set[str] = set()
         try:
-            ids = r.anki.find_notes(f'deck:"{r.mine_cfg.deck}"')
+            ids = anki.find_notes(f'deck:"{mine_cfg.deck}"')
             for chunk in (ids[i : i + 500] for i in range(0, len(ids), 500)):
-                for note in r.anki.notes_info(chunk):
+                for note in anki.notes_info(chunk):
                     val = _strip_tags(note.get("fields", {}).get(fieldname, {}).get("value", ""))
                     if val:
-                        r._mined.add(val)
+                        expressions.add(val)
         except Exception:
             log.debug("seed_mined failed (AnkiConnect down?)", exc_info=True)
+            return None
+        return expressions
+
+    def seed_mined(self) -> None:
+        """Pre-load already-mined expressions from the mining deck."""
+        self.r._mined.update(self.mined_expressions(self.r.anki, self.r.mine_cfg) or ())

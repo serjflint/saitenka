@@ -113,7 +113,7 @@ mask_atlas_writebacks: Counter | None = (
 # finished after the user switched word / scrolled, so it was discarded (idle work that didn't pay off).
 crisp_swaps: Counter | None = None
 crisp_stale: Counter | None = None
-subtitle_geometry_fallbacks: Counter | None = None
+subtitle_geometry_failures: Counter | None = None
 subtitle_geometry_decisions: Counter | None = None
 subtitle_geometry_owner_transitions: Counter | None = None
 subtitle_geometry_recoveries: Counter | None = None
@@ -322,7 +322,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
-    global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
+    global crisp_swaps, crisp_stale, subtitle_geometry_failures
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
@@ -497,9 +497,9 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.crisp.stale",
             description="native re-renders discarded (word switched/scrolled)",
         )
-        subtitle_geometry_fallbacks = meter.create_counter(
-            "saitenka.subtitle_geometry.fallbacks",
-            description="native subtitle geometry transitions to the standard renderer",
+        subtitle_geometry_failures = meter.create_counter(
+            "saitenka.subtitle_geometry.failures",
+            description="native subtitle geometry provider or contract failures",
         )
         subtitle_geometry_decisions = meter.create_counter(
             "saitenka.subtitle_geometry.decisions",
@@ -549,7 +549,7 @@ def unregister() -> None:
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
-    global crisp_swaps, crisp_stale, subtitle_geometry_fallbacks
+    global crisp_swaps, crisp_stale, subtitle_geometry_failures
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
@@ -608,7 +608,7 @@ def unregister() -> None:
         mask_atlas_writebacks = None
         crisp_swaps = None
         crisp_stale = None
-        subtitle_geometry_fallbacks = None
+        subtitle_geometry_failures = None
         subtitle_geometry_decisions = None
         subtitle_geometry_owner_transitions = None
         subtitle_geometry_recoveries = None

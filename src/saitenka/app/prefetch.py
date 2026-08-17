@@ -87,6 +87,7 @@ class RenderAheadReq:
     scroll: int
     view_h: int
     direction: int
+    job_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +114,7 @@ class EngagedHoverReq:
     #  the main thread will re-look-up, or the deferred re-show stays cold and re-defers in a loop
     nested: bool = False  # target overlay: base tooltip (False) or the nested scan popup (True)
     tail: str = ""  # nested only: the scan-cell tail the tick re-derives the fresh anchor from
+    job_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +173,7 @@ class PrefetchState:
         # Scroll-ahead: a single slot (newest scroll wins) the worker drains; guarded by its own lock.
         self.render_ahead_req: RenderAheadReq | None = None
         self.render_ahead_lock = threading.Lock()
+        self.render_ahead_failures: queue.SimpleQueue = queue.SimpleQueue()
         # Engaged-hover (tier-3 cold-miss deferred render): a newest-wins slot the worker drains at TOP
         # priority + a results queue it hands the composed head back on for the tick to apply.
         self.engaged_req: EngagedHoverReq | None = None
@@ -224,9 +227,12 @@ def prefetch_worker_count(reader: Reader) -> int:
 
 
 def start_prefetch(reader: Reader) -> None:
-    if not reader.prefetch or reader.dict_set is None or reader._prefetch_threads:
+    # One engaged worker is part of interactive correctness: a cold hover/scroll must never fall
+    # back to synchronous raster merely because speculative prefetch is disabled or deps are pending.
+    desired = 1 if not reader.prefetch or reader.dict_set is None else prefetch_worker_count(reader)
+    if len(reader._prefetch_threads) >= desired:
         return
-    for k in range(prefetch_worker_count(reader)):
+    for k in range(len(reader._prefetch_threads), desired):
         th = threading.Thread(
             target=lambda: prefetch_worker(reader), name=f"saitenka-prefetch-{k}", daemon=True
         )
@@ -348,8 +354,6 @@ def request_engaged_render(
     scan-cell text (the tick re-derives the anchor from it). Newest-wins (only the current target
     matters). Main-thread + cheap: stores the request; a worker composes it (nothing is shown until it
     lands). No-op when prefetch is off."""
-    if not reader.prefetch:
-        return
     req = EngagedHoverReq(
         reader._prefetch_gen,
         token,
@@ -360,6 +364,7 @@ def request_engaged_render(
         tuple(phrase),
         nested,
         tail,
+        (reader._nest if nested else reader._tip_view).job_id,
     )
     with reader._engaged_lock:
         reader._engaged_req = req
@@ -384,9 +389,10 @@ def _try_engaged_hover(reader: Reader) -> bool:
             _compose_engaged_nested(reader, req) if req.nested else _compose_engaged_base(
                 reader, req
             )
-        reader._engaged_results.put((req.gen, req.key, req.nested, req.tail))
+        reader._engaged_results.put((req.gen, req.key, req.nested, req.tail, True, req.job_id))
     except Exception:
         log.debug("engaged hover render failed for %r", req.token.surface, exc_info=True)
+        reader._engaged_results.put((req.gen, req.key, req.nested, req.tail, False, req.job_id))
     return True
 
 
@@ -442,8 +448,6 @@ def request_engaged_nav(reader: Reader, query: str) -> None:
     """Enqueue a clicked cross-reference navigation (tier-3): the worker builds + warms the navigated
     panel off the main thread, the tick swaps it in from warm bands. ``origin`` pins the tooltip that was
     showing at click time so a word switch can't be hijacked. Newest-wins. No-op when prefetch is off."""
-    if not reader.prefetch:
-        return
     req = EngagedNavReq(reader._prefetch_gen, query, id(reader._tip_state))
     with reader._nav_lock:
         reader._nav_req = req
@@ -493,8 +497,6 @@ def request_engaged_open(reader: Reader, source: str, query: str, anchor, *, min
     ``Anchor`` the popup hangs off — carried because it is NOT scan-re-derivable. ``origin`` pins the base
     tooltip that was up at click time; ``mined`` is the main-thread mine state (so the worker skips
     jamdict). Newest-wins. No-op when prefetch is off."""
-    if not reader.prefetch:
-        return
     req = EngagedOpenReq(
         reader._prefetch_gen,
         source,
@@ -552,9 +554,16 @@ def request_render_ahead(reader: Reader, view, direction: int) -> None:
     (newest wins — only the popup being scrolled matters). Main-thread and cheap: just stores the
     request; a worker does the render. No-op when prefetch is off or the view has no panel."""
     st = view.state
-    if st is None or not reader.prefetch:
+    if st is None:
         return
-    req = RenderAheadReq(reader._prefetch_gen, st, view.scroll, view.view_h, direction)
+    req = RenderAheadReq(
+        reader._prefetch_gen,
+        st,
+        view.desired_scroll,
+        view.view_h,
+        direction,
+        view.job_id,
+    )
     with reader._render_ahead_lock:
         reader._render_ahead_req = req
 
@@ -591,6 +600,7 @@ def _try_render_ahead(reader: Reader) -> bool:
             )
     except Exception:
         log.debug("render-ahead failed", exc_info=True)  # a bad block must never kill the worker
+        reader._render_ahead_failures.put((req.gen, req.panel, req.scroll, req.job_id))
     return True
 
 

@@ -670,16 +670,83 @@ def test_engaged_render_composes_then_drain_shows_warm(tmp_path, monkeypatch):
     assert tuple(r._tip_key) == tuple(key)
 
 
+def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monkeypatch):
+    import contextlib
+
+    from saitenka import otel_metrics
+    from saitenka.app import prefetch, tooltip
+
+    r, _cache = _tall_reader(tmp_path, monkeypatch)
+    _i, tok, inflected, mined = _first_content(r)
+    key = tooltip.panel_key(r, tok, inflected, mined=mined)
+    spans = []
+
+    @contextlib.contextmanager
+    def traced(name, **attrs):
+        spans.append((name, attrs))
+        yield None
+
+    monkeypatch.setattr(otel_metrics, "traced", traced)
+    monkeypatch.setattr(prefetch, "_compose_engaged_base", lambda *_args: 1 / 0)
+    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    prefetch.request_engaged_render(r, tok, inflected, key, mined=mined)
+
+    assert prefetch._try_engaged_hover(r)
+    tooltip.apply_engaged_results(r)
+
+    assert spans[-1][0] == "tooltip_request"
+    assert spans[-1][1]["outcome"] == "failed"
+
+
+def test_engaged_render_requeues_when_capability_changes_its_panel_key(tmp_path, monkeypatch):
+    import threading
+
+    from saitenka.app import prefetch, tooltip
+
+    r, _cache = _tall_reader(tmp_path, monkeypatch)
+    r.prefetch = True
+    r._prefetch_threads = [threading.Thread()]
+    i, tok, inflected, mined = _first_content(r)
+    old_key = tooltip.panel_key(r, tok, inflected, mined=mined)
+    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    prefetch.request_engaged_render(r, tok, inflected, old_key, mined=mined)
+    assert prefetch._try_engaged_hover(r)
+
+    r._tts_ok = not r._tts_ok
+    r.hover = i
+    tooltip.apply_engaged_results(r)
+
+    assert r._tip_state is None
+    assert r._engaged_req is not None
+    assert tuple(r._engaged_req.key) != tuple(old_key)
+
+
 def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     # Key guard (the analysis-overlay pattern): a composed head for a word the user left is dropped — no
     # tooltip flashes for the wrong word. (tier-2/disk stay warm for a later re-hover.)
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r._engaged_results.put((r._prefetch_gen, ("some", "other", "key"), False, ""))
+    r._engaged_results.put((r._prefetch_gen, ("some", "other", "key"), False, "", True, None))
     r.hover, r._tip_state = -1, None  # not hovering that word anymore
     tooltip.apply_engaged_results(r)
     assert r._tip_state is None  # nothing shown
+
+
+def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
+    from saitenka.app import tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    i, _tok, _inflected, _mined = _first_content(r)
+    old_job = r._interaction_jobs.begin("tooltip")
+    r._engaged_results.put((r._prefetch_gen, ("old",), False, "", True, old_job))
+    r.hover = i
+    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+
+    tooltip.apply_engaged_results(r)
+
+    assert r._tip_state is None
+    assert r._engaged_req is None
 
 
 # --- nested scan popup: the same tier-3 off-thread treatment (PR A) ------------------------------
@@ -745,14 +812,15 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     assert (
         st.last_frame_rasters == 0
     )  # bands were rastered off the main thread — the re-show is warm
-    gen, _k, nested, tail = r._engaged_results.get_nowait()
-    assert gen == r._prefetch_gen and nested is True and tail == tok.surface
+    gen, _k, nested, tail, succeeded, _job_id = r._engaged_results.get_nowait()
+    assert gen == r._prefetch_gen and nested is True and tail == tok.surface and succeeded
 
 
 def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     # End-to-end: a cold scan-hover defers → the worker composes → the tick re-derives the anchor from the
     # scan cell and re-opens the now-warm nested popup (a cache hit, no cold raster).
     import threading
+    import time
     from types import SimpleNamespace
 
     from saitenka.app import nested_popup, prefetch, tooltip
@@ -769,11 +837,55 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
 
     r._panel_cache.clear()
     nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)
+    deadline = time.monotonic() + 1
+    while r._engaged_req is None and time.monotonic() < deadline:
+        tooltip.apply_hover_metadata(r)
+        time.sleep(0.001)
     assert r._nest.state is None and r._engaged_req is not None and r._engaged_req.nested is True
     assert prefetch._try_engaged_hover(r) is True
     tooltip.apply_engaged_results(r)  # drain → scan_hit → show_nested warm
     assert r._nest.state is not None  # nested popup now shown
     assert cache.stats()[0] == 0  # still never persisted
+
+
+def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monkeypatch):
+    from saitenka.app.hover_metadata import HoverMetadata
+
+    class MetadataActor:
+        def __init__(self):
+            self.requests = []
+            self.results = []
+
+        def submit(self, request):
+            self.requests.append(request)
+
+        def drain(self):
+            results, self.results = self.results, []
+            return results
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    index, _tok, _inflected, _mined = _first_content(r)
+    actor = MetadataActor()
+    r._interaction_metadata = actor
+    r.hover = index
+    r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
+    tooltip._request_hover_metadata(r, index)
+    original = actor.requests[-1]
+    r._mined_generation += 1
+    actor.results.append(
+        HoverMetadata(
+            original.key,
+            phrase_terms=(),
+            phrase_span=None,
+            mined=False,
+            group_mined=(),
+        )
+    )
+
+    tooltip.apply_hover_metadata(r)
+
+    assert actor.requests[-1].key.mined_generation == r._mined_generation
+    assert actor.requests[-1].key.job_id == r._tip_view.job_id
 
 
 def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
@@ -783,7 +895,7 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r._tip_state, r._tip_rect = None, None
-    r._engaged_results.put((r._prefetch_gen, ("k",), True, "本"))
+    r._engaged_results.put((r._prefetch_gen, ("k",), True, "本", True, None))
     tooltip.apply_engaged_results(r)
     assert r._nest.state is None
 

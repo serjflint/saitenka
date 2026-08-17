@@ -219,38 +219,6 @@ def test_anki_launch_is_fire_and_forget_off_the_critical_path(monkeypatch):
     assert anki == "ANKI" and mine_conf is not None
 
 
-class _SeedFlagReader:
-    """Minimal stand-in for the watcher's cross-thread hand-off (a real Reader is a heavy god-object)."""
-
-    def __init__(self):
-        self._pending_anki_seed = False
-
-
-def test_anki_watch_flags_seed_when_already_up(monkeypatch):
-    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: True)
-    reader = _SeedFlagReader()
-    reader_deps._anki_seed_watch(reader)
-    assert reader._pending_anki_seed is True
-
-
-def test_anki_watch_flags_seed_once_anki_comes_up(monkeypatch):
-    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
-    monkeypatch.setattr(anki_mod, "wait_until_anki_up", lambda *_a, **_k: True)
-    reader = _SeedFlagReader()
-    reader_deps._anki_seed_watch(reader)
-    assert reader._pending_anki_seed is True
-
-
-def test_anki_watch_warns_and_skips_seed_on_timeout(monkeypatch, caplog):
-    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
-    monkeypatch.setattr(anki_mod, "wait_until_anki_up", lambda *_a, **_k: False)
-    reader = _SeedFlagReader()
-    with caplog.at_level("WARNING"):
-        reader_deps._anki_seed_watch(reader)
-    assert reader._pending_anki_seed is False  # never came up → nothing to backfill
-    assert "didn't come up" in caplog.text  # console warning fired
-
-
 def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
     import saitenka.app.scoring as scoring_mod
     import saitenka.app.wordlists as wl

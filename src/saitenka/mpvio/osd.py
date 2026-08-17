@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,8 @@ from saitenka.bgra import (  # re-exported: `from saitenka.mpvio.osd import to_b
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PIL import Image
 
     from saitenka.mpvio.ipc import MpvIPC
@@ -26,6 +29,67 @@ log = logging.getLogger(__name__)
 
 # Overlay ids we've already warned about, so a per-tick redraw (spinner/subtitle) can't flood the log.
 _warned_oids: set[int] = set()
+
+
+def _defer_interaction_for(ipc: object) -> bool:
+    from saitenka.mpvio.ipc import MpvIPC
+
+    return isinstance(ipc, MpvIPC)
+
+
+class _InteractionPresenter:
+    """Newest-wins resource slots for interaction overlay staging and IPC."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._desired: dict[int, tuple[int, Callable[[], None]]] = {}
+        self._sequence = 0
+        self._closed = False
+        self._thread: threading.Thread | None = None
+
+    def submit(self, oid: int, operation: Callable[[], None]) -> None:
+        with self._condition:
+            if self._closed:
+                return
+            self._sequence += 1
+            self._desired[oid] = (self._sequence, operation)
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run,
+                    name="saitenka-interaction-presenter",
+                    daemon=True,
+                )
+                self._thread.start()
+            self._condition.notify()
+
+    def close(self, timeout: float = 1.0) -> None:
+        with self._condition:
+            self._closed = True
+            self._desired.clear()
+            self._condition.notify_all()
+        if self._thread is not None:
+            self._thread.join(timeout)
+
+    def _run(self) -> None:
+        while item := self._next():
+            oid, sequence, operation = item
+            try:
+                operation()
+            except Exception:
+                log.exception("interaction overlay presentation failed for oid=%d", oid)
+            with self._condition:
+                current = self._desired.get(oid)
+                if current is not None and current[0] == sequence:
+                    self._desired.pop(oid, None)
+
+    def _next(self):
+        with self._condition:
+            while not self._desired and not self._closed:
+                self._condition.wait()
+            if self._closed:
+                return None
+            oid, (sequence, operation) = min(self._desired.items(), key=lambda item: item[1][0])
+            return oid, sequence, operation
 
 
 def _warn_overlay_add(oid: int, w: int, h: int, res: dict) -> None:
@@ -71,6 +135,9 @@ class Overlay:
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
+        self._interaction_presenter = _InteractionPresenter()
+        self._defer_interaction = _defer_interaction_for(ipc)
+        self._interaction_oids: set[int] = set()
 
     def _oid(self, oid: int) -> int:
         """Map a logical overlay id (1-based) to the configured physical range."""
@@ -128,9 +195,55 @@ class Overlay:
         _warn_overlay_add(oid, w, h, res)
         return res
 
+    def show_bgra_interactive(
+        self,
+        bgra: np.ndarray,
+        x: int = 0,
+        y: int = 0,
+        oid: int = 0,
+        *,
+        on_presented=None,
+    ) -> dict:
+        """Stage and publish TIP/NESTED pixels off the event thread on real mpv sessions."""
+        if not self._defer_interaction:
+            result = self.show_bgra(bgra, x, y, oid=oid)
+            if on_presented is not None:
+                on_presented(result or {"error": "success"})
+            return result or {"error": "success"}
+        payload = np.ascontiguousarray(bgra).copy()
+        physical_oid = self._oid(oid)
+        self._interaction_oids.add(oid)
+
+        def present() -> None:
+            try:
+                result = self.show_bgra(payload, x, y, oid=oid)
+            except Exception:
+                if on_presented is not None:
+                    on_presented({"error": "failed"})
+                raise
+            else:
+                if on_presented is not None:
+                    on_presented(result)
+
+        self._interaction_presenter.submit(physical_oid, present)
+        return {"error": "deferred"}
+
+    def hide_interactive(self, oid: int = 0) -> dict:
+        if not self._defer_interaction:
+            return self.hide(oid)
+        physical_oid = self._oid(oid)
+
+        def remove() -> None:
+            self.hide(oid)
+
+        self._interaction_presenter.submit(physical_oid, remove)
+        return {"error": "deferred"}
+
     def hide(self, oid: int = 0) -> dict:
         oid = self._oid(oid)
-        res = self.ipc.command("overlay-remove", oid) if self.visible else {"error": "success"}
+        # Removal is idempotent.  Always send it: an in-flight deferred add can finish after visibility
+        # was turned off, and skipping this command would leave those pixels stuck in mpv.
+        res = self.ipc.command("overlay-remove", oid)
         self._live.pop(oid, None)
         self.ops += 1
         p = self._files.pop(oid, None)
@@ -147,6 +260,9 @@ class Overlay:
         for oid, tail in list(self._live.items()):
             self.ipc.command(command, oid, *tail) if visible else self.ipc.command(command, oid)
             self.ops += 1
+        if not visible:
+            for oid in tuple(self._interaction_oids):
+                self.hide_interactive(oid)
 
     def repaint(self) -> None:
         """Re-issue every live overlay so mpv re-composites and PRESENTS them. While paused (esp. on
@@ -159,6 +275,7 @@ class Overlay:
                 self.ipc.command("overlay-add", oid, *tail)
 
     def close(self) -> None:
+        self._interaction_presenter.close()
         for oid in list(self._files):
             try:
                 self.hide(oid)

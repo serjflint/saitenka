@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import sys
 import threading
 import time
@@ -78,6 +79,7 @@ _MAX_RECONNECTS = 30
 # run-mode mpv exiting, whose socket can still accept a connect yet never reply — would otherwise hang
 # the poll loop for command()'s full timeout, _MAX_RECONNECTS times over. Bail fast instead → exit.
 _RECONNECT_PROBE_S = 2.0
+_OUTBOUND_MAX = 256
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +108,9 @@ class MpvIPC:
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
+        self._outbound: queue.Queue[tuple[int, int, bytes, Future[dict]] | None] = queue.Queue(
+            maxsize=_OUTBOUND_MAX
+        )
         self._next_request_id = 0
         self._connection_epoch = 0
         self.connected_at: float | None = None
@@ -119,6 +124,12 @@ class MpvIPC:
         # Replayed on the IPC thread after a successful reconnect (the controller re-issues
         # observe_property, which mpv forgets on a fresh connection). Set by the owner.
         self.on_reconnect: Callable[[], None] | None = None
+        self._writer = threading.Thread(
+            target=self._write_loop,
+            name="mpv-ipc-writer",
+            daemon=True,
+        )
+        self._writer.start()
 
     # --- connection ---------------------------------------------------------------------------
     def connect(self, timeout: float = 10.0, interval: float = 0.1) -> MpvIPC:
@@ -222,12 +233,48 @@ class MpvIPC:
             future.set_result(msg)
 
     # --- io -----------------------------------------------------------------------------------
-    def _write(self, data: bytes) -> None:
+    def _write_target(self, epoch: int) -> tuple[Transport, threading.Event]:
+        """Pin one connection generation for a queued write.
+
+        The transport write itself may block, so the lock cannot cover it.  Returning the matching
+        close event ensures a late failure from a retired transport cannot poison its replacement.
+        """
         with self._write_lock:
             transport = self._transport
-            if self._closed.is_set() or transport is None:
+            closed = self._closed
+            if epoch != self._connection_epoch or closed.is_set() or transport is None:
                 raise OSError("mpv IPC disconnected")
-            transport.write(data)
+            return transport, closed
+
+    def _write_loop(self) -> None:
+        """The sole transport writer; callers only perform bounded queue admission."""
+        while True:
+            try:
+                item = self._outbound.get(timeout=0.1)
+            except queue.Empty:
+                if self._intentional:
+                    return
+                continue
+            if item is None:
+                return
+            epoch, request_id, data, future = item
+            if future.done():
+                continue
+            closed = None
+            try:
+                transport, closed = self._write_target(epoch)
+                transport.write(data)
+            except OSError as error:
+                log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
+                self._reject_write(request_id, future, "disconnected")
+                if closed is not None:
+                    closed.set()
+
+    def _reject_write(self, request_id: int, future: Future[dict], error: str) -> None:
+        with self._pending_lock:
+            self._pending.pop(request_id, None)
+        if not future.done():
+            future.set_result({"error": error})
 
     def command_async(self, *args) -> IPCRequest:
         """Submit a correlated command without waiting for its reply."""
@@ -240,18 +287,11 @@ class MpvIPC:
                 future.set_result({"error": "disconnected"})
                 return IPCRequest(request_id, epoch, future)
             self._pending[request_id] = (epoch, future)
-        cmd = args[0] if args else "?"
+        payload = json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
         try:
-            self._write(
-                json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
-            )
-        except OSError as error:
-            log.warning("mpv IPC: write failed for %r (%s) — disconnected", cmd, error)
-            with self._pending_lock:
-                self._pending.pop(request_id, None)
-            if not future.done():
-                future.set_result({"error": "disconnected"})
-            self._closed.set()
+            self._outbound.put_nowait((epoch, request_id, payload, future))
+        except queue.Full:
+            self._reject_write(request_id, future, "overloaded")
         return IPCRequest(request_id, epoch, future)
 
     def command(self, *args, timeout: float | None = None) -> dict:
@@ -421,6 +461,11 @@ class MpvIPC:
             self._closed.set()
             transport, self._transport = self._transport, None
         self._fail_pending({"error": "disconnected"})
+        try:
+            self._outbound.put_nowait(None)
+        except queue.Full:
+            # Resolve queued requests first; the daemon writer remains bounded if its transport wedged.
+            pass
         if transport is not None:
             try:
                 transport.close()  # unblocks the reader thread's blocking read → it exits
@@ -431,6 +476,8 @@ class MpvIPC:
         if self._reader is not None and self._reader.is_alive():
             self._reader.join(timeout=2.0)
             self._reader = None
+        if self._writer.is_alive():
+            self._writer.join(timeout=2.0)
 
     def __enter__(self) -> MpvIPC:
         return self
