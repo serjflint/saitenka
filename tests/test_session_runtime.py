@@ -7,23 +7,39 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from saitenka.runtime import (
+    CancelEffect,
+    CloseRequested,
+    ConnectionLost,
     ConnectionReplaced,
+    DeadlineRegistry,
+    DiagnosticKind,
+    DiagnosticRecord,
+    EffectDeadline,
     EffectError,
     EffectFinished,
     EffectId,
     EffectOutcome,
     EventOrigin,
+    ExpireEffect,
     MailboxFull,
     Owner,
     RawMpvEvent,
+    ReduceResult,
+    RoutedEvent,
+    RouteError,
+    RouteKey,
     RuntimeEvent,
+    RuntimeLimits,
     ScheduleTimer,
     SessionMailbox,
     SessionReactor,
+    SessionReducer,
+    SessionState,
     StopSession,
     SubmitJob,
     TimerScheduler,
     TrafficClass,
+    UserCommand,
 )
 
 
@@ -94,6 +110,105 @@ def test_mailbox_preserves_sequence_across_reserved_lanes() -> None:
     )
 
     assert mailbox.drain_ready() == (normal, lifecycle)
+
+
+def test_mailbox_limits_each_ready_turn_without_reordering() -> None:
+    mailbox = SessionMailbox()
+    published = tuple(
+        mailbox.publish(
+            RawMpvEvent(str(index)), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL
+        )
+        for index in range(70)
+    )
+
+    assert mailbox.receive_ready(limit=64) == published[:64]
+    assert mailbox.receive_ready(limit=64) == published[64:]
+
+
+def test_close_latch_preempts_a_saturated_lifecycle_lane_once() -> None:
+    mailbox = SessionMailbox(lifecycle_capacity=1)
+    mailbox.publish(
+        ConnectionReplaced(1),
+        origin=EventOrigin.LIFECYCLE,
+        traffic=TrafficClass.LIFECYCLE,
+    )
+    first = mailbox.publish(
+        CloseRequested("first"),
+        origin=EventOrigin.LIFECYCLE,
+        traffic=TrafficClass.LIFECYCLE,
+    )
+    duplicate = mailbox.publish(
+        CloseRequested("duplicate"),
+        origin=EventOrigin.LIFECYCLE,
+        traffic=TrafficClass.LIFECYCLE,
+    )
+
+    assert duplicate is first
+    assert mailbox.receive(timeout=0) == first
+    assert isinstance(mailbox.receive(timeout=0).payload, ConnectionReplaced)
+
+
+def test_connection_loss_has_epoch_coalesced_reserved_admission() -> None:
+    mailbox = SessionMailbox(lifecycle_capacity=1)
+    normal_lifecycle = mailbox.publish(
+        ConnectionReplaced(1),
+        origin=EventOrigin.LIFECYCLE,
+        traffic=TrafficClass.LIFECYCLE,
+    )
+    mailbox.publish(
+        ConnectionLost(1),
+        origin=EventOrigin.LIFECYCLE,
+        traffic=TrafficClass.LIFECYCLE,
+    )
+    latest = mailbox.publish(
+        ConnectionLost(2),
+        origin=EventOrigin.LIFECYCLE,
+        traffic=TrafficClass.LIFECYCLE,
+    )
+
+    assert mailbox.receive_ready() == (normal_lifecycle, latest)
+
+
+def test_mailbox_coalesces_only_the_closed_input_allowlist() -> None:
+    mailbox = SessionMailbox()
+    first_mouse = mailbox.publish(
+        RawMpvEvent("mouse-pos", {"x": 1}),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+        connection_epoch=1,
+    )
+    latest_mouse = mailbox.publish(
+        RawMpvEvent("mouse-pos", {"x": 2}),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+        connection_epoch=1,
+    )
+    property_change = mailbox.publish(
+        RawMpvEvent("property-change", {"name": "sub-text"}),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+        connection_epoch=1,
+    )
+
+    assert mailbox.receive_ready() == (latest_mouse, property_change)
+    assert first_mouse.sequence < latest_mouse.sequence
+
+
+def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
+    mailbox = SessionMailbox()
+    first = mailbox.publish(
+        RawMpvEvent("mouse-pos", {"x": 1}),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+    )
+    second = mailbox.publish(
+        RawMpvEvent("mouse-pos", {"x": 2}),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+    )
+
+    assert mailbox.receive_ready(limit=1) == (first,)
+    assert mailbox.receive_ready(limit=1) == (second,)
 
 
 def test_terminal_reservation_survives_normal_lane_saturation() -> None:
@@ -178,6 +293,25 @@ def test_closed_mailbox_rejects_an_outstanding_terminal_reservation() -> None:
     assert mailbox.snapshot.terminal_reserved == 0
 
 
+def test_closed_mailbox_rejects_reserved_lifecycle_signals() -> None:
+    mailbox = SessionMailbox()
+    mailbox.close()
+
+    for payload in (CloseRequested(), ConnectionLost(1)):
+        try:
+            mailbox.publish(
+                payload,
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=1,
+            )
+        except MailboxFull as error:
+            assert str(error) == "mailbox is closed"
+        else:  # pragma: no cover - closed lifecycle contract
+            raise AssertionError("closed mailbox accepted lifecycle work")
+    assert mailbox.receive(timeout=0) is None
+
+
 def test_named_timer_fires_once_and_cancel_is_terminal() -> None:
     scheduler = TimerScheduler()
     first = ScheduleTimer(EffectId(1), Owner.INTERACTION, "hover:1", "hover-dwell", 5.0)
@@ -197,6 +331,98 @@ def test_named_timer_fires_once_and_cancel_is_terminal() -> None:
     assert scheduler.pop_due(100.0) == ()
 
 
+@dataclass(frozen=True, slots=True)
+class FeatureState:
+    values: tuple[str, ...] = ()
+
+
+def test_composed_reducer_propagates_internal_events_fifo_and_commits_atomically() -> None:
+    seen_committed: list[SessionState] = []
+
+    def playback(state: object, event: RuntimeEvent) -> ReduceResult:
+        assert isinstance(state, FeatureState)
+        assert isinstance(event, RawMpvEvent)
+        next_state = replace(state, values=(*state.values, event.name))
+        return ReduceResult(
+            next_state,
+            (
+                RoutedEvent(Owner.SUBTITLE, UserCommand("first")),
+                RoutedEvent(Owner.SUBTITLE, UserCommand("second")),
+            ),
+        )
+
+    def subtitle(state: object, event: RuntimeEvent) -> ReduceResult:
+        assert isinstance(state, FeatureState)
+        assert isinstance(event, UserCommand)
+        seen_committed.append(initial)
+        return ReduceResult(replace(state, values=(*state.values, event.name)))
+
+    initial = SessionState(
+        FeatureState(), FeatureState(), FeatureState(), FeatureState(), FeatureState()
+    )
+    reducer = SessionReducer(
+        {
+            RouteKey(RawMpvEvent, Owner.PLAYBACK): playback,
+            RouteKey(UserCommand, Owner.SUBTITLE): subtitle,
+        }
+    )
+
+    result = reducer.reduce_turn(initial, RoutedEvent(Owner.PLAYBACK, RawMpvEvent("observed")))
+
+    assert result.state.playback == FeatureState(("observed",))
+    assert result.state.subtitle == FeatureState(("first", "second"))
+    assert seen_committed == [initial, initial]
+
+
+def test_composed_reducer_rejects_unowned_route() -> None:
+    initial = SessionState(None, None, None, None, None)
+    reducer = SessionReducer({})
+
+    try:
+        reducer.reduce_turn(initial, RoutedEvent(Owner.SUBTITLE, RawMpvEvent("wrong-owner")))
+    except RouteError as error:
+        assert str(error) == "no reducer for subtitle:RawMpvEvent"
+    else:  # pragma: no cover - closed routing contract
+        raise AssertionError("unowned route was accepted")
+
+
+def test_composed_reducer_fails_closed_on_internal_event_cycle() -> None:
+    def cycle(state: object, event: RuntimeEvent) -> ReduceResult:
+        return ReduceResult(state, (RoutedEvent(Owner.SESSION, event),))
+
+    initial = SessionState(None, None, None, None, None)
+    reducer = SessionReducer({RouteKey(UserCommand, Owner.SESSION): cycle}, max_internal_events=2)
+
+    try:
+        reducer.reduce_turn(initial, RoutedEvent(Owner.SESSION, UserCommand("cycle")))
+    except RuntimeError as error:
+        assert str(error) == "runtime internal-event limit exceeded"
+    else:  # pragma: no cover - quiescence contract
+        raise AssertionError("internal event cycle was not bounded")
+
+
+def test_runtime_limits_reject_nonpositive_resource_bound() -> None:
+    try:
+        RuntimeLimits(mailbox_turn=0)
+    except ValueError as error:
+        assert str(error) == "runtime limits must be positive"
+    else:  # pragma: no cover - resource policy contract
+        raise AssertionError("zero runtime limit was accepted")
+
+
+def test_runtime_diagnostics_reject_text_bearing_labels() -> None:
+    try:
+        DiagnosticRecord(
+            DiagnosticKind.DEGRADATION_TRANSITION,
+            Owner.SUBTITLE,
+            reason="provider exception includes user text",
+        )
+    except ValueError as error:
+        assert str(error) == "diagnostic labels must be bounded identifiers"
+    else:  # pragma: no cover - privacy contract
+        raise AssertionError("free-form diagnostic label was accepted")
+
+
 def test_timer_rejects_non_finite_deadline_and_clock() -> None:
     try:
         ScheduleTimer(EffectId(1), Owner.SESSION, "session", "deadline", float("nan"))
@@ -212,6 +438,68 @@ def test_timer_rejects_non_finite_deadline_and_clock() -> None:
         assert str(error) == "timer clock must be finite and non-negative"
     else:  # pragma: no cover - clock contract
         raise AssertionError("non-finite clock was accepted")
+
+
+def test_target_completion_cancels_its_distinct_deadline_child() -> None:
+    registry = DeadlineRegistry()
+    identity = EffectDeadline(EffectId(10), 5.0)
+    timer = ScheduleTimer(EffectId(11), Owner.SESSION, identity, "effect:10", 5.0)
+    registry.register(EffectId(10), timer)
+
+    control = registry.target_finished(
+        EffectFinished(EffectId(10), Owner.SUBTITLE, "cue", EffectOutcome.SUCCEEDED)
+    )
+
+    assert control == CancelEffect(EffectId(11), Owner.SESSION, identity)
+    assert (
+        registry.timer_finished(
+            EffectFinished(EffectId(11), Owner.SESSION, identity, EffectOutcome.CANCELLED)
+        )
+        is None
+    )
+
+
+def test_due_deadline_expires_only_its_target_effect() -> None:
+    registry = DeadlineRegistry()
+    identity = EffectDeadline(EffectId(20), 8.0)
+    timer = ScheduleTimer(EffectId(21), Owner.SESSION, identity, "effect:20", 8.0)
+    registry.register(EffectId(20), timer)
+
+    control = registry.timer_finished(
+        EffectFinished(EffectId(21), Owner.SESSION, identity, EffectOutcome.SUCCEEDED)
+    )
+
+    assert control == ExpireEffect(EffectId(20), 8.0)
+    assert (
+        registry.target_finished(
+            EffectFinished(
+                EffectId(20),
+                Owner.SUBTITLE,
+                "cue",
+                EffectOutcome.FAILED,
+                error=EffectError.TIMEOUT,
+            )
+        )
+        is None
+    )
+
+
+def test_deadline_registry_rejects_aliased_parent_child_identity() -> None:
+    registry = DeadlineRegistry()
+    timer = ScheduleTimer(
+        EffectId(30),
+        Owner.SESSION,
+        EffectDeadline(EffectId(30), 1.0),
+        "effect:30",
+        1.0,
+    )
+
+    try:
+        registry.register(EffectId(30), timer)
+    except ValueError as error:
+        assert str(error) == "deadline timer must have a distinct effect ID"
+    else:  # pragma: no cover - parent/child lifecycle contract
+        raise AssertionError("deadline reused its target effect ID")
 
 
 def test_reactor_delivers_exactly_one_terminal_outcome() -> None:

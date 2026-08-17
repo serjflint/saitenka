@@ -23,6 +23,11 @@ class ConnectionReplaced:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectionLost:
+    connection_epoch: int
+
+
+@dataclass(frozen=True, slots=True)
 class CloseRequested:
     reason: str = "requested"
 
@@ -58,7 +63,27 @@ class EffectFinished:
             raise ValueError("only failed or rejected effects carry an error code")
 
 
-type RuntimeEvent = ConnectionReplaced | CloseRequested | RawMpvEvent | UserCommand | EffectFinished
+@dataclass(frozen=True, slots=True)
+class EffectOutcomeEvent:
+    """Ledger-validated completion delivered to its recorded feature owner."""
+
+    effect_id: EffectId
+    owner: Owner
+    identity: object
+    outcome: EffectOutcome
+    result: object = None
+    error: EffectError | None = None
+
+
+type RuntimeEvent = (
+    ConnectionLost
+    | ConnectionReplaced
+    | CloseRequested
+    | RawMpvEvent
+    | UserCommand
+    | EffectFinished
+    | EffectOutcomeEvent
+)
 
 
 @dataclass(frozen=True, slots=True)

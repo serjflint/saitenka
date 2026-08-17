@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka.runtime.effects import (
     AsyncEffect,
+    CancelEffect,
+    CoreControl,
     Effect,
     EffectError,
     EffectId,
     EffectOutcome,
     EmitDiagnostic,
+    ExpireEffect,
     StopSession,
 )
 from saitenka.runtime.events import (
@@ -43,6 +46,10 @@ class EffectDispatcher(Protocol):
     def __call__(self, effect: AsyncEffect, /) -> bool: ...
 
 
+class ControlDispatcher(Protocol):
+    def __call__(self, control: CoreControl, /) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ReactorSnapshot[StateT]:
     state: StateT
@@ -62,12 +69,14 @@ class SessionReactor[StateT]:
         dispatch: EffectDispatcher,
         *,
         diagnostics: Callable[[EmitDiagnostic], None] | None = None,
+        control: ControlDispatcher | None = None,
     ) -> None:
         self._state = state
         self._reducer = reducer
         self._mailbox = mailbox
         self._dispatch = dispatch
         self._diagnostics = diagnostics
+        self._control = control
         self._lifecycle = Lifecycle.OPEN
         self._connection_epoch = 0
         self._pending: dict[EffectId, AsyncEffect] = {}
@@ -154,6 +163,10 @@ class SessionReactor[StateT]:
             return
         if isinstance(effect, StopSession):
             self.close()
+            return
+        if isinstance(effect, (CancelEffect, ExpireEffect)):
+            if self._control is not None:
+                self._control(effect)
             return
         async_effect = effect
         if async_effect.effect_id.value <= self._highest_effect_id:

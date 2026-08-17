@@ -279,6 +279,9 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         except TimeoutError as e:
             print(f"could not attach to mpv IPC at {sock}: {e}", file=sys.stderr)
             return 2
+    from saitenka.mpvio.gateway import install_legacy_gateway
+
+    install_legacy_gateway(ipc)
 
     from saitenka.app.subselect import AttachSubtitleOptions, prepare_attach_startup
     from saitenka.app.subtitle_providers import enabled_providers_for

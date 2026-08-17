@@ -411,15 +411,12 @@ def test_command_submitted_during_reconnect_cannot_cross_connection_epochs():
         target=lambda: submitted.append(ipc.command_async("show-text", "late", 1))
     )
     submit_thread.start()
-    deadline = time.monotonic() + 1
-    while not submitted and not ipc._pending and time.monotonic() < deadline:
-        time.sleep(0.001)
-    assert submitted or ipc._pending
+    assert not submitted
     gate.release.set()
     submit_thread.join(2)
     reconnect_thread.join(2)
 
-    assert submitted[0].future.result(timeout=1) == {"error": "disconnected"}
+    assert submitted[0].future.result(timeout=1) == {"error": "stale-epoch"}
     assert replacement.commands == [["get_property", "pid"]]
     assert reconnected == [True]
     ipc.close()

@@ -461,6 +461,9 @@ def _launch_mpv_and_connect(
 
             kill_process_tree(proc)
             return None, None, None
+    from saitenka.mpvio.gateway import install_legacy_gateway
+
+    install_legacy_gateway(ipc)
     # Immediate feedback for the file-load wait: our overlay isn't built yet and the next steps block
     # the main thread on mpv, so mpv's own OSD is the only surface that can show anything here.
     from saitenka.app.loading import show_startup_hint
