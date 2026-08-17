@@ -503,7 +503,7 @@ def load_deps_async(
 def apply_deps(reader: Reader, deps: dict) -> None:
     """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
     reader._loading = False
-    reader.ov.hide(OverlayId.LOADING)
+    reader.lifecycle_surfaces.remove(OverlayId.LOADING)
     if reader._anki_capability is not None:
         reader._anki_capability.close()
     reader._mined_seed_generation += 1
@@ -548,6 +548,6 @@ def draw_loading(reader: Reader) -> None:
     img = loading_image("saitenka loading dictionaries", reader._load_frame)
     reader._load_frame += 1
     try:
-        reader.ov.show(img, x=24, y=24, oid=OverlayId.LOADING)
+        reader.lifecycle_surfaces.present(img, 24, 24, oid=OverlayId.LOADING)
     except Exception:
         log.debug("loading spinner draw failed", exc_info=True)

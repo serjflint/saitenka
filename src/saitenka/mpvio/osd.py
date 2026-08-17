@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,9 +24,18 @@ if TYPE_CHECKING:
 
     from saitenka.mpvio.ipc import MpvIPC
 
-__all__ = ["Overlay", "to_bgra", "to_bgra_array"]
+__all__ = ["Overlay", "PreparedOverlay", "to_bgra", "to_bgra_array"]
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedOverlay:
+    oid: int
+    path: Path
+    tail: tuple[object, ...]
+    command: tuple[object, ...]
+
 
 # Overlay ids we've already warned about, so a per-tick redraw (spinner/subtitle) can't flood the log.
 _warned_oids: set[int] = set()
@@ -138,6 +148,114 @@ class Overlay:
         self._interaction_presenter = _InteractionPresenter()
         self._defer_interaction = _defer_interaction_for(ipc)
         self._interaction_oids: set[int] = set()
+        self.lifecycle_oids: set[int] = set()
+        self._staged_lifecycle_paths: set[Path] = set()
+        self._lifecycle_lock = threading.Lock()
+        self._compat_effect_id = 1_000_000
+
+    def next_compat_effect_id(self):
+        from saitenka.runtime import EffectId
+
+        effect_id = EffectId(self._compat_effect_id)
+        self._compat_effect_id += 1
+        return effect_id
+
+    def submit_surface_transaction(
+        self, *, owner, identity, command: tuple[object, ...], on_finished
+    ) -> None:
+        from saitenka.runtime import EffectError, EffectFinished, EffectOutcome
+
+        submit = getattr(self.ipc, "submit_runtime_mpv", None)
+        if submit is not None:
+            accepted = submit(
+                owner=owner,
+                identity=identity,
+                command=command,
+                timeout_s=10.0,
+                on_finished=on_finished,
+            )
+            if accepted:
+                return
+            reply = {"error": "disconnected"}
+        elif not isinstance(command[1], int):
+            raise ValueError("surface command requires an integer overlay id")
+        elif command[0] == "overlay-add":
+            reply = self._add(command[1], tuple(command[2:]))
+        else:
+            logical_oid = command[1] - (self.id_base - 1)
+            reply = self.hide(logical_oid)
+        succeeded = reply.get("error") in {None, "success"}
+        on_finished(
+            EffectFinished(
+                self.next_compat_effect_id(),
+                owner,
+                identity,
+                EffectOutcome.SUCCEEDED if succeeded else EffectOutcome.FAILED,
+                error=None if succeeded else EffectError.INVALID_RESULT,
+            )
+        )
+
+    def physical_oid(self, oid: int) -> int:
+        return self._oid(oid)
+
+    def prepare(
+        self, img: Image.Image, x: int = 0, y: int = 0, *, oid: int = 0, revision: int
+    ) -> PreparedOverlay:
+        physical_oid = self._oid(oid)
+        data, w, h, stride = to_bgra(img)
+        with tempfile.NamedTemporaryFile(
+            prefix=f"saitenka-osd-{physical_oid}-r{revision}-",
+            suffix=".bgra",
+            delete=False,
+        ) as staged:
+            path = Path(staged.name)
+        try:
+            path.write_bytes(data)
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        tail: tuple[object, ...] = (int(x), int(y), str(path), 0, "bgra", w, h, stride)
+        with self._lifecycle_lock:
+            self.lifecycle_oids.add(oid)
+            self._staged_lifecycle_paths.add(path)
+        return PreparedOverlay(
+            physical_oid,
+            path,
+            tail,
+            ("overlay-add", physical_oid, *tail),
+        )
+
+    def commit_prepared(self, prepared: PreparedOverlay) -> None:
+        with self._lifecycle_lock:
+            previous = self._files.get(prepared.oid)
+            self._files[prepared.oid] = prepared.path
+            self._staged_lifecycle_paths.discard(prepared.path)
+            self._live[prepared.oid] = prepared.tail
+            self.ops += 1
+        if previous is not None and previous != prepared.path:
+            previous.unlink(missing_ok=True)
+
+    def discard_prepared(self, prepared: PreparedOverlay) -> None:
+        with self._lifecycle_lock:
+            if self._files.get(prepared.oid) == prepared.path:
+                return
+            self._staged_lifecycle_paths.discard(prepared.path)
+        prepared.path.unlink(missing_ok=True)
+
+    def commit_remove(self, oid: int) -> None:
+        physical_oid = self._oid(oid)
+        with self._lifecycle_lock:
+            self._live.pop(physical_oid, None)
+            self.ops += 1
+            path = self._files.pop(physical_oid, None)
+            self.lifecycle_oids.discard(oid)
+        if path is not None and path.exists():
+            path.unlink()
+
+    def remove_lifecycle_now(self, oid: int) -> dict:
+        """Synchronously place a final remove behind any queued add before detaching from mpv."""
+        physical_oid = self._oid(oid)
+        return self.ipc.command("overlay-remove", physical_oid)
 
     def _oid(self, oid: int) -> int:
         """Map a logical overlay id (1-based) to the configured physical range."""
@@ -281,3 +399,7 @@ class Overlay:
                 self.hide(oid)
             except Exception:
                 log.debug("overlay hide on close failed", exc_info=True)
+        with self._lifecycle_lock:
+            staged, self._staged_lifecycle_paths = self._staged_lifecycle_paths, set()
+        for path in staged:
+            path.unlink(missing_ok=True)

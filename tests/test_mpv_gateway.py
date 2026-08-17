@@ -22,6 +22,8 @@ from saitenka.runtime import (
     RawMpvEvent,
     SendMpvCommand,
     SessionMailbox,
+    SurfaceAction,
+    SurfaceTransaction,
     TrafficClass,
     UserCommand,
 )
@@ -86,6 +88,17 @@ def command(effect_id: int, *, deadline: float = 5.0) -> SendMpvCommand:
         f"command:{effect_id}",
         ("get_property", "pause"),
         deadline,
+        0,
+    )
+
+
+def surface_command(effect_id: int, revision: int) -> SendMpvCommand:
+    return SendMpvCommand(
+        EffectId(effect_id),
+        Owner.PRESENTATION,
+        SurfaceTransaction("toast", revision, SurfaceAction.PRESENT),
+        ("overlay-add", 2, "pixels"),
+        5.0,
         0,
     )
 
@@ -287,6 +300,29 @@ def test_gateway_reply_completes_the_reserved_runtime_effect() -> None:
         result=True,
     )
     assert gateway.snapshot.pending == 0
+
+
+def test_gateway_supersedes_older_surface_revision_before_wire_write() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    gateway = MpvGateway(ipc, mailbox, clock=Clock())
+    newer = surface_command(10, 2)
+    older = surface_command(11, 1)
+    assert mailbox.reserve_terminal(newer.effect_id)
+    assert mailbox.reserve_terminal(older.effect_id)
+
+    assert gateway.dispatch(newer)
+    assert gateway.dispatch(older)
+
+    assert len(ipc.requests) == 1
+    envelope = mailbox.receive(timeout=0)
+    assert envelope is not None
+    assert envelope.payload == EffectFinished(
+        older.effect_id,
+        older.owner,
+        older.identity,
+        EffectOutcome.SUPERSEDED,
+    )
 
 
 def test_reply_after_recorded_deadline_is_timeout() -> None:

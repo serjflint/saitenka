@@ -22,6 +22,7 @@ from saitenka.runtime import (
     RuntimeEvent,
     SendMpvCommand,
     SessionMailbox,
+    SurfaceTransaction,
     TrafficClass,
     UserCommand,
 )
@@ -85,6 +86,8 @@ class MpvGateway:
         self._mailbox = mailbox
         self._clock = clock
         self._lock = threading.Lock()
+        self._surface_lock = threading.Lock()
+        self._surface_revisions: dict[str, int] = {}
         self._pending: dict[int, tuple[SendMpvCommand, IPCRequest]] = {}
         self._connection_epoch = 0
         self._next_command_id = 0
@@ -111,6 +114,10 @@ class MpvGateway:
     def legacy(self) -> LegacyRuntimeBridge:
         return self._legacy
 
+    def submit_mpv(self, **kwargs) -> bool:
+        """Submit one correlated command for a compatibility-owned runtime slice."""
+        return self._legacy.submit_mpv(**kwargs)
+
     @property
     def snapshot(self) -> GatewaySnapshot:
         with self._lock:
@@ -123,6 +130,20 @@ class MpvGateway:
             )
 
     def dispatch(self, effect: SendMpvCommand) -> bool:
+        identity = effect.identity
+        if isinstance(identity, SurfaceTransaction):
+            # Serialize admission through command_async so an older revision can never be queued
+            # behind a newer write for the same stable mpv overlay slot.
+            with self._surface_lock:
+                latest = self._surface_revisions.get(identity.slot, 0)
+                if identity.revision <= latest:
+                    self._publish_terminal(effect, EffectOutcome.SUPERSEDED)
+                    return True
+                self._surface_revisions[identity.slot] = identity.revision
+                return self._dispatch_current(effect)
+        return self._dispatch_current(effect)
+
+    def _dispatch_current(self, effect: SendMpvCommand) -> bool:
         with self._lock:
             if effect.connection_epoch != self._connection_epoch:
                 return False

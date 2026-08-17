@@ -46,6 +46,14 @@ from saitenka.runtime.state import (
     SessionState,
     TurnResult,
 )
+from saitenka.runtime.surfaces import (
+    SurfaceAction,
+    SurfaceRuntime,
+    SurfaceSnapshot,
+    SurfaceStatus,
+    SurfaceTransaction,
+    SurfaceTransactionOutcome,
+)
 from saitenka.runtime.timers import TimerScheduler
 
 __all__ = [
@@ -91,6 +99,12 @@ __all__ = [
     "SessionState",
     "StopSession",
     "SubmitJob",
+    "SurfaceAction",
+    "SurfaceRuntime",
+    "SurfaceSnapshot",
+    "SurfaceStatus",
+    "SurfaceTransaction",
+    "SurfaceTransactionOutcome",
     "TimerScheduler",
     "TrafficClass",
     "TurnResult",

@@ -35,6 +35,8 @@ if TYPE_CHECKING:
     class RuntimeGateway(Protocol):
         def publish_legacy_outcome(self, outcome: CommandHandled) -> None: ...
 
+        def submit_mpv(self, **kwargs) -> bool: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -519,6 +521,12 @@ class MpvIPC:
         gateway = self._runtime_gateway
         if gateway is not None:
             gateway.publish_legacy_outcome(outcome)
+
+    def submit_runtime_mpv(self, **kwargs) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.submit_mpv(**kwargs)
 
     def close(self) -> None:
         with self._write_lock:
