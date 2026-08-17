@@ -118,6 +118,12 @@ class MpvGateway:
         """Submit one correlated command for a compatibility-owned runtime slice."""
         return self._legacy.submit_mpv(**kwargs)
 
+    def schedule_timer(self, **kwargs) -> bool:
+        return self._legacy.schedule_timer(**kwargs)
+
+    def cancel_timer(self, timer: str) -> bool:
+        return self._legacy.cancel_timer(timer)
+
     @property
     def snapshot(self) -> GatewaySnapshot:
         with self._lock:

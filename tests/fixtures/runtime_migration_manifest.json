@@ -322,19 +322,7 @@
     ],
     [
       "polled-deadline",
-      "src/saitenka/app/controller.py::Reader.__init__"
-    ],
-    [
-      "polled-deadline",
       "src/saitenka/app/controller.py::Reader._expire_flash"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._expire_toast"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._maybe_log_stall"
     ],
     [
       "polled-deadline",
@@ -346,19 +334,11 @@
     ],
     [
       "polled-deadline",
-      "src/saitenka/app/controller.py::Reader._toast"
-    ],
-    [
-      "polled-deadline",
       "src/saitenka/app/popups.py::TooltipState.__init__"
     ],
     [
       "polled-deadline",
       "src/saitenka/app/reader_context.py::EpisodeContext.__init__"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/reader_deps.py::draw_loading"
     ],
     [
       "polled-deadline",
@@ -1803,8 +1783,7 @@
       "evidence": [
         "call:telemetry.set_gauge_provider",
         "call:self._announce_runtime",
-        "ref:self._run_started",
-        "ref:self._stall_warned"
+        "call:self.lifecycle_timers.schedule"
       ],
       "target": "lifecycle-diagnostics",
       "work_package": "2",

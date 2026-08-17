@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from concurrent.futures import Future
 from typing import TYPE_CHECKING
 
@@ -485,17 +484,18 @@ def begin_deps_build(cfg: dict, build=None) -> Future[dict]:
 def load_deps_async(
     reader: Reader, cfg: dict, build=None, *, prebuilt: Future[dict] | None = None
 ) -> None:
-    """Wire a background dep build into the reader: when it lands, the poll loop injects it on the main
-    thread (:func:`apply_deps`). Plain subs draw meanwhile; a spinner shows until it lands.
+    """Wire a background dep build into the reader: when it lands, the session turn injects it on the
+    main thread (:func:`apply_deps`). Plain subs draw meanwhile; a named timer animates the spinner.
 
     ``prebuilt`` is a Future from a HOISTED :func:`begin_deps_build` (``run`` starts the build before
     mpv launches so it overlaps launch dead time); without it the build starts now (attach/plugin mode,
     already well past mpv connect). The done-callback sets ``_pending_deps`` from the build thread — the
-    same cross-thread hand-off to the poll loop the previous inline version used.
+    same cross-thread hand-off consumed by the session turn.
 
     Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
     reader._loading = True
     reader._enable_async_annotation()
+    reader._schedule_loading_frame(delay_s=0.0)
     fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
     fut.add_done_callback(lambda f: setattr(reader, "_pending_deps", f.result()))
 
@@ -503,6 +503,9 @@ def load_deps_async(
 def apply_deps(reader: Reader, deps: dict) -> None:
     """Inject loaded deps on the main thread and light up coloring/tooltips/mining in place."""
     reader._loading = False
+    from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+    reader.lifecycle_timers.cancel(LifecycleTimerKind.LOADING_FRAME)
     reader.lifecycle_surfaces.remove(OverlayId.LOADING)
     if reader._anki_capability is not None:
         reader._anki_capability.close()
@@ -538,11 +541,7 @@ def apply_deps(reader: Reader, deps: dict) -> None:
 
 
 def draw_loading(reader: Reader) -> None:
-    """Draw the throttled top-left spinner while deps load (main thread, from the poll loop)."""
-    now = time.monotonic()
-    if now < reader._load_next:
-        return
-    reader._load_next = now + 0.08
+    """Draw one top-left spinner frame after its named timer becomes due."""
     from saitenka.app.loading import loading_image
 
     img = loading_image("saitenka loading dictionaries", reader._load_frame)

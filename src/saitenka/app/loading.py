@@ -1,8 +1,7 @@
 """The top-left "loading" spinner shown while dictionaries + scorer load (progressive startup).
 
-Just a bitmap frame builder — the controller drives it from its own poll loop (it owns the mpv IPC
-once running, so there's no separate thread to race it), drawing plain subtitles immediately and
-swapping in FSRS coloring + tooltips + mining once the background load finishes.
+Just a bitmap frame builder. A named lifecycle timer advances it on the session thread while plain
+subtitles remain usable; FSRS coloring, tooltips, and mining appear when background loading finishes.
 """
 
 from __future__ import annotations
