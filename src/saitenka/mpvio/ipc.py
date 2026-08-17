@@ -28,6 +28,13 @@ from saitenka.mpvio.transport import NamedPipeTransport, Transport, UnixSocketTr
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import Protocol
+
+    from saitenka.runtime import CommandHandled
+
+    class RuntimeGateway(Protocol):
+        def publish_legacy_outcome(self, outcome: CommandHandled) -> None: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -108,8 +115,8 @@ class MpvIPC:
         self._events_lock = threading.Lock()
         self._event_sink: Callable[[dict, int], None] | None = None
         self._connection_sink: Callable[[str, int], None] | None = None
-        self._legacy_event_source: Callable[[], list[dict]] | None = None
-        self._runtime_gateway: object | None = None
+        self._legacy_event_source: Callable[[], list[object]] | None = None
+        self._runtime_gateway: RuntimeGateway | None = None
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
@@ -482,20 +489,21 @@ class MpvIPC:
             return False
         return True
 
-    def drain_events(self) -> list[dict]:
+    def drain_events(self) -> list[object]:
         """Return and clear buffered async events (collected by the reader thread)."""
         if self._legacy_event_source is not None:
             return self._legacy_event_source()
         with self._events_lock:
-            evs, self._events = self._events, []
+            buffered, self._events = self._events, []
+            evs: list[object] = list(buffered)
         return evs
 
     def install_runtime_ingress(
         self,
         event_sink: Callable[[dict, int], None],
         connection_sink: Callable[[str, int], None],
-        legacy_event_source: Callable[[], list[dict]],
-        gateway: object,
+        legacy_event_source: Callable[[], list[object]],
+        gateway: RuntimeGateway,
     ) -> None:
         """Switch event ownership to a mailbox while the legacy consumer still drives policy."""
         with self._events_lock:
@@ -506,6 +514,11 @@ class MpvIPC:
             self._connection_sink = connection_sink
             self._legacy_event_source = legacy_event_source
             self._runtime_gateway = gateway
+
+    def publish_legacy_command_outcome(self, outcome: CommandHandled) -> None:
+        gateway = self._runtime_gateway
+        if gateway is not None:
+            gateway.publish_legacy_outcome(outcome)
 
     def close(self) -> None:
         with self._write_lock:

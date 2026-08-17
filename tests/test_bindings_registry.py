@@ -74,6 +74,66 @@ def test_binding_messages_and_handlers_correspond_exactly():
     assert not orphan, f"command handlers no binding can reach (dead handler / message): {orphan}"
 
 
+def test_every_temporary_command_binding_has_one_deletion_owner():
+    commands = Reader(FakeIPC()).commands
+    bindings = dict(commands.bindings)
+    actual = {
+        spec.name: (
+            spec.owner.value,
+            spec.requires_cue,
+            spec.allowed_while_help_open,
+            bindings[spec.name],
+        )
+        for spec in commands.policy.specs
+    }
+    expected = {
+        row[0]: (row[1], row[2] == "cue", row[3] == "help", row[4])
+        for line in _COMMAND_ROUTE_CONTRACT.splitlines()
+        if (row := line.split("|"))
+    }
+
+    assert actual == expected
+
+
+_COMMAND_ROUTE_CONTRACT = """\
+saitenka-toggle-overlay|session|global|modal|work-package-5
+saitenka-cycle-profile|session|global|modal|work-package-5
+saitenka-toggle-hover-pause|session|global|modal|work-package-5
+saitenka-toggle-help|session|global|help|work-package-5
+saitenka-help-prev|session|global|help|work-package-5
+saitenka-help-next|session|global|help|work-package-5
+saitenka-help-close|session|global|help|work-package-5
+saitenka-toggle-subtitle-language|playback|global|modal|work-package-4
+saitenka-mark-subtitle-japanese|playback|global|modal|work-package-4
+saitenka-retry-subtitle-providers|playback|global|modal|work-package-4
+saitenka-translate|subtitle|cue|modal|work-package-4
+saitenka-toggle-annotations|subtitle|global|modal|work-package-4
+saitenka-copy-line|subtitle|cue|modal|work-package-4
+saitenka-sub-prev|subtitle|cue|modal|work-package-4
+saitenka-sub-next|subtitle|cue|modal|work-package-4
+saitenka-sub-replay|subtitle|cue|modal|work-package-4
+saitenka-sub-anchor|subtitle|global|modal|work-package-4
+saitenka-mine|interaction|cue|modal|work-package-5
+saitenka-mine-video|interaction|cue|modal|work-package-5
+saitenka-mine-all|interaction|cue|modal|work-package-5
+saitenka-toggle-bookmark|interaction|cue|modal|work-package-5
+saitenka-toggle-sidebar|interaction|global|modal|work-package-5
+saitenka-toggle-analysis|interaction|global|modal|work-package-5
+saitenka-preview|interaction|cue|modal|work-package-5
+saitenka-preview-close|interaction|global|modal|work-package-5
+saitenka-scroll-up|interaction|global|help|work-package-5
+saitenka-scroll-down|interaction|global|help|work-package-5
+saitenka-speak|interaction|cue|modal|work-package-5
+saitenka-copy|interaction|cue|modal|work-package-5
+saitenka-copy-click|interaction|cue|modal|work-package-5
+saitenka-click|interaction|cue|modal|work-package-5
+saitenka-kanji|interaction|cue|modal|work-package-5
+saitenka-tip-up|interaction|global|modal|work-package-5
+saitenka-tip-down|interaction|global|modal|work-package-5
+saitenka-tip-close|interaction|global|modal|work-package-5
+saitenka-sub-picker|interaction|global|modal|work-package-5"""
+
+
 # --- firing: a press actually runs the bound action -----------------------------------------------
 
 

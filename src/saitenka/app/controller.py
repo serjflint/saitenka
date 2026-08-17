@@ -53,7 +53,6 @@ from saitenka.app.bindings import (
     COPY_LINE_MSG,
     COPY_MSG,
     HELP_CLOSE_MSG,
-    HELP_MESSAGES,
     HELP_NEXT_MSG,
     HELP_PREV_MSG,
     HELP_TOGGLE_MSG,
@@ -103,7 +102,16 @@ from saitenka.app.reader_context import (
     RenderCacheState,
     SessionContext,
 )
-from saitenka.app.runtime import CommandRouter, TickPipeline, TickStage
+from saitenka.app.runtime import (
+    CommandExecution,
+    CommandOutcome,
+    CueCommandState,
+    LegacyCommandBinding,
+    LegacyCommandExecutor,
+    LegacyPickerRepeatGuard,
+    TickPipeline,
+    TickStage,
+)
 from saitenka.app.subtitle_pipeline import (
     CurrentSubtitleRenderer,
     SubtitleGeometryWorker,
@@ -115,6 +123,7 @@ from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import Tokenizer, get_tokenizer
 from saitenka.mpvio.osd import Overlay
+from saitenka.runtime import CommandHandled, UserCommand
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
@@ -193,32 +202,6 @@ _GEOMETRY_PROPS = frozenset(
     }
 )
 _CUE_IDENTITY_PROPS = frozenset({"sub-text", "sub-start", "sub-end", "sid"})
-_CUE_INDEPENDENT_MESSAGES = frozenset(
-    {
-        HELP_TOGGLE_MSG,
-        HELP_PREV_MSG,
-        HELP_NEXT_MSG,
-        HELP_CLOSE_MSG,
-        OVERLAY_TOGGLE_MSG,
-        SUBTITLE_LANGUAGE_MSG,
-        SUBTITLE_MARK_JP_MSG,
-        SUBTITLE_RETRY_MSG,
-        PROFILE_CYCLE_MSG,
-        HOVER_PAUSE_MSG,
-        SIDEBAR_MSG,
-        SUB_PICKER_MSG,
-        ANALYSIS_MSG,
-        ANNOTATION_MSG,
-        PREVIEW_CLOSE_MSG,
-        SCROLL_UP_MSG,
-        SCROLL_DOWN_MSG,
-        TIP_CLOSE_MSG,
-        TIP_UP_MSG,
-        TIP_DOWN_MSG,
-        SUB_ANCHOR_MSG,
-    }
-)
-
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
 _SCALE_BUCKET = 0.05
@@ -2139,7 +2122,7 @@ class Reader:
         self.ipc.command("set_property", "sub-delay", f"{new_delay:.3f}")
         self._toast(f"Subtitles anchored — delay {new_delay:+.1f}s")
 
-    def _build_command_router(self) -> CommandRouter:
+    def _build_command_router(self) -> LegacyCommandExecutor:
         """Assemble feature-owned actions once; handlers are bound and receive no god context."""
 
         def action(method_name: str) -> Callable[[], None]:
@@ -2153,64 +2136,101 @@ class Reader:
         def scroll(delta: int) -> Callable[[], None]:
             return lambda: self._scroll_tip(round(self._tip_ref_h * 0.12) * delta)
 
-        return CommandRouter(
+        def wheel(steps: int) -> Callable[[], None]:
+            def route() -> None:
+                surfaces.route_scroll(self, steps)
+
+            return route
+
+        handlers = {
+            MINE_MSG: action("mine_current"),
+            MINE_VIDEO_MSG: action("mine_current_video"),
+            MINE_ALL_MSG: action("bulk_mine"),
+            TRANS_MSG: action("toggle_translation"),
+            OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
+            SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
+            SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
+            SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
+            PROFILE_CYCLE_MSG: action("cycle_profile"),
+            HOVER_PAUSE_MSG: action("toggle_hover_pause"),
+            BOOKMARK_MSG: action("toggle_bookmark"),
+            SIDEBAR_MSG: action("toggle_sidebar"),
+            SUB_PICKER_MSG: action("toggle_sub_picker"),
+            ANALYSIS_MSG: action("toggle_analysis"),
+            ANNOTATION_MSG: action("toggle_annotation_mode"),
+            HELP_TOGGLE_MSG: action("toggle_help"),
+            HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
+            HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
+            HELP_CLOSE_MSG: lambda: help_overlay.close_help(self),
+            PREVIEW_MSG: action("replay_preview"),
+            PREVIEW_CLOSE_MSG: action("_hide_preview"),
+            SCROLL_UP_MSG: wheel(-1),
+            SCROLL_DOWN_MSG: wheel(1),
+            SPEAK_MSG: action("speak_hovered"),
+            COPY_MSG: action("copy_hovered"),
+            COPY_LINE_MSG: action("copy_line"),
+            COPY_CLICK_MSG: action("copy_click"),
+            CLICK_MSG: action("on_click"),
+            SUB_PREV_MSG: lambda: seek(-1),
+            SUB_NEXT_MSG: lambda: seek(1),
+            SUB_REPLAY_MSG: lambda: seek(0),
+            KANJI_MSG: action("kanji_current"),
+            TIP_UP_MSG: scroll(-1),
+            TIP_DOWN_MSG: scroll(1),
+            TIP_CLOSE_MSG: action("_tip_close_or_back"),
+            SUB_ANCHOR_MSG: action("_anchor_subtitles"),
+        }
+        subtitle_owned = {
+            TRANS_MSG,
+            SUBTITLE_LANGUAGE_MSG,
+            SUBTITLE_MARK_JP_MSG,
+            SUBTITLE_RETRY_MSG,
+            ANNOTATION_MSG,
+            COPY_LINE_MSG,
+            SUB_PREV_MSG,
+            SUB_NEXT_MSG,
+            SUB_REPLAY_MSG,
+            SUB_ANCHOR_MSG,
+        }
+        return LegacyCommandExecutor(
             {
-                MINE_MSG: action("mine_current"),
-                MINE_VIDEO_MSG: action("mine_current_video"),
-                MINE_ALL_MSG: action("bulk_mine"),
-                TRANS_MSG: action("toggle_translation"),
-                OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
-                SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
-                SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
-                SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
-                PROFILE_CYCLE_MSG: action("cycle_profile"),
-                HOVER_PAUSE_MSG: action("toggle_hover_pause"),
-                BOOKMARK_MSG: action("toggle_bookmark"),
-                SIDEBAR_MSG: action("toggle_sidebar"),
-                SUB_PICKER_MSG: action("toggle_sub_picker"),
-                ANALYSIS_MSG: action("toggle_analysis"),
-                ANNOTATION_MSG: action("toggle_annotation_mode"),
-                HELP_TOGGLE_MSG: action("toggle_help"),
-                HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
-                HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
-                HELP_CLOSE_MSG: lambda: help_overlay.close_help(self),
-                PREVIEW_MSG: action("replay_preview"),
-                PREVIEW_CLOSE_MSG: action("_hide_preview"),
-                SCROLL_UP_MSG: scroll(-1),
-                SCROLL_DOWN_MSG: scroll(1),
-                SPEAK_MSG: action("speak_hovered"),
-                COPY_MSG: action("copy_hovered"),
-                COPY_LINE_MSG: action("copy_line"),
-                COPY_CLICK_MSG: action("copy_click"),
-                CLICK_MSG: action("on_click"),
-                SUB_PREV_MSG: lambda: seek(-1),
-                SUB_NEXT_MSG: lambda: seek(1),
-                SUB_REPLAY_MSG: lambda: seek(0),
-                KANJI_MSG: action("kanji_current"),
-                TIP_UP_MSG: scroll(-1),
-                TIP_DOWN_MSG: scroll(1),
-                TIP_CLOSE_MSG: action("_tip_close_or_back"),
-                SUB_ANCHOR_MSG: action("_anchor_subtitles"),
-            },
-            cue_independent=_CUE_INDEPENDENT_MESSAGES,
+                name: LegacyCommandBinding(
+                    handler,
+                    "work-package-4" if name in subtitle_owned else "work-package-5",
+                )
+                for name, handler in handlers.items()
+            }
         )
 
-    def _handle(self, msg: str) -> None:
+    def _command_cue_state(self) -> CueCommandState:
+        if not self._cue_retired:
+            return CueCommandState.ACTIVE
+        if self._cue_identity_ever_installed:
+            return CueCommandState.RETIRED_AFTER_ACTIVE
+        return CueCommandState.NEVER_INSTALLED
+
+    def _handle(self, command: str | UserCommand) -> None:
         # Every saitenka script-message that reaches us (key- or mouse-driven) — the ground truth for
         # "did the keypress arrive". A shortcut that does nothing but never logs here never reached the
         # overlay (unregistered / shadowed by another mpv script or input.conf), vs. one that logs but
         # no-ops (a handler-side reason). Debug so it doesn't flood at info.
-        log.debug("script-message: %s", msg)
-        if self._help_open and msg not in HELP_MESSAGES:
-            return
-        if (
-            self.commands.requires_cue(msg)
-            and self._cue_retired
-            and self._cue_identity_ever_installed
-        ):
-            log.debug("script-message ignored while cue identity is retired: %s", msg)
-            return
-        self.commands.dispatch(msg)
+        if isinstance(command, str):
+            command = UserCommand(command)
+        log.debug("script-message: %s", command.name)
+        result = self.commands.dispatch(
+            command,
+            cue_state=self._command_cue_state(),
+            help_open=self._help_open,
+        )
+        self._publish_command_outcome(result)
+        for coalesced in result.coalesced_events(command.coalesced_ids):
+            self._publish_command_event(coalesced)
+        if result.outcome == CommandOutcome.REJECTED:
+            log.debug("script-message rejected (%s): %s", result.rejection, command.name)
+        elif result.outcome == CommandOutcome.UNBOUND:
+            log.error("script-message has no migration binding: %s", command.name)
+        elif result.outcome == CommandOutcome.FAILED:
+            log.error("script-message failed (%s): %s", result.error_type, command.name)
 
     def _build_tick_pipeline(self) -> TickPipeline:
         return TickPipeline(
@@ -2388,11 +2408,7 @@ class Reader:
             self._maybe_advance()
             self._flush_paused_nudge()
             ops_before = self.ov.ops
-            scroll_steps = self._drain_events()
-            if scroll_steps:
-                surfaces.route_scroll(
-                    self, scroll_steps
-                )  # topmost surface claims it; tooltip is terminal
+            self._drain_events()
             first_tick = not self._interactive_ready
             if first_tick:
                 with otel_metrics.traced("startup.first_tick"):
@@ -2416,30 +2432,42 @@ class Reader:
         if otel_metrics.osd_paused_nudge is not None:
             otel_metrics.osd_paused_nudge.add(1)
 
-    def _drain_events(self) -> int:
-        """Consume this tick's mpv events; returns the net scroll delta (coalesced, not yet applied)."""
-        scroll_steps = 0
-        last_client_message: str | None = None
+    def _drain_events(self) -> None:
+        picker_guard = LegacyPickerRepeatGuard()
         for ev in self.ipc.drain_events():
+            if isinstance(ev, UserCommand):
+                self._drain_command(ev, picker_guard)
+                continue
+            if not isinstance(ev, dict):
+                log.debug("ignored unsupported runtime event: %s", type(ev).__name__)
+                continue
             kind = ev.get("event")
             if kind == "file-loaded":
-                last_client_message = None
+                picker_guard.separate()
             if kind == "property-change":  # observed state — no round-trips
                 self._on_property_change(ev)
             elif kind == "file-loaded":  # #100: re-slot the overlay onto the newly loaded file
                 self._on_file_loaded()
             elif kind == "client-message":
-                msg = (ev.get("args") or [""])[0]
-                if msg == SCROLL_UP_MSG:
-                    scroll_steps -= 1  # coalesce a fast wheel spin into ONE re-render
-                elif msg == SCROLL_DOWN_MSG:
-                    scroll_steps += 1
-                elif msg == SUB_PICKER_MSG and last_client_message == SUB_PICKER_MSG:
-                    log.debug("script-message: %s (coalesced in current IPC batch)", msg)
-                else:
-                    self._handle(msg)
-                last_client_message = msg
-        return scroll_steps
+                args = ev.get("args") or [""]
+                name = args[0] if isinstance(args[0], str) else ""
+                command = UserCommand(name, tuple(args[1:]))
+                self._drain_command(command, picker_guard)
+
+    def _drain_command(self, command: UserCommand, guard: LegacyPickerRepeatGuard) -> None:
+        if (suppressed := guard.inspect(command)) is not None:
+            log.debug("script-message: %s (coalesced in current IPC batch)", command.name)
+            self._publish_command_outcome(suppressed)
+            return
+        self._handle(command)
+
+    def _publish_command_outcome(self, result: CommandExecution) -> None:
+        self._publish_command_event(result.event())
+
+    def _publish_command_event(self, event: CommandHandled) -> None:
+        publish = getattr(self.ipc, "publish_legacy_command_outcome", None)
+        if publish is not None:
+            publish(event)
 
     def _expire_toast(self) -> None:
         if self._toast_until and time.monotonic() > self._toast_until:

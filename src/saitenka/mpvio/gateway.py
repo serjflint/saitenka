@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.runtime import (
     CloseRequested,
+    CommandHandled,
     ConnectionLost,
     ConnectionReplaced,
     EffectError,
@@ -18,9 +19,11 @@ from saitenka.runtime import (
     ExpireEffect,
     MailboxFull,
     RawMpvEvent,
+    RuntimeEvent,
     SendMpvCommand,
     SessionMailbox,
     TrafficClass,
+    UserCommand,
 )
 
 if TYPE_CHECKING:
@@ -36,6 +39,7 @@ class GatewaySnapshot:
     pending: int
     stale_outcomes: int
     inbound_overloads: int
+    command_outcomes: int
 
 
 class LegacyEventRouter:
@@ -50,10 +54,10 @@ class LegacyEventRouter:
             raise RuntimeError("runtime bridge already installed")
         self._runtime_bridge = bridge
 
-    def drain_events(self) -> list[dict]:
+    def drain_events(self) -> list[object]:
         if self._runtime_bridge is not None:
             self._runtime_bridge.publish_due()
-        events: list[dict] = []
+        events: list[object] = []
         for envelope in self._mailbox.receive_ready():
             payload = envelope.payload
             if isinstance(payload, CloseRequested):
@@ -64,6 +68,8 @@ class LegacyEventRouter:
                 continue
             if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
                 events.append(payload.data)
+            elif isinstance(payload, UserCommand):
+                events.append(payload)
         return events
 
 
@@ -81,8 +87,10 @@ class MpvGateway:
         self._lock = threading.Lock()
         self._pending: dict[int, tuple[SendMpvCommand, IPCRequest]] = {}
         self._connection_epoch = 0
+        self._next_command_id = 0
         self._stale_outcomes = 0
         self._inbound_overloads = 0
+        self._command_outcomes = 0
         router = LegacyEventRouter(mailbox)
         ipc.install_runtime_ingress(
             self._publish_observation,
@@ -111,6 +119,7 @@ class MpvGateway:
                 len(self._pending),
                 self._stale_outcomes,
                 self._inbound_overloads,
+                self._command_outcomes,
             )
 
     def dispatch(self, effect: SendMpvCommand) -> bool:
@@ -165,13 +174,32 @@ class MpvGateway:
         name = str(message.get("event", "unknown"))
         if name == "property-change" and message.get("name") == "mouse-pos":
             name = "mouse-pos"
+        payload: RuntimeEvent
+        if name == "client-message":
+            args = message.get("args")
+            with self._lock:
+                command_id = self._next_command_id
+                self._next_command_id += 1
+            if isinstance(args, list | tuple) and args and isinstance(args[0], str):
+                payload = UserCommand(args[0], tuple(args[1:]), command_id)
+            else:
+                payload = UserCommand("", command_id=command_id)
+        else:
+            payload = RawMpvEvent(name, message)
         try:
-            self._mailbox.publish(
-                RawMpvEvent(name, message),
-                origin=EventOrigin.MPV,
-                traffic=TrafficClass.NORMAL,
-                connection_epoch=connection_epoch,
-            )
+            if isinstance(payload, UserCommand):
+                self._mailbox.publish_command(
+                    payload,
+                    origin=EventOrigin.MPV,
+                    connection_epoch=connection_epoch,
+                )
+            else:
+                self._mailbox.publish(
+                    payload,
+                    origin=EventOrigin.MPV,
+                    traffic=TrafficClass.NORMAL,
+                    connection_epoch=connection_epoch,
+                )
         except MailboxFull:
             with self._lock:
                 self._inbound_overloads += 1
@@ -181,6 +209,28 @@ class MpvGateway:
                 traffic=TrafficClass.LIFECYCLE,
                 connection_epoch=connection_epoch,
             )
+
+    def publish_legacy_outcome(self, outcome: CommandHandled) -> None:
+        """Publish a synchronous compatibility result into the ordered runtime stream."""
+
+        if outcome.command_id is None:
+            self._mailbox.publish(
+                outcome,
+                origin=EventOrigin.USER,
+                traffic=TrafficClass.NORMAL,
+                connection_epoch=self.connection_epoch,
+            )
+        else:
+            published = self._mailbox.publish_command_terminal(
+                outcome,
+                origin=EventOrigin.USER,
+                connection_epoch=self.connection_epoch,
+            )
+            with self._lock:
+                if published:
+                    self._command_outcomes += 1
+                else:
+                    self._stale_outcomes += 1
 
     def _publish_connection(self, state: str, connection_epoch: int) -> None:
         payload: ConnectionReplaced | ConnectionLost

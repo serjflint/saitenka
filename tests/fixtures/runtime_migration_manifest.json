@@ -293,6 +293,10 @@
       "src/saitenka/app/translation.py::toggle_translation"
     ],
     [
+      "driver-switch",
+      "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
+    ],
+    [
       "passive-result-drain",
       "src/saitenka/app/analysis_overlay.py::apply_results"
     ],
