@@ -3,9 +3,14 @@ from __future__ import annotations
 import threading
 from concurrent.futures import Future
 
+import pytest
+
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime import (
+    CommandHandled,
+    CommandOutcome,
+    CommandReason,
     ConnectionReplaced,
     EffectError,
     EffectFinished,
@@ -17,6 +22,8 @@ from saitenka.runtime import (
     RawMpvEvent,
     SendMpvCommand,
     SessionMailbox,
+    TrafficClass,
+    UserCommand,
 )
 
 
@@ -93,9 +100,31 @@ def test_gateway_publishes_wire_event_before_the_producer_returns() -> None:
     envelope = mailbox.receive(timeout=0)
     assert envelope is not None
     assert envelope.origin == EventOrigin.MPV
-    assert envelope.payload == RawMpvEvent(
-        "client-message", {"event": "client-message", "args": ["saitenka-picker"]}
-    )
+    assert envelope.payload == UserCommand("saitenka-picker", command_id=0)
+
+
+def test_gateway_preserves_typed_command_arguments() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    MpvGateway(ipc, mailbox)
+
+    ipc.publish({"event": "client-message", "args": ["saitenka-command", 1, "two"]})
+
+    envelope = mailbox.receive(timeout=0)
+    assert envelope is not None
+    assert envelope.payload == UserCommand("saitenka-command", (1, "two"), 0)
+
+
+def test_gateway_represents_malformed_client_message_for_policy_rejection() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    MpvGateway(ipc, mailbox)
+
+    ipc.publish({"event": "client-message", "args": []})
+
+    envelope = mailbox.receive(timeout=0)
+    assert envelope is not None
+    assert envelope.payload == UserCommand("", command_id=0)
 
 
 def test_legacy_router_reads_the_authoritative_mailbox_once() -> None:
@@ -107,6 +136,67 @@ def test_legacy_router_reads_the_authoritative_mailbox_once() -> None:
 
     assert ipc.legacy_source() == [event]
     assert ipc.legacy_source() == []
+
+
+def test_legacy_router_preserves_typed_user_command() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    MpvGateway(ipc, mailbox)
+    ipc.publish({"event": "client-message", "args": ["saitenka-picker", "arg"]})
+
+    assert ipc.legacy_source() == [UserCommand("saitenka-picker", ("arg",), 0)]
+
+
+def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    gateway = MpvGateway(ipc, mailbox)
+    ipc.publish({"event": "client-message", "args": ["mine"]})
+    assert mailbox.receive(timeout=0) is not None
+    outcome = CommandHandled(
+        "mine",
+        Owner.INTERACTION,
+        CommandOutcome.FAILED,
+        command_id=0,
+        reason=CommandReason.INTERNAL,
+    )
+
+    gateway.publish_legacy_outcome(outcome)
+
+    envelope = mailbox.receive(timeout=0)
+    assert envelope is not None
+    assert envelope.origin == EventOrigin.USER
+    assert envelope.payload == outcome
+
+
+@pytest.mark.parametrize(
+    ("outcome", "reason"),
+    [
+        (CommandOutcome.EXECUTED, None),
+        (CommandOutcome.FAILED, CommandReason.INTERNAL),
+        (CommandOutcome.SUPPRESSED, CommandReason.LEGACY_REPEAT),
+    ],
+)
+def test_command_terminal_slot_survives_normal_lane_saturation(outcome, reason) -> None:
+    mailbox = SessionMailbox(normal_capacity=2)
+    ipc = FakeIPC()
+    gateway = MpvGateway(ipc, mailbox)
+    ipc.publish({"event": "client-message", "args": ["mine"]})
+    assert mailbox.receive(timeout=0) is not None
+    mailbox.publish(
+        RawMpvEvent("property-change"),
+        origin=EventOrigin.MPV,
+        traffic=TrafficClass.NORMAL,
+    )
+
+    terminal = CommandHandled("mine", Owner.INTERACTION, outcome, command_id=0, reason=reason)
+    gateway.publish_legacy_outcome(terminal)
+
+    assert mailbox.snapshot.command_reserved == 0
+    assert [envelope.payload for envelope in mailbox.receive_ready()] == [
+        RawMpvEvent("property-change"),
+        terminal,
+    ]
 
 
 def test_gateway_preserves_events_buffered_before_installation() -> None:

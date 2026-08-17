@@ -40,6 +40,9 @@ _AUTONOMOUS_DEADLINES = {
     "src/saitenka/app/otel_export.py::CTFSpanProcessor._flush",
 }
 _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
+_DRIVER_SWITCH_SYMBOLS = {
+    "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
+}
 _DUTY_IDS = {
     "startup": {
         "version-and-render-guard",
@@ -110,6 +113,8 @@ class Scanner(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.stack.append(node.name)
         self.symbols.add(self._source())
+        if self._source() in _DRIVER_SWITCH_SYMBOLS:
+            self.debt.add(Debt("driver-switch", self._source()))
         self.generic_visit(node)
         self.stack.pop()
 

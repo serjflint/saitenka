@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app import surfaces
+from saitenka.app import help_overlay, sidebar, sub_picker, surfaces
+from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.controller import Reader
+from saitenka.app.subselect import SubtitleCandidate
 from saitenka.app.surfaces import SurfaceSpec
+from saitenka.runtime import UserCommand
 
 
 class _FakeState:
@@ -21,9 +24,12 @@ class _FakeState:
 
 
 class _FakeIPC:
+    def __init__(self, **props):
+        self.props = {"osd-dimensions": {"w": 1920, "h": 1080}, **props}
+
     def command(self, *args):
         if args[0] == "get_property":
-            return {"data": {"osd-dimensions": {"w": 1920, "h": 1080}}.get(args[1])}
+            return {"data": self.props.get(args[1])}
         return {"error": "success"}
 
 
@@ -119,3 +125,41 @@ def test_every_surface_state_exposes_open(spec):
     it participates in the forced-mouse-section OR and can never be shown-but-click-through (#100 picker)."""
     reader = Reader(_FakeIPC())
     assert isinstance(spec.captures(reader), bool)
+
+
+def test_scroll_command_routes_to_open_help(monkeypatch):
+    reader = Reader(_FakeIPC())
+    reader._help_open = True
+    steps: list[int] = []
+    monkeypatch.setattr(help_overlay, "step", lambda _reader, step: steps.append(step))
+
+    reader._handle(UserCommand(SCROLL_DOWN_MSG))
+
+    assert steps == [1]
+
+
+def test_scroll_command_routes_to_open_picker(monkeypatch):
+    reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
+    reader.sub_picker.open = True
+    reader.sub_picker.rect = (0, 0, 100, 100)
+    candidate = SubtitleCandidate(
+        "provider", "name", 1, match=False, download=lambda: ("path", "ok")
+    )
+    reader.sub_picker.candidates = (candidate,) * 20
+    monkeypatch.setattr(sub_picker, "redraw", lambda _reader: None)
+
+    reader._handle(UserCommand(SCROLL_DOWN_MSG))
+
+    assert reader.sub_picker.scroll == sub_picker.ROWS_PER_WHEEL_STEP
+
+
+def test_scroll_command_routes_to_open_sidebar(monkeypatch):
+    reader = Reader(_FakeIPC(**{"mouse-pos": {"x": 10, "y": 10}}))
+    reader.sidebar.open = True
+    reader.sidebar.rect = (0, 0, 100, 100)
+    reader.sidebar.total = 100
+    monkeypatch.setattr(sidebar, "redraw", lambda _reader: None)
+
+    reader._handle(UserCommand(SCROLL_DOWN_MSG))
+
+    assert reader.sidebar.scroll == sidebar.ROWS_PER_WHEEL_STEP

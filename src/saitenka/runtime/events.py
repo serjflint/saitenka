@@ -42,6 +42,63 @@ class RawMpvEvent:
 class UserCommand:
     name: str
     args: tuple[object, ...] = ()
+    command_id: int | None = None
+    coalesced_ids: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.command_id is not None and self.command_id < 0:
+            raise ValueError("command IDs must be non-negative")
+        if any(command_id < 0 for command_id in self.coalesced_ids):
+            raise ValueError("coalesced command IDs must be non-negative")
+
+
+class CommandOutcome(StrEnum):
+    EXECUTED = "executed"
+    REJECTED = "rejected"
+    UNBOUND = "unbound"
+    FAILED = "failed"
+    SUPPRESSED = "suppressed"
+
+
+class CommandReason(StrEnum):
+    MALFORMED = "malformed"
+    UNKNOWN = "unknown"
+    HELP_MODAL = "help-modal"
+    CUE_RETIRED = "cue-retired"
+    INTERNAL = "internal"
+    LEGACY_REPEAT = "legacy-repeat"
+    COALESCED = "coalesced"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandHandled:
+    """Typed terminal result of one command-policy or compatibility action."""
+
+    name: str
+    owner: Owner | None
+    outcome: CommandOutcome
+    command_id: int | None = None
+    reason: CommandReason | None = None
+
+    def __post_init__(self) -> None:
+        if self.command_id is not None and self.command_id < 0:
+            raise ValueError("command IDs must be non-negative")
+        rejection_reasons = {
+            CommandReason.MALFORMED,
+            CommandReason.UNKNOWN,
+            CommandReason.HELP_MODAL,
+            CommandReason.CUE_RETIRED,
+        }
+        valid_reason = {
+            CommandOutcome.EXECUTED: self.reason is None,
+            CommandOutcome.UNBOUND: self.reason is None,
+            CommandOutcome.FAILED: self.reason == CommandReason.INTERNAL,
+            CommandOutcome.REJECTED: self.reason in rejection_reasons,
+            CommandOutcome.SUPPRESSED: self.reason
+            in {CommandReason.LEGACY_REPEAT, CommandReason.COALESCED},
+        }[self.outcome]
+        if not valid_reason:
+            raise ValueError("command outcome and reason are inconsistent")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +138,7 @@ type RuntimeEvent = (
     | CloseRequested
     | RawMpvEvent
     | UserCommand
+    | CommandHandled
     | EffectFinished
     | EffectOutcomeEvent
 )

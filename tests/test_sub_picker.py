@@ -16,12 +16,14 @@ from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subselect import SubtitleCandidate
+from saitenka.runtime import CommandHandled, CommandOutcome, CommandReason, Owner
 
 
 class FakeIPC:
     def __init__(self, **props):
         self.commands: list[tuple] = []
         self.events: list[dict] = []
+        self.runtime_outcomes: list[CommandHandled] = []
         self.props: dict = {"osd-dimensions": {"w": 1920, "h": 1080}, **props}
 
     def command(self, *args):
@@ -35,6 +37,9 @@ class FakeIPC:
     def drain_events(self) -> list[dict]:
         events, self.events = self.events, []
         return events
+
+    def publish_legacy_command_outcome(self, outcome: CommandHandled) -> None:
+        self.runtime_outcomes.append(outcome)
 
 
 def _reader(**props) -> tuple[Reader, FakeIPC]:
@@ -235,6 +240,12 @@ def test_queued_picker_presses_open_once_after_startup(monkeypatch):
 
     assert reader.sub_picker.open
     assert len(_picker_adds(ipc)) == 1
+    assert ipc.runtime_outcomes[-1] == CommandHandled(
+        SUB_PICKER_MSG,
+        Owner.INTERACTION,
+        CommandOutcome.SUPPRESSED,
+        reason=CommandReason.LEGACY_REPEAT,
+    )
 
 
 def test_picker_press_after_help_close_is_not_coalesced(monkeypatch):

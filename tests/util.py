@@ -215,6 +215,8 @@ class FakeIPC:
         self._event_sink = None
         self._connection_sink = None
         self._legacy_event_source = None
+        self._runtime_gateway = None
+        self.runtime_outcomes: list[object] = []
 
     def set_prop(self, name: str, value) -> None:
         """Simulate mpv: update the property AND emit a buffered property-change event."""
@@ -251,13 +253,20 @@ class FakeIPC:
         evs, self.events = self.events, []
         return evs
 
-    def install_runtime_ingress(self, event_sink, connection_sink, legacy_event_source, _gateway):
+    def install_runtime_ingress(self, event_sink, connection_sink, legacy_event_source, gateway):
         self._event_sink = event_sink
         self._connection_sink = connection_sink
         self._legacy_event_source = legacy_event_source
+        self._runtime_gateway = gateway
         for event in self.events:
             event_sink(event, 0)
         self.events = []
+
+    def publish_legacy_command_outcome(self, outcome) -> None:
+        if self._runtime_gateway is None:
+            self.runtime_outcomes.append(outcome)
+        else:
+            self._runtime_gateway.publish_legacy_outcome(outcome)
 
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:

@@ -5,12 +5,13 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from saitenka.runtime.events import (
     CloseRequested,
+    CommandHandled,
     ConnectionLost,
     EffectFinished,
     EventEnvelope,
@@ -43,6 +44,7 @@ class MailboxSnapshot:
     terminal: int
     terminal_reserved: int
     terminal_enqueued: int
+    command_reserved: int
     close_requested: bool
     connection_lost: bool
     closed: bool
@@ -73,6 +75,7 @@ class SessionMailbox:
         self._next_sequence = 0
         self._terminal_reservations: set[EffectId] = set()
         self._terminal_enqueued: set[EffectId] = set()
+        self._command_reservations: set[int] = set()
         self._close_latch: EventEnvelope | None = None
         self._connection_lost: EventEnvelope | None = None
         self._closed = False
@@ -90,6 +93,8 @@ class SessionMailbox:
             raise ValueError("terminal events must use publish_terminal")
         if isinstance(payload, EffectFinished):
             raise TypeError("effect completions must use publish_terminal")
+        if isinstance(payload, CommandHandled) and payload.command_id is not None:
+            raise TypeError("correlated command outcomes must use publish_command_terminal")
         with self._condition:
             if self._closed:
                 raise MailboxFull("mailbox is closed")
@@ -124,10 +129,55 @@ class SessionMailbox:
                 terminal=len(self._queues[TrafficClass.TERMINAL]),
                 terminal_reserved=len(self._terminal_reservations),
                 terminal_enqueued=len(self._terminal_enqueued),
+                command_reserved=len(self._command_reservations),
                 close_requested=self._close_latch is not None,
                 connection_lost=self._connection_lost is not None,
                 closed=self._closed,
             )
+
+    def publish_command(
+        self,
+        command: UserCommand,
+        *,
+        origin: EventOrigin,
+        connection_epoch: int | None = None,
+    ) -> EventEnvelope:
+        command_id = command.command_id
+        if command_id is None:
+            raise ValueError("runtime commands require a command ID")
+        with self._condition:
+            if self._closed:
+                raise MailboxFull("mailbox is closed")
+            if command_id in self._command_reservations:
+                raise ValueError(f"command already admitted: {command_id}")
+            normal = self._queues[TrafficClass.NORMAL]
+            used = len(normal) + len(self._command_reservations)
+            if used + 2 > self._capacities[TrafficClass.NORMAL]:
+                raise MailboxFull("normal mailbox lane cannot reserve a command outcome")
+            self._command_reservations.add(command_id)
+            envelope = self._envelope_locked(command, origin, connection_epoch)
+            normal.append(envelope)
+            self._condition.notify()
+            return envelope
+
+    def publish_command_terminal(
+        self,
+        outcome: CommandHandled,
+        *,
+        origin: EventOrigin,
+        connection_epoch: int | None = None,
+    ) -> bool:
+        command_id = outcome.command_id
+        if command_id is None:
+            raise ValueError("runtime command outcomes require a command ID")
+        with self._condition:
+            if self._closed or command_id not in self._command_reservations:
+                return False
+            self._command_reservations.remove(command_id)
+            envelope = self._envelope_locked(outcome, origin, connection_epoch)
+            self._queues[TrafficClass.NORMAL].append(envelope)
+            self._condition.notify()
+            return True
 
     def reserve_terminal(self, effect_id: EffectId) -> bool:
         with self._condition:
@@ -210,13 +260,15 @@ class SessionMailbox:
         with self._condition:
             self._closed = True
             self._terminal_reservations.clear()
+            self._command_reservations.clear()
             self._condition.notify_all()
 
     def _publish_locked(self, envelope: EventEnvelope, traffic: TrafficClass) -> None:
         if self._closed:
             raise MailboxFull("mailbox is closed")
         queue = self._queues[traffic]
-        if len(queue) >= self._capacities[traffic]:
+        reserved = len(self._command_reservations) if traffic == TrafficClass.NORMAL else 0
+        if len(queue) + reserved >= self._capacities[traffic]:
             raise MailboxFull(f"{traffic.value} mailbox lane is full")
         queue.append(envelope)
         self._condition.notify()
@@ -262,6 +314,15 @@ class SessionMailbox:
         result: list[EventEnvelope] = []
         for envelope in items:
             if result and SessionMailbox._may_coalesce(result[-1], envelope):
+                previous = result[-1]
+                left, right = previous.payload, envelope.payload
+                if isinstance(left, UserCommand) and isinstance(right, UserCommand):
+                    assert left.command_id is not None
+                    merged = replace(
+                        right,
+                        coalesced_ids=(*left.coalesced_ids, left.command_id, *right.coalesced_ids),
+                    )
+                    envelope = replace(envelope, payload=merged)
                 result[-1] = envelope
             else:
                 result.append(envelope)
@@ -275,5 +336,8 @@ class SessionMailbox:
         if isinstance(left, RawMpvEvent) and isinstance(right, RawMpvEvent):
             return left.name == right.name == "mouse-pos"
         if isinstance(left, UserCommand) and isinstance(right, UserCommand):
-            return left.name == right.name and left.name in {"scroll-up", "scroll-down"}
+            return left.name == right.name and left.name in {
+                "saitenka-scroll-up",
+                "saitenka-scroll-down",
+            }
         return False

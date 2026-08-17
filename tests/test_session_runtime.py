@@ -9,6 +9,9 @@ from hypothesis import strategies as st
 from saitenka.runtime import (
     CancelEffect,
     CloseRequested,
+    CommandHandled,
+    CommandOutcome,
+    CommandReason,
     ConnectionLost,
     ConnectionReplaced,
     DeadlineRegistry,
@@ -192,6 +195,36 @@ def test_mailbox_coalesces_only_the_closed_input_allowlist() -> None:
 
     assert mailbox.receive_ready() == (latest_mouse, property_change)
     assert first_mouse.sequence < latest_mouse.sequence
+
+
+def test_mailbox_coalesces_production_scroll_names_without_losing_outcome_slots() -> None:
+    mailbox = SessionMailbox(normal_capacity=4)
+    mailbox.publish_command(UserCommand("saitenka-scroll-up", command_id=0), origin=EventOrigin.MPV)
+    mailbox.publish_command(UserCommand("saitenka-scroll-up", command_id=1), origin=EventOrigin.MPV)
+
+    (envelope,) = mailbox.receive_ready()
+    assert envelope.payload == UserCommand("saitenka-scroll-up", command_id=1, coalesced_ids=(0,))
+
+    assert mailbox.publish_command_terminal(
+        CommandHandled(
+            "saitenka-scroll-up",
+            Owner.INTERACTION,
+            CommandOutcome.EXECUTED,
+            command_id=1,
+        ),
+        origin=EventOrigin.USER,
+    )
+    assert mailbox.publish_command_terminal(
+        CommandHandled(
+            "saitenka-scroll-up",
+            Owner.INTERACTION,
+            CommandOutcome.SUPPRESSED,
+            command_id=0,
+            reason=CommandReason.COALESCED,
+        ),
+        origin=EventOrigin.USER,
+    )
+    assert mailbox.snapshot.command_reserved == 0
 
 
 def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
