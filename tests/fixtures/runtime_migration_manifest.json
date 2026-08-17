@@ -210,15 +210,7 @@
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader._expire_toast"
-    ],
-    [
-      "direct-overlay-mutation",
       "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader._toast"
     ],
     [
       "direct-overlay-mutation",
@@ -243,14 +235,6 @@
     [
       "direct-overlay-mutation",
       "src/saitenka/app/nested_popup.py::hide_nested"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/reader_deps.py::apply_deps"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/reader_deps.py::draw_loading"
     ],
     [
       "direct-overlay-mutation",

@@ -51,22 +51,26 @@ def test_draw_loading_shows_spinner_throttles_then_resumes(monkeypatch):
     monkeypatch.setattr(reader_deps.time, "monotonic", lambda: clock[0])
 
     r = Reader(FakeIPC())
-    r.ov = _RecOv()
     r._loading = True
     r._load_next = 0.0  # allow an immediate first draw
 
     r._draw_loading()  # leg 1: initial draw
-    assert OverlayId.LOADING in r.ov.shown  # spinner painted top-left
+    adds = [
+        command for command in r.ipc.commands if command[:2] == ("overlay-add", OverlayId.LOADING)
+    ]
+    assert adds  # spinner painted top-left
     assert r._load_frame == 1  # frame advanced
-    n1 = len(r.ov.shown)
+    n1 = len(adds)
 
     clock[0] += 0.079  # leg 2: still inside the 80 ms window → suppressed
     r._draw_loading()
-    assert len(r.ov.shown) == n1 and r._load_frame == 1
+    assert len([c for c in r.ipc.commands if c[:2] == ("overlay-add", OverlayId.LOADING)]) == n1
+    assert r._load_frame == 1
 
     clock[0] += 0.001  # leg 3: reaches the 80 ms boundary → draw resumes
     r._draw_loading()
-    assert len(r.ov.shown) == n1 + 1 and r._load_frame == 2
+    assert len([c for c in r.ipc.commands if c[:2] == ("overlay-add", OverlayId.LOADING)]) == n1 + 1
+    assert r._load_frame == 2
 
 
 # --- the mpv-native startup breadcrumb (the only feedback during mpv's pre-overlay file-load) --------
@@ -332,11 +336,10 @@ def test_apply_deps_stops_the_spinner():
     from saitenka.app.overlay_ids import OverlayId
 
     r = Reader(FakeIPC())
-    r.ov = _RecOv()
     r._loading = True
     r._apply_deps({})  # background load finished (even with nothing) → spinner off
     assert r._loading is False
-    assert OverlayId.LOADING in r.ov.hidden
+    assert ("overlay-remove", OverlayId.LOADING) in r.ipc.commands
 
 
 def test_load_deps_async_uses_a_custom_build():

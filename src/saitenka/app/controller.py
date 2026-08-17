@@ -359,6 +359,9 @@ class Reader:
         self._startup_hint_lease = startup_hint_lease
         self._interactive_ready = False
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
+        from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+
+        self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
         current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
         if o.subtitle_geometry.native_visible:
@@ -2037,7 +2040,7 @@ class Reader:
         img = render_toast(text, kind)
         x = (self.osd[0] - img.width) // 2
         y = round(self.osd[1] * 0.08)
-        self.ov.show(img, x, y, oid=TOAST_ID)
+        self.lifecycle_surfaces.present(img, x, y, oid=TOAST_ID)
         self._toast_until = time.monotonic() + seconds
 
     def toggle_hover_pause(self) -> None:
@@ -2471,7 +2474,7 @@ class Reader:
 
     def _expire_toast(self) -> None:
         if self._toast_until and time.monotonic() > self._toast_until:
-            self.ov.hide(TOAST_ID)
+            self.lifecycle_surfaces.remove(TOAST_ID)
             self._toast_until = 0.0
 
     def _expire_flash(self) -> None:
@@ -2671,5 +2674,6 @@ class Reader:
             self._backlog_store.close()
         if self._mined_store is not None:
             self._mined_store.close()
+        self.lifecycle_surfaces.close()
         self.ov.close()
         shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir
