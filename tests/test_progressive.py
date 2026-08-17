@@ -9,7 +9,7 @@ import time
 from concurrent.futures import Future
 
 import pytest
-from util import FakeIPC
+from util import FakeIPC, runtime_gateway
 
 from saitenka import otel_metrics
 from saitenka.app.bindings import SUB_PICKER_MSG
@@ -163,7 +163,7 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll():
     from saitenka.app.loading import show_startup_hint
 
     ipc = FakeIPC()
-    lease = show_startup_hint(ipc)
+    lease = show_startup_hint(runtime_gateway(ipc))
     r = Reader(ipc, startup_hint_lease=lease)
     assert ("show-text", "", 1) not in ipc.commands
 
@@ -180,7 +180,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     from saitenka.app.loading import show_startup_hint
 
     ipc = FakeIPC()
-    reader = Reader(ipc, startup_hint_lease=show_startup_hint(ipc))
+    reader = Reader(ipc, startup_hint_lease=show_startup_hint(runtime_gateway(ipc)))
     clear = ("show-text", "", 1)
     observed = []
     monkeypatch.setattr(
@@ -188,7 +188,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
         "toggle_sub_picker",
         lambda: observed.append(clear in ipc.commands),
     )
-    ipc.events.append({"event": "client-message", "args": [SUB_PICKER_MSG]})
+    ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
     assert reader.poll_once() is True
     assert observed == [False]
@@ -203,14 +203,15 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll():
             super().__init__()
             self.requests: list[IPCRequest] = []
 
-        def command_async(self, *args):
+        def command_async(self, *args, expected_connection_epoch=None):
+            del expected_connection_epoch
             request = IPCRequest(len(self.requests), 0, Future())
             self.commands.append(args)
             self.requests.append(request)
             return request
 
     ipc = _AsyncFakeIPC()
-    lease = show_startup_hint(ipc)
+    lease = show_startup_hint(runtime_gateway(ipc))
     assert lease is not None
     ipc.requests[0].future.set_result({"error": "success"})
     reader = Reader(ipc, startup_hint_lease=lease)

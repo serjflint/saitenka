@@ -82,14 +82,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/loading.py::clear_startup_hint"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/loading.py::show_startup_hint"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/media.py::current_timespan"
     ],
     [
