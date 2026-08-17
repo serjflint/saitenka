@@ -1,0 +1,53 @@
+from pathlib import Path
+
+from reader_host_contract import unexpected_reader_parameters
+
+ROOT = Path(__file__).resolve().parent.parent
+ALLOWLIST = ROOT / "tests/fixtures/reader_host_allowlist.json"
+
+
+def test_new_feature_functions_cannot_accept_the_reader_host_object() -> None:
+    assert unexpected_reader_parameters(ROOT, ALLOWLIST) == set()
+
+
+def test_reader_host_allowlist_rejects_a_new_module(tmp_path: Path) -> None:
+    app = tmp_path / "src/saitenka/app/nested"
+    app.mkdir(parents=True)
+    (app / "new_feature.py").write_text(
+        "from somewhere import Reader as Host\n"
+        "import somewhere as controller\n"
+        "from typing import TYPE_CHECKING, TypeAlias\n"
+        "ReaderMaybe: TypeAlias = Host | None\n"
+        "type ReaderHost = ReaderMaybe\n"
+        "ReaderUnion = Host | None\n"
+        "if TYPE_CHECKING:\n"
+        "    QualifiedHost = controller.Reader\n"
+        '    ForwardHost: TypeAlias = "Reader"\n'
+        "def mutate(host: Host | None) -> None:\n    pass\n"
+        "def mutate_again(*reader) -> None:\n    pass\n"
+        "def mutate_alias(host: ReaderHost) -> None:\n    pass\n"
+        "def mutate_union(host: ReaderUnion) -> None:\n    pass\n"
+        "def mutate_qualified(host: QualifiedHost) -> None:\n    pass\n"
+        "def mutate_forward(host: ForwardHost) -> None:\n    pass\n",
+        encoding="utf-8",
+    )
+    empty_allowlist = tmp_path / "allowlist.json"
+    empty_allowlist.write_text("{}", encoding="utf-8")
+
+    assert unexpected_reader_parameters(tmp_path, empty_allowlist) == {
+        "saitenka.app.nested.new_feature: current=6 baseline=0"
+    }
+
+
+def test_reader_host_allowlist_has_no_slack_after_a_removal(tmp_path: Path) -> None:
+    app = tmp_path / "src/saitenka/app"
+    app.mkdir(parents=True)
+    (app / "feature.py").write_text(
+        'def mutate(host: "controller.Reader | None") -> None:\n    pass\n', encoding="utf-8"
+    )
+    stale_allowlist = tmp_path / "allowlist.json"
+    stale_allowlist.write_text('{"saitenka.app.feature": 2}', encoding="utf-8")
+
+    assert unexpected_reader_parameters(tmp_path, stale_allowlist) == {
+        "saitenka.app.feature: current=1 baseline=2"
+    }
