@@ -201,17 +201,13 @@ class _ScriptedTransport:
         self.closed = True
 
 
-def test_pump_reconnects_after_a_dropped_pipe_and_replays_observers():
+def test_reconnect_once_replaces_a_dropped_live_pipe():
     # mpv.net drops the IPC pipe mid-session but stays running: the reader hits EOF and sets the gate,
-    # yet a re-dial reaches a LIVE mpv (it answers the liveness probe), so pump() recovers and replays
-    # observers instead of surfacing a fatal disconnect.
+    # yet a re-dial reaches a LIVE mpv and answers the liveness probe.
     a, b = socket.socketpair()
     b.settimeout(2.0)
     ipc = MpvIPC(r"\\.\pipe\mpvsocket")
-    replays: list = []
-    ipc.on_reconnect = lambda: replays.append(True)
     ipc._transport = _ScriptedTransport()  # immediate EOF = dropped pipe
-    ipc._events.append({"event": "property-change", "name": "sub-text", "data": "stale"})
     ipc._start_reader()
     assert ipc._closed.wait(1.0)  # reader saw EOF
     ipc._dial = lambda _path, _timeout: UnixSocketTransport(a)
@@ -232,10 +228,9 @@ def test_pump_reconnects_after_a_dropped_pipe_and_replays_observers():
 
     th = threading.Thread(target=serve_probe)
     th.start()
-    ipc.pump()  # must NOT raise — a live re-dial recovers the dropped pipe
+    assert ipc.reconnect_once()
     th.join(2.0)
 
-    assert replays == [True]  # observers replayed after the live reconnect
     assert ipc._reconnects_left == left_before - 1
     assert ipc.drain_events() == []
     ipc.close()
@@ -285,7 +280,7 @@ def test_reader_from_old_epoch_cannot_close_the_replacement_connection():
 
     probe = threading.Thread(target=serve_probe)
     probe.start()
-    ipc.pump()
+    assert ipc.reconnect_once()
     probe.join(2)
 
     old.release.set()
@@ -326,9 +321,7 @@ def test_close_wins_over_an_inflight_reconnect_dial():
     outcomes = []
 
     def reconnect() -> None:
-        try:
-            ipc.pump()
-        except OSError:
+        if not ipc.reconnect_once():
             outcomes.append("disconnected")
 
     thread = threading.Thread(target=reconnect)
@@ -399,8 +392,7 @@ def test_command_submitted_during_reconnect_cannot_cross_connection_epochs():
     reconnected = []
 
     def reconnect() -> None:
-        ipc.pump()
-        reconnected.append(True)
+        reconnected.append(ipc.reconnect_once())
 
     reconnect_thread = threading.Thread(target=reconnect)
     reconnect_thread.start()
@@ -422,7 +414,7 @@ def test_command_submitted_during_reconnect_cannot_cross_connection_epochs():
     ipc.close()
 
 
-def test_pump_gives_up_when_a_redial_connects_but_never_replies():
+def test_reconnect_once_rejects_a_redial_that_never_replies():
     # REGRESSION (2.0.1): a self-launched mpv that QUIT leaves a socket that can still accept a connect
     # yet never replies. Without the liveness probe pump() declared that a "reconnect" and hung the
     # poll loop for command()'s full timeout, _MAX_RECONNECTS times over. The probe must detect the
@@ -435,12 +427,11 @@ def test_pump_gives_up_when_a_redial_connects_but_never_replies():
     ipc._start_reader()
     assert ipc._closed.wait(1.0)
 
-    with pytest.raises(OSError, match="disconnected"):
-        ipc.pump()
+    assert not ipc.reconnect_once()
     ipc.close()
 
 
-def test_pump_does_not_reconnect_after_intentional_close():
+def test_reconnect_once_does_not_run_after_intentional_close():
     ipc = MpvIPC("x")
     ipc._dial = lambda _p, _t: _ScriptedTransport([b'{"event":"y"}\n'])
     ipc._transport = _ScriptedTransport()
@@ -449,11 +440,10 @@ def test_pump_does_not_reconnect_after_intentional_close():
 
     ipc.close()  # a real shutdown — must NOT reconnect
 
-    with pytest.raises(OSError, match="disconnected"):
-        ipc.pump()
+    assert not ipc.reconnect_once()
 
 
-def test_pump_gives_up_when_redial_keeps_failing():
+def test_reconnect_once_consumes_one_bounded_failed_redial():
     # A genuinely-gone mpv (quit): re-dials fail, so pump() consumes an attempt and surfaces the
     # disconnect (the overlay exits) instead of looping forever.
     ipc = MpvIPC("x")
@@ -466,8 +456,7 @@ def test_pump_gives_up_when_redial_keeps_failing():
     ipc._start_reader()
     assert ipc._closed.wait(1.0)
 
-    with pytest.raises(OSError, match="disconnected"):
-        ipc.pump()
+    assert not ipc.reconnect_once()
     assert ipc._reconnects_left == _MAX_RECONNECTS - 1
 
 

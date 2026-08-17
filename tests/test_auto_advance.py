@@ -194,6 +194,8 @@ def test_reconnect_reslots_file_changed_while_disconnected(tmp_path):
     ipc.props["path"] = str(second)
 
     reader._on_ipc_reconnect()
+    reader._on_property_change({"event": "property-change", "name": "path", "data": str(second)})
+    reader._on_file_loaded()
 
     assert seen == [second]
     assert reader._cue_retired is True

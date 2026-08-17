@@ -2512,6 +2512,46 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
     assert reader._cue_retired is True
 
 
+def test_connection_loss_retires_cue_and_suspends_commands_and_tick(monkeypatch):
+    from util import FakeIPC as EventIPC
+
+    from saitenka.app.runtime import LegacyPickerRepeatGuard
+    from saitenka.runtime import (
+        CommandHandled,
+        CommandOutcome,
+        CommandReason,
+        ConnectionLost,
+        UserCommand,
+    )
+
+    ipc = EventIPC()
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.set_subtitle("古い字幕")
+    copied = []
+    monkeypatch.setattr(reader, "copy_line", lambda: copied.append(reader.sub_text))
+    ticks = []
+    monkeypatch.setattr(reader.tick_pipeline, "run", lambda **_kwargs: ticks.append(True))
+    guard = LegacyPickerRepeatGuard()
+
+    reader._drain_event(ConnectionLost(0), guard)
+    reader._drain_event(UserCommand(C.COPY_LINE_MSG, command_id=7), guard)
+    assert reader.poll_once()
+
+    assert copied == []
+    assert ticks == []
+    assert reader._cue_retired
+    assert reader.tokens == [] and reader.boxes == []
+    assert ipc.runtime_outcomes == [
+        CommandHandled(
+            C.COPY_LINE_MSG,
+            None,
+            CommandOutcome.REJECTED,
+            command_id=7,
+            reason=CommandReason.DISCONNECTED,
+        )
+    ]
+
+
 def test_same_text_with_new_timing_installs_a_new_cue_identity():
     from util import FakeIPC as EventIPC
 
@@ -2542,6 +2582,7 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
     ipc.props[name] = value
 
     reader._on_ipc_reconnect()
+    reader._on_property_change({"event": "property-change", "name": name, "data": value})
 
     assert reader._cue_retired is True
     assert reader.tokens == [] and reader.boxes == []
