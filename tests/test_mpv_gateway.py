@@ -156,6 +156,27 @@ def test_ipc_rejects_old_epoch_command_after_replacement_installation() -> None:
     ipc.close()
 
 
+def test_healthy_writer_lock_contention_does_not_drop_command() -> None:
+    ipc = MpvIPC("unused")
+    ipc._closed.clear()
+    entered = threading.Event()
+    requests: list[IPCRequest] = []
+
+    ipc._write_lock.acquire()
+    thread = threading.Thread(
+        target=lambda: (entered.set(), requests.append(ipc.command_async("show-text", "ok", 1)))
+    )
+    thread.start()
+    assert entered.wait(1)
+    assert requests == []
+    ipc._write_lock.release()
+    thread.join(1)
+
+    assert requests and requests[0].accepted
+    assert requests[0].connection_epoch == 0
+    ipc.close()
+
+
 def test_gateway_reply_completes_the_reserved_runtime_effect() -> None:
     mailbox = SessionMailbox()
     ipc = FakeIPC()

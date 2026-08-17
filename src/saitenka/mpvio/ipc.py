@@ -118,6 +118,7 @@ class MpvIPC:
         )
         self._next_request_id = 0
         self._connection_epoch = 0
+        self._transitioning = threading.Event()
         self.connected_at: float | None = None
         self._closed = threading.Event()
         self._reader: threading.Thread | None = None
@@ -295,14 +296,9 @@ class MpvIPC:
     ) -> IPCRequest:
         """Submit a correlated command without waiting for its reply."""
         future: Future[dict] = Future()
-        if not self._write_lock.acquire(blocking=False):
-            with self._pending_lock:
-                request_id = self._next_request_id
-                self._next_request_id += 1
-                epoch = self._connection_epoch
-            future.set_result({"error": "disconnected"})
-            return IPCRequest(request_id, epoch, future, accepted=False)
-        try:
+        observed_epoch = self._connection_epoch
+        observed_transition = self._transitioning.is_set()
+        with self._write_lock:
             with self._pending_lock:
                 request_id = self._next_request_id
                 self._next_request_id += 1
@@ -310,7 +306,12 @@ class MpvIPC:
                 if self._closed.is_set():
                     future.set_result({"error": "disconnected"})
                     return IPCRequest(request_id, epoch, future, accepted=False)
-                if expected_connection_epoch is not None and epoch != expected_connection_epoch:
+                required_epoch = (
+                    observed_epoch
+                    if expected_connection_epoch is None
+                    else expected_connection_epoch
+                )
+                if observed_transition or epoch != required_epoch:
                     future.set_result({"error": "stale-epoch"})
                     return IPCRequest(request_id, epoch, future, accepted=False)
                 self._pending[request_id] = (epoch, future)
@@ -319,8 +320,6 @@ class MpvIPC:
                 self._outbound.put_nowait((epoch, request_id, payload, future))
             except queue.Full:
                 self._reject_write(request_id, future, "overloaded")
-        finally:
-            self._write_lock.release()
         return IPCRequest(request_id, epoch, future)
 
     def command(self, *args, timeout: float | None = None) -> dict:
@@ -434,34 +433,38 @@ class MpvIPC:
             return None
 
     def _install_replacement(self, transport: Transport) -> tuple[bool, list[Future[dict]]]:
-        with self._write_lock:
-            if self._intentional:
-                self._close_transport(transport)
-                return False, []
-            with self._feed_lock:
-                self._buf = b""
-                with self._pending_lock:
-                    retired_epoch = self._connection_epoch
-                    self._connection_epoch += 1
-                    retired = [
-                        future
-                        for pending_epoch, future in self._pending.values()
-                        if pending_epoch == retired_epoch
-                    ]
-                    self._pending = {
-                        request_id: item
-                        for request_id, item in self._pending.items()
-                        if item[0] != retired_epoch
-                    }
-            with self._events_lock:
-                self._events = []
-            self._transport = transport
-            self._closed = threading.Event()
-            sink = self._connection_sink
-            if sink is not None:
-                sink("replaced", self._connection_epoch)
-            self._start_reader()
-        return True, retired
+        self._transitioning.set()
+        try:
+            with self._write_lock:
+                if self._intentional:
+                    self._close_transport(transport)
+                    return False, []
+                with self._feed_lock:
+                    self._buf = b""
+                    with self._pending_lock:
+                        retired_epoch = self._connection_epoch
+                        self._connection_epoch += 1
+                        retired = [
+                            future
+                            for pending_epoch, future in self._pending.values()
+                            if pending_epoch == retired_epoch
+                        ]
+                        self._pending = {
+                            request_id: item
+                            for request_id, item in self._pending.items()
+                            if item[0] != retired_epoch
+                        }
+                with self._events_lock:
+                    self._events = []
+                self._transport = transport
+                self._closed = threading.Event()
+                sink = self._connection_sink
+                if sink is not None:
+                    sink("replaced", self._connection_epoch)
+                self._start_reader()
+            return True, retired
+        finally:
+            self._transitioning.clear()
 
     def _replacement_is_live(self) -> bool:
         # Liveness gate: a re-dial that connects to a QUIT mpv (self-launched run-mode exit, or an
