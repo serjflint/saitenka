@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786948671652,
+  "lastUpdate": 1786965606274,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -6833,6 +6833,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.747925,
             "range": "3 replicas; min 1.21862; max 22.3815; MAD 0.529307; worst 22.3815",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ead9ef2fac8e4b70d74e123a1fc2f569a398583c",
+          "message": "Merge pull request #387 from serjflint/codex/native-interaction-polish\n\nfix: keep subtitle interactions off the event loop",
+          "timestamp": "2026-08-17T16:19:13+05:00",
+          "tree_id": "46e143cab5d63c8ff575eeecac92e99a8dd224b9",
+          "url": "https://github.com/serjflint/saitenka/commit/ead9ef2fac8e4b70d74e123a1fc2f569a398583c"
+        },
+        "date": 1786965605135,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.314575,
+            "range": "3 replicas; min 6.30104; max 6.39215; MAD 0.013534",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.938635,
+            "range": "3 replicas; min 8.79478; max 9.24053; MAD 0.143851; worst 9.24053",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.238591,
+            "range": "3 replicas; min 17.7801; max 19.6257; MAD 0.458511",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.560836,
+            "range": "3 replicas; min 18.2736; max 21.3129; MAD 0.287267; worst 21.3129",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 20.761492,
+            "range": "3 replicas; min 18.0364; max 27.8105; MAD 2.72509",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.14888,
+            "range": "3 replicas; min 0.138626; max 0.166591; MAD 0.010254; worst 0.166591",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.893344,
+            "range": "3 replicas; min 39.4935; max 253.014; MAD 4.39986; worst 253.014",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.612454,
+            "range": "3 replicas; min 2.58135; max 4.07928; MAD 0.0311; worst 4.07928",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.35369,
+            "range": "3 replicas; min 1.27195; max 1.96556; MAD 0.081744; worst 1.96556",
             "unit": "ms"
           }
         ]
