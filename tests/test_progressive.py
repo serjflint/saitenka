@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import queue
 import threading
 import time
 from concurrent.futures import Future
@@ -67,27 +68,38 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
     r.anki = object()
     r.mine_cfg = object()
     attempts = 0
-    completed = threading.Event()
+    published = threading.Event()
+
+    class ResultQueue:
+        def __init__(self) -> None:
+            self._queue = queue.Queue()
+
+        def put(self, result) -> None:
+            self._queue.put(result)
+            published.set()
+
+        def get_nowait(self):
+            return self._queue.get_nowait()
+
+    r._mined_seed_results = ResultQueue()
 
     def fetch(_anki, _cfg):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            completed.set()
             return None
-        completed.set()
         return {"猫"}
 
     monkeypatch.setattr(r._miner, "mined_expressions", fetch)
     r._request_mined_seed()
-    assert completed.wait(1)
+    assert published.wait(1)
     r._apply_pending_mined_seed()
     assert r._mined == set()
 
-    completed.clear()
+    published.clear()
     r._mined_seed_next_due = 0.0
     r._request_mined_seed()
-    assert completed.wait(1)
+    assert published.wait(1)
     r._apply_pending_mined_seed()
 
     assert attempts == 2 and r._mined == {"猫"}

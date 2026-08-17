@@ -751,6 +751,10 @@ docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" 
 # re-blessed (`python tools/corpus_check.py show`). Same drift-guard idiom docs-consts applies to constants,
 # here applied to stolen conformance suites. Zero-LLM, stdlib. Planted +/- controls: tests/test_corpus_check.py.
 corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check" }
+# GATE (in `all`) — exact symbol inventory for the temporary tick/direct-IPC/host-object coupling.
+# A vertical runtime slice must delete its old entries and re-bless the mechanically derived debt set;
+# startup, close, and entrypoint duties additionally resolve to live source symbols.
+runtime-migration = { shell = "uv run --extra full python tools/runtime_migration_check.py check" }
 # NOT in `all` (needs Node + a pinned Yomitan checkout; fetches py-fsrs) — the regenerate-and-diff sibling
 # of corpus-lock for GENERATED corpora (fsrs vectors, JP/FR transform differentials). corpus-lock guards
 # *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
@@ -827,7 +831,7 @@ ps1 = { shell = "pwsh -NoProfile -Command \"Invoke-ScriptAnalyzer -Path install 
 # Run the whole advisory tier at once (nightly / pre-release / agent-triage — not the push gate).
 hygiene = ["deadcode", "dup"]
 
-all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock"]
+all = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "test-ft", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "corpus-lock", "runtime-migration"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not
 # `all`). Re-adds the supply-chain + installer checks pulled from the fast PR loop (audit/licenses/shell —
