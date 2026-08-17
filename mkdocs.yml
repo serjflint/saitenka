@@ -91,6 +91,7 @@ nav:
       - Performance & benchmarks: why/benchmarks.md
   - Contributing:
       - Architecture: contributing/architecture.md
+      - Interactive runtime: contributing/runtime.md
       - Continuous benchmarks: contributing/continuous-benchmarks.md
       - Rendering: contributing/rendering.md
       - Future native renderer: contributing/native-renderer.md
