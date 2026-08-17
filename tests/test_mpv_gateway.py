@@ -41,7 +41,9 @@ class FakeIPC:
         self.legacy_source = legacy_source
         self.gateway = gateway
 
-    def command_async(self, *_args) -> IPCRequest:
+    def command_async(self, *_args, expected_connection_epoch=None) -> IPCRequest:
+        if expected_connection_epoch not in {None, 0}:
+            return IPCRequest(len(self.requests), 0, Future(), accepted=False)
         request = IPCRequest(len(self.requests), 0, Future())
         self.requests.append(request)
         return request
@@ -133,6 +135,24 @@ def test_replacement_epoch_is_published_before_its_first_wire_event() -> None:
         "file-loaded", {"event": "file-loaded"}
     )
     assert first.sequence < second.sequence
+    ipc.close()
+
+
+def test_ipc_rejects_old_epoch_command_after_replacement_installation() -> None:
+    ipc = MpvIPC("unused")
+    ipc._connection_epoch = 1
+    ipc._closed.clear()
+
+    request = ipc.command_async(
+        "get_property",
+        "pause",
+        expected_connection_epoch=0,
+    )
+
+    assert not request.accepted
+    assert request.connection_epoch == 1
+    assert request.future.result() == {"error": "stale-epoch"}
+    assert ipc._pending == {}
     ipc.close()
 
 

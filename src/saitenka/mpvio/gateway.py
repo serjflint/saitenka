@@ -94,7 +94,13 @@ class MpvGateway:
                 return False
             if effect.effect_id.value in self._pending:
                 return False
-            request = self._ipc.command_async(*effect.command)
+        request = self._ipc.command_async(
+            *effect.command,
+            expected_connection_epoch=effect.connection_epoch,
+        )
+        if not request.accepted:
+            return False
+        with self._lock:
             self._pending[effect.effect_id.value] = (effect, request)
         request.future.add_done_callback(lambda future: self._reply(effect.effect_id.value, future))
         return True

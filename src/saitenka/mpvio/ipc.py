@@ -87,6 +87,7 @@ class IPCRequest:
     request_id: int
     connection_epoch: int
     future: Future[dict]
+    accepted: bool = True
 
 
 class MpvIPC:
@@ -287,22 +288,39 @@ class MpvIPC:
         if not future.done():
             future.set_result({"error": error})
 
-    def command_async(self, *args) -> IPCRequest:
+    def command_async(
+        self,
+        *args,
+        expected_connection_epoch: int | None = None,
+    ) -> IPCRequest:
         """Submit a correlated command without waiting for its reply."""
         future: Future[dict] = Future()
-        with self._pending_lock:
-            request_id = self._next_request_id
-            self._next_request_id += 1
-            epoch = self._connection_epoch
-            if self._closed.is_set():
-                future.set_result({"error": "disconnected"})
-                return IPCRequest(request_id, epoch, future)
-            self._pending[request_id] = (epoch, future)
-        payload = json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
+        if not self._write_lock.acquire(blocking=False):
+            with self._pending_lock:
+                request_id = self._next_request_id
+                self._next_request_id += 1
+                epoch = self._connection_epoch
+            future.set_result({"error": "disconnected"})
+            return IPCRequest(request_id, epoch, future, accepted=False)
         try:
-            self._outbound.put_nowait((epoch, request_id, payload, future))
-        except queue.Full:
-            self._reject_write(request_id, future, "overloaded")
+            with self._pending_lock:
+                request_id = self._next_request_id
+                self._next_request_id += 1
+                epoch = self._connection_epoch
+                if self._closed.is_set():
+                    future.set_result({"error": "disconnected"})
+                    return IPCRequest(request_id, epoch, future, accepted=False)
+                if expected_connection_epoch is not None and epoch != expected_connection_epoch:
+                    future.set_result({"error": "stale-epoch"})
+                    return IPCRequest(request_id, epoch, future, accepted=False)
+                self._pending[request_id] = (epoch, future)
+            payload = json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
+            try:
+                self._outbound.put_nowait((epoch, request_id, payload, future))
+            except queue.Full:
+                self._reject_write(request_id, future, "overloaded")
+        finally:
+            self._write_lock.release()
         return IPCRequest(request_id, epoch, future)
 
     def command(self, *args, timeout: float | None = None) -> dict:
