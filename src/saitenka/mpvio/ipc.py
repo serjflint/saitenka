@@ -33,6 +33,10 @@ if TYPE_CHECKING:
     from saitenka.runtime import CommandHandled
 
     class RuntimeGateway(Protocol):
+        def close(self) -> None: ...
+
+        def register_observers(self, names: tuple[str, ...]) -> dict[str, dict]: ...
+
         def publish_legacy_outcome(self, outcome: CommandHandled) -> None: ...
 
         def submit_mpv(self, **kwargs) -> bool: ...
@@ -132,6 +136,7 @@ class MpvIPC:
         self._next_request_id = 0
         self._connection_epoch = 0
         self._transitioning = threading.Event()
+        self._reconnect_lock = threading.Lock()
         self.connected_at: float | None = None
         self._closed = threading.Event()
         self._reader: threading.Thread | None = None
@@ -140,9 +145,6 @@ class MpvIPC:
         )
         self._intentional = False  # close() vs a dropped pipe — only the latter reconnects
         self._reconnects_left = _MAX_RECONNECTS
-        # Replayed on the IPC thread after a successful reconnect (the controller re-issues
-        # observe_property, which mpv forgets on a fresh connection). Set by the owner.
-        self.on_reconnect: Callable[[], None] | None = None
         self._writer = threading.Thread(
             target=self._write_loop,
             name="mpv-ipc-writer",
@@ -157,9 +159,7 @@ class MpvIPC:
         # Windows exposes IPC as a named pipe, Unix as a socket file — identical framing on top (see
         # transport.py). Pick the adapter, then retry-dial until the server is up or the deadline.
         dial = NamedPipeTransport.dial if sys.platform == "win32" else UnixSocketTransport.dial
-        self._dial = (
-            dial  # reused by _reconnect() to re-dial the same endpoint after a dropped pipe
-        )
+        self._dial = dial  # reused by the gateway's reconnect actor after a dropped pipe
         while time.monotonic() < deadline:
             try:
                 self._transport = dial(self.path, timeout)
@@ -384,43 +384,36 @@ class MpvIPC:
     def _fail_pending(self, result: dict, *, epoch: int | None = None) -> None:
         self._resolve_pending(self._pop_pending(epoch), result)
 
-    def pump(self) -> None:
-        """Surface a disconnect so the poll loop stops. The reader thread does the actual socket
-        reads now, so steady-state event delivery no longer depends on this being called — but the
-        controller's contract (``pump()`` raises ``OSError`` when mpv goes away) is preserved.
+    @property
+    def reconnects_left(self) -> int:
+        return self._reconnects_left
 
-        Before surfacing the disconnect, try to recover a merely-dropped pipe (mpv.net) by re-dialing
-        the same endpoint. Runs on the caller's (IPC/main) thread, so the observer replay it triggers
-        issues commands safely; only an intentional close() or an exhausted/failed reconnect raises."""
-        if not self._closed.is_set():
-            return
-        if self._intentional or not self._reconnect():
-            raise OSError("mpv IPC disconnected")
+    @property
+    def disconnected(self) -> bool:
+        return self._closed.is_set()
 
-    def _reconnect(self) -> bool:
-        """Re-dial the same endpoint after a dropped pipe; on success restart the reader and replay
-        observers. Bounded by ``_reconnects_left`` so a quit mpv (dials keep failing) still exits."""
-        if self._dial is None or self._reconnects_left <= 0:
-            return False
-        self._detach_for_reconnect()
-        self._reconnects_left -= 1
-        transport = self._dial_replacement()
-        if transport is None:
-            return False
-        installed, retired = self._install_replacement(transport)
-        if not installed:
-            return False
-        self._resolve_pending(retired, {"error": "disconnected"})
-        if not self._replacement_is_live():
-            return False
-        log.warning(
-            "mpv IPC: reconnected to %s after a dropped pipe (%d reconnect(s) left)",
-            self.path,
-            self._reconnects_left,
-        )
-        if self.on_reconnect is not None:
-            self.on_reconnect()  # controller re-issues observe_property (lost on the new connection)
-        return True
+    def reconnect_once(self) -> bool:
+        """Attempt one epoch-fenced re-dial for the gateway's reconnect actor."""
+        with self._reconnect_lock:
+            if self._dial is None or self._reconnects_left <= 0 or self._intentional:
+                return False
+            self._detach_for_reconnect()
+            self._reconnects_left -= 1
+            transport = self._dial_replacement()
+            if transport is None:
+                return False
+            installed, retired = self._install_replacement(transport)
+            if not installed:
+                return False
+            self._resolve_pending(retired, {"error": "disconnected"})
+            if not self._replacement_is_live():
+                return False
+            log.warning(
+                "mpv IPC: reconnected to %s after a dropped pipe (%d reconnect(s) left)",
+                self.path,
+                self._reconnects_left,
+            )
+            return True
 
     @staticmethod
     def _close_transport(transport: Transport) -> None:
@@ -482,7 +475,7 @@ class MpvIPC:
     def _replacement_is_live(self) -> bool:
         # Liveness gate: a re-dial that connects to a QUIT mpv (self-launched run-mode exit, or an
         # external mpv that closed) can accept the socket yet never reply. Probe once — our sentinels
-        # ("disconnected"/"timeout") mean gone, so bail and let pump() raise; ANY real mpv reply (even
+        # ("disconnected"/"timeout") mean gone; ANY real mpv reply (even
         # a property error) proves it's live, so keep the reconnection. Prevents the ~10s×N quit hang.
         if self.command("get_property", "pid", timeout=_RECONNECT_PROBE_S).get("error") in {
             "disconnected",
@@ -520,6 +513,8 @@ class MpvIPC:
             self._connection_sink = connection_sink
             self._legacy_event_source = legacy_event_source
             self._runtime_gateway = gateway
+        if self._closed.is_set() and not self._intentional:
+            connection_sink("lost", self._connection_epoch)
 
     def publish_legacy_command_outcome(self, outcome: CommandHandled) -> None:
         gateway = self._runtime_gateway
@@ -544,6 +539,12 @@ class MpvIPC:
             return False
         return gateway.cancel_timer(timer)
 
+    def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return {}
+        return gateway.register_observers(names)
+
     def close(self) -> None:
         with self._write_lock:
             self._intentional = (
@@ -551,6 +552,9 @@ class MpvIPC:
             )
             self._closed.set()
             transport, self._transport = self._transport, None
+        gateway = self._runtime_gateway
+        if gateway is not None:
+            gateway.close()
         self._fail_pending({"error": "disconnected"})
         try:
             self._outbound.put_nowait(None)

@@ -191,7 +191,7 @@ def test_reader_thread_drains_events_without_manual_pump(make_link):
     link.push(b'{"event":"property-change","name":"sub-text","data":"x"}\n')
     evs = _drain_until(link.ipc)
     assert [e["name"] for e in evs if e.get("event") == "property-change"] == ["sub-text"]
-    link.ipc.pump()  # not disconnected → must not raise
+    assert not link.ipc.disconnected
 
 
 def test_command_reply_returns_amid_interleaved_events(make_link):
@@ -253,13 +253,11 @@ def test_second_attached_client_independently_sees_events(make_link):
 
 
 def test_close_unblocks_reader_and_command_reports_disconnect(make_link):
-    """EOF (mpv quit / pipe closed) must unblock the reader, make ``pump()`` raise, and make a
-    subsequent ``command()`` return a disconnect result rather than hang."""
+    """EOF must unblock the reader and make later commands fail without hanging."""
     link = make_link()
     link.disconnect()  # EOF on the client's transport
     _wait_closed(link.ipc)
-    with pytest.raises(OSError):
-        link.ipc.pump()
+    assert link.ipc.disconnected
     assert link.ipc.command("get_property", "anything").get("error") == "disconnected"
 
 

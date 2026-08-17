@@ -28,6 +28,13 @@ class ConnectionLost:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectionReady:
+    """A replacement epoch is live and its observer snapshot is fully queued."""
+
+    connection_epoch: int
+
+
+@dataclass(frozen=True, slots=True)
 class CloseRequested:
     reason: str = "requested"
 
@@ -65,6 +72,7 @@ class CommandReason(StrEnum):
     UNKNOWN = "unknown"
     HELP_MODAL = "help-modal"
     CUE_RETIRED = "cue-retired"
+    DISCONNECTED = "disconnected"
     INTERNAL = "internal"
     LEGACY_REPEAT = "legacy-repeat"
     COALESCED = "coalesced"
@@ -88,6 +96,7 @@ class CommandHandled:
             CommandReason.UNKNOWN,
             CommandReason.HELP_MODAL,
             CommandReason.CUE_RETIRED,
+            CommandReason.DISCONNECTED,
         }
         valid_reason = {
             CommandOutcome.EXECUTED: self.reason is None,
@@ -134,6 +143,7 @@ class EffectOutcomeEvent:
 
 type RuntimeEvent = (
     ConnectionLost
+    | ConnectionReady
     | ConnectionReplaced
     | CloseRequested
     | RawMpvEvent

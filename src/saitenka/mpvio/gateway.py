@@ -5,12 +5,14 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from saitenka.runtime import (
     CloseRequested,
     CommandHandled,
     ConnectionLost,
+    ConnectionReady,
     ConnectionReplaced,
     EffectError,
     EffectFinished,
@@ -18,6 +20,7 @@ from saitenka.runtime import (
     EventOrigin,
     ExpireEffect,
     MailboxFull,
+    Owner,
     RawMpvEvent,
     RuntimeEvent,
     SendMpvCommand,
@@ -43,6 +46,23 @@ class GatewaySnapshot:
     command_outcomes: int
 
 
+@dataclass(frozen=True, slots=True)
+class ReconnectRetry:
+    connection_epoch: int
+    attempt: int
+
+
+class ConnectionPhase(StrEnum):
+    READY = "ready"
+    LOST = "lost"
+    CONNECTING = "connecting"
+    REPLAYING = "replaying"
+    CLOSED = "closed"
+
+
+_CANDIDATE_EVENT_LIMIT = 256
+
+
 class LegacyEventRouter:
     """Temporary sole consumer that presents mailbox observations to Reader unchanged."""
 
@@ -60,18 +80,27 @@ class LegacyEventRouter:
             self._runtime_bridge.publish_due()
         events: list[object] = []
         for envelope in self._mailbox.receive_ready():
-            payload = envelope.payload
-            if isinstance(payload, CloseRequested):
-                raise OSError("runtime mailbox overloaded")
-            if isinstance(payload, EffectFinished):
-                if self._runtime_bridge is not None:
-                    self._runtime_bridge.handle_terminal(payload)
-                continue
-            if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
-                events.append(payload.data)
-            elif isinstance(payload, UserCommand):
-                events.append(payload)
+            self._route(envelope.payload, events)
         return events
+
+    def _route(self, payload: RuntimeEvent, events: list[object]) -> None:
+        if isinstance(payload, CloseRequested):
+            reason = (
+                "runtime mailbox overloaded"
+                if payload.reason == "runtime-overloaded"
+                else payload.reason
+            )
+            raise OSError(reason)
+        if isinstance(payload, EffectFinished):
+            if self._runtime_bridge is not None:
+                self._runtime_bridge.handle_terminal(payload)
+            return
+        if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
+            events.append(payload.data)
+        elif isinstance(
+            payload, UserCommand | ConnectionLost | ConnectionReady | ConnectionReplaced
+        ):
+            events.append(payload)
 
 
 class MpvGateway:
@@ -90,10 +119,18 @@ class MpvGateway:
         self._surface_revisions: dict[str, int] = {}
         self._pending: dict[int, tuple[SendMpvCommand, IPCRequest]] = {}
         self._connection_epoch = 0
+        self._connection_phase = ConnectionPhase.READY
+        self._candidate_events: list[dict] = []
         self._next_command_id = 0
         self._stale_outcomes = 0
         self._inbound_overloads = 0
         self._command_outcomes = 0
+        self._observers: tuple[str, ...] = ()
+        self._reconnect_thread: threading.Thread | None = None
+        self._reconnect_epoch: int | None = None
+        self._reconnect_attempt = 0
+        self._closed = False
+        self._ready = False
         router = LegacyEventRouter(mailbox)
         ipc.install_runtime_ingress(
             self._publish_observation,
@@ -104,6 +141,9 @@ class MpvGateway:
         from saitenka.runtime.legacy import LegacyRuntimeBridge
 
         self._legacy = LegacyRuntimeBridge(mailbox, self, router, clock=clock)
+        with self._lock:
+            self._ready = True
+        self._start_pending_reconnect()
 
     @property
     def connection_epoch(self) -> int:
@@ -123,6 +163,30 @@ class MpvGateway:
 
     def cancel_timer(self, timer: str) -> bool:
         return self._legacy.cancel_timer(timer)
+
+    def register_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
+        """Own observer IDs and initial snapshots; reconnect replays the same closed set."""
+        with self._lock:
+            if self._closed:
+                return {}
+            self._observers = tuple(names)
+        replies: dict[str, dict] = {}
+        for observer_id, name in enumerate(names, 1):
+            self._ipc.command("observe_property", observer_id, name)
+            replies[name] = self._ipc.command("get_property", name)
+        return replies
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._connection_phase = ConnectionPhase.CLOSED
+            self._candidate_events.clear()
+            thread = self._reconnect_thread
+        self._legacy.cancel_timer("mpv-reconnect")
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.5)
 
     @property
     def snapshot(self) -> GatewaySnapshot:
@@ -151,7 +215,10 @@ class MpvGateway:
 
     def _dispatch_current(self, effect: SendMpvCommand) -> bool:
         with self._lock:
-            if effect.connection_epoch != self._connection_epoch:
+            if (
+                self._connection_phase is not ConnectionPhase.READY
+                or effect.connection_epoch != self._connection_epoch
+            ):
                 return False
             if effect.effect_id.value in self._pending:
                 return False
@@ -198,44 +265,85 @@ class MpvGateway:
         self._publish_terminal(effect, EffectOutcome.FAILED, code)
 
     def _publish_observation(self, message: dict, connection_epoch: int) -> None:
-        name = str(message.get("event", "unknown"))
-        if name == "property-change" and message.get("name") == "mouse-pos":
-            name = "mouse-pos"
-        payload: RuntimeEvent
-        if name == "client-message":
-            args = message.get("args")
-            with self._lock:
-                command_id = self._next_command_id
-                self._next_command_id += 1
-            if isinstance(args, list | tuple) and args and isinstance(args[0], str):
-                payload = UserCommand(args[0], tuple(args[1:]), command_id)
+        with self._lock:
+            if self._closed or connection_epoch != self._connection_epoch:
+                return
+            if self._connection_phase is ConnectionPhase.REPLAYING:
+                if len(self._candidate_events) >= _CANDIDATE_EVENT_LIMIT:
+                    self._inbound_overloads += 1
+                    overloaded = True
+                else:
+                    self._candidate_events.append(dict(message))
+                    overloaded = False
+                if not overloaded:
+                    return
+            elif self._connection_phase is not ConnectionPhase.READY:
+                return
             else:
-                payload = UserCommand("", command_id=command_id)
-        else:
-            payload = RawMpvEvent(name, message)
+                overloaded = False
+        if overloaded:
+            self._request_close(connection_epoch)
+            return
+        self._publish_ready_observation(message, connection_epoch)
+
+    def _publish_ready_observation(
+        self,
+        message: dict,
+        connection_epoch: int,
+        *,
+        lock_held: bool = False,
+    ) -> None:
+        payload = self._observation_payload(message, lock_held=lock_held)
         try:
-            if isinstance(payload, UserCommand):
-                self._mailbox.publish_command(
-                    payload,
-                    origin=EventOrigin.MPV,
-                    connection_epoch=connection_epoch,
-                )
-            else:
-                self._mailbox.publish(
-                    payload,
-                    origin=EventOrigin.MPV,
-                    traffic=TrafficClass.NORMAL,
-                    connection_epoch=connection_epoch,
-                )
+            self._publish_observation_payload(payload, connection_epoch)
         except MailboxFull:
-            with self._lock:
-                self._inbound_overloads += 1
+            self._record_inbound_overload(lock_held=lock_held)
             self._mailbox.publish(
                 CloseRequested("runtime-overloaded"),
                 origin=EventOrigin.LIFECYCLE,
                 traffic=TrafficClass.LIFECYCLE,
                 connection_epoch=connection_epoch,
             )
+
+    def _observation_payload(self, message: dict, *, lock_held: bool) -> RuntimeEvent:
+        name = str(message.get("event", "unknown"))
+        if name == "property-change" and message.get("name") == "mouse-pos":
+            name = "mouse-pos"
+        if name == "client-message":
+            args = message.get("args")
+            if lock_held:
+                command_id = self._next_command_id
+                self._next_command_id += 1
+            else:
+                with self._lock:
+                    command_id = self._next_command_id
+                    self._next_command_id += 1
+            if isinstance(args, list | tuple) and args and isinstance(args[0], str):
+                return UserCommand(args[0], tuple(args[1:]), command_id)
+            return UserCommand("", command_id=command_id)
+        return RawMpvEvent(name, message)
+
+    def _publish_observation_payload(self, payload: RuntimeEvent, connection_epoch: int) -> None:
+        if isinstance(payload, UserCommand):
+            self._mailbox.publish_command(
+                payload,
+                origin=EventOrigin.MPV,
+                connection_epoch=connection_epoch,
+            )
+        else:
+            self._mailbox.publish(
+                payload,
+                origin=EventOrigin.MPV,
+                traffic=TrafficClass.NORMAL,
+                connection_epoch=connection_epoch,
+            )
+
+    def _record_inbound_overload(self, *, lock_held: bool) -> None:
+        if lock_held:
+            self._inbound_overloads += 1
+        else:
+            with self._lock:
+                self._inbound_overloads += 1
 
     def publish_legacy_outcome(self, outcome: CommandHandled) -> None:
         """Publish a synchronous compatibility result into the ordered runtime stream."""
@@ -260,15 +368,157 @@ class MpvGateway:
                     self._stale_outcomes += 1
 
     def _publish_connection(self, state: str, connection_epoch: int) -> None:
-        payload: ConnectionReplaced | ConnectionLost
+        lost = state == "lost"
         with self._lock:
+            if self._closed:
+                return
             if state == "replaced":
                 self._connection_epoch = connection_epoch
-                payload = ConnectionReplaced(connection_epoch)
-            else:
-                payload = ConnectionLost(connection_epoch)
+                self._reconnect_epoch = connection_epoch
+                self._connection_phase = ConnectionPhase.REPLAYING
+                self._candidate_events.clear()
+                return
+            was_ready = self._connection_phase is ConnectionPhase.READY
+            self._connection_phase = ConnectionPhase.LOST
+            self._candidate_events.clear()
+        if was_ready:
+            self._mailbox.publish(
+                ConnectionLost(connection_epoch),
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=connection_epoch,
+            )
+        if lost:
+            self._request_reconnect(connection_epoch)
+
+    def _commit_replacement(self, connection_epoch: int, replay: tuple[dict, ...]) -> bool:
+        with self._lock:
+            if (
+                self._closed
+                or self._connection_phase is not ConnectionPhase.REPLAYING
+                or connection_epoch != self._connection_epoch
+                or self._ipc.disconnected
+            ):
+                return False
+            candidate = tuple(self._candidate_events)
+            self._candidate_events.clear()
+            self._mailbox.publish(
+                ConnectionReplaced(connection_epoch),
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=connection_epoch,
+            )
+            for message in (*replay, {"event": "file-loaded"}, *candidate):
+                self._publish_ready_observation(message, connection_epoch, lock_held=True)
+            self._mailbox.publish(
+                ConnectionReady(connection_epoch),
+                origin=EventOrigin.LIFECYCLE,
+                traffic=TrafficClass.LIFECYCLE,
+                connection_epoch=connection_epoch,
+            )
+            self._connection_phase = ConnectionPhase.READY
+            return True
+
+    def _start_pending_reconnect(self) -> None:
+        with self._lock:
+            epoch = self._reconnect_epoch
+        if epoch is not None:
+            self._request_reconnect(epoch)
+
+    def _request_reconnect(self, connection_epoch: int) -> None:
+        with self._lock:
+            if self._closed or connection_epoch != self._connection_epoch:
+                return
+            if not self._ready:
+                self._reconnect_epoch = connection_epoch
+                return
+            if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
+                self._reconnect_epoch = connection_epoch
+                return
+            self._reconnect_epoch = connection_epoch
+            self._connection_phase = ConnectionPhase.CONNECTING
+            thread = threading.Thread(
+                target=self._reconnect,
+                name="mpv-reconnect",
+                daemon=True,
+            )
+            self._reconnect_thread = thread
+        thread.start()
+
+    def _reconnect(self) -> None:
+        if self._ipc.reconnect_once() and self._finish_reconnect():
+            return
+        self._handle_reconnect_failure()
+
+    def _finish_reconnect(self) -> bool:
+        epoch = self.connection_epoch
+        replay = self._replay_observers(epoch)
+        if replay is None or not self._commit_replacement(epoch, replay):
+            return False
+        with self._lock:
+            self._reconnect_attempt = 0
+            pending_epoch = self._reconnect_epoch
+            self._reconnect_thread = None
+            restart = self._connection_phase is ConnectionPhase.LOST
+            if not restart and pending_epoch == epoch:
+                self._reconnect_epoch = None
+        if restart and pending_epoch is not None:
+            self._request_reconnect(pending_epoch)
+        return True
+
+    def _handle_reconnect_failure(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._connection_phase = ConnectionPhase.LOST
+            self._candidate_events.clear()
+            self._reconnect_thread = None
+            retry_epoch = self._connection_epoch
+            self._reconnect_attempt += 1
+            attempt = self._reconnect_attempt
+        if self._ipc.reconnects_left <= 0:
+            self._request_close(retry_epoch)
+            return
+        self._schedule_reconnect_retry(retry_epoch, attempt)
+
+    def _schedule_reconnect_retry(self, retry_epoch: int, attempt: int) -> None:
+        def retry(completion: EffectFinished) -> None:
+            if completion.outcome is EffectOutcome.SUCCEEDED:
+                self._request_reconnect(retry_epoch)
+            elif completion.outcome is EffectOutcome.REJECTED:
+                self._request_close(retry_epoch)
+
+        if not self._legacy.schedule_timer(
+            owner=Owner.SESSION,
+            identity=ReconnectRetry(retry_epoch, attempt),
+            timer="mpv-reconnect",
+            due_at=self._clock() + min(0.25, 0.05 * attempt),
+            on_finished=retry,
+        ):
+            self._request_close(retry_epoch)
+
+    def _replay_observers(self, connection_epoch: int) -> tuple[dict, ...] | None:
+        with self._lock:
+            names = self._observers
+            if (
+                self._closed
+                or self._connection_phase is not ConnectionPhase.REPLAYING
+                or connection_epoch != self._connection_epoch
+            ):
+                return None
+        replay: list[dict] = []
+        for observer_id, name in enumerate(names, 1):
+            if self._ipc.command("observe_property", observer_id, name).get("error") != "success":
+                return None
+            reply = self._ipc.command("get_property", name)
+            if reply.get("error") != "success":
+                return None
+            replay.append({"event": "property-change", "name": name, "data": reply.get("data")})
+        return tuple(replay)
+
+    def _request_close(self, connection_epoch: int) -> None:
         self._mailbox.publish(
-            payload,
+            CloseRequested("mpv-disconnected"),
             origin=EventOrigin.LIFECYCLE,
             traffic=TrafficClass.LIFECYCLE,
             connection_epoch=connection_epoch,
@@ -304,3 +554,15 @@ class MpvGateway:
 
 def install_legacy_gateway(ipc: MpvIPC) -> MpvGateway:
     return MpvGateway(ipc, SessionMailbox())
+
+
+def register_observer_set(ipc, names: tuple[str, ...]) -> dict[str, dict]:
+    """Register through the gateway when installed, or through a minimal test/pre-run adapter."""
+    register = getattr(ipc, "register_runtime_observers", None)
+    if register is not None:
+        return register(names)
+    replies: dict[str, dict] = {}
+    for observer_id, name in enumerate(names, 1):
+        ipc.command("observe_property", observer_id, name)
+        replies[name] = ipc.command("get_property", name)
+    return replies

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from concurrent.futures import Future
 
 import pytest
@@ -11,6 +12,8 @@ from saitenka.runtime import (
     CommandHandled,
     CommandOutcome,
     CommandReason,
+    ConnectionLost,
+    ConnectionReady,
     ConnectionReplaced,
     EffectError,
     EffectFinished,
@@ -43,6 +46,13 @@ class FakeIPC:
         self.connection_sink = None
         self.legacy_source = None
         self.requests: list[IPCRequest] = []
+        self.commands: list[tuple] = []
+        self.reconnect_results: list[bool] = []
+        self.reconnects_left = 3
+        self.disconnected = False
+        self.reconnected = threading.Event()
+        self.replay_entered: threading.Event | None = None
+        self.replay_release: threading.Event | None = None
 
     def install_runtime_ingress(self, event_sink, connection_sink, legacy_source, gateway) -> None:
         self.event_sink = event_sink
@@ -56,6 +66,24 @@ class FakeIPC:
         request = IPCRequest(len(self.requests), 0, Future())
         self.requests.append(request)
         return request
+
+    def command(self, *args, **_kwargs) -> dict:
+        self.commands.append(args)
+        if args and args[0] == "observe_property" and self.replay_entered is not None:
+            self.replay_entered.set()
+            assert self.replay_release is not None
+            assert self.replay_release.wait(1)
+        return {"error": "success", "data": args[-1]}
+
+    def reconnect_once(self) -> bool:
+        result = self.reconnect_results.pop(0) if self.reconnect_results else False
+        self.reconnects_left -= 1
+        if result:
+            self.disconnected = False
+            assert self.connection_sink is not None
+            self.connection_sink("replaced", 1)
+            self.reconnected.set()
+        return result
 
     def publish(self, message: dict, epoch: int = 0) -> None:
         assert self.event_sink is not None
@@ -126,6 +154,64 @@ def test_gateway_preserves_typed_command_arguments() -> None:
     envelope = mailbox.receive(timeout=0)
     assert envelope is not None
     assert envelope.payload == UserCommand("saitenka-command", (1, "two"), 0)
+
+
+@pytest.mark.timeout(5)
+def test_connection_loss_wakes_reconnect_and_replays_registered_observers() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    ipc.reconnect_results = [True]
+    gateway = MpvGateway(ipc, mailbox)
+    assert gateway.register_observers(("pause",)) == {
+        "pause": {"error": "success", "data": "pause"}
+    }
+    ipc.commands.clear()
+    assert ipc.connection_sink is not None
+
+    ipc.connection_sink("lost", 0)
+    assert ipc.reconnected.wait(1)
+    deadline = time.monotonic() + 1
+    events: list[object] = []
+    while time.monotonic() < deadline and len(events) < 5:
+        events.extend(ipc.legacy_source())
+        time.sleep(0.001)
+
+    assert events == [
+        ConnectionLost(0),
+        ConnectionReplaced(1),
+        {"event": "property-change", "name": "pause", "data": "pause"},
+        {"event": "file-loaded"},
+        ConnectionReady(1),
+    ]
+    assert ipc.commands == [
+        ("observe_property", 1, "pause"),
+        ("get_property", "pause"),
+    ]
+
+
+@pytest.mark.timeout(5)
+def test_failed_reconnect_retries_only_when_named_timer_is_due() -> None:
+    clock = Clock()
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    ipc.reconnect_results = [False, True]
+    MpvGateway(ipc, mailbox, clock=clock)
+    assert ipc.connection_sink is not None
+
+    ipc.connection_sink("lost", 0)
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and (
+        len(ipc.reconnect_results) == 2 or mailbox.snapshot.terminal_reserved == 0
+    ):
+        time.sleep(0.001)
+    assert len(ipc.reconnect_results) == 1
+    assert not ipc.reconnected.is_set()
+
+    ipc.legacy_source()
+    assert not ipc.reconnected.is_set()
+    clock.now += 0.05
+    ipc.legacy_source()
+    assert ipc.reconnected.wait(1)
 
 
 def test_gateway_represents_malformed_client_message_for_policy_rejection() -> None:
@@ -223,7 +309,54 @@ def test_gateway_preserves_events_buffered_before_installation() -> None:
     ipc.close()
 
 
-def test_replacement_epoch_is_published_before_its_first_wire_event() -> None:
+def test_gateway_observes_a_disconnect_that_preceded_ingress_installation() -> None:
+    mailbox = SessionMailbox()
+    ipc = MpvIPC("unused")
+    ipc._closed.set()
+    gateway = MpvGateway(ipc, mailbox)
+
+    envelope = mailbox.receive(timeout=1)
+
+    assert envelope is not None
+    assert envelope.payload == ConnectionLost(0)
+    gateway.close()
+    ipc.close()
+
+
+@pytest.mark.timeout(5)
+def test_exhausted_reconnect_requests_a_bounded_session_stop() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    ipc.reconnect_results = [False]
+    ipc.reconnects_left = 1
+    MpvGateway(ipc, mailbox)
+    assert ipc.connection_sink is not None
+
+    ipc.connection_sink("lost", 0)
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        try:
+            ipc.legacy_source()
+        except OSError as error:
+            assert str(error) == "mpv-disconnected"
+            return
+        time.sleep(0.001)
+    raise AssertionError("reconnect exhaustion did not stop the session")
+
+
+def test_closed_gateway_ignores_late_connection_loss() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    gateway = MpvGateway(ipc, mailbox)
+    assert ipc.connection_sink is not None
+    gateway.close()
+
+    ipc.connection_sink("lost", 0)
+
+    assert mailbox.receive(timeout=0) is None
+
+
+def test_candidate_wire_event_is_not_published_before_replay_commits() -> None:
     mailbox = SessionMailbox()
     ipc = MpvIPC("unused")
     MpvGateway(ipc, mailbox)
@@ -231,14 +364,108 @@ def test_replacement_epoch_is_published_before_its_first_wire_event() -> None:
     installed, _retired = ipc._install_replacement(ImmediateEventTransport())
 
     assert installed
-    first = mailbox.receive(timeout=1)
-    second = mailbox.receive(timeout=1)
-    assert first is not None and first.payload == ConnectionReplaced(1)
-    assert second is not None and second.payload == RawMpvEvent(
-        "file-loaded", {"event": "file-loaded"}
-    )
-    assert first.sequence < second.sequence
+    assert mailbox.receive(timeout=0) is None
     ipc.close()
+
+
+@pytest.mark.timeout(5)
+def test_replaying_connection_blocks_commands_and_buffers_wire_events() -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    ipc.reconnect_results = [True]
+    gateway = MpvGateway(ipc, mailbox)
+    gateway.register_observers(("pause",))
+    ipc.replay_entered = threading.Event()
+    ipc.replay_release = threading.Event()
+    assert ipc.connection_sink is not None
+
+    ipc.connection_sink("lost", 0)
+    assert ipc.replay_entered.wait(1)
+    ipc.publish({"event": "property-change", "name": "pause", "data": False}, epoch=1)
+    blocked = SendMpvCommand(
+        EffectId(71),
+        Owner.SESSION,
+        "during-replay",
+        ("set_property", "pause", True),
+        5.0,
+        1,
+    )
+    assert not gateway.dispatch(blocked)
+    assert ipc.legacy_source() == [ConnectionLost(0)]
+
+    ipc.replay_release.set()
+    deadline = time.monotonic() + 1
+    events: list[object] = []
+    while time.monotonic() < deadline and not any(isinstance(x, ConnectionReady) for x in events):
+        events.extend(ipc.legacy_source())
+        time.sleep(0.001)
+
+    assert events == [
+        ConnectionReplaced(1),
+        {"event": "property-change", "name": "pause", "data": "pause"},
+        {"event": "file-loaded"},
+        {"event": "property-change", "name": "pause", "data": False},
+        ConnectionReady(1),
+    ]
+
+
+@pytest.mark.timeout(5)
+def test_failed_candidate_never_publishes_a_replacement() -> None:
+    class FailedCandidateIPC(FakeIPC):
+        def reconnect_once(self) -> bool:
+            self.reconnects_left = 0
+            self.disconnected = True
+            assert self.connection_sink is not None
+            self.connection_sink("replaced", 1)
+            self.publish({"event": "file-loaded"}, epoch=1)
+            return False
+
+    mailbox = SessionMailbox()
+    ipc = FailedCandidateIPC()
+    MpvGateway(ipc, mailbox)
+    assert ipc.connection_sink is not None
+
+    ipc.connection_sink("lost", 0)
+    deadline = time.monotonic() + 1
+    observed: list[object] = []
+    while time.monotonic() < deadline:
+        try:
+            observed.extend(ipc.legacy_source())
+        except OSError:
+            break
+        time.sleep(0.001)
+
+    assert not any(isinstance(event, ConnectionReplaced | ConnectionReady) for event in observed)
+
+
+@pytest.mark.timeout(5)
+def test_loss_after_commit_before_worker_cleanup_starts_another_attempt(monkeypatch) -> None:
+    mailbox = SessionMailbox()
+    ipc = FakeIPC()
+    ipc.reconnect_results = [True, False]
+    gateway = MpvGateway(ipc, mailbox)
+    committed = threading.Event()
+    release_cleanup = threading.Event()
+    original_commit = gateway._commit_replacement
+
+    def commit_then_block(connection_epoch: int, replay: tuple[dict, ...]) -> bool:
+        result = original_commit(connection_epoch, replay)
+        committed.set()
+        assert release_cleanup.wait(1)
+        return result
+
+    monkeypatch.setattr(gateway, "_commit_replacement", commit_then_block)
+    assert ipc.connection_sink is not None
+
+    ipc.connection_sink("lost", 0)
+    assert committed.wait(1)
+    ipc.connection_sink("lost", 1)
+    release_cleanup.set()
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline and ipc.reconnect_results:
+        time.sleep(0.001)
+
+    assert ipc.reconnect_results == []
 
 
 def test_ipc_rejects_old_epoch_command_after_replacement_installation() -> None:

@@ -42,10 +42,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader.start_observing"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader.toggle_hover_pause"
     ],
     [
@@ -1721,7 +1717,6 @@
       "id": "observers-and-replay",
       "source": "src/saitenka/app/controller.py::Reader.run",
       "evidence": [
-        "ref:self.ipc.on_reconnect",
         "call:self.start_observing"
       ],
       "target": "mpv-gateway",

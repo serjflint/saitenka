@@ -136,6 +136,7 @@ class _AsyncIPC:
         self.requests: list[IPCRequest] = []
         self.legacy_source = list
         self.connection_sink = None
+        self.disconnected = False
 
     def command_async(self, *args, expected_connection_epoch=None):
         del expected_connection_epoch
@@ -206,12 +207,14 @@ def test_show_disconnect_delivered_after_reconnect_still_clears() -> None:
     from saitenka.app.loading import HintOutcome, show_startup_hint
 
     ipc = _AsyncIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    lease = show_startup_hint(gateway)
     assert lease is not None
     lease.mark_ready()
     ipc.requests[0].future.set_result({"error": "disconnected"})
     assert ipc.connection_sink is not None
     ipc.connection_sink("replaced", 1)
+    assert gateway._commit_replacement(1, ())
     lease.connection_replaced()
 
     ipc.drain_events()
@@ -224,7 +227,8 @@ def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
     from saitenka.app.loading import show_startup_hint
 
     ipc = _AsyncIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    lease = show_startup_hint(gateway)
     assert lease is not None
     ipc.requests[0].future.set_result({"error": "success"})
     ipc.drain_events()
@@ -268,7 +272,8 @@ def test_clear_disconnect_delivered_after_reconnect_still_retries(monkeypatch) -
     monkeypatch.setattr(loading.otel_metrics, "traced", traced)
 
     ipc = _AsyncIPC()
-    lease = show_startup_hint(runtime_gateway(ipc))
+    gateway = runtime_gateway(ipc)
+    lease = show_startup_hint(gateway)
     assert lease is not None
     ipc.requests[0].future.set_result({"error": "success"})
     ipc.drain_events()
@@ -276,6 +281,7 @@ def test_clear_disconnect_delivered_after_reconnect_still_retries(monkeypatch) -
     ipc.requests[1].future.set_result({"error": "disconnected"})
     assert ipc.connection_sink is not None
     ipc.connection_sink("replaced", 1)
+    assert gateway._commit_replacement(1, ())
     lease.connection_replaced()
 
     ipc.drain_events()

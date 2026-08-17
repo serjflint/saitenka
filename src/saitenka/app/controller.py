@@ -122,8 +122,16 @@ from saitenka.app.toast import render_toast
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
 from saitenka.app.tokenizer import Tokenizer, get_tokenizer
+from saitenka.mpvio.gateway import register_observer_set
 from saitenka.mpvio.osd import Overlay
-from saitenka.runtime import CommandHandled, UserCommand
+from saitenka.runtime import (
+    CommandHandled,
+    CommandReason,
+    ConnectionLost,
+    ConnectionReady,
+    ConnectionReplaced,
+    UserCommand,
+)
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
@@ -358,6 +366,7 @@ class Reader:
         self.ipc = ipc
         self._startup_hint_lease = startup_hint_lease
         self._interactive_ready = False
+        self._connection_ready = True
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
         from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
         from saitenka.app.lifecycle_timers import LifecycleTimers
@@ -717,9 +726,9 @@ class Reader:
         """Register ``observe_property`` for the hot-path properties and seed their initial values
         with ONE get_property each. After this, the poll loop consumes buffered ``property-change``
         events instead of doing blocking round-trips every tick. Main-thread only (IPC)."""
-        for i, name in enumerate(OBSERVED_PROPS, 1):
-            self.ipc.command("observe_property", i, name)
-            reply = self.ipc.command("get_property", name)
+        replies = self._register_observers()
+        for name in OBSERVED_PROPS:
+            reply = replies[name]
             data = reply.get("data")
             if connection_replaced:
                 self._on_property_change({"event": "property-change", "name": name, "data": data})
@@ -743,6 +752,11 @@ class Reader:
             )
         else:
             self._probe_display_sources("seed", self._observed.get("osd-dimensions") or {})
+
+    def _register_observers(self) -> dict[str, dict]:
+        replies = register_observer_set(self.ipc, tuple(OBSERVED_PROPS))
+        replies = {name: replies.get(name) or {"error": "unavailable"} for name in OBSERVED_PROPS}
+        return replies
 
     def _prop(self, name: str):
         """Latest value of a property: the observed (event-driven) state when observing, else a
@@ -2412,12 +2426,13 @@ class Reader:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
-            self.ipc.pump()  # sole socket reader in steady state: fetch events, detect mpv quit
+            self._drain_events()
+            if not self._connection_ready:
+                return True
             session_stats.tick(self)
             self._maybe_advance()
             self._flush_paused_nudge()
             ops_before = self.ov.ops
-            self._drain_events()
             first_tick = not self._interactive_ready
             if first_tick:
                 with otel_metrics.traced("startup.first_tick"):
@@ -2444,24 +2459,46 @@ class Reader:
     def _drain_events(self) -> None:
         picker_guard = LegacyPickerRepeatGuard()
         for ev in self.ipc.drain_events():
-            if isinstance(ev, UserCommand):
-                self._drain_command(ev, picker_guard)
-                continue
-            if not isinstance(ev, dict):
-                log.debug("ignored unsupported runtime event: %s", type(ev).__name__)
-                continue
-            kind = ev.get("event")
-            if kind == "file-loaded":
-                picker_guard.separate()
-            if kind == "property-change":  # observed state — no round-trips
-                self._on_property_change(ev)
-            elif kind == "file-loaded":  # #100: re-slot the overlay onto the newly loaded file
-                self._on_file_loaded()
-            elif kind == "client-message":
-                args = ev.get("args") or [""]
-                name = args[0] if isinstance(args[0], str) else ""
-                command = UserCommand(name, tuple(args[1:]))
-                self._drain_command(command, picker_guard)
+            self._drain_event(ev, picker_guard)
+
+    def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
+        if isinstance(ev, ConnectionLost):
+            self._connection_ready = False
+            self._retire_cue_identity("connection-lost")
+            return
+        if isinstance(ev, ConnectionReplaced):
+            self._on_ipc_reconnect()
+            return
+        if isinstance(ev, ConnectionReady):
+            self._connection_ready = True
+            return
+        if isinstance(ev, UserCommand):
+            if not self._connection_ready:
+                self._publish_command_event(
+                    CommandHandled(
+                        ev.name,
+                        None,
+                        CommandOutcome.REJECTED,
+                        command_id=ev.command_id,
+                        reason=CommandReason.DISCONNECTED,
+                    )
+                )
+                return
+            self._drain_command(ev, picker_guard)
+            return
+        if not isinstance(ev, dict):
+            log.debug("ignored unsupported runtime event: %s", type(ev).__name__)
+            return
+        kind = ev.get("event")
+        if kind == "file-loaded":
+            picker_guard.separate()
+            self._on_file_loaded()
+        elif kind == "property-change":
+            self._on_property_change(ev)
+        elif kind == "client-message":
+            args = ev.get("args") or [""]
+            name = args[0] if isinstance(args[0], str) else ""
+            self._drain_command(UserCommand(name, tuple(args[1:])), picker_guard)
 
     def _drain_command(self, command: UserCommand, guard: LegacyPickerRepeatGuard) -> None:
         if (suppressed := guard.inspect(command)) is not None:
@@ -2615,9 +2652,6 @@ class Reader:
         interval = interval if interval is not None else self.poll_interval
         with otel_metrics.traced("startup.reader_setup"):
             self.refresh_osd()
-            # Re-register observers after an IPC reconnect (mpv.net drops the pipe mid-session; a fresh
-            # connection has forgotten every observe_property) — runs on the IPC thread inside pump().
-            self.ipc.on_reconnect = self._on_ipc_reconnect
             with otel_metrics.traced("startup.reader_setup.observers"):
                 self.start_observing()  # event-driven property reads from here on
             with otel_metrics.traced("startup.reader_setup.keybinds"):
@@ -2646,8 +2680,6 @@ class Reader:
             time.sleep(interval)
 
     def _on_ipc_reconnect(self) -> None:
-        self.start_observing(connection_replaced=True)
-        self._on_file_loaded()
         self.subtitle_pipeline.connection_replaced(self)
         if self._startup_hint_lease is not None:
             self._startup_hint_lease.connection_replaced()
