@@ -9,9 +9,9 @@ hit. Beyond the renderer, the codebase bolts a full reader onto mpv: subtitle dr
 hitboxes, hover → dictionary lookup → tooltip, word coloring by known/frequency/JLPT state, and
 one-key Anki mining.
 
-Design strategy: "simplest tool first, escalate on limits" (see README's Escalation ladder) —
-Pillow does the rendering today; Rust + cosmic-text + the libmpv render API is the fallback only if
-Pillow hits a real wall (per-frame animation, huge panels, GPU scaling).
+Design strategy: "simplest tool first, escalate on limits" (see README's Escalation ladder).
+Pillow remains the dictionary-panel and standard-subtitle rasterizer. The optional native-visible
+subtitle mode uses libass only for offscreen token geometry; it does not replace the panel renderer.
 
 ## Module map
 
@@ -48,8 +48,9 @@ internal modules with explicit dependency contracts, not independently published
   It has no application, rendering, mpv, or filesystem dependencies; `app/sub_index.py` is the thin
   file-loading adapter. The corpus and differential checks therefore exercise the stable surface
   without constructing a `Reader`.
-- **`app/`** — the application layer. `controller.py`'s `Reader` owns the mpv session lifecycle and
-  interactive state. `runtime/` owns command dispatch and ordered tick primitives;
+- **`app/`** — the application layer. `controller.py`'s `Reader` is the production driver and
+  owns the mpv session lifecycle and interactive state. `app/runtime/` owns its closed command table
+  and ordered tick primitives;
   `reader_factory.py` is the production `Reader` construction seam. `cli.py` owns process setup and
   Cyclopts registration, `commands/` owns domain command surfaces and attach orchestration, and
   `launch/` owns run orchestration. The remaining domains include `tokenizer.py` (the tokenizer-strategy
@@ -61,6 +62,10 @@ internal modules with explicit dependency contracts, not independently published
   `episode_analysis.py`/`analysis_overlay.py` (cached whole-track metrics and their background UI);
   `session_stats.py` (event aggregation and asynchronous local history, reusing analysis snapshots);
   `jimaku.py`/`tsukihime.py`/`subtitle_providers.py` (subtitle fetching).
+- **`runtime/`** — an isolated, test-only session contract package: closed events/effects, bounded
+  mailbox lanes with reserved terminal capacity, a deterministic lifecycle ledger, and named timers.
+  Production does not import it. The [runtime architecture](docs/contributing/runtime.md) describes
+  its relationship to the production loop and the maintained invariants.
 - **Root leaf modules** — dependency-neutral types and policies shared across layers live directly in
   `saitenka` rather than a generic `utils` package: `model.py`, `bgra.py`, `fonts.py`, `mask_atlas.py`,
   `otel_metrics.py`, `parallel.py`, `resources.py`, `session.py`, and `version.py`. A root module should
@@ -98,6 +103,10 @@ named `TickPipeline`. Both reject duplicate names, which makes ordering and owne
 testable. `Reader` still assembles those tables from its feature methods, so this is an explicit
 internal composition seam rather than an open third-party plugin API.
 
+The separate `saitenka.runtime` contract package is not part of this assembly. See
+[Interactive runtime architecture](docs/contributing/runtime.md) for both runtime packages, their
+actual call boundaries, and the executable invariants.
+
 The extension points have different maturity levels; keeping that distinction explicit prevents a
 protocol-shaped class from being mistaken for production swappability.
 
@@ -107,6 +116,7 @@ protocol-shaped class from being mistaken for production swappability.
 | Subtitle acquisition | `SubtitleProvider` registry | Live: built-ins register capabilities and ordered fetch functions without provider branches in callers. |
 | Tokenization | profile tokenizer strategy | Live: Japanese and Latin strategies are selected by the reading profile. |
 | Reader commands and ticks | `CommandRouter`, `TickPipeline` | Explicit and unit-testable; assembled inside `Reader`, not externally injected. |
+| Session events and effects | `saitenka.runtime` | Test-only: mailbox, lifecycle ledger, and timers are characterized but not a production driver. |
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
@@ -280,10 +290,12 @@ format, geometry, and dictionary identity, so a changed configuration misses rat
 pixels with stale layout. SQLite failures degrade cleanly; malformed compressed blobs are not yet
 handled as misses on every read path.
 
-## Data flow (the hover → lookup → render → mine chain)
+## Current production data flow (hover → lookup → render → mine)
 
-1. `Reader.poll_once` pumps observed mpv properties and input events, then runs the named tick stages:
-   expire surfaces, refresh OSD, reconcile subtitles, apply background results, and update interaction.
+1. `MpvIPC`'s reader thread buffers observed properties and client messages while resolving correlated
+   reply futures directly. `Reader.poll_once` checks connection health, drains the buffered events,
+   then runs the named tick stages: expire surfaces, refresh OSD, reconcile subtitles, apply
+   background results, and update interaction.
 2. A new subtitle line is normalized, tokenized by the active profile, compound-merged against the
    dictionary capability, scored, and cached as a `TokenizedCue`. Subtitle rendering returns the
    visible word boxes used by the hover test.
@@ -510,7 +522,7 @@ current bounds and failure modes:
 
 | Subsystem | Bound or scheduling rule | Consequence |
 | --- | --- | --- |
-| mpv IPC | One socket owner; properties are observed and buffered; one reply can be in flight. | The tick drains local events instead of issuing several blocking property round-trips. |
+| mpv IPC | One reader and one bounded writer; properties are observed and buffered; request IDs correlate concurrent replies to their own futures. | The tick drains local events, outbound admission is bounded, and replies cannot be misrouted between commands. |
 | Subtitle work | One cue is rendered; tokenization is LRU-cached by normalized text. A background warm may cover the finite cue index. | Repeated, replayed, and prefetched lines avoid parsing and scoring. The token cache cannot grow with session length. |
 | Lookup | SQL values are bound; wildcard searches have a result limit; decoded records use a per-dictionary LRU. | Result construction and decoded glossary retention are capped independently of dictionary size. |
 | Panel identity | An LRU bounds retained `Panel`s. Keys include every value that changes content or header state. | Re-hover is a cache hit without reusing a semantically stale image. |
