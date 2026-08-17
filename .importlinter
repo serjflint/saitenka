@@ -117,3 +117,12 @@ source_modules =
     saitenka
 forbidden_modules =
     libasslite
+
+[importlinter:contract:runtime-core-independent]
+name = Runtime core never imports app or mpv adapters
+type = forbidden
+source_modules =
+    saitenka.runtime
+forbidden_modules =
+    saitenka.app
+    saitenka.mpvio
