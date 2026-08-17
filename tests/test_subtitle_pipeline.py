@@ -217,7 +217,15 @@ def test_coordinator_delegates_current_renderer() -> None:
     assert renderer.drawn_host is host
 
 
-def test_worker_drops_superseded_pending_request() -> None:
+def test_worker_drops_superseded_pending_request(monkeypatch) -> None:
+    start = threading.Event()
+    run = SubtitleGeometryWorker._run
+
+    def delayed_run(worker: SubtitleGeometryWorker) -> None:
+        assert start.wait(1.0)
+        run(worker)
+
+    monkeypatch.setattr(SubtitleGeometryWorker, "_run", delayed_run)
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     first = request(coordinator.generation, 1_250)
@@ -225,6 +233,7 @@ def test_worker_drops_superseded_pending_request() -> None:
 
     assert worker.submit(first)
     assert worker.submit(second)
+    start.set()
     assert worker.wait_idle()
 
     assert coordinator.current is not None

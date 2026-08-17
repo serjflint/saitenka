@@ -3,17 +3,18 @@ from __future__ import annotations
 import threading
 import time
 
-from util import FakeIPC
+from util import FakeIPC, runtime_gateway
 
-from saitenka.app.capabilities import CapabilityProbe
+from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.controller import Reader
 from saitenka.app.tokenize import Token
 from saitenka.app.tooltip import panel_key
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
 
 def _await_result(probe: CapabilityProbe) -> None:
     for _ in range(200):
-        if probe.apply():
+        if probe.value is not None:
             return
         time.sleep(0.001)
     raise AssertionError("capability probe did not publish")
@@ -52,13 +53,13 @@ def test_capability_close_rejects_late_result():
     release.set()
     time.sleep(0.01)
 
-    assert probe.apply() is False
     assert probe.value is None
 
 
 def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     clock = [0.0]
     first = threading.Event()
+    second = threading.Event()
     calls = 0
 
     def run() -> bool:
@@ -67,6 +68,7 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
         if calls == 1:
             first.wait(1)
             return False
+        second.wait(1)
         return True
 
     probe = CapabilityProbe(run, name="test", ttl=30, retry=1, timeout=5, clock=lambda: clock[0])
@@ -74,12 +76,12 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     clock[0] = 6.0
     assert probe.request()
     assert not probe.request(force=True)
+    second.set()
     _await_result(probe)
     assert probe.value is True and calls == 2
 
     first.set()
     time.sleep(0.01)
-    assert probe.apply() is False
     assert probe.value is True
 
 
@@ -124,3 +126,115 @@ def test_late_tts_result_changes_panel_cache_identity(monkeypatch):
         assert before != after
     finally:
         reader.close()
+
+
+def test_runtime_capability_completion_changes_reader_only_after_event_delivery(monkeypatch):
+    finished = threading.Event()
+
+    def probe() -> bool:
+        finished.set()
+        return True
+
+    monkeypatch.setattr("saitenka.app.controller.tts_available", probe)
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    try:
+        reader._apply_capabilities()
+        assert finished.wait(1.0)
+        assert reader._tts_ok is False
+
+        for _ in range(200):
+            reader._drain_events()
+            reader._apply_capabilities()
+            if reader._tts_ok:
+                break
+            time.sleep(0.001)
+
+        assert reader._tts_ok is True
+    finally:
+        reader.close()
+        gateway.close()
+
+
+def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    submit = configure_runtime_jobs(ipc)
+    assert submit is not None
+    clock = [0.0]
+    releases = {"tts": threading.Event(), "anki": threading.Event()}
+    calls = {"tts": 0, "anki": 0}
+
+    def make_probe(name: str):
+        def probe() -> bool:
+            calls[name] += 1
+            if calls[name] == 1:
+                releases[name].wait(1.0)
+                return False
+            return True
+
+        return CapabilityProbe(
+            probe,
+            name=name,
+            ttl=30.0,
+            retry=1.0,
+            timeout=5.0,
+            clock=lambda: clock[0],
+            submit=submit,
+        )
+
+    probes = tuple(make_probe(name) for name in ("tts", "anki"))
+    try:
+        assert all(probe.request() for probe in probes)
+        clock[0] = 6.0
+        assert all(probe.request() for probe in probes)
+        for _ in range(200):
+            ipc.drain_events()
+            if all(probe.value is True for probe in probes):
+                break
+            time.sleep(0.001)
+
+        assert calls == {"tts": 2, "anki": 2}
+        assert all(probe.value is True for probe in probes)
+    finally:
+        for probe in probes:
+            probe.close()
+        for release in releases.values():
+            release.set()
+        gateway.close()
+
+
+def test_runtime_admission_failure_preserves_last_known_capability() -> None:
+    clock = [0.0]
+    outcomes = [
+        (EffectOutcome.SUCCEEDED, True, None),
+        (EffectOutcome.REJECTED, None, EffectError.OVERLOADED),
+        (EffectOutcome.SUCCEEDED, True, None),
+    ]
+
+    def submit(*, owner, identity, lane, request, on_finished) -> bool:
+        del lane, request
+        outcome, result, error = outcomes.pop(0)
+        on_finished(
+            EffectFinished(EffectId(3 - len(outcomes)), owner, identity, outcome, result, error)
+        )
+        return outcome is EffectOutcome.SUCCEEDED
+
+    probe = CapabilityProbe(
+        lambda: True,
+        name="test",
+        ttl=30.0,
+        retry=1.0,
+        clock=lambda: clock[0],
+        submit=submit,
+    )
+    assert probe.request()
+    assert probe.value is True
+
+    assert not probe.request(force=True)
+    assert probe.value is True
+    assert not probe.request()
+    clock[0] = 1.0
+    assert probe.request()
+    assert probe.value is True

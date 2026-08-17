@@ -35,6 +35,7 @@ from saitenka.runtime.events import (
     RuntimeEvent,
     UserCommand,
 )
+from saitenka.runtime.jobs import JobBroker, JobLanePolicy
 from saitenka.runtime.limits import DEFAULT_RUNTIME_LIMITS, RuntimeLimits
 from saitenka.runtime.mailbox import MailboxFull, SessionMailbox, TrafficClass
 from saitenka.runtime.reactor import SessionReactor
@@ -84,6 +85,8 @@ __all__ = [
     "EventEnvelope",
     "EventOrigin",
     "ExpireEffect",
+    "JobBroker",
+    "JobLanePolicy",
     "MailboxFull",
     "Owner",
     "RawMpvEvent",

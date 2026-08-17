@@ -529,6 +529,7 @@ def apply_deps(reader: Reader, deps: dict) -> None:
             retry=min(reader.anki_ok_ttl, 1.0),
             timeout=max(reader.anki_ping_timeout * 2, 0.1),
             max_retry=max(reader.anki_ok_ttl, 8.0),
+            submit=reader._capability_submit,
         )
         reader._anki_capability.request(force=True)
     from saitenka.app import analysis_overlay

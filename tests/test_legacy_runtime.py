@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import threading
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, cast
 
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime.effects import EffectError, EffectOutcome, Owner
+from saitenka.runtime.jobs import JobLanePolicy
 from saitenka.runtime.mailbox import SessionMailbox
 
 if TYPE_CHECKING:
@@ -173,3 +175,103 @@ def test_named_timer_rejects_when_terminal_capacity_is_full() -> None:
     assert completed[0].identity == "second"
     assert completed[0].outcome is EffectOutcome.REJECTED
     assert completed[0].error is EffectError.OVERLOADED
+
+
+def test_job_completion_is_delivered_on_the_reader_turn() -> None:
+    ipc = FakeIPC()
+    mailbox = SessionMailbox()
+    gateway = MpvGateway(cast("MpvIPC", ipc), mailbox, clock=Clock())
+    ran = threading.Event()
+    completed: list[EffectFinished] = []
+
+    def work(request: object, _cancelled: threading.Event) -> object:
+        ran.set()
+        return f"done:{request}"
+
+    gateway.register_job_lane("probe", JobLanePolicy(capacity=1), work)
+    assert gateway.submit_job(
+        owner=Owner.SESSION,
+        identity="probe:1",
+        lane="probe",
+        request="input",
+        on_finished=completed.append,
+    )
+    assert ran.wait(1.0)
+    assert completed == []
+
+    envelope = mailbox.receive(timeout=1.0)
+    assert envelope is not None
+    gateway.legacy.handle_terminal(cast("EffectFinished", envelope.payload))
+    assert len(completed) == 1
+    assert completed[0].outcome is EffectOutcome.SUCCEEDED
+    assert completed[0].result == "done:input"
+
+
+def test_job_lane_rejects_saturation_with_a_terminal_outcome() -> None:
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
+    started = threading.Event()
+    release = threading.Event()
+    completed: list[EffectFinished] = []
+
+    def blocked(request: object, _cancelled: threading.Event) -> object:
+        started.set()
+        release.wait()
+        return request
+
+    gateway.register_job_lane("probe", JobLanePolicy(capacity=1), blocked)
+    assert gateway.submit_job(
+        owner=Owner.SESSION,
+        identity="probe:1",
+        lane="probe",
+        request="first",
+        on_finished=completed.append,
+    )
+    assert started.wait(1.0)
+    assert not gateway.submit_job(
+        owner=Owner.SESSION,
+        identity="probe:2",
+        lane="probe",
+        request="second",
+        on_finished=completed.append,
+    )
+    assert len(completed) == 1
+    assert completed[0].identity == "probe:2"
+    assert completed[0].outcome is EffectOutcome.REJECTED
+    assert completed[0].error is EffectError.OVERLOADED
+    release.set()
+
+
+def test_job_close_cancels_pending_work_and_quarantines_late_completion() -> None:
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
+    started = threading.Event()
+    completed: list[EffectFinished] = []
+
+    def cooperative(request: object, cancelled: threading.Event) -> object:
+        started.set()
+        assert cancelled.wait(1.0)
+        return request
+
+    gateway.register_job_lane("probe", JobLanePolicy(capacity=1), cooperative)
+    assert gateway.submit_job(
+        owner=Owner.SESSION,
+        identity="probe:1",
+        lane="probe",
+        request="input",
+        on_finished=completed.append,
+    )
+    assert started.wait(1.0)
+
+    gateway.close()
+    assert ipc.legacy_source() == []
+    assert len(completed) == 1
+    assert completed[0].outcome is EffectOutcome.CANCELLED
+    assert not gateway.submit_job(
+        owner=Owner.SESSION,
+        identity="probe:2",
+        lane="probe",
+        request="late",
+        on_finished=completed.append,
+    )
+    assert completed[-1].outcome is EffectOutcome.REJECTED

@@ -29,6 +29,7 @@ from saitenka.runtime import (
     TrafficClass,
     UserCommand,
 )
+from saitenka.runtime.jobs import JobBroker, JobLanePolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -140,7 +141,14 @@ class MpvGateway:
         )
         from saitenka.runtime.legacy import LegacyRuntimeBridge
 
-        self._legacy = LegacyRuntimeBridge(mailbox, self, router, clock=clock)
+        self._jobs = JobBroker(mailbox)
+        self._legacy = LegacyRuntimeBridge(
+            mailbox,
+            self,
+            router,
+            job_adapter=self._jobs,
+            clock=clock,
+        )
         with self._lock:
             self._ready = True
         self._start_pending_reconnect()
@@ -164,6 +172,12 @@ class MpvGateway:
     def cancel_timer(self, timer: str) -> bool:
         return self._legacy.cancel_timer(timer)
 
+    def register_job_lane(self, name: str, policy: JobLanePolicy, handler) -> None:
+        self._jobs.register(name, policy, handler)
+
+    def submit_job(self, **kwargs) -> bool:
+        return self._legacy.submit_job(**kwargs)
+
     def register_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         """Own observer IDs and initial snapshots; reconnect replays the same closed set."""
         with self._lock:
@@ -177,6 +191,7 @@ class MpvGateway:
         return replies
 
     def close(self) -> None:
+        self._jobs.close()
         with self._lock:
             if self._closed:
                 return
