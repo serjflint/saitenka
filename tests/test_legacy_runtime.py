@@ -99,3 +99,77 @@ def test_legacy_bridge_rejects_when_terminal_capacity_cannot_fit_the_deadline_pa
     assert completed[0].outcome is EffectOutcome.REJECTED
     assert completed[0].error is EffectError.OVERLOADED
     assert ipc.requests == []
+
+
+def test_named_timer_delivers_only_after_its_due_turn() -> None:
+    clock = Clock()
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=clock)
+    completed: list[EffectFinished] = []
+
+    assert gateway.legacy.schedule_timer(
+        owner=Owner.SESSION,
+        identity="toast:1",
+        timer="lifecycle:toast",
+        due_at=2.0,
+        on_finished=completed.append,
+    )
+    clock.now = 1.99
+    assert ipc.legacy_source() == []
+    assert completed == []
+
+    clock.now = 2.0
+    assert ipc.legacy_source() == []
+    assert [item.outcome for item in completed] == [EffectOutcome.SUCCEEDED]
+
+
+def test_replacing_named_timer_terminally_cancels_old_revision() -> None:
+    clock = Clock()
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=clock)
+    completed: list[tuple[str, EffectOutcome]] = []
+
+    for identity, due in (("toast:1", 1.0), ("toast:2", 2.0)):
+        assert gateway.legacy.schedule_timer(
+            owner=Owner.SESSION,
+            identity=identity,
+            timer="lifecycle:toast",
+            due_at=due,
+            on_finished=lambda result, identity=identity: completed.append(
+                (identity, result.outcome)
+            ),
+        )
+    assert ipc.legacy_source() == []
+    clock.now = 2.0
+    assert ipc.legacy_source() == []
+
+    assert completed == [
+        ("toast:1", EffectOutcome.CANCELLED),
+        ("toast:2", EffectOutcome.SUCCEEDED),
+    ]
+
+
+def test_named_timer_rejects_when_terminal_capacity_is_full() -> None:
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(terminal_capacity=1), clock=Clock())
+    completed: list[EffectFinished] = []
+    assert gateway.legacy.schedule_timer(
+        owner=Owner.SESSION,
+        identity="first",
+        timer="first",
+        due_at=1.0,
+        on_finished=completed.append,
+    )
+
+    assert not gateway.legacy.schedule_timer(
+        owner=Owner.SESSION,
+        identity="second",
+        timer="second",
+        due_at=1.0,
+        on_finished=completed.append,
+    )
+
+    assert len(completed) == 1
+    assert completed[0].identity == "second"
+    assert completed[0].outcome is EffectOutcome.REJECTED
+    assert completed[0].error is EffectError.OVERLOADED

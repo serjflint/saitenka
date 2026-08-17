@@ -783,9 +783,8 @@ def test_stall_stays_quiet_when_ipc_alive_but_no_subs(caplog):
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc._bytes_read = 500  # mpv's replies ARE arriving
     r = Reader(ipc)
-    r._run_started = time.monotonic() - 10  # past the threshold
     with caplog.at_level(logging.WARNING):
-        r._maybe_log_stall()
+        r._check_startup_health()
     assert not [rec for rec in caplog.records if rec.levelno >= logging.WARNING]
 
 
@@ -798,9 +797,8 @@ def test_stall_warns_when_read_direction_is_dead(caplog):
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     ipc._bytes_read = 0  # dead read direction
     r = Reader(ipc)
-    r._run_started = time.monotonic() - 10
     with caplog.at_level(logging.WARNING):
-        r._maybe_log_stall()
+        r._check_startup_health()
     assert any("IPC looks dead" in rec.message for rec in caplog.records)
 
 

@@ -37,6 +37,10 @@ if TYPE_CHECKING:
 
         def submit_mpv(self, **kwargs) -> bool: ...
 
+        def schedule_timer(self, **kwargs) -> bool: ...
+
+        def cancel_timer(self, timer: str) -> bool: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -527,6 +531,18 @@ class MpvIPC:
         if gateway is None:
             return False
         return gateway.submit_mpv(**kwargs)
+
+    def schedule_runtime_timer(self, **kwargs) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.schedule_timer(**kwargs)
+
+    def cancel_runtime_timer(self, timer: str) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.cancel_timer(timer)
 
     def close(self) -> None:
         with self._write_lock:

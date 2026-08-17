@@ -55,6 +55,7 @@ class LegacyRuntimeBridge:
         self._lock = threading.Lock()
         self._next_effect = 0
         self._callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
+        self._timer_callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
         self._deadlines = DeadlineRegistry()
         self._timers = TimerScheduler()
         router.install_runtime_bridge(self)
@@ -122,6 +123,58 @@ class LegacyRuntimeBridge:
         )
         return True
 
+    def schedule_timer(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        timer: str,
+        due_at: float,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool:
+        effect_id = self._allocate_one()
+        effect = ScheduleTimer(
+            effect_id,
+            owner,
+            identity,
+            timer,
+            due_at,
+            self.connection_epoch,
+        )
+        if not self._mailbox.reserve_terminal(effect_id):
+            on_finished(
+                EffectFinished(
+                    effect_id,
+                    owner,
+                    identity,
+                    EffectOutcome.REJECTED,
+                    error=EffectError.OVERLOADED,
+                )
+            )
+            return False
+        with self._lock:
+            self._timer_callbacks[effect_id] = on_finished
+            replaced = self._timers.schedule(effect)
+        if replaced is not None:
+            self._mailbox.publish_terminal(
+                replaced,
+                origin=EventOrigin.TIMER,
+                connection_epoch=None,
+            )
+        return True
+
+    def cancel_timer(self, timer: str) -> bool:
+        with self._lock:
+            cancelled = self._timers.cancel(timer)
+        if cancelled is None:
+            return False
+        self._mailbox.publish_terminal(
+            cancelled,
+            origin=EventOrigin.TIMER,
+            connection_epoch=None,
+        )
+        return True
+
     def publish_due(self) -> None:
         with self._lock:
             due = self._timers.pop_due(self._clock())
@@ -134,6 +187,11 @@ class LegacyRuntimeBridge:
 
     def handle_terminal(self, completion: EffectFinished) -> None:
         if not self._mailbox.retire_terminal(completion.effect_id):
+            return
+        with self._lock:
+            timer_callback = self._timer_callbacks.pop(completion.effect_id, None)
+        if timer_callback is not None:
+            timer_callback(completion)
             return
         expire = None
         with self._lock:
@@ -163,6 +221,12 @@ class LegacyRuntimeBridge:
             timer = EffectId(self._next_effect + 1)
             self._next_effect += 2
         return target, timer
+
+    def _allocate_one(self) -> EffectId:
+        with self._lock:
+            effect = EffectId(self._next_effect)
+            self._next_effect += 1
+        return effect
 
     def _reserve_pair(self, target: EffectId, timer: EffectId) -> bool:
         if not self._mailbox.reserve_terminal(target):

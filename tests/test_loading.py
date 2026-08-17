@@ -37,40 +37,20 @@ class _RecOv:
         self.hidden.append(oid)
 
 
-def test_draw_loading_shows_spinner_throttles_then_resumes(monkeypatch):
+def test_draw_loading_paints_one_timer_authorized_frame():
     from util import FakeIPC
 
-    from saitenka.app import reader_deps
     from saitenka.app.controller import Reader
     from saitenka.app.overlay_ids import OverlayId
 
-    # Drive the clock explicitly across the 80 ms throttle window: on a loaded free-threaded (no-GIL)
-    # CI runner >80 ms can pass between two Python statements, so a real clock made the throttle
-    # assertion flaky (#73). Stepping a fixed clock proves all three legs deterministically.
-    clock = [100.0]
-    monkeypatch.setattr(reader_deps.time, "monotonic", lambda: clock[0])
-
     r = Reader(FakeIPC())
     r._loading = True
-    r._load_next = 0.0  # allow an immediate first draw
-
-    r._draw_loading()  # leg 1: initial draw
+    r._draw_loading()
     adds = [
         command for command in r.ipc.commands if command[:2] == ("overlay-add", OverlayId.LOADING)
     ]
-    assert adds  # spinner painted top-left
-    assert r._load_frame == 1  # frame advanced
-    n1 = len(adds)
-
-    clock[0] += 0.079  # leg 2: still inside the 80 ms window → suppressed
-    r._draw_loading()
-    assert len([c for c in r.ipc.commands if c[:2] == ("overlay-add", OverlayId.LOADING)]) == n1
+    assert len(adds) == 1
     assert r._load_frame == 1
-
-    clock[0] += 0.001  # leg 3: reaches the 80 ms boundary → draw resumes
-    r._draw_loading()
-    assert len([c for c in r.ipc.commands if c[:2] == ("overlay-add", OverlayId.LOADING)]) == n1 + 1
-    assert r._load_frame == 2
 
 
 # --- the mpv-native startup breadcrumb (the only feedback during mpv's pre-overlay file-load) --------

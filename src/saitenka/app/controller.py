@@ -360,8 +360,10 @@ class Reader:
         self._interactive_ready = False
         self.ov = Overlay(ipc, id_base=o.overlay_id_base)
         from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
+        from saitenka.app.lifecycle_timers import LifecycleTimers
 
         self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
+        self.lifecycle_timers = LifecycleTimers(ipc)
         current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
         if o.subtitle_geometry.native_visible:
@@ -418,7 +420,6 @@ class Reader:
         self._hover_group_mined: tuple[bool, ...] = ()
         self._loading = False
         self._load_frame = 0
-        self._load_next = 0.0
         self._miner = Miner(self)  # mining flow (app/miner.py)
         self.mine_key = o.keys.mine_key
         self.mine_video_key = o.keys.mine_video_key
@@ -600,7 +601,6 @@ class Reader:
         self.scan_delay = o.tooltip.scan_delay
         self.hover_switch_delay = o.tooltip.hover_switch_delay
         self._tmp = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
-        self._toast_until = 0.0
         # Event-driven property state (observe_property); empty + off until run() calls
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
@@ -2041,7 +2041,15 @@ class Reader:
         x = (self.osd[0] - img.width) // 2
         y = round(self.osd[1] * 0.08)
         self.lifecycle_surfaces.present(img, x, y, oid=TOAST_ID)
-        self._toast_until = time.monotonic() + seconds
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        scheduled = self.lifecycle_timers.schedule(
+            LifecycleTimerKind.TOAST_EXPIRY,
+            seconds,
+            lambda: self.lifecycle_surfaces.remove(TOAST_ID),
+        )
+        if not scheduled:
+            self.lifecycle_surfaces.remove(TOAST_ID)
 
     def toggle_hover_pause(self) -> None:
         self.pause_on_tooltip = not self.pause_on_tooltip
@@ -2247,7 +2255,6 @@ class Reader:
         )
 
     def _expire_surfaces(self) -> None:
-        self._expire_toast()
         self._expire_flash()
 
     def _refresh_surfaces(self) -> None:
@@ -2270,7 +2277,6 @@ class Reader:
             self._geometry_dirty = False
             if self.subtitle_pipeline.generation == generation:
                 self.native_geometry.refresh(self)
-        self._maybe_log_stall()
 
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
@@ -2472,11 +2478,6 @@ class Reader:
         if publish is not None:
             publish(event)
 
-    def _expire_toast(self) -> None:
-        if self._toast_until and time.monotonic() > self._toast_until:
-            self.lifecycle_surfaces.remove(TOAST_ID)
-            self._toast_until = 0.0
-
     def _expire_flash(self) -> None:
         if not (self._flash_until and time.monotonic() >= self._flash_until):
             return
@@ -2509,8 +2510,6 @@ class Reader:
         if self._pending_deps is not None:
             deps, self._pending_deps = self._pending_deps, None
             self._apply_deps(deps)
-        elif self._loading:
-            self._draw_loading()
 
     def _schedule_paused_nudge(self, ops_before: int) -> None:
         """An overlay changed while mpv is paused → schedule a re-flush next tick so mpv actually
@@ -2521,7 +2520,7 @@ class Reader:
             if otel_metrics.osd_paused_draw is not None:
                 otel_metrics.osd_paused_draw.add(1)
 
-    def _maybe_log_stall(self) -> None:
+    def _check_startup_health(self) -> None:
         """One-time startup diagnostic for 'mpv plays but the overlay can't draw'. The RELIABLE failure
         signal is a dead read direction, NOT missing subtitles: a section can legitimately have no subs
         for minutes (an anime OP), so 'no sub-text' alone must never warn — that was the old
@@ -2529,13 +2528,7 @@ class Reader:
         classic Windows named-pipe failure) or osd-dimensions never resolved — because then nothing can
         draw regardless of subtitles. If the pipe is alive but there's simply no cue yet, note it once
         at debug. Lives in overlay.log / report; playback is unaffected."""
-        if getattr(self, "_stall_warned", False):
-            return
-        started = getattr(self, "_run_started", None)
-        if started is None or time.monotonic() - started < 8.0:
-            return
-        self._stall_warned = True
-        secs = time.monotonic() - started
+        secs = 8.0
         bytes_read = getattr(self.ipc, "_bytes_read", -1)
         osd_ok = self._prop("osd-dimensions") not in (None, {})
         if bytes_read == 0 or not osd_ok:
@@ -2579,6 +2572,21 @@ class Reader:
 
     def _draw_loading(self) -> None:
         reader_deps.draw_loading(self)
+
+    def _schedule_loading_frame(self, *, delay_s: float) -> bool:
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        return self.lifecycle_timers.schedule(
+            LifecycleTimerKind.LOADING_FRAME,
+            delay_s,
+            self._loading_frame_due,
+        )
+
+    def _loading_frame_due(self) -> None:
+        if not self._loading or self._pending_deps is not None:
+            return
+        self._draw_loading()
+        self._schedule_loading_frame(delay_s=0.08)
 
     def _announce_runtime(self) -> None:
         """Print the runtime banner exactly once, from wherever prefetch actually finishes starting
@@ -2627,8 +2635,13 @@ class Reader:
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
         if self.dict_set is not None:
             self._announce_runtime()
-        self._run_started = time.monotonic()  # baseline for the no-subtitle stall diagnostic
-        self._stall_warned = False
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        self.lifecycle_timers.schedule(
+            LifecycleTimerKind.STARTUP_HEALTH,
+            8.0,
+            self._check_startup_health,
+        )
         while self.poll_once():
             time.sleep(interval)
 
@@ -2674,6 +2687,7 @@ class Reader:
             self._backlog_store.close()
         if self._mined_store is not None:
             self._mined_store.close()
+        self.lifecycle_timers.close()
         self.lifecycle_surfaces.close()
         self.ov.close()
         shutil.rmtree(self._tmp, ignore_errors=True)  # clean up the per-session scratch dir
