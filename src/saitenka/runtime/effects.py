@@ -56,6 +56,24 @@ class SubmitJob:
 
 
 @dataclass(frozen=True, slots=True)
+class SendMpvCommand:
+    effect_id: EffectId
+    owner: Owner
+    identity: object
+    command: tuple[object, ...]
+    deadline: float
+    connection_epoch: int
+
+    def __post_init__(self) -> None:
+        if not self.command:
+            raise ValueError("mpv command must not be empty")
+        if not math.isfinite(self.deadline) or self.deadline < 0:
+            raise ValueError("mpv command deadline must be finite and non-negative")
+        if self.connection_epoch < 0:
+            raise ValueError("connection epoch must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class ScheduleTimer:
     effect_id: EffectId
     owner: Owner
@@ -96,7 +114,7 @@ class ExpireEffect:
             raise ValueError("effect deadline must be finite and non-negative")
 
 
-type AsyncEffect = SubmitJob | ScheduleTimer
+type AsyncEffect = SubmitJob | ScheduleTimer | SendMpvCommand
 type CoreControl = CancelEffect | ExpireEffect
 
 

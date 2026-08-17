@@ -15,6 +15,7 @@ from saitenka.runtime.effects import (
     ExpireEffect,
     Owner,
     ScheduleTimer,
+    SendMpvCommand,
     StopSession,
     SubmitJob,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "RuntimeEvent",
     "RuntimeLimits",
     "ScheduleTimer",
+    "SendMpvCommand",
     "SessionMailbox",
     "SessionReactor",
     "SessionReducer",

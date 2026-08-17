@@ -105,6 +105,10 @@ class MpvIPC:
         )
         self._events: list[dict] = []  # async events (property-change, client-message, …)
         self._events_lock = threading.Lock()
+        self._event_sink: Callable[[dict, int], None] | None = None
+        self._connection_sink: Callable[[str, int], None] | None = None
+        self._legacy_event_source: Callable[[], list[dict]] | None = None
+        self._runtime_gateway: object | None = None
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
@@ -193,6 +197,9 @@ class MpvIPC:
         finally:
             closed.set()
             self._fail_pending({"error": "disconnected"}, epoch=epoch)
+            sink = self._connection_sink
+            if sink is not None:
+                sink("lost", epoch)
 
     def _feed(self, chunk: bytes, *, connection_epoch: int | None = None) -> None:
         """Accumulate bytes, split complete JSON lines, route events vs replies. Reader-thread only
@@ -200,9 +207,9 @@ class MpvIPC:
         with self._feed_lock:
             if connection_epoch is not None and connection_epoch != self._connection_epoch:
                 return
-            self._feed_current(chunk)
+            self._feed_current(chunk, self._connection_epoch)
 
-    def _feed_current(self, chunk: bytes) -> None:
+    def _feed_current(self, chunk: bytes, connection_epoch: int) -> None:
         self._buf += chunk
         while b"\n" in self._buf:
             line, _, self._buf = self._buf.partition(b"\n")
@@ -212,11 +219,15 @@ class MpvIPC:
                 msg = json.loads(line.decode())
             except (ValueError, UnicodeDecodeError):
                 continue  # never let a garbled line kill the reader
-            self._route_message(msg)
+            self._route_message(msg, connection_epoch)
 
-    def _route_message(self, msg: dict) -> None:
+    def _route_message(self, msg: dict, connection_epoch: int) -> None:
         if "event" in msg:
             with self._events_lock:
+                sink = self._event_sink
+                if sink is not None:
+                    sink(dict(msg), connection_epoch)
+                    return
                 self._events.append(msg)
             return
         request_id = msg.get("request_id")
@@ -429,6 +440,9 @@ class MpvIPC:
             self._transport = transport
             self._closed = threading.Event()
             self._start_reader()
+        sink = self._connection_sink
+        if sink is not None:
+            sink("replaced", self._connection_epoch)
         return True, retired
 
     def _replacement_is_live(self) -> bool:
@@ -449,9 +463,28 @@ class MpvIPC:
 
     def drain_events(self) -> list[dict]:
         """Return and clear buffered async events (collected by the reader thread)."""
+        if self._legacy_event_source is not None:
+            return self._legacy_event_source()
         with self._events_lock:
             evs, self._events = self._events, []
         return evs
+
+    def install_runtime_ingress(
+        self,
+        event_sink: Callable[[dict, int], None],
+        connection_sink: Callable[[str, int], None],
+        legacy_event_source: Callable[[], list[dict]],
+        gateway: object,
+    ) -> None:
+        """Switch event ownership to a mailbox while the legacy consumer still drives policy."""
+        with self._events_lock:
+            buffered, self._events = self._events, []
+            for event in buffered:
+                event_sink(dict(event), self._connection_epoch)
+            self._event_sink = event_sink
+            self._connection_sink = connection_sink
+            self._legacy_event_source = legacy_event_source
+            self._runtime_gateway = gateway
 
     def close(self) -> None:
         with self._write_lock:
