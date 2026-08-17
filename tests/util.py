@@ -16,6 +16,7 @@ import importlib.util
 import os
 import sys
 import threading
+from concurrent.futures import Future
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -24,13 +25,21 @@ import pytest
 from PIL import Image
 
 from saitenka.model import Theme
+from saitenka.mpvio.gateway import MpvGateway
+from saitenka.mpvio.ipc import IPCRequest
 from saitenka.panel import Definition, Entry, Freq, panel_rows, render_panel
+from saitenka.runtime.mailbox import SessionMailbox
 
 if TYPE_CHECKING:
     from saitenka.render.layout_backend import LayoutBackend
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 UPDATE = os.environ.get("SAITENKA_UPDATE_GOLDEN") == "1"
+
+
+def runtime_gateway(ipc) -> MpvGateway:
+    return MpvGateway(ipc, SessionMailbox())
+
 
 # Goldens are blessed on macOS (canonical, committed at golden/<name>). Text-heavy panels can render a
 # pixel wider under a different FreeType (e.g. Linux CI), which the MAE diff can't absorb once the size
@@ -202,11 +211,21 @@ class FakeIPC:
         self.events: list[dict] = []
         self.props: dict = {}
         self.commands: list[tuple] = []
+        self.requests: list[IPCRequest] = []
+        self._event_sink = None
+        self._connection_sink = None
+        self._legacy_event_source = None
 
     def set_prop(self, name: str, value) -> None:
         """Simulate mpv: update the property AND emit a buffered property-change event."""
         self.props[name] = value
-        self.events.append({"event": "property-change", "name": name, "data": value})
+        self.emit({"event": "property-change", "name": name, "data": value})
+
+    def emit(self, event: dict) -> None:
+        if self._event_sink is None:
+            self.events.append(event)
+        else:
+            self._event_sink(event, 0)
 
     def pump(self) -> None:
         """Real IPC reads the socket here; the fake's events are queued directly."""
@@ -217,9 +236,28 @@ class FakeIPC:
             return {"data": self.props.get(args[1])}
         return {"data": None}
 
+    def command_async(self, *args, expected_connection_epoch=None):
+        del expected_connection_epoch
+        self.commands.append(args)
+        future: Future[dict] = Future()
+        future.set_result({"error": "success", "data": None})
+        request = IPCRequest(len(self.requests), 0, future)
+        self.requests.append(request)
+        return request
+
     def drain_events(self) -> list[dict]:
+        if self._legacy_event_source is not None:
+            return self._legacy_event_source()
         evs, self.events = self.events, []
         return evs
+
+    def install_runtime_ingress(self, event_sink, connection_sink, legacy_event_source, _gateway):
+        self._event_sink = event_sink
+        self._connection_sink = connection_sink
+        self._legacy_event_source = legacy_event_source
+        for event in self.events:
+            event_sink(event, 0)
+        self.events = []
 
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:

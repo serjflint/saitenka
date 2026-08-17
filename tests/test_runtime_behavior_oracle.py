@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from legacy_reader_behavior import LegacyReaderTrace
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
-from util import FakeIPC
+from util import FakeIPC, runtime_gateway
 
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
@@ -28,7 +28,8 @@ class _AsyncHintIPC(FakeIPC):
         super().__init__()
         self.requests: list[IPCRequest] = []
 
-    def command_async(self, *args):
+    def command_async(self, *args, expected_connection_epoch=None):
+        del expected_connection_epoch
         request = IPCRequest(len(self.requests), 0, Future())
         self.commands.append(args)
         self.requests.append(request)
@@ -37,13 +38,13 @@ class _AsyncHintIPC(FakeIPC):
 
 def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch) -> None:
     ipc = _AsyncHintIPC()
-    lease = show_startup_hint(ipc)
+    lease = show_startup_hint(runtime_gateway(ipc))
     assert lease is not None
     ipc.requests[0].future.set_result({"error": "success"})
     reader = Reader(ipc, startup_hint_lease=lease, renderer=NullRenderer())
     dispatched: list[bool] = []
     monkeypatch.setattr(reader, "toggle_sub_picker", lambda: dispatched.append(True))
-    ipc.events.append({"event": "client-message", "args": [SUB_PICKER_MSG]})
+    ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
     trace = LegacyReaderTrace(reader)
 
     assert reader.poll_once()

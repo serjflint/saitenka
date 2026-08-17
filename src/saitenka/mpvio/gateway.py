@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.mpvio.ipc import IPCRequest, MpvIPC
+    from saitenka.runtime.legacy import LegacyRuntimeBridge
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,13 +43,25 @@ class LegacyEventRouter:
 
     def __init__(self, mailbox: SessionMailbox) -> None:
         self._mailbox = mailbox
+        self._runtime_bridge: LegacyRuntimeBridge | None = None
+
+    def install_runtime_bridge(self, bridge: LegacyRuntimeBridge) -> None:
+        if self._runtime_bridge is not None:
+            raise RuntimeError("runtime bridge already installed")
+        self._runtime_bridge = bridge
 
     def drain_events(self) -> list[dict]:
+        if self._runtime_bridge is not None:
+            self._runtime_bridge.publish_due()
         events: list[dict] = []
         for envelope in self._mailbox.receive_ready():
             payload = envelope.payload
             if isinstance(payload, CloseRequested):
                 raise OSError("runtime mailbox overloaded")
+            if isinstance(payload, EffectFinished):
+                if self._runtime_bridge is not None:
+                    self._runtime_bridge.handle_terminal(payload)
+                continue
             if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
                 events.append(payload.data)
         return events
@@ -77,6 +90,18 @@ class MpvGateway:
             router.drain_events,
             self,
         )
+        from saitenka.runtime.legacy import LegacyRuntimeBridge
+
+        self._legacy = LegacyRuntimeBridge(mailbox, self, router, clock=clock)
+
+    @property
+    def connection_epoch(self) -> int:
+        with self._lock:
+            return self._connection_epoch
+
+    @property
+    def legacy(self) -> LegacyRuntimeBridge:
+        return self._legacy
 
     @property
     def snapshot(self) -> GatewaySnapshot:
