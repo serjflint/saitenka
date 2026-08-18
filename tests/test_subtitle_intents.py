@@ -155,7 +155,9 @@ def test_the_reducer_never_mutates_its_inputs() -> None:
     ],
 )
 def test_navigation_asks_for_the_matching_step(command: SubtitleCommand, delta: int) -> None:
-    assert reduce(command, inputs()) == (SeekCue(delta),)
+    """The step carries the cue it is relative to. A bare delta cannot be checked for staleness by
+    anyone downstream, because "previous" does not say previous to what."""
+    assert reduce(command, inputs(cue_revision=7)) == (SeekCue(delta, 7),)
 
 
 def test_anchoring_snaps_the_nearest_cue_to_the_playhead() -> None:

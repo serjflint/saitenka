@@ -38,6 +38,10 @@
     ],
     [
       "direct-mpv-command",
+      "src/saitenka/app/controller.py::Reader._seek_cue"
+    ],
+    [
+      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
     ],
     [

@@ -56,6 +56,9 @@ class SubtitleInputs:
     cue_starts: tuple[float, ...] = ()
     playhead: float | None = None
     sub_delay: float = 0.0
+    #: The projection's cue revision when these facts were read. Navigation is relative to a cue,
+    #: so an effect decided here has to say which one — see `SeekCue`.
+    cue_revision: int = 0
 
 
 # --- effects ------------------------------------------------------------------------------------
@@ -97,9 +100,15 @@ class SetAnnotationMode:
 
 @dataclass(frozen=True, slots=True)
 class SeekCue:
-    """Step the subtitle timeline: -1 previous, 0 replay, +1 next."""
+    """Step the subtitle timeline: -1 previous, 0 replay, +1 next.
+
+    ``cue_revision`` is the cue the step is relative to. "Previous" means nothing on its own —
+    previous to *what* — so once this effect can outlive the keypress that produced it, an
+    executor has to be able to tell that the cue it was decided against is gone.
+    """
 
     delta: int
+    cue_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,8 +183,8 @@ def _toggle_annotation_mode(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...
 
 
 def _navigate(delta: int):
-    def reduce_navigation(_inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
-        return (SeekCue(delta),)
+    def reduce_navigation(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
+        return (SeekCue(delta, inputs.cue_revision),)
 
     return reduce_navigation
 

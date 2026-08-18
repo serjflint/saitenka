@@ -2204,6 +2204,7 @@ class Reader:
             cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),
             playhead=None if playhead is None else float(playhead),
             sub_delay=float(self._prop("sub-delay") or 0.0),
+            cue_revision=self.cue_revision,
         )
 
     def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
@@ -2223,9 +2224,7 @@ class Reader:
             if effect.redraw:
                 self._draw_subtitle()
         elif isinstance(effect, subtitle_intents.SeekCue):
-            self.subtitle_pipeline.invalidate()
-            self._sub_nav(effect.delta)
-            self.ipc.command("sub-seek", str(effect.delta))
+            self._seek_cue(effect)
         elif isinstance(effect, subtitle_intents.SetSubtitleDelay):
             self.ipc.command("set_property", "sub-delay", f"{effect.seconds:.3f}")
         elif isinstance(effect, subtitle_intents.CopyCueText):
@@ -2980,6 +2979,26 @@ class Reader:
     # --- subtitle navigation (instant render, then seek) --------------------------------------
     def load_sub_index(self, path) -> None:
         subnav.load_sub_index(self, path)
+
+    def _seek_cue(self, effect: subtitle_intents.SeekCue) -> bool:
+        """Carry out a navigation step, unless the cue it was decided against is gone.
+
+        "Previous" is meaningless without a cue to be previous *to*, so a step that outlives its
+        cue would seek from a baseline the user never saw. Dropping it is reported rather than
+        silent: a navigation key that does nothing and says nothing is indistinguishable from a
+        wedged runtime.
+        """
+        with otel_metrics.traced("sub_nav_identity") as span:
+            span.set("delta", effect.delta)
+            span.set("requested_for", effect.cue_revision)
+            if effect.cue_revision != self.cue_revision:
+                span.set("outcome", "superseded")
+                return False
+            span.set("outcome", "executed")
+        self.subtitle_pipeline.invalidate()
+        self._sub_nav(effect.delta)
+        self.ipc.command("sub-seek", str(effect.delta))
+        return True
 
     def _sub_nav(self, delta: int) -> bool:
         return subnav.sub_nav(self, delta)

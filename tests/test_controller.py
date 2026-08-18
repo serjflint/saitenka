@@ -195,6 +195,33 @@ def test_sub_seek_next_sends_ipc_command():
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
 
 
+def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch):
+    """WP4.5: a navigation effect is qualified by the cue it was decided against.
+
+    Today reduce and execute are adjacent, so this cannot happen live — which is exactly why it
+    needs pinning now. The moment the step is queued behind anything, a seek carried out against a
+    cue the user has already left moves the video somewhere they never asked for, and the whole
+    keypress reads as a runtime glitch rather than a stale command.
+    """
+    from util import record_spans
+
+    from saitenka.app.subtitle_intents import SeekCue
+
+    spans = record_spans(monkeypatch)
+    ipc = FakeIPC()
+    r = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    r.set_subtitle("猫を見る")
+    stale = SeekCue(1, r.cue_revision)
+    r.set_subtitle("犬も見る")  # the cue the step was decided against is gone
+
+    assert not r._seek_cue(stale)
+
+    assert not any(command and command[0] == "sub-seek" for command in ipc.commands)
+    (decision,) = [span["attrs"] for span in spans if span["name"] == "sub_nav_identity"]
+    assert decision["outcome"] == "superseded"  # dropped out loud, not silently
+    assert r._seek_cue(SeekCue(1, r.cue_revision))  # and the current cue still navigates
+
+
 def test_sub_seek_replay_sends_ipc_command():
     """Receiving the sub-replay client-message must send sub-seek 0 to mpv IPC."""
     ipc = FakeIPC()
