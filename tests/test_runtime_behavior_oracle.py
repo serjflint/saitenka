@@ -94,9 +94,18 @@ def test_changed_cue_retires_interaction_before_later_batch_command(monkeypatch)
             {"event": "client-message", "args": ["saitenka-copy-line"]},
         )
     )
+    # Reconciliation now runs at the drain's batch boundary rather than on the next tick, so the
+    # conflict phase is observed from inside the drain — after every event in the batch was
+    # processed against the retired cue, before the replacement settles. Same three phases, real
+    # boundaries; snapshotting after the drain would only ever see the settled state.
+    settle = reader._settle_cue_observation
+
+    def traced_settle() -> None:
+        trace.observe("cue-conflict", outcome="input-rejected")
+        settle()
+
+    monkeypatch.setattr(reader, "_settle_cue_observation", traced_settle)
     reader._drain_events()
-    trace.observe("cue-conflict", outcome="input-rejected")
-    reader._reconcile_subtitles()
     trace.observe("cue-reconciled", outcome="replacement-active")
 
     assert copied == []

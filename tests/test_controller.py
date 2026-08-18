@@ -842,6 +842,7 @@ def test_paused_draw_schedules_and_fires_an_osd_nudge():
     r = Reader(ipc)
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
+    r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
     r.poll_once()  # adopts the cue → draws SUB_ID while paused → schedules the nudge
     assert r._nudge_pending is True
     before = _count_adds(ipc)
@@ -858,7 +859,9 @@ def test_playing_draw_does_not_nudge():
     r = Reader(ipc)
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
+    r._observe_property("sub-text", "いち")
     r.poll_once()
+    assert r.sub_text == "いち"  # the cue really did draw — otherwise the nudge check is vacuous
     assert r._nudge_pending is False
 
 
@@ -894,6 +897,7 @@ def test_paused_nudge_records_otel_counters():
     otel_metrics.register(reader, provider.get_meter("test"))
     try:
         ipc.props["sub-text"] = "いち"
+        r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
         r.poll_once()  # a draw lands while paused → osd.paused_draw, schedules the nudge
         r.poll_once()  # nudge fires → osd.paused_nudge
         snap = otel_metrics.snapshot()
@@ -2613,13 +2617,11 @@ def test_cue_change_retires_interaction_before_later_command_in_same_batch(monke
 
     reader._drain_events()
 
+    # The command was rejected because the conflicting observation retired the cue first — that
+    # rejection IS the ordering proof. The drain then settles the replacement in the same turn;
+    # reconciliation used to wait for the next tick.
     assert copied == []
-    assert reader._cue_retired is True
-    assert reader.tokens == [] and reader.boxes == []
-
-    reader._reconcile_subtitles()
     assert reader.sub_text == "新しい字幕"
-    assert reader._cue_retired is False
 
 
 def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
@@ -2641,8 +2643,8 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
 
     reader._drain_events()
 
-    assert navigated == []
-    assert reader._cue_retired is True
+    assert navigated == []  # the nav command was rejected against the retired cue
+    assert reader.sub_text == "新しい字幕"  # and the replacement settled in the same drain
 
 
 def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():

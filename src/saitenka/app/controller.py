@@ -2778,13 +2778,15 @@ class Reader:
         """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
         try:
             self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
+            # Sampled before the drain: cue reconciliation draws from the batch boundary, so a
+            # sample taken after it would miss the very draw the paused nudge exists to re-flush.
+            ops_before = self.ov.ops
             self._drain_events()
             if not self._connection_ready:
                 return True
             session_stats.tick(self)
             self._maybe_advance()
             self._flush_paused_nudge()
-            ops_before = self.ov.ops
             first_tick = not self._interactive_ready
             if first_tick:
                 with otel_metrics.traced("startup.first_tick"):

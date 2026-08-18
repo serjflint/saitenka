@@ -1221,11 +1221,16 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
             "time-pos": 4.2,
         }
     )
+    # mpv pushes the new authored row as its own observation; the old tick stage used to pull it
+    # through the ass-full probe instead, which let this test skip it.
+    result._on_property_change(
+        {"name": "sub-text/ass-full", "data": ipc.props["sub-text/ass-full"]}
+    )
     result._on_property_change({"name": "sub-start", "data": 4.0})
     result._on_property_change({"name": "sub-end", "data": 6.0})
     assert result.boxes == []
 
-    result._settle_cue_observation()
+    settle_geometry(result, ipc)
 
     assert result.boxes == []
     assert result.native_geometry.worker.wait_idle()
