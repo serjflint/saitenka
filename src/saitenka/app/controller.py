@@ -8,7 +8,6 @@ near the word. Both overlays live in mpv's own OSD surface → fullscreen-safe.
 from __future__ import annotations
 
 import logging
-import queue
 import tempfile
 import threading
 import time
@@ -278,13 +277,9 @@ class Reader:
         "episode.subtitle", "translation_secondary_sid"
     )
     # Prefetch runtime state (app/prefetch.py PrefetchState) under its historical flat names.
-    _prefetch_q = Delegated[queue.Queue]("prefetch_state", "q")
-    _head_prefetch_q = Delegated[queue.PriorityQueue]("prefetch_state", "head_q")
-    _head_seq = Delegated[int]("prefetch_state", "head_seq")
     _head_built = Delegated[int]("prefetch_state", "head_built")
     _prefetch_gen = Delegated[int]("prefetch_state", "gen")
     _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
-    _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
     # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
     # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
     _mined = Delegated[set[str]]("session", "mined")
@@ -541,8 +536,7 @@ class Reader:
         # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
         # is a plain panel_cache hit with no new key-matching logic to get wrong.
         self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
-        # Speculative prefetch queues and workers remain separate from the bounded interactive raster
-        # lane: a scroll must not wait behind episode warming.
+        # A dedicated broker lane keeps speculative work behind interactive raster work.
         self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
         self._engaged_tooltip = tooltip_engaged.EngagedState()
         self._engaged_tooltip_backend = tooltip_engaged.ReaderEngagedBackend(self)
@@ -1672,7 +1666,7 @@ class Reader:
     def _precompose_head(
         self, st: Panel, tok, inflected, *, mined: bool, cap: int, protected: bool = False
     ) -> None:
-        """Precompose ``st``'s first viewport in idle (the prefetch worker path) and, when the persistent
+        """Precompose ``st``'s first viewport in idle (the prefetch lane) and, when the persistent
         cache is on, write a cost-gated head to disk for a later session's cold hover. ``protected`` (the
         offline prewarm) marks the popular set eviction-last so live write-back can't thrash it."""
         cache = self._render_cache()
@@ -1702,6 +1696,9 @@ class Reader:
             self._cancel_engaged_tooltip()
             self._cancel_render_ahead()
 
+    def _finish_speculative_prefetch(self, completion: EffectFinished) -> None:
+        prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
+
     def _upcoming_cue_texts(self, n: int) -> list[str]:
         return prefetch.upcoming_cue_texts(self, n)
 
@@ -1712,7 +1709,7 @@ class Reader:
         """Live cache-size gauges for the telemetry interval sampler (writer thread, ~1s cadence — NOT
         the hot path). ``panel_cache.bytes`` is the retained (compressed) on-heap footprint;
         ``dict_cache.size`` the decoded-entry count across every dictionary. Read under ``_cache_lock``
-        so a concurrent prefetch worker mutating the panel cache can't fault the iteration."""
+        so a concurrent prefetch job mutating the panel cache can't fault the iteration."""
         with self._cache_lock:
             panel_n = len(self._panel_cache)
             panel_bytes = sum(st.retained_nbytes for st in self._panel_cache.values())
@@ -1894,8 +1891,8 @@ class Reader:
         tooltip.navigate_tip(self, query)
 
     def _navigated_panel(self, query: str):
-        """The read-only reference Panel for a nav target — built off the main thread by the prefetch
-        worker (tier-3 clicked nav), so the seam lives on the Reader (no prefetch→tooltip import)."""
+        """The read-only reference Panel for a nav target — built off the main thread by the engaged
+        tooltip lane, so the seam lives on the Reader (no engaged-tooltip→tooltip import)."""
         return tooltip._navigated_panel(self, query)
 
     def _tip_close_or_back(self) -> None:
@@ -1908,8 +1905,8 @@ class Reader:
         nested_popup.open_search(self, pattern, wx, wy, wh)
 
     def _engaged_open_panel(self, source: str, query: str, *, mined: bool | None = None):
-        """The (cached) panel for a clicked/keyed nested open — the shared builder the prefetch worker +
-        tick reach via the Reader seam (no prefetch→nested_popup import, which would cycle). The worker
+        """The (cached) panel for a clicked/keyed nested open — the shared builder the engaged-tooltip
+        lane and session thread reach via the Reader seam. The worker
         passes ``mined`` (jamdict isn't worker-safe); the main thread lets it recompute."""
         return nested_popup._engaged_open_panel(self, source, query, mined=mined)
 
@@ -2860,9 +2857,9 @@ class Reader:
         self._runtime_announced = True
         mode = "free-threaded (GIL off)" if gil_disabled() else "GIL"
         print(  # noqa: T201  # user-facing banner; log.info alone won't show — console handler is WARNING-level (logsetup.py)
-            f"[saitenka] runtime: {mode} · {len(self._prefetch_threads)} prefetch worker(s)"
+            f"[saitenka] runtime: {mode} · {self.prefetch_state.workers} prefetch worker(s)"
         )
-        log.info("runtime: %s, %d prefetch worker(s)", mode, len(self._prefetch_threads))
+        log.info("runtime: %s, %d prefetch worker(s)", mode, self.prefetch_state.workers)
 
     def run(self, interval: float | None = None) -> None:
         from saitenka.render.banded import guard_main_render
@@ -2889,7 +2886,7 @@ class Reader:
             telemetry.set_gauge_provider(
                 self._telemetry_gauges
             )  # no-op unless telemetry is configured
-        # In run/attach the deps (and thus prefetch workers) load ASYNC — dict_set is still None here,
+        # In run/attach the deps (and thus the prefetch lane) load ASYNC — dict_set is still None here,
         # so start_prefetch above was a no-op and the worker count is 0. Defer the banner to when
         # prefetch actually starts (apply_deps → _announce_runtime); only announce now on the sync path
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
@@ -2938,8 +2935,9 @@ class Reader:
         tooltip_engaged.close(self._engaged_tooltip)
         if close_lane is not None:
             close_lane("tooltip-engaged", max(0.0, deadline - time.monotonic()))
-        for th in self._prefetch_threads:
-            th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
+        prefetch.close(self.prefetch_state)
+        if close_lane is not None:
+            close_lane("speculative-prefetch", max(0.0, deadline - time.monotonic()))
         if self.native_geometry is not None:
             self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.clear(self)

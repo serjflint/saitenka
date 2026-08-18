@@ -254,6 +254,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
             "cue-annotation",
             "tooltip-render-ahead",
             "tooltip-engaged",
+            "speculative-prefetch",
         ]
         order.append("artifacts")
 
@@ -268,6 +269,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
         "cue-annotation",
         "tooltip-render-ahead",
         "tooltip-engaged",
+        "speculative-prefetch",
         "artifacts",
     ]
 
