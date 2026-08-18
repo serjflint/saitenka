@@ -377,6 +377,7 @@ class Reader:
 
         self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
+        self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)
         current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
         if o.subtitle_geometry.native_visible:
@@ -2314,7 +2315,6 @@ class Reader:
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
         subtitle_modes.apply_fetch_results(self)
-        analysis_overlay.apply_results(self)
         sub_picker.update(self)
         sidebar.update(self)
         if self.native_geometry is not None:
@@ -2373,6 +2373,15 @@ class Reader:
         before = len(self._mined)
         self._mined.update(values)
         self._mined_generation += int(len(self._mined) != before)
+
+    def _finish_analysis(self, completion: EffectFinished) -> None:
+        changed = analysis_overlay.finish(self.analysis, completion)
+        if completion.outcome is not EffectOutcome.REJECTED:
+            changed |= analysis_overlay.submit_pending(
+                self.analysis, self._analysis_submit, self._finish_analysis
+            )
+        if changed:
+            analysis_overlay.redraw(self)
 
     def _update_interaction(self) -> None:
         self._feed_episode_annotation()
@@ -2713,8 +2722,6 @@ class Reader:
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         for th in self._subtitle_fetch_threads:
-            th.join(timeout=2.0)
-        for th in self.analysis.threads:
             th.join(timeout=2.0)
         if self.native_geometry is not None:
             self.subtitle_pipeline.deactivate(self)
