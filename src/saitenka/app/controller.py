@@ -2414,7 +2414,6 @@ class Reader:
         sidebar.update(self)
         if self.native_geometry is not None:
             self.native_geometry.apply(self)
-        self.subtitle_pipeline.poll_ownership(self)
 
     def _apply_capabilities(self) -> None:
         if self._tts_capability is not None:

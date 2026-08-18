@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
@@ -29,6 +30,7 @@ from saitenka.app.subtitle_ownership import (
     reduce_ownership,
 )
 from saitenka.app.subtitles import box_for_token
+from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,6 +40,16 @@ if TYPE_CHECKING:
 log = logging.getLogger("saitenka.app.subtitle_render")
 
 SUB_ID = OverlayId.SUB
+OWNERSHIP_RETRY_TIMER = "subtitle:ownership-retry"
+
+
+@dataclass(frozen=True, slots=True)
+class OwnershipRetryDue:
+    """Identity of one ownership retry deadline; the effect id fences a late due."""
+
+    effect_id: int
+
+
 NATIVE_FOCUS_ID = 1_001
 
 
@@ -150,8 +162,8 @@ class NativeVisibleRenderer:
         self._activation_failure_reported = False
         self._restore_visibility: bool | None = None
         self._selection: str | None = None
-        self._retry_due: float | None = None
         self._retry_effect_id: int | None = None
+        self._retry_immediate: int | None = None
         self._clock = clock
 
     @property
@@ -342,30 +354,82 @@ class NativeVisibleRenderer:
         )
 
     def _execute(self, reader: Reader, actions: tuple[OwnershipAction, ...]) -> None:
-        for action in actions:
-            if action.kind == ActionKind.ASSERT_NATIVE_VISIBILITY:
-                self._assert_native(reader, action)
-            elif action.kind == ActionKind.CLEAR_LEGACY:
-                self._fallback.clear(reader)
-            elif action.kind == ActionKind.CLEAR_INTERACTION:
-                self._hide_focus(reader)
-            elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
-                self._stage_legacy(reader, action)
-            elif action.kind == ActionKind.SHOW_MPV:
-                reader.ipc.command(
-                    "set_property",
-                    "sub-visibility",
-                    True,  # noqa: FBT003  # mpv IPC wire value
-                )
-            elif action.kind == ActionKind.SCHEDULE_RETRY:
-                self._retry_effect_id = action.effect_id
-                self._retry_due = self._clock() + (action.delay_ms or 0) / 1_000
-            elif action.kind == ActionKind.CANCEL_RETRY:
-                self._retry_effect_id = None
-                self._retry_due = None
-            elif action.kind == ActionKind.RESTORE_VISIBILITY:
-                restore = True if self._restore_visibility is None else self._restore_visibility
-                reader.ipc.command("set_property", "sub-visibility", restore)
+        pending = list(actions)
+        while pending:
+            batch, pending = pending, []
+            for action in batch:
+                self._apply_action(reader, action)
+            # A retry the timer port refused runs after its batch commits, so an immediate retry
+            # never re-enters mid-batch. The FSM's bounded attempt count stops it looping.
+            if (effect_id := self._retry_immediate) is not None:
+                self._retry_immediate = None
+                pending.extend(self._retry_actions(effect_id))
+
+    def _apply_action(self, reader: Reader, action: OwnershipAction) -> None:
+        if action.kind == ActionKind.ASSERT_NATIVE_VISIBILITY:
+            self._assert_native(reader, action)
+        elif action.kind == ActionKind.CLEAR_LEGACY:
+            self._fallback.clear(reader)
+        elif action.kind == ActionKind.CLEAR_INTERACTION:
+            self._hide_focus(reader)
+        elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
+            self._stage_legacy(reader, action)
+        elif action.kind == ActionKind.SHOW_MPV:
+            reader.ipc.command(
+                "set_property",
+                "sub-visibility",
+                True,  # noqa: FBT003  # mpv IPC wire value
+            )
+        elif action.kind == ActionKind.SCHEDULE_RETRY:
+            self._arm_retry(reader, action)
+        elif action.kind == ActionKind.CANCEL_RETRY:
+            self._retry_effect_id = None
+            self._retry_immediate = None
+            cancel = getattr(reader.ipc, "cancel_runtime_timer", None)
+            if cancel is not None:
+                cancel(OWNERSHIP_RETRY_TIMER)
+        elif action.kind == ActionKind.RESTORE_VISIBILITY:
+            restore = True if self._restore_visibility is None else self._restore_visibility
+            reader.ipc.command("set_property", "sub-visibility", restore)
+
+    def _arm_retry(self, reader: Reader, action: OwnershipAction) -> None:
+        """Arm the ownership retry as a named deadline, fenced by its effect id."""
+        effect_id = action.effect_id
+        self._retry_effect_id = effect_id
+        if effect_id is None:  # the FSM always ids a scheduled retry; nothing to fence without one
+            return
+
+        def due(completion: EffectFinished) -> None:
+            if completion.outcome is EffectOutcome.SUCCEEDED:
+                self._execute(reader, self._retry_actions(effect_id))
+
+        schedule = getattr(reader.ipc, "schedule_runtime_timer", None)
+        if schedule is not None and schedule(
+            owner=Owner.SUBTITLE,
+            identity=OwnershipRetryDue(effect_id),
+            timer=OWNERSHIP_RETRY_TIMER,
+            due_at=self._clock() + (action.delay_ms or 0) / 1_000,
+            on_finished=due,
+        ):
+            return
+        # No timer port: run the retry immediately rather than dropping it. Losing the delay shows
+        # up in tests; losing the retry would silently strand pixel ownership.
+        self._retry_immediate = effect_id
+
+    def _retry_actions(self, effect_id: int | None) -> tuple[OwnershipAction, ...]:
+        """Reduce one due retry. A due for a superseded schedule is inert."""
+        if effect_id is None or effect_id != self._retry_effect_id:
+            return ()
+        self._retry_effect_id = None
+        self._state, actions = reduce_ownership(
+            self._state,
+            OwnershipEvent(
+                EventKind.RETRY_DUE,
+                context=self._state.context,
+                effect_id=effect_id,
+            ),
+        )
+        return actions
 
     def _ensure_selection(self, reader: Reader) -> None:
         selection = repr(
@@ -446,22 +510,6 @@ class NativeVisibleRenderer:
         self._execute(reader, actions)
         if nonempty:
             self.activate(reader)
-
-    def poll(self, reader: Reader) -> None:
-        if self._retry_due is None or self._clock() < self._retry_due:
-            return
-        effect_id = self._retry_effect_id
-        self._retry_due = None
-        self._retry_effect_id = None
-        self._state, actions = reduce_ownership(
-            self._state,
-            OwnershipEvent(
-                EventKind.RETRY_DUE,
-                context=self._state.context,
-                effect_id=effect_id,
-            ),
-        )
-        self._execute(reader, actions)
 
     def draw(self, reader: Reader) -> None:
         if self._state.owner == PixelOwner.LEGACY:

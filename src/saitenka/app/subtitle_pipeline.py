@@ -117,11 +117,6 @@ class SubtitleModeCoordinator:
         if changed is not None:
             changed(reader, nonempty=nonempty)
 
-    def poll_ownership(self, reader: Reader) -> None:
-        poll = getattr(self._renderer, "poll", None)
-        if poll is not None:
-            poll(reader)
-
     def deactivate(self, reader: Reader) -> None:
         deactivate = getattr(self._renderer, "deactivate", None)
         if deactivate is not None:

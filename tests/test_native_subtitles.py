@@ -56,6 +56,8 @@ ASS_TWO = (
 class FakeIPC:
     def __init__(self) -> None:
         self.commands: list[tuple] = []
+        #: Named timers armed through the runtime port; nothing fires on a wall clock.
+        self.timers: dict[str, tuple] = {}
         self.props = {
             "sid": 2,
             "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
@@ -85,6 +87,23 @@ class FakeIPC:
         self.set_property_exception: Exception | None = None
         self.overlay_add_error: str | None = None
         self.get_property_error: str | None = None
+
+    def schedule_runtime_timer(self, *, timer, identity, due_at, on_finished, **_kwargs) -> bool:
+        self.timers[timer] = (identity, due_at, on_finished)
+        return True
+
+    def cancel_runtime_timer(self, timer) -> bool:
+        return self.timers.pop(timer, None) is not None
+
+    def fire_runtime_timer(self, timer) -> bool:
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        entry = self.timers.pop(timer, None)
+        if entry is None:
+            return False
+        identity, _due_at, on_finished = entry
+        on_finished(EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED))
+        return True
 
     def command(self, *args):
         self.commands.append(args)
@@ -1453,11 +1472,10 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
         renderer.cue_changed(result, nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
         renderer.draw(result)
-        now[0] = 0.049
-        renderer.poll(result)
+        # The retry is a named deadline now: nothing happens until it is due.
+        assert ipc.timers["subtitle:ownership-retry"][1] == pytest.approx(0.05)
         assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1
-        now[0] = 0.05
-        renderer.poll(result)
+        assert ipc.fire_runtime_timer("subtitle:ownership-retry")
 
     assert ipc.commands.count(("set_property", "sub-visibility", True)) == 2
     assert ipc.commands.count(("set_property", "sub-visibility", False)) == 0

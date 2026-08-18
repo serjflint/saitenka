@@ -154,7 +154,7 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._execute"
+      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action"
     ],
     [
       "direct-mpv-command",
@@ -1042,15 +1042,19 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.poll_ownership"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.resume_after_overlay"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.suspend_for_overlay"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._arm_retry"
     ],
     [
       "reader-parameter",
@@ -1115,10 +1119,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.draw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.poll"
     ],
     [
       "reader-parameter",
