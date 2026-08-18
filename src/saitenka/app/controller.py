@@ -120,9 +120,13 @@ from saitenka.app.runtime import (
     TickStage,
 )
 from saitenka.app.subtitle_pipeline import (
+    GEOMETRY_LANE,
     CurrentSubtitleRenderer,
     SubtitleGeometryWorker,
     SubtitleModeCoordinator,
+)
+from saitenka.app.subtitle_pipeline import (
+    configure_runtime_job as configure_geometry_lane,
 )
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer, SubtitleRenderer
 from saitenka.app.toast import render_toast
@@ -377,6 +381,7 @@ class Reader:
                 SubtitleGeometryWorker(
                     self.subtitle_pipeline,
                     cache_max=o.subtitle_geometry.cache_max,
+                    submit=configure_geometry_lane(ipc),
                 ),
                 lookahead=o.subtitle_geometry.lookahead,
             )
@@ -3086,9 +3091,14 @@ class Reader:
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
         close_lane = getattr(self.ipc, "close_runtime_job_lane", None)
         deadline = time.monotonic() + 2.0
+        # Each `close_lane` call site is duty evidence the migration checker matches by name and
+        # order, so these stay literal — routing them through one helper reads as a lost close.
         if close_lane is not None:
             close_lane("subtitle-fetch", max(0.0, deadline - time.monotonic()))
             close_lane("subtitle-picker", max(0.0, deadline - time.monotonic()))
+            # Stop the executor before the state it renders against is torn down: a job admitted
+            # after this cannot outlive `native_geometry.close()` below.
+            close_lane(GEOMETRY_LANE, max(0.0, deadline - time.monotonic()))
         if self._annotation is not None:
             self._annotation.close()
         if close_lane is not None:

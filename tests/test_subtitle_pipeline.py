@@ -221,23 +221,21 @@ def test_coordinator_delegates_current_renderer() -> None:
     assert renderer.drawn_host is host
 
 
-def test_worker_drops_superseded_pending_request(monkeypatch) -> None:
-    start = threading.Event()
-    run = SubtitleGeometryWorker._run
-
-    def delayed_run(worker: SubtitleGeometryWorker) -> None:
-        assert start.wait(1.0)
-        run(worker)
-
-    monkeypatch.setattr(SubtitleGeometryWorker, "_run", delayed_run)
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+def test_worker_drops_superseded_pending_request() -> None:
+    """Only one current request waits at a time: a newer one replaces the queued older one rather
+    than queueing behind it, so the older never reaches the lane at all."""
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     first = request(coordinator.generation, 1_250)
     second = request(coordinator.generation, 1_300)
 
+    # Occupy the lane so both currents queue rather than executing on arrival.
+    assert worker.prefetch("blocking", coordinator.generation, lambda: request(0, 1_100))
+    assert backend.entered.wait(1)
     assert worker.submit(first)
     assert worker.submit(second)
-    start.set()
+    backend.release.set()
     assert worker.wait_idle()
 
     assert coordinator.current is not None
@@ -540,6 +538,43 @@ def test_worker_reports_loss_aware_prefetch_miss_provenance() -> None:
     assert worker.prefetch_miss_reason("never-seen") == "provenance-unknown"
     release.set()
     assert worker.wait_idle()
+    worker.close()
+
+
+def test_a_gatewayed_session_runs_geometry_on_the_broker_lane() -> None:
+    """The composition seam, pinned. `configure_runtime_job` resolves the lane once here; if it
+    silently returned None the worker would fall back to its local lane and production geometry
+    would never reach the broker — bounded admission and close would both be someone else's.
+    """
+    from util import FakeIPC, runtime_gateway
+
+    from saitenka.app.subtitle_pipeline import GEOMETRY_LANE, configure_runtime_job
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    ipc.install_runtime_ingress(lambda *_a: None, lambda *_a: None, None, gateway)
+
+    submit = configure_runtime_job(ipc)
+
+    assert submit is not None
+    assert ipc.close_runtime_job_lane(GEOMETRY_LANE, 1.0)  # registered, and closeable by name
+
+
+def test_an_ungatewayed_session_still_executes_geometry() -> None:
+    """Negative control for the lane resolution: without a broker the worker owns a local lane, so
+    there is one execution path rather than a silently disabled feature."""
+    from util import FakeIPC
+
+    from saitenka.app.subtitle_pipeline import configure_runtime_job
+
+    assert configure_runtime_job(FakeIPC()) is None
+
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=None)
+
+    assert worker.submit(request(coordinator.generation)) and worker.wait_idle()
+
+    assert coordinator.current is not None
     worker.close()
 
 

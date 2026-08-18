@@ -253,6 +253,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
         assert order == [
             "subtitle-fetch",
             "subtitle-picker",
+            "subtitle-geometry",
             "cue-annotation",
             "tooltip-render-ahead",
             "tooltip-engaged",
@@ -269,6 +270,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
     assert order == [
         "subtitle-fetch",
         "subtitle-picker",
+        "subtitle-geometry",
         "cue-annotation",
         "tooltip-render-ahead",
         "tooltip-engaged",

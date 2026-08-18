@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
+from saitenka.runtime import EffectFinished, Owner
+from saitenka.runtime.jobs import JobLanePolicy, LocalJobLane
 from saitenka.subtitles.geometry import GeometrySnapshot
 
 if TYPE_CHECKING:
@@ -20,6 +22,18 @@ if TYPE_CHECKING:
     from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest
 
     GeometryRequestBuilder = Callable[[], GeometryRequest]
+
+
+class JobSubmitter(Protocol):
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
 
 
 class CurrentSubtitleRenderer(Protocol):
@@ -294,10 +308,53 @@ class SubtitleModeCoordinator:
                 self._backend.close()
 
 
-class SubtitleGeometryWorker:
-    """One worker, one pending slot, and a bounded result cache."""
+GEOMETRY_LANE = "subtitle-geometry"
 
-    def __init__(self, coordinator: SubtitleModeCoordinator, *, cache_max: int = 3) -> None:
+#: Deeper than the one job in flight: `_pump` re-submits from the tail of the handler, while the
+#: finished effect is still counted against the lane, and a refused admission is dropped work.
+_GEOMETRY_LANE_POLICY = JobLanePolicy(capacity=4, workers=1)
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryJob:
+    """One unit of lane work: either the current request or one speculative prefetch."""
+
+    worker: SubtitleGeometryWorker
+    current: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None
+    prefetch: tuple[str, tuple[int, GeometryRequestBuilder]] | None
+
+
+def run_geometry_job(request: object, cancelled: threading.Event) -> object:
+    _ = cancelled  # the coordinator's generation fence already retires superseded work
+    if not isinstance(request, GeometryJob):
+        raise TypeError("invalid subtitle-geometry request")
+    request.worker.execute(request)
+    return None
+
+
+def configure_runtime_job(ipc) -> JobSubmitter | None:
+    """Resolve the lane once, at composition. Absence becomes an explicit value here rather than a
+    probe at each use site — see the sanctioned half of the capability-probe split."""
+    register = getattr(ipc, "register_runtime_job_lane", None)
+    if register is None or not register(GEOMETRY_LANE, _GEOMETRY_LANE_POLICY, run_geometry_job):
+        return None
+    return ipc.submit_runtime_job
+
+
+class SubtitleGeometryWorker:
+    """One pending slot, a bounded prefetch queue, and a bounded result cache.
+
+    The queue policy is the feature's; execution is the lane's. Without a gateway the lane is local
+    (`LocalJobLane`) rather than a private thread, so there is one execution path either way.
+    """
+
+    def __init__(
+        self,
+        coordinator: SubtitleModeCoordinator,
+        *,
+        cache_max: int = 3,
+        submit: JobSubmitter | None = None,
+    ) -> None:
         if cache_max <= 0:
             raise ValueError("geometry result cache bound must be positive")
         self._coordinator = coordinator
@@ -312,7 +369,8 @@ class SubtitleGeometryWorker:
         self._provenance: OrderedDict[str, str] = OrderedDict()
         self._history_lossy = False
         self._epoch_cause: str | None = None
-        self._busy = False
+        self._inflight = False
+        self._issued = 0
         self._closed = False
         self._submitted = 0
         self._superseded = 0
@@ -324,12 +382,12 @@ class SubtitleGeometryWorker:
         self._max_submit_us = 0
         self._prefetched_count = 0
         self._prefetch_dropped = 0
-        self._thread = threading.Thread(
-            target=self._run,
-            name="saitenka-subtitle-geometry",
-            daemon=True,
+        self._local = (
+            None
+            if submit is not None
+            else LocalJobLane(GEOMETRY_LANE, _GEOMETRY_LANE_POLICY, run_geometry_job)
         )
-        self._thread.start()
+        self._submit: JobSubmitter = submit or self._local.submit  # type: ignore[union-attr]
 
     @property
     def generation(self) -> int:
@@ -353,29 +411,26 @@ class SubtitleGeometryWorker:
             if self._closed:
                 return False
             self._submitted += 1
-            if work_key is not None and work_key in self._prefetch_pending:
-                self._prefetch_pending.pop(work_key)
-                if self._pending is not None:
-                    self._superseded += 1
-                self._pending = (reservation, build, work_key)
-                self._condition.notify()
-                elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
-                self._max_submit_us = max(self._max_submit_us, elapsed_us)
-                return True
             if work_key is not None and work_key == self._prefetch_inflight_key:
                 if work_key in self._prefetch_waiters:
                     self._superseded += 1
                 self._prefetch_waiters[work_key] = reservation
-                elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
-                self._max_submit_us = max(self._max_submit_us, elapsed_us)
+                self._record_submit_latency(started)
                 return True
+            if work_key is not None and work_key in self._prefetch_pending:
+                # Promote the queued speculation instead of running its builder: the current
+                # request already carries the real one.
+                self._prefetch_pending.pop(work_key)
             if self._pending is not None:
                 self._superseded += 1
             self._pending = (reservation, build, work_key)
-            self._condition.notify()
-            elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
-            self._max_submit_us = max(self._max_submit_us, elapsed_us)
+            self._record_submit_latency(started)
+        self._pump()
         return True
+
+    def _record_submit_latency(self, started: int) -> None:
+        elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
+        self._max_submit_us = max(self._max_submit_us, elapsed_us)
 
     def prefetch(self, key: str, generation: int, build: GeometryRequestBuilder) -> bool:
         if generation != self._coordinator.generation:
@@ -389,8 +444,65 @@ class SubtitleGeometryWorker:
                 dropped, _item = self._prefetch_pending.popitem(last=False)
                 self._prefetch_dropped += 1
                 self._remember_provenance(dropped, "prefetch-superseded")
-            self._condition.notify()
-            return True
+        self._pump()
+        return True
+
+    def _pump(self) -> None:
+        """Hand the next queued item to the lane, one in flight at a time.
+
+        The queue policy stays here — a single current slot that supersedes, a bounded prefetch
+        queue that drops oldest — because the broker owns admission and never feature state.
+        """
+        with self._condition:
+            if self._closed or self._inflight:
+                return
+            pending, self._pending = self._pending, None
+            if pending is not None:
+                job = GeometryJob(self, pending, None)
+            elif self._prefetch_pending:
+                entry = self._prefetch_pending.popitem(last=False)
+                self._prefetch_inflight_key = entry[0]
+                job = GeometryJob(self, None, entry)
+            else:
+                return
+            self._inflight = True
+            self._issued += 1
+            identity = (GEOMETRY_LANE, self._issued)
+
+        def finished(_completion: EffectFinished) -> None:
+            """The terminal has no consumer yet: the host still polls `apply` from a tick stage.
+            Routing that poll onto this completion is the next contract, and needs every
+            geometry-owning test gateway-wired first."""
+
+        if self._submit(
+            owner=Owner.SUBTITLE,
+            identity=identity,
+            lane=GEOMETRY_LANE,
+            request=job,
+            on_finished=finished,
+        ):
+            return
+        # Refused admission is dropped work, not queued work: unwind so the queue does not believe
+        # something is still in flight and stall every later request behind it.
+        with self._condition:
+            self._inflight = False
+            if job.current is not None:
+                self._superseded += 1
+            else:
+                self._prefetch_inflight_key = None
+                self._prefetch_dropped += 1
+            self._condition.notify_all()
+
+    def execute(self, job: GeometryJob) -> None:
+        """Run one lane job. Called on a lane worker thread by :func:`run_geometry_job`."""
+        try:
+            if job.current is not None:
+                self._process_current(job.current)
+            else:
+                assert job.prefetch is not None
+                self._process_prefetch(job.prefetch)
+        finally:
+            self._pump()
 
     def _remember_provenance(self, key: str, reason: str) -> None:
         self._provenance.pop(key, None)
@@ -473,7 +585,7 @@ class SubtitleGeometryWorker:
                 self._cache.popitem(last=False)
 
     def _idle(self) -> None:
-        self._busy = False
+        self._inflight = False
         self._condition.notify_all()
 
     def _drop_prefetch(self, key: str, error: Exception | None = None) -> None:
@@ -608,38 +720,6 @@ class SubtitleGeometryWorker:
             return
         self._finish_current(published=published)
 
-    def _next_work(
-        self,
-    ) -> tuple[
-        tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None,
-        tuple[str, tuple[int, GeometryRequestBuilder]] | None,
-    ]:
-        with self._condition:
-            while self._pending is None and not self._prefetch_pending and not self._closed:
-                self._condition.wait()
-            if self._closed:
-                return None, None
-            pending = self._pending
-            if pending is not None:
-                self._pending = None
-                prefetch = None
-            else:
-                prefetch = self._prefetch_pending.popitem(last=False)
-                self._prefetch_inflight_key = prefetch[0]
-            self._busy = True
-            return pending, prefetch
-
-    def _run(self) -> None:
-        while True:
-            pending, prefetch = self._next_work()
-            if self._closed:
-                return
-            if pending is not None:
-                self._process_current(pending)
-            else:
-                assert prefetch is not None
-                self._process_prefetch(prefetch)
-
     def mark_presented(self, request: GeometryRequest) -> bool:
         current = self._coordinator.current
         ready = current is not None and (
@@ -683,16 +763,21 @@ class SubtitleGeometryWorker:
             )
 
     def wait_idle(self, timeout: float = 5.0) -> bool:
+        """Block until the queue is drained and no job is executing.
+
+        This is about the *work*, not its terminal: the lane completion that publishes the result
+        is drained by the runtime, so waiting on it here would be waiting on the caller.
+        """
         deadline = time.monotonic() + timeout
         with self._condition:
             while (
-                self._pending is not None or self._prefetch_pending or self._busy
+                self._pending is not None or self._prefetch_pending or self._inflight
             ) and not self._closed:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
                 self._condition.wait(remaining)
-            return self._pending is None and not self._prefetch_pending and not self._busy
+            return self._pending is None and not self._prefetch_pending and not self._inflight
 
     def close(self) -> None:
         with self._condition:
@@ -706,7 +791,6 @@ class SubtitleGeometryWorker:
             self._prefetched.clear()
             self._cache.clear()
             self._condition.notify_all()
-        self._thread.join(timeout=5)
-        if self._thread.is_alive():
-            raise RuntimeError("subtitle geometry worker did not stop")
+        if self._local is not None:
+            self._local.close()
         self._coordinator.close()

@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.runtime.effects import EffectError, EffectOutcome, SubmitJob
+from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, SubmitJob
 from saitenka.runtime.events import EffectFinished, EventOrigin
 
 if TYPE_CHECKING:
@@ -134,6 +134,53 @@ class _Lane:
                     error=error,
                 )
             )
+
+
+class LocalJobLane:
+    """A lane whose terminals go straight back to the submitting feature, with no mailbox.
+
+    Admission, execution and cancellation are the broker's — only the terminal's destination
+    differs. It exists so a feature keeps ONE execution path whether or not the runtime gateway is
+    installed: a feature that runs a private thread for the un-gatewayed case has two
+    implementations of the same lane, and the untested one is the one that drifts.
+    """
+
+    def __init__(self, name: str, policy: JobLanePolicy, handler: JobHandler) -> None:
+        self._name = name
+        self._lock = threading.Lock()
+        self._callbacks: dict[EffectId, Callable[[EffectFinished], None]] = {}
+        self._issued = 0
+        self._lane = _Lane(name, policy, handler, self._complete)
+
+    def submit(
+        self,
+        *,
+        owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool:
+        if lane != self._name:
+            return False
+        with self._lock:
+            self._issued += 1
+            effect_id = EffectId(self._issued)
+            self._callbacks[effect_id] = on_finished
+        if self._lane.admit(SubmitJob(effect_id, owner, identity, lane, request)):
+            return True
+        with self._lock:
+            self._callbacks.pop(effect_id, None)
+        return False
+
+    def close(self, timeout: float = 2.0) -> None:
+        self._lane.close(time.monotonic() + max(0.0, timeout))
+
+    def _complete(self, completion: EffectFinished) -> None:
+        with self._lock:
+            callback = self._callbacks.pop(completion.effect_id, None)
+        if callback is not None:
+            callback(completion)
 
 
 class JobBroker:
