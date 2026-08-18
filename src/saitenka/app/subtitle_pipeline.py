@@ -370,6 +370,10 @@ class SubtitleGeometryWorker:
         self._history_lossy = False
         self._epoch_cause: str | None = None
         self._inflight = False
+        self._pending_settled: Callable[[], None] | None = None
+        #: Settlements owed by the job now executing — a current request's own, plus any caller
+        #: that attached to an in-flight speculation instead of submitting its own job.
+        self._settling: list[Callable[[], None]] = []
         self._issued = 0
         self._closed = False
         self._submitted = 0
@@ -402,7 +406,10 @@ class SubtitleGeometryWorker:
         build: GeometryRequestBuilder,
         *,
         work_key: str | None = None,
+        on_settled: Callable[[], None] | None = None,
     ) -> bool:
+        """Queue the current request. ``on_settled`` runs when its lane terminal is delivered —
+        that completion, not a tick, is what tells the host a result is ready to publish."""
         started = time.perf_counter_ns()
         reservation = self._coordinator.reserve(generation)
         if reservation is None:
@@ -415,6 +422,10 @@ class SubtitleGeometryWorker:
                 if work_key in self._prefetch_waiters:
                     self._superseded += 1
                 self._prefetch_waiters[work_key] = reservation
+                # No job of our own: the speculation already executing is what will answer, so its
+                # terminal owes this caller the settlement.
+                if on_settled is not None:
+                    self._settling.append(on_settled)
                 self._record_submit_latency(started)
                 return True
             if work_key is not None and work_key in self._prefetch_pending:
@@ -424,6 +435,7 @@ class SubtitleGeometryWorker:
             if self._pending is not None:
                 self._superseded += 1
             self._pending = (reservation, build, work_key)
+            self._pending_settled = on_settled
             self._record_submit_latency(started)
         self._pump()
         return True
@@ -459,6 +471,9 @@ class SubtitleGeometryWorker:
             pending, self._pending = self._pending, None
             if pending is not None:
                 job = GeometryJob(self, pending, None)
+                if self._pending_settled is not None:
+                    self._settling.append(self._pending_settled)
+                self._pending_settled = None
             elif self._prefetch_pending:
                 entry = self._prefetch_pending.popitem(last=False)
                 self._prefetch_inflight_key = entry[0]
@@ -500,9 +515,12 @@ class SubtitleGeometryWorker:
         """The lane terminal. Admission of the next job happens here rather than at the end of the
         handler, so work enters from the thread that consumes terminals.
 
-        Nothing else consumes it yet: the host still polls `apply` from a tick stage. Routing that
-        poll onto this completion is the remaining half of the slice.
+        It also pays out the settlements this job owed, which is how a result reaches the host.
         """
+        with self._condition:
+            settling, self._settling = self._settling, []
+        for settle in settling:
+            settle()
         self._pump()
 
     def _remember_provenance(self, key: str, reason: str) -> None:

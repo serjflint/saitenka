@@ -1001,6 +1001,9 @@ class NativeSubtitleGeometry:
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
         if cache_hit:
+            # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
+            # a cached cue would sit unapplied until some later miss happened to land.
+            self.apply(reader)
             return True
         try:
             selection = self._annotations(
@@ -1036,13 +1039,23 @@ class NativeSubtitleGeometry:
                 selection.annotations,
             )
 
-        accepted = self.worker.submit_job(inputs.generation, build, work_key=inputs.key)
+        def settled() -> None:
+            """The lane terminal is what publishes the result — nothing polls for it."""
+            self.apply(reader)
+
+        # Everything the result will be judged against is established BEFORE the work is queued.
+        # These used to run after, which reads fine while a completion is guaranteed to be later —
+        # and silently wipes the result the moment one is not, because `_degrade_geometry` clears
+        # the very boxes the completion just published.
+        if inputs.observation_key is not None:
+            self._pending_key = (inputs.generation, inputs.observation_key)
+        self._submitted_at = (inputs.generation, time.perf_counter())
+        self.worker.mark_not_ready()
+        self._degrade_geometry(reader, "subtitle-geometry-cache-miss")
+        accepted = self.worker.submit_job(
+            inputs.generation, build, work_key=inputs.key, on_settled=settled
+        )
         if accepted:
-            if inputs.observation_key is not None:
-                self._pending_key = (inputs.generation, inputs.observation_key)
-            self._submitted_at = (inputs.generation, time.perf_counter())
-            self.worker.mark_not_ready()
-            self._degrade_geometry(reader, "subtitle-geometry-cache-miss")
             self._prefetch(
                 reader,
                 inputs.path,

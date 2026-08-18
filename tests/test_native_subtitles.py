@@ -90,6 +90,53 @@ class FakeIPC:
         self.get_property_error: str | None = None
         self.correlate_commands = False
         self.submitted: list[tuple] = []
+        self.job_lanes: dict[str, object] = {}
+        self.pending_jobs: list[tuple] = []
+
+    def register_runtime_job_lane(self, name, policy, handler) -> bool:  # noqa: ARG002
+        # Geometry only. Every lane in the session probes for this port at composition, so accepting
+        # any name would move annotation, tooltip raster and prefetch onto lanes too — five
+        # subsystems this file does not exercise, changing when their results land.
+        if name != "subtitle-geometry":
+            return False
+        self.job_lanes[name] = handler
+        return True
+
+    def submit_runtime_job(self, *, owner, identity, lane, request, on_finished) -> bool:
+        """Run one lane job inline, then QUEUE its terminal for the next drain.
+
+        The work runs inline so results are deterministic without threads. The terminal must not
+        be, though: the broker publishes it to the mailbox, so it reaches the host on a later drain,
+        never re-entering the call that submitted it. Delivering it inline collapses the window in
+        which a cue is scheduled but not yet published — a real state the host spends time in, and
+        one several tests exist to pin.
+        """
+        from saitenka.runtime import EffectError, EffectOutcome
+
+        handler = self.job_lanes.get(lane)
+        if handler is None:
+            return False
+        outcome, error = EffectOutcome.SUCCEEDED, None
+        try:
+            handler(request, threading.Event())
+        except Exception:  # noqa: BLE001  # the broker turns a handler failure into an outcome
+            outcome, error = EffectOutcome.FAILED, EffectError.INTERNAL
+        self.pending_jobs.append(
+            (on_finished, EffectFinished(EffectId(0), owner, identity, outcome, error=error))
+        )
+        return True
+
+    def deliver_runtime_jobs(self) -> int:
+        """Drain queued lane terminals, including any a terminal itself produces."""
+        delivered = 0
+        while self.pending_jobs:
+            on_finished, completion = self.pending_jobs.pop(0)
+            on_finished(completion)
+            delivered += 1
+        return delivered
+
+    def close_runtime_job_lane(self, name, timeout=2.0) -> bool:  # noqa: ARG002
+        return self.job_lanes.pop(name, None) is not None
 
     def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
         """Admit a correlated command, completing it inline unless the test wants to place the
@@ -293,6 +340,18 @@ def reader(
     return result, ipc, backend
 
 
+def settle_jobs(result: Reader, ipc: FakeIPC) -> None:
+    """Let the geometry lane finish and deliver its terminals.
+
+    Two steps because they are two facts: the work completing, and the host being told. The broker
+    publishes a completion to the mailbox, so the host learns on a later drain — which is why a cue
+    can be scheduled and not yet published, and why this is not folded into `wait_idle`.
+    """
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    ipc.deliver_runtime_jobs()
+
+
 def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
     """Advance past the batch boundary the way the next drain would.
 
@@ -312,8 +371,8 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     assert backend.requests
     assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
@@ -345,8 +404,8 @@ def test_visible_cue_cache_miss_keeps_native_pixels_until_geometry_is_ready(tmp_
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
     assert result.boxes == []
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert result.boxes
     result.close()
 
@@ -393,8 +452,8 @@ def test_native_visibility_is_reasserted_after_track_reconfigure(tmp_path: Path)
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.commands.clear()
 
     result.subtitle_pipeline.activate(result)
@@ -433,7 +492,7 @@ def test_missing_source_keeps_native_pixels_without_hits(tmp_path: Path) -> None
     result.native_geometry.set_source(tmp_path / "missing.ass")
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     result.native_geometry.apply(result)
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-unavailable"
@@ -470,11 +529,11 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     path clears `boxes` and drives the FSM in the same call, which is exactly where the two would
     get welded together.
     """
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     renderer = result.subtitle_pipeline.renderer
     assert isinstance(renderer, NativeVisibleRenderer)
     assert renderer.ownership_state.owner is PixelOwner.NATIVE
@@ -484,7 +543,7 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
     assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
 
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # unproved boxes go, pixels stay
@@ -495,8 +554,8 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
     assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
     assert result.boxes
@@ -507,8 +566,8 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     result.hover = 0
     result._paused_by_tip = True
@@ -518,7 +577,7 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     result.native_geometry.worker.invalidate_cache()
 
     assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
 
     assert ("set_property", "pause", False) not in ipc.commands
@@ -534,13 +593,13 @@ def test_failed_provider_keeps_native_pixels_while_recovery_is_pending(tmp_path:
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     backend.error = RuntimeError("font provider unavailable")
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
     assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
     ipc.commands.clear()
     backend.error = None
@@ -560,7 +619,7 @@ def test_completed_provider_failure_survives_refresh_before_apply(tmp_path: Path
     backend.error = RuntimeError("font provider unavailable")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     ipc.props["sub-start"] = None
     ipc.props["sub-end"] = None
     ipc.commands.clear()
@@ -582,7 +641,7 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     backend.error = RuntimeError("font provider unavailable")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
     original_tokenizer = result.tokenizer
     result.use_tokenizer(_AllSkippableTokenizer())
@@ -598,7 +657,7 @@ def test_annotation_free_cue_is_a_valid_noninteractive_recovery(
     result.use_tokenizer(original_tokenizer)
     ipc.commands.clear()
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
     assert result.native_geometry.status.owner == "native"
     assert ("set_property", "sub-visibility", False) not in ipc.commands
@@ -610,13 +669,13 @@ def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path)
     backend.error = RuntimeError("font provider unavailable")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
     ipc.commands.clear()
 
     result.set_subtitle("")
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
 
     assert result.native_geometry.status.owner == "native"
@@ -626,18 +685,18 @@ def test_empty_cue_does_not_claim_recovery_from_provider_failure(tmp_path: Path)
 
 
 def test_blank_interval_does_not_repeat_provider_failure_diagnostic(tmp_path: Path, caplog) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
     assert result.native_geometry is not None
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
         result.set_subtitle("猫を見る")
-        assert result.native_geometry.worker.wait_idle()
+        settle_jobs(result, ipc)
         assert not result.native_geometry.apply(result)
         result.set_subtitle("")
         result.set_subtitle("猫を見る")
-        assert result.native_geometry.worker.wait_idle()
+        settle_jobs(result, ipc)
         assert not result.native_geometry.apply(result)
 
     assert [record.getMessage() for record in caplog.records] == [
@@ -736,9 +795,9 @@ def test_ass_geometry_restores_hits_after_noninteractive_source_switch(tmp_path:
     source.write_bytes(ASS)
     result.native_geometry.set_source(source, reader=result)
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert backend.requests
     assert ("set_property", "sub-visibility", True) in ipc.commands
     assert result.native_geometry.status.fallback_reason is None
@@ -754,9 +813,9 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert len(backend.requests) == 2
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.set_subtitle("")
     result._observing = True
     result._playback = result._projection.seed_all(result._playback, ipc.props)
@@ -783,7 +842,7 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
 
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 2
     stats = result.native_geometry.worker.stats
     assert (stats.ready_before_presented, stats.presented) == (1, 2)
@@ -799,12 +858,12 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")))
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     backend.error = RuntimeError("font provider unavailable")
     ipc.props["osd-dimensions"] = {"w": 1279, "h": 720}
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     assert not result.native_geometry.apply(result)
     assert result.native_geometry.status.owner == "native"
     backend.error = None
@@ -827,7 +886,7 @@ def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: 
     assert result.native_geometry.status.fallback_reason is None
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -852,8 +911,8 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
     second = "Dialogue: 1,0:00:03.00,0:00:07.00,Default,,0000,0000,0000,,犬も見る"
     ipc.props.update({"sub-text/ass-full": first, "sub-end": 5.0})
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 3
     ipc.commands.clear()
 
@@ -866,7 +925,7 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
         }
     )
     result.set_subtitle("猫を見る\n犬も見る")
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.props.update(
         {
             "sub-text/ass-full": second,
@@ -877,7 +936,7 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
     )
     result.set_subtitle("犬も見る")
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 3
     assert ("set_property", "sub-visibility", False) not in ipc.commands
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -885,14 +944,14 @@ def test_lookahead_caches_start_and_end_transitions_for_overlapping_events(
 
 
 def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     assert result.native_geometry is not None
     result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(8.0, 9.0, "不存在")))
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(backend.requests) == 1
     assert result.native_geometry.status.fallback_reason is None
     result.close()
@@ -901,7 +960,7 @@ def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path
 def test_native_lookahead_uses_the_single_annotation_coordinator(
     tmp_path: Path, monkeypatch
 ) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(
         ASS.replace(
@@ -937,7 +996,7 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     )
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert any(request.timestamp_ms == 4_001 for request in backend.requests)
     result.close()
@@ -964,7 +1023,7 @@ def test_geometry_request_uses_delay_adjusted_subtitle_timestamp(
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[0].timestamp_ms == expected_timestamp_ms
     result.close()
@@ -1038,7 +1097,7 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
 
 
 def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
     assert result.native_geometry is not None
@@ -1047,7 +1106,7 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
 
     result.set_subtitle("犬も見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[0].frame_id.active_event_ids[0].start_ms == 4_000
     result.close()
@@ -1057,8 +1116,8 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     old_generation = result.subtitle_pipeline.generation
     ipc.commands.clear()
 
@@ -1075,19 +1134,19 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
 
 
 def test_tokenizer_change_rebuilds_geometry_after_new_tokens_land(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) > 1
 
     result.use_tokenizer(_SingleTokenizer())
     result._retokenize_current_cue()
 
     assert result.boxes == []
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) == len(backend.requests[-1].palette) == 1
     result.close()
 
@@ -1118,12 +1177,12 @@ def test_unpaintable_full_width_space_is_not_required_from_libass(tmp_path: Path
 
     result.set_subtitle("猫　犬")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert [entry.token_index for entry in backend.requests[0].palette] == [0, 2]
     assert result.native_geometry.status.eligible_tokens == 2
     assert result.native_geometry.status.skipped_tokens == 1
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert [box.index for box in result.boxes] == [0, 2]
     result.close()
 
@@ -1139,8 +1198,8 @@ def test_sparse_native_boxes_anchor_tooltip_by_token_identity(tmp_path: Path) ->
     )
     result.use_tokenizer(_WhitespaceTokenizer())
     result.set_subtitle("猫　犬")
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.commands.clear()
 
     result.set_hover(2)
@@ -1192,11 +1251,11 @@ def test_simultaneous_ass_events_publish_event_aware_hit_geometry(tmp_path: Path
 
     result.set_subtitle("猫\n犬")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert [event.source_order for event in backend.requests[0].frame_id.active_event_ids] == [0, 1]
     assert {entry.event_id.source_order for entry in backend.requests[0].palette} == {0, 1}
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert len(result.boxes) == len(backend.requests[0].palette)
     result.close()
 
@@ -1226,7 +1285,7 @@ def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: 
     backend.error = RuntimeError("boom")
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert not result.native_geometry.apply(result)
     clears = ipc.commands.count(("osd-overlay", 1001, "none", ""))
@@ -1240,19 +1299,19 @@ def test_provider_error_is_consumed_once_and_cleared_by_source_switch(tmp_path: 
 
 
 def test_repeated_provider_failure_emits_one_transition_diagnostic(tmp_path: Path, caplog) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
     assert result.native_geometry is not None
     caplog.clear()
 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.native_subtitles"):
         result.set_subtitle("猫を見る")
-        assert result.native_geometry.worker.wait_idle()
+        settle_jobs(result, ipc)
         result.native_geometry.apply(result)
         result.subtitle_pipeline.invalidate()
         result.native_geometry.worker.invalidate_cache()
         assert result.native_geometry.schedule(result)
-        assert result.native_geometry.worker.wait_idle()
+        settle_jobs(result, ipc)
         result.native_geometry.apply(result)
 
     assert [record.getMessage() for record in caplog.records] == [
@@ -1265,8 +1324,8 @@ def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) ->
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
     result._draw_subtitle()
     focus_index = len(ipc.commands)
@@ -1275,7 +1334,7 @@ def test_invalid_result_identity_removes_visible_native_focus(tmp_path: Path) ->
     result.subtitle_pipeline.invalidate()
     result.native_geometry.worker.invalidate_cache()
     assert result.native_geometry.schedule(result)
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert not result.native_geometry.apply(result)
     assert result.boxes == []
@@ -1287,8 +1346,8 @@ def test_empty_cue_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
     result._draw_subtitle()
 
@@ -1303,8 +1362,8 @@ def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.hover = 0
     result._draw_subtitle()
 
@@ -1372,8 +1431,10 @@ def test_a_geometry_result_that_lands_while_ownership_is_undecided_is_not_lost(
     assert result.native_geometry is not None
     result.set_subtitle("猫を見る")
 
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result) is False  # deferred: no answer to publish against
+    settle_jobs(result, ipc)
+    assert (
+        result.native_geometry.status.geometry_ready
+    )  # the lane terminal published it is False  # deferred: no answer to publish against
     # Deferring is not degrading — recording a rejection here is the regression.
     assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
 
@@ -1455,8 +1516,8 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     ipc.props["sub-text"] = "猫を見る"
     result._on_property_change({"name": "sub-text", "data": "猫を見る"})
     result._settle_cue_observation()
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     ipc.props.update(
         {
@@ -1479,10 +1540,10 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     settle_geometry(result, ipc)
 
     assert result.boxes == []
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[-1].frame_id.active_event_ids[0].start_ms == 4_000
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1492,8 +1553,8 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     original_boxes = list(result.boxes)
     result._observing = True
@@ -1525,8 +1586,8 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     native_boxes = list(result.boxes)
     result._observing = True
@@ -1611,10 +1672,10 @@ def test_mpv_empty_style_override_normalization_is_supported(tmp_path: Path) -> 
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1638,14 +1699,14 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     request = backend.requests[-1]
     assert request.frame_size == (3024, 1898)
     assert request.storage_size == (1920, 1080)
     assert request.margins == (98, 99, 0, 0)
     assert request.use_margins is False
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1655,7 +1716,7 @@ def test_authored_ass_force_margins_is_forwarded(tmp_path: Path) -> None:
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[-1].use_margins is True
     result.close()
@@ -1665,8 +1726,8 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     before = len(backend.requests)
     assert backend.requests[-1].use_margins is False  # the input the change is about to flip
@@ -1674,13 +1735,13 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
     ipc.props["options/sub-ass-force-margins"] = True
     result._on_property_change({"name": "options/sub-ass-force-margins", "data": True})
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     # Assert the NEXT request carries the changed input, not that some request ever did: the
     # observation key covers the render profile, so a changed input must produce a new request.
     assert len(backend.requests) > before
     assert backend.requests[-1].use_margins is True
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result.close()
 
 
@@ -1691,8 +1752,8 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.timers.clear()
 
     result._on_property_change({"name": "options/sub-pos", "data": 95.0})
@@ -1716,8 +1777,8 @@ def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> No
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     ipc.props["options/sub-pos"] = 95.0
     result._on_property_change({"name": "options/sub-pos", "data": 95.0})
@@ -1737,7 +1798,7 @@ def test_osd_and_video_pixel_aspects_are_composed(tmp_path: Path) -> None:
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
 
     assert backend.requests[-1].pixel_aspect == pytest.approx(1.5)
     result.close()
@@ -1759,14 +1820,14 @@ def test_ass_video_aspect_override_falls_back_with_observed_value(tmp_path: Path
 
 
 def test_non_utf8_ass_has_stable_fallback_reason(tmp_path: Path) -> None:
-    result, _ipc, _backend = reader(tmp_path)
+    result, ipc, _backend = reader(tmp_path)
     source = tmp_path / "legacy.ass"
     source.write_bytes(ASS + b"\xff")
     assert result.native_geometry is not None
     result.native_geometry.set_source(source, reader=result)
 
     result.set_subtitle("猫を見る")
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     result.native_geometry.apply(result)
 
     assert result.native_geometry.status.fallback_reason == "subtitle-source-encoding-unsupported"
@@ -1805,8 +1866,8 @@ def test_rejected_native_visibility_reassertion_restores_legacy_renderer(tmp_pat
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     result._sub_pending = None
     ipc.command(
         "set_property",
@@ -1915,8 +1976,8 @@ def test_rejected_legacy_stage_does_not_commit_or_hide_native_pixels(tmp_path: P
     assert isinstance(renderer, NativeVisibleRenderer)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
-    assert result.native_geometry.apply(result)
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     ipc.command(
         "set_property",
         "sub-visibility",
@@ -1981,10 +2042,10 @@ def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
     result, ipc, _backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     ipc.set_property_error = "disconnected"
 
-    assert result.native_geometry.apply(result)
+    assert result.native_geometry.status.geometry_ready  # the lane terminal published it
 
     failures = [
         attributes
@@ -2000,12 +2061,12 @@ def test_native_visibility_rejection_with_true_readback_keeps_native_owner(
 
 
 def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> None:
-    result, _ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path)
     backend.error = RuntimeError("font provider unavailable")
 
     result.set_subtitle("猫を見る")
     assert result.native_geometry is not None
-    assert result.native_geometry.worker.wait_idle()
+    settle_jobs(result, ipc)
     result.native_geometry.apply(result)
 
     assert result._telemetry_gauges() == IsPartialDict(

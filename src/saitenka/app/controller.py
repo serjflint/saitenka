@@ -2475,8 +2475,6 @@ class Reader:
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
         sidebar.update(self)
-        if self.native_geometry is not None:
-            self.native_geometry.apply(self)
 
     def _apply_capabilities(self) -> None:
         if self._tts_capability is not None:
