@@ -278,10 +278,6 @@
     ],
     [
       "passive-result-drain",
-      "src/saitenka/app/analysis_overlay.py::apply_results"
-    ],
-    [
-      "passive-result-drain",
       "src/saitenka/app/hover_metadata.py::InteractionMetadataActor.drain"
     ],
     [
@@ -375,10 +371,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/analysis_overlay.py::_unavailable"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::apply_results"
     ],
     [
       "reader-parameter",
@@ -1815,8 +1807,7 @@
         "call:self._stop.set",
         "call:self._annotation.close",
         "loop:self._prefetch_threads=>call:th.join",
-        "loop:self._subtitle_fetch_threads=>call:th.join",
-        "loop:self.analysis.threads=>call:th.join"
+        "loop:self._subtitle_fetch_threads=>call:th.join"
       ],
       "target": "job-broker-lanes",
       "work_package": "3,5",
