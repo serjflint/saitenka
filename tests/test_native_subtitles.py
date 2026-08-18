@@ -218,6 +218,17 @@ def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
     return result, ipc, backend
 
 
+def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
+    """Advance past the batch boundary the way the next drain would.
+
+    Geometry-input changes arm one zero-delay deadline rather than refreshing per observation, so
+    a test that changes an input has to let that deadline come due before asserting on the request
+    the backend received.
+    """
+    result._reconcile_subtitles()
+    ipc.fire_runtime_timer("subtitle:geometry-refresh")
+
+
 def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
 
@@ -1241,7 +1252,7 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
 
     result._on_property_change({"name": "sub-start", "data": None})
     result._on_property_change({"name": "sub-end", "data": None})
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert result.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -1249,7 +1260,7 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
 
     result._on_property_change({"name": "sub-start", "data": 1.0})
     result._on_property_change({"name": "sub-end", "data": 3.0})
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert result.boxes == original_boxes
     assert not any(command[0] == "overlay-add" for command in ipc.commands)
@@ -1280,7 +1291,7 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     )
     result._on_property_change({"name": "sub-start", "data": None})
     result._on_property_change({"name": "sub-end", "data": None})
-    result._reconcile_subtitles()
+    settle_geometry(result, ipc)
 
     assert native_boxes
     assert result.boxes == []
@@ -1408,10 +1419,57 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
 
     ipc.props["options/sub-ass-force-margins"] = True
     result._on_property_change({"name": "options/sub-ass-force-margins", "data": True})
+    ipc.fire_runtime_timer("subtitle:geometry-refresh")
     assert result.native_geometry.worker.wait_idle()
 
     assert backend.requests[-1].use_margins is True
     assert result.native_geometry.apply(result)
+    result.close()
+
+
+def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> None:
+    """A resize publishes several inputs together. Each one used to set a dirty flag drained by
+    the tick; they now share one deadline, so the batch costs one refresh instead of one per
+    property."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    ipc.timers.clear()
+
+    result._on_property_change({"name": "options/sub-pos", "data": 95.0})
+    first = result._geometry_refresh.armed
+    result._on_property_change({"name": "options/sub-scale", "data": 1.5})
+    result._on_property_change({"name": "options/sub-use-margins", "data": True})
+
+    assert first is not None
+    assert result._geometry_refresh.armed is first  # both later changes coalesced into it
+    assert list(ipc.timers) == ["subtitle:geometry-refresh"]
+
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    assert result._geometry_refresh.armed is None  # retired by its own due event
+    result.close()
+
+
+def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> None:
+    """The tick drain refreshed only while the pipeline generation held. The deadline keeps that
+    guard: a refresh armed for the old track is cancelled rather than left to fire against the
+    replacement."""
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+
+    ipc.props["options/sub-pos"] = 95.0
+    result._on_property_change({"name": "options/sub-pos", "data": 95.0})
+    assert result._geometry_refresh.armed is not None
+
+    result._on_property_change({"name": "sid", "data": 3})
+
+    assert result._geometry_refresh.armed is None
+    assert "subtitle:geometry-refresh" not in ipc.timers
     result.close()
 
 

@@ -24,6 +24,7 @@ from saitenka.app import (
     backlog,
     card_preview,
     cue_annotation,
+    geometry_refresh,
     help_overlay,
     hover_metadata,
     hover_snapshot,
@@ -203,6 +204,7 @@ OBSERVED_PROPS = (
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
 _SETTLE_TIMER = "subtitle:navigation-settle"
+_GEOMETRY_REFRESH_TIMER = "subtitle:geometry-refresh"
 _SCALE_BUCKET = 0.05
 
 # Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
@@ -610,7 +612,7 @@ class Reader:
         # given observation conflicts with the installed cue identity.
         self._projection = PlaybackProjection()
         self._playback = PlaybackState()
-        self._geometry_dirty = False
+        self._geometry_refresh = geometry_refresh.RefreshWindow()
         self._ass_full_probe_dirty = True
         # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
         # opt-in (never set under attach, so SyncPlay-managed playback never advances). `_eof_handled`
@@ -790,10 +792,6 @@ class Reader:
         self._playback = projected.state
         for delta in projected.deltas:
             self._apply_playback_delta(delta)
-        # Pre-run/test paths have no tick to drain the dirty flag, so refresh inline.
-        if self._geometry_dirty and not self._observing and self.native_geometry is not None:
-            self._geometry_dirty = False
-            self.native_geometry.refresh(self)
 
     def _apply_playback_delta(self, delta: playback.PlaybackDelta) -> None:
         if isinstance(delta, playback.CueIdentityRetired):
@@ -801,6 +799,7 @@ class Reader:
         elif isinstance(delta, playback.AuthoredCueStale):
             self._ass_full_probe_dirty = True
         elif isinstance(delta, playback.SubtitleSelectionChanged):
+            self.retire_geometry_refresh()  # the track it was armed for is gone
             if self.native_geometry is not None:
                 self.native_geometry.set_source(None, reader=self)
             else:
@@ -810,7 +809,7 @@ class Reader:
             if self.native_geometry is not None:
                 self.native_geometry.record_clock_change(self)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
-            self._geometry_dirty = True
+            self._arm_geometry_refresh()
 
     def _install_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
         """Bind the cue identity in both owners: the annotation state and the projection, which
@@ -822,6 +821,54 @@ class Reader:
             start=identity.observed_start,
             end=identity.observed_end,
         )
+
+    # --- coalesced geometry refresh (WP4.4) ----------------------------------------------------
+    def _arm_geometry_refresh(self) -> None:
+        """Defer the refresh to a zero-delay deadline so one batch of input changes runs libass
+        once, at the head of the next drain — after the whole batch has been observed."""
+        generation = self.subtitle_pipeline.generation
+        window, due = self._geometry_refresh.arm(generation)
+        self._geometry_refresh = window
+        if due is None:  # an armed deadline already covers this change
+            return
+
+        def fired(completion: EffectFinished) -> None:
+            if completion.outcome is EffectOutcome.SUCCEEDED:
+                self._geometry_refresh_due(due)
+
+        schedule = getattr(self.ipc, "schedule_runtime_timer", None)
+        if schedule is None or not schedule(
+            owner=Owner.SUBTITLE,
+            identity=due,
+            timer=_GEOMETRY_REFRESH_TIMER,
+            due_at=time.monotonic(),
+            on_finished=fired,
+        ):
+            # Coalescing is an optimisation, not a guard: with no timer port (or a full one) the
+            # refresh still has to happen, so run it now. Unlike the settle window — whose absence
+            # must fail closed because it changes what the user sees — skipping this one would
+            # silently drop hit boxes.
+            self._geometry_refresh = self._geometry_refresh.retire()
+            self._refresh_geometry()
+
+    def _geometry_refresh_due(self, due: geometry_refresh.GeometryRefreshDue) -> None:
+        if not self._geometry_refresh.fires(due, self.subtitle_pipeline.generation):
+            return  # superseded, or the source moved under it
+        self._geometry_refresh = self._geometry_refresh.retire()
+        self._refresh_geometry()
+
+    def _refresh_geometry(self) -> None:
+        if self.native_geometry is not None:
+            self.native_geometry.refresh(self)
+
+    def retire_geometry_refresh(self) -> None:
+        """Drop a pending refresh; the source or track it was armed for is gone."""
+        if self._geometry_refresh.armed is None:
+            return
+        self._geometry_refresh = self._geometry_refresh.retire()
+        cancel = getattr(self.ipc, "cancel_runtime_timer", None)
+        if cancel is not None:
+            cancel(_GEOMETRY_REFRESH_TIMER)
 
     # --- subtitle navigation settle window (WP4.5) --------------------------------------------
     def open_settle_window(self) -> None:
@@ -2396,12 +2443,7 @@ class Reader:
                 )
                 self.native_geometry.observe_ass_full_reply(reply)
             self._ass_full_probe_dirty = False
-        generation = self.subtitle_pipeline.generation
         self._reconcile_sub_text(self._prop("sub-text") or "")
-        if self.native_geometry is not None and self._geometry_dirty:
-            self._geometry_dirty = False
-            if self.subtitle_pipeline.generation == generation:
-                self.native_geometry.refresh(self)
 
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
@@ -3020,6 +3062,7 @@ class Reader:
         if close_lane is not None:
             close_lane("mask-atlas-startup", max(0.0, deadline - time.monotonic()))
         mask_atlas_startup.uninstall(self.session.render_cache)
+        self.retire_geometry_refresh()  # no refresh may land after the provider closes
         if self.native_geometry is not None:
             self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.clear(self)
