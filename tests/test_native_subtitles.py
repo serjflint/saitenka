@@ -1417,11 +1417,17 @@ def test_authored_ass_margin_policy_change_refreshes_geometry(tmp_path: Path) ->
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
 
+    before = len(backend.requests)
+    assert backend.requests[-1].use_margins is False  # the input the change is about to flip
+
     ipc.props["options/sub-ass-force-margins"] = True
     result._on_property_change({"name": "options/sub-ass-force-margins", "data": True})
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
     assert result.native_geometry.worker.wait_idle()
 
+    # Assert the NEXT request carries the changed input, not that some request ever did: the
+    # observation key covers the render profile, so a changed input must produce a new request.
+    assert len(backend.requests) > before
     assert backend.requests[-1].use_margins is True
     assert result.native_geometry.apply(result)
     result.close()
