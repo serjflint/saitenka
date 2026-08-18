@@ -64,7 +64,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
             assert release.wait(2)
             self.tokens = [Token("猫", "猫", "猫", "名詞", 0, 1)]
 
-        def set_hover(self, index: int) -> None:
+        def prepare_hover_blocking(self, index: int) -> None:
             self.hovered = index
 
         def _mark_interactive_ready(self) -> None:

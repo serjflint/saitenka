@@ -18,7 +18,7 @@ import time
 from typing import TYPE_CHECKING, NamedTuple
 
 from saitenka import otel_metrics
-from saitenka.app import nested_popup, prefetch
+from saitenka.app import nested_popup, tooltip_engaged
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.media import copy_clipboard, speak
 from saitenka.app.nested_popup import TIP_GAP
@@ -318,7 +318,7 @@ def set_hover(reader: Reader, index: int) -> None:
         return
     reader._tip_view.job_id = reader._interaction_jobs.begin("tooltip")
     reader._tip_view.job_kind = "tooltip"
-    if prefetch.workers_running(reader):
+    if reader._interaction_metadata_submit is not None:
         # Retire the previous tooltip's logical identity immediately. Its acknowledged pixels may stay
         # until the replacement paints, but stale nested/open results can no longer attach to it.
         reader._hide_nested()
@@ -946,13 +946,20 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
 
     # Cold miss (nothing in the panel cache AND tier-2 direct-paint missed): do NOT build/raster on the
     # main thread — that synchronous build is what balloons tooltip_show p95+. Enqueue a TOP-priority
-    # worker compose and show NOTHING; the tick (apply_engaged_results) re-invokes this once the panel is
-    # warm, when it becomes an ordinary cache-hit show. (tier-3 deferred render.) Only defer when a
-    # prefetch worker is actually running to service it — otherwise (prefetch off / no workers) there is
-    # nothing to compose it, so fall through to a synchronous build.
-    if reader._tip_show_cold and not painted and prefetch.workers_running(reader):
-        prefetch.request_engaged_render(reader, tok, inflected, key, mined=mined, phrase=phrase)
-        return True
+    # bounded compose and show NOTHING; the typed completion re-invokes this once the panel is warm,
+    # when it becomes an ordinary cache-hit show. If admission is unavailable, build synchronously.
+    if reader._tip_show_cold and not painted:
+        request = tooltip_engaged.HoverRequest(
+            tok,
+            inflected,
+            mined,
+            tuple(key),
+            cap,
+            tuple(phrase),
+            job_id=reader._tip_view.job_id,
+        )
+        if reader._request_engaged_tooltip(request):
+            return True
 
     st = panel_for(
         reader,
@@ -1166,59 +1173,35 @@ def render_tip_view(reader: Reader) -> None:
     render_view(reader, reader._tip_view)
 
 
-def apply_engaged_results(reader: Reader) -> None:
-    """Tick drain (tier-3): show the popups whose cold-miss head a worker just composed. For each
-    handed-back ``(gen, key, nested, tail)``: skip if stale (seek / line change), then dispatch to the
-    base tooltip or the nested scan popup. Each re-derives the CURRENT target and compares keys (the
-    analysis-overlay guard, so a stale word can never flash) before the now-warm show."""
-    for gen, key, nested, tail, succeeded, job_id in prefetch.drain_engaged_results(reader):
-        if gen != reader._prefetch_gen:
-            continue  # stale (seek / line change)
-        if not succeeded:
-            reader._interaction_jobs.finish("tooltip", "failed", job_id=job_id)
-            continue
-        popup = reader._nest if nested else reader._tip_view
-        if popup.job_id != job_id:
-            continue
-        if nested:
-            _apply_engaged_nested(reader, tail)
-        else:
-            _apply_engaged_base(reader, key)
-    for gen, origin, st in prefetch.drain_nav_results(reader):
-        _apply_engaged_nav(reader, gen, origin, st)
-    for gen, source, query, anchor, origin in prefetch.drain_open_results(reader):
-        _apply_engaged_open(reader, gen, source, query, anchor, origin)
-
-
-def _apply_engaged_open(
-    reader: Reader, gen: int, source: str, query: str, anchor, origin: int
-) -> None:
+def apply_engaged_open(reader: Reader, result: tooltip_engaged.OpenReady) -> None:
     """Place a worker-warmed clicked/keyed nested open, iff still valid: same generation, and the base
     tip is still up and is the SAME one that was showing at click time (``origin``). REPLACES any current
     nested popup (an explicit open/`k`-cycle wins over a hover-scan popup — newest-wins on the slot keeps
     only the latest intent). Re-selects the (now-warm) cached panel via the shared builder and
     ``place_nested``s it at the carried anchor — a cache hit whose bands the worker rastered, no getmask2."""
-    if gen != reader._prefetch_gen or reader._tip_state is None:
+    if reader._tip_state is None:
         return
-    if id(reader._tip_state) != origin:
+    if id(reader._tip_state) != result.origin:
         return  # the base tooltip switched under us — don't open onto the new word
-    built = nested_popup._engaged_open_panel(reader, source, query)  # main thread → recompute mined
+    built = nested_popup._engaged_open_panel(
+        reader, result.source, result.query
+    )  # main thread → recompute mined
     if built is None:
         return
     st, key, token, word, _mined = built
-    nested_popup.place_nested(reader, st, key, token, word, nested_popup.Anchor(*anchor))
+    nested_popup.place_nested(reader, st, key, token, word, nested_popup.Anchor(*result.anchor))
 
 
-def _apply_engaged_nav(reader: Reader, gen: int, origin: int, st: Panel | None) -> None:
+def apply_engaged_nav(reader: Reader, result: tooltip_engaged.NavigateReady) -> None:
     """Swap in a worker-built navigated panel (clicked cross-ref), iff still valid: same generation, a
     tooltip is still up, and it's the SAME tooltip that was showing at click time (``origin`` = its
     ``id``) — a word switch in the defer window must not be hijacked into the clicked target. The bands
     are worker-warmed, so the swap's blit is a cheap assemble, not a raster."""
-    if st is None or gen != reader._prefetch_gen or reader._tip_state is None:
+    if result.panel is None or reader._tip_state is None:
         return
-    if id(reader._tip_state) != origin:
+    if id(reader._tip_state) != result.origin:
         return  # the tooltip changed under us — don't hijack the new one
-    _install_navigated(reader, st)
+    _install_navigated(reader, result.panel)
 
 
 def _apply_engaged_base(reader: Reader, _key: tuple) -> None:
@@ -1257,6 +1240,16 @@ def _apply_engaged_nested(reader: Reader, tail: str) -> None:
         anchor,
         tail,
     )
+
+
+def apply_engaged_hover(reader: Reader, result: tooltip_engaged.HoverReady) -> None:
+    popup = reader._nest if result.nested else reader._tip_view
+    if popup.job_id != result.job_id:
+        return
+    if result.nested:
+        _apply_engaged_nested(reader, result.tail)
+    else:
+        _apply_engaged_base(reader, result.key)
 
 
 def apply_pending_crisp(reader: Reader, view: PopupView) -> None:
@@ -1408,9 +1401,10 @@ def navigate_tip(reader: Reader, query: str) -> None:
     assemble, no raster). No worker → the synchronous path (unchanged)."""
     if reader.dict_set is None:
         return
-    if prefetch.workers_running(reader) and reader._tip_state is not None:
-        prefetch.request_engaged_nav(reader, query)
-        return
+    if reader._tip_state is not None:
+        request = tooltip_engaged.NavigateRequest(query, id(reader._tip_state))
+        if reader._request_engaged_tooltip(request):
+            return
     st = _navigated_panel(reader, query)
     if st is None:
         return

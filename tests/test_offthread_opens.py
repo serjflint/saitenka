@@ -6,17 +6,47 @@ worker the open is synchronous (unchanged)."""
 from __future__ import annotations
 
 import json
+import threading
 import zipfile
 
 import dicthelp
 from util import FakeIPC
 
-from saitenka.app import nested_popup, prefetch, tooltip
+from saitenka.app import nested_popup, tooltip, tooltip_engaged
 from saitenka.app.config import ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.tokenize import Token
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
+
+
+class _DeferredEngagedSubmitter:
+    def __init__(self, reader):
+        self.backend = tooltip_engaged.ReaderEngagedBackend(reader)
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return True
+
+    def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
+        call = self.calls.pop(0)
+        result = (
+            tooltip_engaged.run_engaged(call["request"], threading.Event(), self.backend)
+            if run
+            else None
+        )
+        call["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                call["owner"],
+                call["identity"],
+                outcome,
+                result=result,
+                error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
+            )
+        )
 
 
 def _fixture_ds(tmp_path):
@@ -52,12 +82,8 @@ def _reader(tmp_path, *, worker: bool):
     r.set_hover(0)
     r.set_hover(1)
     r.set_hover(0)  # end on 読む, both base panels now cached
-    if (
-        worker
-    ):  # make workers_running(reader) True without a live thread; we pump the worker by hand
-        import threading
-
-        r._prefetch_threads.append(threading.Thread(target=lambda: None))
+    if worker:
+        r._engaged_tooltip_submit = _DeferredEngagedSubmitter(r)
     return r
 
 
@@ -66,21 +92,29 @@ def test_no_worker_opens_kanji_synchronously(tmp_path):
     r = _reader(tmp_path, worker=False)
     nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)
     assert r._nest.state is not None and r._nest.word == "読"
-    assert r._open_req is None  # nothing deferred
+    assert r._engaged_tooltip.inflight is None  # nothing deferred
 
 
 def test_kanji_open_defers_then_places_warm_without_interactive_raster(tmp_path):
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)
     assert r._nest.state is None  # deferred — nothing shown on the click tick
-    assert r._open_req is not None
+    assert r._engaged_tooltip_submit.calls
 
-    assert prefetch._try_engaged_open(r)  # the worker warms the kanji panel's bands
-    tooltip.apply_engaged_results(r)  # the tick places it warm
+    r._engaged_tooltip_submit.finish()
 
     assert r._nest.state is not None and r._nest.word == "読"
     # the place composited from worker-warmed bands — zero synchronous glyph rasters on this tick
     assert r._nest.state.windowed.last_frame_rasters == 0
+
+
+def test_kanji_open_worker_failure_uses_current_origin_sync_fallback(tmp_path):
+    r = _reader(tmp_path, worker=True)
+    nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)
+
+    r._engaged_tooltip_submit.finish(outcome=EffectOutcome.FAILED, run=False)
+
+    assert r._nest.state is not None and r._nest.word == "読"
 
 
 def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
@@ -88,10 +122,32 @@ def test_open_dropped_when_the_base_word_switches_in_the_defer_window(tmp_path):
     # the new word.
     r = _reader(tmp_path, worker=True)
     nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)  # origin = id(読む panel)
-    prefetch._try_engaged_open(r)
+    submitter = r._engaged_tooltip_submit
+    call = submitter.calls.pop(0)
+    result = tooltip_engaged.run_engaged(call["request"], threading.Event(), submitter.backend)
     r.set_hover(1)  # switch the base tooltip to 見る (a different panel → different id)
-    tooltip.apply_engaged_results(r)
+    call["on_finished"](
+        EffectFinished(
+            EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
+        )
+    )
     assert r._nest.state is None  # the stale open was dropped, not opened onto 見る
+
+
+def test_stale_open_failure_skips_sync_rebuild(tmp_path, monkeypatch):
+    r = _reader(tmp_path, worker=True)
+    nested_popup.open_kanji(r, "読", 100.0, 300.0, 40.0)
+    r.set_hover(1)
+    rebuilt = []
+    monkeypatch.setattr(
+        r,
+        "_engaged_open_panel",
+        lambda source, query, **kwargs: rebuilt.append((source, query, kwargs)),
+    )
+
+    r._engaged_tooltip_submit.finish(outcome=EffectOutcome.FAILED, run=False)
+
+    assert rebuilt == [] and r._nest.state is None
 
 
 def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
@@ -100,7 +156,7 @@ def test_kanji_with_no_entry_toasts_on_the_click_tick(tmp_path, monkeypatch):
     monkeypatch.setattr(r, "_toast", lambda text, _k="ok", _s=2.8: toasts.append(text))
     nested_popup.open_kanji(r, "犬", 100.0, 300.0, 40.0)  # 犬 isn't in the kanji bank
     assert toasts and "犬" in toasts[0]  # the no-entry toast fired on the tick…
-    assert r._open_req is None and r._nest.state is None  # …and nothing was deferred or shown
+    assert r._engaged_tooltip.inflight is None and r._nest.state is None
 
 
 def test_cross_reference_link_open_defers(tmp_path):
@@ -110,7 +166,6 @@ def test_cross_reference_link_open_defers(tmp_path):
     r = _reader(tmp_path, worker=True)
     lb = LinkBox("見る", 10, 20, 40, 40)
     tooltip.nested_popup.open_link(r, lb, r._tip_xy, r._tip_scroll)
-    assert r._nest.state is None and r._open_req is not None  # deferred
-    prefetch._try_engaged_open(r)
-    tooltip.apply_engaged_results(r)
+    assert r._nest.state is None and r._engaged_tooltip_submit.calls
+    r._engaged_tooltip_submit.finish()
     assert r._nest.state is not None and r._nest.word == "見る"

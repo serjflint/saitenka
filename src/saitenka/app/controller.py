@@ -44,6 +44,7 @@ from saitenka.app import (
     surfaces,
     telemetry,
     tooltip,
+    tooltip_engaged,
     tooltip_raster,
     translation,
 )
@@ -283,15 +284,6 @@ class Reader:
     _head_built = Delegated[int]("prefetch_state", "head_built")
     _prefetch_gen = Delegated[int]("prefetch_state", "gen")
     _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
-    _engaged_req = Delegated[prefetch.EngagedHoverReq | None]("prefetch_state", "engaged_req")
-    _engaged_lock = Delegated[threading.Lock]("prefetch_state", "engaged_lock")
-    _engaged_results = Delegated[queue.Queue]("prefetch_state", "engaged_results")
-    _nav_req = Delegated[prefetch.EngagedNavReq | None]("prefetch_state", "nav_req")
-    _nav_lock = Delegated[threading.Lock]("prefetch_state", "nav_lock")
-    _nav_results = Delegated[queue.Queue]("prefetch_state", "nav_results")
-    _open_req = Delegated[prefetch.EngagedOpenReq | None]("prefetch_state", "open_req")
-    _open_lock = Delegated[threading.Lock]("prefetch_state", "open_lock")
-    _open_results = Delegated[queue.Queue]("prefetch_state", "open_results")
     _prefetch_threads = Delegated[list[threading.Thread]]("prefetch_state", "threads")
     # Session-lifetime state (app/reader_context.py SessionContext) under its historical flat names;
     # the render-cache / mask-atlas cluster is migrated directly onto ``reader.session.render_cache.*``.
@@ -552,6 +544,11 @@ class Reader:
         # Speculative prefetch queues and workers remain separate from the bounded interactive raster
         # lane: a scroll must not wait behind episode warming.
         self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
+        self._engaged_tooltip = tooltip_engaged.EngagedState()
+        self._engaged_tooltip_backend = tooltip_engaged.ReaderEngagedBackend(self)
+        self._engaged_tooltip_submit = tooltip_engaged.configure_runtime_job(
+            ipc, self._engaged_tooltip_backend
+        )
         self._render_ahead = tooltip_raster.RenderAheadState()
         self._render_ahead_submit = tooltip_raster.configure_runtime_job(ipc)
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
@@ -1395,6 +1392,20 @@ class Reader:
     def set_hover(self, index: int) -> None:
         tooltip.set_hover(self, index)
 
+    def prepare_hover_blocking(self, index: int) -> None:
+        """Build the deterministic demo/screenshot hover before the event loop starts."""
+        metadata_submit, engaged_submit = (
+            self._interaction_metadata_submit,
+            self._engaged_tooltip_submit,
+        )
+        self._interaction_metadata_submit = None
+        self._engaged_tooltip_submit = None
+        try:
+            tooltip.set_hover(self, index)
+        finally:
+            self._interaction_metadata_submit = metadata_submit
+            self._engaged_tooltip_submit = engaged_submit
+
     def set_annotation_hover(self, *, revealed: bool) -> None:
         target = bool(
             revealed
@@ -1688,6 +1699,7 @@ class Reader:
         generation = self._prefetch_gen
         prefetch.update_prefetch(self)
         if self._prefetch_gen != generation:
+            self._cancel_engaged_tooltip()
             self._cancel_render_ahead()
 
     def _upcoming_cue_texts(self, n: int) -> list[str]:
@@ -2320,7 +2332,6 @@ class Reader:
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
         self._apply_capabilities()
-        tooltip.apply_engaged_results(self)
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
         sidebar.update(self)
@@ -2432,6 +2443,70 @@ class Reader:
             submit=self._render_ahead_submit,
             on_finished=self._finish_render_ahead,
         )
+
+    def _request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
+        return tooltip_engaged.submit(
+            self._engaged_tooltip,
+            request,
+            generation=self._prefetch_gen,
+            submitter=self._engaged_tooltip_submit,
+            on_finished=self._finish_engaged_tooltip,
+        )
+
+    def _finish_engaged_tooltip(self, completion: EffectFinished) -> None:
+        finished = tooltip_engaged.finish(
+            self._engaged_tooltip,
+            completion,
+            self._engaged_tooltip_submit,
+            self._finish_engaged_tooltip,
+        )
+        if finished is None:
+            return
+        identity, request, result, succeeded, superseded, rejected = finished
+        if rejected is not None:
+            rejected_identity, rejected_request = rejected
+            if rejected_identity.generation == self._prefetch_gen:
+                self._fallback_engaged_tooltip(rejected_request)
+        if identity.generation != self._prefetch_gen:
+            return
+        if superseded:
+            return
+        if isinstance(request, tooltip_engaged.HoverRequest) and not succeeded:
+            self._interaction_jobs.finish("tooltip", "failed", job_id=request.job_id)
+            return
+        if not succeeded:
+            self._fallback_engaged_tooltip(request)
+            return
+        if isinstance(result, tooltip_engaged.HoverReady):
+            tooltip.apply_engaged_hover(self, result)
+        elif isinstance(result, tooltip_engaged.NavigateReady):
+            tooltip.apply_engaged_nav(self, result)
+        elif isinstance(result, tooltip_engaged.OpenReady):
+            tooltip.apply_engaged_open(self, result)
+
+    def _fallback_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> None:
+        if isinstance(request, tooltip_engaged.NavigateRequest | tooltip_engaged.OpenRequest) and (
+            request.origin != id(self._tip_state)
+        ):
+            return
+        try:
+            result = tooltip_engaged.run_engaged(
+                tooltip_engaged.EngagedWork(request, threading.Event()),
+                threading.Event(),
+                self._engaged_tooltip_backend,
+            )
+        except Exception:
+            log.warning("engaged tooltip fallback failed", exc_info=True)
+            return
+        if isinstance(result, tooltip_engaged.HoverReady):
+            tooltip.apply_engaged_hover(self, result)
+        elif isinstance(result, tooltip_engaged.NavigateReady):
+            tooltip.apply_engaged_nav(self, result)
+        elif isinstance(result, tooltip_engaged.OpenReady):
+            tooltip.apply_engaged_open(self, result)
+
+    def _cancel_engaged_tooltip(self) -> None:
+        tooltip_engaged.cancel(self._engaged_tooltip)
 
     def _finish_render_ahead(self, completion: EffectFinished) -> None:
         finished = tooltip_raster.finish(
@@ -2860,6 +2935,9 @@ class Reader:
         tooltip_raster.close(self._render_ahead)
         if close_lane is not None:
             close_lane("tooltip-render-ahead", max(0.0, deadline - time.monotonic()))
+        tooltip_engaged.close(self._engaged_tooltip)
+        if close_lane is not None:
+            close_lane("tooltip-engaged", max(0.0, deadline - time.monotonic()))
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         if self.native_geometry is not None:
