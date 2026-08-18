@@ -55,6 +55,18 @@ class FakeIPC:
             self.props["sid"] = args[2]
         return {"data": None}
 
+    def submit_runtime_mpv(self, *, identity, command, on_finished=None, **_kwargs) -> bool:
+        """Apply the command and report the correlated success, without a full gateway: this fake
+        owns its own event queue, which mailbox ingress would take over."""
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        self.command(*command)
+        if on_finished is not None:
+            on_finished(
+                EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED)
+            )
+        return True
+
     def pump(self):
         pass
 

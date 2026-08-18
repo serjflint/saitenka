@@ -118,38 +118,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::_add_background_japanese"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::_replace_japanese_track"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::_reset_sub_delay"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::configure"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::release_secondary"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::select_initial"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::select_track"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::setup_secondary"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/subtitle_modes.py::sub_tracks"
     ],
     [

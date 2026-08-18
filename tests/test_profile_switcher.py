@@ -10,7 +10,7 @@ for a real subprocess/socket/filesystem — none touched here; mirrors test_toke
 from __future__ import annotations
 
 import pytest
-from util import FakeIPC, keybind_registry, press
+from util import FakeIPC, keybind_registry, press, runtime_gateway
 
 from saitenka.app import prefetch
 from saitenka.app.controller import Reader
@@ -74,7 +74,9 @@ def _restore_tokenizer_registry():
 
 
 def _headless(profile=None, profiles=None) -> Reader:
-    reader = Reader(FakeIPC(), profile=profile, renderer=NullRenderer())
+    ipc = FakeIPC()
+    runtime_gateway(ipc)  # selection issues correlated commands
+    reader = Reader(ipc, profile=profile, renderer=NullRenderer())
     if profiles is not None:
         reader.set_profile_cycle(profiles)
     reader.osd = (1280, 720)
@@ -199,7 +201,9 @@ def test_cycle_back_to_the_default_reselects_its_track_via_base_slang():
     """Wrapping back to the slang-less JP default re-selects ITS track using the base slang the launcher
     threaded through set_profile_cycle — proving the fallback isn't hard-coded to the default string."""
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    reader = Reader(FakeIPC(), profile=DEFAULT_PROFILE, renderer=NullRenderer())
+    ipc = FakeIPC()
+    runtime_gateway(ipc)  # selection issues correlated commands
+    reader = Reader(ipc, profile=DEFAULT_PROFILE, renderer=NullRenderer())
     reader.set_profile_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
     reader.osd = (1280, 720)
     reader.ipc.props["track-list"] = _JA_FR_TRACKS

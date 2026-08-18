@@ -41,6 +41,28 @@ def sub_tracks(ipc) -> list[dict]:
     return [track for track in data if track.get("type") == "sub"]
 
 
+def _send(ipc, identity: str, *command: object) -> None:
+    """Send one correlated subtitle command through the gateway.
+
+    Not awaited: mpv has a single ordered outbound channel and a synchronous read is queued behind
+    this write, so a readback after it still observes the write. What the correlation buys is a
+    terminal outcome — a rejected selection is reported instead of vanishing into a discarded reply.
+    """
+
+    def finished(completion: EffectFinished) -> None:
+        if completion.outcome is not EffectOutcome.SUCCEEDED:
+            log.warning("subtitle command %s did not apply: %s", identity, completion.outcome)
+
+    if not ipc.submit_runtime_mpv(
+        owner=Owner.SUBTITLE,
+        identity=identity,
+        command=command,
+        timeout_s=10.0,
+        on_finished=finished,
+    ):
+        log.warning("subtitle command %s was not admitted", identity)
+
+
 @dataclass(frozen=True)
 class SubtitleFetchResult:
     path: Path | None
@@ -142,7 +164,7 @@ def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
     startup = _initial(sub_tracks(ipc), slang)
     sid = startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
     if sid is not None:
-        ipc.command("set_property", "sid", sid)
+        _send(ipc, "select-primary", "set_property", "sid", sid)
     return startup
 
 
@@ -153,7 +175,7 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     reader.subtitle_slang = slang
     reader.subtitle_pipeline.activate(reader)
     if reader._get("secondary-sid") not in {None, False, "no"}:
-        reader.ipc.command("set_property", "secondary-sid", "no")
+        _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     # Null the mirror too: configure now runs mid-session (a live profile cycle re-selects the track),
     # where a stale _translation_secondary_sid would leave the EN reveal stuck off — setup_secondary's
     # `mirror == sid` guard would skip re-issuing secondary-sid. At launch the mirror is already None.
@@ -173,8 +195,8 @@ def setup_secondary(reader: Reader) -> int | None:
         return None
     if reader._translation_secondary_sid == sid:
         return sid
-    reader.ipc.command("set_property", "secondary-sid", sid)
-    reader.ipc.command("set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
+    _send(reader.ipc, "select-secondary", "set_property", "secondary-sid", sid)
+    _send(reader.ipc, "hide-secondary", "set_property", "secondary-sub-visibility", False)  # noqa: FBT003  # mpv IPC wire value
     reader._translation_secondary_sid = sid
     return sid
 
@@ -182,7 +204,7 @@ def setup_secondary(reader: Reader) -> int | None:
 def release_secondary(reader: Reader) -> None:
     if reader._translation_secondary_sid is None:
         return
-    reader.ipc.command("set_property", "secondary-sid", "no")
+    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
 
 
@@ -252,9 +274,9 @@ def select_track(reader: Reader, sid: int, target: Language) -> None:
     """Carry out a decided language switch: make ``sid`` primary and adopt ``target`` as the role."""
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-    reader.ipc.command("set_property", "secondary-sid", "no")
+    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
-    reader.ipc.command("set_property", "sid", sid)
+    _send(reader.ipc, "select-primary", "set_property", "sid", sid)
     reader.subtitle_language = target
     reader._sub_index = None
     from saitenka.app import analysis_overlay
@@ -413,7 +435,7 @@ def _reset_sub_delay(reader: Reader) -> None:
     and keeps it across tracks, so a stale offset from a previous run/track would silently mistime a
     freshly file-timed track (found live: a resync looked wrong until sub-delay was hand-zeroed). The
     manual anchor key stays cumulative — it just refines from this clean 0 baseline after a load."""
-    reader.ipc.command("set_property", "sub-delay", 0.0)
+    _send(reader.ipc, "reset-sub-delay", "set_property", "sub-delay", 0.0)
 
 
 def _replace_japanese_track(
@@ -427,10 +449,12 @@ def _replace_japanese_track(
 
     for track in sub_tracks(reader.ipc):
         if track.get("external") and track.get("id") is not None:
-            reader.ipc.command("sub-remove", track["id"])
-    reader.ipc.command("set_property", "secondary-sid", "no")
+            _send(reader.ipc, "remove-external", "sub-remove", track["id"])
+    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
-    reader.ipc.command("sub-add", str(path), "select", "", "jpn")  # "select" → mpv selects it now
+    _send(
+        reader.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
+    )  # mpv selects it now
     _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
     reader.jp_sid = reader._get("sid")  # the just-selected track, not discover_tracks' first JP
     reader.en_sid = discover_tracks(reader.ipc, reader.subtitle_slang).en_sid
@@ -449,7 +473,7 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     path, status = result.path, result.status
     current_sid = reader._get("sid")
     had_japanese = reader.jp_sid is not None
-    reader.ipc.command("sub-add", str(path), "auto", "", "jpn")
+    _send(reader.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
     select_japanese = selects_background_japanese(
@@ -460,13 +484,19 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
         jp_sid=reader.jp_sid,
     )
     if not select_japanese:
-        reader.ipc.command("set_property", "sid", current_sid if current_sid is not None else "no")
+        _send(
+            reader.ipc,
+            "keep-primary",
+            "set_property",
+            "sid",
+            current_sid if current_sid is not None else "no",
+        )
         reader._toast("Japanese subtitles ready — Alt+t to switch")
         log.info("%s", status)
         return
-    reader.ipc.command("set_property", "secondary-sid", "no")
+    _send(reader.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
-    reader.ipc.command("set_property", "sid", reader.jp_sid)
+    _send(reader.ipc, "select-japanese", "set_property", "sid", reader.jp_sid)
     _reset_sub_delay(reader)  # our file is the timing truth; drop any persisted/stale mpv offset
     reader.subtitle_language = MAIN_LANG
     reader.set_subtitle("")

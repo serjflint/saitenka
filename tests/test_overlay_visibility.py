@@ -1,5 +1,6 @@
 """Runtime visibility for every Saitenka-owned OSD surface."""
 
+import util
 from PIL import Image
 
 from saitenka.app.config import KeyOptions, ReaderOptions
@@ -8,18 +9,17 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.mpvio.osd import Overlay
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self):
-        self.commands: list[tuple] = []
-        self.props = {"sub-visibility": False}  # osd-level left to mpv; toggle no longer manages it
+        super().__init__()
+        self.props["sub-visibility"] = False  # osd-level left to mpv; toggle no longer manages it
+        util.runtime_gateway(self)
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
+        reply = super().command(*args)
         if args[0] == "set_property":
             self.props[args[1]] = args[2]
-        return {"error": "success"}
+        return reply
 
 
 def _image(color: str = "red") -> Image.Image:
