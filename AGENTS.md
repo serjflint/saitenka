@@ -203,6 +203,15 @@ Consult it when adding or rewriting a test.
   `all`) binds each corpus's case census (count + key-set hash) to a committed manifest, so a re-vendor /
   re-gen that drops or mutates cases fails until the manifest is **deliberately re-blessed**
   (`python tools/corpus_check.py show`) — same discipline as a golden re-bless.
+- **Establish a precondition through the path production uses.** Reaching past the seam to *set up*
+  state is the quiet way to test a state the runtime cannot reach. It stays green until a migration
+  moves the source of truth, then fails somewhere else entirely — the setup's owner is never in the
+  traceback. So when the assertion reads state downstream of a seam, drive the setup *through* that
+  seam: a cue arrives by observing `sub-text`, not by calling `set_subtitle` (the projection owns cue
+  identity, and the Reader-side writer does not publish to it). Convenience back doors are fine for a
+  test that stays on one side of the seam they bypass. The same divergence bites fakes: a `Fake*` with
+  two write paths for one channel (`command_async` recording directly instead of delegating to
+  `command`) reads as a production regression.
 - **`monkeypatch` is the sanctioned seam, `mock` is not.** Injecting a fake or repointing an extracted
   symbol via `monkeypatch.setattr` is correct and normal here (see **Refactoring**). Do **not** reach
   for `unittest.mock`/`MagicMock` to fake *internal* behaviour — construct the real collaborator or use

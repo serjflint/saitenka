@@ -2727,6 +2727,32 @@ def test_same_text_with_new_timing_installs_a_new_cue_identity():
     assert reader._current_cue_identity.observed_start == 3.0
 
 
+@pytest.mark.xfail(
+    reason="open bug: a Reader-side cue write does not publish to the projection, so the stale "
+    "projected text is reconciled back over it on the next cue observation",
+    strict=True,
+)
+def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation():
+    """Two writers, one fact. `set_subtitle` is the Reader-side writer (subtitle_modes clears the
+    cue on a mode/track change) and `observe` is mpv's; only the second updates the projection, and
+    reconciliation reads the projection. So a cue the Reader deliberately cleared comes back on the
+    next changed cue fact — the divergence is what makes it representable at all."""
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props.update({"sub-text": "猫を見る", "sid": 1, "sub-start": 1.0, "sub-end": 3.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+
+    reader.set_subtitle("")  # what a language/track switch does
+    assert reader.sub_text == ""
+
+    reader._on_property_change({"name": "sub-end", "data": 9.5})
+    reader._settle_cue_observation()
+
+    assert reader.sub_text == ""
+
+
 @pytest.mark.parametrize(("name", "value"), [("sid", 2), ("sub-start", 3.0), ("sub-end", 4.0)])
 def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, value):
     from util import FakeIPC as EventIPC
