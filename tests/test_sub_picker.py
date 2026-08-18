@@ -45,7 +45,7 @@ class FakeIPC:
             self.props[args[1]] = args[2]
         return {"error": "success"}
 
-    def drain_events(self) -> list[dict]:
+    def drain_events(self, *_args, **_kwargs) -> list[dict]:
         events, self.events = self.events, []
         return events
 

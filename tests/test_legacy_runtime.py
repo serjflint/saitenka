@@ -25,9 +25,11 @@ class FakeIPC:
     def __init__(self) -> None:
         self.requests: list[IPCRequest] = []
         self.legacy_source = list
+        self.event_sink = None
 
-    def install_runtime_ingress(self, _event_sink, _connection_sink, legacy_source, _gateway):
+    def install_runtime_ingress(self, event_sink, _connection_sink, legacy_source, _gateway):
         self.legacy_source = legacy_source
+        self.event_sink = event_sink
 
     def command_async(self, *args, expected_connection_epoch=None) -> IPCRequest:
         del args, expected_connection_epoch
@@ -275,3 +277,50 @@ def test_job_close_cancels_pending_work_and_quarantines_late_completion() -> Non
         on_finished=completed.append,
     )
     assert completed[-1].outcome is EffectOutcome.REJECTED
+
+
+def _observation_then_terminal(ipc: FakeIPC, gateway: MpvGateway, sink: list) -> None:
+    """Publish an observation, then resolve a command so its terminal is the later envelope."""
+    assert gateway.legacy.submit_mpv(
+        owner=Owner.SESSION,
+        identity="probe",
+        command=("get_property", "sub-visibility"),
+        timeout_s=10.0,
+        on_finished=lambda completion: sink.append(("terminal", completion.identity)),
+    )
+    assert ipc.event_sink is not None
+    ipc.event_sink({"event": "property-change", "name": "sub-text", "data": "ichi"}, 0)
+    ipc.requests[0].future.set_result({"error": "success", "data": True})
+
+
+def test_ordered_terminals_hands_the_completion_back_in_envelope_sequence() -> None:
+    """A completion published after an observation must not be dispatched before it. The caller
+    owns a whole turn, so it receives both and runs them in the order mpv produced them."""
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
+    seen: list = []
+
+    _observation_then_terminal(ipc, gateway, seen)
+    drained = ipc.legacy_source(ordered_terminals=True)
+
+    assert seen == []  # nothing ran during the drain
+    for event in drained:
+        if isinstance(event, dict):
+            seen.append(("observation", event["name"]))
+        else:
+            gateway.dispatch_terminal(event)
+    assert seen == [("observation", "sub-text"), ("terminal", "probe")]
+
+
+def test_inline_dispatch_runs_the_completion_before_the_batch_is_handled() -> None:
+    """The negative control for the test above, and the contract `_drive_annotation_once` keeps:
+    without ordered terminals the callback fires mid-drain, ahead of an older observation."""
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
+    seen: list = []
+
+    _observation_then_terminal(ipc, gateway, seen)
+    drained = ipc.legacy_source()
+
+    assert seen == [("terminal", "probe")]  # already ran, before the caller sees anything
+    assert [event["name"] for event in drained if isinstance(event, dict)] == ["sub-text"]

@@ -77,7 +77,7 @@ class FakeIPC:
             return {"data": self.props.get(args[1])}
         return {"data": None}
 
-    def drain_events(self):
+    def drain_events(self, *_args, **_kwargs):
         return []
 
 

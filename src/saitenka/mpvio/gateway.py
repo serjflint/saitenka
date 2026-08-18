@@ -76,19 +76,32 @@ class LegacyEventRouter:
             raise RuntimeError("runtime bridge already installed")
         self._runtime_bridge = bridge
 
-    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
+    def drain_events(
+        self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
+    ) -> list[object]:
+        """Drain one batch. With `ordered_terminals`, completions are returned in envelope
+        sequence for the caller to dispatch instead of being run inline.
+
+        Inline dispatch runs a completion's callback *during* the drain, so it precedes every
+        observation the caller has not handled yet — the reverse of mailbox sequence, and of the
+        order the WP6 runner will deliver. Callers that own a whole turn ask for ordered
+        terminals; `Reader._drive_annotation_once` must not, because it drains from inside cue
+        construction and a due event dispatched there would reenter mid-build.
+        """
         if self._runtime_bridge is not None:
             self._runtime_bridge.publish_due()
         events: list[object] = []
         if timeout is None or timeout > 0:
             envelope = self._mailbox.receive(timeout=timeout)
             if envelope is not None:
-                self._route(envelope.payload, events)
+                self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
         for envelope in self._mailbox.receive_ready():
-            self._route(envelope.payload, events)
+            self._route(envelope.payload, events, ordered_terminals=ordered_terminals)
         return events
 
-    def _route(self, payload: RuntimeEvent, events: list[object]) -> None:
+    def _route(
+        self, payload: RuntimeEvent, events: list[object], *, ordered_terminals: bool = False
+    ) -> None:
         if isinstance(payload, CloseRequested):
             reason = (
                 "runtime mailbox overloaded"
@@ -97,7 +110,9 @@ class LegacyEventRouter:
             )
             raise OSError(reason)
         if isinstance(payload, EffectFinished):
-            if self._runtime_bridge is not None:
+            if ordered_terminals:
+                events.append(payload)
+            elif self._runtime_bridge is not None:
                 self._runtime_bridge.handle_terminal(payload)
             return
         if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
@@ -175,6 +190,10 @@ class MpvGateway:
 
     def cancel_timer(self, timer: str) -> bool:
         return self._legacy.cancel_timer(timer)
+
+    def dispatch_terminal(self, completion: EffectFinished) -> None:
+        """Run a completion that `drain_events(ordered_terminals=True)` handed to the caller."""
+        self._legacy.handle_terminal(completion)
 
     def register_job_lane(self, name: str, policy: JobLanePolicy, handler) -> None:
         self._jobs.register(name, policy, handler)

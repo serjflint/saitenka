@@ -31,6 +31,8 @@ from saitenka.panel import Definition, Entry, Freq, panel_rows, render_panel
 from saitenka.runtime.mailbox import SessionMailbox
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.render.layout_backend import LayoutBackend
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
@@ -219,7 +221,7 @@ class FakeIPC:
         self.runtime_outcomes: list[object] = []
         #: Named timers scheduled through the runtime port, newest per name. Nothing fires on a
         #: wall clock — a test calls `fire_runtime_timer` so ordering stays deterministic.
-        self.timers: dict[str, tuple[object, object]] = {}
+        self.timers: dict[str, tuple[object, Callable[[object], None]]] = {}
 
     def schedule_runtime_timer(self, *, timer: str, identity, on_finished, **_kwargs) -> bool:
         self.timers[timer] = (identity, on_finished)
@@ -272,9 +274,11 @@ class FakeIPC:
         self.requests.append(request)
         return request
 
-    def drain_events(self, timeout: float | None = 0.0) -> list[dict]:
+    def drain_events(
+        self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
+    ) -> list[dict]:
         if self._legacy_event_source is not None:
-            return self._legacy_event_source(timeout)
+            return self._legacy_event_source(timeout, ordered_terminals=ordered_terminals)
         evs, self.events = self.events, []
         return evs
 
@@ -286,6 +290,10 @@ class FakeIPC:
         for event in self.events:
             event_sink(event, 0)
         self.events = []
+
+    def dispatch_runtime_terminal(self, completion) -> None:
+        if self._runtime_gateway is not None:
+            self._runtime_gateway.dispatch_terminal(completion)
 
     def publish_legacy_command_outcome(self, outcome) -> None:
         if self._runtime_gateway is None:

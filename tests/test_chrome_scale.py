@@ -19,7 +19,7 @@ class FakeIPC:
     def command(self, *_args):
         return {"data": None, "error": "success"}
 
-    def drain_events(self):
+    def drain_events(self, *_args, **_kwargs):
         return []
 
 

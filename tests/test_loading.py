@@ -149,7 +149,7 @@ class _AsyncIPC:
         self.connection_sink = connection_sink
         self.legacy_source = legacy_event_source
 
-    def drain_events(self):
+    def drain_events(self, *_args, **_kwargs):
         return self.legacy_source()
 
 

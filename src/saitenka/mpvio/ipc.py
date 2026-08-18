@@ -45,11 +45,18 @@ if TYPE_CHECKING:
 
         def cancel_timer(self, timer: str) -> bool: ...
 
+        def dispatch_terminal(self, completion) -> None: ...
+
         def register_job_lane(self, name: str, policy, handler) -> None: ...
 
         def submit_job(self, **kwargs) -> bool: ...
 
         def close_job_lane(self, name: str, timeout: float = 2.0) -> bool: ...
+
+    class LegacyEventSource(Protocol):
+        def __call__(
+            self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
+        ) -> list[object]: ...
 
 
 log = logging.getLogger(__name__)
@@ -131,7 +138,7 @@ class MpvIPC:
         self._events_lock = threading.Lock()
         self._event_sink: Callable[[dict, int], None] | None = None
         self._connection_sink: Callable[[str, int], None] | None = None
-        self._legacy_event_source: Callable[[float | None], list[object]] | None = None
+        self._legacy_event_source: LegacyEventSource | None = None
         self._runtime_gateway: RuntimeGateway | None = None
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
@@ -494,10 +501,16 @@ class MpvIPC:
             return False
         return True
 
-    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
-        """Return and clear buffered async events (collected by the reader thread)."""
+    def drain_events(
+        self, timeout: float | None = 0.0, *, ordered_terminals: bool = False
+    ) -> list[object]:
+        """Return and clear buffered async events (collected by the reader thread).
+
+        `ordered_terminals` asks the runtime router to return effect completions in envelope
+        sequence rather than dispatching them inline; see `LegacyEventRouter.drain_events`.
+        """
         if self._legacy_event_source is not None:
-            return self._legacy_event_source(timeout)
+            return self._legacy_event_source(timeout, ordered_terminals=ordered_terminals)
         with self._events_lock:
             buffered, self._events = self._events, []
             evs: list[object] = list(buffered)
@@ -507,7 +520,7 @@ class MpvIPC:
         self,
         event_sink: Callable[[dict, int], None],
         connection_sink: Callable[[str, int], None],
-        legacy_event_source: Callable[[float | None], list[object]],
+        legacy_event_source: LegacyEventSource,
         gateway: RuntimeGateway,
     ) -> None:
         """Switch event ownership to a mailbox while the legacy consumer still drives policy."""
@@ -526,6 +539,12 @@ class MpvIPC:
         gateway = self._runtime_gateway
         if gateway is not None:
             gateway.publish_legacy_outcome(outcome)
+
+    def dispatch_runtime_terminal(self, completion) -> None:
+        """Run a completion returned by `drain_events(ordered_terminals=True)`."""
+        gateway = self._runtime_gateway
+        if gateway is not None:
+            gateway.dispatch_terminal(completion)
 
     def submit_runtime_mpv(self, **kwargs) -> bool:
         gateway = self._runtime_gateway

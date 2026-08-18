@@ -29,7 +29,7 @@ class FakeIPC:
     def pump(self):
         pass
 
-    def drain_events(self):
+    def drain_events(self, *_args, **_kwargs):
         return []
 
 

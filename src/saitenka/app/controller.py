@@ -2756,10 +2756,15 @@ class Reader:
 
     def _drain_events(self) -> None:
         picker_guard = LegacyPickerRepeatGuard()
-        for ev in self.ipc.drain_events():
+        # This drain owns a whole turn, so completions come back in envelope sequence and are
+        # dispatched below in order with the observations they followed.
+        for ev in self.ipc.drain_events(ordered_terminals=True):
             self._drain_event(ev, picker_guard)
 
     def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
+        if isinstance(ev, EffectFinished):
+            self.ipc.dispatch_runtime_terminal(ev)
+            return
         if isinstance(ev, ConnectionLost):
             self._connection_ready = False
             self._retire_cue_identity("connection-lost")
