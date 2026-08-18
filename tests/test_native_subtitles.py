@@ -13,6 +13,7 @@ from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
+from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.tokenize import Token
@@ -318,14 +319,14 @@ class _AllSkippableTokenizer(_SingleTokenizer):
 
 
 def reader(
-    tmp_path: Path, *, correlated_surfaces: bool = False
+    tmp_path: Path, *, correlated_surfaces: bool = False, native_visible: bool = True
 ) -> tuple[Reader, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC()
     backend = FakeBackend()
     options = ReaderOptions(
-        subtitle_geometry=SubtitleGeometryOptions(native_visible=True),
+        subtitle_geometry=SubtitleGeometryOptions(native_visible=native_visible),
         prefetch=False,
     )
     # Overlay egress is a composition decision, so the surface path is only correlated when a test
@@ -336,8 +337,11 @@ def reader(
         geometry_backend=backend,
         runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
     )
-    assert result.native_geometry is not None
-    result.native_geometry.set_source(source)
+    # Native geometry exists exactly when the mode does — the legacy renderer lays its own boxes out
+    # and has no provider to schedule against.
+    assert (result.native_geometry is not None) == native_visible
+    if result.native_geometry is not None:
+        result.native_geometry.set_source(source)
     return result, ipc, backend
 
 
@@ -346,9 +350,11 @@ def settle_jobs(result: Reader, ipc: FakeIPC) -> None:
 
     Two steps because they are two facts: the work completing, and the host being told. The broker
     publishes a completion to the mailbox, so the host learns on a later drain — which is why a cue
-    can be scheduled and not yet published, and why this is not folded into `wait_idle`.
+    can be scheduled and not yet published, and why this is not folded into `wait_idle`. A legacy
+    session has no lane at all, so there is nothing to settle.
     """
-    assert result.native_geometry is not None
+    if result.native_geometry is None:
+        return
     assert result.native_geometry.worker.wait_idle()
     ipc.deliver_runtime_jobs()
 
@@ -584,6 +590,32 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
     assert result.boxes
+    result.close()
+
+
+@pytest.mark.parametrize("native_visible", [True, False], ids=["native", "legacy"])
+def test_navigation_lands_on_the_target_cue_under_either_renderer(
+    tmp_path: Path, *, native_visible: bool
+) -> None:
+    """WP4.5's one navigation interaction contract, replayed under both renderers.
+
+    Which renderer owns the pixels is a visibility decision; where a navigation key lands the user
+    is not. The two paths diverge everywhere below that — native publishes a hit map from a
+    provider, legacy lays the boxes out itself — so a navigation regression in one is invisible to
+    every test written against the other.
+    """
+    result, ipc, _backend = reader(tmp_path, native_visible=native_visible)
+    result._sub_index = CueIndex([Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る")])
+    result.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    result.hover = 0
+
+    assert result._seek_cue(SeekCue(1, result.cue_revision))
+
+    assert result.sub_text == "犬も見る"  # the target cue, drawn from the index without waiting
+    assert result.hover == -1  # …with the previous cue's interaction state gone
+    assert [token.surface for token in result.tokens] == ["犬", "も", "見る"]
+    assert ("sub-seek", "1") in [command[:2] for command in ipc.commands if len(command) >= 2]
     result.close()
 
 
