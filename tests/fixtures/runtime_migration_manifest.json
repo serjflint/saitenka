@@ -282,10 +282,6 @@
     ],
     [
       "passive-result-drain",
-      "src/saitenka/app/controller.py::Reader._apply_pending_mined_seed"
-    ],
-    [
-      "passive-result-drain",
       "src/saitenka/app/hover_metadata.py::InteractionMetadataActor.drain"
     ],
     [
@@ -1738,7 +1734,7 @@
         "call:self._seed_mined",
         "src/saitenka/app/controller.py::Reader._apply_capabilities|call:self._tts_capability.request",
         "src/saitenka/app/controller.py::Reader._apply_capabilities|call:self._anki_capability.request",
-        "src/saitenka/app/controller.py::Reader._request_mined_seed|call:threading.Thread"
+        "src/saitenka/app/controller.py::Reader._request_mined_seed|call:self._mined_seed_submit"
       ],
       "target": "external-io-lanes",
       "work_package": "3,5",

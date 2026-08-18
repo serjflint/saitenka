@@ -27,6 +27,7 @@ from saitenka.app import (
     cue_annotation,
     help_overlay,
     hover_snapshot,
+    mined_seed,
     mined_store,
     miner_ui,
     native_subtitles,
@@ -130,6 +131,9 @@ from saitenka.runtime import (
     ConnectionLost,
     ConnectionReady,
     ConnectionReplaced,
+    EffectFinished,
+    EffectOutcome,
+    Owner,
     UserCommand,
 )
 from saitenka.subtitles import Cue, CueIndex
@@ -411,9 +415,6 @@ class Reader:
         # Progressive startup: deps loaded on a background thread, injected on the main thread by the
         # poll loop (see load_deps_async / _apply_deps). Until then, subs render plain + a spinner shows.
         self._pending_deps: dict | None = None
-        self._mined_seed_results: queue.SimpleQueue[tuple[int, set[str] | None]] = (
-            queue.SimpleQueue()
-        )
         self._mined_seed_generation = 0
         self._mined_seed_inflight = False
         self._mined_seed_done = False
@@ -455,6 +456,7 @@ class Reader:
         from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 
         self._capability_submit = configure_runtime_jobs(ipc)
+        self._mined_seed_submit = mined_seed.configure_runtime_job(ipc)
 
         self._tts_capability = (
             None
@@ -2304,7 +2306,6 @@ class Reader:
         self._apply_pending_deps_or_spinner()
         self._apply_capabilities()
         self._apply_annotation_results()
-        self._apply_pending_mined_seed()
         tooltip.apply_engaged_results(self)
         tooltip.apply_hover_metadata(self)
         tooltip.apply_render_ahead_failures(self)
@@ -2339,36 +2340,39 @@ class Reader:
             or self.mine_cfg is None
         ):
             return
+        if self._mined_seed_submit is None:
+            return
         self._mined_seed_inflight = True
         generation = self._mined_seed_generation
-        anki, mine_cfg = self.anki, self.mine_cfg
+        self._mined_seed_submit(
+            owner=Owner.SESSION,
+            identity=generation,
+            lane="mined-seed",
+            request=mined_seed.MinedSeedRequest(self.anki, self.mine_cfg),
+            on_finished=self._finish_mined_seed,
+        )
 
-        def run() -> None:
-            values = self._miner.mined_expressions(anki, mine_cfg)
-            self._mined_seed_results.put((generation, values))
-
-        threading.Thread(target=run, name="saitenka-anki-seed", daemon=True).start()
-
-    def _apply_pending_mined_seed(self) -> None:
-        while True:
-            try:
-                generation, values = self._mined_seed_results.get_nowait()
-            except queue.Empty:
-                return
-            if generation != self._mined_seed_generation or self._stop.is_set():
-                continue
-            self._mined_seed_inflight = False
-            if values is None:
-                self._mined_seed_failures += 1
-                self._mined_seed_next_due = time.monotonic() + min(
-                    8.0, 0.25 * (2 ** (self._mined_seed_failures - 1))
-                )
-                continue
-            self._mined_seed_done = True
-            self._mined_seed_failures = 0
-            before = len(self._mined)
-            self._mined.update(values)
-            self._mined_generation += int(len(self._mined) != before)
+    def _finish_mined_seed(self, completion: EffectFinished) -> None:
+        generation = completion.identity
+        if (
+            not isinstance(generation, int)
+            or generation != self._mined_seed_generation
+            or self._stop.is_set()
+        ):
+            return
+        self._mined_seed_inflight = False
+        values = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
+        if not isinstance(values, set):
+            self._mined_seed_failures += 1
+            self._mined_seed_next_due = time.monotonic() + min(
+                8.0, 0.25 * (2 ** (self._mined_seed_failures - 1))
+            )
+            return
+        self._mined_seed_done = True
+        self._mined_seed_failures = 0
+        before = len(self._mined)
+        self._mined.update(values)
+        self._mined_generation += int(len(self._mined) != before)
 
     def _update_interaction(self) -> None:
         self._feed_episode_annotation()
