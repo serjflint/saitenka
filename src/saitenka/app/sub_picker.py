@@ -11,7 +11,7 @@ Provider-agnostic by construction: the reader carries a *lister* thunk (built fr
 in the CLI, exactly like the retry factory), so this module never imports jimaku/tsukihime — it renders
 :class:`~saitenka.app.subselect.SubtitleCandidate` rows and runs the chosen one's ``download`` thunk
 through the normal subtitle-fetch pipeline (:func:`saitenka.app.subtitle_modes.start_fetch` →
-:func:`~saitenka.app.subtitle_modes.apply_fetch_results`), so track add / select / re-index come free
+:func:`~saitenka.app.subtitle_modes.apply_fetch_result`), so track add / select / re-index come free
 and no mpv IPC ever runs off the reader thread. Modelled on :mod:`saitenka.app.sidebar` (click / scroll
 / hover-suppression surface) and :mod:`saitenka.app.help_overlay` (open / close lifecycle).
 """
@@ -19,16 +19,19 @@ and no mpv IPC ever runs off the reader thread. Modelled on :mod:`saitenka.app.s
 from __future__ import annotations
 
 import logging
-import queue
-import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import SidebarRow, render_picker
+from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
+    import threading
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
     from saitenka.app.subselect import SubtitleCandidate
 
@@ -50,7 +53,56 @@ class PickerState:
     scroll: int = 0
     rect: tuple[int, int, int, int] | None = None
     hits: tuple = ()
-    results: queue.SimpleQueue = field(default_factory=queue.SimpleQueue)
+    generation: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ListingRequest:
+    lister: Callable[[str], tuple]
+    video: str
+
+
+@dataclass(frozen=True, slots=True)
+class ListingResult:
+    candidates: tuple[SubtitleCandidate, ...]
+    warnings: tuple[str, ...]
+    error: str | None = None
+
+
+class JobSubmitter(Protocol):
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
+
+
+def run_listing(request: object, cancelled: threading.Event) -> object:
+    if not isinstance(request, ListingRequest):
+        raise TypeError("invalid subtitle listing request")
+    if cancelled.is_set():
+        return None
+    try:
+        candidates, warnings = request.lister(request.video)
+        return ListingResult(tuple(candidates), tuple(warnings))
+    except Exception as exc:  # provider failures are soft and shown in the picker
+        log.warning("subtitle candidate listing failed", exc_info=True)
+        return ListingResult((), (), f"subtitle search failed: {exc}")
+
+
+def configure_runtime_job(ipc) -> JobSubmitter | None:
+    register = getattr(ipc, "register_runtime_job_lane", None)
+    if register is None or not register(
+        "subtitle-picker",
+        JobLanePolicy(capacity=2, workers=2),
+        run_listing,
+    ):
+        return None
+    return ipc.submit_runtime_job
 
 
 def configure(reader: Reader, lister) -> None:
@@ -73,18 +125,30 @@ def _human_size(size: int) -> str:
 def _start_listing(reader: Reader, video: str) -> None:
     lister = reader._sub_picker_lister
     assert lister is not None  # open_picker guards this
+    episode = reader.episode
+    generation = reader.sub_picker.generation
+    submitter = reader._sub_picker_submit
+    if submitter is None:
+        apply_listing(
+            reader,
+            generation,
+            ListingResult((), (), "subtitle search unavailable"),
+        )
+        return
 
-    def work() -> None:
-        try:
-            candidates, warnings = lister(video)
-            reader.sub_picker.results.put((candidates, warnings, None))
-        except Exception as exc:  # provider failures are soft — surfaced in the panel, not raised
-            log.warning("subtitle candidate listing failed", exc_info=True)
-            reader.sub_picker.results.put((None, None, f"subtitle search failed: {exc}"))
+    def finished(completion: EffectFinished) -> None:
+        finished_listing = finish_listing(completion)
+        if finished_listing is not None and episode is reader.episode and not reader._stop.is_set():
+            finished_generation, result = finished_listing
+            apply_listing(reader, finished_generation, result)
 
-    thread = threading.Thread(target=work, name="saitenka-sub-picker", daemon=True)
-    reader._subtitle_fetch_threads.append(thread)
-    thread.start()
+    submitter(
+        owner=Owner.SUBTITLE,
+        identity=generation,
+        lane="subtitle-picker",
+        request=ListingRequest(lister, video),
+        on_finished=finished,
+    )
 
 
 def open_picker(reader: Reader) -> None:
@@ -102,6 +166,7 @@ def open_picker(reader: Reader) -> None:
     state.candidates = ()
     state.warnings = ()
     state.scroll = 0
+    state.generation += 1
     reader.set_hover(-1)
     redraw(reader)
     _start_listing(reader, str(video))
@@ -111,6 +176,7 @@ def close_picker(reader: Reader) -> None:
     if not reader.sub_picker.open:
         return
     reader.sub_picker.open = False
+    reader.sub_picker.generation += 1
     reader.ov.hide(PICKER_ID)
     reader.sub_picker.rect = None
     reader.sub_picker.hits = ()
@@ -120,22 +186,24 @@ def toggle(reader: Reader) -> None:
     close_picker(reader) if reader.sub_picker.open else open_picker(reader)
 
 
-def update(reader: Reader) -> None:
-    """Drain the off-thread listing result and repaint. Called once per poll tick (reader thread)."""
+def apply_listing(reader: Reader, generation: int, result: ListingResult) -> None:
     state = reader.sub_picker
-    changed = False
-    while True:
-        try:
-            candidates, warnings, error = state.results.get_nowait()
-        except queue.Empty:
-            break
-        state.loading = False
-        state.error = error
-        state.candidates = tuple(candidates or ())
-        state.warnings = tuple(warnings or ())
-        changed = True
-    if changed and state.open:
-        redraw(reader)
+    if not state.open or generation != state.generation:
+        return
+    state.loading = False
+    state.error = result.error
+    state.candidates = result.candidates
+    state.warnings = result.warnings
+    redraw(reader)
+
+
+def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | None:
+    result = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
+    if not isinstance(result, ListingResult):
+        result = ListingResult((), (), "subtitle search unavailable")
+    if isinstance(completion.identity, int):
+        return completion.identity, result
+    return None
 
 
 def _rows(reader: Reader) -> list[SidebarRow]:
@@ -255,7 +323,7 @@ def _download(reader: Reader, index: int) -> None:
     )
     close_picker(
         reader
-    )  # panel closes; the swap lands via apply_fetch_results when the file arrives
+    )  # panel closes; the swap lands from the broker completion when the file arrives
 
 
 def on_click(reader: Reader, x: float, y: float) -> bool:

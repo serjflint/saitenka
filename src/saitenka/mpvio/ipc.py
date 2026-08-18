@@ -49,6 +49,8 @@ if TYPE_CHECKING:
 
         def submit_job(self, **kwargs) -> bool: ...
 
+        def close_job_lane(self, name: str, timeout: float = 2.0) -> bool: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -555,6 +557,12 @@ class MpvIPC:
         if gateway is None:
             return False
         return gateway.submit_job(**kwargs)
+
+    def close_runtime_job_lane(self, name: str, timeout: float = 2.0) -> bool:
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        return gateway.close_job_lane(name, timeout)
 
     def register_runtime_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         gateway = self._runtime_gateway

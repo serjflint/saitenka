@@ -2,21 +2,32 @@
 
 Behavioural, headless (no real mpv / no network): the panel is driven through a FakeIPC and the real
 Reader, the candidate *lister* is a plain thunk (the CLI builds it from enabled_providers), listing
-results are pushed onto the state queue (bypassing the off-thread search), and the download click is
-asserted through the SubtitleCandidate.download thunk + the start_fetch seam (monkeypatched at its
-source module, since sub_picker imports it at call time).
+results are applied at the broker-completion seam, and the download click is asserted through the
+SubtitleCandidate.download thunk + the start_fetch seam (monkeypatched at its source module, since
+sub_picker imports it at call time).
 """
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
+from util import FakeIPC as RuntimeFakeIPC
+from util import runtime_gateway
 
 from saitenka.app import sub_picker, subtitle_modes
 from saitenka.app.bindings import HELP_CLOSE_MSG, SUB_PICKER_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subselect import SubtitleCandidate
-from saitenka.runtime import CommandHandled, CommandOutcome, CommandReason, Owner
+from saitenka.runtime import (
+    CommandHandled,
+    CommandOutcome,
+    CommandReason,
+    EffectOutcome,
+    Owner,
+)
 
 
 class FakeIPC:
@@ -67,6 +78,126 @@ def _picker_adds(ipc: FakeIPC) -> list[tuple]:
     return [c for c in ipc.commands if c[:2] == ("overlay-add", OverlayId.PICKER)]
 
 
+def _drain_until(reader: Reader, predicate) -> None:
+    deadline = time.monotonic() + 1
+    while not predicate() and time.monotonic() < deadline:
+        reader._drain_events()
+        time.sleep(0.001)
+    assert predicate()
+
+
+def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes():
+    ipc = RuntimeFakeIPC()
+    ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    reader.osd = (1920, 1080)
+    old_started = threading.Event()
+    old_release = threading.Event()
+    calls = 0
+
+    def lister(_video):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            old_started.set()
+            assert old_release.wait(1)
+            return [_candidate("old.ass")], []
+        return [_candidate("current.ass")], []
+
+    reader.configure_sub_picker(lister)
+    try:
+        sub_picker.open_picker(reader)
+        assert old_started.wait(1)
+        sub_picker.close_picker(reader)
+        sub_picker.open_picker(reader)
+        _drain_until(reader, lambda: bool(reader.sub_picker.candidates))
+        assert reader.sub_picker.candidates[0].name == "current.ass"
+
+        old_release.set()
+        _drain_until(reader, lambda: calls == 2)
+        for _ in range(10):
+            reader._drain_events()
+        assert reader.sub_picker.candidates[0].name == "current.ass"
+    finally:
+        old_release.set()
+        reader.close()
+        gateway.close()
+
+
+def test_subtitle_picker_lane_rejects_work_beyond_its_bound():
+    ipc = RuntimeFakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    release = threading.Event()
+    started = [threading.Event(), threading.Event()]
+    start_lock = threading.Lock()
+    start_index = 0
+
+    def lister(_video):
+        nonlocal start_index
+        with start_lock:
+            index = start_index
+            start_index += 1
+        started[index].set()
+        assert release.wait(1)
+        return (), ()
+
+    request = sub_picker.ListingRequest(lister, "/v/ep01.mkv")
+    submitter = reader._sub_picker_submit
+    assert submitter is not None
+    outcomes = []
+    try:
+        accepted = [
+            submitter(
+                owner=Owner.SUBTITLE,
+                identity=index,
+                lane="subtitle-picker",
+                request=request,
+                on_finished=outcomes.append,
+            )
+            for index in range(3)
+        ]
+        assert started[0].wait(1) and started[1].wait(1)
+        assert accepted == [True, True, False]
+        assert outcomes[-1].outcome is EffectOutcome.REJECTED
+    finally:
+        release.set()
+        reader.close()
+        gateway.close()
+
+
+def test_episode_rebind_closes_loading_picker_and_rejects_old_listing():
+    ipc = RuntimeFakeIPC()
+    ipc.props.update({"path": "/v/ep01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    reader.osd = (1920, 1080)
+    started = threading.Event()
+    release = threading.Event()
+
+    def lister(_video):
+        started.set()
+        assert release.wait(1)
+        return [_candidate("old.ass")], []
+
+    reader.configure_sub_picker(lister)
+    try:
+        sub_picker.open_picker(reader)
+        assert started.wait(1)
+        reader.rebind_episode()
+        assert reader.sub_picker.open is False
+
+        release.set()
+        for _ in range(10):
+            reader._drain_events()
+        assert reader.sub_picker.candidates == ()
+    finally:
+        release.set()
+        reader.close()
+        gateway.close()
+
+
 def test_toggle_without_a_provider_configured_warns_and_stays_closed():
     reader, ipc = _reader(path="/v/ep01.mkv")
 
@@ -88,8 +219,9 @@ def test_open_lists_candidates_across_providers_and_renders_rows(monkeypatch):
     sub_picker.open_picker(reader)
     assert reader.sub_picker.open and reader.sub_picker.loading
 
-    reader.sub_picker.results.put((candidates, [], None))
-    sub_picker.update(reader)
+    sub_picker.apply_listing(
+        reader, reader.sub_picker.generation, sub_picker.ListingResult(tuple(candidates), ())
+    )
 
     assert reader.sub_picker.loading is False
     assert reader.sub_picker.candidates == tuple(candidates)
@@ -106,8 +238,11 @@ def test_provider_warnings_are_shown_in_the_footer():
     reader.configure_sub_picker(_lister([]))
     reader.sub_picker.open = True
 
-    reader.sub_picker.results.put(([_candidate("a.srt")], ["tsukihime: search truncated"], None))
-    sub_picker.update(reader)
+    sub_picker.apply_listing(
+        reader,
+        reader.sub_picker.generation,
+        sub_picker.ListingResult((_candidate("a.srt"),), ("tsukihime: search truncated",)),
+    )
 
     assert reader.sub_picker.warnings == ("tsukihime: search truncated",)
     footer = sub_picker._footer(reader, total=1, shown=1)
@@ -120,8 +255,11 @@ def test_listing_error_is_shown_and_leaves_no_candidates():
     reader.sub_picker.open = True
     reader.sub_picker.loading = True
 
-    reader.sub_picker.results.put((None, None, "subtitle search failed: boom"))
-    sub_picker.update(reader)
+    sub_picker.apply_listing(
+        reader,
+        reader.sub_picker.generation,
+        sub_picker.ListingResult((), (), "subtitle search failed: boom"),
+    )
 
     assert reader.sub_picker.error == "subtitle search failed: boom"
     assert reader.sub_picker.candidates == ()
@@ -151,7 +289,7 @@ def test_clicking_a_row_runs_that_candidates_download_and_closes(monkeypatch):
     gx, gy = rect[0] + hit.x + hit.w / 2, rect[1] + hit.y + hit.h / 2
 
     assert sub_picker.on_click(reader, gx, gy) is True
-    assert reader.sub_picker.open is False  # panel closes; the swap lands via apply_fetch_results
+    assert reader.sub_picker.open is False  # panel closes; the swap lands from broker completion
     assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
     assert len(fetches) == 1
     do, kwargs = fetches[0]

@@ -170,6 +170,15 @@ class JobBroker:
         for lane in lanes:
             lane.close(deadline)
 
+    def close_lane(self, name: str, timeout: float = 2.0) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._lock:
+            lane = self._lanes.pop(name, None)
+        if lane is None:
+            return False
+        lane.close(deadline)
+        return True
+
     def _complete(self, completion: EffectFinished) -> None:
         self._mailbox.publish_terminal(
             completion,

@@ -10,7 +10,6 @@ module owns the **episode** tier (and its cohesive sub-clusters, e.g. ``Subtitle
 
 from __future__ import annotations
 
-import queue
 import threading
 from typing import TYPE_CHECKING, overload
 
@@ -72,8 +71,6 @@ class SubtitleSource:
         self.en_sid: int | None = None
         self.language: Language = MAIN_LANG
         self.slang = "ja,jpn,jp"
-        self.results: queue.SimpleQueue = queue.SimpleQueue()
-        self.fetch_threads: list[threading.Thread] = []
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()

@@ -1,15 +1,20 @@
 """JP/EN primary modes and background Japanese-track arrival."""
 
+import shutil
 import threading
+import time
 from pathlib import Path
 
 import pytest
 from PIL import Image
+from util import FakeIPC as RuntimeFakeIPC
+from util import runtime_gateway
 
 from saitenka.app import subtitle_modes
 from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from saitenka.app.subtitles import SubtitleRender
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.subtitles import CueIndex, parse_srt
 
 
@@ -52,6 +57,206 @@ class FakeIPC:
 
 JP = {"id": 2, "type": "sub", "lang": "jpn"}
 EN = {"id": 1, "type": "sub", "lang": "eng"}
+
+
+class FetchJobs:
+    def __init__(self, reader: Reader) -> None:
+        self.reader = reader
+        self.accepted = []
+        reader._subtitle_fetch_submit = self.submit
+
+    def submit(self, **kwargs) -> bool:
+        self.accepted.append(kwargs)
+        return True
+
+    def finish(self, index: int = 0) -> None:
+        accepted = self.accepted[index]
+        result = subtitle_modes.run_fetch(accepted["request"], threading.Event())
+        accepted["on_finished"](
+            EffectFinished(
+                EffectId(index + 1),
+                Owner.SUBTITLE,
+                accepted["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=result,
+            )
+        )
+
+
+def _drain_until(reader: Reader, predicate) -> None:
+    deadline = time.monotonic() + 1
+    while not predicate() and time.monotonic() < deadline:
+        reader._drain_events()
+        time.sleep(0.001)
+    assert predicate()
+
+
+def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeypatch):
+    ipc = RuntimeFakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    event_thread = threading.get_ident()
+    worker_thread = None
+    messages = []
+
+    def fetch():
+        nonlocal worker_thread
+        worker_thread = threading.get_ident()
+        return None, "provider: no match"
+
+    monkeypatch.setattr(reader, "_toast", lambda message, level: messages.append((message, level)))
+    try:
+        subtitle_modes.start_fetch(reader, fetch)
+        _drain_until(reader, lambda: bool(messages))
+        assert worker_thread is not None and worker_thread != event_thread
+        assert messages == [("provider: no match", "warn")]
+    finally:
+        reader.close()
+        gateway.close()
+
+
+def test_subtitle_fetch_lane_rejects_work_beyond_its_bound():
+    ipc = RuntimeFakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    release = threading.Event()
+    started = [threading.Event(), threading.Event()]
+    start_lock = threading.Lock()
+    start_index = 0
+
+    def blocked_fetch():
+        nonlocal start_index
+        with start_lock:
+            index = start_index
+            start_index += 1
+        started[index].set()
+        assert release.wait(1)
+        return None, "done"
+
+    request = subtitle_modes.SubtitleFetchRequest(
+        fetch=blocked_fetch,
+        select_if_unchanged=False,
+        initial_sid=None,
+        replace=False,
+        force_select=False,
+    )
+    submitter = reader._subtitle_fetch_submit
+    assert submitter is not None
+    outcomes = []
+    try:
+        accepted = [
+            submitter(
+                owner=Owner.SUBTITLE,
+                identity=index,
+                lane="subtitle-fetch",
+                request=request,
+                on_finished=outcomes.append,
+            )
+            for index in range(5)
+        ]
+        assert started[0].wait(1) and started[1].wait(1)
+        assert accepted == [True, True, True, True, False]
+        assert outcomes[-1].outcome is EffectOutcome.REJECTED
+    finally:
+        release.set()
+        reader.close()
+        gateway.close()
+
+
+def test_newer_explicit_subtitle_choice_supersedes_older_completion(tmp_path, monkeypatch):
+    ipc = FakeIPC([EN.copy()])
+    reader = Reader(ipc)
+    jobs = FetchJobs(reader)
+    reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    monkeypatch.setattr(reader, "_toast", lambda *_args: None)
+    older = tmp_path / "older.ass"
+    newer = tmp_path / "newer.ass"
+    older.write_text("older", encoding="utf-8")
+    newer.write_text("newer", encoding="utf-8")
+
+    subtitle_modes.start_fetch(
+        reader,
+        lambda: (older, "older"),
+        force_select=True,
+        name="picker-download",
+    )
+    subtitle_modes.start_fetch(
+        reader,
+        lambda: (newer, "newer"),
+        force_select=True,
+        name="picker-download",
+    )
+    jobs.finish(1)
+    jobs.finish(0)
+
+    added = [command[1] for command in ipc.commands if command[0] == "sub-add"]
+    assert added == [str(newer)]
+
+
+def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
+    ipc = RuntimeFakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    started = threading.Event()
+    release = threading.Event()
+    messages = []
+
+    def fetch():
+        started.set()
+        assert release.wait(1)
+        return None, "late"
+
+    monkeypatch.setattr(reader, "_toast", lambda message, level: messages.append((message, level)))
+    try:
+        subtitle_modes.start_fetch(reader, fetch)
+        assert started.wait(1)
+        reader._stop.set()
+        ipc.close_runtime_job_lane("subtitle-fetch", timeout=0)
+        release.set()
+        for _ in range(10):
+            reader._drain_events()
+        assert messages == []
+        assert reader._subtitle_fetch_submit is not None
+        assert not reader._subtitle_fetch_submit(
+            owner=Owner.SUBTITLE,
+            identity="after-close",
+            lane="subtitle-fetch",
+            request=subtitle_modes.SubtitleFetchRequest(
+                fetch=lambda: (None, "unused"),
+                select_if_unchanged=False,
+                initial_sid=None,
+                replace=False,
+                force_select=False,
+            ),
+            on_finished=lambda _completion: None,
+        )
+    finally:
+        release.set()
+        reader.close()
+        gateway.close()
+
+
+def test_reader_close_quarantines_both_subtitle_lanes_before_artifact_removal(monkeypatch):
+    ipc = FakeIPC()
+    reader = Reader(ipc)
+    order = []
+
+    def close_lane(name, _timeout):
+        assert reader._stop.is_set()
+        order.append(name)
+        return True
+
+    def remove_artifacts(_path, *, ignore_errors):
+        assert ignore_errors
+        assert order == ["subtitle-fetch", "subtitle-picker"]
+        order.append("artifacts")
+
+    ipc.close_runtime_job_lane = close_lane
+    monkeypatch.setattr(shutil, "rmtree", remove_artifacts)
+
+    reader.close()
+
+    assert order == ["subtitle-fetch", "subtitle-picker", "artifacts"]
 
 
 def test_startup_prefers_japanese_and_remembers_both_tracks():
@@ -241,6 +446,7 @@ def test_english_primary_is_plain_and_noninteractive(monkeypatch):
 def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, monkeypatch):
     ipc = FakeIPC([EN.copy()])
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
     rebuilt = []
@@ -253,8 +459,7 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     ipc.commands.clear()
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
 
     assert ("sub-add", str(path), "auto", "", "jpn") in ipc.commands
     assert reader.jp_sid == 9 and reader.subtitle_language == "jp"
@@ -267,6 +472,7 @@ def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path,
     other = {"id": 7, "type": "sub", "lang": "kor"}
     ipc = FakeIPC([EN.copy(), other])
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     path = Path(tmp_path / "episode.ja.srt")
@@ -274,8 +480,7 @@ def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path,
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
     ipc.command("set_property", "sid", 7)
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
 
     assert ipc.props["sid"] == 7
     assert reader.subtitle_language == "en"
@@ -284,6 +489,7 @@ def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path,
 def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader, "_toast", lambda *_args: None)
     monkeypatch.setattr(
@@ -293,8 +499,7 @@ def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monke
     path.write_text("Japanese", encoding="utf-8")
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
 
     assert reader.subtitle_language == "jp"
     assert ("set_property", "sid", 9) in ipc.commands
@@ -308,6 +513,7 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
     ipc = FakeIPC()
     ipc.props["sub-delay"] = 10.0  # stale offset a previous run/track left in mpv
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader, "_toast", lambda *_a: None)
     monkeypatch.setattr(
@@ -317,8 +523,7 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
     path.write_text("Japanese", encoding="utf-8")
 
     reader.fetch_japanese_subs_async(lambda: (path, "jimaku: ready"))
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
 
     assert reader.subtitle_language == "jp"
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
@@ -347,9 +552,8 @@ def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypat
     ipc = FakeIPC([EN.copy()])
     ipc.props["path"] = "/videos/Show - 02.mkv"
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
-    started = threading.Event()
-    release = threading.Event()
     paths = []
     messages = []
     monkeypatch.setattr(
@@ -362,19 +566,16 @@ def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypat
         paths.append(video_path)
 
         def fetch():
-            started.set()
-            assert release.wait(timeout=1)
             return None, "jimaku: no match; tsukihime: ambiguous"
 
         return fetch
 
     reader.configure_subtitle_retry(factory)
     reader.retry_japanese_subtitles()
-    assert started.wait(timeout=1)
     reader.retry_japanese_subtitles()
 
     assert paths == ["/videos/Show - 02.mkv"]
-    assert len(reader._subtitle_fetch_threads) == 1
+    assert len(jobs.accepted) == 1
     assert messages[:2] == [
         ("Searching Japanese subtitle providers…", "ok"),
         ("Subtitle sync already running", "warn"),
@@ -382,15 +583,14 @@ def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypat
     assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
 
-    release.set()
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
     assert messages[-1] == ("jimaku: no match; tsukihime: ambiguous", "warn")
 
 
 def test_runtime_retry_reports_missing_provider_or_media(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     messages = []
     monkeypatch.setattr(
         reader,
@@ -406,13 +606,14 @@ def test_runtime_retry_reports_missing_provider_or_media(monkeypatch):
         ("No media loaded for subtitle search", "warn"),
         ("No Japanese subtitle providers enabled", "warn"),
     ]
-    assert reader._subtitle_fetch_threads == []
+    assert jobs.accepted == []
 
 
 def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, monkeypatch):
     ipc = FakeIPC([EN.copy()])
     ipc.props["path"] = "/videos/Show - 03.mkv"
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     path = tmp_path / "episode.ja.srt"
     path.write_text("Japanese")
@@ -422,8 +623,7 @@ def test_runtime_retry_success_retains_english_until_explicit_switch(tmp_path, m
     ipc.commands.clear()
 
     reader.retry_japanese_subtitles()
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
 
     assert reader.subtitle_language == "en"
     assert ("sub-add", str(path), "auto", "", "jpn") in ipc.commands
@@ -454,7 +654,8 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
     path.write_text("Japanese", encoding="utf-8")
     ipc.commands.clear()
 
-    reader._subtitle_results.put(
+    subtitle_modes.apply_fetch_result(
+        reader,
         subtitle_modes.SubtitleFetchResult(
             path=path,
             status="picker: chosen",
@@ -462,9 +663,8 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
             initial_sid=1,
             replace=True,
             force_select=True,
-        )
+        ),
     )
-    subtitle_modes.apply_fetch_results(reader)
 
     assert (
         reader.subtitle_language == "jp"
@@ -491,6 +691,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     ipc = FakeIPC([EN.copy(), jp_external])
     ipc.props["path"] = "/videos/Show - 03.mkv"
     reader = Reader(ipc)
+    jobs = FetchJobs(reader)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     assert reader.subtitle_language == "jp"
     messages = []
@@ -511,8 +712,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     ipc.commands.clear()
 
     reader.retry_japanese_subtitles()
-    reader._subtitle_fetch_threads[0].join(timeout=1)
-    subtitle_modes.apply_fetch_results(reader)
+    jobs.finish()
 
     # video is wrapped in Path before resync → compare the OS-native form (Windows uses backslashes)
     assert resynced == [(str(Path("/videos/Show - 03.mkv")), str(current))]  # CURRENT sub, no fetch
@@ -791,12 +991,12 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(tmp_
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
-    reader._subtitle_results.put(
+    subtitle_modes.apply_fetch_result(
+        reader,
         subtitle_modes.SubtitleFetchResult(
             path=path, status="resynced", select_if_unchanged=False, initial_sid=1, replace=True
-        )
+        ),
     )
-    subtitle_modes.apply_fetch_results(reader)
 
     assert replaced == []  # never clobbered the primary slot from English
     assert reader.subtitle_language == SECOND_LANG

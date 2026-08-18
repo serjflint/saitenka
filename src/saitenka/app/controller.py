@@ -258,8 +258,6 @@ class Reader:
     en_sid = Delegated[int | None]("episode.subtitle", "en_sid")
     subtitle_language = Delegated[subtitle_modes.Language]("episode.subtitle", "language")
     subtitle_slang = Delegated[str]("episode.subtitle", "slang")
-    _subtitle_results = Delegated[queue.SimpleQueue]("episode.subtitle", "results")
-    _subtitle_fetch_threads = Delegated[list[threading.Thread]]("episode.subtitle", "fetch_threads")
     _sub_index = Delegated[CueIndex | None]("episode", "sub_index")
     _nav_idx = Delegated[int]("episode", "nav_idx")
     _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
@@ -379,6 +377,10 @@ class Reader:
         self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
         self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)
+        self._subtitle_fetch_submit = subtitle_modes.configure_runtime_job(ipc)
+        self._subtitle_fetch_sequence = 0
+        self._subtitle_force_select_revision = 0
+        self._sub_picker_submit = sub_picker.configure_runtime_job(ipc)
         current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
         if o.subtitle_geometry.native_visible:
@@ -2314,8 +2316,6 @@ class Reader:
         tooltip.apply_pending_scroll(self, self._nest)
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
-        subtitle_modes.apply_fetch_results(self)
-        sub_picker.update(self)
         sidebar.update(self)
         if self.native_geometry is not None:
             self.native_geometry.apply(self)
@@ -2405,6 +2405,58 @@ class Reader:
                 self._interaction_metadata_submit,
                 self._finish_interaction_metadata,
             )
+
+    def _submit_subtitle_fetch(
+        self,
+        request: subtitle_modes.SubtitleFetchRequest,
+        *,
+        name: str,
+        on_done: Callable[[], None] | None = None,
+    ) -> None:
+        episode = self.episode
+        self._subtitle_fetch_sequence += 1
+        identity = (self._subtitle_fetch_sequence, name)
+        force_select_revision = None
+        if request.force_select:
+            self._subtitle_force_select_revision += 1
+            force_select_revision = self._subtitle_force_select_revision
+
+        def finish(completion: EffectFinished) -> None:
+            if (
+                episode is not self.episode
+                or self._stop.is_set()
+                or (
+                    force_select_revision is not None
+                    and force_select_revision != self._subtitle_force_select_revision
+                )
+            ):
+                return
+            try:
+                subtitle_modes.apply_fetch_result(
+                    self, subtitle_modes.finish_fetch(request, completion)
+                )
+            finally:
+                if on_done is not None:
+                    on_done()
+
+        submitter = self._subtitle_fetch_submit
+        if submitter is None:
+            subtitle_modes.apply_fetch_result(self, subtitle_modes.unavailable_fetch(request))
+            if on_done is not None:
+                on_done()
+            return
+        submitter(
+            owner=Owner.SUBTITLE,
+            identity=identity,
+            lane="subtitle-fetch",
+            request=request,
+            on_finished=finish,
+        )
+
+    def rebind_episode(self) -> None:
+        sub_picker.close_picker(self)
+        self._subtitle_force_select_revision += 1
+        self.episode = EpisodeContext()
 
     def _update_interaction(self) -> None:
         self._feed_episode_annotation()
@@ -2740,12 +2792,15 @@ class Reader:
         self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
+        close_lane = getattr(self.ipc, "close_runtime_job_lane", None)
+        if close_lane is not None:
+            deadline = time.monotonic() + 2.0
+            close_lane("subtitle-fetch", max(0.0, deadline - time.monotonic()))
+            close_lane("subtitle-picker", max(0.0, deadline - time.monotonic()))
         if self._annotation is not None:
             self._annotation.close(timeout=2.0)
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
-        for th in self._subtitle_fetch_threads:
-            th.join(timeout=2.0)
         if self.native_geometry is not None:
             self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.clear(self)
