@@ -230,3 +230,52 @@ def test_composition_threads_grouped_optional_services():
         "dict",
     )
     assert reader._tts_ok is True
+
+
+def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks() -> None:
+    """The Reader used to construct `LibassGeometryBackend` itself when none was passed, so it was
+    not injectable in the case that mattered — the shipping one. A host that picks its own provider
+    cannot be handed a different one, which is what makes the conformance contract testable.
+    """
+    from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+    from saitenka.app.controller import Reader
+    from saitenka.app.reader_factory import _geometry_backend
+
+    assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
+    chosen = _geometry_backend(SubtitleGeometryOptions(native_visible=True))
+    assert chosen is not None  # composition makes the choice
+    chosen.close()
+
+    options = ReaderOptions(
+        subtitle_geometry=SubtitleGeometryOptions(native_visible=True), prefetch=False
+    )
+    direct = Reader(FakeIPC(), options=options)
+
+    # …and the Reader does not. A render attempt in native mode produces neither a result nor an
+    # error, which is the signature of "no provider at all" — a self-selected one would leave one
+    # or the other behind.
+    assert direct.subtitle_pipeline.render(_probe_request(direct)) is None
+    assert direct.subtitle_pipeline.current is None
+    assert direct.subtitle_pipeline.last_error is None
+    direct.close()
+
+
+def _probe_request(reader):
+    from saitenka.subtitles import (
+        GeometryRequest,
+        SubtitleEventId,
+        SubtitleFrameId,
+        SubtitleTrackId,
+    )
+
+    track_id = SubtitleTrackId("probe")
+    event_id = SubtitleEventId(track_id, 0, 1_000, 0, 0)
+    return GeometryRequest(
+        generation=reader.subtitle_pipeline.generation,
+        track_id=track_id,
+        frame_id=SubtitleFrameId(track_id, (event_id,)),
+        timestamp_ms=0,
+        frame_size=(1920, 1080),
+        storage_size=(1920, 1080),
+        ass=b"[Script Info]\n",
+    )

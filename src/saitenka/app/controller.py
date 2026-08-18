@@ -360,21 +360,12 @@ class Reader:
         self._sub_picker_submit = sub_picker.configure_runtime_job(ipc)
         current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
-        if o.subtitle_geometry.native_visible:
-            if renderer is None:
-                current_renderer = NativeVisibleRenderer()
-            if geometry_backend is None:
-                from saitenka.subtitles.libass_backend import LibassGeometryBackend
-
-                library_path = (
-                    Path(o.subtitle_geometry.library_path)
-                    if o.subtitle_geometry.library_path
-                    else None
-                )
-                geometry_backend = LibassGeometryBackend(
-                    library_path=library_path,
-                    renderer_cache_max=o.subtitle_geometry.cache_max,
-                )
+        if o.subtitle_geometry.native_visible and renderer is None:
+            current_renderer = NativeVisibleRenderer()
+        # No provider is chosen here. Which implementation renders geometry is a composition
+        # decision (`reader_factory._geometry_backend`); a host that picks its own provider cannot
+        # be handed a different one, which is what makes the fake/null/libass conformance contract
+        # testable at all.
         self.subtitle_pipeline = SubtitleModeCoordinator(current_renderer, geometry_backend)
         if o.subtitle_geometry.native_visible:
             self.native_geometry = native_subtitles.NativeSubtitleGeometry(

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
 
-    from saitenka.app.config import ReaderOptions
+    from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
     from saitenka.app.controller import Reader
     from saitenka.app.loading import StartupHintLease
     from saitenka.app.profiles import Profile
@@ -35,6 +36,7 @@ def create_reader(
     startup_hint_lease: StartupHintLease | None = None,
     tokenizer_warm: Future[None] | None = None,
 ) -> Reader:
+    from saitenka.app.config import ReaderOptions
     from saitenka.app.controller import Reader
 
     resolved = services or ReaderServices()
@@ -54,4 +56,26 @@ def create_reader(
         # resolved. A session assembled here uses gateway egress; a Reader built directly (tests,
         # prewarm) writes straight to mpv unless its caller says otherwise.
         runtime_submit=getattr(ipc, "submit_runtime_mpv", None),
+        # Same reasoning for the geometry provider: which implementation runs is composition's
+        # call, not the Reader's. A Reader built directly gets whatever its caller injects.
+        geometry_backend=_geometry_backend((options or ReaderOptions()).subtitle_geometry),
+    )
+
+
+def _geometry_backend(settings: SubtitleGeometryOptions):
+    """Pick the shipping geometry provider for a session's settings.
+
+    Lives here rather than beside the `GeometryBackend` Protocol because selecting an
+    implementation means importing one, and `libass_backend` already imports `geometry` — the
+    package may not depend on its own leaf. Composition is where that dependency belongs anyway: a
+    host that picks its own provider cannot be handed a different one, which is what makes the
+    fake/null/libass conformance contract testable at all.
+    """
+    if not settings.native_visible:
+        return None
+    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+
+    return LibassGeometryBackend(
+        library_path=Path(settings.library_path) if settings.library_path else None,
+        renderer_cache_max=settings.cache_max,
     )
