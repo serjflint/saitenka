@@ -9,12 +9,13 @@ Panel round-trip uses constructed rows, mirroring test_windowed_prefetch.
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from typing import ClassVar
 
 import numpy as np
 
-from saitenka.app import prefetch, tooltip
+from saitenka.app import tooltip, tooltip_raster
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import Panel
 from saitenka.app.render_cache import (
@@ -24,9 +25,36 @@ from saitenka.app.render_cache import (
     dict_set_signature,
 )
 from saitenka.panel import Definition, Entry, panel_rows
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 WIDTH = 384
 SIG = "v1|w384|c260|test-dicts"
+
+
+class _DeferredRenderSubmitter:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return True
+
+    def finish(self):
+        call = self.calls.pop(0)
+        result = tooltip_raster.run_render_ahead(call["request"], threading.Event())
+        call["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                call["owner"],
+                call["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=result,
+            )
+        )
+
+    def finish_all(self):
+        while self.calls:
+            self.finish()
 
 
 def _cache(tmp_path, **kw) -> RenderCache:
@@ -319,6 +347,7 @@ def _nested_reader(*, two_words: bool = False):
     r = Reader(
         FakeIPC(), dict_set=_ScrollTallDS(), options=ReaderOptions(prefetch=True), scan_delay=0.0
     )
+    r._render_ahead_submit = _DeferredRenderSubmitter()
     r.osd = (3840, 2160)  # 4K → _raster_scale 2.0, so _blit_native takes the crisp path
     r.sub_origin = (0, 0)
     r.tokens = [Token("本命", "本命", "ほんめい", "名詞", 0, 2)]
@@ -370,7 +399,7 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)  # soft first paint
     tooltip.scroll_view(r, r._nest, r._nest.view_h // 2)  # soft-first + records a render-ahead
     assert r._nest.crisp_pending
-    prefetch._try_render_ahead(r)  # the worker warms the nested NATIVE viewport at the new scroll
+    r._render_ahead_submit.finish_all()
 
     rasters = assert_no_interactive_raster(r._nest, lambda: tooltip.apply_pending_crisp(r, r._nest))
     assert rasters == 0
@@ -385,13 +414,16 @@ def test_nested_scroll_requests_render_ahead_for_the_nested_view():
     r._open_nested(tok, tok.surface, 300.0, 2000.0, 40.0)
     nest = r._nest.state
     tooltip.scroll_view(r, r._nest, max(1, r._nest.view_h // 3))
-    req = r._render_ahead_req
+    pending = r._render_ahead.pending
+    assert pending is not None
+    req = pending[1]
     assert req is not None and req.panel is nest  # the request targets the nested panel
 
 
 def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
     """Drive a flick + one worker render-ahead pass, recording every ``scale`` the panel's render_ahead
     was warmed at — the observable of #297's fix (raw bands warmed ahead, not only native)."""
+    r._render_ahead_submit.finish_all()
     seen: list[float] = []
     st = view.state
     assert st is not None
@@ -403,7 +435,7 @@ def _render_ahead_scales(r, view, monkeypatch) -> list[float]:
 
     monkeypatch.setattr(st, "render_ahead", spy)
     tooltip.scroll_view(r, view, view.view_h)  # flick → records a render-ahead
-    prefetch._try_render_ahead(r)
+    r._render_ahead_submit.finish_all()
     return seen
 
 

@@ -248,7 +248,12 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     def remove_artifacts(_path, *, ignore_errors):
         assert ignore_errors
-        assert order == ["subtitle-fetch", "subtitle-picker", "cue-annotation"]
+        assert order == [
+            "subtitle-fetch",
+            "subtitle-picker",
+            "cue-annotation",
+            "tooltip-render-ahead",
+        ]
         order.append("artifacts")
 
     ipc.close_runtime_job_lane = close_lane
@@ -256,7 +261,13 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     reader.close()
 
-    assert order == ["subtitle-fetch", "subtitle-picker", "cue-annotation", "artifacts"]
+    assert order == [
+        "subtitle-fetch",
+        "subtitle-picker",
+        "cue-annotation",
+        "tooltip-render-ahead",
+        "artifacts",
+    ]
 
 
 def test_startup_prefers_japanese_and_remembers_both_tracks():

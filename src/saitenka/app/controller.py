@@ -44,6 +44,7 @@ from saitenka.app import (
     surfaces,
     telemetry,
     tooltip,
+    tooltip_raster,
     translation,
 )
 from saitenka.app.bindings import (
@@ -282,11 +283,6 @@ class Reader:
     _head_built = Delegated[int]("prefetch_state", "head_built")
     _prefetch_gen = Delegated[int]("prefetch_state", "gen")
     _prefetch_key = Delegated[tuple[str, bool] | None]("prefetch_state", "key")
-    _render_ahead_req = Delegated[prefetch.RenderAheadReq | None](
-        "prefetch_state", "render_ahead_req"
-    )
-    _render_ahead_lock = Delegated[threading.Lock]("prefetch_state", "render_ahead_lock")
-    _render_ahead_failures = Delegated[queue.SimpleQueue]("prefetch_state", "render_ahead_failures")
     _engaged_req = Delegated[prefetch.EngagedHoverReq | None]("prefetch_state", "engaged_req")
     _engaged_lock = Delegated[threading.Lock]("prefetch_state", "engaged_lock")
     _engaged_results = Delegated[queue.Queue]("prefetch_state", "engaged_results")
@@ -553,10 +549,11 @@ class Reader:
         # rare-frequency, excluding already-known/-mined) — no separate cache tier, so a later hover
         # is a plain panel_cache hit with no new key-matching logic to get wrong.
         self.head_prefetch_lookahead = o.perf.head_prefetch_lookahead
-        # Prefetch runtime state (app/prefetch.py PrefetchState): work queues, worker threads, the
-        # generation counter, and the scroll-ahead slot. The Delegated shims below keep the historical
-        # ``reader._prefetch_*``/``_head_*``/``_render_ahead_*`` names working across the hot paths.
+        # Speculative prefetch queues and workers remain separate from the bounded interactive raster
+        # lane: a scroll must not wait behind episode warming.
         self.prefetch_state = prefetch.PrefetchState(o.perf.head_prefetch_queue_max)
+        self._render_ahead = tooltip_raster.RenderAheadState()
+        self._render_ahead_submit = tooltip_raster.configure_runtime_job(ipc)
         # Per-cue tokenization cache (app/token_cache.py): source line → its tokenized+scored result,
         # so a looped/re-watched/nav-back line annotates at cue time with no plain-then-upgrade flicker.
         self.token_cache = TokenCache(o.perf.token_cache_max)
@@ -1688,7 +1685,10 @@ class Reader:
         prefetch.start_prefetch(self)
 
     def _update_prefetch(self) -> None:
+        generation = self._prefetch_gen
         prefetch.update_prefetch(self)
+        if self._prefetch_gen != generation:
+            self._cancel_render_ahead()
 
     def _upcoming_cue_texts(self, n: int) -> list[str]:
         return prefetch.upcoming_cue_texts(self, n)
@@ -2321,9 +2321,6 @@ class Reader:
         self._apply_pending_deps_or_spinner()
         self._apply_capabilities()
         tooltip.apply_engaged_results(self)
-        tooltip.apply_render_ahead_failures(self)
-        tooltip.apply_pending_scroll(self, self._tip_view)
-        tooltip.apply_pending_scroll(self, self._nest)
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
         sidebar.update(self)
@@ -2415,6 +2412,55 @@ class Reader:
                 self._interaction_metadata_submit,
                 self._finish_interaction_metadata,
             )
+
+    def _request_render_ahead(self, view: PopupView, direction: int) -> bool:
+        panel = view.state
+        if panel is None:
+            return False
+        return tooltip_raster.request(
+            self._render_ahead,
+            tooltip_raster.RenderAheadRequest(
+                panel,
+                view.desired_scroll,
+                view.view_h,
+                direction,
+                self._raster_scale,
+                threading.Event(),
+            ),
+            generation=self._prefetch_gen,
+            job_id=view.job_id,
+            submit=self._render_ahead_submit,
+            on_finished=self._finish_render_ahead,
+        )
+
+    def _finish_render_ahead(self, completion: EffectFinished) -> None:
+        finished = tooltip_raster.finish(
+            self._render_ahead,
+            completion,
+            self._render_ahead_submit,
+            self._finish_render_ahead,
+        )
+        if finished is None:
+            return
+        identity, request, succeeded = finished
+        if identity.generation != self._prefetch_gen:
+            return
+        for view in (self._tip_view, self._nest):
+            if (
+                view.state is request.panel
+                and view.desired_scroll == identity.scroll
+                and view.job_id == identity.job_id
+            ):
+                if succeeded:
+                    tooltip.apply_pending_scroll(self, view)
+                    tooltip.apply_pending_crisp(self, view)
+                else:
+                    view.desired_scroll = view.scroll
+                    self._interaction_jobs.finish("scroll", "failed", job_id=identity.job_id)
+                return
+
+    def _cancel_render_ahead(self) -> None:
+        tooltip_raster.cancel(self._render_ahead)
 
     def _submit_subtitle_fetch(
         self,
@@ -2811,6 +2857,9 @@ class Reader:
             self._annotation.close()
         if close_lane is not None:
             close_lane("cue-annotation", max(0.0, deadline - time.monotonic()))
+        tooltip_raster.close(self._render_ahead)
+        if close_lane is not None:
+            close_lane("tooltip-render-ahead", max(0.0, deadline - time.monotonic()))
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         if self.native_geometry is not None:

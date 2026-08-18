@@ -289,10 +289,6 @@
       "src/saitenka/app/prefetch.py::drain_open_results"
     ],
     [
-      "passive-result-drain",
-      "src/saitenka/app/tooltip.py::apply_render_ahead_failures"
-    ],
-    [
       "polled-deadline",
       "src/saitenka/app/controller.py::Reader._expire_flash"
     ],
@@ -762,10 +758,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_try_render_ahead"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::_warm_episode_loop"
     ],
     [
@@ -803,10 +795,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/prefetch.py::request_engaged_render"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::request_render_ahead"
     ],
     [
       "reader-parameter",
@@ -1458,10 +1446,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_render_ahead_failures"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::blit_panel"
     ],
     [
@@ -1796,8 +1780,11 @@
         "call:close_lane:subtitle-fetch",
         "call:close_lane:subtitle-picker",
         "call:close_lane:cue-annotation",
+        "call:tooltip_raster.close",
+        "call:close_lane:tooltip-render-ahead",
         "order:call:self._stop.set>call:close_lane:subtitle-fetch",
         "order:call:close_lane:cue-annotation>call:shutil.rmtree",
+        "order:call:close_lane:tooltip-render-ahead>call:shutil.rmtree",
         "call:self._annotation.close",
         "loop:self._prefetch_threads=>call:th.join"
       ],

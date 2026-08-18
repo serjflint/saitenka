@@ -202,7 +202,7 @@ def place_nested(reader: Reader, st, key, token, word: str, anchor: Anchor, tail
     # tooltip already imports this module for TIP_GAP); also kick a render-ahead so a first wheel notch
     # on the nested popup composites crisp off warm bands, like the base tooltip.
     reader._render_nested_view()
-    prefetch.request_render_ahead(reader, reader._nest, 1)
+    reader._request_render_ahead(reader._nest, 1)
 
 
 def link_hit(mx: float, my: float, state, xy, scroll: int, *, scale: float = 1.0):

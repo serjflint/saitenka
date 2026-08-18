@@ -328,13 +328,16 @@ def test_scroll_warms_native_bands_ahead_at_hidpi():
     from saitenka.app import tooltip
 
     r = _reader()
+    submitted = []
+    r._render_ahead_submit = lambda **kwargs: submitted.append(kwargs) or True
     r.osd = (3840, 2160)  # 4K → display scale 2.0, crisp active
     Driver(r).move_to_word(_content_word(r))  # show the (tall, scrollable) tooltip
     assert r._tip_state.full_height > r._tip_view_h  # scrollable
-    r._render_ahead_req = None  # clear the show-time request; isolate the scroll's
     tooltip.scroll_tip(r, 200)  # what the wheel drives
     assert r._tip_scroll > 0  # scrolled
-    req = r._render_ahead_req
+    pending = r._render_ahead.pending
+    assert pending is not None
+    req = pending[1]
     assert (
         req is not None and req.scroll == r._tip_scroll and req.direction == 1
     )  # warm follows scroll
