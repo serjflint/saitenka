@@ -26,7 +26,7 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._reconcile_subtitles"
+      "src/saitenka/app/controller.py::Reader._probe_ass_full"
     ],
     [
       "direct-mpv-command",
@@ -1499,10 +1499,6 @@
     [
       "tick-stage",
       "src/saitenka/app/controller.py::Reader._expire_surfaces"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader._reconcile_subtitles"
     ],
     [
       "tick-stage",

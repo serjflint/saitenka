@@ -1206,11 +1206,14 @@ def test_a_geometry_schedule_that_never_starts_names_the_missing_input(tmp_path:
     result.set_subtitle("猫を見る")
     result.tokens = []  # annotation has not landed yet: inputs are not assembled
 
-    traced: list[str] = []
-    result.native_geometry._trace_unscheduled = traced.append  # type: ignore[method-assign]
+    traced: list[tuple[str, int]] = []
+    result.native_geometry._trace_unscheduled = lambda reason, revision: traced.append(  # type: ignore[method-assign]
+        (reason, revision)
+    )
     assert result.native_geometry.schedule(result) is False
 
-    assert traced == ["no-tokens"]
+    # The revision is what lets a dropped schedule be matched to the observation that armed it.
+    assert traced == [("no-tokens", result.cue_revision)]
     result.close()
 
 
@@ -1226,12 +1229,18 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
-    result.set_subtitle("猫を見る")
-    assert result.native_geometry is not None
+
+    # Drive the first cue as an observation, not a set_subtitle call: reconciliation reads the cue
+    # from the projection now, so a cue the projection never saw settles as empty and the next
+    # observation retires a cue this test never installed there.
+    result._observing = True
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    ipc.props["sub-text"] = "猫を見る"
+    result._on_property_change({"name": "sub-text", "data": "猫を見る"})
+    result._settle_cue_observation()
     assert result.native_geometry.worker.wait_idle()
     assert result.native_geometry.apply(result)
 
-    result._observing = True
     ipc.props.update(
         {
             "sub-text": "猫を見る",

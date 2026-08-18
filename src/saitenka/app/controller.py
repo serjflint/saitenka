@@ -2824,8 +2824,21 @@ class Reader:
         at a time and has no batch), so reconciling per delta would build the cue three times, twice
         against a half-updated identity. The drain is where the batch exists, so it coalesces."""
         cue, self._pending_cue = self._pending_cue, None
-        if cue is not None:
+        # A reconcile that decides to do nothing used to be as silent as a geometry schedule that
+        # never started; the two together are what make a dropped cue traceable.
+        with otel_metrics.traced("cue_reconcile") as span:
+            span.set("cue_revision", self.cue_revision)
+            if cue is None:
+                span.set("outcome", "no-observation")
+                return
+            before = self.sub_text
             self._reconcile_sub_text(cue.text)
+            span.set("outcome", "adopted" if self.sub_text != before else "reinstalled")
+
+    @property
+    def cue_revision(self) -> int:
+        """The projection's cue revision — the identity a geometry refresh was armed for."""
+        return self._playback.cue.cue.value
 
     def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
         if isinstance(ev, EffectFinished):

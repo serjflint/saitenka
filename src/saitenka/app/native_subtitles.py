@@ -877,29 +877,38 @@ class NativeSubtitleGeometry:
                     start, end = indexed.start, indexed.end
         return start, end, timestamp_ms, active_rows
 
-    def _trace_unscheduled(self, reason: str) -> None:
+    def _trace_unscheduled(self, reason: str, cue_revision: int) -> None:
         """Name a geometry schedule that never started. Not a degrade: the inputs are not assembled
-        yet, so pixels and ownership are untouched — only the silence is the bug."""
-        with otel_metrics.traced("subtitle_geometry_unscheduled") as span:
+        yet, so pixels and ownership are untouched — only the silence is the bug. The revision is
+        what ties a dropped schedule back to the observation that armed the refresh."""
+        with otel_metrics.traced("subtitle_geometry_inputs") as span:
             span.set("reason", reason)
-        log.debug("geometry schedule skipped: %s", reason)
+            span.set("cue_revision", cue_revision)
+        log.debug("geometry schedule skipped: %s (cue revision %d)", reason, cue_revision)
+
+    def _unassembled_input(self, *, cue_text: str, has_tokens: bool) -> str | None:
+        """Which of the four schedule preconditions is not met yet, if any. These are "inputs not
+        assembled", not a failure — name which and do not degrade."""
+        if self.source_path is None:
+            return "no-source-path"
+        if self._source_bytes is None:
+            return "no-source-bytes"
+        if not cue_text.strip():
+            return "no-cue-text"
+        if not has_tokens:
+            return "no-tokens"
+        return None
 
     def _resolve_schedule_inputs(self, reader: Reader) -> _ScheduleInputs | None:
         path = self.source_path
         source = self._source_bytes
-        if path is None or source is None or not reader.sub_text.strip() or not reader.tokens:
+        unassembled = self._unassembled_input(
+            cue_text=reader.sub_text, has_tokens=bool(reader.tokens)
+        )
+        if unassembled is not None or path is None or source is None:
             # Every other exit below records a reason; this one used to return a bare None, so a
-            # geometry schedule that never ran was invisible in the logs and in telemetry. These
-            # four are "inputs not assembled yet", not a failure — name which, and do not degrade.
-            self._trace_unscheduled(
-                "no-source-path"
-                if path is None
-                else "no-source-bytes"
-                if source is None
-                else "no-cue-text"
-                if not reader.sub_text.strip()
-                else "no-tokens"
-            )
+            # geometry schedule that never ran was invisible in the logs and in telemetry.
+            self._trace_unscheduled(unassembled or "no-source-path", reader.cue_revision)
             return None
         if self.ass_full_capability == AssFullCapability.UNSUPPORTED:
             self._degrade_geometry(reader, "subtitle-ass-full-unsupported")
