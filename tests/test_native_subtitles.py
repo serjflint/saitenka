@@ -257,7 +257,9 @@ class _AllSkippableTokenizer(_SingleTokenizer):
         return True
 
 
-def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
+def reader(
+    tmp_path: Path, *, correlated_surfaces: bool = False
+) -> tuple[Reader, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC()
@@ -266,7 +268,14 @@ def reader(tmp_path: Path) -> tuple[Reader, FakeIPC, FakeBackend]:
         subtitle_geometry=SubtitleGeometryOptions(native_visible=True),
         prefetch=False,
     )
-    result = Reader(ipc, options=options, geometry_backend=backend)
+    # Overlay egress is a composition decision, so the surface path is only correlated when a test
+    # asks for it; without it the overlay writes run inline, as they do with no gateway.
+    result = Reader(
+        ipc,
+        options=options,
+        geometry_backend=backend,
+        runtime_submit=ipc.submit_runtime_mpv if correlated_surfaces else None,
+    )
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
     return result, ipc, backend
@@ -1776,6 +1785,36 @@ def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path
     assert result.boxes
     assert any(command[0] == "overlay-add" for command in ipc.commands)
     assert renderer.ownership_state.owner.value == "legacy"
+    result.close()
+
+
+def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: Path) -> None:
+    """The ordering rule this slice exists for.
+
+    Taking legacy ownership before our own pixels are acknowledged is what lets the hide run
+    against an unproved surface, leaving the frame with no subtitle at all — absent pixels, which
+    WP4.3 forbids. So the overlay commit gates the ownership transition, not the other way round.
+    Before this slice `_reply_accepted(draw(...))` was `True` the moment `draw` returned.
+    """
+    result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    result.set_subtitle("猫を見る")
+    ipc.commands.clear()
+
+    ipc.correlate_commands = True
+    renderer.reassert(result)
+    assert ipc.deliver_runtime_mpv()  # the visibility write
+    ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
+    assert ipc.deliver_runtime_mpv()  # the readback: FALSE, so pixels hand off to legacy
+
+    pending = [command for _identity, command, _cb in ipc.submitted]
+    assert any(command[0] == "overlay-add" for command in pending)
+    assert renderer.ownership_state.owner != PixelOwner.LEGACY  # the commit is still outstanding
+
+    assert ipc.deliver_runtime_mpv()  # the overlay commit lands
+
+    assert renderer.ownership_state.owner == PixelOwner.LEGACY
     result.close()
 
 

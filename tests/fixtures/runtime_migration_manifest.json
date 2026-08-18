@@ -214,14 +214,6 @@
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.clear"
-    ],
-    [
-      "direct-overlay-mutation",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.draw"
-    ],
-    [
-      "direct-overlay-mutation",
       "src/saitenka/app/tooltip.py::decorate_and_upload"
     ],
     [

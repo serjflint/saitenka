@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.controller import Reader
+    from saitenka.runtime.surfaces import SurfaceTransaction
 
 log = logging.getLogger("saitenka.app.subtitle_render")
 
@@ -96,7 +97,9 @@ class SubtitleRenderer:
             provider or subtitle_raster.PillowRasterProvider()
         )
 
-    def draw(self, reader: Reader) -> dict:
+    def draw(
+        self, reader: Reader, *, on_settled: Callable[[bool], None] | None = None
+    ) -> SurfaceTransaction:
         # Plain covers the secondary track and any cue still awaiting (or denied) its annotation:
         # the cue shows at cue time and reader_deps re-renders it annotated once deps land.
         request = subtitle_raster.build_request(
@@ -133,10 +136,14 @@ class SubtitleRenderer:
             log.info(
                 "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
             )
-        return reader.ov.show(sr.image, ox, oy, oid=SUB_ID)
+        # Revision-fenced: a newer cue's transaction supersedes this one's acknowledgement rather
+        # than racing it onto the same mpv slot. `on_settled` is how staging learns pixels exist.
+        return reader.lifecycle_surfaces.present(
+            sr.image, ox, oy, oid=SUB_ID, owner=Owner.SUBTITLE, on_settled=on_settled
+        )
 
     def clear(self, reader: Reader) -> None:
-        reader.ov.hide(SUB_ID)
+        reader.lifecycle_surfaces.remove(SUB_ID, owner=Owner.SUBTITLE)
 
 
 class NullRenderer:
@@ -380,41 +387,50 @@ class NativeVisibleRenderer:
             log.warning("mpv rejected subtitle visibility assertion: %s", failure)
 
     def _stage_legacy(self, reader: Reader, action: OwnershipAction) -> None:
-        owner_before = self._state.owner
-        try:
-            staged = self._reply_accepted(self._fallback.draw(reader))
-            accepted = staged and (
+        """Stage legacy pixels, then hide mpv's — never the other way round.
+
+        The hide may not precede a confirmed commit: mpv's subtitles would vanish while ours are
+        still pending, leaving the frame with no subtitle at all. So the commit outcome gates the
+        hide, and a failed commit rolls back to the last confirmed surface.
+        """
+
+        def settled(*, committed: bool) -> None:
+            owner_before = self._state.owner
+            accepted = committed and (
                 self._state.visibility == Visibility.FALSE or self._hide_mpv_subtitles(reader)
             )
-        except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
-            accepted = False
-        if not accepted:
-            self._fallback.clear(reader)
-        self._state, followups = reduce_ownership(
-            self._state,
-            OwnershipEvent(
-                EventKind.LEGACY_STAGE_RESULT,
-                context=action.context,
-                effect_id=action.effect_id,
+            if not accepted:
+                self._fallback.clear(reader)
+            self._state, followups = reduce_ownership(
+                self._state,
+                OwnershipEvent(
+                    EventKind.LEGACY_STAGE_RESULT,
+                    context=action.context,
+                    effect_id=action.effect_id,
+                    accepted=accepted,
+                ),
+            )
+            self._visibility = False if accepted else None
+            self._native_ready = False
+            is_rehandoff = action.kind == ActionKind.RESTAGE_LEGACY
+            self._trace_ownership(
+                "legacy-rehandoff-result" if is_rehandoff else "legacy-stage-result",
+                owner_before=owner_before,
                 accepted=accepted,
-            ),
-        )
-        self._visibility = False if accepted else None
-        self._native_ready = False
-        is_rehandoff = action.kind == ActionKind.RESTAGE_LEGACY
-        self._trace_ownership(
-            "legacy-rehandoff-result" if is_rehandoff else "legacy-stage-result",
-            owner_before=owner_before,
-            accepted=accepted,
-            effect_id=action.effect_id,
-        )
-        if (
-            accepted
-            and not is_rehandoff
-            and self._state.context.mode == OwnershipMode.NATIVE_VISIBLE
-        ):
-            self._record_catastrophic_fallback()
-        self._execute(reader, followups)
+                effect_id=action.effect_id,
+            )
+            if (
+                accepted
+                and not is_rehandoff
+                and self._state.context.mode == OwnershipMode.NATIVE_VISIBLE
+            ):
+                self._record_catastrophic_fallback()
+            self._execute(reader, followups)
+
+        try:
+            self._fallback.draw(reader, on_settled=lambda ok: settled(committed=ok))
+        except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
+            settled(committed=False)
 
     def _hide_mpv_subtitles(self, reader: Reader) -> bool:
         reply = reader.ipc.command(
