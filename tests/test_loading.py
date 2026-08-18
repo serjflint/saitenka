@@ -120,12 +120,12 @@ def test_interactive_readiness_waits_for_operable_osd_dimensions(unavailable):
     r = Reader(ipc, startup_hint_lease=show_startup_hint(runtime_gateway(ipc)))
     ipc.drain_events()
     r._observing = True
-    r._observed["osd-dimensions"] = unavailable
+    r._playback = r._projection.seed(r._playback, "osd-dimensions", unavailable)
 
     r._mark_interactive_ready()
     assert ("show-text", "", 1) not in ipc.commands
 
-    r._observed["osd-dimensions"] = {"w": 1920, "h": 1080}
+    r._playback = r._projection.seed(r._playback, "osd-dimensions", {"w": 1920, "h": 1080})
     r._mark_interactive_ready()
     assert ipc.commands.count(("show-text", "", 1)) == 1
 

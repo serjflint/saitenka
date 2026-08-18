@@ -610,8 +610,10 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     assert result.native_geometry.apply(result)
     result.set_subtitle("")
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed.update({"sub-text": "", "sub-start": None, "sub-end": None})
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed_all(
+        result._playback, {"sub-text": "", "sub-start": None, "sub-end": None}
+    )
 
     result._on_property_change({"name": "sub-delay", "data": -6.0})
     result._reconcile_subtitles()
@@ -839,8 +841,8 @@ def test_sub_delay_property_event_records_the_derived_subtitle_clock(
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["time-pos"] = 11.25
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed(result._playback, "time-pos", 11.25)
 
     result._on_property_change({"name": "sub-delay", "data": 10.0})
 
@@ -875,9 +877,10 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["time-pos"] = None
-    result._observed["sub-start"] = None
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed_all(
+        result._playback, {"time-pos": None, "sub-start": None}
+    )
 
     result._on_property_change({"name": "sub-delay", "data": 10.0})
 
@@ -1213,8 +1216,8 @@ def test_split_timing_property_batch_keeps_published_native_interaction(
     result._sub_pending = None
     original_boxes = list(result.boxes)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["sub-text"] = result.sub_text
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed(result._playback, "sub-text", result.sub_text)
     ipc.commands.clear()
 
     result._on_property_change({"name": "sub-start", "data": None})
@@ -1246,8 +1249,8 @@ def test_incomplete_observation_with_changed_frame_clears_only_interaction(
     result._sub_pending = None
     native_boxes = list(result.boxes)
     result._observing = True
-    result._observed.update(ipc.props)
-    result._observed["sub-text"] = result.sub_text
+    result._playback = result._projection.seed_all(result._playback, ipc.props)
+    result._playback = result._projection.seed(result._playback, "sub-text", result.sub_text)
     ipc.commands.clear()
 
     result._on_property_change(

@@ -415,7 +415,7 @@ def test_primary_sid_event_updates_rendering_language():
     reader = Reader(ipc)
     reader.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     reader._translate_on = True
-    reader._observed = {"sid": 2}
+    reader._playback = reader._projection.seed_all(reader._playback, {"sid": 2})
     ipc.props["sid"] = 1
     ipc.commands.clear()
 

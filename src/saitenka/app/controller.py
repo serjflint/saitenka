@@ -13,7 +13,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from concurrent.futures import Future
@@ -138,7 +138,9 @@ from saitenka.runtime import (
     EffectOutcome,
     Owner,
     UserCommand,
+    playback,
 )
+from saitenka.runtime.playback import PlaybackProjection, PlaybackState
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
@@ -194,29 +196,8 @@ OBSERVED_PROPS = (
     "options/sub-fonts-dir",
     "eof-reached",  # #100: rising edge drives auto-advance (only when advance_hook is installed)
 )
-_GEOMETRY_PROPS = frozenset(
-    {
-        "sub-text/ass-full",
-        "sub-start",
-        "sub-end",
-        "video-out-params",
-        "osd-dimensions",
-        "options/sub-ass-override",
-        "options/sub-ass-scale-with-window",
-        "options/sub-scale",
-        "options/sub-pos",
-        "options/sub-use-margins",
-        "options/sub-ass-force-margins",
-        "options/sub-ass-video-aspect-override",
-        "options/sub-ass-use-video-data",
-        "options/sub-ass-vsfilter-aspect-compat",
-        "options/sub-ass-style-overrides",
-        "options/sub-font-provider",
-        "options/embeddedfonts",
-        "options/sub-fonts-dir",
-    }
-)
-_CUE_IDENTITY_PROPS = frozenset({"sub-text", "sub-start", "sub-end", "sid"})
+# Which observations are geometry inputs, which retire the cue identity, and which render space
+# they revise all live in saitenka/runtime/playback.py — the sole interpreter.
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
 _SCALE_BUCKET = 0.05
@@ -622,7 +603,11 @@ class Reader:
         # Event-driven property state (observe_property); empty + off until run() calls
         # start_observing(), so direct get_property keeps working for tests / pre-run paths.
         self._observing = False
-        self._observed: dict = {}
+        # Sole interpreter of raw mpv observations (saitenka/runtime/playback.py): it owns the
+        # latest values, the explicit source/track/render-space revisions, and the decision that a
+        # given observation conflicts with the installed cue identity.
+        self._projection = PlaybackProjection()
+        self._playback = PlaybackState()
         self._geometry_dirty = False
         self._ass_full_probe_dirty = True
         # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
@@ -752,94 +737,105 @@ class Reader:
             reply = replies[name]
             data = reply.get("data")
             if connection_replaced:
-                self._on_property_change({"event": "property-change", "name": name, "data": data})
+                self._observe_property(name, data)
             else:
-                self._observed[name] = data
+                self._playback = self._projection.seed(self._playback, name, data)
             if name == "sub-text/ass-full" and self.native_geometry is not None:
                 self.native_geometry.observe_ass_full_reply(reply)
         self._observing = True
         # Seed values are the first sign the mpv→client read path works: a None osd-dimensions here
         # (with mpv clearly running) means get_property replies aren't coming back — the pipe read is
         # dead, so nothing will ever draw. Logged so it lands in overlay.log / report.
+        osd = self._playback.value("osd-dimensions")
         log.info(
             "observing mpv props; seed osd-dimensions=%r sub-text=%r",
-            self._observed.get("osd-dimensions"),
-            self._observed.get("sub-text"),
+            osd,
+            self._playback.value("sub-text"),
         )
-        if self._observed.get("osd-dimensions") is None:
+        if osd is None:
             log.warning(
                 "osd-dimensions seed is None — mpv isn't returning get_property replies (dead pipe / "
                 "attached to a not-yet-ready mpv); the overlay won't draw until that recovers"
             )
         else:
-            self._probe_display_sources("seed", self._observed.get("osd-dimensions") or {})
+            self._probe_display_sources("seed", osd if isinstance(osd, dict) else {})
 
     def _register_observers(self) -> dict[str, dict]:
         replies = register_observer_set(self.ipc, tuple(OBSERVED_PROPS))
         replies = {name: replies.get(name) or {"error": "unavailable"} for name in OBSERVED_PROPS}
         return replies
 
-    def _prop(self, name: str):
+    def _prop(self, name: str) -> Any:
         """Latest value of a property: the observed (event-driven) state when observing, else a
         blocking get_property (tests / pre-run paths)."""
-        if self._observing and name in self._observed:
-            return self._observed[name]
+        if self._observing and self._playback.observes(name):
+            return self._playback.value(name)
         return self._get(name)
-
-    def _update_subtitle_geometry_observation(
-        self, name: str, data: object, *, changed: bool
-    ) -> None:
-        if name == "sid" and changed:
-            self._ass_full_probe_dirty = True
-            if self.native_geometry is not None:
-                self.native_geometry.set_source(None, reader=self)
-            else:
-                self.subtitle_pipeline.invalidate()
-            subtitle_modes.on_primary_changed(self, data)
-        elif changed and self.native_geometry is not None and name == "sub-delay":
-            self.native_geometry.record_clock_change(self)
-        elif changed and self.native_geometry is not None and name in _GEOMETRY_PROPS:
-            self._geometry_dirty = True
-        if changed and name == "sub-text":
-            self._ass_full_probe_dirty = True
-        if self._geometry_dirty and not self._observing and self.native_geometry is not None:
-            self._geometry_dirty = False
-            self.native_geometry.refresh(self)
 
     def _on_property_change(self, ev: dict) -> None:
         name = ev.get("name")
         if name:
-            changed = ev.get("data") != self._observed.get(name)
-            if name == "pause" and ev.get("data") != self._observed.get(name):
-                # Breadcrumb for the "overlay only updates on mouse move" report: while paused, mpv's
-                # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
-                # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
-                log.debug("mpv pause -> %s", ev.get("data"))
-            self._observed[name] = ev.get("data")
-            if (
-                changed
-                and name in _CUE_IDENTITY_PROPS
-                and self._identity_change_is_usable(name, ev)
-            ):
-                self._retire_cue_identity(name)
-            self._update_subtitle_geometry_observation(name, ev.get("data"), changed=changed)
+            self._observe_property(str(name), ev.get("data"))
 
-    def _identity_change_is_usable(self, name: str, ev: dict) -> bool:
-        if name not in {"sub-start", "sub-end"}:
-            return True
-        data = ev.get("data")
-        identity = self._current_cue_identity
-        if data is None or identity is None:
-            return False
-        installed = identity.observed_start if name == "sub-start" else identity.observed_end
-        return data != installed
+    def _observe_property(self, name: str, data: object) -> None:
+        """Hand one ordered observation to the projection and apply the deltas it publishes."""
+        if name == "pause" and data != self._playback.value("pause"):
+            # Breadcrumb for the "overlay only updates on mouse move" report: while paused, mpv's
+            # d3d11 flip-model VO won't re-present the window on an overlay-add (see the
+            # --d3d11-flip=no launch mitigation). Correlate pause spans with overlay draws.
+            log.debug("mpv pause -> %s", data)
+        projected = self._projection.observe(self._playback, name, data)
+        self._playback = projected.state
+        for delta in projected.deltas:
+            self._apply_playback_delta(delta)
+        # Pre-run/test paths have no tick to drain the dirty flag, so refresh inline.
+        if self._geometry_dirty and not self._observing and self.native_geometry is not None:
+            self._geometry_dirty = False
+            self.native_geometry.refresh(self)
+
+    def _apply_playback_delta(self, delta: playback.PlaybackDelta) -> None:
+        if isinstance(delta, playback.CueIdentityRetired):
+            self._retire_cue_identity(delta.reason.value)
+        elif isinstance(delta, playback.AuthoredCueStale):
+            self._ass_full_probe_dirty = True
+        elif isinstance(delta, playback.SubtitleSelectionChanged):
+            if self.native_geometry is not None:
+                self.native_geometry.set_source(None, reader=self)
+            else:
+                self.subtitle_pipeline.invalidate()
+            subtitle_modes.on_primary_changed(self, delta.sid)
+        elif isinstance(delta, playback.SubtitleTimingChanged):
+            if self.native_geometry is not None:
+                self.native_geometry.record_clock_change(self)
+        elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
+            self._geometry_dirty = True
+
+    def _install_cue_identity(self, identity: cue_annotation.CueIdentity) -> None:
+        """Bind the cue identity in both owners: the annotation state and the projection, which
+        decides which later observation conflicts with it."""
+        self._current_cue_identity = identity
+        self._cue_retired = False
+        self._playback = self._projection.install(
+            self._playback,
+            start=identity.observed_start,
+            end=identity.observed_end,
+        )
+
+    def _clear_cue_identity(self) -> None:
+        """Drop the installed identity in both owners; the projection then stops treating later
+        sub-start/sub-end observations as conflicts."""
+        self._cue_retired = True
+        self._current_cue_identity = None
+        self._playback, _deltas = self._projection.retire(
+            self._playback, playback.RetireReason.CUE_TEXT
+        )
 
     def _retire_cue_identity(self, reason: str) -> None:
         if self._cue_retired:
+            self._clear_cue_identity()
             return
         log.debug("cue interaction retired: %s", reason)
-        self._cue_retired = True
-        self._current_cue_identity = None
+        self._clear_cue_identity()
         self._teardown_tip()
         self.hover = -1
         self.lines, self.tokens, self.styles, self.boxes = [], [], None, []
@@ -956,8 +952,7 @@ class Reader:
         self.hover = -1
         self._annotation_hover = False
         self.sub_text = text
-        self._cue_retired = True
-        self._current_cue_identity = None
+        self._clear_cue_identity()
         self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
         self._annotation_degraded = False
         self._nav_idx = -1  # any external cause of a cue change invalidates the nav chaining hint
@@ -979,16 +974,14 @@ class Reader:
         if self.subtitle_language == SECOND_LANG:
             self.lines, self.tokens, self.styles = [], [], None
             self.boxes = []
-            self._current_cue_identity = self._annotation_identity(self._cue_norm(text))
-            self._cue_retired = False
+            self._install_cue_identity(self._annotation_identity(self._cue_norm(text)))
             self._cue_identity_ever_installed = True
             self._draw_subtitle()
             return
         # honour explicit line breaks (\n, ASS \N); tokenize each source line separately
         norm = self._cue_norm(text)
         cached = self.token_cache.get(norm)
-        self._current_cue_identity = self._annotation_identity(norm)
-        self._cue_retired = False
+        self._install_cue_identity(self._annotation_identity(norm))
         self._cue_identity_ever_installed = True
         if cached is not None:
             self._apply_tokenized_cue(cached)
@@ -1100,7 +1093,7 @@ class Reader:
         if self._annotation is None or self.subtitle_language == SECOND_LANG:
             return
         identity = self._annotation_identity(norm)
-        self._current_cue_identity = identity
+        self._install_cue_identity(identity)
         cached = self._annotation.submit(
             self._annotation_key(norm),
             self._annotation_inputs(norm),
@@ -1341,8 +1334,7 @@ class Reader:
         if self._annotation_async:
             self._retire_cue_identity("profile")
             norm = self._cue_norm(self.sub_text)
-            self._current_cue_identity = self._annotation_identity(norm)
-            self._cue_retired = False
+            self._install_cue_identity(self._annotation_identity(norm))
             self._sub_pending = norm
             self._annotation_degraded = False
             self._schedule_current_annotation(norm)
@@ -2308,7 +2300,9 @@ class Reader:
         if self.native_geometry is not None and self._ass_full_probe_dirty:
             if self.native_geometry.ass_full_capability.value == "unknown":
                 reply = self.ipc.command("get_property", "sub-text/ass-full")
-                self._observed["sub-text/ass-full"] = reply.get("data")
+                self._playback = self._projection.seed(
+                    self._playback, "sub-text/ass-full", reply.get("data")
+                )
                 self.native_geometry.observe_ass_full_reply(reply)
             self._ass_full_probe_dirty = False
         generation = self.subtitle_pipeline.generation
@@ -2633,6 +2627,7 @@ class Reader:
         if p is None or p == self._slotted_path:
             return
         self._annotation_source_epoch += 1
+        self._playback = self._projection.source_replaced(self._playback, p).state
         self._retire_cue_identity("file-loaded")
         self._slotted_path = p
         self.reslot_hook(p)
@@ -2742,7 +2737,7 @@ class Reader:
     def _mark_interactive_ready(self) -> None:
         if self._interactive_ready:
             return
-        if self._observing and self._observed.get("osd-dimensions") in (None, {}):
+        if self._observing and self._playback.value("osd-dimensions") in (None, {}):
             return
         self._interactive_ready = True
         connected_at = getattr(self.ipc, "connected_at", None)

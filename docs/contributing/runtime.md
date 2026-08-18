@@ -4,8 +4,9 @@ Saitenka has two runtime packages with different jobs:
 
 - `saitenka.app.runtime` supplies the command table and ordered stages used by the production
   `Reader` loop;
-- `saitenka.runtime` is an isolated contract package for events, effects, mailbox admission,
-  effect lifecycle, and timers. It is exercised by tests and is not imported by production code.
+- `saitenka.runtime` holds the pure runtime contracts — events, effects, mailbox admission, effect
+  lifecycle, timers, and the playback projection. Most of it is still exercised only by tests; the
+  projection is live in production.
 
 This page describes both as they exist on `main`. The whole-system module map remains in
 [Architecture](architecture.md); native subtitle ownership and its supported operating envelope are
@@ -88,10 +89,37 @@ policy and renderer/executor control native visibility and the legacy subtitle s
 transaction, including temporary surface suspension. A geometry miss therefore removes or delays
 hit boxes while keeping the selected pixel owner stable.
 
+## Playback projection
+
+`PlaybackProjection` (`saitenka/runtime/playback.py`) is the sole interpreter of raw mpv property
+observations. `Reader` hands it one ordered observation at a time and applies the typed deltas it
+publishes; nothing downstream compares raw property values or decides what a property means.
+
+```text
+property-change ──► PlaybackProjection.observe(state, name, data)
+                             │
+                             ├─ CueIdentityRetired      (conflicting observation)
+                             ├─ AuthoredCueStale
+                             ├─ SubtitleSelectionChanged
+                             ├─ SubtitleTimingChanged
+                             ├─ RenderSpaceChanged / GeometryInputChanged
+                             └─ SourceChanged / ConnectionChanged
+```
+
+The projection owns the immutable facts (connection, media/source, track/role, cue, render space,
+timing, pointer, pause), the explicit `Revision` values that make source, track, and render-space
+identity comparable without runtime state, and the decision that a given observation conflicts with
+the installed cue identity. A conflict retires that identity in the same observation, before a later
+cue-dependent command in the same drain can use it.
+
+Pointer and pause facts are projected but their deltas stay unpublished (`LEGACY_OWNED`) while the
+legacy route still owns those behaviours.
+
 ## Isolated runtime contracts
 
-The root `saitenka.runtime` package has no production caller. Its public objects define and test a
-small event/effect lifecycle independently of `Reader`, mpv, Pillow, libass, SQLite, and Anki:
+The rest of the root `saitenka.runtime` package has no production caller yet. Its public objects
+define and test a small event/effect lifecycle independently of `Reader`, mpv, Pillow, libass,
+SQLite, and Anki:
 
 ```text
 EventEnvelope
@@ -125,6 +153,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | --- | --- |
 | One live state owner | The `Reader` thread mutates production session and presentation state. Background actors return values; the IPC writer owns transport writes, not domain state. |
 | Ordered input | mpv events are drained in arrival order. Conflicting cue observations retire cue-dependent interaction before a later command is dispatched. |
+| One observation interpreter | `PlaybackProjection` alone turns raw mpv properties into typed facts, explicit revisions, and deltas. A transport burst has no semantic meaning: split and joined delivery of the same ordered observations converge to the same state. |
 | Identity-qualified publication | Annotation, geometry, tooltip, and related background results publish only when their semantic identity is still current. |
 | Transactional pixel ownership | The ownership policy and renderer/executor control native visibility and the legacy subtitle surface. Geometry readiness cannot cause a style switch. |
 | Correlated IPC | Replies require a known request ID from the current connection epoch; late and unknown replies are discarded. Outbound admission is bounded. |
