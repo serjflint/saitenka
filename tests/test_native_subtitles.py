@@ -1801,6 +1801,42 @@ def test_native_visibility_exception_with_false_readback_commits_legacy(tmp_path
     result.close()
 
 
+def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
+    tmp_path: Path,
+) -> None:
+    """The revision fence, which is why the surface is a transaction and not a bare write.
+
+    Two cues can have overlay-adds in flight at once. If the older one's acknowledgement were
+    accepted it would mark the slot present at a revision the newer cue has already replaced, and
+    the stale bitmap would be the one the runtime believes is on screen.
+    """
+    from saitenka.app.overlay_ids import OverlayId
+    from saitenka.runtime.surfaces import SurfaceStatus
+
+    result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    result.set_subtitle("猫を見る")
+    ipc.correlate_commands = True
+
+    older = renderer._fallback.draw(result)
+    newer = renderer._fallback.draw(result)
+    assert newer.revision > older.revision
+
+    assert ipc.deliver_runtime_mpv(match="overlay-add")  # the older commit, now overtaken
+    snapshot = result.lifecycle_surfaces.snapshot(OverlayId.SUB)
+    assert snapshot is not None
+    assert snapshot.status is SurfaceStatus.PENDING
+    assert snapshot.acknowledged_revision != older.revision
+
+    assert ipc.deliver_runtime_mpv(match="overlay-add")  # the newer commit
+    snapshot = result.lifecycle_surfaces.snapshot(OverlayId.SUB)
+    assert snapshot is not None
+    assert snapshot.status is SurfaceStatus.PRESENT
+    assert snapshot.acknowledged_revision == newer.revision
+    result.close()
+
+
 def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: Path) -> None:
     """The ordering rule this slice exists for.
 
