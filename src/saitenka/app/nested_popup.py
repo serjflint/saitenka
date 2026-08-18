@@ -55,7 +55,7 @@ def show_nested(reader: Reader, sb) -> None:
     if prefetch.workers_running(reader):
         from saitenka.app.hover_metadata import NestedMetadataKey, NestedMetadataRequest
 
-        reader._interaction_metadata.submit(
+        reader._request_interaction_metadata(
             NestedMetadataRequest(
                 NestedMetadataKey(
                     reader._prefetch_gen,

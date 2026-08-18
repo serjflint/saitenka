@@ -278,10 +278,6 @@
     ],
     [
       "passive-result-drain",
-      "src/saitenka/app/hover_metadata.py::InteractionMetadataActor.drain"
-    ],
-    [
-      "passive-result-drain",
       "src/saitenka/app/prefetch.py::drain_engaged_results"
     ],
     [
@@ -1803,7 +1799,7 @@
         "call:self._tts_capability.close",
         "call:self._anki_capability.close",
         "call:self._interaction_jobs.cancel_all",
-        "call:self._interaction_metadata.close",
+        "call:hover_metadata.close",
         "call:self._stop.set",
         "call:self._annotation.close",
         "loop:self._prefetch_threads=>call:th.join",

@@ -250,7 +250,7 @@ def resolve_hover(reader: Reader, index: int) -> None:
 def _request_hover_metadata(reader: Reader, index: int) -> None:
     from saitenka.app.hover_metadata import HoverMetadataKey, HoverMetadataRequest
 
-    reader._interaction_metadata.submit(
+    reader._request_interaction_metadata(
         HoverMetadataRequest(
             HoverMetadataKey(
                 reader._prefetch_gen,
@@ -268,47 +268,41 @@ def _request_hover_metadata(reader: Reader, index: int) -> None:
     )
 
 
-def apply_hover_metadata(reader: Reader) -> None:
-    from saitenka.app.hover_metadata import HoverMetadata
-
-    for result in reader._interaction_metadata.drain():
-        if not isinstance(result, HoverMetadata):
-            nested_popup.apply_nested_metadata(reader, result)
-            continue
-        key = result.key
-        current = (
-            reader._prefetch_gen,
-            reader._dependency_generation,
-            reader._mined_generation,
-            reader._current_cue_identity,
-            reader.hover,
-            reader._tip_view.job_id,
-        )
-        expected = (
-            key.generation,
-            key.dependency_generation,
-            key.mined_generation,
-            key.cue_identity,
-            key.index,
-            key.job_id,
-        )
-        if current != expected:
-            same_target = current[:2] + current[3:] == expected[:2] + expected[3:]
-            if same_target:
-                _request_hover_metadata(reader, key.index)
-            continue
-        if result.error:
-            reader._interaction_jobs.finish("tooltip", "failed")
-            continue
-        reader._hover_terms = result.phrase_terms
-        reader._hover_span = result.phrase_span
-        reader._hover_mined = result.mined
-        reader._hover_group_mined = result.group_mined
-        reader._draw_subtitle()
-        if show_tooltip(reader, key.index):
-            if reader._session_recorder is not None:
-                reader._session_recorder.record_lookup()
-            reader._sync_auto_translation()
+def apply_hover_metadata(reader: Reader, result) -> None:
+    key = result.key
+    current = (
+        reader._prefetch_gen,
+        reader._dependency_generation,
+        reader._mined_generation,
+        reader._current_cue_identity,
+        reader.hover,
+        reader._tip_view.job_id,
+    )
+    expected = (
+        key.generation,
+        key.dependency_generation,
+        key.mined_generation,
+        key.cue_identity,
+        key.index,
+        key.job_id,
+    )
+    if current != expected:
+        same_target = current[:2] + current[3:] == expected[:2] + expected[3:]
+        if same_target:
+            _request_hover_metadata(reader, key.index)
+        return
+    if result.error:
+        reader._interaction_jobs.finish("tooltip", "failed")
+        return
+    reader._hover_terms = result.phrase_terms
+    reader._hover_span = result.phrase_span
+    reader._hover_mined = result.mined
+    reader._hover_group_mined = result.group_mined
+    reader._draw_subtitle()
+    if show_tooltip(reader, key.index):
+        if reader._session_recorder is not None:
+            reader._session_recorder.record_lookup()
+        reader._sync_auto_translation()
 
 
 def set_hover(reader: Reader, index: int) -> None:

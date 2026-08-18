@@ -26,6 +26,7 @@ from saitenka.app import (
     card_preview,
     cue_annotation,
     help_overlay,
+    hover_metadata,
     hover_snapshot,
     mined_seed,
     mined_store,
@@ -422,11 +423,11 @@ class Reader:
         self._mined_seed_failures = 0
         self._mined_seed_next_due = 0.0
         self._mined_generation = 0
-        from saitenka.app.hover_metadata import InteractionMetadataActor
         from saitenka.app.interaction_jobs import InteractionJobs
 
         self._interaction_jobs = InteractionJobs()
-        self._interaction_metadata = InteractionMetadataActor()
+        self._interaction_metadata = hover_metadata.InteractionMetadataState()
+        self._interaction_metadata_submit = hover_metadata.configure_runtime_job(ipc)
         self._hover_mined = False
         self._hover_group_mined: tuple[bool, ...] = ()
         self._loading = False
@@ -2308,7 +2309,6 @@ class Reader:
         self._apply_capabilities()
         self._apply_annotation_results()
         tooltip.apply_engaged_results(self)
-        tooltip.apply_hover_metadata(self)
         tooltip.apply_render_ahead_failures(self)
         tooltip.apply_pending_scroll(self, self._tip_view)
         tooltip.apply_pending_scroll(self, self._nest)
@@ -2382,6 +2382,29 @@ class Reader:
             )
         if changed:
             analysis_overlay.redraw(self)
+
+    def _request_interaction_metadata(self, request: hover_metadata.MetadataRequest) -> bool:
+        return hover_metadata.submit(
+            self._interaction_metadata,
+            request,
+            self._interaction_metadata_submit,
+            self._finish_interaction_metadata,
+        )
+
+    def _finish_interaction_metadata(self, completion: EffectFinished) -> None:
+        result = hover_metadata.finish(self._interaction_metadata, completion)
+        try:
+            if isinstance(result, hover_metadata.HoverMetadata):
+                tooltip.apply_hover_metadata(self, result)
+            elif isinstance(result, hover_metadata.NestedMetadata):
+                nested_popup.apply_nested_metadata(self, result)
+        finally:
+            hover_metadata.finish_publication(self._interaction_metadata)
+            hover_metadata.submit_pending(
+                self._interaction_metadata,
+                self._interaction_metadata_submit,
+                self._finish_interaction_metadata,
+            )
 
     def _update_interaction(self) -> None:
         self._feed_episode_annotation()
@@ -2713,7 +2736,7 @@ class Reader:
             self._anki_capability.close()
         self._mined_seed_generation += 1
         self._interaction_jobs.cancel_all()
-        self._interaction_metadata.close()
+        hover_metadata.close(self._interaction_metadata)
         self._release_mouse_capture()  # hand the mouse back before a detached mpv outlives us
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
