@@ -706,7 +706,6 @@ def reslot_to_current(
     recorder + prefetch, and warms N+1's subs. Session-scoped state (deck-mined set, backlog, render
     caches) is untouched by construction."""
     from saitenka import otel_metrics
-    from saitenka.app.reader_context import EpisodeContext
     from saitenka.app.subselect import remove_external_sub_tracks
     from saitenka.app.subtitle_modes import select_initial
 
@@ -729,9 +728,7 @@ def reslot_to_current(
         session_stats.finish(
             reader
         )  # write the just-finished episode complete BEFORE the recorder resets
-        reader.episode = (
-            EpisodeContext()
-        )  # one rebind → every episode-scoped field back to no-episode state
+        reader.rebind_episode()
         # drop the carried-over launch --sub-file (a prior episode's srt); a nonzero count each advance
         # is the carried-over-sub signature
         span.set("externals_dropped", remove_external_sub_tracks(ipc))

@@ -279,6 +279,11 @@ class FakeIPC:
             return False
         return self._runtime_gateway.submit_job(**kwargs)
 
+    def close_runtime_job_lane(self, name, timeout=2.0) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.close_job_lane(name, timeout)
+
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
-import queue
-import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
+from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
+    import threading
     from collections.abc import Callable
     from pathlib import Path
 
@@ -80,6 +81,76 @@ class SubtitleFetchResult:
     )
     force_select: bool = (
         False  # an explicit picker choice: select the fetched track NOW, even from English
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleFetchRequest:
+    fetch: ProviderFetch
+    select_if_unchanged: bool
+    initial_sid: int | str | None
+    replace: bool
+    force_select: bool
+
+
+class JobSubmitter(Protocol):
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
+
+
+def run_fetch(request: object, cancelled: threading.Event) -> object:
+    if not isinstance(request, SubtitleFetchRequest):
+        raise TypeError("invalid subtitle fetch request")
+    if cancelled.is_set():
+        return None
+    try:
+        path, status = request.fetch()
+    except Exception as exc:  # provider failures are soft and user-visible
+        log.warning("background subtitle fetch failed", exc_info=True)
+        path, status = None, f"Japanese subtitle fetch failed: {exc}"
+    return SubtitleFetchResult(
+        path,
+        status,
+        request.select_if_unchanged,
+        request.initial_sid,
+        request.replace,
+        request.force_select,
+    )
+
+
+def configure_runtime_job(ipc) -> JobSubmitter | None:
+    register = getattr(ipc, "register_runtime_job_lane", None)
+    if register is None or not register(
+        "subtitle-fetch",
+        JobLanePolicy(capacity=4, workers=2),
+        run_fetch,
+    ):
+        return None
+    return ipc.submit_runtime_job
+
+
+def finish_fetch(request: SubtitleFetchRequest, completion: EffectFinished) -> SubtitleFetchResult:
+    result = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
+    if isinstance(result, SubtitleFetchResult):
+        return result
+    return unavailable_fetch(request)
+
+
+def unavailable_fetch(request: SubtitleFetchRequest) -> SubtitleFetchResult:
+    return SubtitleFetchResult(
+        None,
+        "Japanese subtitle fetch unavailable",
+        request.select_if_unchanged,
+        request.initial_sid,
+        request.replace,
+        request.force_select,
     )
 
 
@@ -322,36 +393,8 @@ def start_fetch(
     background contract."""
     initial_sid = reader._get("sid") if select_if_unchanged else None
 
-    def work() -> None:
-        try:
-            try:
-                path, status = fetch()
-                reader._subtitle_results.put(
-                    SubtitleFetchResult(
-                        path, status, select_if_unchanged, initial_sid, replace, force_select
-                    )
-                )
-            except (
-                Exception
-            ) as exc:  # provider failures are soft; surfaced through the normal toast path
-                log.warning("background subtitle fetch failed", exc_info=True)
-                reader._subtitle_results.put(
-                    SubtitleFetchResult(
-                        None,
-                        f"Japanese subtitle fetch failed: {exc}",
-                        select_if_unchanged,
-                        initial_sid,
-                        replace,
-                        force_select,
-                    )
-                )
-        finally:
-            if on_done is not None:
-                on_done()
-
-    thread = threading.Thread(target=work, name=f"saitenka-{name}", daemon=True)
-    reader._subtitle_fetch_threads.append(thread)
-    thread.start()
+    request = SubtitleFetchRequest(fetch, select_if_unchanged, initial_sid, replace, force_select)
+    reader._submit_subtitle_fetch(request, name=name, on_done=on_done)
 
 
 def configure_retry(reader: Reader, factory: ProviderFetchFactory | None) -> None:
@@ -515,24 +558,19 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     log.info("%s", status)
 
 
-def apply_fetch_results(reader: Reader) -> None:
-    while True:
-        try:
-            result = reader._subtitle_results.get_nowait()
-        except queue.Empty:
-            return
-        if result.path is None:
-            log.warning("%s", result.status)
-            reader._toast(result.status, "warn")
-        # An explicit picker choice selects the chosen source NOW, from any current language (English
-        # included) — the user picked it on purpose, so the keep-current background contract doesn't apply.
-        elif result.force_select:
-            _replace_japanese_track(
-                reader, result.path, result.status, toast="Japanese subtitles selected"
-            )
-        # A user retry while watching Japanese swaps the on-screen (mistimed) track for the re-synced
-        # file; from English it falls through to the non-disruptive add (fetch JP, keep EN until Alt+t).
-        elif result.replace and reader.subtitle_language == MAIN_LANG:
-            _replace_japanese_track(reader, result.path, result.status)
-        else:
-            _add_background_japanese(reader, result)
+def apply_fetch_result(reader: Reader, result: SubtitleFetchResult) -> None:
+    if result.path is None:
+        log.warning("%s", result.status)
+        reader._toast(result.status, "warn")
+    # An explicit picker choice selects the chosen source NOW, from any current language (English
+    # included) — the user picked it on purpose, so the keep-current background contract doesn't apply.
+    elif result.force_select:
+        _replace_japanese_track(
+            reader, result.path, result.status, toast="Japanese subtitles selected"
+        )
+    # A user retry while watching Japanese swaps the on-screen (mistimed) track for the re-synced
+    # file; from English it falls through to the non-disruptive add (fetch JP, keep EN until Alt+t).
+    elif result.replace and reader.subtitle_language == MAIN_LANG:
+        _replace_japanese_track(reader, result.path, result.status)
+    else:
+        _add_background_japanese(reader, result)

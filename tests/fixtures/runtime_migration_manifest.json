@@ -290,14 +290,6 @@
     ],
     [
       "passive-result-drain",
-      "src/saitenka/app/sub_picker.py::update"
-    ],
-    [
-      "passive-result-drain",
-      "src/saitenka/app/subtitle_modes.py::apply_fetch_results"
-    ],
-    [
-      "passive-result-drain",
       "src/saitenka/app/tooltip.py::apply_render_ahead_failures"
     ],
     [
@@ -982,6 +974,10 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/sub_picker.py::apply_listing"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/sub_picker.py::close_picker"
     ],
     [
@@ -1015,10 +1011,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sub_picker.py::toggle"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sub_picker.py::update"
     ],
     [
       "reader-parameter",
@@ -1078,7 +1070,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::apply_fetch_results"
+      "src/saitenka/app/subtitle_modes.py::apply_fetch_result"
     ],
     [
       "reader-parameter",
@@ -1801,9 +1793,12 @@
         "call:self._interaction_jobs.cancel_all",
         "call:hover_metadata.close",
         "call:self._stop.set",
+        "call:close_lane:subtitle-fetch",
+        "call:close_lane:subtitle-picker",
+        "order:call:self._stop.set>call:close_lane:subtitle-fetch",
+        "order:call:close_lane:subtitle-picker>call:shutil.rmtree",
         "call:self._annotation.close",
-        "loop:self._prefetch_threads=>call:th.join",
-        "loop:self._subtitle_fetch_threads=>call:th.join"
+        "loop:self._prefetch_threads=>call:th.join"
       ],
       "target": "job-broker-lanes",
       "work_package": "3,5",
@@ -1879,7 +1874,7 @@
       "target": "artifact-close",
       "work_package": "3,4,6",
       "replacement": "RemoveSessionArtifacts -> CloseStepOutcome",
-      "test": "temporary artifacts are removed after their providers stop"
+      "test": "temporary artifacts are removed after their providers stop or are quarantined"
     },
     {
       "id": "transport",

@@ -178,6 +178,9 @@ class MpvGateway:
     def submit_job(self, **kwargs) -> bool:
         return self._legacy.submit_job(**kwargs)
 
+    def close_job_lane(self, name: str, timeout: float = 2.0) -> bool:
+        return self._jobs.close_lane(name, timeout)
+
     def register_observers(self, names: tuple[str, ...]) -> dict[str, dict]:
         """Own observer IDs and initial snapshots; reconnect replays the same closed set."""
         with self._lock:
