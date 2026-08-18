@@ -1,19 +1,18 @@
-"""Scroll-ahead wiring: a scroll notch records a single newest-wins request that a prefetch worker
-drains to warm the next blocks OFF the main thread. The block-level render_ahead correctness lives in
-``test_windowed_prefetch.py``; here we pin the request slot, generation-cancellation, and that the
-worker actually warms a real panel."""
+"""Scroll-ahead broker wiring and newest-wins publication."""
 
 from __future__ import annotations
 
 import contextlib
+import threading
 
 from saitenka import otel_metrics
-from saitenka.app import prefetch, tooltip
+from saitenka.app import prefetch, tooltip_raster
 from saitenka.app.config import ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.popups import Panel
 from saitenka.panel import Definition, Entry, panel_rows
 from saitenka.render.banded import WindowedPanel
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
 WIDTH = 384
 
@@ -38,13 +37,45 @@ class _RecordingPanel:
     def __init__(self):
         self.calls = []
 
+    def viewport(self, scroll, view_h, *, scale=1.0):
+        self.calls.append(("viewport", scroll, view_h, scale))
+
     def render_ahead(self, scroll, view_h, *, direction, should_cancel, scale=1.0):
         self.calls.append((scroll, view_h, direction, should_cancel(), scale))
         return len(self.calls)
 
 
+class _ManualSubmitter:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return True
+
+    def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
+        call = self.calls.pop(0)
+        request = call["request"]
+        result = (
+            tooltip_raster.run_render_ahead(request, threading.Event())
+            if run and outcome is EffectOutcome.SUCCEEDED
+            else None
+        )
+        call["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                call["owner"],
+                call["identity"],
+                outcome,
+                result=result,
+                error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
+            )
+        )
+
+
 def _reader() -> Reader:
     r = Reader(_FakeIPC(), options=ReaderOptions(prefetch=True))
+    r._render_ahead_submit = _ManualSubmitter()
     r._tip_view_h = 300
     r._tip_scroll = 120
     r._tip_view.desired_scroll = 120
@@ -59,59 +90,100 @@ def _tall_panel() -> Panel:
     return Panel(WindowedPanel(panel_rows(entry, WIDTH), WIDTH, render_block_fn=None), "ほんめい")
 
 
-def test_scroll_records_the_newest_request_only():
+def test_scroll_keeps_one_newest_pending_request():
     r = _reader()
     r._tip_state = _RecordingPanel()  # type: ignore[assignment]  # only the slot fields are read
-    prefetch.request_render_ahead(r, r._tip_view, 1)
+    r._request_render_ahead(r._tip_view, 1)
     r._tip_scroll = 999
     r._tip_view.desired_scroll = 999
-    prefetch.request_render_ahead(r, r._tip_view, -1)
-    req = r._render_ahead_req
-    assert req is not None
+    r._request_render_ahead(r._tip_view, -1)
+    pending = r._render_ahead.pending
+    assert pending is not None
+    req = pending[1]
     assert (req.scroll, req.view_h, req.direction) == (999, 300, -1)  # newest scroll won
 
 
-def test_engaged_request_survives_disabled_speculative_prefetch():
-    r = _reader()
-    r._tip_state = None
-    prefetch.request_render_ahead(r, r._tip_view, 1)
-    assert r._render_ahead_req is None
-
-    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
-    r.prefetch = False
-    prefetch.request_render_ahead(r, r._tip_view, 1)
-    assert r._render_ahead_req is not None
-
-
-def test_worker_drains_the_slot_and_warms_off_thread():
+def test_newest_pending_request_runs_once_after_inflight_completion():
     r = _reader()
     panel = _RecordingPanel()
     r._tip_state = panel  # type: ignore[assignment]
-    prefetch.request_render_ahead(r, r._tip_view, 1)
+    r._request_render_ahead(r._tip_view, 1)
+    r._tip_view.desired_scroll = 999
+    r._request_render_ahead(r._tip_view, -1)
 
-    handled = prefetch._try_render_ahead(r)
+    r._render_ahead_submit.finish()
+    assert len(r._render_ahead_submit.calls) == 1
+    r._tip_view.scroll = 999
+    r._render_ahead_submit.finish()
 
-    assert handled is True
-    assert r._render_ahead_req is None  # slot drained
+    assert [call[0] for call in panel.calls if isinstance(call[0], int)] == [999]
+    assert r._render_ahead_submit.calls == []
+
+
+def test_running_stale_request_observes_supersession_before_newest_runs():
+    entered = threading.Event()
+    release = threading.Event()
+    cancelled = []
+
+    class BlockingPanel(_RecordingPanel):
+        def render_ahead(
+            self, _scroll, _view_h, *, direction: int, should_cancel, scale: float = 1.0
+        ):
+            _ = direction, scale
+            entered.set()
+            release.wait(1)
+            cancelled.append(should_cancel())
+
+    r = _reader()
+    old = BlockingPanel()
+    new = _RecordingPanel()
+    r._tip_state = old  # type: ignore[assignment]
+    r._request_render_ahead(r._tip_view, 1)
+    worker = threading.Thread(target=r._render_ahead_submit.finish)
+    worker.start()
+    assert entered.wait(1)
+
+    r._tip_state = new  # type: ignore[assignment]
+    r._request_render_ahead(r._tip_view, -1)
+    release.set()
+    worker.join(1)
+    r._render_ahead_submit.finish()
+
+    assert cancelled == [True]
+    assert [call[0] for call in new.calls if isinstance(call[0], int)] == [120]
+
+
+def test_render_ahead_survives_disabled_speculative_prefetch():
+    r = _reader()
+    r._tip_state = None
+    assert not r._request_render_ahead(r._tip_view, 1)
+
+    r._tip_state = _RecordingPanel()  # type: ignore[assignment]
+    r.prefetch = False
+    assert r._request_render_ahead(r._tip_view, 1)
+
+
+def test_broker_completion_warms_the_requested_viewport():
+    r = _reader()
+    panel = _RecordingPanel()
+    r._tip_state = panel  # type: ignore[assignment]
+    r._request_render_ahead(r._tip_view, 1)
+    r._render_ahead_submit.finish()
     # warmed at the scroll pos, not cancelled, at the (bucketed) display scale — native bands (one panel)
     assert panel.calls == [(120, 300, 1, False, r._raster_scale)]
 
 
-def test_empty_slot_is_not_handled():
-    assert prefetch._try_render_ahead(_reader()) is False
-
-
-def test_stale_request_from_a_word_switch_is_dropped():
+def test_stale_completion_from_a_word_switch_is_not_published():
     r = _reader()
     panel = _RecordingPanel()
     r._tip_state = panel  # type: ignore[assignment]
-    prefetch.request_render_ahead(r, r._tip_view, 1)
-    r._prefetch_gen += 1  # a line change / seek invalidates the in-flight request
-
-    handled = prefetch._try_render_ahead(r)
-
-    assert handled is True  # consumed (so the worker loops), but...
-    assert panel.calls == []  # ...never rendered the stale panel
+    r._request_render_ahead(r._tip_view, 1)
+    r._prefetch_gen += 1
+    r._cancel_render_ahead()
+    before = r._tip_view.scroll
+    r._render_ahead_submit.finish()
+    assert r._tip_view.scroll == before
+    assert panel.calls == []
 
 
 def test_prefetch_state_cancel_bumps_the_generation():
@@ -128,9 +200,8 @@ def test_worker_actually_warms_a_real_panel():
     r = _reader()
     r._tip_scroll = 0
     r._tip_state = _tall_panel()
-    prefetch.request_render_ahead(r, r._tip_view, 1)
-
-    prefetch._try_render_ahead(r)
+    r._request_render_ahead(r._tip_view, 1)
+    r._render_ahead_submit.finish()
 
     assert r._tip_state.windowed.cached_blocks > 0  # blocks warmed without any viewport() call
 
@@ -152,10 +223,8 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
     panel = BrokenPanel()
     r._tip_state = panel  # type: ignore[assignment]
     r._tip_view.job_id = r._interaction_jobs.begin("scroll")
-    prefetch.request_render_ahead(r, r._tip_view, 1)
-
-    assert prefetch._try_render_ahead(r)
-    tooltip.apply_render_ahead_failures(r)
+    r._request_render_ahead(r._tip_view, 1)
+    r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert r._tip_view.desired_scroll == r._tip_view.scroll
     assert spans[-1][0] == "scroll_request"
@@ -169,16 +238,28 @@ def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> N
     r._tip_view.desired_scroll = 100
     old_job = r._interaction_jobs.begin("scroll")
     r._tip_view.job_id = old_job
-    prefetch.request_render_ahead(r, r._tip_view, -1)
+    r._request_render_ahead(r._tip_view, -1)
 
     r._tip_view.desired_scroll = 200
     r._tip_view.job_id = r._interaction_jobs.begin("scroll")
     r._tip_view.desired_scroll = 100
     current_job = r._interaction_jobs.begin("scroll")
     r._tip_view.job_id = current_job
-    r._render_ahead_failures.put((r._prefetch_gen, panel, 100, old_job))
-
-    tooltip.apply_render_ahead_failures(r)
+    r._render_ahead_submit.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert r._tip_view.desired_scroll == 100
     assert r._tip_view.job_id == current_job
+
+
+def test_close_rejects_new_work_and_quarantines_late_completion() -> None:
+    r = _reader()
+    panel = _RecordingPanel()
+    r._tip_state = panel  # type: ignore[assignment]
+    r._request_render_ahead(r._tip_view, 1)
+    before = r._tip_view.scroll
+
+    tooltip_raster.close(r._render_ahead)
+    r._render_ahead_submit.finish()
+
+    assert r._tip_view.scroll == before
+    assert not r._request_render_ahead(r._tip_view, -1)

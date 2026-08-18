@@ -20,7 +20,6 @@ from saitenka.app.perf import gil_disabled
 
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
-    from saitenka.app.popups import Panel
     from saitenka.app.tokenize import Token
     from saitenka.subtitles import CueIndex
 
@@ -73,21 +72,6 @@ class HeadPrefetchItem:
     token: Token
     inflected: str
     mined: bool
-
-
-@dataclass(frozen=True, slots=True)
-class RenderAheadReq:
-    """The latest scroll-ahead warm for the on-screen tooltip: render the blocks just beyond the
-    viewport in the scroll ``direction`` (+1 down / -1 up) off the main thread. Held in a single slot
-    on the Reader (newest scroll wins — only the current position matters), not a queue. ``gen`` is the
-    prefetch generation at request time, so a word switch / seek drops a stale request."""
-
-    gen: int
-    panel: Panel
-    scroll: int
-    view_h: int
-    direction: int
-    job_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,10 +154,6 @@ class PrefetchState:
         self.key: tuple[str, bool] | None = (
             None  # last (sub_text, engaged) queued — dedupes re-runs
         )
-        # Scroll-ahead: a single slot (newest scroll wins) the worker drains; guarded by its own lock.
-        self.render_ahead_req: RenderAheadReq | None = None
-        self.render_ahead_lock = threading.Lock()
-        self.render_ahead_failures: queue.SimpleQueue = queue.SimpleQueue()
         # Engaged-hover (tier-3 cold-miss deferred render): a newest-wins slot the worker drains at TOP
         # priority + a results queue it hands the composed head back on for the tick to apply.
         self.engaged_req: EngagedHoverReq | None = None
@@ -323,8 +303,6 @@ def prefetch_worker(reader: Reader) -> None:
         if _try_engaged_nav(reader):  # a clicked cross-ref — top intent, like a hover cold-miss
             continue
         if _try_engaged_hover(reader):  # the word hovered NOW that missed everything — top priority
-            continue
-        if _try_render_ahead(reader):  # on-screen scroll warm next
             continue
         if _try_head_prefetch_item(reader):
             continue
@@ -547,61 +525,6 @@ def drain_open_results(reader: Reader):
             yield reader._open_results.get_nowait()
         except queue.Empty:
             return
-
-
-def request_render_ahead(reader: Reader, view, direction: int) -> None:
-    """Record a scroll-ahead warm for ``view`` (the base tooltip or the nested popup) in ``direction``
-    (newest wins — only the popup being scrolled matters). Main-thread and cheap: just stores the
-    request; a worker does the render. No-op when prefetch is off or the view has no panel."""
-    st = view.state
-    if st is None:
-        return
-    req = RenderAheadReq(
-        reader._prefetch_gen,
-        st,
-        view.desired_scroll,
-        view.view_h,
-        direction,
-        view.job_id,
-    )
-    with reader._render_ahead_lock:
-        reader._render_ahead_req = req
-
-
-def _try_render_ahead(reader: Reader) -> bool:
-    """Drain the scroll-ahead slot and warm the next blocks off the main thread. ``True`` when a
-    request was handled (so the worker re-checks the on-screen warm before the cheaper decode queue)."""
-    with reader._render_ahead_lock:
-        req = reader._render_ahead_req
-        reader._render_ahead_req = None
-    if req is None:
-        return False
-    if reader._stop.is_set() or req.gen != reader._prefetch_gen:
-        return True  # stale (word changed / seek / closing) — handled, keep looping
-    try:
-        scale = reader._raster_scale
-        cancel = lambda: reader._stop.is_set() or req.gen != reader._prefetch_gen  # noqa: E731
-        # One-panel crisp: the main thread painted SOFT and never rasters. Warm the CURRENT native
-        # viewport here (worker) so the poll loop can upgrade it to crisp, then warm the next screen ahead.
-        if scale > 1.0:
-            req.panel.viewport(
-                req.scroll, req.view_h, scale=scale
-            )  # render+cache the visible native bands
-        req.panel.render_ahead(
-            req.scroll, req.view_h, direction=req.direction, should_cancel=cancel, scale=scale
-        )
-        if scale > 1.0:
-            # A flick that outruns the native render-ahead reveals a region the soft-first blit rasters
-            # from RAW 1× bands (blit_panel warm_only=False) — synchronously on the scroll tick (#297).
-            # Warm those raw bands ahead too, so the soft path finds them cached instead of rastering on
-            # the interactive thread. (scale==1 already warmed raw above — this covers the native case.)
-            req.panel.render_ahead(
-                req.scroll, req.view_h, direction=req.direction, should_cancel=cancel, scale=1.0
-            )
-    except Exception:
-        log.debug("render-ahead failed", exc_info=True)  # a bad block must never kill the worker
-        reader._render_ahead_failures.put((req.gen, req.panel, req.scroll, req.job_id))
-    return True
 
 
 def _enqueue(reader: Reader, item: PrefetchItem) -> None:

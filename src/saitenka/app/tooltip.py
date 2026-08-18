@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import dataclasses as _dc
 import logging
-import queue
 import time
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -991,14 +990,12 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         render_tip_view(reader)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
     # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
-    # direct-paint (#149) path is soft too. Ask the scroll-ahead worker to warm the native bands and let
-    # the poll loop (apply_pending_crisp) upgrade soft→crisp. Keep the source token for scroll warms.
+    # direct-paint (#149) path is soft too. Ask the raster lane to warm the native bands; its completion
+    # upgrades soft→crisp. Keep the source token for scroll warms.
     reader._tip_tok, reader._tip_inflected = tok, inflected
     if painted:
         reader._crisp_pending = True  # direct-paint is soft → poll upgrades once bands warm
-    prefetch.request_render_ahead(
-        reader, reader._tip_view, 1
-    )  # warm the current native viewport off the main thread
+    reader._request_render_ahead(reader._tip_view, 1)
     return True
 
 
@@ -1464,8 +1461,8 @@ def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
     view.job_kind = "scroll"
     view.desired_scroll = ns
     view.hide_at = 0.0  # scrolling counts as interacting → keep this popup up
-    prefetch.request_render_ahead(reader, view, 1 if delta > 0 else -1)
-    if not prefetch.workers_running(reader):
+    deferred = reader._request_render_ahead(view, 1 if delta > 0 else -1)
+    if not deferred:
         view.scroll = ns
         render_view(reader, view)
         return True
@@ -1485,26 +1482,6 @@ def apply_pending_scroll(reader: Reader, view: PopupView) -> None:
         return
     view.scroll = view.desired_scroll
     render_view(reader, view)
-
-
-def apply_render_ahead_failures(reader: Reader) -> None:
-    """Retire failed scroll warms without leaving a viewport pending forever."""
-    while True:
-        try:
-            gen, panel, desired_scroll, job_id = reader._render_ahead_failures.get_nowait()
-        except queue.Empty:
-            return
-        if gen != reader._prefetch_gen:
-            continue
-        for view in (reader._tip_view, reader._nest):
-            if (
-                view.state is panel
-                and view.desired_scroll == desired_scroll
-                and view.job_id == job_id
-            ):
-                view.desired_scroll = view.scroll
-                reader._interaction_jobs.finish("scroll", "failed", job_id=job_id)
-                break
 
 
 def scroll_tip(reader: Reader, delta: int) -> None:
