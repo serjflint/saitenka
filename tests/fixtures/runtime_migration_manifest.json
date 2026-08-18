@@ -10,7 +10,7 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._anchor_subtitles"
+      "src/saitenka/app/controller.py::Reader._apply_subtitle_effect"
     ],
     [
       "direct-mpv-command",

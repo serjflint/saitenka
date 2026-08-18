@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import pytest
+
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.subtitle_intents import (
     AcquireSubtitles,
     AcquisitionSource,
     AdoptCurrentAsTarget,
     Announce,
+    CopyCueText,
+    SeekCue,
     SelectTrack,
     SetAnnotationMode,
+    SetSubtitleDelay,
     SubtitleCommand,
     SubtitleInputs,
+    ToggleTranslation,
     reduce,
 )
 from saitenka.app.subtitle_selection import SubtitleTracks
@@ -27,6 +33,10 @@ def inputs(**overrides: object) -> SubtitleInputs:
         "retry_in_flight": False,
         "media_path": "/media/ep1.mkv",
         "has_external_sub": False,
+        "has_cue_lines": True,
+        "cue_starts": (1.0, 5.0, 9.0),
+        "playhead": 5.2,
+        "sub_delay": 0.0,
     }
     return SubtitleInputs(**{**base, **overrides})  # type: ignore[arg-type]
 
@@ -131,3 +141,61 @@ def test_the_reducer_never_mutates_its_inputs() -> None:
         reduce(command, given)
 
     assert given == inputs()
+
+
+# --- navigation, anchoring, copy, translation (WP4.5) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "delta"),
+    [
+        (SubtitleCommand.NAVIGATE_PREVIOUS, -1),
+        (SubtitleCommand.REPLAY_CUE, 0),
+        (SubtitleCommand.NAVIGATE_NEXT, 1),
+    ],
+)
+def test_navigation_asks_for_the_matching_step(command: SubtitleCommand, delta: int) -> None:
+    assert reduce(command, inputs()) == (SeekCue(delta),)
+
+
+def test_anchoring_snaps_the_nearest_cue_to_the_playhead() -> None:
+    effects = reduce(SubtitleCommand.ANCHOR_TIMING, inputs(playhead=5.2, sub_delay=0.0))
+
+    assert effects[0] == SetSubtitleDelay(pytest.approx(0.2))
+    assert isinstance(effects[1], Announce)
+
+
+def test_anchoring_is_cumulative_from_the_current_delay() -> None:
+    """The nearest cue is chosen on the DELAYED timeline — what is actually on screen — so a
+    second anchor refines the first instead of fighting it."""
+    effects = reduce(SubtitleCommand.ANCHOR_TIMING, inputs(playhead=5.2, sub_delay=4.0))
+
+    # With a +4s delay the cue starting at 1.0 shows at 5.0, so it is the one being heard.
+    assert effects[0] == SetSubtitleDelay(pytest.approx(4.2))
+
+
+def test_anchoring_without_a_track_says_so() -> None:
+    effects = reduce(SubtitleCommand.ANCHOR_TIMING, inputs(cue_starts=()))
+
+    assert effects == (Announce("No subtitle track to anchor", "warn"),)
+
+
+def test_anchoring_without_a_playhead_does_nothing() -> None:
+    assert reduce(SubtitleCommand.ANCHOR_TIMING, inputs(playhead=None)) == ()
+
+
+def test_copying_a_cue_copies_and_confirms() -> None:
+    effects = reduce(SubtitleCommand.COPY_LINE, inputs(has_cue_lines=True))
+
+    assert effects == (CopyCueText(), Announce("copied line"))
+
+
+def test_copying_with_nothing_rendered_warns_instead() -> None:
+    effects = reduce(SubtitleCommand.COPY_LINE, inputs(has_cue_lines=False))
+
+    assert effects == (Announce("no line to copy", "warn"),)
+    assert not any(isinstance(effect, CopyCueText) for effect in effects)
+
+
+def test_translation_toggles_unconditionally() -> None:
+    assert reduce(SubtitleCommand.TOGGLE_TRANSLATION, inputs()) == (ToggleTranslation(),)

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
+from saitenka.app.subnav_policy import anchor_delay
 from saitenka.app.subtitle_selection import toggle_target
 
 if TYPE_CHECKING:
@@ -29,6 +30,12 @@ class SubtitleCommand(StrEnum):
     MARK_CURRENT_JAPANESE = "mark-current-japanese"
     RETRY_ACQUISITION = "retry-acquisition"
     TOGGLE_ANNOTATION_MODE = "toggle-annotation-mode"
+    NAVIGATE_PREVIOUS = "navigate-previous"
+    NAVIGATE_NEXT = "navigate-next"
+    REPLAY_CUE = "replay-cue"
+    ANCHOR_TIMING = "anchor-timing"
+    COPY_LINE = "copy-line"
+    TOGGLE_TRANSLATION = "toggle-translation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +50,12 @@ class SubtitleInputs:
     retry_in_flight: bool
     media_path: str | None
     has_external_sub: bool
+    #: Rendered cue lines exist, so there is something to copy.
+    has_cue_lines: bool = False
+    #: Authored cue start times, for anchoring. Empty when no index is loaded.
+    cue_starts: tuple[float, ...] = ()
+    playhead: float | None = None
+    sub_delay: float = 0.0
 
 
 # --- effects ------------------------------------------------------------------------------------
@@ -83,13 +96,43 @@ class SetAnnotationMode:
 
 
 @dataclass(frozen=True, slots=True)
+class SeekCue:
+    """Step the subtitle timeline: -1 previous, 0 replay, +1 next."""
+
+    delta: int
+
+
+@dataclass(frozen=True, slots=True)
+class SetSubtitleDelay:
+    seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class CopyCueText:
+    """Copy the whole cue under the cursor."""
+
+
+@dataclass(frozen=True, slots=True)
+class ToggleTranslation:
+    """Reveal or hide the secondary-language line."""
+
+
+@dataclass(frozen=True, slots=True)
 class Announce:
     text: str
     kind: str = "ok"
 
 
 type SubtitleEffect = (
-    SelectTrack | AdoptCurrentAsTarget | AcquireSubtitles | SetAnnotationMode | Announce
+    SelectTrack
+    | AdoptCurrentAsTarget
+    | AcquireSubtitles
+    | SetAnnotationMode
+    | SeekCue
+    | SetSubtitleDelay
+    | CopyCueText
+    | ToggleTranslation
+    | Announce
 )
 
 
@@ -130,11 +173,46 @@ def _toggle_annotation_mode(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...
     return (SetAnnotationMode(mode, redraw=inputs.has_cue), Announce(f"annotations: {label}"))
 
 
+def _navigate(delta: int):
+    def reduce_navigation(_inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
+        return (SeekCue(delta),)
+
+    return reduce_navigation
+
+
+def _anchor(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
+    if not inputs.cue_starts:
+        return (Announce("No subtitle track to anchor", "warn"),)
+    if inputs.playhead is None:
+        return ()  # no playhead yet: nothing to anchor against, and nothing worth saying
+    delay = anchor_delay(
+        inputs.cue_starts, playhead=inputs.playhead, current_delay=inputs.sub_delay
+    )
+    assert delay is not None
+    return (SetSubtitleDelay(delay), Announce(f"Subtitles anchored — delay {delay:+.1f}s"))
+
+
+def _copy_line(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
+    if not inputs.has_cue_lines:
+        return (Announce("no line to copy", "warn"),)
+    return (CopyCueText(), Announce("copied line"))
+
+
+def _toggle_translation(_inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
+    return (ToggleTranslation(),)
+
+
 _REDUCERS = {
     SubtitleCommand.TOGGLE_LANGUAGE: _toggle_language,
     SubtitleCommand.MARK_CURRENT_JAPANESE: _mark_current_japanese,
     SubtitleCommand.RETRY_ACQUISITION: _retry,
     SubtitleCommand.TOGGLE_ANNOTATION_MODE: _toggle_annotation_mode,
+    SubtitleCommand.NAVIGATE_PREVIOUS: _navigate(-1),
+    SubtitleCommand.NAVIGATE_NEXT: _navigate(1),
+    SubtitleCommand.REPLAY_CUE: _navigate(0),
+    SubtitleCommand.ANCHOR_TIMING: _anchor,
+    SubtitleCommand.COPY_LINE: _copy_line,
+    SubtitleCommand.TOGGLE_TRANSLATION: _toggle_translation,
 }
 
 

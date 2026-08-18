@@ -63,3 +63,17 @@ def resolve_target(
     if target < 0:  # out of range / ambiguous
         return None
     return NavigationTarget(target, index.cues[target])
+
+
+def anchor_delay(
+    cue_starts: tuple[float, ...], *, playhead: float, current_delay: float
+) -> float | None:
+    """The `sub-delay` that snaps the cue the user is hearing to start now.
+
+    The cue nearest the playhead is chosen against the *delayed* timeline, because that is what is
+    on screen — so a second anchor refines the first rather than fighting it.
+    """
+    if not cue_starts:
+        return None
+    nearest = min(cue_starts, key=lambda start: abs((start + current_delay) - playhead))
+    return playhead - nearest

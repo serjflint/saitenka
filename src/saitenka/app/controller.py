@@ -1493,11 +1493,7 @@ class Reader:
 
     def copy_line(self) -> None:
         """Shift+C — copy the whole subtitle cue under the cursor (all its lines)."""
-        if not self.lines:
-            self._toast("no line to copy", "warn", 1.2)
-            return
-        copy_clipboard("\n".join(self._sentence_lines()))
-        self._toast("copied line", "ok", 1.2)
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.COPY_LINE)
 
     def _flash(self, oid: int) -> None:
         tooltip.flash(self, oid)
@@ -2089,7 +2085,7 @@ class Reader:
         translation.sync_auto_translation(self)
 
     def toggle_translation(self) -> None:
-        translation.toggle_translation(self)
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
 
     def toggle_overlay(self) -> None:
         if self.ov.visible:
@@ -2115,6 +2111,8 @@ class Reader:
         """Read every fact the subtitle commands decide from, once, before deciding."""
         from saitenka.app.subtitle_modes import _current_external_sub
 
+        index = self._sub_index
+        playhead = self._prop("time-pos")
         return subtitle_intents.SubtitleInputs(
             tracks=subtitle_modes.discover_tracks(self.ipc, self.subtitle_slang),
             active_sid=self._get("sid"),
@@ -2124,6 +2122,10 @@ class Reader:
             retry_in_flight=self.episode.subtitle.retry_active,
             media_path=self._get("path"),
             has_external_sub=_current_external_sub(self.ipc) is not None,
+            has_cue_lines=bool(self.lines),
+            cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),
+            playhead=None if playhead is None else float(playhead),
+            sub_delay=float(self._prop("sub-delay") or 0.0),
         )
 
     def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
@@ -2142,6 +2144,16 @@ class Reader:
             self._annotation_hover = False
             if effect.redraw:
                 self._draw_subtitle()
+        elif isinstance(effect, subtitle_intents.SeekCue):
+            self.subtitle_pipeline.invalidate()
+            self._sub_nav(effect.delta)
+            self.ipc.command("sub-seek", str(effect.delta))
+        elif isinstance(effect, subtitle_intents.SetSubtitleDelay):
+            self.ipc.command("set_property", "sub-delay", f"{effect.seconds:.3f}")
+        elif isinstance(effect, subtitle_intents.CopyCueText):
+            copy_clipboard("\n".join(self._sentence_lines()))
+        elif isinstance(effect, subtitle_intents.ToggleTranslation):
+            translation.toggle_translation(self)
         elif isinstance(effect, subtitle_intents.Announce):
             self._toast(effect.text, effect.kind)
 
@@ -2237,26 +2249,22 @@ class Reader:
         log.info("registered %d global keybinds (anki=%s)", bound, self.anki is not None)
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
+    def _navigate_previous(self) -> None:
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.NAVIGATE_PREVIOUS)
+
+    def _navigate_next(self) -> None:
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.NAVIGATE_NEXT)
+
+    def _replay_cue(self) -> None:
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.REPLAY_CUE)
+
     def _anchor_subtitles(self) -> None:
         """One-press manual re-time: snap the sub cue nearest the playhead to start NOW. For when
         auto-sync leaves a residual offset (e.g. a different-length OP), pause as a line's audio
         begins and press — mpv's ``sub-delay`` shifts so that cue lands here, and every later cue
         follows by the same offset. The overlay reads the delayed ``sub-text``, so the on-screen line
         moves with it. Cumulative (anchors from the current delay), so a second anchor refines a first."""
-        index = self._sub_index
-        if index is None or not index.cues:
-            self._toast("No subtitle track to anchor", "warn")
-            return
-        playhead = self._prop("time-pos")
-        if playhead is None:
-            return
-        playhead = float(playhead)
-        delay = float(self._prop("sub-delay") or 0.0)
-        # the cue currently displayed nearest the playhead is the one the user is hearing → snap it
-        nearest = min(index.cues, key=lambda c: abs((c.start + delay) - playhead))
-        new_delay = playhead - nearest.start
-        self.ipc.command("set_property", "sub-delay", f"{new_delay:.3f}")
-        self._toast(f"Subtitles anchored — delay {new_delay:+.1f}s")
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.ANCHOR_TIMING)
 
     def _build_command_router(self) -> LegacyCommandExecutor:
         """Assemble feature-owned actions once; handlers are bound and receive no god context."""
@@ -2282,7 +2290,6 @@ class Reader:
             MINE_MSG: action("mine_current"),
             MINE_VIDEO_MSG: action("mine_current_video"),
             MINE_ALL_MSG: action("bulk_mine"),
-            TRANS_MSG: action("toggle_translation"),
             OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
             PROFILE_CYCLE_MSG: action("cycle_profile"),
             HOVER_PAUSE_MSG: action("toggle_hover_pause"),
@@ -2300,40 +2307,30 @@ class Reader:
             SCROLL_DOWN_MSG: wheel(1),
             SPEAK_MSG: action("speak_hovered"),
             COPY_MSG: action("copy_hovered"),
-            COPY_LINE_MSG: action("copy_line"),
             COPY_CLICK_MSG: action("copy_click"),
             CLICK_MSG: action("on_click"),
-            SUB_PREV_MSG: lambda: seek(-1),
-            SUB_NEXT_MSG: lambda: seek(1),
-            SUB_REPLAY_MSG: lambda: seek(0),
             KANJI_MSG: action("kanji_current"),
             TIP_UP_MSG: scroll(-1),
             TIP_DOWN_MSG: scroll(1),
             TIP_CLOSE_MSG: action("_tip_close_or_back"),
-            SUB_ANCHOR_MSG: action("_anchor_subtitles"),
         }
-        subtitle_owned = {
-            TRANS_MSG,
-            COPY_LINE_MSG,
-            SUB_PREV_MSG,
-            SUB_NEXT_MSG,
-            SUB_REPLAY_MSG,
-            SUB_ANCHOR_MSG,
-        }
-        # Migrated (WP4.2): the decision is `subtitle_intents.reduce`, so these carry no
-        # compatibility binding at all.
+        # Migrated (WP4.2 / WP4.5): the decision is `subtitle_intents.reduce`, so these carry
+        # no compatibility binding at all.
         reducers = {
             SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
             SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
             SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
             ANNOTATION_MSG: action("toggle_annotation_mode"),
+            TRANS_MSG: action("toggle_translation"),
+            COPY_LINE_MSG: action("copy_line"),
+            SUB_PREV_MSG: action("_navigate_previous"),
+            SUB_NEXT_MSG: action("_navigate_next"),
+            SUB_REPLAY_MSG: action("_replay_cue"),
+            SUB_ANCHOR_MSG: action("_anchor_subtitles"),
         }
         return LegacyCommandExecutor(
             {
-                name: LegacyCommandBinding(
-                    handler,
-                    "work-package-4" if name in subtitle_owned else "work-package-5",
-                )
+                name: LegacyCommandBinding(handler, "work-package-5")
                 for name, handler in handlers.items()
             },
             reducers=reducers,
