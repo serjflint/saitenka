@@ -352,6 +352,31 @@ def settle_jobs(result: Reader, ipc: FakeIPC) -> None:
     ipc.deliver_runtime_jobs()
 
 
+def visible_pixel_changes(ipc: FakeIPC) -> list[tuple[object, object]]:
+    """Every moment the command trace changed what the user can actually see.
+
+    Neither a raw trace nor a final-state fold answers "did the picture move": the trace fails on a
+    repaint that re-sends the payload already on screen, and the fold cannot see a flicker — a
+    change and a change back land on the same final state. So the sequence of *effective* writes is
+    the observable, and an unchanged suffix is the claim.
+    """
+    state: dict[object, object] = {}
+    changes: list[tuple[object, object]] = []
+    for command in ipc.commands:
+        if command[:2] == ("set_property", "sub-visibility"):
+            key, value = "sub-visibility", command[2]
+        elif command and command[0] == "osd-overlay":
+            key, value = ("osd-overlay", command[1]), command[2:]
+        elif command and command[0] in {"overlay-add", "overlay-remove"}:
+            key, value = ("overlay", command[1]), command
+        else:
+            continue
+        if state.get(key, object()) != value:
+            state[key] = value
+            changes.append((key, value))
+    return changes
+
+
 def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
     """Advance past the batch boundary the way the next drain would.
 
@@ -556,9 +581,46 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     assert result.native_geometry.schedule(result)
     settle_jobs(result, ipc)
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
-
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
     assert result.boxes
+    result.close()
+
+
+def test_a_late_valid_hit_map_restores_interaction_without_changing_visible_pixels(
+    tmp_path: Path,
+) -> None:
+    """WP4.4's positive case, which quarantining stale results does not cover.
+
+    Retiring a late result is only half the contract: a result that is late but still *valid* for
+    the cue on screen has to be taken. The failure mode it guards is the mirror of the quarantine —
+    a restore that repaints, so the user sees the cue flicker to prove a hit map they never see.
+    """
+    result, ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.boxes
+
+    # A provider failure retires the hit boxes for the cue that is still displayed.
+    backend.error = RuntimeError("font provider unavailable")
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result)
+    settle_jobs(result, ipc)
+    assert not result.native_geometry.apply(result)
+    assert result.boxes == []
+    degraded = visible_pixel_changes(ipc)
+
+    # The retry lands while that same cue is still on screen: interaction comes back…
+    backend.error = None
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result)
+    settle_jobs(result, ipc)
+
+    assert result.native_geometry.status.geometry_ready
+    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    assert visible_pixel_changes(ipc) == degraded  # …and nothing the user can see moved
     result.close()
 
 
