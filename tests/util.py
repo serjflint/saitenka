@@ -267,9 +267,11 @@ class FakeIPC:
 
     def command_async(self, *args, expected_connection_epoch=None):
         del expected_connection_epoch
-        self.commands.append(args)
+        # Delegate to `command` rather than recording directly: mpv has one channel, and a subclass
+        # that simulates state (track selection, sub-add/remove) must see async writes too.
+        reply = self.command(*args)
         future: Future[dict] = Future()
-        future.set_result({"error": "success", "data": None})
+        future.set_result({"error": "success", **reply})
         request = IPCRequest(len(self.requests), 0, future)
         self.requests.append(request)
         return request
@@ -294,6 +296,11 @@ class FakeIPC:
     def dispatch_runtime_terminal(self, completion) -> None:
         if self._runtime_gateway is not None:
             self._runtime_gateway.dispatch_terminal(completion)
+
+    def submit_runtime_mpv(self, **kwargs) -> bool:
+        if self._runtime_gateway is None:
+            return False
+        return self._runtime_gateway.submit_mpv(**kwargs)
 
     def publish_legacy_command_outcome(self, outcome) -> None:
         if self._runtime_gateway is None:
