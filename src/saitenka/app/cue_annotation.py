@@ -7,7 +7,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
 from saitenka import otel_metrics
@@ -66,6 +66,47 @@ class AnnotationResult:
     error: Exception | None
     queue_wait_ms: float
     work_ms: float
+
+
+class AnnotationDisposition(StrEnum):
+    """What an arrived annotation result is allowed to do to live state."""
+
+    PUBLISH = "published"
+    #: Failed for the cue that is still on screen: drop the pending upgrade and keep plain pixels.
+    DEGRADE = "degrade"
+    #: Failed for a cue that is already gone — nothing to degrade.
+    FAILED_STALE = "failed-stale"
+    #: The tokenizer/dictionary generation moved on while the work was in flight.
+    STALE_GENERATION = "stale-generation"
+    #: The cue identity was retired or replaced while the work was in flight.
+    STALE_CUE = "stale-cue"
+
+    @property
+    def failed(self) -> bool:
+        return self in {AnnotationDisposition.DEGRADE, AnnotationDisposition.FAILED_STALE}
+
+
+def disposition(
+    result: AnnotationResult,
+    *,
+    current_identity: CueIdentity | None,
+    current_key: AnnotationWorkKey | None,
+    cue_retired: bool,
+    pending_text: str | None,
+) -> AnnotationDisposition:
+    """Decide what a completion may do. Identity beats arrival order: a result publishes only
+    while its cue identity, work generation and pending upgrade all still match. A failure can
+    only degrade interaction for the cue that is still on screen — never change its pixels."""
+    matches_current = result.identity is not None and result.identity == current_identity
+    if result.error is not None or result.cue is None or result.identity is None:
+        if matches_current and result.key == current_key:
+            return AnnotationDisposition.DEGRADE
+        return AnnotationDisposition.FAILED_STALE
+    if result.key != current_key:
+        return AnnotationDisposition.STALE_GENERATION
+    if cue_retired or not matches_current or result.identity.normalized_text != pending_text:
+        return AnnotationDisposition.STALE_CUE
+    return AnnotationDisposition.PUBLISH
 
 
 @dataclass(frozen=True, slots=True)

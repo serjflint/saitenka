@@ -1127,9 +1127,8 @@ class Reader:
 
     def _publish_annotation(self, cue: TokenizedCue, identity: cue_annotation.CueIdentity) -> bool:
         if (
-            self._cue_retired
-            or identity != self._current_cue_identity
-            or identity.normalized_text != self._sub_pending
+            self._annotation_disposition_for(identity, cue)
+            is not cue_annotation.AnnotationDisposition.PUBLISH
         ):
             return False
         self.token_cache.put(identity.normalized_text, cue)
@@ -1141,31 +1140,49 @@ class Reader:
         self._draw_subtitle()
         return True
 
+    def _annotation_disposition_for(
+        self, identity: cue_annotation.CueIdentity, cue: TokenizedCue | None
+    ) -> cue_annotation.AnnotationDisposition:
+        return self._annotation_disposition(
+            cue_annotation.AnnotationResult(
+                self._annotation_key(identity.normalized_text), identity, cue, None, 0.0, 0.0
+            )
+        )
+
+    def _annotation_disposition(
+        self, result: cue_annotation.AnnotationResult
+    ) -> cue_annotation.AnnotationDisposition:
+        current_key = (
+            self._annotation_key(result.identity.normalized_text)
+            if result.identity is not None
+            else None
+        )
+        return cue_annotation.disposition(
+            result,
+            current_identity=self._current_cue_identity,
+            current_key=current_key,
+            cue_retired=self._cue_retired,
+            pending_text=self._sub_pending,
+        )
+
     def _finish_annotation(self, result: cue_annotation.AnnotationResult) -> None:
         with otel_metrics.traced("cue_annotation", phase="publish") as span:
             span.set("queue_wait_ms", round(result.queue_wait_ms, 3))
             span.set("work_ms", round(result.work_ms, 3))
-            if result.error is not None or result.cue is None or result.identity is None:
-                if (
-                    result.identity is not None
-                    and result.identity == self._current_cue_identity
-                    and result.key == self._annotation_key(result.identity.normalized_text)
-                ):
-                    self._sub_pending = None
-                    self._annotation_degraded = True
-                    log.warning("cue annotation unavailable; keeping plain subtitles")
+            outcome = self._annotation_disposition(result)
+            if outcome is cue_annotation.AnnotationDisposition.DEGRADE:
+                # The cue is still on screen: drop the pending upgrade and keep its plain pixels.
+                self._sub_pending = None
+                self._annotation_degraded = True
+                log.warning("cue annotation unavailable; keeping plain subtitles")
+            if outcome.failed:
                 span.set("outcome", "failed")
                 span.set("failure", "annotation-error")
                 return
-            if result.key != self._annotation_key(result.identity.normalized_text):
-                span.set("outcome", "stale-generation")
-                return
-            span.set(
-                "outcome",
-                "published"
-                if self._publish_annotation(result.cue, result.identity)
-                else "stale-cue",
-            )
+            if outcome is cue_annotation.AnnotationDisposition.PUBLISH:
+                assert result.cue is not None and result.identity is not None
+                self._publish_annotation(result.cue, result.identity)
+            span.set("outcome", outcome.value)
 
     @staticmethod
     def _cue_norm(text: str) -> str:
