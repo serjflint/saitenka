@@ -698,6 +698,38 @@ def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path
     result.close()
 
 
+def test_cache_miss_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path) -> None:
+    """The other half of WP4.3's "removes unproved hit boxes only".
+
+    A miss and a provider failure reach the same degrade, but from opposite sides: the failure
+    arrives with a verdict, the miss only says "not yet". The miss is the one that runs on every
+    ordinary cue, and it is the one that degrades *before* the work is even queued — so if the
+    removal were ever wider than the boxes, this is the path the user would feel it on.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    settle_jobs(result, ipc)
+    assert result.native_geometry.status.geometry_ready
+    result._sub_pending = None
+    result.hover = 0
+    result._paused_by_tip = True
+    ipc.commands.clear()
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+
+    assert result.native_geometry.schedule(result)  # degrades on the miss, before the lane runs
+
+    assert result.native_geometry.status.fallback_reason == "subtitle-geometry-cache-miss"
+    assert result.boxes == []
+    assert result.hover == 0
+    assert ("set_property", "pause", False) not in ipc.commands
+    assert ("set_property", "sub-visibility", False) not in ipc.commands
+    assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    result._paused_by_tip = False
+    result.close()
+
+
 def test_failed_provider_keeps_native_pixels_while_recovery_is_pending(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
