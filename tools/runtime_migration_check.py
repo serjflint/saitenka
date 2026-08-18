@@ -361,9 +361,37 @@ def show() -> int:
     return 0
 
 
+def status() -> int:
+    """Per-kind census against the blessed manifest — the migration's progress checklist.
+
+    Hand-maintained counts in planning docs drift the moment a slice lands, and the slice plan calls a
+    wrong denominator a gate failure. Read them from here instead of retyping them.
+    """
+    manifest = _load()
+    actual, _symbols, _evidence = scan()
+    rows = manifest.get("debt")
+    blessed: set[tuple[str, str]] = (
+        {(row[0], row[1]) for row in rows if isinstance(row, list)}
+        if isinstance(rows, list)
+        else set()
+    )
+    live = {(item.kind, item.source) for item in actual}
+    kinds = sorted({kind for kind, _ in blessed | live})
+    width = max(len(kind) for kind in kinds)
+    for kind in kinds:
+        was = sum(1 for k, _ in blessed if k == kind)
+        now = sum(1 for k, _ in live if k == kind)
+        drift = "" if was == now else f"  ({now - was:+d} unblessed)"
+        print(f"{kind:<{width}}  {now:>4}{drift}")
+    duties = sum(len(group) for group in duty_groups(manifest))
+    print(f"{'':<{width}}  {'-' * 4}")
+    print(f"{'total':<{width}}  {len(live):>4}   {duties} duties")
+    return 0
+
+
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "check"
-    commands = {"bless": bless, "check": check, "show": show}
+    commands = {"bless": bless, "check": check, "show": show, "status": status}
     if command not in commands:
         print(f"unknown command: {command}", file=sys.stderr)
         raise SystemExit(2)

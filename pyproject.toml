@@ -755,6 +755,7 @@ corpus-lock = { shell = "uv run --extra full python tools/corpus_check.py check"
 # A vertical runtime slice must delete its old entries and re-bless the mechanically derived debt set;
 # startup, close, and entrypoint duties additionally resolve to live source symbols.
 runtime-migration = { shell = "uv run --extra full python tools/runtime_migration_check.py check" }
+runtime-status = { shell = "uv run --extra full python tools/runtime_migration_check.py status", help = "Per-kind runtime-debt census — read counts from here, never retype them into a doc" }
 # NOT in `all` (needs Node + a pinned Yomitan checkout; fetches py-fsrs) — the regenerate-and-diff sibling
 # of corpus-lock for GENERATED corpora (fsrs vectors, JP/FR transform differentials). corpus-lock guards
 # *stolen* corpora from silently shrinking; this guards *generated* ones from silently drifting off their
