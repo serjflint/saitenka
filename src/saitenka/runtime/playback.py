@@ -440,6 +440,23 @@ class PlaybackProjection:
 
     # --- lifecycle observations ---------------------------------------------------------------
 
+    def cue_replaced(self, state: PlaybackState, text: str) -> PlaybackState:
+        """Record a cue the owning reducer chose itself rather than observed from mpv.
+
+        A Reader-side cue change — a language or track switch clearing the line — is a statement
+        about the very fact ``sub-text`` names. Without it the projection keeps mpv's last text and
+        the next changed cue fact reconciles that back over the Reader's, so the cleared cue
+        returns: two representations of one fact, which is what invariant 13 forbids.
+
+        The observed value moves with it, so a later mpv observation of the *old* text is a change
+        again and republishes. Emitting no delta is deliberate — the caller is the one making the
+        decision, and handing it back would only invite it to act on its own write.
+        """
+        if text == state.cue.text:
+            return state
+        cue = replace(state.cue, text=text, cue=state.cue.cue.advance())
+        return replace(state, cue=cue)._with_property("sub-text", text)
+
     def source_replaced(self, state: PlaybackState, path: object = None) -> Projected:
         """A new media source is live: bump the source revision and retire the old identity."""
         media = MediaFacts(state.media.source.advance(), path)

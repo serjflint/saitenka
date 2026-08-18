@@ -212,6 +212,41 @@ def test_an_unchanged_role_is_not_a_transition() -> None:
     assert projection.role_changed(state, "jp").deltas == ()
 
 
+def test_a_reducer_side_cue_becomes_the_projected_one() -> None:
+    """Invariant 13 at the reducer: the owning reducer and mpv write the same fact, so a cue the
+    reducer chose has to land where the observed one does — otherwise the next observed cue fact
+    carries mpv's stale text and reconciliation puts it back."""
+    projection = PlaybackProjection()
+    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
+
+    state = projection.cue_replaced(state, "")
+
+    assert state.identity().text == ""
+    assert projection.observe(state, "sub-end", 9.5).state.identity().text == ""
+
+
+def test_a_reducer_side_cue_leaves_the_old_text_observable_again() -> None:
+    """The value moves with the fact, so mpv re-sending the text the reducer cleared is a change
+    once more. Without this the dedup guard would hold the old value and silently swallow it."""
+    projection = PlaybackProjection()
+    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
+    state = projection.cue_replaced(state, "")
+
+    projected = projection.observe(state, "sub-text", "猫を見る")
+
+    assert projected.deltas != ()
+    assert projected.state.identity().text == "猫を見る"
+
+
+def test_an_unchanged_reducer_side_cue_is_not_a_new_cue() -> None:
+    """The negative control: reconciliation reinstalls the cue it just read, so treating that as a
+    replacement would advance the revision on every settle and never converge."""
+    projection = PlaybackProjection()
+    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
+
+    assert projection.cue_replaced(state, "猫を見る") is state
+
+
 # --- gate: an old epoch or incomplete observation cannot resurrect retired state ---------------
 
 

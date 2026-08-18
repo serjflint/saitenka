@@ -1065,6 +1065,10 @@ class Reader:
         self.hover = -1
         self._annotation_hover = False
         self.sub_text = text
+        # Invariant 13: the projection owns which cue is current, so a Reader-side decision about
+        # it has to reach the projection too — otherwise the next changed cue fact reconciles mpv's
+        # stale text back over this one.
+        self._playback = self._projection.cue_replaced(self._playback, text)
         self._clear_cue_identity()
         self._sub_pending = None  # any cue change abandons a still-pending upgrade for the old cue
         self._annotation_degraded = False
