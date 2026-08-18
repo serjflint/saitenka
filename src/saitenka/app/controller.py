@@ -3066,6 +3066,7 @@ class Reader:
             close_lane("mask-atlas-startup", max(0.0, deadline - time.monotonic()))
         mask_atlas_startup.uninstall(self.session.render_cache)
         self.retire_geometry_refresh()  # no refresh may land after the provider closes
+        self.retire_settle_window()  # nor may a settle deadline outlive the session
         if self.native_geometry is not None:
             self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.clear(self)

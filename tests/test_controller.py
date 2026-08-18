@@ -230,7 +230,9 @@ _NAV_SRT = (
 def _reader_with_index(monkeypatch):
     from saitenka.subtitles import CueIndex, parse_srt
 
-    ipc = FakeIPC()
+    # The shared fake, not this file's local one: the settle-timer gate below asserts on its
+    # schedule/cancel ledger, which is the only place "retired exactly once" is observable.
+    ipc = RuntimeFakeIPC()
     r = Reader(ipc)
     r.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     monkeypatch.setattr(r, "renderer", NullRenderer())  # skip the raster; assert state only
@@ -582,6 +584,72 @@ def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     r.retire_settle_window()  # window already closed
     r._reconcile_sub_text("")
     assert r.sub_text == ""
+
+
+# --- WP4.5 gate: the settle timer is retired exactly once, by each of its four triggers ---------
+
+_SETTLE = "subtitle:navigation-settle"
+
+
+def _navigated(monkeypatch):
+    """A reader mid-navigation: the settle window is open and its deadline is scheduled."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r._sub_settle.open
+    assert ipc.timer_calls(_SETTLE) == ["schedule"]
+    return r, ipc
+
+
+def test_a_reconcile_cancels_the_settle_timer_exactly_once(monkeypatch):
+    r, ipc = _navigated(monkeypatch)
+
+    r._reconcile_sub_text("さん")  # a genuine later cue closes the window
+    r._reconcile_sub_text("よん")  # a second reconcile must not cancel a window that is gone
+
+    assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
+    assert not r._sub_settle.open
+
+
+def test_a_source_replacement_cancels_the_settle_timer_exactly_once(monkeypatch):
+    r, ipc = _navigated(monkeypatch)
+
+    r._replace_subtitle_source("/media/next.srt", reason="test")
+    r._replace_subtitle_source("/media/third.srt", reason="test")
+
+    assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
+
+
+def test_close_cancels_the_settle_timer(monkeypatch):
+    """A deadline may not outlive the session that armed it."""
+    r, ipc = _navigated(monkeypatch)
+
+    r.close()
+
+    assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
+    assert not r._sub_settle.open
+
+
+def test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open(monkeypatch):
+    """The classic race: the first nav's deadline arrives after a second nav opened its own."""
+    r, ipc = _navigated(monkeypatch)
+    stale = ipc.timers[_SETTLE][0]
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))  # supersede: a second nav, a second deadline
+
+    r._settle_due(stale)
+
+    assert r._sub_settle.open
+
+
+def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch):
+    """A fired deadline is already spent; cancelling it would be the second retirement."""
+    r, ipc = _navigated(monkeypatch)
+
+    assert ipc.fire_runtime_timer(_SETTLE)
+
+    assert not r._sub_settle.open
+    assert ipc.timer_calls(_SETTLE) == ["schedule"]
 
 
 def test_repeated_empty_observation_is_idempotent(monkeypatch):

@@ -222,13 +222,21 @@ class FakeIPC:
         #: Named timers scheduled through the runtime port, newest per name. Nothing fires on a
         #: wall clock — a test calls `fire_runtime_timer` so ordering stays deterministic.
         self.timers: dict[str, tuple[object, Callable[[object], None]]] = {}
+        #: Every schedule/cancel by timer name, in order. A ledger, not a live view: "retired
+        #: exactly once" is a statement about the calls, which `timers` alone cannot answer.
+        self.timer_log: list[tuple[str, str]] = []
 
     def schedule_runtime_timer(self, *, timer: str, identity, on_finished, **_kwargs) -> bool:
         self.timers[timer] = (identity, on_finished)
+        self.timer_log.append(("schedule", timer))
         return True
 
     def cancel_runtime_timer(self, timer: str) -> bool:
+        self.timer_log.append(("cancel", timer))
         return self.timers.pop(timer, None) is not None
+
+    def timer_calls(self, timer: str) -> list[str]:
+        return [action for action, name in self.timer_log if name == timer]
 
     def fire_runtime_timer(self, timer: str, *, outcome=None) -> bool:
         """Deliver a scheduled timer's due event, as the gateway would."""
