@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 class NavigationTarget:
     index: int
     cue: Cue
+    #: Other cues that were on screen alongside the one this step was measured from. Carried so a
+    #: step taken in an overlap is distinguishable in a trace from an unambiguous one — the two
+    #: land the user in different places and only one of them is obviously right.
+    overlapping: int = 0
 
 
 def cue_is_on_screen(
@@ -53,16 +57,19 @@ def resolve_target(
     """
     if len(index) == 0:
         return None
-    current = index.locate(text=text, sub_start=sub_start, time_pos=time_pos, preferred=nav_idx)
-    if current < 0:
+    active = index.locate_active(
+        text=text, sub_start=sub_start, time_pos=time_pos, preferred=nav_idx
+    )
+    if not active.located:
         return None
+    current = active.position
     inside = cue_is_on_screen(
         index.cues[current], text=text, sub_start=sub_start, time_pos=time_pos
     )
     target = index.target(current, delta, inside=inside)
     if target < 0:  # out of range / ambiguous
         return None
-    return NavigationTarget(target, index.cues[target])
+    return NavigationTarget(target, index.cues[target], active.overlapping)
 
 
 def anchor_delay(

@@ -64,7 +64,7 @@ def sub_nav(reader: Reader, delta: int) -> bool:
     # Span covers the decision AND the render it triggers below — set_subtitle's own "cue_redraw"
     # span nests inside this one, so the span's total duration IS the keypress → drawn latency for
     # the instant-nav path.
-    with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek"):
+    with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek") as span:
         target = subnav_policy.resolve_target(
             idx,
             delta=delta,
@@ -75,6 +75,9 @@ def sub_nav(reader: Reader, delta: int) -> bool:
         )
         if target is None:
             return False  # no index match / out of range → let mpv's sub-seek handle it
+        # A step measured inside an overlap and one measured from a lone cue land the user in
+        # different places, and only the trace can tell them apart afterwards.
+        span.set("overlapping", target.overlapping)
         # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
         # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
         # before landing on the real target; reconcile below must not mistake that for a correction.
