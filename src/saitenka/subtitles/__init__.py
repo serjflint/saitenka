@@ -47,6 +47,7 @@ from saitenka.subtitles.geometry import (
 )
 from saitenka.subtitles.index import CueIndex
 from saitenka.subtitles.model import Cue
+from saitenka.subtitles.null_backend import NullGeometryBackend
 from saitenka.subtitles.parsers import parse_ass, parse_cues, parse_srt
 
 __all__ = [
@@ -64,6 +65,7 @@ __all__ = [
     "GeometryRequest",
     "GeometrySnapshot",
     "GeometryVariant",
+    "NullGeometryBackend",
     "PreparedAssFrame",
     "PreparedAssGeometry",
     "RawSubtitleEvent",
