@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import queue
 import threading
 import time
 from concurrent.futures import Future
@@ -14,6 +13,7 @@ from util import FakeIPC, runtime_gateway
 from saitenka import otel_metrics
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.controller import Reader
+from saitenka.app.miner import Miner
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.app.tokenize import Token
 from saitenka.mpvio.ipc import IPCRequest
@@ -39,49 +39,82 @@ def test_apply_deps_injects_and_stops_loading():
     assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
 
 
-def test_mined_seed_result_publishes_once_on_the_next_tick():
-    r = Reader(FakeIPC())
-    r._mined_seed_inflight = True
-    r._mined_seed_results.put((r._mined_seed_generation, {"猫"}))
+def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch):
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    monkeypatch.setattr(Miner, "mined_expressions", lambda _anki, _cfg: {"猫"})
+    r = Reader(ipc)
+    r.anki = object()
+    r.mine_cfg = object()
+    try:
+        r._request_mined_seed()
+        for _ in range(200):
+            r._drain_events()
+            if r._mined:
+                break
+            time.sleep(0.001)
 
-    r._apply_pending_mined_seed()
-    r._apply_pending_mined_seed()
+        assert r._mined == {"猫"}
+        assert r._mined_generation == 1
+        assert r._mined_seed_inflight is False
+    finally:
+        r.close()
+        gateway.close()
 
-    assert r._mined == {"猫"}
-    assert r._mined_generation == 1
-    assert r._mined_seed_inflight is False
 
+def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch):
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    old_anki = object()
+    new_anki = object()
+    old_started = threading.Event()
+    release = threading.Event()
 
-def test_mined_seed_result_from_replaced_dependencies_is_rejected():
-    r = Reader(FakeIPC())
-    r._mined_seed_results.put((r._mined_seed_generation, {"古い"}))
-    r._mined_seed_generation += 1
+    def fetch(anki, _cfg):
+        if anki is old_anki:
+            old_started.set()
+            release.wait(1)
+            return {"古い"}
+        return {"新しい"}
 
-    r._apply_pending_mined_seed()
+    monkeypatch.setattr(Miner, "mined_expressions", fetch)
+    r = Reader(ipc)
+    r.anki = old_anki
+    r.mine_cfg = object()
+    try:
+        r._request_mined_seed()
+        assert old_started.wait(1)
+        r._mined_seed_generation += 1
+        r._mined_seed_inflight = False
+        r.anki = new_anki
+        r._request_mined_seed()
+        for _ in range(200):
+            r._drain_events()
+            if r._mined:
+                break
+            time.sleep(0.001)
 
-    assert r._mined == set()
-    assert r._mined_generation == 0
+        assert r._mined == {"新しい"}
+        assert r._mined_generation == 1
+        release.set()
+        for _ in range(200):
+            r._drain_events()
+            time.sleep(0.001)
+
+        assert r._mined == {"新しい"}
+        assert r._mined_generation == 1
+    finally:
+        r.close()
+        gateway.close()
 
 
 def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
-    r = Reader(FakeIPC())
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    r = Reader(ipc)
     r.anki = object()
     r.mine_cfg = object()
     attempts = 0
-    published = threading.Event()
-
-    class ResultQueue:
-        def __init__(self) -> None:
-            self._queue = queue.Queue()
-
-        def put(self, result) -> None:
-            self._queue.put(result)
-            published.set()
-
-        def get_nowait(self):
-            return self._queue.get_nowait()
-
-    r._mined_seed_results = ResultQueue()
 
     def fetch(_anki, _cfg):
         nonlocal attempts
@@ -90,19 +123,28 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch):
             return None
         return {"猫"}
 
-    monkeypatch.setattr(r._miner, "mined_expressions", fetch)
-    r._request_mined_seed()
-    assert published.wait(1)
-    r._apply_pending_mined_seed()
-    assert r._mined == set()
+    monkeypatch.setattr(Miner, "mined_expressions", fetch)
+    try:
+        r._request_mined_seed()
+        for _ in range(200):
+            r._drain_events()
+            if not r._mined_seed_inflight:
+                break
+            time.sleep(0.001)
+        assert r._mined == set()
 
-    published.clear()
-    r._mined_seed_next_due = 0.0
-    r._request_mined_seed()
-    assert published.wait(1)
-    r._apply_pending_mined_seed()
+        r._mined_seed_next_due = 0.0
+        r._request_mined_seed()
+        for _ in range(200):
+            r._drain_events()
+            if r._mined:
+                break
+            time.sleep(0.001)
 
-    assert attempts == 2 and r._mined == {"猫"}
+        assert attempts == 2 and r._mined == {"猫"}
+    finally:
+        r.close()
+        gateway.close()
 
 
 def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch):
