@@ -210,6 +210,7 @@ class NativeVisibleRenderer:
         accepted: bool | None = None,
         visibility: Visibility | None = None,
         effect_id: int | None = None,
+        deferred: bool | None = None,
     ) -> None:
         with otel_metrics.traced("subtitle_pixel_ownership") as span:
             span.set("event", event)
@@ -226,6 +227,10 @@ class NativeVisibleRenderer:
                 span.set("accepted", accepted)
             if effect_id is not None:
                 span.set("effect_id", effect_id)
+            if deferred is not None:
+                # Whether the answer arrived after its caller returned — the window in which
+                # consumers were told "not yet" and a re-drive is owed.
+                span.set("deferred", deferred)
 
     def _assert_native(self, reader: Reader, action: OwnershipAction) -> None:
         """Assert native visibility, then read back what mpv actually holds.
@@ -259,6 +264,7 @@ class NativeVisibleRenderer:
                 visibility=visibility,
                 owner_before=owner_before,
                 exhausted_before=exhausted_before,
+                deferred=deferred,
             )
             self._execute(reader, followups)
             established = (
@@ -269,35 +275,35 @@ class NativeVisibleRenderer:
                 # published nothing. The refresh is the seam that rebuilds hit boxes.
                 reader.native_geometry.refresh(reader)
 
-        def confirm(write: EffectFinished) -> Callable[[EffectFinished], None]:
+        def confirm(*, accepted: bool, reply: object) -> Callable[[EffectFinished], None]:
             def confirmed(read: EffectFinished) -> None:
                 settle(
-                    accepted=True,
+                    accepted=accepted,
                     visibility=self._visibility_of(read.result)
                     if read.outcome is EffectOutcome.SUCCEEDED
                     else Visibility.UNKNOWN,
-                    reply=write.result,
+                    reply=reply,
                 )
 
             return confirmed
 
         def read_back(write: EffectFinished) -> None:
-            if write.outcome is not EffectOutcome.SUCCEEDED:
-                settle(
-                    accepted=False,
-                    visibility=Visibility.UNKNOWN,
-                    reply={"error": str(write.outcome)},
-                )
-            elif not reader.ipc.submit_runtime_mpv(
+            # The readback runs whether or not the write was accepted: mpv's actual state decides
+            # ownership, and a FALSE readback is legacy proof even when our write was refused.
+            # `accepted` only feeds the diagnostic — report the typed error the terminal carries,
+            # since the code is what tells a dead pipe from a rejected value.
+            accepted = write.outcome is EffectOutcome.SUCCEEDED
+            reply = write.result if accepted else {"error": str(write.error or write.outcome)}
+            if not reader.ipc.submit_runtime_mpv(
                 owner=Owner.SUBTITLE,
                 identity=_VISIBILITY_READBACK,
                 command=("get_property", "sub-visibility"),
                 timeout_s=10.0,
-                on_finished=confirm(write),
+                on_finished=confirm(accepted=accepted, reply=reply),
             ):
-                # The write landed; only the readback was refused. An unread boundary is UNKNOWN,
-                # never legacy proof — the FSM's retry decides what happens next.
-                settle(accepted=True, visibility=Visibility.UNKNOWN, reply=write.result)
+                # An unread boundary is UNKNOWN, never legacy proof — the FSM's bounded retry
+                # decides what happens next.
+                settle(accepted=accepted, visibility=Visibility.UNKNOWN, reply=reply)
 
         if reader.ipc.submit_runtime_mpv(
             owner=Owner.SUBTITLE,
@@ -308,8 +314,9 @@ class NativeVisibleRenderer:
         ):
             deferred = self._state.owner != PixelOwner.NATIVE
             return
-        reply, accepted = self._set_native_visible(reader)
-        settle(accepted=accepted, visibility=self._read_visibility(reader), reply=reply)
+        # No egress at all: there is nothing to assert against and nothing to read back, so the
+        # boundary is UNKNOWN. Never legacy proof — the FSM's bounded retry decides what follows.
+        settle(accepted=False, visibility=Visibility.UNKNOWN, reply={"error": "not-admitted"})
 
     def _capture_restore_visibility(self, reader: Reader) -> None:
         if self._restore_visibility is not None:
@@ -317,17 +324,6 @@ class NativeVisibleRenderer:
         initial = self._read_visibility(reader)
         if initial != Visibility.UNKNOWN:
             self._restore_visibility = initial == Visibility.TRUE
-
-    def _set_native_visible(self, reader: Reader) -> tuple[object, bool]:
-        try:
-            reply = reader.ipc.command(
-                "set_property",
-                "sub-visibility",
-                True,  # noqa: FBT003  # mpv IPC wire value
-            )
-        except Exception as error:  # noqa: BLE001  # readback below decides ownership
-            reply = {"error": f"{type(error).__name__}: {error}"}
-        return reply, self._reply_accepted(reply)
 
     def _apply_assertion_result(
         self, action: OwnershipAction, visibility: Visibility
@@ -362,6 +358,7 @@ class NativeVisibleRenderer:
         visibility: Visibility,
         owner_before: PixelOwner,
         exhausted_before: bool,
+        deferred: bool = False,
     ) -> None:
         self._trace_ownership(
             "native-visibility-assertion",
@@ -369,6 +366,7 @@ class NativeVisibleRenderer:
             accepted=accepted,
             visibility=visibility,
             effect_id=action.effect_id,
+            deferred=deferred,
         )
         if self._state.retry_exhausted and not exhausted_before:
             if otel_metrics.subtitle_pixel_retry_exhausted is not None:

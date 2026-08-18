@@ -138,10 +138,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._set_native_visible"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.draw"
     ],
     [
@@ -1051,10 +1047,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._set_native_visible"
     ],
     [
       "reader-parameter",

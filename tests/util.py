@@ -306,9 +306,42 @@ class FakeIPC:
             self._runtime_gateway.dispatch_terminal(completion)
 
     def submit_runtime_mpv(self, **kwargs) -> bool:
-        if self._runtime_gateway is None:
-            return False
-        return self._runtime_gateway.submit_mpv(**kwargs)
+        if self._runtime_gateway is not None:
+            return self._runtime_gateway.submit_mpv(**kwargs)
+        return self._submit_inline(**kwargs)
+
+    def _submit_inline(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Run a correlated command and complete it before returning.
+
+        A fake without a gateway used to refuse the submit, which left every caller on a
+        synchronous fallback that production never takes. Completing inline keeps the egress
+        identical to production's while staying deterministic; delivery goes through `command` so
+        this fake's own mpv-state simulation sees the write, and reply errors map the way
+        `MpvGateway._reply` maps them.
+        """
+        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
+
+        outcome, error, result = EffectOutcome.SUCCEEDED, None, None
+        try:
+            reply = self.command(*command)
+        except Exception:  # noqa: BLE001  # the gateway reports a dead pipe, it never raises
+            outcome, error = EffectOutcome.FAILED, EffectError.DISCONNECTED
+        else:
+            if isinstance(reply, dict):
+                result = reply.get("data")
+                if reply.get("error") not in {None, "success"}:
+                    outcome = EffectOutcome.FAILED
+                    error = {
+                        "disconnected": EffectError.DISCONNECTED,
+                        "timeout": EffectError.TIMEOUT,
+                        "overloaded": EffectError.OVERLOADED,
+                    }.get(reply.get("error"), EffectError.INVALID_RESULT)
+        on_finished(
+            EffectFinished(
+                EffectId(0), Owner.SUBTITLE, identity, outcome, result=result, error=error
+            )
+        )
+        return True
 
     def publish_legacy_command_outcome(self, outcome) -> None:
         if self._runtime_gateway is None:

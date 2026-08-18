@@ -92,34 +92,52 @@ class FakeIPC:
         self.submitted: list[tuple] = []
 
     def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
-        """Admit a correlated command only when a test opts in, and never complete it here.
+        """Admit a correlated command, completing it inline unless the test wants to place the
+        terminal itself.
 
-        Off by default so this file's tests keep exercising the synchronous arm, which is what an
-        mpv without the gateway still takes. A test that turns it on drives the terminal itself
-        via `deliver_runtime_mpv`, which is the only way to place a late or out-of-order result.
+        Inline is the default so a test that does not care about ownership timing reads exactly as
+        it did when the command was synchronous. `correlate_commands = True` queues instead, which
+        is the only way to observe the mid-flight window or place a late result.
         """
-        if not self.correlate_commands:
-            return False
-        self.commands.append(command)
         self.submitted.append((identity, command, on_finished))
+        if not self.correlate_commands:
+            self.deliver_runtime_mpv()
         return True
 
     def deliver_runtime_mpv(self, *, outcome=None, result=None) -> bool:
-        """Complete the oldest outstanding correlated command."""
-        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+        """Complete the oldest outstanding correlated command.
+
+        Delivery runs it through `command`, not around it: a fake whose correlated path skips its
+        own mpv-state simulation reports a stale readback, which presents as a production ownership
+        regression rather than as the fake-only fault it is.
+        """
+        from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 
         if not self.submitted:
             return False
         identity, command, on_finished = self.submitted.pop(0)
-        if result is None and command[0] == "get_property":
-            result = self.props.get(command[1])
+        outcome = outcome or EffectOutcome.SUCCEEDED
+        error = None
+        if outcome is EffectOutcome.SUCCEEDED:
+            try:
+                reply = self.command(*command)
+            except Exception:  # noqa: BLE001  # the gateway reports a dead pipe, it never raises
+                outcome, error = EffectOutcome.FAILED, EffectError.DISCONNECTED
+            else:
+                if result is None and isinstance(reply, dict):
+                    result = reply.get("data")
+                if isinstance(reply, dict) and reply.get("error") not in {None, "success"}:
+                    # Same mapping the real gateway applies (`MpvGateway._reply`); a fake that
+                    # collapses every reply error to one code hides which failure a caller saw.
+                    outcome = EffectOutcome.FAILED
+                    error = {
+                        "disconnected": EffectError.DISCONNECTED,
+                        "timeout": EffectError.TIMEOUT,
+                        "overloaded": EffectError.OVERLOADED,
+                    }.get(reply.get("error"), EffectError.INVALID_RESULT)
         on_finished(
             EffectFinished(
-                EffectId(0),
-                Owner.SUBTITLE,
-                identity,
-                outcome or EffectOutcome.SUCCEEDED,
-                result=result,
+                EffectId(0), Owner.SUBTITLE, identity, outcome, result=result, error=error
             )
         )
         return True
@@ -1314,9 +1332,9 @@ def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Pa
 
     # mpv accepted the write and still reports FALSE — the case the readback exists for, and the
     # reason the write's own outcome cannot stand in for it.
-    ipc.props["sub-visibility"] = False
-    assert ipc.deliver_runtime_mpv()
-    assert ipc.deliver_runtime_mpv()
+    assert ipc.deliver_runtime_mpv()  # the set_property terminal
+    ipc.props["sub-visibility"] = False  # ...and mpv did not honour it
+    assert ipc.deliver_runtime_mpv()  # the get_property readback
 
     assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
     assert not result._native_ownership_undecided()
@@ -1331,8 +1349,12 @@ def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -
 
     assert ipc.deliver_runtime_mpv(outcome=EffectOutcome.REJECTED)
 
-    # No readback is issued for a write that never applied, and an unanswered boundary is UNKNOWN.
-    assert ipc.submitted == []
+    # A refused write still reads back — mpv's actual state decides ownership, not our write's
+    # outcome, and the readback is what can still prove legacy.
+    assert [command for _identity, command, _cb in ipc.submitted] == [
+        ("get_property", "sub-visibility")
+    ]
+    assert ipc.deliver_runtime_mpv()
     assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
     result.close()
 
