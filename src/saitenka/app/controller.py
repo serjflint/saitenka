@@ -321,6 +321,7 @@ class Reader:
         startup_hint_lease: StartupHintLease | None = None,
         tokenizer_warm: Future[None] | None = None,
         tts_ok: bool | None = None,  # noqa: FBT001 -- tri-state capability snapshot
+        runtime_submit=None,
         **legacy_kw,
     ):
         """``options`` is the canonical grouped-knobs object (see app/config.py; a new knob is one
@@ -340,13 +341,9 @@ class Reader:
         self._startup_hint_lease = startup_hint_lease
         self._interactive_ready = False
         self._connection_ready = True
-        self.ov = Overlay(
-            ipc,
-            id_base=o.overlay_id_base,
-            # Composition knows both sides, so the port is resolved once here rather than probed
-            # inside the adapter on every surface transaction.
-            runtime_submit=getattr(ipc, "submit_runtime_mpv", None),
-        )
+        # Supplied by composition (`create_reader`), never probed off `ipc`: which egress the
+        # overlay uses is a wiring decision, not something to infer from a collaborator's methods.
+        self.ov = Overlay(ipc, id_base=o.overlay_id_base, runtime_submit=runtime_submit)
         from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
         from saitenka.app.lifecycle_timers import LifecycleTimers
 

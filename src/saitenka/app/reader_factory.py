@@ -50,4 +50,8 @@ def create_reader(
         profile=profile,
         startup_hint_lease=startup_hint_lease,
         tokenizer_warm=tokenizer_warm,
+        # This factory is the composition layer, so it is where the correlated-command port is
+        # resolved. A session assembled here uses gateway egress; a Reader built directly (tests,
+        # prewarm) writes straight to mpv unless its caller says otherwise.
+        runtime_submit=getattr(ipc, "submit_runtime_mpv", None),
     )
