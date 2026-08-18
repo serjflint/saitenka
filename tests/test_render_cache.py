@@ -823,9 +823,25 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     import time
     from types import SimpleNamespace
 
-    from saitenka.app import nested_popup, prefetch, tooltip
+    from saitenka.app import hover_metadata, nested_popup, prefetch, tooltip
+    from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
+
+    def submit_metadata(**kwargs):
+        result = hover_metadata.run_metadata(kwargs["request"], threading.Event())
+        kwargs["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                Owner.INTERACTION,
+                kwargs["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=result,
+            )
+        )
+        return True
+
+    r._interaction_metadata_submit = submit_metadata
     r.prefetch = True
     r._prefetch_threads = [threading.Thread()]
     _i, tok, _inflected, _mined = _first_content(r)
@@ -839,7 +855,6 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)
     deadline = time.monotonic() + 1
     while r._engaged_req is None and time.monotonic() < deadline:
-        tooltip.apply_hover_metadata(r)
         time.sleep(0.001)
     assert r._nest.state is None and r._engaged_req is not None and r._engaged_req.nested is True
     assert prefetch._try_engaged_hover(r) is True
@@ -851,41 +866,28 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
 def test_mined_generation_change_requeues_current_hover_metadata(tmp_path, monkeypatch):
     from saitenka.app.hover_metadata import HoverMetadata
 
-    class MetadataActor:
-        def __init__(self):
-            self.requests = []
-            self.results = []
-
-        def submit(self, request):
-            self.requests.append(request)
-
-        def drain(self):
-            results, self.results = self.results, []
-            return results
-
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     index, _tok, _inflected, _mined = _first_content(r)
-    actor = MetadataActor()
-    r._interaction_metadata = actor
+    requests = []
+    monkeypatch.setattr(r, "_request_interaction_metadata", requests.append)
     r.hover = index
     r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
     tooltip._request_hover_metadata(r, index)
-    original = actor.requests[-1]
+    original = requests[-1]
     r._mined_generation += 1
-    actor.results.append(
+    tooltip.apply_hover_metadata(
+        r,
         HoverMetadata(
             original.key,
             phrase_terms=(),
             phrase_span=None,
             mined=False,
             group_mined=(),
-        )
+        ),
     )
 
-    tooltip.apply_hover_metadata(r)
-
-    assert actor.requests[-1].key.mined_generation == r._mined_generation
-    assert actor.requests[-1].key.job_id == r._tip_view.job_id
+    assert requests[-1].key.mined_generation == r._mined_generation
+    assert requests[-1].key.job_id == r._tip_view.job_id
 
 
 def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):

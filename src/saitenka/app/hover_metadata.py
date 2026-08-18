@@ -1,16 +1,19 @@
-"""Newest-wins worker for phrase and mining metadata used by hover presentation."""
+"""Newest-wins phrase and mining metadata jobs used by hover presentation."""
 
 from __future__ import annotations
 
-import queue
-import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.lookup import card_for
 from saitenka.app.tokenizer import get_tokenizer
+from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
+    import threading
+    from collections.abc import Callable
+
     from saitenka.app.tokenize import Token
 
 
@@ -70,75 +73,121 @@ class NestedMetadata:
     error: bool = False
 
 
-class InteractionMetadataActor:
-    """Own tokenizer/Jamdict work and publish immutable, identity-qualified results."""
+MetadataRequest = HoverMetadataRequest | NestedMetadataRequest
+MetadataResult = HoverMetadata | NestedMetadata
 
-    def __init__(self) -> None:
-        self._condition = threading.Condition()
-        self._pending: HoverMetadataRequest | NestedMetadataRequest | None = None
-        self._results: queue.SimpleQueue[HoverMetadata | NestedMetadata] = queue.SimpleQueue()
-        self._closed = False
-        self._thread: threading.Thread | None = None
 
-    def submit(self, request: HoverMetadataRequest | NestedMetadataRequest) -> None:
-        with self._condition:
-            if self._closed:
-                return
-            if self._thread is None:
-                self._thread = threading.Thread(
-                    target=self._run,
-                    name="saitenka-interaction-metadata",
-                    daemon=True,
-                )
-                self._thread.start()
-            self._pending = request
-            self._condition.notify()
+class JobSubmitter(Protocol):
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
 
-    def drain(self) -> list[HoverMetadata | NestedMetadata]:
-        results: list[HoverMetadata | NestedMetadata] = []
-        while True:
-            try:
-                results.append(self._results.get_nowait())
-            except queue.Empty:
-                return results
 
-    def close(self, timeout: float = 1.0) -> None:
-        with self._condition:
-            self._closed = True
-            self._pending = None
-            self._condition.notify_all()
-        if self._thread is not None:
-            self._thread.join(timeout)
+@dataclass(slots=True)
+class InteractionMetadataState:
+    """Event-thread state; the broker owns execution and lifetime."""
 
-    def _run(self) -> None:
-        while request := self._next():
-            try:
-                result = (
-                    _resolve_hover(request)
-                    if isinstance(request, HoverMetadataRequest)
-                    else _resolve_nested(request)
-                )
-            except Exception:  # noqa: BLE001 -- optional interaction metadata fails closed
-                result = (
-                    HoverMetadata(request.key, (), None, mined=False, group_mined=(), error=True)
-                    if isinstance(request, HoverMetadataRequest)
-                    else NestedMetadata(
-                        request.key, None, (), mined=False, group_mined=(), error=True
-                    )
-                )
-            with self._condition:
-                if self._closed:
-                    return
-            self._results.put(result)
+    next_sequence: int = 0
+    inflight: tuple[int, MetadataRequest] | None = None
+    pending: MetadataRequest | None = None
+    publishing: bool = False
+    closed: bool = False
 
-    def _next(self) -> HoverMetadataRequest | NestedMetadataRequest | None:
-        with self._condition:
-            while self._pending is None and not self._closed:
-                self._condition.wait()
-            if self._closed:
-                return None
-            request, self._pending = self._pending, None
-            return request
+
+def run_metadata(request: object, cancelled: threading.Event) -> object:
+    if cancelled.is_set():
+        return None
+    if isinstance(request, HoverMetadataRequest):
+        return _resolve_hover(request)
+    if isinstance(request, NestedMetadataRequest):
+        return _resolve_nested(request)
+    raise TypeError("invalid interaction metadata request")
+
+
+def configure_runtime_job(ipc) -> JobSubmitter | None:
+    register = getattr(ipc, "register_runtime_job_lane", None)
+    if register is None or not register(
+        "interaction-metadata",
+        JobLanePolicy(capacity=1),
+        run_metadata,
+    ):
+        return None
+    return ipc.submit_runtime_job
+
+
+def submit(
+    state: InteractionMetadataState,
+    request: MetadataRequest,
+    job_submitter: JobSubmitter | None,
+    on_finished: Callable[[EffectFinished], None],
+) -> bool:
+    """Admit immediately or retain only the newest intent behind the running job."""
+    if state.closed:
+        return False
+    if state.inflight is not None or state.publishing:
+        state.pending = request
+        return True
+    if job_submitter is None:
+        return False
+    state.next_sequence += 1
+    sequence = state.next_sequence
+    state.inflight = (sequence, request)
+    accepted = job_submitter(
+        owner=Owner.INTERACTION,
+        identity=sequence,
+        lane="interaction-metadata",
+        request=request,
+        on_finished=on_finished,
+    )
+    if not accepted and state.inflight == (sequence, request):
+        state.inflight = None
+    return accepted
+
+
+def finish(state: InteractionMetadataState, completion: EffectFinished) -> MetadataResult | None:
+    """Retire one correlated job and normalize every failure to a typed result."""
+    current = state.inflight
+    if state.closed or current is None or completion.identity != current[0]:
+        return None
+    _sequence, request = current
+    state.inflight = None
+    state.publishing = True
+    result = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
+    if isinstance(request, HoverMetadataRequest):
+        if isinstance(result, HoverMetadata) and result.key == request.key:
+            return result
+        return HoverMetadata(request.key, (), None, mined=False, group_mined=(), error=True)
+    if isinstance(result, NestedMetadata) and result.key == request.key:
+        return result
+    return NestedMetadata(request.key, None, (), mined=False, group_mined=(), error=True)
+
+
+def finish_publication(state: InteractionMetadataState) -> None:
+    state.publishing = False
+
+
+def submit_pending(
+    state: InteractionMetadataState,
+    job_submitter: JobSubmitter | None,
+    on_finished: Callable[[EffectFinished], None],
+) -> bool:
+    request, state.pending = state.pending, None
+    if request is None:
+        return False
+    return submit(state, request, job_submitter, on_finished)
+
+
+def close(state: InteractionMetadataState) -> None:
+    state.closed = True
+    state.inflight = None
+    state.pending = None
+    state.publishing = False
 
 
 def _resolve_hover(request: HoverMetadataRequest) -> HoverMetadata:
