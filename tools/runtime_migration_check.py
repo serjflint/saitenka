@@ -50,7 +50,6 @@ _DUTY_IDS = {
         "observers-and-replay",
         "bindings-and-input-sections",
         "mined-seed-and-capabilities",
-        "annotation-prefetch-and-atlas",
         "session-history",
         "telemetry-and-startup-health",
         "runtime-ready",

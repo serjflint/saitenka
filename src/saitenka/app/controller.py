@@ -27,6 +27,7 @@ from saitenka.app import (
     help_overlay,
     hover_metadata,
     hover_snapshot,
+    mask_atlas_startup,
     mined_seed,
     mined_store,
     miner_ui,
@@ -493,6 +494,8 @@ class Reader:
                 mask_atlas_on=o.tooltip.mask_atlas,  # persistent glyph mask atlas (#149 Tier-1), opt-out
             )
         )
+        self._mask_atlas_startup = mask_atlas_startup.ActivationState()
+        self._mask_atlas_submit = mask_atlas_startup.configure_runtime_job(ipc)
         # Idle crisp post-render (hi-dpi): after the instant soft upscale, a single background worker
         # re-renders the CURRENT viewport at NATIVE resolution (reusing a native-scale panel across scrolls
         # of the same word) and the poll loop swaps it in — so scrolling stays crisp, not just the first band.
@@ -655,6 +658,18 @@ class Reader:
         )
         self.commands = self._build_command_router()
         self.tick_pipeline = self._build_tick_pipeline()
+        self.start_prefetch()
+        from saitenka.app.paths import cache_dir
+
+        mask_atlas_startup.request(
+            self._mask_atlas_startup,
+            mask_atlas_startup.MaskAtlasRequest(
+                enabled=self.session.render_cache.mask_atlas_on,
+                path=cache_dir() / "mask-atlas.sqlite",
+            ),
+            self._mask_atlas_submit,
+            self._finish_mask_atlas_startup,
+        )
 
     def hover_view(self) -> hover_snapshot.HoverView:
         """Read-only snapshot of the hover stack (nested popup / tooltip / pause / nav / scan) —
@@ -1536,33 +1551,10 @@ class Reader:
                 rc.obj = RenderCache.open(path, max_bytes=rc.cache_max_bytes)
         return rc.obj
 
-    def _enable_mask_atlas(self) -> None:
-        """Install the persistent glyph mask atlas WHEN AVAILABLE (a prebuilt ``mask-atlas.sqlite``
-        exists): wire it as fonts' write-back AND lazy per-glyph read source. Reads are on-demand
-        (:meth:`MaskAtlas.get_one`, fronted by the per-thread ``glyph_mask`` LRU), so there's NO bulk load
-        into RAM — the atlas is usable the instant it's opened and startup never stalls on a ~GB deserialize
-        (an 864 MB atlas was ~9 s). Once at session start; no-op when opted out or no prebuilt atlas."""
-        from saitenka import fonts
-        from saitenka.app.paths import cache_dir
-        from saitenka.mask_atlas import MaskAtlas
-
-        rc = self.session.render_cache
-        if not rc.mask_atlas_on or rc.mask_atlas is not None:
-            return
-        path = cache_dir() / "mask-atlas.sqlite"
-        if not path.exists():  # use-when-available — prewarm builds it
-            return
-        atlas = MaskAtlas.open(path)
-        if atlas is None:
-            return
-        rc.mask_atlas = atlas
-        fonts.set_mask_atlas(
-            None, atlas
-        )  # lazy per-glyph reads + live-miss write-back; no bulk RAM load
-        log.info(
-            "mask atlas: ready — lazy per-glyph reads (%d MB on disk)",
-            atlas.disk_bytes() // 1_000_000,
-        )
+    def _finish_mask_atlas_startup(self, completion: EffectFinished) -> None:
+        opened = mask_atlas_startup.finish(self._mask_atlas_startup, completion)
+        if opened is not None:
+            mask_atlas_startup.install(self.session.render_cache, opened)
 
     def _render_cache_sig(self) -> str:
         """The current ``config_sig`` (format+width+cap+dict-set), memoised per (width, cap) so a
@@ -2850,7 +2842,7 @@ class Reader:
 
     def _announce_runtime(self) -> None:
         """Print the runtime banner exactly once, from wherever prefetch actually finishes starting
-        (sync: run(); async: apply_deps after start_prefetch). Reports the LIVE worker count — the old
+        (sync: construction; async: apply_deps after start_prefetch). Reports the LIVE worker count — the old
         run()-time print always showed 0 because async deps hadn't spawned the workers yet."""
         if self._runtime_announced:
             return
@@ -2880,14 +2872,12 @@ class Reader:
             with otel_metrics.traced("startup.reader_setup.keybinds"):
                 self._register_keybinds()
             self._seed_mined()
-            self.start_prefetch()
-            self._enable_mask_atlas()  # load a prebuilt glyph mask atlas (bg) if one exists — #149 Tier-1
             session_stats.start(self)
             telemetry.set_gauge_provider(
                 self._telemetry_gauges
             )  # no-op unless telemetry is configured
         # In run/attach the deps (and thus the prefetch lane) load ASYNC — dict_set is still None here,
-        # so start_prefetch above was a no-op and the worker count is 0. Defer the banner to when
+        # so construction-time start_prefetch was a no-op and the worker count is 0. Defer the banner to when
         # prefetch actually starts (apply_deps → _announce_runtime); only announce now on the sync path
         # (deps already present, e.g. a demo/screenshot run) where apply_deps is never called.
         if self.dict_set is not None:
@@ -2938,6 +2928,10 @@ class Reader:
         prefetch.close(self.prefetch_state)
         if close_lane is not None:
             close_lane("speculative-prefetch", max(0.0, deadline - time.monotonic()))
+        mask_atlas_startup.close(self._mask_atlas_startup)
+        if close_lane is not None:
+            close_lane("mask-atlas-startup", max(0.0, deadline - time.monotonic()))
+        mask_atlas_startup.uninstall(self.session.render_cache)
         if self.native_geometry is not None:
             self.subtitle_pipeline.deactivate(self)
             self.subtitle_pipeline.clear(self)

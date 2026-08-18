@@ -7,12 +7,16 @@ existing font/golden tests cover that); these exercise it ON.
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 
 import pytest
 
 from saitenka import fonts
+from saitenka.app import mask_atlas_startup
+from saitenka.app.reader_context import RenderCacheState
 from saitenka.mask_atlas import MaskAtlas, deserialize_core, serialize_core
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 
 def _font(char: str = "見", size: int = 40):
@@ -110,13 +114,11 @@ def test_get_one_miss_then_hit_round_trips(tmp_path):
 
 
 @pytest.mark.usefixtures("_atlas_off")
-def test_enable_mask_atlas_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
+def test_runtime_activation_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
     # Regression: startup must wire the atlas as a LAZY per-glyph reader, NEVER bulk-load it into RAM.
     # An 864 MB / 587k-mask `load_into` stalled startup ~9s (the "saitenka starting…" hang). Guard: the
-    # controller opens the atlas, points fonts at it for lazy reads + write-back, and NEVER calls load_into.
+    # startup actor opens the atlas, points fonts at it for lazy reads + write-back, and never bulk-loads.
     import saitenka.mask_atlas as mask_atlas_mod
-    from saitenka.app import paths
-    from saitenka.app.controller import Reader
 
     atlas_path = tmp_path / "mask-atlas.sqlite"  # a prebuilt atlas the session should read lazily
     seed = MaskAtlas.open(atlas_path)
@@ -127,34 +129,27 @@ def test_enable_mask_atlas_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
     )
     seed.close()
 
-    monkeypatch.setattr(paths, "cache_dir", lambda: tmp_path)
-
     def _boom(*_a, **_k):
         raise AssertionError("load_into was called — startup must NOT bulk-load the atlas into RAM")
 
     monkeypatch.setattr(mask_atlas_mod.MaskAtlas, "load_into", _boom)
 
-    class _IPC:  # _enable_mask_atlas never touches IPC; a bare stub suffices to build the Reader
-        def command(self, *_a):
-            return {"data": None}
-
-        def pump(self):
-            pass
-
-        def drain_events(self):
-            return []
-
-    reader = Reader(_IPC())
-    reader.session.render_cache.mask_atlas_on = True
-    reader.session.render_cache.mask_atlas = None
     fonts.set_mask_atlas(None, None)  # start from a clean slate
-
-    reader._enable_mask_atlas()  # must NOT raise (no load_into) and must wire the lazy path
+    opened = mask_atlas_startup.open_mask_atlas(
+        mask_atlas_startup.MaskAtlasRequest(enabled=True, path=atlas_path),
+        threading.Event(),
+    )
+    assert isinstance(opened, mask_atlas_startup.OpenedMaskAtlas)
+    target = RenderCacheState(
+        cache_on=False,
+        cache_max_bytes=0,
+        cache_min_height_px=0,
+        mask_atlas_on=True,
+    )
+    assert mask_atlas_startup.install(target, opened)
 
     assert fonts._ATLAS_MEM is None  # no bulk read dict loaded into RAM
-    assert (
-        fonts._ATLAS_WRITE is reader.session.render_cache.mask_atlas
-    )  # atlas = lazy read + write-back
+    assert fonts._ATLAS_WRITE is target.mask_atlas  # atlas = lazy read + write-back
     # and it actually reads lazily: the seeded glyph resolves through get_one, not getmask2
     fonts._tls.masks = OrderedDict()
 
@@ -163,6 +158,69 @@ def test_enable_mask_atlas_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
 
     monkeypatch.setattr(font, "getmask2", _no_raster)
     assert fonts.glyph_mask(font, "見", "L", (0.0, 0.0)) is not None
+
+
+def test_runtime_activation_rejects_a_late_result_after_close(tmp_path):
+    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
+    assert atlas is not None
+    state = mask_atlas_startup.ActivationState(generation=1, inflight=True)
+    mask_atlas_startup.close(state)
+
+    result = mask_atlas_startup.finish(
+        state,
+        EffectFinished(
+            EffectId(1),
+            Owner.SESSION,
+            ("mask-atlas-startup", 1),
+            EffectOutcome.SUCCEEDED,
+            result=mask_atlas_startup.OpenedMaskAtlas(atlas),
+        ),
+    )
+
+    assert result is None
+
+
+def test_runtime_activation_admits_only_one_startup_job(tmp_path):
+    calls = []
+
+    def submit(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    state = mask_atlas_startup.ActivationState()
+    request = mask_atlas_startup.MaskAtlasRequest(enabled=True, path=tmp_path / "atlas.sqlite")
+
+    assert mask_atlas_startup.request(state, request, submit, lambda _completion: None)
+    assert not mask_atlas_startup.request(state, request, submit, lambda _completion: None)
+    assert len(calls) == 1
+
+
+def test_runtime_activation_opens_only_after_its_correlated_terminal(tmp_path):
+    path = tmp_path / "atlas.sqlite"
+    seed = MaskAtlas.open(path)
+    assert seed is not None
+    seed.close()
+    calls = []
+
+    def submit(**kwargs):
+        calls.append(kwargs)
+        return True
+
+    state = mask_atlas_startup.ActivationState()
+    request = mask_atlas_startup.MaskAtlasRequest(enabled=True, path=path)
+    assert mask_atlas_startup.request(state, request, submit, lambda _completion: None)
+    opened = mask_atlas_startup.open_mask_atlas(request, threading.Event())
+    completion = EffectFinished(
+        EffectId(7),
+        Owner.SESSION,
+        calls[0]["identity"],
+        EffectOutcome.SUCCEEDED,
+        result=opened,
+    )
+
+    assert isinstance(
+        mask_atlas_startup.finish(state, completion), mask_atlas_startup.OpenedMaskAtlas
+    )
 
 
 def test_put_is_idempotent_no_duplicate_rows(tmp_path):

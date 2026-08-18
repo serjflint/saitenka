@@ -255,6 +255,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
             "tooltip-render-ahead",
             "tooltip-engaged",
             "speculative-prefetch",
+            "mask-atlas-startup",
         ]
         order.append("artifacts")
 
@@ -270,6 +271,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
         "tooltip-render-ahead",
         "tooltip-engaged",
         "speculative-prefetch",
+        "mask-atlas-startup",
         "artifacts",
     ]
 

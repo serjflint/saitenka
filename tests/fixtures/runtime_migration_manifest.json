@@ -1626,18 +1626,6 @@
       "test": "late capability results cannot mutate a retired episode"
     },
     {
-      "id": "annotation-prefetch-and-atlas",
-      "source": "src/saitenka/app/controller.py::Reader.run",
-      "evidence": [
-        "call:self.start_prefetch",
-        "call:self._enable_mask_atlas"
-      ],
-      "target": "job-broker",
-      "work_package": "3",
-      "replacement": "StartRuntimeJobs -> JobOutcome",
-      "test": "every admitted startup job reaches one terminal outcome"
-    },
-    {
       "id": "session-history",
       "source": "src/saitenka/app/controller.py::Reader.run",
       "evidence": [
@@ -1706,13 +1694,19 @@
         "call:close_lane:tooltip-engaged",
         "call:prefetch.close",
         "call:close_lane:speculative-prefetch",
+        "call:mask_atlas_startup.close",
+        "call:close_lane:mask-atlas-startup",
+        "call:mask_atlas_startup.uninstall",
         "order:call:self._stop.set>call:close_lane:subtitle-fetch",
         "order:call:close_lane:cue-annotation>call:shutil.rmtree",
         "order:call:close_lane:tooltip-render-ahead>call:shutil.rmtree",
         "order:call:close_lane:tooltip-engaged>call:shutil.rmtree",
         "order:call:close_lane:speculative-prefetch>call:shutil.rmtree",
+        "order:call:close_lane:mask-atlas-startup>call:shutil.rmtree",
         "call:self._annotation.close",
-        "order:call:prefetch.close>call:close_lane:speculative-prefetch"
+        "order:call:prefetch.close>call:close_lane:speculative-prefetch",
+        "order:call:mask_atlas_startup.close>call:close_lane:mask-atlas-startup",
+        "order:call:close_lane:mask-atlas-startup>call:mask_atlas_startup.uninstall"
       ],
       "target": "job-broker-lanes",
       "work_package": "3,5",

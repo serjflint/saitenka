@@ -225,8 +225,8 @@ def prefetch_worker_count(reader: Reader) -> int:
 
     ``gil_disabled()`` is only trustworthy AFTER fugashi has loaded — it wraps a C extension that
     hasn't declared free-threaded safety and silently re-enables the GIL on first use, not at import
-    (``tokenize.py``). This is called from ``start_prefetch()`` at the very top of ``run()``, before
-    any subtitle line has ever been tokenized, so without this warm-up it always sees the pre-fugashi
+    (``tokenize.py``). This is called from ``start_prefetch()`` during Reader construction, before any
+    subtitle line has ever been tokenized, so without this warm-up it always sees the pre-fugashi
     state — spawning the free-threaded worker count on a build that loses the GIL moments later anyway,
     paying the allocator's per-thread-arena memory tax (see ``vibe/hot-path-idle-spreading-plan.md``)
     for parallelism that never actually happens. Force the load now (its one-time cost lands at startup
@@ -244,10 +244,10 @@ def start_prefetch(reader: Reader) -> None:
     state = reader.prefetch_state
     if state.closed or state.submitter is not None:
         return
-    desired = prefetch_worker_count(reader)
     register = getattr(reader.ipc, "register_runtime_job_lane", None)
     if register is None:
         return
+    desired = prefetch_worker_count(reader)
     backend = HostPrefetchBackend(reader)
     if not register(
         "speculative-prefetch",
