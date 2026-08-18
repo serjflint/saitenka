@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from util import keybind_registry
+from util import FakeIPC as RuntimeFakeIPC
+from util import keybind_registry, runtime_gateway
 
 import saitenka.app.controller as C
 from saitenka.app import miner_ui, nested_popup, tooltip
@@ -1047,10 +1048,11 @@ def test_prefetch_queues_full_render_when_paused():
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.sub_text = "本命"
+    submitted = []
+    r.prefetch_state.workers = 8
+    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
     r._update_prefetch()
-    queued = []
-    while not r._prefetch_q.empty():
-        queued.append(r._prefetch_q.get())  # typed PrefetchItem (Stage 8b)
+    queued = [entry["request"].item for entry in submitted]
     assert [i.token.surface for i in queued] == ["本命"]  # the content word got queued
     assert all(i.full for i in queued)  # engaged → a hover is imminent, full panel render
 
@@ -1063,16 +1065,20 @@ def test_prefetch_queues_cheap_warm_while_just_playing():
     ipc = FakeIPC()
     ipc.props["pause"] = False  # playing, not engaged
     r = _reader_with_word(ipc)
+    submitted = []
+    r.prefetch_state.workers = 8
+    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
     g0 = r._prefetch_gen
     r._update_prefetch()
     assert r._prefetch_gen == g0 + 1  # bumped → in-flight work is invalidated
-    item = r._prefetch_q.get_nowait()
+    item = submitted[0]["request"].item
     assert item.token.surface == "本命"
     assert item.full is False  # idle-time warm only, no layout/drawing
 
 
 def test_prefetch_worker_warms_cache_then_close_joins():
-    ipc = FakeIPC()
+    ipc = RuntimeFakeIPC()
+    gateway = runtime_gateway(ipc)
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.start_prefetch()
@@ -1094,9 +1100,7 @@ def test_prefetch_worker_warms_cache_then_close_joins():
         assert key in r._panel_cache  # prefetched in the background, no hover needed
     finally:
         r.close()
-    assert not any(
-        t.is_alive() for t in r._prefetch_threads
-    )  # close() stopped + joined the workers
+        gateway.close()
 
 
 def test_hover_off_window_still_lingers(monkeypatch):
@@ -2357,16 +2361,16 @@ def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):
     def tracked_is_mined(tok):
         import threading
 
-        if threading.current_thread().name.startswith("saitenka-prefetch"):
+        if threading.current_thread().name.startswith("saitenka-job-speculative-prefetch"):
             is_mined_calls_from_workers.append(tok.surface)
         return original_is_mined(tok)
 
     monkeypatch.setattr(r, "_is_mined", tracked_is_mined)
+    submitted = []
+    r.prefetch_state.workers = 8
+    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
     r._update_prefetch()
-    # Drain the queue — read what was queued
-    items = []
-    while not r._prefetch_q.empty():
-        items.append(r._prefetch_q.get())
+    items = [entry["request"].item for entry in submitted]
     assert items, "nothing was queued"
     # Each queued item must carry the main-thread-evaluated mined flag (typed since Stage 8b)
     assert isinstance(items[0].mined, bool), f"queue item lacks the mined flag: {items[0]}"
@@ -2690,8 +2694,11 @@ def test_prefetch_queue_items_are_typed_dataclasses():
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.sub_text = "本命"
+    submitted = []
+    r.prefetch_state.workers = 8
+    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
     r._update_prefetch()
-    item = r._prefetch_q.get()
+    item = submitted[0]["request"].item
     assert isinstance(item, PrefetchItem)
     assert item.token.surface == "本命"
     assert item.inflected == "本命"

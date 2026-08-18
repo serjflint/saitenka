@@ -1,11 +1,11 @@
 """Prefetch lookahead: WARM the next cues' words while the current line plays, and the cache-size /
 RSS gauges the telemetry interval sampler reports."""
 
-import queue
-
+from saitenka.app import prefetch
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer
+from saitenka.app.tokenize import Token
 from saitenka.panel import Definition, Entry
 from saitenka.subtitles import CueIndex, parse_srt
 
@@ -55,20 +55,18 @@ def _reader(monkeypatch, *, lookahead, props=None):
     return r
 
 
-def _drain(r):
-    out = []
-    while True:
-        try:
-            out.append(r._prefetch_q.get_nowait())
-        except queue.Empty:
-            return out
+def _submitted_items(r):
+    submitted = []
+    r.prefetch_state.workers = 64
+    r.prefetch_state.submitter = lambda **kwargs: submitted.append(kwargs) or True
+    r._update_prefetch()
+    return [entry["request"].item for entry in submitted]
 
 
 def test_lookahead_warms_the_next_cues_words(monkeypatch):
     r = _reader(monkeypatch, lookahead=2)
     r.set_subtitle("本を読む")  # cue 1
-    r._update_prefetch()
-    surfaces = [i.token.surface for i in _drain(r)]
+    surfaces = [i.token.surface for i in _submitted_items(r)]
     # cue 2 (書く) and cue 3 (水, 飲む) get warmed; を is a particle, skipped.
     assert "書く" in surfaces and "水" in surfaces and "飲む" in surfaces
 
@@ -77,8 +75,7 @@ def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
     # Paused ⇒ the CURRENT line renders full; a future line is never engaged → always warm/unmined.
     r = _reader(monkeypatch, lookahead=1, props={"pause": True})
     r.set_subtitle("本を読む")
-    r._update_prefetch()
-    items = _drain(r)
+    items = _submitted_items(r)
     future = [i for i in items if i.token.surface == "書く"]  # only in cue 2
     assert future and all(i.full is False and i.mined is False for i in future)
     current = [i for i in items if i.token.surface == "読む"]  # only in cue 1
@@ -88,17 +85,111 @@ def test_lookahead_items_are_warm_only_even_while_engaged(monkeypatch):
 def test_lookahead_dedupes_against_the_current_line(monkeypatch):
     r = _reader(monkeypatch, lookahead=1)
     r.set_subtitle("本を読む")  # 本 is also cue 2's first word
-    r._update_prefetch()
-    surfaces = [i.token.surface for i in _drain(r)]
+    surfaces = [i.token.surface for i in _submitted_items(r)]
     assert surfaces.count("本") == 1  # warmed once by the current line, not again for the next
 
 
 def test_no_lookahead_when_disabled(monkeypatch):
     r = _reader(monkeypatch, lookahead=0)
     r.set_subtitle("本を読む")
-    r._update_prefetch()
-    surfaces = [i.token.surface for i in _drain(r)]
+    surfaces = [i.token.surface for i in _submitted_items(r)]
     assert "書く" not in surfaces and "水" not in surfaces  # only the current line queued
+
+
+def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
+    r = _reader(monkeypatch, lookahead=10_000)
+    calls = 0
+    tokenize = r.tokenizer.tokenize
+
+    def counted(text):
+        nonlocal calls
+        calls += 1
+        return tokenize(text)
+
+    monkeypatch.setattr(r.tokenizer, "tokenize", counted)
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, n: ["本"] * n)
+
+    r.set_subtitle("本を読む")
+    _submitted_items(r)
+
+    assert calls <= 65  # current cue plus at most 64 future cues
+
+
+def test_head_construction_bounds_scorer_work_when_no_word_is_eligible(monkeypatch):
+    r = _reader(monkeypatch, lookahead=0)
+    r.set_subtitle("本を読む")
+    r.head_prefetch_lookahead = 10_000
+    r.prefetch_state = prefetch.PrefetchState(4)
+    calls = 0
+
+    class _Scorer:
+        def score_line(self, tokens):
+            nonlocal calls
+            calls += 1
+            return [type("Style", (), {"tag": "known"})() for _token in tokens]
+
+    r.scorer = _Scorer()
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, n: ["本"] * n)
+
+    _submitted_items(r)
+
+    assert calls == 4
+
+
+def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypatch):
+    r = _reader(monkeypatch, lookahead=0)
+    r.set_subtitle("本を読む")
+    r.head_prefetch_lookahead = 1
+    r.prefetch_state = prefetch.PrefetchState(4)
+    tokens = [Token(f"語{i}", f"語{i}", f"ご{i}", "名詞", i, i + 1) for i in range(100)]
+    probes = 0
+
+    class _Scorer:
+        def score_line(self, values):
+            return [type("Style", (), {"tag": "n+1"})() for _value in values]
+
+    def is_mined(_token):
+        nonlocal probes
+        probes += 1
+        return False
+
+    r.scorer = _Scorer()
+    monkeypatch.setattr(r.tokenizer, "tokenize", lambda _text: tokens)
+    monkeypatch.setattr(r.tokenizer, "is_content", lambda _token: True)
+    monkeypatch.setattr(r, "_is_mined", is_mined)
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, _n: ["long"])
+
+    heads = prefetch._head_prefetch_items(r, 1, set())
+
+    assert len(heads) == probes == 4
+
+
+def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_prefix(monkeypatch):
+    r = _reader(monkeypatch, lookahead=0)
+    r.set_subtitle("本を読む")
+    r.head_prefetch_lookahead = 1
+    r.prefetch_state = prefetch.PrefetchState(1)
+    tokens = [
+        Token("は", "は", "は", "助詞", 0, 1),
+        Token("語", "語", "ご", "名詞", 1, 2),
+    ]
+
+    class _Scorer:
+        def score_line(self, values):
+            return [
+                type("Style", (), {"tag": "known"})(),
+                type("Style", (), {"tag": "n+1"})(),
+            ][: len(values)]
+
+    r.scorer = _Scorer()
+    monkeypatch.setattr(r.tokenizer, "tokenize", lambda _text: tokens)
+    monkeypatch.setattr(r.tokenizer, "is_content", lambda token: token.surface == "語")
+    monkeypatch.setattr(r, "_is_mined", lambda _token: False)
+    monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _reader, _n: ["ordinary"])
+
+    heads = prefetch._head_prefetch_items(r, 1, set())
+
+    assert [item.token.surface for _priority, item in heads] == ["語"]
 
 
 def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):

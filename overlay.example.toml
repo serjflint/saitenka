@@ -96,8 +96,8 @@
 #                            # prefetch_lookahead — render jobs cost far more than decode-only ones, so it
 #                            # carries a real memory cost under sustained use (more pronounced on
 #                            # free-threaded builds). Set 0 to disable; raise it to look further ahead.
-# head_prefetch_queue_max = 24 # caps in-flight speculative render jobs (the transient-memory bound for
-#                            # head_prefetch_lookahead above)
+# head_prefetch_queue_max = 24 # caps queued upcoming-cue head renders, 1–64 (the transient-memory bound for
+#                            # head_prefetch_lookahead above); executing work is bounded by workers
 # poll_interval = 0.025      # main-loop tick (s) — trades CPU against input latency
 # no_audio_play = false      # set true to NOT auto-play the sentence audio on mine
 

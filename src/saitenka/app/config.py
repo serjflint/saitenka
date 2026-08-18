@@ -301,7 +301,7 @@ class PerfOptions:
     # panel_cache's LRU bounds RETAINED size, not concurrently-building PIL objects in flight.
     head_prefetch_queue_max: int = field(
         default=24,
-        metadata={"help": "Cap on in-flight/queued head-render jobs (transient-RSS bound)."},
+        metadata={"help": "Queued head-render cap, 1–64 (transient-RSS bound)."},
     )
     # Sized for a whole episode's cues so a full-file tokenization prefetch never evicts a cue still needed.
     token_cache_max: int = field(

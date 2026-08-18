@@ -1,24 +1,22 @@
-"""Background prefetch: warm the current/next line's tooltips ahead of the mouse.
-
-Typed queue items (frozen dataclasses, so a line change can never make a worker read mutated state)
-plus the worker-thread + enqueue logic itself. The functions take ``reader: Reader`` — the Reader
-still owns the queues/threads/generation counter as instance state; this module is the logic, not a
-new owner — and are called from thin delegating methods on
-:class:`~saitenka.app.controller.Reader`.
-"""
+"""Bounded speculative dictionary and tooltip warming."""
 
 from __future__ import annotations
 
+import heapq
 import logging
-import queue
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from itertools import islice
+from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka import otel_metrics
 from saitenka.app.perf import gil_disabled
+from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.controller import Reader
     from saitenka.app.tokenize import Token
     from saitenka.subtitles import CueIndex
@@ -33,6 +31,9 @@ _AUTO_WORKERS_FREE_THREADED = (
     4  # free-threaded: renders in parallel, 4 pairs with the render pool width
 )
 _AUTO_WORKERS_GIL = 2  # a GIL build can't render in parallel — extra workers only contend
+_MAX_WARM_PENDING = 64
+_MAX_HEAD_PENDING = 64
+_MAX_HEAD_TOKEN_PROBES = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,29 +76,145 @@ class HeadPrefetchItem:
 
 
 class PrefetchState:
-    """Runtime state of the background prefetch subsystem: the decode-warm and speculative-head work
-    queues, the persistent worker threads, the generation counter whose bump drops every in-flight job
-    on a line change / resume / seek, and the single-slot scroll-ahead + engaged-hover requests. Grouped
-    so the Reader owns prefetch as one unit and a #100 re-slot can invalidate it in one call (``cancel()``)."""
+    """Bounded speculative intent and accepted-job state."""
 
     def __init__(self, head_queue_max: int) -> None:
-        self.q: queue.Queue = queue.Queue()  # decode-warm + engaged-head jobs (FIFO)
-        # speculative head-renders for upcoming words; maxsize is the transient-RSS cap
-        self.head_q: queue.PriorityQueue = queue.PriorityQueue(maxsize=head_queue_max)
-        self.head_seq = 0  # tie-breaker so priority-queue items never compare HeadPrefetchItems
-        self.head_built = 0  # a speculative head-render job actually ran to completion
-        self.gen = 0  # bumped on line change / resume / seek → cancels in-flight (see cancel())
-        self.key: tuple[str, bool] | None = (
-            None  # last (sub_text, engaged) queued — dedupes re-runs
-        )
-        self.threads: list[threading.Thread] = []  # persistent workers (session-lifetime)
+        if not 1 <= head_queue_max <= _MAX_HEAD_PENDING:
+            raise ValueError(f"head prefetch queue limit must be between 1 and {_MAX_HEAD_PENDING}")
+        self.head_queue_max = head_queue_max
+        self.head_built = 0
+        self.gen = 0
+        self.key: tuple[str, bool] | None = None
+        self.sequence = 0
+        self.workers = 0
+        self.pending_limit = head_queue_max + _MAX_WARM_PENDING
+        self.pending: list[tuple[int, int, PrefetchIdentity, PrefetchWork]] = []
+        self.inflight: dict[int, tuple[PrefetchIdentity, PrefetchWork]] = {}
+        self.submitter: JobSubmitter | None = None
+        self.closed = False
 
     def cancel(self) -> int:
-        """Invalidate everything queued/in-flight for the old state by bumping the generation; the
-        worker drops any item whose ``gen`` no longer matches. Returns the new generation for the
-        items about to be enqueued."""
+        """Invalidate queued and executing work and return the new generation."""
         self.gen += 1
+        for _identity, work in self.inflight.values():
+            work.superseded.set()
+        pending = len(self.pending)
+        for _priority, _sequence, _identity, work in self.pending:
+            work.superseded.set()
+        self.pending.clear()
+        if pending and otel_metrics.prefetch_queue_depth is not None:
+            otel_metrics.prefetch_queue_depth.add(-pending)
         return self.gen
+
+    @property
+    def snapshot(self) -> PrefetchSnapshot:
+        return PrefetchSnapshot(
+            self.gen,
+            len(self.pending),
+            len(self.inflight),
+            self.pending_limit,
+            self.head_built,
+            self.closed,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PrefetchSnapshot:
+    generation: int
+    pending: int
+    inflight: int
+    pending_limit: int
+    head_built: int
+    closed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PrefetchIdentity:
+    sequence: int
+    generation: int
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class PrefetchWork:
+    item: PrefetchItem | HeadPrefetchItem
+    superseded: threading.Event
+
+
+class PrefetchHost(Protocol):
+    dict_set: PrefetchDictionary | None
+
+    def _tip_cap(self) -> int: ...
+
+    def _panel_for(self, token, inflected, **kwargs): ...
+
+    def _worker_seed_head(self, panel, token, inflected, **kwargs) -> bool: ...
+
+    def _precompose_head(self, panel, token, inflected, **kwargs) -> None: ...
+
+    def _mem_fill(self, token, inflected, **kwargs) -> None: ...
+
+
+class PrefetchDictionary(Protocol):
+    def entry_for(self, token, inflected): ...
+
+
+class JobSubmitter(Protocol):
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished,
+    ) -> bool: ...
+
+
+class HostPrefetchBackend:
+    """Worker adapter over the existing cache and panel seams."""
+
+    def __init__(self, host: object) -> None:
+        self._reader = cast("PrefetchHost", host)
+
+    def run(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:
+        if isinstance(item, HeadPrefetchItem):
+            with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
+                return self._render_head(item, should_cancel)
+        with otel_metrics.traced("prefetch_decode", kind="head" if item.full else "warm"):
+            if item.full:
+                return self._render_head(item, should_cancel)
+            reader = self._reader
+            if reader.dict_set is not None and not should_cancel():
+                reader.dict_set.entry_for(item.token, item.inflected)
+        return not should_cancel()
+
+    def _render_head(self, item: PrefetchItem | HeadPrefetchItem, should_cancel) -> bool:
+        reader = self._reader
+        cap = reader._tip_cap()
+        panel = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
+        if should_cancel():
+            return False
+        if not reader._worker_seed_head(
+            panel, item.token, item.inflected, mined=item.mined, cap=cap
+        ):
+            reader._precompose_head(panel, item.token, item.inflected, mined=item.mined, cap=cap)
+            if not should_cancel():
+                reader._mem_fill(item.token, item.inflected, mined=item.mined)
+        return not should_cancel()
+
+
+def run_prefetch(work: object, cancelled: threading.Event, backend: HostPrefetchBackend) -> bool:
+    if not isinstance(work, PrefetchWork):
+        raise TypeError("invalid speculative-prefetch request")
+    should_cancel = lambda: cancelled.is_set() or work.superseded.is_set()  # noqa: E731
+    if should_cancel():
+        return False
+    try:
+        return backend.run(work.item, should_cancel)
+    except Exception:
+        log.debug("speculative prefetch failed", exc_info=True)
+        raise
 
 
 def prefetch_worker_count(reader: Reader) -> int:
@@ -124,104 +241,111 @@ def prefetch_worker_count(reader: Reader) -> int:
 def start_prefetch(reader: Reader) -> None:
     if not reader.prefetch or reader.dict_set is None:
         return
+    state = reader.prefetch_state
+    if state.closed or state.submitter is not None:
+        return
     desired = prefetch_worker_count(reader)
-    if len(reader._prefetch_threads) >= desired:
+    register = getattr(reader.ipc, "register_runtime_job_lane", None)
+    if register is None:
         return
-    for k in range(len(reader._prefetch_threads), desired):
-        th = threading.Thread(
-            target=lambda: prefetch_worker(reader), name=f"saitenka-prefetch-{k}", daemon=True
+    backend = HostPrefetchBackend(reader)
+    if not register(
+        "speculative-prefetch",
+        JobLanePolicy(capacity=desired, workers=desired),
+        lambda request, cancelled: run_prefetch(request, cancelled, backend),
+    ):
+        return
+    state.workers = desired
+    state.submitter = reader.ipc.submit_runtime_job
+
+
+def _submit_pending(
+    state: PrefetchState,
+    on_finished,
+) -> None:
+    submitter = state.submitter
+    while (
+        not state.closed
+        and submitter is not None
+        and len(state.inflight) < state.workers
+        and state.pending
+    ):
+        _priority, _sequence, identity, work = heapq.heappop(state.pending)
+        if otel_metrics.prefetch_queue_depth is not None:
+            otel_metrics.prefetch_queue_depth.add(-1)
+        state.inflight[identity.sequence] = (identity, work)
+        accepted = submitter(
+            owner=Owner.INTERACTION,
+            identity=identity,
+            lane="speculative-prefetch",
+            request=work,
+            on_finished=on_finished,
         )
-        th.start()
-        reader._prefetch_threads.append(th)
-
-
-def _run_item(reader: Reader, item: PrefetchItem) -> None:
-    """A viewport-first HEAD render when the user's engaged (a hover is imminent), else a cheap
-    dict-only WARM (decode+cache the semantic entry in the source's decoded-entry LRU, no layout) so a
-    later hover/render skips the decode."""
-    # Idle-warming span: how much idle budget the worker actually spends warming upcoming words —
-    # the live counterpart to what --timeline measures out-of-band (worker keep-ahead margin).
-    with otel_metrics.traced("prefetch_decode", kind="head" if item.full else "warm"):
-        if item.full:
-            # Head-first, NOT the whole panel: the windowed engine composites the tail on scroll, so
-            # pre-rendering the full body of every engaged content word just saturates the worker on
-            # pathological entries. Same viewport cap + panel_for()/cache path a hover uses, so the
-            # warmed head is a hit. item.mined came from the main thread — never call _is_mined/card_for
-            # from a worker (jamdict is not thread-safe on free-threaded builds).
-            cap = reader._tip_cap()
-            st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-            # Seed from disk FIRST (inflate on the worker, ~10× cheaper than a raster) into the panel +
-            # tier-2 RAM; only compose+persist on a genuine miss — so a prewarmed head is a cheap inflate
-            # here, and a fresh raster still write-backs to disk (#149) and mirrors into tier-2.
-            if not reader._worker_seed_head(
-                st, item.token, item.inflected, mined=item.mined, cap=cap
-            ):
-                reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
-                reader._mem_fill(item.token, item.inflected, mined=item.mined)
-        elif reader.dict_set is not None:  # None only if dicts were torn down mid-flight
-            reader.dict_set.entry_for(item.token, item.inflected)
-
-
-def _try_prefetch_item(reader: Reader) -> None:
-    try:
-        item: PrefetchItem = reader._prefetch_q.get(timeout=0.2)
-    except queue.Empty:
-        return
-    if otel_metrics.prefetch_queue_depth is not None:
-        otel_metrics.prefetch_queue_depth.add(-1)
-    if reader._stop.is_set() or item.gen != reader._prefetch_gen:
-        return  # cancelled (line changed / resumed / seek / closing)
-    try:
-        _run_item(reader, item)
-    except Exception:
-        log.debug(
-            "prefetch render failed for %r", item.token.surface, exc_info=True
-        )  # a bad word must never kill the worker
-
-
-def _try_head_prefetch_item(reader: Reader) -> bool:
-    """One queued speculative head-render, if any; ``True`` when handled (so the
-    worker loops before the plain decode-warm queue: a render job is worth doing ahead of a cheap
-    decode, but never outranks a real :class:`FinishItem` for the on-screen tooltip)."""
-    try:
-        _priority, _seq, item = reader._head_prefetch_q.get_nowait()
-    except queue.Empty:
-        return False
-    if reader._stop.is_set() or item.gen != reader._prefetch_gen:
-        return True  # cancelled (line changed / resumed / seek) — still "handled", keep looping
-    try:
-        # Same viewport cap + same panel_for()/panel_cache path a real hover uses — written into the
-        # SAME cache, so a later hover is an ordinary cache hit (see HeadPrefetchItem docstring).
-        # kind="head_ahead" distinguishes the speculative lookahead render from the engaged current
-        # line's kind="head" — without a span here it was invisible, folding into anonymous `render`.
-        with otel_metrics.traced("prefetch_decode", kind="head_ahead"):
-            cap = reader._tip_cap()
-            st = reader._panel_for(item.token, item.inflected, min_h=cap, mined=item.mined)
-            # Disk-seed first (cheap inflate → panel + tier-2 RAM); compose+persist only on a miss.
-            if not reader._worker_seed_head(
-                st, item.token, item.inflected, mined=item.mined, cap=cap
-            ):
-                reader._precompose_head(st, item.token, item.inflected, mined=item.mined, cap=cap)
-                reader._mem_fill(item.token, item.inflected, mined=item.mined)
-        reader._head_built += 1
-    except Exception:
-        log.debug(
-            "head prefetch render failed for %r", item.token.surface, exc_info=True
-        )  # a bad/pathological word must never kill the worker
-    return True
-
-
-def prefetch_worker(reader: Reader) -> None:
-    while not reader._stop.is_set():
-        if _try_head_prefetch_item(reader):
+        if accepted:
             continue
-        _try_prefetch_item(reader)
+        state.inflight.pop(identity.sequence, None)
+        log.debug("speculative-prefetch admission rejected")
+        rejected = len(state.pending)
+        for _queued_priority, _queued_sequence, _queued_identity, queued in state.pending:
+            queued.superseded.set()
+        state.pending.clear()
+        if rejected and otel_metrics.prefetch_queue_depth is not None:
+            otel_metrics.prefetch_queue_depth.add(-rejected)
+        break
 
 
-def _enqueue(reader: Reader, item: PrefetchItem) -> None:
-    reader._prefetch_q.put(item)
-    if otel_metrics.prefetch_queue_depth is not None:
-        otel_metrics.prefetch_queue_depth.add(1)
+def schedule(
+    state: PrefetchState,
+    jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]],
+    on_finished,
+) -> bool:
+    if state.closed or state.submitter is None or state.workers <= 0:
+        return False
+    jobs.sort(key=lambda job: job[0])
+    admitted = False
+    for priority, item in jobs[: state.pending_limit]:
+        state.sequence += 1
+        identity = PrefetchIdentity(
+            state.sequence,
+            item.gen,
+            "head-ahead" if isinstance(item, HeadPrefetchItem) else "head" if item.full else "warm",
+        )
+        heapq.heappush(
+            state.pending,
+            (priority, state.sequence, identity, PrefetchWork(item, threading.Event())),
+        )
+        admitted = True
+        if otel_metrics.prefetch_queue_depth is not None:
+            otel_metrics.prefetch_queue_depth.add(1)
+    _submit_pending(state, on_finished)
+    return admitted
+
+
+def finish(
+    state: PrefetchState,
+    completion: EffectFinished,
+    on_finished,
+) -> None:
+    identity = completion.identity
+    if not isinstance(identity, PrefetchIdentity):
+        return
+    current = state.inflight.pop(identity.sequence, None)
+    if current is None or current[0] != identity:
+        return
+    if (
+        completion.outcome is EffectOutcome.SUCCEEDED
+        and completion.result is True
+        and identity.generation == state.gen
+        and identity.kind == "head-ahead"
+    ):
+        state.head_built += 1
+    _submit_pending(state, on_finished)
+
+
+def close(state: PrefetchState) -> None:
+    state.cancel()
+    state.closed = True
+    state.inflight.clear()
 
 
 def _candidates(reader: Reader) -> list[tuple[int, int, Token]]:
@@ -258,35 +382,48 @@ def update_prefetch(reader: Reader) -> None:
     if key == reader._prefetch_key:
         return
     reader._prefetch_key = key
-    gen = reader.prefetch_state.cancel()  # invalidate anything queued/in-flight for the old state
+    state = reader.prefetch_state
+    gen = state.cancel()
     cands = _candidates(reader)
+    jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]] = []
     for _, i, t in cands:
-        _enqueue(
-            reader, PrefetchItem(gen, t, reader._inflected_surface(i), reader._is_mined(t), engaged)
+        jobs.append(
+            (
+                0 if engaged else 2,
+                PrefetchItem(gen, t, reader._inflected_surface(i), reader._is_mined(t), engaged),
+            )
         )
     if reader.prefetch_lookahead > 0:
-        _enqueue_lookahead(reader, gen, {t.lemma for _, _, t in cands})
+        jobs.extend(_lookahead_items(reader, gen, {t.lemma for _, _, t in cands}))
     if reader.head_prefetch_lookahead > 0:
-        _enqueue_head_prefetch(reader, gen, {t.lemma for _, _, t in cands})
+        jobs.extend(_head_prefetch_items(reader, gen, {t.lemma for _, _, t in cands}))
+    schedule(state, jobs, reader._finish_speculative_prefetch)
 
 
-def _enqueue_lookahead(reader: Reader, gen: int, seen: set[str]) -> None:
+def _lookahead_items(reader: Reader, gen: int, seen: set[str]) -> list[tuple[int, PrefetchItem]]:
     """WARM (dict-only, never full, ``mined=False``) the content words of the next
     ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
     main-thread jamdict/scorer work runs here. ``seen`` carries the current line's lemmas so a word
     already queued isn't warmed twice. No-op without an external sub index."""
-    for text in upcoming_cue_texts(reader, reader.prefetch_lookahead):
+    items: list[tuple[int, PrefetchItem]] = []
+    cue_limit = min(max(0, reader.prefetch_lookahead), _MAX_WARM_PENDING)
+    for text in upcoming_cue_texts(reader, cue_limit):
         toks = reader.tokenizer.tokenize(text)
         for i, t in enumerate(toks):
             if not reader.tokenizer.is_content(t) or t.lemma in seen:
                 continue
             seen.add(t.lemma)
-            _enqueue(
-                reader,
-                PrefetchItem(
-                    gen, t, reader.tokenizer.inflected_in(toks, i), mined=False, full=False
-                ),
+            items.append(
+                (
+                    3,
+                    PrefetchItem(
+                        gen, t, reader.tokenizer.inflected_in(toks, i), mined=False, full=False
+                    ),
+                )
             )
+            if len(items) >= _MAX_WARM_PENDING:
+                return items
+    return items
 
 
 def _head_priority(tag: str) -> int | None:
@@ -326,30 +463,65 @@ def _head_prefetch_candidate(
     return priority, HeadPrefetchItem(gen, t, inflected, mined=False)
 
 
-def _enqueue_head_prefetch(reader: Reader, gen: int, seen: set[str]) -> None:
+def _head_candidates_for_text(
+    text: str,
+    seen: set[str],
+    tokenize: Callable[[str], list[Token]],
+    is_content: Callable[[Token], bool],
+    score: Callable[[list[Token]], object],
+    candidate_for: Callable[[list[Token], int, Token, object], tuple[int, HeadPrefetchItem] | None],
+    candidate_limit: int,
+    probe_limit: int,
+) -> tuple[list[tuple[int, HeadPrefetchItem]], int]:
+    toks = tokenize(text)
+    styles = score(toks)
+    candidates: list[tuple[int, HeadPrefetchItem]] = []
+    probes = 0
+    for i, token in islice(enumerate(toks), probe_limit):
+        probes += 1
+        if not is_content(token) or token.lemma in seen:
+            continue
+        seen.add(token.lemma)
+        candidate = candidate_for(toks, i, token, styles)
+        if candidate is not None:
+            candidates.append(candidate)
+            if len(candidates) >= candidate_limit:
+                break
+    return candidates, probes
+
+
+def _head_prefetch_items(
+    reader: Reader, gen: int, seen: set[str]
+) -> list[tuple[int, HeadPrefetchItem]]:
     """Speculative HEAD render for a SELECTIVE subset of the next
     ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
-    render cost over plain decode-warming, in priority order, bounded by the queue's ``maxsize`` (the
+    render cost over plain decode-warming, in priority order, bounded by ``head_queue_max`` (the
     transient-RSS cap — panel_cache's LRU only bounds RETAINED size). Needs a scorer for the n+1/
-    known/freq signal; a no-op without one (or without a sub index, like ``_enqueue_lookahead``)."""
+    known/freq signal; a no-op without one or a subtitle index."""
     if reader.scorer is None:
-        return
-    for text in upcoming_cue_texts(reader, reader.head_prefetch_lookahead):
-        toks = reader.tokenizer.tokenize(text)
-        styles = reader.scorer.score_line(toks)
-        for i, t in enumerate(toks):
-            if not reader.tokenizer.is_content(t) or t.lemma in seen:
-                continue
-            seen.add(t.lemma)
-            candidate = _head_prefetch_candidate(reader, gen, toks, i, t, styles)
-            if candidate is None:
-                continue
-            priority, entry = candidate
-            reader._head_seq += 1
-            try:
-                reader._head_prefetch_q.put_nowait((priority, reader._head_seq, entry))
-            except queue.Full:
-                return  # at capacity — drop the rest; decode-only warming still covers them
+        return []
+    candidates: list[tuple[int, HeadPrefetchItem]] = []
+    probe_budget = _MAX_HEAD_TOKEN_PROBES
+    cue_limit = min(max(0, reader.head_prefetch_lookahead), reader.prefetch_state.head_queue_max)
+    for text in upcoming_cue_texts(reader, cue_limit):
+        found, probes = _head_candidates_for_text(
+            text,
+            seen,
+            reader.tokenizer.tokenize,
+            reader.tokenizer.is_content,
+            reader.scorer.score_line,
+            lambda toks, i, token, styles: _head_prefetch_candidate(
+                reader, gen, toks, i, token, styles
+            ),
+            reader.prefetch_state.head_queue_max - len(candidates),
+            probe_budget,
+        )
+        candidates.extend(found)
+        probe_budget -= probes
+        if len(candidates) >= reader.prefetch_state.head_queue_max or probe_budget <= 0:
+            break
+    candidates.sort(key=lambda candidate: candidate[0])
+    return [(1, item) for _priority, item in candidates[: reader.prefetch_state.head_queue_max]]
 
 
 def upcoming_cue_texts(reader: Reader, n: int) -> list[str]:

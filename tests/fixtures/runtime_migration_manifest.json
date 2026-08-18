@@ -698,15 +698,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_enqueue"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_enqueue_head_prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_enqueue_lookahead"
+      "src/saitenka/app/prefetch.py::_head_prefetch_items"
     ],
     [
       "reader-parameter",
@@ -714,15 +706,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_run_item"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_try_head_prefetch_item"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_try_prefetch_item"
+      "src/saitenka/app/prefetch.py::_lookahead_items"
     ],
     [
       "reader-parameter",
@@ -731,10 +715,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/prefetch.py::cap_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::prefetch_worker"
     ],
     [
       "reader-parameter",
@@ -1724,12 +1704,15 @@
         "call:close_lane:tooltip-render-ahead",
         "call:tooltip_engaged.close",
         "call:close_lane:tooltip-engaged",
+        "call:prefetch.close",
+        "call:close_lane:speculative-prefetch",
         "order:call:self._stop.set>call:close_lane:subtitle-fetch",
         "order:call:close_lane:cue-annotation>call:shutil.rmtree",
         "order:call:close_lane:tooltip-render-ahead>call:shutil.rmtree",
         "order:call:close_lane:tooltip-engaged>call:shutil.rmtree",
+        "order:call:close_lane:speculative-prefetch>call:shutil.rmtree",
         "call:self._annotation.close",
-        "loop:self._prefetch_threads=>call:th.join"
+        "order:call:prefetch.close>call:close_lane:speculative-prefetch"
       ],
       "target": "job-broker-lanes",
       "work_package": "3,5",

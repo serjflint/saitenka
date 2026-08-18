@@ -862,7 +862,6 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.prefetch = False
-    r._prefetch_threads = []
     _i, tok, inflected, _mined = _first_content(r)
     r._tip_xy, r._tip_scroll = (0, 0), 0
     r._panel_cache.clear()
@@ -1011,7 +1010,6 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r.prefetch = False
-    r._prefetch_threads = []
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r, tok.surface)
     assert r._engaged_tooltip.inflight is None

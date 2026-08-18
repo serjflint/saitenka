@@ -184,7 +184,7 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(capsys, monke
     always said '0 prefetch worker(s)'. It must now fire from apply_deps with the live count, exactly
     once (a later re-inject must not re-print)."""
     r = Reader(FakeIPC())
-    monkeypatch.setattr(r, "start_prefetch", lambda: r._prefetch_threads.extend(("w1", "w2", "w3")))
+    monkeypatch.setattr(r, "start_prefetch", lambda: setattr(r.prefetch_state, "workers", 3))
     r._apply_deps({"scorer": None, "dict_set": None, "anki": None, "mine_cfg": None})
     assert "3 prefetch worker(s)" in capsys.readouterr().out  # real count, not 0
     r._apply_deps({})  # a second injection must not re-announce
