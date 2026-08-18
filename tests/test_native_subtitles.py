@@ -462,6 +462,47 @@ def test_oversized_source_keeps_native_pixels_before_provider_work(tmp_path: Pat
     result.close()
 
 
+def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> None:
+    """WP4.3's gate, asserted on the owner itself rather than on the absence of a write.
+
+    Whether hit boxes exist is an interaction fact; who owns the pixels is a visibility fact. The
+    pure FSM keeps them apart, but that is not evidence the system does — the Reader-side degrade
+    path clears `boxes` and drives the FSM in the same call, which is exactly where the two would
+    get welded together.
+    """
+    result, _ipc, backend = reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert result.native_geometry is not None
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+    renderer = result.subtitle_pipeline.renderer
+    assert isinstance(renderer, NativeVisibleRenderer)
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE
+    assert result.boxes
+
+    backend.error = RuntimeError("font provider unavailable")
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result)
+    assert result.native_geometry.worker.wait_idle()
+    assert not result.native_geometry.apply(result)
+
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE  # unproved boxes go, pixels stay
+    assert not renderer.ownership_state.geometry_ready
+    assert result.boxes == []
+
+    backend.error = None
+    result.subtitle_pipeline.invalidate()
+    result.native_geometry.worker.invalidate_cache()
+    assert result.native_geometry.schedule(result)
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result)
+
+    assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
+    assert result.boxes
+    result.close()
+
+
 def test_provider_failure_preserves_hover_pause_while_boxes_are_removed(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     result.set_subtitle("猫を見る")
