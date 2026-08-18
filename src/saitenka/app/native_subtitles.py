@@ -877,10 +877,29 @@ class NativeSubtitleGeometry:
                     start, end = indexed.start, indexed.end
         return start, end, timestamp_ms, active_rows
 
+    def _trace_unscheduled(self, reason: str) -> None:
+        """Name a geometry schedule that never started. Not a degrade: the inputs are not assembled
+        yet, so pixels and ownership are untouched — only the silence is the bug."""
+        with otel_metrics.traced("subtitle_geometry_unscheduled") as span:
+            span.set("reason", reason)
+        log.debug("geometry schedule skipped: %s", reason)
+
     def _resolve_schedule_inputs(self, reader: Reader) -> _ScheduleInputs | None:
         path = self.source_path
         source = self._source_bytes
         if path is None or source is None or not reader.sub_text.strip() or not reader.tokens:
+            # Every other exit below records a reason; this one used to return a bare None, so a
+            # geometry schedule that never ran was invisible in the logs and in telemetry. These
+            # four are "inputs not assembled yet", not a failure — name which, and do not degrade.
+            self._trace_unscheduled(
+                "no-source-path"
+                if path is None
+                else "no-source-bytes"
+                if source is None
+                else "no-cue-text"
+                if not reader.sub_text.strip()
+                else "no-tokens"
+            )
             return None
         if self.ass_full_capability == AssFullCapability.UNSUPPORTED:
             self._degrade_geometry(reader, "subtitle-ass-full-unsupported")

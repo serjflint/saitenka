@@ -1197,6 +1197,23 @@ def test_close_removes_visible_native_focus(tmp_path: Path) -> None:
     assert ("osd-overlay", 1001, "none", "") in ipc.commands
 
 
+def test_a_geometry_schedule_that_never_starts_names_the_missing_input(tmp_path: Path) -> None:
+    """The four preconditions in _resolve_schedule_inputs used to return a bare None, so a schedule
+    that never ran left no trace in logs or telemetry — which is why the repeated-text gap below took
+    an hour to locate. Not a degrade: pixels and ownership are untouched, only the silence was wrong."""
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.native_geometry is not None
+    result.set_subtitle("猫を見る")
+    result.tokens = []  # annotation has not landed yet: inputs are not assembled
+
+    traced: list[str] = []
+    result.native_geometry._trace_unscheduled = traced.append  # type: ignore[method-assign]
+    assert result.native_geometry.schedule(result) is False
+
+    assert traced == ["no-tokens"]
+    result.close()
+
+
 def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
