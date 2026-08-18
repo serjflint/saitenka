@@ -379,7 +379,11 @@ class PlaybackProjection:
             state = replace(state, track=track)
             return state, (SubtitleSelectionChanged(track.track, data, track.role),)
         if name in CUE_PROPERTIES:
-            return self._apply_cue(state, name, data), ()
+            # One delta per changed cue fact, carrying the identity that fact implies. The reducer
+            # sees one observation at a time and has no batch, so coalescing a split burst
+            # (sub-start, sub-text, sub-end) is the drain's job, by ObservedCue equality.
+            state = self._apply_cue(state, name, data)
+            return state, (CueObservationChanged(state.identity()),)
         if name in RENDER_SPACE_PROPERTIES:
             render_space = RenderSpaceFacts(state.render_space.render_space.advance())
             state = replace(state, render_space=render_space)

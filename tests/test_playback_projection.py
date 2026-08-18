@@ -9,8 +9,10 @@ from saitenka.runtime.playback import (
     AuthoredCueStale,
     ConnectionChanged,
     CueIdentityRetired,
+    CueObservationChanged,
     FactDomain,
     GeometryInputChanged,
+    ObservedCue,
     PauseChanged,
     PlaybackProjection,
     PlaybackState,
@@ -301,7 +303,7 @@ def test_cue_timing_is_a_geometry_input_but_not_a_render_space_revision() -> Non
 
     projected = projection.observe(PlaybackState(), "sub-start", 4.0)
 
-    assert kinds(projected.deltas) == [GeometryInputChanged]
+    assert kinds(projected.deltas) == [CueObservationChanged, GeometryInputChanged]
     assert projected.state.render_space.render_space == Revision()
 
 
@@ -313,6 +315,76 @@ def test_sub_delay_reports_timing_without_revising_the_render_space() -> None:
     assert kinds(projected.deltas) == [SubtitleTimingChanged]
     assert projected.state.timing.delay == 0.5
     assert projected.state.render_space.render_space == Revision()
+
+
+# --- gate: every cue observation publishes the identity it implies -----------------------------
+
+
+def observed(deltas: tuple[object, ...]) -> list[ObservedCue]:
+    return [d.cue for d in deltas if isinstance(d, CueObservationChanged)]
+
+
+def test_a_split_cue_burst_settles_on_the_same_identity_as_a_joined_one() -> None:
+    projection = PlaybackProjection()
+    cue = ("猫を見る", 1.0, 3.0)
+
+    split = PlaybackState()
+    for name, data in zip(
+        ("sub-start", "sub-text", "sub-end"), (cue[1], cue[0], cue[2]), strict=True
+    ):
+        split = projection.observe(split, name, data).state
+    joined = PlaybackState()
+    for name, data in zip(("sub-text", "sub-start", "sub-end"), cue, strict=True):
+        joined = projection.observe(joined, name, data).state
+
+    assert split.identity() == joined.identity()
+
+
+def test_each_changed_cue_fact_publishes_the_identity_it_implies() -> None:
+    projection = PlaybackProjection()
+    state = PlaybackState()
+
+    seen = []
+    for name, data in (("sub-start", 1.0), ("sub-text", "猫を見る"), ("sub-end", 3.0)):
+        projected = projection.observe(state, name, data)
+        state = projected.state
+        seen.extend(observed(projected.deltas))
+
+    # The reducer has no batch, so a split burst is three deltas; the last carries the whole cue and
+    # the drain coalesces by equality. Only sub-text advances the cue revision.
+    assert [(c.text, c.start, c.end) for c in seen] == [
+        ("", 1.0, None),
+        ("猫を見る", 1.0, None),
+        ("猫を見る", 1.0, 3.0),
+    ]
+    assert [c.cue for c in seen] == [Revision(), Revision(1), Revision(1)]
+
+
+def test_repeated_identical_cue_text_publishes_no_further_identity() -> None:
+    projection = PlaybackProjection()
+    state = projection.observe(PlaybackState(), "sub-text", "猫を見る").state
+
+    projected = projection.observe(state, "sub-text", "猫を見る")
+
+    # Negative control for observe()'s unchanged-value guard: drop it and this publishes a second
+    # identity, so every cue would reconcile twice.
+    assert observed(projected.deltas) == []
+
+
+def test_identical_text_under_a_new_track_changes_identity_without_a_cue_delta() -> None:
+    projection = PlaybackProjection()
+    state = projection.observe(PlaybackState(), "sub-text", "猫を見る").state
+    before = state.identity()
+
+    state = projection.observe(state, "sid", 2).state
+    after = projection.observe(state, "sub-text", "猫を見る")
+
+    # observe()'s guard is keyed on the property value, so mpv re-sending the same text under a new
+    # track publishes no cue delta even though the identity moved. A delta-driven consumer must take
+    # the track change from SubtitleSelectionChanged; subscribing to cue deltas alone would miss it.
+    assert observed(after.deltas) == []
+    assert after.state.identity() != before
+    assert SubtitleSelectionChanged in kinds(projection.observe(state, "sid", 3).deltas)
 
 
 # --- gate: pointer and pause stay legacy-owned in production -----------------------------------
