@@ -11,6 +11,7 @@ from saitenka.app.subtitle_pipeline import (
     SubtitleGeometryWorker,
     SubtitleModeCoordinator,
 )
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.subtitles import (
     GeometryRequest,
     GeometrySnapshot,
@@ -576,6 +577,84 @@ def test_an_ungatewayed_session_still_executes_geometry() -> None:
 
     assert coordinator.current is not None
     worker.close()
+
+
+class SaturatedLane:
+    """A lane that refuses admission while ``full``, and otherwise runs the job inline.
+
+    Refusal is what the broker answers at capacity, and it is the one arm no other test reaches —
+    every fake so far admits everything. The worker has to read it as dropped work rather than as
+    work in flight, or one refusal wedges the queue for the rest of the session.
+    """
+
+    def __init__(self) -> None:
+        self.full = True
+        self.admitted = 0
+
+    def __call__(self, *, owner, identity, lane, request, on_finished) -> bool:  # noqa: ARG002
+        if self.full:
+            return False
+        self.admitted += 1
+        request.worker.execute(request)
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+        return True
+
+
+class DeferredLane(SaturatedLane):
+    """A lane that admits the job and holds it, so a test picks what lands before it executes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held: list[tuple[object, object, object]] = []
+
+    def __call__(self, *, owner, identity, lane, request, on_finished) -> bool:  # noqa: ARG002
+        self.held.append((request, identity, on_finished))
+        return True
+
+    def run_one(self, owner) -> None:
+        job, identity, on_finished = self.held.pop(0)
+        job.worker.execute(job)
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_a_refused_lane_admission_drops_the_work_without_wedging_the_queue() -> None:
+    lane = SaturatedLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=lane)
+
+    assert worker.submit(request(coordinator.generation))  # reserved, then refused admission
+
+    assert lane.admitted == 0
+    assert coordinator.current is None
+    assert worker.stats.superseded == 1  # counted as dropped, not left pending
+
+    lane.full = False
+    assert worker.submit(request(coordinator.generation))
+
+    assert lane.admitted == 1
+    assert coordinator.current is not None  # nothing believed a job was still in flight
+    worker.close()
+
+
+def test_a_job_that_executes_after_close_publishes_nothing_and_takes_no_successor() -> None:
+    """Close quarantine, driven at the lane rather than at the coordinator.
+
+    A job already admitted cannot be recalled, so the contract is about what its result is allowed
+    to do on arrival — a session that has torn down its surface must not have pixels handed to it
+    by work it started before.
+    """
+    lane = DeferredLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=lane)
+    assert worker.submit(request(coordinator.generation))
+    assert lane.held  # admitted, not yet executed
+
+    worker.close()
+    lane.run_one(Owner.SUBTITLE)
+
+    assert coordinator.current is None
+    assert not worker.submit(request(coordinator.generation))
+    assert not lane.held  # and the terminal admitted no successor behind it
 
 
 def test_new_epoch_reports_its_invalidation_cause_once() -> None:
