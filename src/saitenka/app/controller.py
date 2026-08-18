@@ -340,7 +340,13 @@ class Reader:
         self._startup_hint_lease = startup_hint_lease
         self._interactive_ready = False
         self._connection_ready = True
-        self.ov = Overlay(ipc, id_base=o.overlay_id_base)
+        self.ov = Overlay(
+            ipc,
+            id_base=o.overlay_id_base,
+            # Composition knows both sides, so the port is resolved once here rather than probed
+            # inside the adapter on every surface transaction.
+            runtime_submit=getattr(ipc, "submit_runtime_mpv", None),
+        )
         from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
         from saitenka.app.lifecycle_timers import LifecycleTimers
 

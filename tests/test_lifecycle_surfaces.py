@@ -55,7 +55,7 @@ class _DeferredIPC:
 
 def test_close_places_final_remove_after_pending_add_before_attach_disconnect():
     ipc = _DeferredIPC()
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
     surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.LOADING)
     ipc.execute(0)  # mpv applied the add, but its correlated completion is not drained yet
     assert ipc.visible == {OverlayId.LOADING}
@@ -71,7 +71,7 @@ def test_close_places_final_remove_after_pending_add_before_attach_disconnect():
 
 def test_late_present_ack_cannot_restore_removed_lifecycle_surface():
     ipc = _DeferredIPC()
-    overlay = Overlay(ipc)
+    overlay = Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv)
     surfaces = LifecycleSurfaces(overlay)
 
     surfaces.present(Image.new("RGBA", (2, 2), "white"), 4, 5, oid=OverlayId.TOAST)
@@ -86,7 +86,7 @@ def test_late_present_ack_cannot_restore_removed_lifecycle_surface():
 
 def test_rejected_surface_submission_is_terminally_failed():
     ipc = _DeferredIPC(accepted=False)
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
 
     surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.LOADING)
 
@@ -135,7 +135,7 @@ def test_concurrent_preparation_cannot_reverse_slot_revision_dispatch():
 
 def test_queued_surface_revisions_keep_distinct_immutable_files():
     ipc = _DeferredIPC()
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
 
     surfaces.present(Image.new("RGBA", (1, 1), "white"), 0, 0, oid=OverlayId.LOADING)
     surfaces.present(Image.new("RGBA", (3, 2), "black"), 0, 0, oid=OverlayId.LOADING)
@@ -171,7 +171,7 @@ class _SubmissionFailureIPC(_DeferredIPC):
 
 def test_submission_exception_fails_revision_and_discards_staged_file():
     ipc = _SubmissionFailureIPC()
-    surfaces = LifecycleSurfaces(Overlay(ipc))
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
     surfaces.present(Image.new("RGBA", (1, 1)), 0, 0, oid=OverlayId.TOAST)
 
     assert surfaces.snapshot(OverlayId.TOAST).status is SurfaceStatus.FAILED

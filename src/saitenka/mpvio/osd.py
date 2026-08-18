@@ -135,12 +135,18 @@ def _set_draw_geometry(span: otel_metrics.SpanSetter, x: int, y: int, w: int, h:
 class Overlay:
     """Manage one or more mpv OSD overlays keyed by id (0..63)."""
 
-    def __init__(self, ipc: MpvIPC, id_base: int = 1):
+    def __init__(self, ipc: MpvIPC, id_base: int = 1, *, runtime_submit=None):
         """``id_base`` shifts the physical mpv overlay ids so we can coexist with another script that
         owns the low ids (namespace hygiene). The controller keeps using its logical ids 1..6;
-        base 1 (default) is a no-op offset → byte-identical to before."""
+        base 1 (default) is a no-op offset → byte-identical to before.
+
+        ``runtime_submit`` is the correlated-command port, supplied by composition. It is a
+        constructor argument rather than something detected on ``ipc``, because a probe makes egress
+        depend on which methods a collaborator happens to expose: handing any fake the port would
+        silently move overlay writes onto the gateway and change what every caller observes."""
         self.ipc = ipc
         self.id_base = id_base
+        self._runtime_submit = runtime_submit
         self._files: dict[int, Path] = {}
         self._live: dict[int, tuple] = {}  # physical oid -> last overlay-add tail, for repaint()
         self.visible = True
@@ -165,7 +171,7 @@ class Overlay:
     ) -> None:
         from saitenka.runtime import EffectError, EffectFinished, EffectOutcome
 
-        submit = getattr(self.ipc, "submit_runtime_mpv", None)
+        submit = self._runtime_submit
         if submit is not None:
             accepted = submit(
                 owner=owner,
