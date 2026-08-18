@@ -14,6 +14,7 @@ import threading
 from typing import TYPE_CHECKING, overload
 
 from saitenka.app.languages import MAIN_LANG
+from saitenka.app.subnav_settle import SettleWindow
 
 # In-RAM ceiling for the tier-2 compressed-head cache. Independent of the disk ceiling
 # (``render_cache_max_mb``, which can be GBs): compressed heads are ~10× smaller than the BGRA arrays,
@@ -87,7 +88,8 @@ class EpisodeContext:
         # from mpv's slow video seek; the real sub-seek fires behind it and reconciles once it settles.
         self.sub_index: CueIndex | None = None
         self.nav_idx = -1  # last cue index jumped to (chaining hint; -1 = unknown)
-        self.sub_settle_until = 0.0  # while >now, ignore transient-empty sub-text during a seek
+        # While open, ignore mpv's mid-seek transient sub-text (app/subnav_settle.py).
+        self.sub_settle = SettleWindow()
         self.nav_prev_text = ""  # cue text showing right before a nav render (reconcile)
         self.nav_provisional_cue_counted = False
         # durable per-session recorder (app/session_stats.py); None until stats start on file load

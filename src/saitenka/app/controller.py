@@ -40,6 +40,7 @@ from saitenka.app import (
     sidebar,
     sub_picker,
     subnav,
+    subnav_settle,
     subtitle_intents,
     subtitle_modes,
     surfaces,
@@ -201,6 +202,7 @@ OBSERVED_PROPS = (
 # they revise all live in saitenka/runtime/playback.py — the sole interpreter.
 # The one-panel crisp path snaps the display scale to this bucket so mpv's osd-dimensions wobble
 # reuses cached native bands instead of re-rastering (see Reader._raster_scale).
+_SETTLE_TIMER = "subtitle:navigation-settle"
 _SCALE_BUCKET = 0.05
 
 # Every mpv size/scale source, probed at each osd-dimensions change to diagnose why the tooltip scale
@@ -244,7 +246,7 @@ class Reader:
     subtitle_slang = Delegated[str]("episode.subtitle", "slang")
     _sub_index = Delegated[CueIndex | None]("episode", "sub_index")
     _nav_idx = Delegated[int]("episode", "nav_idx")
-    _sub_settle_until = Delegated[float]("episode", "sub_settle_until")
+    _sub_settle = Delegated[subnav_settle.SettleWindow]("episode", "sub_settle")
     _nav_prev_text = Delegated[str]("episode", "nav_prev_text")
     _nav_provisional_cue_counted = Delegated[bool]("episode", "nav_provisional_cue_counted")
     _session_recorder = Delegated[session_stats.SessionRecorder | None](
@@ -821,7 +823,45 @@ class Reader:
             end=identity.observed_end,
         )
 
+    # --- subtitle navigation settle window (WP4.5) --------------------------------------------
+    def open_settle_window(self) -> None:
+        """Absorb mpv's mid-seek transients until the seek lands or the named deadline is due."""
+        window = self._sub_settle.begin()
+        self._sub_settle = window
+        identity = window.identity
+
+        def due(completion: EffectFinished) -> None:
+            if completion.outcome is EffectOutcome.SUCCEEDED:
+                self._settle_due(identity)
+
+        schedule = getattr(self.ipc, "schedule_runtime_timer", None)
+        if schedule is None:
+            # No runtime timer port (tests, pre-run): never open a window we cannot retire.
+            self._sub_settle = window.retire()
+            return
+        if not schedule(
+            owner=Owner.SUBTITLE,
+            identity=identity,
+            timer=_SETTLE_TIMER,
+            due_at=time.monotonic() + subnav_settle.SETTLE_SECONDS,
+            on_finished=due,
+        ):
+            self._sub_settle = window.retire()
+
+    def _settle_due(self, identity: subnav_settle.NavigationSettleDue) -> None:
+        self._sub_settle = self._sub_settle.due(identity)
+
+    def retire_settle_window(self) -> None:
+        """Close the window and cancel its deadline; safe to call when none is open."""
+        if not self._sub_settle.open:
+            return
+        self._sub_settle = self._sub_settle.retire()
+        cancel = getattr(self.ipc, "cancel_runtime_timer", None)
+        if cancel is not None:
+            cancel(_SETTLE_TIMER)
+
     def _replace_subtitle_source(self, path: object = None, *, reason: str) -> None:
+        self.retire_settle_window()
         """A new authored subtitle source is live: revise it in the projection (which every cue
         identity is derived from) and retire the identity the old source produced."""
         self._playback = self._projection.source_replaced(self._playback, path).state

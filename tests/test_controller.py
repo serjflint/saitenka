@@ -25,12 +25,31 @@ class FakeIPC:
         self.events = []
         self.props = {}
         self.commands = []
+        #: Named timers scheduled through the runtime port; nothing fires on a wall clock.
+        self.timers = {}
 
     def command(self, *args):
         self.commands.append(args)
         if args and args[0] == "get_property":
             return {"data": self.props.get(args[1])}
         return {"data": None}
+
+    def schedule_runtime_timer(self, *, timer, identity, on_finished, **_kwargs):
+        self.timers[timer] = (identity, on_finished)
+        return True
+
+    def cancel_runtime_timer(self, timer):
+        return self.timers.pop(timer, None) is not None
+
+    def fire_runtime_timer(self, timer):
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        entry = self.timers.pop(timer, None)
+        if entry is None:
+            return False
+        identity, on_finished = entry
+        on_finished(EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED))
+        return True
 
     def pump(self):
         pass
@@ -560,7 +579,7 @@ def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     """Outside the settle window an empty sub-text is honoured (a real gap between cues clears it)."""
     r, _ipc = _reader_with_index(monkeypatch)
     r.set_subtitle("に")
-    r._sub_settle_until = 0.0  # window already expired
+    r.retire_settle_window()  # window already closed
     r._reconcile_sub_text("")
     assert r.sub_text == ""
 
@@ -614,6 +633,48 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
     )  # the settled cue is interactive without losing the chaining hint
 
 
+def test_the_settle_deadline_retires_the_window_exactly_once(monkeypatch):
+    """The window closes on its named due event, not on a wall clock the reconcile polls."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r._sub_settle.open
+    assert "subtitle:navigation-settle" in ipc.timers
+
+    assert ipc.fire_runtime_timer("subtitle:navigation-settle")
+
+    assert r._sub_settle.open is False
+    r._reconcile_sub_text("")  # no longer guarded: a real gap now clears the overlay
+    assert r.sub_text == ""
+
+
+def test_a_superseded_navigation_deadline_cannot_close_the_current_window(monkeypatch):
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    stale = r._sub_settle.identity
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))  # a second nav opens its own window
+
+    r._settle_due(stale)
+
+    assert r._sub_settle.open
+
+
+def test_replacing_the_subtitle_source_retires_the_settle_window(monkeypatch):
+    r, ipc = _reader_with_index(monkeypatch)
+    r.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r._handle(_msg_for(ipc, "Alt+RIGHT"))
+    assert r._sub_settle.open
+
+    r._replace_subtitle_source("/media/next.mkv", reason="test")
+
+    assert r._sub_settle.open is False
+    assert "subtitle:navigation-settle" not in ipc.timers
+
+
 def test_settle_guard_reinstalls_retired_identity_for_same_text():
     ipc = FakeIPC()
     ipc.props.update({"sid": 1, "sub-start": 1.0, "sub-end": 2.0})
@@ -621,7 +682,7 @@ def test_settle_guard_reinstalls_retired_identity_for_same_text():
     reader.set_subtitle("同じ字幕")
     reader._nav_prev_text = "同じ字幕"
     reader._nav_idx = 1
-    reader._sub_settle_until = time.monotonic() + 1.0
+    reader._sub_settle = reader._sub_settle.begin()
     reader._retire_cue_identity("sub-start")
 
     reader._reconcile_sub_text("同じ字幕")

@@ -39,13 +39,13 @@ def test_episode_context_defaults_are_the_no_episode_state():
     assert (
         ctx.sub_index,
         ctx.nav_idx,
-        ctx.sub_settle_until,
+        ctx.sub_settle.open,
         ctx.nav_prev_text,
         ctx.nav_provisional_cue_counted,
     ) == (
         None,
         -1,
-        0.0,
+        False,
         "",
         False,
     )
@@ -73,7 +73,7 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     r.en_sid = 6
     r.subtitle_language = "en"
     r._nav_idx = 9
-    r._sub_settle_until = 12.5
+    r._sub_settle = r._sub_settle.begin()
     r.episode.subtitle.retry_active = True  # a nested-cluster field, migrated fully off the Reader
 
     r.episode = EpisodeContext()  # the re-slot move: one rebind resets every episode field
@@ -82,7 +82,7 @@ def test_reslot_rebinds_the_episode_without_leaking_prior_state():
     assert r.en_sid is None
     assert r.subtitle_language == "jp"
     assert r._nav_idx == -1
-    assert r._sub_settle_until == 0.0
+    assert r._sub_settle.open is False
     assert r.episode.subtitle.retry_active is False
 
 

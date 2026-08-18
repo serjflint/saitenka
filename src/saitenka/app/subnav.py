@@ -6,11 +6,11 @@ Takes ``reader: Reader`` (the AGENTS.md seam pattern) with thin delegating metho
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
+from saitenka.app import subnav_settle
 from saitenka.app.sub_index import load_index
 
 if TYPE_CHECKING:
@@ -98,8 +98,8 @@ def sub_nav(reader: Reader, delta: int) -> bool:
             reader._geometry_cue_hint = None
         reader._nav_idx = tgt
         # Guard the reconcile: mpv's sub-text briefly reads empty (or the pre-nav cue) mid-seek;
-        # ignoring that avoids reverting the render before it settles. ~1s covers a slow seek.
-        reader._sub_settle_until = time.monotonic() + 1.0
+        # ignoring that avoids reverting the render before it settles.
+        reader.open_settle_window()
     return True
 
 
@@ -117,9 +117,12 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
     if text == reader.sub_text and (not reader._cue_retired or not text.strip()):
         return
     identity_reinstall = text == reader.sub_text and reader._cue_retired
-    within_settle = time.monotonic() < reader._sub_settle_until
-    if within_settle and (
-        not text.strip() or (text == reader._nav_prev_text and not identity_reinstall)
+    window = reader._sub_settle
+    if subnav_settle.swallows(
+        window,
+        text=text,
+        nav_prev_text=reader._nav_prev_text,
+        identity_reinstall=identity_reinstall,
     ):
         return
     # Only spans an actual cue change (guarded above), not every poll tick — sibling to sub_nav's
@@ -132,11 +135,11 @@ def reconcile_sub_text(reader: Reader, text: str) -> None:
         otel_metrics.sub_text_reconcile_duration_ms, "sub_text_reconcile"
     ):
         nav_idx = reader._nav_idx
-        if identity_reinstall and within_settle and reader._nav_provisional_cue_counted:
+        if identity_reinstall and window.open and reader._nav_provisional_cue_counted:
             reader.set_subtitle(text, revise_session_cue=True)
         else:
             reader.set_subtitle(text)
         reader._nav_provisional_cue_counted = False
         if identity_reinstall:
             reader._nav_idx = nav_idx
-    reader._sub_settle_until = 0.0
+    reader.retire_settle_window()

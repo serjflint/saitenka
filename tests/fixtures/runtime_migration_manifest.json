@@ -294,23 +294,11 @@
     ],
     [
       "polled-deadline",
-      "src/saitenka/app/reader_context.py::EpisodeContext.__init__"
-    ],
-    [
-      "polled-deadline",
       "src/saitenka/app/sidebar.py::scroll"
     ],
     [
       "polled-deadline",
       "src/saitenka/app/sidebar.py::update"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/subnav.py::reconcile_sub_text"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/subnav.py::sub_nav"
     ],
     [
       "polled-deadline",

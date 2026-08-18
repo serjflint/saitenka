@@ -217,6 +217,31 @@ class FakeIPC:
         self._legacy_event_source = None
         self._runtime_gateway = None
         self.runtime_outcomes: list[object] = []
+        #: Named timers scheduled through the runtime port, newest per name. Nothing fires on a
+        #: wall clock — a test calls `fire_runtime_timer` so ordering stays deterministic.
+        self.timers: dict[str, tuple[object, object]] = {}
+
+    def schedule_runtime_timer(self, *, timer: str, identity, on_finished, **_kwargs) -> bool:
+        self.timers[timer] = (identity, on_finished)
+        return True
+
+    def cancel_runtime_timer(self, timer: str) -> bool:
+        return self.timers.pop(timer, None) is not None
+
+    def fire_runtime_timer(self, timer: str, *, outcome=None) -> bool:
+        """Deliver a scheduled timer's due event, as the gateway would."""
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        entry = self.timers.pop(timer, None)
+        if entry is None:
+            return False
+        identity, on_finished = entry
+        on_finished(
+            EffectFinished(
+                EffectId(0), Owner.SUBTITLE, identity, outcome or EffectOutcome.SUCCEEDED
+            )
+        )
+        return True
 
     def set_prop(self, name: str, value) -> None:
         """Simulate mpv: update the property AND emit a buffered property-change event."""
