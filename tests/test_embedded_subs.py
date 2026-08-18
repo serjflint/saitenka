@@ -5,20 +5,17 @@ building a real Reader (this module only touches .ipc, ._get and .load_sub_index
 
 from __future__ import annotations
 
+import util
+
 from saitenka.app import embedded_subs as es
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, tracks=None, path=None):
-        self._tracks = tracks or []
-        self._path = path
-
-    def command(self, *args):
-        if args[:2] == ("get_property", "track-list"):
-            return {"data": self._tracks}
-        if args[:2] == ("get_property", "path"):
-            return {"data": self._path}
-        return {"data": None}
+        super().__init__()
+        self.props["track-list"] = tracks or []
+        self.props["path"] = path
+        util.runtime_gateway(self)
 
 
 class FakeReader:

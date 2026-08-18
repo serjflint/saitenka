@@ -17,16 +17,19 @@ from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.subtitles import CueIndex, parse_srt
 
 
-class FakeIPC:
+class FakeIPC(RuntimeFakeIPC):
+    """Gateway-wired, and a small mpv track simulator on top: selecting a sid or adding/removing an
+    external track updates ``track-list`` the way mpv does, so selection policy is exercised against
+    state rather than against a recorded call list."""
+
     def __init__(self, tracks=()):
+        super().__init__()
         self.tracks = list(tracks)
-        self.props = {"track-list": self.tracks, "pause": False, "secondary-sid": "no"}
-        self.commands: list[tuple] = []
+        self.props.update({"track-list": self.tracks, "pause": False, "secondary-sid": "no"})
+        runtime_gateway(self)
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
+        reply = super().command(*args)
         if args[:2] == ("set_property", "sid"):
             self.props["sid"] = args[2]
             for track in self.tracks:
@@ -51,7 +54,7 @@ class FakeIPC:
                     track["selected"] = track["id"] == 9
         if args[0] == "sub-remove":
             self.tracks[:] = [t for t in self.tracks if t.get("id") != args[1]]
-        return {"data": None}
+        return reply
 
 
 JP = {"id": 2, "type": "sub", "lang": "jpn"}

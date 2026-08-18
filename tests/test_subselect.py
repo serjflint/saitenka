@@ -1,27 +1,31 @@
 """attach/plugin-mode subtitle selection: pick the JP track over the user's English-first mpv, or
-fetch jimaku when the file has no JP subs. A FakeIPC records commands and serves track-list/path."""
+fetch jimaku when the file has no JP subs.
+
+The fake is the shared gateway-wired one, so selection can be exercised through the runtime command
+path rather than a bare ``.command()`` recorder. ``calls``/``sets`` keep the assertions the file was
+written with.
+"""
 
 from __future__ import annotations
+
+import util
 
 from saitenka.app import subselect
 
 
-class FakeIPC:
+class FakeIPC(util.FakeIPC):
     def __init__(self, tracks=None, path=None):
-        self._tracks = tracks or []
-        self._path = path
-        self.calls: list[tuple] = []
+        super().__init__()
+        self.props["track-list"] = tracks or []
+        self.props["path"] = path
+        util.runtime_gateway(self)
 
-    def command(self, *args):
-        self.calls.append(args)
-        if args[:2] == ("get_property", "track-list"):
-            return {"data": self._tracks}
-        if args[:2] == ("get_property", "path"):
-            return {"data": self._path}
-        return {"data": None}
+    @property
+    def calls(self) -> list[tuple]:
+        return self.commands
 
     def sets(self, prop):
-        return [a[2] for a in self.calls if a[:2] == ("set_property", prop)]
+        return [a[2] for a in self.commands if a[:2] == ("set_property", prop)]
 
 
 JP = {"id": 2, "type": "sub", "lang": "jpn"}
