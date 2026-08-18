@@ -225,8 +225,11 @@ def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
     a test that changes an input has to let that deadline come due before asserting on the request
     the backend received.
     """
-    result._settle_cue_observation()
+    # Production order: the deadline armed during one drain comes due as an envelope at the head of
+    # the next, and cue reconciliation settles at that drain's end. Firing after settling would let
+    # reconciliation retire the deadline before it is ever delivered.
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    result._settle_cue_observation()
 
 
 def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Path) -> None:
