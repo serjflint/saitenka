@@ -225,7 +225,7 @@ def settle_geometry(result: Reader, ipc: FakeIPC) -> None:
     a test that changes an input has to let that deadline come due before asserting on the request
     the backend received.
     """
-    result._reconcile_subtitles()
+    result._settle_cue_observation()
     ipc.fire_runtime_timer("subtitle:geometry-refresh")
 
 
@@ -646,7 +646,7 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     )
 
     result._on_property_change({"name": "sub-delay", "data": -6.0})
-    result._reconcile_subtitles()
+    result._settle_cue_observation()
 
     assert len(backend.requests) == 2
     result._observing = False
@@ -1225,7 +1225,7 @@ def test_repeated_text_event_retires_interaction_before_timing_refresh(tmp_path:
     result._on_property_change({"name": "sub-end", "data": 6.0})
     assert result.boxes == []
 
-    result._reconcile_subtitles()
+    result._settle_cue_observation()
 
     assert result.boxes == []
     assert result.native_geometry.worker.wait_idle()

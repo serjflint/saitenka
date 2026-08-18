@@ -616,6 +616,8 @@ class Reader:
         self._projection = PlaybackProjection()
         self._playback = PlaybackState()
         self._geometry_refresh = geometry_refresh.RefreshWindow()
+        #: Latest cue identity observed this drain, reconciled once at the batch boundary.
+        self._pending_cue: playback.ObservedCue | None = None
         self._ass_full_probe_dirty = True
         # #100 auto-advance: run mode installs a re-slot callback; the presence of the hook IS the
         # opt-in (never set under attach, so SyncPlay-managed playback never advances). `_eof_handled`
@@ -750,6 +752,10 @@ class Reader:
             if name == "sub-text/ass-full" and self.native_geometry is not None:
                 self.native_geometry.observe_ass_full_reply(reply)
         self._observing = True
+        # Seeding goes through projection.seed, which discards the deltas it would publish, so the
+        # cue already on screen at startup never produces a CueObservationChanged. Reconcile it once
+        # by hand — otherwise the overlay stays blank until mpv's next sub-text change.
+        self._reconcile_sub_text(str(self._playback.value("sub-text") or ""))
         # Seed values are the first sign the mpv→client read path works: a None osd-dimensions here
         # (with mpv clearly running) means get_property replies aren't coming back — the pipe read is
         # dead, so nothing will ever draw. Logged so it lands in overlay.log / report.
@@ -796,11 +802,26 @@ class Reader:
         for delta in projected.deltas:
             self._apply_playback_delta(delta)
 
+    def _probe_ass_full(self) -> None:
+        """Resolve mpv's authored-ASS capability once per file. Driven by `AuthoredCueStale`, which
+        the projection publishes on the same observation that invalidated the cached probe."""
+        if self.native_geometry is None or not self._ass_full_probe_dirty:
+            return
+        if self.native_geometry.ass_full_capability.value == "unknown":
+            reply = self.ipc.command("get_property", "sub-text/ass-full")
+            self._playback = self._projection.seed(
+                self._playback, "sub-text/ass-full", reply.get("data")
+            )
+            self.native_geometry.observe_ass_full_reply(reply)
+        self._ass_full_probe_dirty = False
+
     def _apply_playback_delta(self, delta: playback.PlaybackDelta) -> None:
         if isinstance(delta, playback.CueIdentityRetired):
             self._retire_cue_identity(delta.reason.value)
         elif isinstance(delta, playback.AuthoredCueStale):
-            self._ass_full_probe_dirty = True
+            self._probe_ass_full()
+        elif isinstance(delta, playback.CueObservationChanged):
+            self._pending_cue = delta.cue  # coalesced at the drain boundary; latest wins
         elif isinstance(delta, playback.SubtitleSelectionChanged):
             self.retire_geometry_refresh()  # the track it was armed for is gone
             if self.native_geometry is not None:
@@ -2421,7 +2442,6 @@ class Reader:
             (
                 TickStage("expire-surfaces", self._expire_surfaces),
                 TickStage("refresh-osd", self._refresh_surfaces),
-                TickStage("reconcile-subtitles", self._reconcile_subtitles),
                 TickStage("apply-background-results", self._apply_background_results),
                 TickStage("update-interaction", self._update_interaction),
             )
@@ -2436,17 +2456,6 @@ class Reader:
                 self._draw_subtitle()
             help_overlay.redraw(self)
             analysis_overlay.redraw(self)
-
-    def _reconcile_subtitles(self) -> None:
-        if self.native_geometry is not None and self._ass_full_probe_dirty:
-            if self.native_geometry.ass_full_capability.value == "unknown":
-                reply = self.ipc.command("get_property", "sub-text/ass-full")
-                self._playback = self._projection.seed(
-                    self._playback, "sub-text/ass-full", reply.get("data")
-                )
-                self.native_geometry.observe_ass_full_reply(reply)
-            self._ass_full_probe_dirty = False
-        self._reconcile_sub_text(self._prop("sub-text") or "")
 
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
@@ -2805,6 +2814,16 @@ class Reader:
         # dispatched below in order with the observations they followed.
         for ev in self.ipc.drain_events(ordered_terminals=True):
             self._drain_event(ev, picker_guard)
+        self._settle_cue_observation()
+
+    def _settle_cue_observation(self) -> None:
+        """Reconcile at the batch boundary, not per delta. mpv splits one cue across sub-text,
+        sub-start and sub-end observations; the projection publishes each (it sees one observation
+        at a time and has no batch), so reconciling per delta would build the cue three times, twice
+        against a half-updated identity. The drain is where the batch exists, so it coalesces."""
+        cue, self._pending_cue = self._pending_cue, None
+        if cue is not None:
+            self._reconcile_sub_text(cue.text)
 
     def _drain_event(self, ev: object, picker_guard: LegacyPickerRepeatGuard) -> None:
         if isinstance(ev, EffectFinished):
