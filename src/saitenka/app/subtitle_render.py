@@ -63,16 +63,19 @@ _VISIBILITY_ASSERT = "ownership:assert-native-visibility"
 _VISIBILITY_READBACK = "ownership:readback-visibility"
 
 
-def _send_visibility(ipc, identity: str, *, visible: bool) -> None:
+def _send_visibility(ipc, identity: str, *, visible: bool, on_outcome=None) -> None:
     """One correlated `sub-visibility` write. Not awaited: mpv has a single ordered outbound
     channel, so a later read still observes it — what the correlation buys is a terminal outcome
     instead of a discarded reply."""
 
     def finished(completion: EffectFinished) -> None:
-        if completion.outcome is not EffectOutcome.SUCCEEDED:
+        applied = completion.outcome is EffectOutcome.SUCCEEDED
+        if not applied:
             log.warning(
                 "subtitle visibility write %s did not apply: %s", identity, completion.outcome
             )
+        if on_outcome is not None:
+            on_outcome(applied)
 
     if not ipc.submit_runtime_mpv(
         owner=Owner.SUBTITLE,
@@ -82,6 +85,8 @@ def _send_visibility(ipc, identity: str, *, visible: bool) -> None:
         on_finished=finished,
     ):
         log.warning("subtitle visibility write %s was not admitted", identity)
+        if on_outcome is not None:
+            on_outcome(False)  # noqa: FBT003  # the applied flag is the whole payload
 
 
 class SubtitleRenderer:
@@ -417,10 +422,15 @@ class NativeVisibleRenderer:
         """
 
         def settled(*, committed: bool) -> None:
+            if committed and self._state.visibility != Visibility.FALSE:
+                # mpv is still showing its own; hide them now that ours are acknowledged, and let
+                # that write's outcome decide whether the handoff completed.
+                self._hide_mpv_subtitles(reader, on_finished=lambda ok: finish(accepted=ok))
+            else:
+                finish(accepted=committed)
+
+        def finish(*, accepted: bool) -> None:
             owner_before = self._state.owner
-            accepted = committed and (
-                self._state.visibility == Visibility.FALSE or self._hide_mpv_subtitles(reader)
-            )
             if not accepted:
                 self._fallback.clear(reader)
             self._state, followups = reduce_ownership(
@@ -454,13 +464,15 @@ class NativeVisibleRenderer:
         except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
             settled(committed=False)
 
-    def _hide_mpv_subtitles(self, reader: Reader) -> bool:
-        reply = reader.ipc.command(
-            "set_property",
-            "sub-visibility",
-            False,  # noqa: FBT003  # mpv IPC wire value
+    def _hide_mpv_subtitles(self, reader: Reader, *, on_finished) -> None:
+        """Hide mpv's subtitles once ours are confirmed. Correlated: whether the handoff completed
+        is the write's terminal outcome, not a discarded reply."""
+        _send_visibility(
+            reader.ipc,
+            "subtitle:hide-for-legacy",
+            visible=False,
+            on_outcome=on_finished,
         )
-        return self._reply_accepted(reply)
 
     @staticmethod
     def _record_catastrophic_fallback() -> None:
