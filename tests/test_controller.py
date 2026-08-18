@@ -2516,6 +2516,28 @@ def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch):
     assert reader._cue_retired is True
 
 
+def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():
+    """Re-showing identical text after a source swap must not reuse the old cue identity."""
+    from util import FakeIPC as EventIPC
+
+    ipc = EventIPC()
+    ipc.props.update({"sub-text": "同じ字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    reader.start_observing()
+    reader.set_subtitle("同じ字幕")
+    before = reader._current_cue_identity
+    assert before is not None
+
+    reader._replace_subtitle_source("/media/next.mkv", reason="test")
+
+    assert reader._cue_retired is True
+    reader.set_subtitle("同じ字幕")
+    after = reader._current_cue_identity
+    assert after is not None
+    assert after != before
+    assert after.normalized_text == before.normalized_text
+
+
 def test_connection_loss_retires_cue_and_suspends_commands_and_tick(monkeypatch):
     from util import FakeIPC as EventIPC
 

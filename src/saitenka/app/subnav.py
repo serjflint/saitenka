@@ -25,8 +25,7 @@ def load_sub_index(reader: Reader, path) -> None:
     idx = load_index(path)
     if idx is None:
         return
-    reader._annotation_source_epoch += 1
-    reader._retire_cue_identity("subtitle-index")
+    reader._replace_subtitle_source(path, reason="subtitle-index")
     reader._sub_index = idx
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:

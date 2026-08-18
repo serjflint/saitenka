@@ -543,7 +543,6 @@ class Reader:
         self._annotation_async = False
         self._dependencies_settled = True
         self._dependency_generation = 0
-        self._annotation_source_epoch = 0
         self._current_cue_identity: cue_annotation.CueIdentity | None = None
         self._cue_retired = True
         self._cue_identity_ever_installed = False
@@ -821,6 +820,12 @@ class Reader:
             end=identity.observed_end,
         )
 
+    def _replace_subtitle_source(self, path: object = None, *, reason: str) -> None:
+        """A new authored subtitle source is live: revise it in the projection (which every cue
+        identity is derived from) and retire the identity the old source produced."""
+        self._playback = self._projection.source_replaced(self._playback, path).state
+        self._retire_cue_identity(reason)
+
     def _clear_cue_identity(self) -> None:
         """Drop the installed identity in both owners; the projection then stops treating later
         sub-start/sub-end observations as conflicts."""
@@ -1060,7 +1065,7 @@ class Reader:
 
     def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
         return cue_annotation.CueIdentity(
-            self._annotation_source_epoch,
+            self._playback.media.source.value,
             self._prop("sid"),
             self.subtitle_language,
             norm,
@@ -2626,9 +2631,7 @@ class Reader:
         p = self.current_media_path()
         if p is None or p == self._slotted_path:
             return
-        self._annotation_source_epoch += 1
-        self._playback = self._projection.source_replaced(self._playback, p).state
-        self._retire_cue_identity("file-loaded")
+        self._replace_subtitle_source(p, reason="file-loaded")
         self._slotted_path = p
         self.reslot_hook(p)
 
