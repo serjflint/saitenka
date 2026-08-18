@@ -1429,12 +1429,9 @@ def run_vocab(
 def _timeline_interact(reader) -> None:
     """Exercise the nested scan popup + a clicked kanji open + a clicked cross-reference off the CURRENT
     base tooltip, so a --timeline run has realistic ``prefetch_decode``/``tip_compose``/``render``
-    kind=nested|clicked|engaged_open latency — not only base hovers. Each deferred interaction (tier-3) is
-    PUMPED: enqueue the off-thread compose, sleep so the worker lands it, then drain
-    ``apply_engaged_results`` so the WARM swap runs — otherwise the cheap warm compose reads as *absent*,
-    not *cheap*, and under-reports the win. Best-effort: a word with no scan cells / no kanji simply skips."""
-    from saitenka.app import tooltip as _tt
-
+    kind=nested|clicked|engaged_open latency — not only base hovers. Each deferred interaction is pumped
+    through the runtime mailbox so the warm swap is measured rather than omitted. Best-effort: a word
+    with no scan cells or kanji simply skips."""
     st = reader._tip_state
     if st is None:
         return
@@ -1452,16 +1449,12 @@ def _timeline_interact(reader) -> None:
     # a clicked/keyed kanji open (deferred, tier-3): warms off-thread → prefetch_decode[engaged_open]
     reader.kanji_current()
     time.sleep(0.02)
-    _tt.apply_engaged_results(
-        reader
-    )  # pump the deferred open's warm place (cheap tip_compose[nested])
+    reader._drain_events()  # pump the typed completion and warm placement
     reader._hide_nested()
     if 0 <= reader.hover < len(reader.tokens):
         reader._navigate_tip(reader.tokens[reader.hover].surface)  # in-place nav → kind="clicked"
         time.sleep(0.02)
-        _tt.apply_engaged_results(
-            reader
-        )  # pump the deferred nav swap → tip_compose[clicked] reads cheap
+        reader._drain_events()  # pump the typed completion and warm swap
 
 
 def run_timeline(

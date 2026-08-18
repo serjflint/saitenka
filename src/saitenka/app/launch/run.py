@@ -914,7 +914,7 @@ def _execute_reader_session(
                 (i for i, t in enumerate(reader.tokens) if reader.tokenizer.is_content(t)), 0
             )
         print(f"demo hover → token[{idx}] = {reader.tokens[idx].surface!r}")
-        reader.set_hover(idx)
+        reader.prepare_hover_blocking(idx)
         reader._mark_interactive_ready()
         _run_demo_actions(reader, ipc, demo)
     else:

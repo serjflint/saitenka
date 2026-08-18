@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app import prefetch
+from saitenka.app import tooltip_engaged
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import Panel, PopupView
 from saitenka.app.prefetch import cap_for
@@ -52,7 +52,7 @@ def show_nested(reader: Reader, sb) -> None:
     """Open (or switch) the nested popup for the word starting at scan cell ``sb`` — its text is the
     Yomitan-style tail from the hovered char, so the first token is the word under the cursor. The
     popup is anchored to that inner word's on-screen cell, above/below like the base tooltip."""
-    if prefetch.workers_running(reader):
+    if reader._interaction_metadata_submit is not None:
         from saitenka.app.hover_metadata import NestedMetadataKey, NestedMetadataRequest
 
         reader._request_interaction_metadata(
@@ -144,8 +144,8 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     by scan-hover and a clicked cross-reference link. ``extra_terms`` are the longest-match phrases
     stacked above the bare word (empty for a clicked link, whose query is already exact).
 
-    ``defer`` (the scan-hover path only): on a cold inner word with a prefetch worker running, enqueue a
-    top-priority off-thread compose and show NOTHING — the tick (``apply_engaged_results``) re-derives the
+    ``defer`` (the scan-hover path only): on a cold inner word, request a bounded off-thread compose and
+    show NOTHING — its typed completion re-derives the
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
     if mined is None:
@@ -157,23 +157,25 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
         phrase=extra_terms,
         group_mined=group_mined,
     )
-    if defer and key not in reader._panel_cache and prefetch.workers_running(reader):
+    if defer and key not in reader._panel_cache:
         # Retain the identity-qualified presentation inputs while the engaged worker warms this key.
         reader._nest.key = key
         reader._nest.token = tok
         reader._nest.word = tok.surface
         reader._nest.tail = tail or tok.surface
-        prefetch.request_engaged_render(
-            reader,
+        request = tooltip_engaged.HoverRequest(
             tok,
             inflected,
-            key,
-            mined=mined,
-            phrase=extra_terms,
+            mined,
+            tuple(key),
+            reader._tip_cap(),
+            tuple(extra_terms),
             nested=True,
             tail=tail or tok.surface,
+            job_id=reader._nest.job_id,
         )
-        return
+        if reader._request_engaged_tooltip(request):
+            return
     st = reader._panel_for(
         tok,
         inflected,
@@ -282,8 +284,14 @@ def _open_engaged(reader: Reader, source: str, query: str, anchor: Anchor) -> No
             reader._toast(f"no kanji entry for {query}", "warn", 1.2)
         return
     st, key, token, word, mined = built
-    if prefetch.workers_running(reader):  # worker warms the bands → the tick places it warm
-        prefetch.request_engaged_open(reader, source, query, anchor, mined=mined)
+    request = tooltip_engaged.OpenRequest(
+        source,
+        query,
+        (anchor.wx, anchor.wy, anchor.wh),
+        id(reader._tip_state),
+        mined,
+    )
+    if reader._request_engaged_tooltip(request):
         return
     place_nested(reader, st, key, token, word, anchor)
 

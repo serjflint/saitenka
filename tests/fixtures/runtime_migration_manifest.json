@@ -277,18 +277,6 @@
       "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"
     ],
     [
-      "passive-result-drain",
-      "src/saitenka/app/prefetch.py::drain_engaged_results"
-    ],
-    [
-      "passive-result-drain",
-      "src/saitenka/app/prefetch.py::drain_nav_results"
-    ],
-    [
-      "passive-result-drain",
-      "src/saitenka/app/prefetch.py::drain_open_results"
-    ],
-    [
       "polled-deadline",
       "src/saitenka/app/controller.py::Reader._expire_flash"
     ],
@@ -710,14 +698,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_compose_engaged_base"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_compose_engaged_nested"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::_enqueue"
     ],
     [
@@ -738,18 +718,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_try_engaged_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_try_engaged_nav"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::_try_engaged_open"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::_try_head_prefetch_item"
     ],
     [
@@ -766,35 +734,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::drain_engaged_results"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::drain_nav_results"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::drain_open_results"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::prefetch_worker"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/prefetch.py::prefetch_worker_count"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::request_engaged_nav"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::request_engaged_open"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::request_engaged_render"
     ],
     [
       "reader-parameter",
@@ -815,10 +759,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/prefetch.py::warm_episode_tokens"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::workers_running"
     ],
     [
       "reader-parameter",
@@ -1326,15 +1266,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_apply_engaged_nav"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_apply_engaged_nested"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::_apply_engaged_open"
     ],
     [
       "reader-parameter",
@@ -1430,7 +1362,15 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::apply_engaged_results"
+      "src/saitenka/app/tooltip.py::apply_engaged_hover"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::apply_engaged_nav"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/tooltip.py::apply_engaged_open"
     ],
     [
       "reader-parameter",
@@ -1782,9 +1722,12 @@
         "call:close_lane:cue-annotation",
         "call:tooltip_raster.close",
         "call:close_lane:tooltip-render-ahead",
+        "call:tooltip_engaged.close",
+        "call:close_lane:tooltip-engaged",
         "order:call:self._stop.set>call:close_lane:subtitle-fetch",
         "order:call:close_lane:cue-annotation>call:shutil.rmtree",
         "order:call:close_lane:tooltip-render-ahead>call:shutil.rmtree",
+        "order:call:close_lane:tooltip-engaged>call:shutil.rmtree",
         "call:self._annotation.close",
         "loop:self._prefetch_threads=>call:th.join"
       ],

@@ -5,7 +5,7 @@ import time
 
 from util import FakeIPC
 
-from saitenka.app import hover_metadata, prefetch
+from saitenka.app import hover_metadata
 from saitenka.app.controller import Reader
 from saitenka.app.hover_metadata import HoverMetadataKey, HoverMetadataRequest
 from saitenka.app.tokenize import Token
@@ -97,7 +97,6 @@ def test_interactive_hover_submits_metadata_without_probing_dictionary(monkeypat
     reader = Reader(FakeIPC(), dict_set=Dictionary())
     reader.tokens = [Token("猫", "猫", "ネコ", "名詞", 0, 1)]
     submitted = []
-    monkeypatch.setattr(prefetch, "workers_running", lambda _reader: True)
     reader._interaction_metadata_submit = lambda **kwargs: (
         submitted.append(kwargs["request"]) or True
     )

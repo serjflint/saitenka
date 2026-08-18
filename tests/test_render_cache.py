@@ -15,7 +15,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from saitenka.app import tooltip, tooltip_raster
+from saitenka.app import tooltip, tooltip_engaged, tooltip_raster
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.popups import Panel
 from saitenka.app.render_cache import (
@@ -25,7 +25,7 @@ from saitenka.app.render_cache import (
     dict_set_signature,
 )
 from saitenka.panel import Definition, Entry, panel_rows
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
 WIDTH = 384
 SIG = "v1|w384|c260|test-dicts"
@@ -55,6 +55,44 @@ class _DeferredRenderSubmitter:
     def finish_all(self):
         while self.calls:
             self.finish()
+
+
+class _DeferredEngagedSubmitter:
+    def __init__(self, reader):
+        self.backend = tooltip_engaged.ReaderEngagedBackend(reader)
+        self.calls = []
+        self.reject_next = False
+
+    def __call__(self, **kwargs):
+        if self.reject_next:
+            self.reject_next = False
+            return False
+        self.calls.append(kwargs)
+        return True
+
+    def finish(self, *, outcome=EffectOutcome.SUCCEEDED, run=True):
+        call = self.calls.pop(0)
+        result = (
+            tooltip_engaged.run_engaged(call["request"], threading.Event(), self.backend)
+            if run
+            else None
+        )
+        call["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                call["owner"],
+                call["identity"],
+                outcome,
+                result=result,
+                error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
+            )
+        )
+
+
+def _enable_engaged(reader):
+    submitter = _DeferredEngagedSubmitter(reader)
+    reader._engaged_tooltip_submit = submitter
+    return submitter
 
 
 def _cache(tmp_path, **kw) -> RenderCache:
@@ -612,7 +650,7 @@ def test_compressed_head_cache_get_bumps_ram_recency():
 # --- worker disk→tier-2 hydration + tier-3 poll-deferred render ----------------------------------
 
 
-def _tall_reader(tmp_path, monkeypatch):
+def _tall_reader(tmp_path, monkeypatch, ipc=None):
     from util import FakeIPC
 
     from saitenka.app.config import ReaderOptions, TooltipOptions
@@ -620,7 +658,7 @@ def _tall_reader(tmp_path, monkeypatch):
 
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     r = Reader(
-        FakeIPC(),
+        ipc or FakeIPC(),
         dict_set=_TallDS(),
         options=ReaderOptions(tooltip=TooltipOptions(render_cache=True)),
     )
@@ -631,6 +669,23 @@ def _tall_reader(tmp_path, monkeypatch):
     cache = _cache(tmp_path)
     r.session.render_cache.obj, r.session.render_cache.built = cache, True
     return r, cache
+
+
+def test_preloop_demo_hover_is_ready_with_a_real_runtime_gateway(tmp_path, monkeypatch):
+    from util import FakeIPC, runtime_gateway
+
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch, ipc)
+    i, _tok, _inflected, _mined = _first_content(r)
+    r._panel_cache.clear()
+    try:
+        r.prepare_hover_blocking(i)
+        assert r._tip_state is not None
+        assert r._engaged_tooltip.inflight is None
+    finally:
+        r.close()
+        gateway.close()
 
 
 def _first_content(r):
@@ -663,41 +718,34 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
 def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
     # A cold miss (empty tier-2 + disk) must NOT build/raster on the main thread: no tooltip is shown,
     # and a top-priority worker compose is enqueued instead.
-    import threading
-
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]  # a worker is running to service the deferral
+    submitter = _enable_engaged(r)
     i, _tok, _inflected, _mined = _first_content(r)
     r._panel_cache.clear()  # ensure cold
     tooltip.show_tooltip(r, i)
     assert r._tip_state is None  # nothing shown — deferred
-    assert r._engaged_req is not None  # handed to the worker
+    assert submitter.calls  # handed to the runtime actor
 
 
-def test_engaged_render_composes_then_drain_shows_warm(tmp_path, monkeypatch):
-    import threading
-
-    from saitenka.app import prefetch, tooltip
+def test_engaged_render_composes_then_completion_shows_warm(tmp_path, monkeypatch):
+    from saitenka.app import tooltip
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]  # a worker is running to service the deferral
+    submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
     key = tooltip.panel_key(r, tok, inflected, mined=mined, phrase=r._hover_terms)
 
     # Cold hover defers → worker composes (panel cache + tier-2 + disk all warmed).
     r._panel_cache.clear()
     tooltip.show_tooltip(r, i)
-    assert r._tip_state is None and r._engaged_req is not None
-    assert prefetch._try_engaged_hover(r) is True
+    assert r._tip_state is None and submitter.calls
+    r.hover = i
+    submitter.finish()
     assert cache.stats()[0] == 1 and len(r.session.render_cache.mem) == 1
 
-    # Still hovering the same word → the drain shows the now-warm tooltip (a cache hit, no cold raster).
-    r.hover = i
-    tooltip.apply_engaged_results(r)
+    # Still hovering the same word → completion shows the now-warm tooltip.
     assert r._tip_state is not None  # shown
     assert tuple(r._tip_key) == tuple(key)
 
@@ -706,7 +754,7 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
     import contextlib
 
     from saitenka import otel_metrics
-    from saitenka.app import prefetch, tooltip
+    from saitenka.app import tooltip
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
     _i, tok, inflected, mined = _first_content(r)
@@ -719,38 +767,43 @@ def test_engaged_render_failure_emits_a_terminal_tooltip_outcome(tmp_path, monke
         yield None
 
     monkeypatch.setattr(otel_metrics, "traced", traced)
-    monkeypatch.setattr(prefetch, "_compose_engaged_base", lambda *_args: 1 / 0)
+    submitter = _enable_engaged(r)
     r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
-    prefetch.request_engaged_render(r, tok, inflected, key, mined=mined)
-
-    assert prefetch._try_engaged_hover(r)
-    tooltip.apply_engaged_results(r)
+    assert r._request_engaged_tooltip(
+        tooltip_engaged.HoverRequest(
+            tok, inflected, mined, tuple(key), r._tip_cap(), job_id=r._tip_view.job_id
+        )
+    )
+    submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert spans[-1][0] == "tooltip_request"
     assert spans[-1][1]["outcome"] == "failed"
 
 
-def test_engaged_render_requeues_when_capability_changes_its_panel_key(tmp_path, monkeypatch):
-    import threading
-
-    from saitenka.app import prefetch, tooltip
+def test_engaged_render_capability_change_does_not_strand_hover(tmp_path, monkeypatch):
+    from saitenka.app import tooltip
 
     r, _cache = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     i, tok, inflected, mined = _first_content(r)
     old_key = tooltip.panel_key(r, tok, inflected, mined=mined)
     r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
-    prefetch.request_engaged_render(r, tok, inflected, old_key, mined=mined)
-    assert prefetch._try_engaged_hover(r)
+    assert r._request_engaged_tooltip(
+        tooltip_engaged.HoverRequest(
+            tok, inflected, mined, tuple(old_key), r._tip_cap(), job_id=r._tip_view.job_id
+        )
+    )
 
     r._tts_ok = not r._tts_ok
     r.hover = i
-    tooltip.apply_engaged_results(r)
+    monkeypatch.setattr(tooltip, "_paint_from_cache", lambda *_args: False)
+    submitter.finish()
 
-    assert r._tip_state is None
-    assert r._engaged_req is not None
-    assert tuple(r._engaged_req.key) != tuple(old_key)
+    assert r._tip_state is not None or submitter.calls
+    if submitter.calls:
+        queued = submitter.calls[-1]["request"].request
+        assert isinstance(queued, tooltip_engaged.HoverRequest)
+        assert tuple(queued.key) != tuple(old_key)
 
 
 def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
@@ -759,9 +812,10 @@ def test_engaged_result_discarded_when_word_changed(tmp_path, monkeypatch):
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r._engaged_results.put((r._prefetch_gen, ("some", "other", "key"), False, "", True, None))
     r.hover, r._tip_state = -1, None  # not hovering that word anymore
-    tooltip.apply_engaged_results(r)
+    tooltip.apply_engaged_hover(
+        r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=None)
+    )
     assert r._tip_state is None  # nothing shown
 
 
@@ -771,14 +825,15 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     i, _tok, _inflected, _mined = _first_content(r)
     old_job = r._interaction_jobs.begin("tooltip")
-    r._engaged_results.put((r._prefetch_gen, ("old",), False, "", True, old_job))
     r.hover = i
     r._tip_view.job_id = r._interaction_jobs.begin("tooltip")
 
-    tooltip.apply_engaged_results(r)
+    tooltip.apply_engaged_hover(
+        r, tooltip_engaged.HoverReady(("old",), nested=False, tail="", job_id=old_job)
+    )
 
     assert r._tip_state is None
-    assert r._engaged_req is None
+    assert r._engaged_tooltip.pending is None
 
 
 # --- nested scan popup: the same tier-3 off-thread treatment (PR A) ------------------------------
@@ -787,19 +842,17 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
 def test_nested_cold_miss_defers_and_enqueues_nested(tmp_path, monkeypatch):
     # A cold inner word (scan-hover) with a worker running defers: the getmask2 raster goes off the main
     # thread, no nested popup is shown yet, and a NESTED engaged request is queued.
-    import threading
-
     from saitenka.app import nested_popup
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     _i, tok, inflected, _mined = _first_content(r)
     r._tip_xy, r._tip_scroll = (0, 0), 0
     r._panel_cache.clear()
     nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
     assert r._nest.state is None  # nothing shown — deferred
-    assert r._engaged_req is not None and r._engaged_req.nested is True
+    request = submitter.calls[-1]["request"].request
+    assert isinstance(request, tooltip_engaged.HoverRequest) and request.nested
 
 
 def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
@@ -815,28 +868,27 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
     r._panel_cache.clear()
     nested_popup.open_nested(r, tok, inflected, nested_popup.Anchor(5, 300, 20), defer=True)
     assert r._nest.state is not None  # shown synchronously
-    assert r._engaged_req is None
+    assert r._engaged_tooltip.pending is None and r._engaged_tooltip.inflight is None
 
 
 def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch):
     # The nested worker compose WARMS the nested-cap viewport bands (so the re-show has no synchronous
     # raster) but does NOT persist to disk — the nested viewport is nested-cap-shaped, not the base head
     # the render-cache keys share, so a write would collide.
-    import threading
-
-    from saitenka.app import prefetch, tooltip
+    from saitenka.app import tooltip
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     _i, tok, inflected, mined = _first_content(r)
     key = tooltip.panel_key(r, tok, inflected, mined=mined)
 
     r._panel_cache.clear()
-    prefetch.request_engaged_render(
-        r, tok, inflected, key, mined=mined, nested=True, tail=tok.surface
+    assert r._request_engaged_tooltip(
+        tooltip_engaged.HoverRequest(
+            tok, inflected, mined, tuple(key), r._tip_cap(), nested=True, tail=tok.surface
+        )
     )
-    assert prefetch._try_engaged_hover(r) is True
+    submitter.finish()
     assert cache.stats()[0] == 0  # nested never persisted to disk
     st = r._panel_cache[key]  # panel warmed into the cache
     vh = min(st.full_height, r._cap_for(r.nested_max_frac))
@@ -844,8 +896,6 @@ def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch)
     assert (
         st.last_frame_rasters == 0
     )  # bands were rastered off the main thread — the re-show is warm
-    gen, _k, nested, tail, succeeded, _job_id = r._engaged_results.get_nowait()
-    assert gen == r._prefetch_gen and nested is True and tail == tok.surface and succeeded
 
 
 def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
@@ -855,7 +905,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     import time
     from types import SimpleNamespace
 
-    from saitenka.app import hover_metadata, nested_popup, prefetch, tooltip
+    from saitenka.app import hover_metadata, nested_popup, tooltip
     from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
     r, cache = _tall_reader(tmp_path, monkeypatch)
@@ -874,8 +924,7 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
         return True
 
     r._interaction_metadata_submit = submit_metadata
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     _i, tok, _inflected, _mined = _first_content(r)
     r._tip_xy, r._tip_scroll = (0, 0), 0
     sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20)
@@ -886,11 +935,10 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
     r._panel_cache.clear()
     nested_popup.show_nested(r, sb)  # cold → defer (same phrase the worker will build under)
     deadline = time.monotonic() + 1
-    while r._engaged_req is None and time.monotonic() < deadline:
+    while not submitter.calls and time.monotonic() < deadline:
         time.sleep(0.001)
-    assert r._nest.state is None and r._engaged_req is not None and r._engaged_req.nested is True
-    assert prefetch._try_engaged_hover(r) is True
-    tooltip.apply_engaged_results(r)  # drain → scan_hit → show_nested warm
+    assert r._nest.state is None and submitter.calls
+    submitter.finish()
     assert r._nest.state is not None  # nested popup now shown
     assert cache.stats()[0] == 0  # still never persisted
 
@@ -929,8 +977,9 @@ def test_engaged_nested_dropped_when_cursor_left(tmp_path, monkeypatch):
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
     r._tip_state, r._tip_rect = None, None
-    r._engaged_results.put((r._prefetch_gen, ("k",), True, "本", True, None))
-    tooltip.apply_engaged_results(r)
+    tooltip.apply_engaged_hover(
+        r, tooltip_engaged.HoverReady(("k",), nested=True, tail="本", job_id=None)
+    )
     assert r._nest.state is None
 
 
@@ -946,16 +995,14 @@ def _base_tip_up(r):
 def test_clicked_nav_defers_when_worker_running(tmp_path, monkeypatch):
     # A clicked cross-ref with a worker running enqueues an off-thread nav (build+raster off the click
     # tick) and does NOT swap synchronously — no getmask2 on the tick.
-    import threading
-
     from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r, tok.surface)
-    assert r._nav_req is not None and r._nav_req.query == tok.surface
+    request = submitter.calls[-1]["request"].request
+    assert isinstance(request, tooltip_engaged.NavigateRequest) and request.query == tok.surface
     assert r._tip_nav == []  # nothing pushed / swapped yet
 
 
@@ -967,45 +1014,96 @@ def test_clicked_nav_no_worker_navigates_synchronously(tmp_path, monkeypatch):
     r._prefetch_threads = []
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r, tok.surface)
-    assert r._nav_req is None
+    assert r._engaged_tooltip.inflight is None
     assert len(r._tip_nav) == 1  # synchronous swap pushed the previous view
 
 
 def test_engaged_nav_composes_then_swaps_from_warm_bands(tmp_path, monkeypatch):
-    import threading
-
-    from saitenka.app import prefetch, tooltip
+    from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
     old = r._tip_state
     tooltip.navigate_tip(r, tok.surface)  # defer
-    assert prefetch._try_engaged_nav(r) is True  # worker builds + warms
-    tooltip.apply_engaged_results(r)  # tick swaps
+    submitter.finish()
     assert r._tip_state is not None and r._tip_state is not old  # navigated panel installed
     assert len(r._tip_nav) == 1  # previous view pushed for Esc/back
     assert r._tip_key is None  # a navigated view is keyless
 
 
+def test_engaged_nav_worker_failure_uses_current_origin_sync_fallback(tmp_path, monkeypatch):
+    from saitenka.app import tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    submitter = _enable_engaged(r)
+    tok = _base_tip_up(r)
+    old = r._tip_state
+
+    tooltip.navigate_tip(r, tok.surface)
+    submitter.finish(outcome=EffectOutcome.FAILED, run=False)
+
+    assert r._tip_state is not None and r._tip_state is not old
+    assert len(r._tip_nav) == 1
+
+
+def test_rejected_new_generation_uses_its_own_sync_fallback(tmp_path, monkeypatch):
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    submitter = _enable_engaged(r)
+    tok = _base_tip_up(r)
+    old = r._tip_state
+    assert r._request_engaged_tooltip(
+        tooltip_engaged.HoverRequest(tok, tok.surface, mined=False, key=("old",), cap=r._tip_cap())
+    )
+    r._prefetch_gen += 1
+    r._cancel_engaged_tooltip()
+    assert r._request_engaged_tooltip(tooltip_engaged.NavigateRequest(tok.surface, id(old)))
+    submitter.reject_next = True
+
+    submitter.finish(outcome=EffectOutcome.FAILED, run=False)
+
+    assert r._tip_state is not None and r._tip_state is not old
+    assert len(r._tip_nav) == 1
+
+
 def test_engaged_nav_dropped_when_tooltip_changed(tmp_path, monkeypatch):
     # origin guard: if the base tooltip changed (a word switch) in the defer window, the composed nav is
     # dropped — never hijacks the new tooltip into the clicked target.
-    import threading
-
-    from saitenka.app import prefetch, tooltip
+    from saitenka.app import tooltip
 
     r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
-    r.prefetch = True
-    r._prefetch_threads = [threading.Thread()]
+    submitter = _enable_engaged(r)
     tok = _base_tip_up(r)
     tooltip.navigate_tip(r, tok.surface)
-    assert prefetch._try_engaged_nav(r) is True
+    call = submitter.calls.pop(0)
+    result = tooltip_engaged.run_engaged(call["request"], threading.Event(), submitter.backend)
     # A word switch in the defer window → a genuinely different panel object under _tip_state.
     j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
     r._tip_state = r._panel_for(
         r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
     )
-    tooltip.apply_engaged_results(r)
+    call["on_finished"](
+        EffectFinished(
+            EffectId(1), call["owner"], call["identity"], EffectOutcome.SUCCEEDED, result=result
+        )
+    )
     assert r._tip_nav == []  # not swapped — origin mismatch
+
+
+def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
+    from saitenka.app import tooltip
+
+    r, _cache_obj = _tall_reader(tmp_path, monkeypatch)
+    submitter = _enable_engaged(r)
+    tok = _base_tip_up(r)
+    tooltip.navigate_tip(r, tok.surface)
+    j = next(k for k, t in enumerate(r.tokens) if t.is_content and t.surface != tok.surface)
+    r._tip_state = r._panel_for(
+        r.tokens[j], r._inflected_surface(j), min_h=r._tip_cap(), mined=False
+    )
+    rebuilt = []
+    monkeypatch.setattr(r, "_navigated_panel", lambda query: rebuilt.append(query))
+
+    submitter.finish(outcome=EffectOutcome.FAILED, run=False)
+
+    assert rebuilt == [] and r._tip_nav == []
