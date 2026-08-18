@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
-from saitenka.app import subnav_settle
+from saitenka.app import subnav_policy, subnav_settle
 from saitenka.app.sub_index import load_index
 
 if TYPE_CHECKING:
@@ -59,44 +59,35 @@ def sub_nav(reader: Reader, delta: int) -> bool:
     nav render ``sub_text`` is the line we drew, so ``locate`` finds it by text and ``_nav_idx``
     disambiguates duplicates — next/next/next steps forward predictably."""
     idx = reader._sub_index
-    if idx is None or len(idx) == 0:
+    if idx is None:
         return False
-    # Span covers locate/target AND the render it triggers below — set_subtitle's own "cue_redraw"
+    # Span covers the decision AND the render it triggers below — set_subtitle's own "cue_redraw"
     # span nests inside this one, so the span's total duration IS the keypress → drawn latency for
     # the instant-nav path.
     with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek"):
-        sub_start = _get_float(reader, "sub-start")
-        time_pos = _get_float(reader, "time-pos")
-        current = idx.locate(
-            text=reader.sub_text, sub_start=sub_start, time_pos=time_pos, preferred=reader._nav_idx
+        target = subnav_policy.resolve_target(
+            idx,
+            delta=delta,
+            text=reader.sub_text,
+            sub_start=_get_float(reader, "sub-start"),
+            time_pos=_get_float(reader, "time-pos"),
+            nav_idx=reader._nav_idx,
         )
-        if current < 0:
-            return False
-        # Is a cue actually on screen now, or is `current` just the upcoming one in a gap? A sub is
-        # showing (non-empty text), or the position falls inside current's span. This decides
-        # whether prev/next straddle the cue or step onto the upcoming one (see CueIndex.target).
-        c = idx.cues[current]
-        inside = bool(reader.sub_text.strip())
-        if not inside and sub_start is not None:
-            inside = c.start <= sub_start < c.end
-        if not inside and time_pos is not None:
-            inside = c.start <= time_pos < c.end
-        tgt = idx.target(current, delta, inside=inside)
-        if tgt < 0:
-            return False  # out of range / ambiguous → let mpv's sub-seek handle it
+        if target is None:
+            return False  # no index match / out of range → let mpv's sub-seek handle it
         # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
         # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
         # before landing on the real target; reconcile below must not mistake that for a correction.
         reader._nav_prev_text = reader.sub_text
-        reader._geometry_cue_hint = idx.cues[tgt]
+        reader._geometry_cue_hint = target.cue
         try:
             reader.set_subtitle(
-                idx.cues[tgt].text,
+                target.cue.text,
                 provisional_navigation=True,
             )  # instant overlay render (also resets _nav_idx)
         finally:
             reader._geometry_cue_hint = None
-        reader._nav_idx = tgt
+        reader._nav_idx = target.index
         # Guard the reconcile: mpv's sub-text briefly reads empty (or the pre-nav cue) mid-seek;
         # ignoring that avoids reverting the render before it settles.
         reader.open_settle_window()
