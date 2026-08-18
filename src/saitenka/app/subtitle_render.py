@@ -13,6 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
+from saitenka.app import subtitle_raster
 from saitenka.app.languages import SECOND_LANG
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitle_ownership import (
@@ -27,7 +28,7 @@ from saitenka.app.subtitle_ownership import (
     Visibility,
     reduce_ownership,
 )
-from saitenka.app.subtitles import box_for_token, render_plain_subtitle, render_subtitle
+from saitenka.app.subtitles import box_for_token
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -75,42 +76,40 @@ class SubtitleRenderer:
             False,  # noqa: FBT003  # mpv IPC wire value
         )
 
+    def __init__(self, provider: subtitle_raster.SubtitleRasterPort | None = None) -> None:
+        self.provider: subtitle_raster.SubtitleRasterPort = (
+            provider or subtitle_raster.PillowRasterProvider()
+        )
+
     def draw(self, reader: Reader) -> dict:
+        # Plain covers the secondary track and any cue still awaiting (or denied) its annotation:
+        # the cue shows at cue time and reader_deps re-renders it annotated once deps land.
+        request = subtitle_raster.build_request(
+            subtitle_raster.raster_style(
+                secondary_role=reader.subtitle_language == SECOND_LANG,
+                upgrade_pending=reader._sub_pending is not None,
+                annotation_degraded=reader._annotation_degraded,
+            ),
+            subtitle_raster.RasterContent(
+                reader.sub_text,
+                reader.lines,
+                reader.osd[0],
+                reader.sub_size,
+                # configurable box alpha (0 = fully transparent)
+                (0, 0, 0, reader.sub_bg_opacity),
+            ),
+            subtitle_raster.AnnotationOverlay(
+                subtitle_raster.annotation_visible(
+                    mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
+                ),
+                reader.hover,
+                reader._hover_span,
+                reader.styles,
+            ),
+        )
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
-            # Draw plain for the known/translation track, OR a cue still awaiting a complete
-            # tokenization (dictionaries loading): the cue shows at cue time and reader_deps
-            # re-renders it annotated once deps land.
-            background = (
-                0,
-                0,
-                0,
-                reader.sub_bg_opacity,
-            )  # configurable box alpha (0 = fully transparent)
-            if (
-                reader.subtitle_language == SECOND_LANG
-                or reader._sub_pending is not None
-                or reader._annotation_degraded
-            ):
-                sr = render_plain_subtitle(
-                    reader.sub_text, reader.osd[0], size=reader.sub_size, background=background
-                )
-            else:
-                annotated = reader.annotation_mode == "full" or reader._annotation_hover
-                # A phrase span highlights [start, end) — start can precede the hovered token (a leading
-                # お in お休み), so it drives the underline, not reader.hover.
-                span = reader._hover_span if annotated else None
-                sr = render_subtitle(
-                    reader.lines,
-                    reader.osd[0],
-                    size=reader.sub_size,
-                    hover=span[0]
-                    if span
-                    else (reader.hover if annotated and reader.hover >= 0 else None),
-                    hover_end=span[1] if span else None,
-                    styles=reader.styles if annotated else None,
-                    background=background,
-                )
-        reader.boxes = sr.boxes
+            sr = self.provider.render(request)
+        reader.boxes = list(sr.boxes)
         ox = (reader.osd[0] - sr.image.width) // 2
         oy = reader.osd[1] - sr.image.height - reader.bottom_margin
         reader.sub_origin = (ox, oy)

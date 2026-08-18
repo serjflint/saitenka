@@ -1,13 +1,12 @@
 """Learning-annotation visibility remains independent of tooltip and playback state."""
 
 import pytest
-from PIL import Image
+from util import RecordingRasterProvider
 
 from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from saitenka.app.controller import Reader
-from saitenka.app.subtitle_render import NullRenderer
-from saitenka.app.subtitles import SubtitleRender
+from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.tooltip import update_hover_impl
 
 
@@ -50,21 +49,16 @@ def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch):
     reader.tokens = [object()]
     reader.styles = ["scored"]
     reader.hover = 0
-    rendered = []
     monkeypatch.setattr(reader.ov, "show", lambda *_args, **_kwargs: None)
-
-    def render(*_args, **kwargs):
-        rendered.append(kwargs)
-        return SubtitleRender(Image.new("RGBA", (10, 10)), [])
-
-    monkeypatch.setattr("saitenka.app.subtitle_render.render_subtitle", render)
+    provider = RecordingRasterProvider(size=(10, 10))
+    reader.renderer = SubtitleRenderer(provider)
 
     reader._draw_subtitle()
     reader.set_annotation_hover(revealed=True)
     reader.set_annotation_hover(revealed=False)
 
     assert reader.styles == ["scored"]
-    assert [(call["styles"], call["hover"]) for call in rendered] == [
+    assert [(request.styles, request.hover) for request in provider.requests] == [
         (None, None),
         (["scored"], 0),
         (None, None),

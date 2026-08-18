@@ -1,14 +1,14 @@
 """Acceptance coverage for FSRS maturity colors and their presentation boundary."""
 
 import pytest
-from PIL import Image
+from util import RecordingRasterProvider
 
 from saitenka.app import reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.controller import Reader
 from saitenka.app.fsrs import KnownSnap
 from saitenka.app.scoring import Palette, Scorer
-from saitenka.app.subtitles import SubtitleRender
+from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.tokenize import Token
 from saitenka.app.wordlists import FreqDict, KnownWords
 
@@ -108,17 +108,12 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch):
     reader.lines = [[object()]]
     reader.styles = scorer.score_line(reader.tokens)
     reader.hover = 0
-    rendered = []
     monkeypatch.setattr(reader.ov, "show", lambda *_args, **_kwargs: None)
-
-    def render(*_args, **kwargs):
-        rendered.append(kwargs["styles"])
-        return SubtitleRender(Image.new("RGBA", (10, 10)), [])
-
-    monkeypatch.setattr("saitenka.app.subtitle_render.render_subtitle", render)
+    provider = RecordingRasterProvider(size=(10, 10))
+    reader.renderer = SubtitleRenderer(provider)
 
     reader._draw_subtitle()
     reader.set_annotation_hover(revealed=True)
 
-    assert rendered == [None, reader.styles]
+    assert [request.styles for request in provider.requests] == [None, reader.styles]
     assert reader.styles[0].tag == "learning"

@@ -6,14 +6,13 @@ import time
 from pathlib import Path
 
 import pytest
-from PIL import Image
 from util import FakeIPC as RuntimeFakeIPC
-from util import runtime_gateway
+from util import RecordingRasterProvider, runtime_gateway
 
 from saitenka.app import subtitle_modes, subtitle_selection
 from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
-from saitenka.app.subtitles import SubtitleRender
+from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.subtitles import CueIndex, parse_srt
 
@@ -449,15 +448,14 @@ def test_english_primary_is_plain_and_noninteractive(monkeypatch):
         "tokenize",
         lambda _text: (_ for _ in ()).throw(AssertionError("English must not be tokenized")),
     )
-    monkeypatch.setattr(
-        "saitenka.app.subtitle_render.render_plain_subtitle",
-        lambda *_args, **_kwargs: SubtitleRender(Image.new("RGBA", (20, 10)), []),
-    )
+    provider = RecordingRasterProvider()
+    reader.renderer = SubtitleRenderer(provider)
 
     reader.set_subtitle("Readable English")
 
     assert reader.sub_text == "Readable English"
     assert reader.lines == [] and reader.tokens == [] and reader.boxes == []
+    assert provider.styles == ["plain"]
 
 
 def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, monkeypatch):

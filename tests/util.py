@@ -537,3 +537,29 @@ PROFILES: list[Profile] = [
     Profile(Theme(), 384, "ruby_heavy"),  # dense inline furigana — Phase-B ruby-clearance shape
     Profile(Theme(scale=2.0), 384, "wide_cjk"),  # narrow + hi-dpi → the tallest kinsoku wrap
 ]
+
+
+class RecordingRasterProvider:
+    """A raster provider that records requests instead of rasterizing.
+
+    Proves the provider-neutral contract: the reducer's plain/styled choice and the request it
+    assembles are observable without Pillow, and a fake satisfies exactly what the shipping
+    provider does.
+    """
+
+    def __init__(self, size: tuple[int, int] = (20, 10)) -> None:
+        self.requests: list = []
+        self._size = size
+
+    def render(self, request):
+        from PIL import Image
+
+        from saitenka.app.subtitle_raster import SubtitleRasterResult
+
+        self.requests.append(request)
+        return SubtitleRasterResult(Image.new("RGBA", self._size), ())
+
+    @property
+    def styles(self) -> list[str]:
+        """The plain/styled decision behind each request, in order."""
+        return [request.style.value for request in self.requests]
