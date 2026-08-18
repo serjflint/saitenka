@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787028537772,
+  "lastUpdate": 1787029649117,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -7847,6 +7847,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.901828,
             "range": "3 replicas; min 1.2027; max 28.5016; MAD 0.699129; worst 28.5016",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fe84b598d3d849e750d4e331306c9e197e396a3d",
+          "message": "refactor(runtime): broker hover metadata (#401)",
+          "timestamp": "2026-08-18T10:06:38+05:00",
+          "tree_id": "68b77742172054d955728d1abcba08f02ac76d90",
+          "url": "https://github.com/serjflint/saitenka/commit/fe84b598d3d849e750d4e331306c9e197e396a3d"
+        },
+        "date": 1787029647558,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.334156,
+            "range": "3 replicas; min 5.90958; max 6.34795; MAD 0.013796",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.942955,
+            "range": "3 replicas; min 8.89639; max 9.19341; MAD 0.046569; worst 9.19341",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 17.703956,
+            "range": "3 replicas; min 16.4678; max 17.7942; MAD 0.090206",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 17.944447,
+            "range": "3 replicas; min 16.6334; max 17.9937; MAD 0.049241; worst 17.9937",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 18.321165,
+            "range": "3 replicas; min 16.6304; max 27.9741; MAD 1.6908",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.131548,
+            "range": "3 replicas; min 0.11205; max 0.134911; MAD 0.003363; worst 0.134911",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.075857,
+            "range": "3 replicas; min 38.9725; max 189.214; MAD 0.103352; worst 189.214",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.713973,
+            "range": "3 replicas; min 2.70004; max 133.961; MAD 0.013932; worst 133.961",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.910447,
+            "range": "3 replicas; min 1.18571; max 7.6018; MAD 0.724739; worst 7.6018",
             "unit": "ms"
           }
         ]
