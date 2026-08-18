@@ -15,6 +15,8 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka.app import subtitle_artifact
+
 if TYPE_CHECKING:
     from saitenka.app.controller import Reader
 
@@ -81,20 +83,17 @@ def build_sub_index_for_current_track(reader: Reader) -> None:
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:
         native_geometry.set_source(None, reader=reader)
-    track = _selected_sub_track(reader.ipc)
-    if track is None:
+    artifact = subtitle_artifact.resolve(
+        _selected_sub_track(reader.ipc), media_path=reader._get("path")
+    )
+    if isinstance(artifact, subtitle_artifact.ArtifactUnavailable):
+        log.debug("no subtitle artifact for the current track: %s", artifact.value)
         return
-    if track.get("external"):
-        ext = track.get("external-filename")
-        if ext:
-            reader.load_sub_index(Path(ext))
+    if isinstance(artifact, subtitle_artifact.ExternalArtifact):
+        reader.load_sub_index(Path(artifact.path))
         return
-    ff_index = track.get("ff-index")
-    video = reader._get("path")
-    if ff_index is None or not video:
-        return
-    video_path = Path(video)
-    dest = embedded_subs_cache_dir() / embedded_subs_cache_key(video_path, ff_index)
-    if not dest.exists() and not extract_embedded_track(video_path, ff_index, dest):
+    video_path = Path(artifact.media_path)
+    dest = embedded_subs_cache_dir() / embedded_subs_cache_key(video_path, artifact.ff_index)
+    if not dest.exists() and not extract_embedded_track(video_path, artifact.ff_index, dest):
         return
     reader.load_sub_index(dest)
