@@ -40,6 +40,7 @@ from saitenka.app import (
     sidebar,
     sub_picker,
     subnav,
+    subtitle_intents,
     subtitle_modes,
     surfaces,
     telemetry,
@@ -448,7 +449,7 @@ class Reader:
         self.pause_on_tooltip = o.tooltip.pause_on_tooltip  # auto-pause mpv while a tooltip shows
         if o.tooltip.annotation_mode not in {"full", "hover"}:
             raise ValueError(f"unknown annotation mode: {o.tooltip.annotation_mode!r}")
-        self.annotation_mode = o.tooltip.annotation_mode
+        self.annotation_mode: subtitle_intents.AnnotationMode = o.tooltip.annotation_mode
         self._annotation_hover = False
         # Visual-only: draw the kanji panel's big headword in the numbered stroke-order font. Set here
         # (the shared Reader init) so both the run and attach seams get it from one place; a pure render
@@ -2069,11 +2070,46 @@ class Reader:
     ) -> None:
         subtitle_modes.configure(self, startup, slang=slang)
 
+    # --- subtitle-owned commands: pure reducer, executed here (WP4.2) -------------------------
+    def _subtitle_inputs(self) -> subtitle_intents.SubtitleInputs:
+        """Read every fact the subtitle commands decide from, once, before deciding."""
+        from saitenka.app.subtitle_modes import _current_external_sub
+
+        return subtitle_intents.SubtitleInputs(
+            tracks=subtitle_modes.discover_tracks(self.ipc, self.subtitle_slang),
+            active_sid=self._get("sid"),
+            language=self.subtitle_language,
+            annotation_mode=self.annotation_mode,
+            has_cue=bool(self.sub_text.strip()),
+            retry_in_flight=self.episode.subtitle.retry_active,
+            media_path=self._get("path"),
+            has_external_sub=_current_external_sub(self.ipc) is not None,
+        )
+
+    def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
+        for effect in subtitle_intents.reduce(command, self._subtitle_inputs()):
+            self._apply_subtitle_effect(effect)
+
+    def _apply_subtitle_effect(self, effect: subtitle_intents.SubtitleEffect) -> None:
+        if isinstance(effect, subtitle_intents.SelectTrack):
+            subtitle_modes.select_track(self, effect.sid, effect.target)
+        elif isinstance(effect, subtitle_intents.AdoptCurrentAsTarget):
+            subtitle_modes.adopt_current_as_target(self, effect.sid)
+        elif isinstance(effect, subtitle_intents.AcquireSubtitles):
+            subtitle_modes.begin_acquisition(self, effect.media_path, effect.source)
+        elif isinstance(effect, subtitle_intents.SetAnnotationMode):
+            self.annotation_mode = effect.mode
+            self._annotation_hover = False
+            if effect.redraw:
+                self._draw_subtitle()
+        elif isinstance(effect, subtitle_intents.Announce):
+            self._toast(effect.text, effect.kind)
+
     def toggle_subtitle_language(self) -> None:
-        subtitle_modes.toggle(self)
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_LANGUAGE)
 
     def mark_current_subtitle_japanese(self) -> None:
-        subtitle_modes.force_current_as_japanese(self)
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.MARK_CURRENT_JAPANESE)
 
     def fetch_japanese_subs_async(self, fetch) -> None:
         subtitle_modes.start_fetch(self, fetch, select_if_unchanged=True)
@@ -2082,7 +2118,7 @@ class Reader:
         subtitle_modes.configure_retry(self, factory)
 
     def retry_japanese_subtitles(self) -> None:
-        subtitle_modes.retry(self)
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.RETRY_ACQUISITION)
 
     def _secondary_text(self) -> str:
         return translation.secondary_text(self)
@@ -2129,12 +2165,7 @@ class Reader:
         analysis_overlay.toggle(self)
 
     def toggle_annotation_mode(self) -> None:
-        self.annotation_mode = "hover" if self.annotation_mode == "full" else "full"
-        self._annotation_hover = False
-        if self.sub_text.strip():
-            self._draw_subtitle()
-        label = "full" if self.annotation_mode == "full" else "hover-only"
-        self._toast(f"annotations: {label}")
+        self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
 
     def toggle_help(self) -> None:
         help_overlay.toggle(self)
@@ -2213,16 +2244,12 @@ class Reader:
             MINE_ALL_MSG: action("bulk_mine"),
             TRANS_MSG: action("toggle_translation"),
             OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
-            SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
-            SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
-            SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
             PROFILE_CYCLE_MSG: action("cycle_profile"),
             HOVER_PAUSE_MSG: action("toggle_hover_pause"),
             BOOKMARK_MSG: action("toggle_bookmark"),
             SIDEBAR_MSG: action("toggle_sidebar"),
             SUB_PICKER_MSG: action("toggle_sub_picker"),
             ANALYSIS_MSG: action("toggle_analysis"),
-            ANNOTATION_MSG: action("toggle_annotation_mode"),
             HELP_TOGGLE_MSG: action("toggle_help"),
             HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
             HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
@@ -2247,15 +2274,19 @@ class Reader:
         }
         subtitle_owned = {
             TRANS_MSG,
-            SUBTITLE_LANGUAGE_MSG,
-            SUBTITLE_MARK_JP_MSG,
-            SUBTITLE_RETRY_MSG,
-            ANNOTATION_MSG,
             COPY_LINE_MSG,
             SUB_PREV_MSG,
             SUB_NEXT_MSG,
             SUB_REPLAY_MSG,
             SUB_ANCHOR_MSG,
+        }
+        # Migrated (WP4.2): the decision is `subtitle_intents.reduce`, so these carry no
+        # compatibility binding at all.
+        reducers = {
+            SUBTITLE_LANGUAGE_MSG: action("toggle_subtitle_language"),
+            SUBTITLE_MARK_JP_MSG: action("mark_current_subtitle_japanese"),
+            SUBTITLE_RETRY_MSG: action("retry_japanese_subtitles"),
+            ANNOTATION_MSG: action("toggle_annotation_mode"),
         }
         return LegacyCommandExecutor(
             {
@@ -2264,7 +2295,8 @@ class Reader:
                     "work-package-4" if name in subtitle_owned else "work-package-5",
                 )
                 for name, handler in handlers.items()
-            }
+            },
+            reducers=reducers,
         )
 
     def _command_cue_state(self) -> CueCommandState:

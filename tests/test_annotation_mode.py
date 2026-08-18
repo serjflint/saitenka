@@ -162,7 +162,7 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     monkeypatch.setattr(
         reader, "renderer", _SpyRenderer(lambda rd: drawn.append(rd.annotation_mode))
     )
-    monkeypatch.setattr(reader, "_toast", lambda text: toasts.append(text))
+    monkeypatch.setattr(reader, "_toast", lambda text, *_a, **_k: toasts.append(text))
 
     reader.toggle_annotation_mode()
 

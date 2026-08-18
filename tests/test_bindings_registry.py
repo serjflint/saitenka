@@ -75,14 +75,16 @@ def test_binding_messages_and_handlers_correspond_exactly():
 
 
 def test_every_temporary_command_binding_has_one_deletion_owner():
+    """Each permanent spec routes either to a reducer (migrated, no binding row left to delete)
+    or to exactly one temporary binding with a named deletion owner — never to both."""
     commands = Reader(FakeIPC()).commands
-    bindings = dict(commands.bindings)
+    assert commands.migrated.isdisjoint(dict(commands.bindings))
     actual = {
         spec.name: (
             spec.owner.value,
             spec.requires_cue,
             spec.allowed_while_help_open,
-            bindings[spec.name],
+            commands.route(spec.name),
         )
         for spec in commands.policy.specs
     }
@@ -103,11 +105,11 @@ saitenka-toggle-help|session|global|help|work-package-5
 saitenka-help-prev|session|global|help|work-package-5
 saitenka-help-next|session|global|help|work-package-5
 saitenka-help-close|session|global|help|work-package-5
-saitenka-toggle-subtitle-language|playback|global|modal|work-package-4
-saitenka-mark-subtitle-japanese|playback|global|modal|work-package-4
-saitenka-retry-subtitle-providers|playback|global|modal|work-package-4
+saitenka-toggle-subtitle-language|playback|global|modal|migrated
+saitenka-mark-subtitle-japanese|playback|global|modal|migrated
+saitenka-retry-subtitle-providers|playback|global|modal|migrated
 saitenka-translate|subtitle|cue|modal|work-package-4
-saitenka-toggle-annotations|subtitle|global|modal|work-package-4
+saitenka-toggle-annotations|subtitle|global|modal|migrated
 saitenka-copy-line|subtitle|cue|modal|work-package-4
 saitenka-sub-prev|subtitle|cue|modal|work-package-4
 saitenka-sub-next|subtitle|cue|modal|work-package-4

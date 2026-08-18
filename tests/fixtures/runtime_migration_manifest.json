@@ -142,15 +142,15 @@
     ],
     [
       "direct-mpv-command",
+      "src/saitenka/app/subtitle_modes.py::select_track"
+    ],
+    [
+      "direct-mpv-command",
       "src/saitenka/app/subtitle_modes.py::setup_secondary"
     ],
     [
       "direct-mpv-command",
       "src/saitenka/app/subtitle_modes.py::sub_tracks"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_modes.py::toggle"
     ],
     [
       "direct-mpv-command",
@@ -698,11 +698,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_head_prefetch_items"
+      "src/saitenka/app/prefetch.py::_head_prefetch_candidate"
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_head_prefetch_candidate"
+      "src/saitenka/app/prefetch.py::_head_prefetch_items"
     ],
     [
       "reader-parameter",
@@ -974,11 +974,19 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/subtitle_modes.py::adopt_current_as_target"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::announce_track"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::apply_fetch_result"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_modes.py::begin_acquisition"
     ],
     [
       "reader-parameter",
@@ -990,10 +998,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::force_current_as_japanese"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::on_primary_changed"
     ],
     [
@@ -1002,7 +1006,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::retry"
+      "src/saitenka/app/subtitle_modes.py::select_track"
     ],
     [
       "reader-parameter",
@@ -1011,10 +1015,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_modes.py::start_fetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_modes.py::toggle"
     ],
     [
       "reader-parameter",

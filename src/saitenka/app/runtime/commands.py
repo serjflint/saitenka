@@ -64,6 +64,9 @@ class CueCommandState(StrEnum):
 
 CommandRejection = CommandReason
 
+#: Route label for a command that no longer has a temporary binding to delete.
+MIGRATED_ROUTE = "migrated"
+
 
 @dataclass(frozen=True, slots=True)
 class CommandSpec:
@@ -303,18 +306,28 @@ class CommandPolicy:
 
 
 class LegacyCommandExecutor:
-    """Temporary synchronous adapter from accepted intents to bound feature actions."""
+    """Temporary synchronous adapter from accepted intents to bound feature actions.
+
+    A name carried by `reducers` is already migrated: its decision is a pure reducer and it holds
+    no `LegacyCommandBinding` row. Reducer routes take precedence, so a migrated command cannot
+    keep a compatibility handler alive behind it.
+    """
 
     def __init__(
         self,
         bindings: Mapping[str, LegacyCommandBinding],
         *,
         policy: CommandPolicy | None = None,
+        reducers: Mapping[str, Callable[[], None]] | None = None,
     ) -> None:
         self.policy = policy or CommandPolicy()
-        unknown = frozenset(bindings) - self.policy.names()
+        self._reducers = dict(reducers or {})
+        unknown = (frozenset(bindings) | frozenset(self._reducers)) - self.policy.names()
         if unknown:
             raise ValueError(f"legacy bindings have no command spec: {sorted(unknown)!r}")
+        overlap = frozenset(bindings) & frozenset(self._reducers)
+        if overlap:
+            raise ValueError(f"migrated commands must not keep a binding: {sorted(overlap)!r}")
         self._bindings = dict(bindings)
 
     def names(self) -> frozenset[str]:
@@ -325,6 +338,18 @@ class LegacyCommandExecutor:
         return tuple(
             (name, binding.deletion_owner) for name, binding in sorted(self._bindings.items())
         )
+
+    @property
+    def migrated(self) -> frozenset[str]:
+        """Commands whose decision is a reducer. These hold no temporary binding row."""
+        return frozenset(self._reducers)
+
+    def route(self, name: str) -> str:
+        """`migrated`, or the deletion owner of the temporary binding still behind the name."""
+        if name in self._reducers:
+            return MIGRATED_ROUTE
+        binding = self._bindings.get(name)
+        return binding.deletion_owner if binding is not None else "unbound"
 
     def dispatch(
         self,
@@ -344,8 +369,11 @@ class LegacyCommandExecutor:
             )
         intent = decision.intent
         assert intent is not None
-        binding = self._bindings.get(intent.name)
-        if binding is None:
+        handler = self._reducers.get(intent.name)
+        if handler is None:
+            binding = self._bindings.get(intent.name)
+            handler = binding.handler if binding is not None else None
+        if handler is None:
             return CommandExecution(
                 intent.name,
                 intent.owner,
@@ -353,7 +381,7 @@ class LegacyCommandExecutor:
                 command_id=intent.command_id,
             )
         try:
-            binding.handler()
+            handler()
         except Exception as error:  # noqa: BLE001  # failure is a typed terminal outcome
             return CommandExecution(
                 intent.name,

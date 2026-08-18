@@ -14,7 +14,6 @@ from saitenka.app.subtitle_selection import (
     fetch_action,
     language_name,
     selects_background_japanese,
-    toggle_target,
     wanted_languages,
 )
 from saitenka.app.subtitle_selection import discover as _discover
@@ -249,17 +248,10 @@ def announce_track(reader: Reader, sid) -> None:
             return
 
 
-def toggle(reader: Reader) -> None:
+def select_track(reader: Reader, sid: int, target: Language) -> None:
+    """Carry out a decided language switch: make ``sid`` primary and adopt ``target`` as the role."""
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-    decision = toggle_target(
-        tracks, active_sid=reader._get("sid"), language=reader.subtitle_language
-    )
-    target, sid = decision.target, decision.sid
-    if not decision.available:
-        reader._toast(f"{target.upper()} subtitles unavailable", "warn")
-        return
-
     reader.ipc.command("set_property", "secondary-sid", "no")
     reader._translation_secondary_sid = None
     reader.ipc.command("set_property", "sid", sid)
@@ -279,14 +271,10 @@ def toggle(reader: Reader) -> None:
     announce_track(reader, sid)
 
 
-def force_current_as_japanese(reader: Reader) -> None:
+def adopt_current_as_target(reader: Reader, sid) -> None:
     """Override: treat mpv's current primary subtitle track as the Japanese target, whatever its tag.
     The manual escape hatch — bound to a key so the user acts in mpv directly — for the rare case
     auto-adoption guessed wrong (an untagged track that is really English) or never fired."""
-    sid = reader._get("sid")
-    if sid is None:
-        reader._toast("No subtitle track to mark", "warn")
-        return
     reader.jp_sid = sid
     if reader.en_sid == sid:
         reader.en_sid = None
@@ -300,7 +288,6 @@ def force_current_as_japanese(reader: Reader) -> None:
 
     build_sub_index_for_current_track(reader)
     reader.set_subtitle(reader.sub_text)  # recolor the on-screen cue now, don't wait for the next
-    reader._toast("Marked current subtitles as Japanese")
     log.info("user forced subtitle sid=%s as the Japanese primary", sid)
 
 
@@ -392,20 +379,27 @@ def _start_provider_fetch(reader: Reader, video_path: str) -> None:
     )
 
 
-def retry(reader: Reader) -> None:
-    """The subtitle-sync keybind. If you already have subs on screen, RE-SYNC them in place (no
-    provider query — you only want them re-timed). Only when there are no external subs does it fall
-    back to querying providers."""
-    video_path = reader._get("path")
-    if not video_path:
-        reader._toast("No media loaded for subtitle search", "warn")
+def _claim_retry(state) -> bool:
+    """Take the single-flight retry slot. The reducer already rejected the common re-entry; this
+    closes the window between reading that fact and acting on it."""
+    with state.retry_lock:
+        if state.retry_active:
+            return False
+        state.retry_active = True
+    return True
+
+
+def begin_acquisition(reader: Reader, video_path: str, source) -> None:
+    """Carry out a decided subtitle acquisition. Re-timing needs the external file that was on
+    screen when the decision was made; if it went away, fall back to querying providers."""
+    from saitenka.app.subtitle_intents import AcquisitionSource
+
+    current = (
+        _current_external_sub(reader.ipc) if source is AcquisitionSource.RESYNC_CURRENT else None
+    )
+    if not _claim_retry(reader.episode.subtitle):
+        reader._toast("Subtitle sync already running", "warn")
         return
-    with reader.episode.subtitle.retry_lock:
-        if reader.episode.subtitle.retry_active:
-            reader._toast("Subtitle sync already running", "warn")
-            return
-        reader.episode.subtitle.retry_active = True
-    current = _current_external_sub(reader.ipc)
     if current is not None:
         _start_resync_window(reader, video_path, current)
     else:
