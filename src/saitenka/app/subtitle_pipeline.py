@@ -469,17 +469,12 @@ class SubtitleGeometryWorker:
             self._issued += 1
             identity = (GEOMETRY_LANE, self._issued)
 
-        def finished(_completion: EffectFinished) -> None:
-            """The terminal has no consumer yet: the host still polls `apply` from a tick stage.
-            Routing that poll onto this completion is the next contract, and needs every
-            geometry-owning test gateway-wired first."""
-
         if self._submit(
             owner=Owner.SUBTITLE,
             identity=identity,
             lane=GEOMETRY_LANE,
             request=job,
-            on_finished=finished,
+            on_finished=self._delivered,
         ):
             return
         # Refused admission is dropped work, not queued work: unwind so the queue does not believe
@@ -495,14 +490,20 @@ class SubtitleGeometryWorker:
 
     def execute(self, job: GeometryJob) -> None:
         """Run one lane job. Called on a lane worker thread by :func:`run_geometry_job`."""
-        try:
-            if job.current is not None:
-                self._process_current(job.current)
-            else:
-                assert job.prefetch is not None
-                self._process_prefetch(job.prefetch)
-        finally:
-            self._pump()
+        if job.current is not None:
+            self._process_current(job.current)
+        else:
+            assert job.prefetch is not None
+            self._process_prefetch(job.prefetch)
+
+    def _delivered(self, _completion: EffectFinished) -> None:
+        """The lane terminal. Admission of the next job happens here rather than at the end of the
+        handler, so work enters from the thread that consumes terminals.
+
+        Nothing else consumes it yet: the host still polls `apply` from a tick stage. Routing that
+        poll onto this completion is the remaining half of the slice.
+        """
+        self._pump()
 
     def _remember_provenance(self, key: str, reason: str) -> None:
         self._provenance.pop(key, None)
