@@ -201,7 +201,11 @@ def _ensure_mode(
     unavailable = state.owner == PixelOwner.LEGACY or state.retry_exhausted or state.retry_suspended
     already_native = state.native_pixels_established and not verify
     wrong_mode = verify and state.context.mode != OwnershipMode.NATIVE_VISIBLE
-    if unavailable or already_native or wrong_mode:
+    # Single-flight: a verify may not supersede an assertion still in flight. _assert_native mints a
+    # fresh effect_id and overwrites active_assertion_id, so the first assertion's result would then
+    # fail _assertion_result's identity check and be dropped — two effects, one owner.
+    in_flight = state.active_effect_kind == ActionKind.ASSERT_NATIVE_VISIBILITY
+    if unavailable or already_native or wrong_mode or (verify and in_flight):
         return state, ()
     return _assert_native(state) if verify else _start_mode(state)
 
