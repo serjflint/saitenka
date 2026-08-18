@@ -120,10 +120,22 @@ class SubtitleRenderer:
         self.provider: subtitle_raster.SubtitleRasterPort = (
             provider or subtitle_raster.PillowRasterProvider()
         )
+        self._closed = False
+
+    def close(self) -> None:
+        """Quarantine the surface and release the provider. A cue that arrives after this — a late
+        annotation publishing its upgrade — must not stage pixels onto a slot the close path has
+        already emptied."""
+        self._closed = True
+        self.provider.close()
 
     def draw(
         self, reader: Reader, *, on_settled: Callable[[bool], None] | None = None
-    ) -> SurfaceTransaction:
+    ) -> SurfaceTransaction | None:
+        if self._closed:
+            if on_settled is not None:
+                on_settled(False)  # noqa: FBT003  # the settlement flag is the whole payload
+            return None
         # Plain covers the secondary track and any cue still awaiting (or denied) its annotation:
         # the cue shows at cue time and reader_deps re-renders it annotated once deps land.
         request = subtitle_raster.build_request(
@@ -177,6 +189,9 @@ class NullRenderer:
         pass
 
     def clear(self, reader: Reader) -> None:
+        pass
+
+    def close(self) -> None:
         pass
 
 
@@ -675,6 +690,9 @@ class NativeVisibleRenderer:
     def clear(self, reader: Reader) -> None:
         self._hide_focus(reader)
         self._fallback.clear(reader)
+
+    def close(self) -> None:
+        self._fallback.close()
 
     def deactivate(self, reader: Reader) -> None:
         self._state, actions = reduce_ownership(

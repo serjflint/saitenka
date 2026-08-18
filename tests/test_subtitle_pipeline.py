@@ -26,9 +26,13 @@ from saitenka.subtitles import (
 class FakeCurrentRenderer:
     def __init__(self) -> None:
         self.drawn_host: object | None = None
+        self.closed = False
 
     def draw(self, reader: object) -> None:
         self.drawn_host = reader
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeGeometryBackend:

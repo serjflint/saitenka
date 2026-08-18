@@ -50,6 +50,10 @@ class SubtitleRasterResult:
 class SubtitleRasterPort(Protocol):
     def render(self, request: SubtitleRasterRequest) -> SubtitleRasterResult: ...
 
+    def close(self) -> None:
+        """Release whatever the provider holds. Part of the port because a close participant is a
+        contract, not a capability to probe for: a provider with no state still has to answer."""
+
 
 def raster_style(
     *, secondary_role: bool, upgrade_pending: bool, annotation_degraded: bool
@@ -112,6 +116,9 @@ def build_request(
 
 class PillowRasterProvider:
     """The shipping provider: Pillow rasterization, no policy."""
+
+    def close(self) -> None:
+        """Stateless: each render allocates and returns its own image."""
 
     def render(self, request: SubtitleRasterRequest) -> SubtitleRasterResult:
         from saitenka.app.subtitles import render_plain_subtitle, render_subtitle

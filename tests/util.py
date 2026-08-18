@@ -626,11 +626,17 @@ class RecordingRasterProvider:
     Proves the provider-neutral contract: the reducer's plain/styled choice and the request it
     assembles are observable without Pillow, and a fake satisfies exactly what the shipping
     provider does.
+
+    Pass ``delegate`` to record in front of a real provider instead of standing in for one — that is
+    how the same neutrality assertions run against ``PillowRasterProvider``, which records nothing
+    itself. Recording is the observation, not the substitution.
     """
 
-    def __init__(self, size: tuple[int, int] = (20, 10)) -> None:
+    def __init__(self, size: tuple[int, int] = (20, 10), *, delegate=None) -> None:
         self.requests: list = []
+        self.closed = False
         self._size = size
+        self._delegate = delegate
 
     def render(self, request):
         from PIL import Image
@@ -638,7 +644,14 @@ class RecordingRasterProvider:
         from saitenka.app.subtitle_raster import SubtitleRasterResult
 
         self.requests.append(request)
+        if self._delegate is not None:
+            return self._delegate.render(request)
         return SubtitleRasterResult(Image.new("RGBA", self._size), ())
+
+    def close(self) -> None:
+        self.closed = True
+        if self._delegate is not None:
+            self._delegate.close()
 
     @property
     def styles(self) -> list[str]:

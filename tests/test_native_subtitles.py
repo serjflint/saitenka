@@ -1821,6 +1821,7 @@ def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
 
     older = renderer._fallback.draw(result)
     newer = renderer._fallback.draw(result)
+    assert older is not None and newer is not None  # an open surface always mints a transaction
     assert newer.revision > older.revision
 
     assert ipc.deliver_runtime_mpv(match="overlay-add")  # the older commit, now overtaken

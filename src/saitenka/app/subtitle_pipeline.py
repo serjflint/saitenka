@@ -27,6 +27,8 @@ class CurrentSubtitleRenderer(Protocol):
 
     def clear(self, reader: Reader) -> None: ...
 
+    def close(self) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class GeometryTicket:
@@ -284,6 +286,9 @@ class SubtitleModeCoordinator:
             self._closed = True
             self._generation += 1
             self._current = None
+        # The renderer is a close participant alongside the geometry backend: quarantining geometry
+        # while the raster surface stays live leaves a late annotation able to publish pixels.
+        self._renderer.close()
         with self._backend_lock:
             if self._backend is not None:
                 self._backend.close()

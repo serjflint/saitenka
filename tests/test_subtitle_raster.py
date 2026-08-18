@@ -143,3 +143,115 @@ def test_the_pillow_provider_renders_both_styles() -> None:
 
     assert plain.image.width > 0
     assert styled.image.width > 0
+
+
+# --- the surface: what a Reader publishes, under either provider -------------------------------
+#
+# Every test below is parametrized over both providers, which is WP4.3's neutrality gate stated the
+# way it matters: not "each provider renders something" but "the same trace decides the same thing
+# whichever one is installed". The recorder wraps Pillow rather than replacing it, so the shipping
+# path is the one under assertion.
+
+
+@pytest.fixture(params=["fake", "pillow"])
+def recorder(request: pytest.FixtureRequest):
+    from util import RecordingRasterProvider
+
+    if request.param == "fake":
+        return RecordingRasterProvider(size=(20, 10))
+    return RecordingRasterProvider(delegate=PillowRasterProvider())
+
+
+class _ExistsDS:
+    """A dict set exposing only ``terms_exist`` — its presence is what makes a tokenization
+    complete, and therefore what turns a plain cue into a styled one."""
+
+    def terms_exist(self, _forms):
+        return set()
+
+
+def _reader(recorder, *, dict_set=None):
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.subtitle_render import SubtitleRenderer
+
+    reader = Reader(FakeIPC(), dict_set=dict_set)
+    reader.osd = (1920, 1080)
+    reader.renderer = SubtitleRenderer(recorder)
+    return reader
+
+
+def test_a_cue_publishes_plain_immediately_and_styled_onto_the_same_identity(recorder) -> None:
+    """WP4.3: plain pixels publish at cue time and the later styled result replaces only the same
+    identity. Drives the production path — a cue arriving before the dictionaries are ready, then
+    the same cue once they land."""
+    reader = _reader(recorder)
+
+    reader.set_subtitle("猫を見る")
+    reader.dict_set = _ExistsDS()
+    reader.set_subtitle("猫を見る")
+
+    assert recorder.styles == ["plain", "styled"]
+    assert {published.text for published in recorder.requests} == {"猫を見る"}
+
+
+def test_an_annotation_for_a_replaced_cue_never_restyles_the_current_one(recorder) -> None:
+    """The other half of "only the same identity": a result that completes after its cue is gone.
+
+    The identity guard lives in the annotation disposition and nowhere else — a second copy on the
+    surface would be a second representation of the same fact, which is what invariant 13 forbids.
+    So this asserts the guard from the surface's side rather than duplicating it there.
+    """
+    from saitenka.app import cue_annotation
+    from saitenka.app.token_cache import TokenizedCue
+    from saitenka.app.tokenize import Token
+
+    reader = _reader(recorder, dict_set=_ExistsDS())
+    reader.set_subtitle("猫を見る")
+    stale = reader._annotation_identity("猫を見る")
+    stale_key = reader._annotation_key("猫を見る")
+    reader.set_subtitle("犬を見る")
+    published = len(recorder.requests)
+
+    token = Token("猫", "猫", "ねこ", "名詞", 0, 1)
+    reader._finish_annotation(
+        cue_annotation.AnnotationResult(
+            stale_key, stale, TokenizedCue(lines=[[token]], tokens=[token], styles=None), None, 0, 0
+        )
+    )
+
+    assert len(recorder.requests) == published
+    assert reader.sub_text == "犬を見る"
+
+
+def test_a_closed_subtitle_surface_publishes_no_pixels_and_releases_its_provider(recorder) -> None:
+    """The close participant. A cue that arrives after close — a late annotation publishing its
+    upgrade — must not stage pixels onto a slot the close path has already emptied."""
+    reader = _reader(recorder, dict_set=_ExistsDS())
+    reader.set_subtitle("猫を見る")
+    published = len(recorder.requests)
+
+    reader.subtitle_pipeline.close()
+    reader.set_subtitle("犬を見る")
+
+    assert len(recorder.requests) == published
+    assert recorder.closed
+
+
+def test_a_draw_onto_a_closed_surface_settles_its_caller_as_uncommitted(recorder) -> None:
+    """Negative control for the quarantine: staging must learn the pixels never landed. Silently
+    returning no transaction would leave legacy ownership waiting on an answer that never comes."""
+    from saitenka.app.subtitle_render import SubtitleRenderer
+
+    reader = _reader(recorder, dict_set=_ExistsDS())
+    reader.set_subtitle("猫を見る")
+    renderer = reader.renderer
+    assert isinstance(renderer, SubtitleRenderer)
+    settled: list[bool] = []
+
+    renderer.close()
+    transaction = renderer.draw(reader, on_settled=settled.append)
+
+    assert transaction is None
+    assert settled == [False]
