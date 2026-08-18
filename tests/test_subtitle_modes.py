@@ -10,7 +10,7 @@ from PIL import Image
 from util import FakeIPC as RuntimeFakeIPC
 from util import runtime_gateway
 
-from saitenka.app import subtitle_modes
+from saitenka.app import subtitle_modes, subtitle_selection
 from saitenka.app.controller import Reader
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from saitenka.app.subtitles import SubtitleRender
@@ -762,7 +762,7 @@ def test_runtime_retry_resyncs_current_subs_without_querying_providers(tmp_path,
     ],
 )
 def test_lang_matches_prefix_rule_and_wildcard_edges(lang, wants, expected):
-    assert subtitle_modes.lang_matches(lang, wants) is expected
+    assert subtitle_selection.lang_matches(lang, wants) is expected
 
 
 def test_foreign_only_tracks_use_the_selected_one_as_primary():

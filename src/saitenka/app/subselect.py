@@ -17,9 +17,6 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.subtitle_modes import (
-    lang_matches as _lang_matches,
-)
-from saitenka.app.subtitle_modes import (
     select_initial,
 )
 from saitenka.app.subtitle_modes import (
@@ -32,6 +29,9 @@ from saitenka.app.subtitle_providers import (
     fetch_first,
     get_provider,
     register_provider,
+)
+from saitenka.app.subtitle_selection import (
+    lang_matches as _lang_matches,
 )
 
 if TYPE_CHECKING:

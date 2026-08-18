@@ -6,7 +6,21 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka.app.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
+from saitenka.app.languages import MAIN_LANG, Language
+from saitenka.app.subtitle_selection import (
+    FetchAction,
+    SubtitleStartup,
+    SubtitleTracks,
+    fetch_action,
+    language_name,
+    selects_background_japanese,
+    toggle_target,
+    wanted_languages,
+)
+from saitenka.app.subtitle_selection import discover as _discover
+from saitenka.app.subtitle_selection import initial as _initial
+from saitenka.app.subtitle_selection import matching_track as _matching_track
+from saitenka.app.subtitle_selection import primary_role as _primary_role_for
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy
 
@@ -22,52 +36,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
-JP_LANGS = {"ja", "jpn", "jp", "japanese"}
-
-
-def lang_matches(lang: str | None, wants: list[str]) -> bool:
-    low = (lang or "").lower()
-    return any(
-        want and (low == want or low.startswith(want) or want.startswith(low)) for want in wants
-    )
-
 
 def sub_tracks(ipc) -> list[dict]:
     data = ipc.command("get_property", "track-list").get("data") or []
     return [track for track in data if track.get("type") == "sub"]
-
-
-def _matching_track(tracks: list[dict], wants: list[str]) -> dict | None:
-    return next((track for track in tracks if lang_matches(track.get("lang"), wants)), None)
-
-
-def _fill_untagged_tracks(
-    tracks: list[dict], jp: dict | None, en: dict | None
-) -> tuple[dict | None, dict | None]:
-    selected = sorted(
-        (track for track in tracks if track.get("selected")),
-        key=lambda track: track.get("main-selection", 0),
-    )
-    if jp is None and selected and selected[0] is not en:
-        jp = selected[0]
-    if jp is None and en is None and tracks:
-        jp = tracks[0]
-    if en is None:
-        en = next((track for track in tracks if track.get("id") != (jp or {}).get("id")), None)
-    return jp, en
-
-
-@dataclass(frozen=True)
-class SubtitleTracks:
-    jp_sid: int | None
-    en_sid: int | None
-
-
-@dataclass(frozen=True)
-class SubtitleStartup:
-    tracks: SubtitleTracks
-    active: Language | None
 
 
 @dataclass(frozen=True)
@@ -159,34 +131,20 @@ def has_track_for_slang(ipc, slang: str) -> bool:
     (unlike :func:`discover_tracks`, which grabs the first track when nothing matches). The live profile
     switcher gates on this: cycling to a language the file has no track for keeps the current track and
     warns, instead of silently grabbing an unrelated one."""
-    wants = [part.strip().lower() for part in slang.split(",") if part.strip()]
-    return _matching_track(sub_tracks(ipc), wants) is not None
+    return _matching_track(sub_tracks(ipc), wanted_languages(slang)) is not None
 
 
 def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
-    tracks = sub_tracks(ipc)
-    wants = [part.strip().lower() for part in slang.split(",") if part.strip()]
-    jp = _matching_track(tracks, wants)
-    en = _matching_track(tracks, list(EN_LANGS))
-    jp, en = _fill_untagged_tracks(tracks, jp, en)
-    return SubtitleTracks(
-        jp_sid=jp.get("id") if jp is not None else None,
-        en_sid=en.get("id") if en is not None else None,
-    )
+    return _discover(sub_tracks(ipc), slang)
 
 
 def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
     """Prefer Japanese, fall back to tagged English, and leave a missing-both file untouched."""
-    tracks = discover_tracks(ipc, slang)
-    active: Language | None = None
-    sid = tracks.jp_sid
-    if sid is not None:
-        active = MAIN_LANG
-    elif tracks.en_sid is not None:
-        active, sid = SECOND_LANG, tracks.en_sid
+    startup = _initial(sub_tracks(ipc), slang)
+    sid = startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
     if sid is not None:
         ipc.command("set_property", "sid", sid)
-    return SubtitleStartup(tracks, active)
+    return startup
 
 
 def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,jp") -> None:
@@ -262,22 +220,9 @@ def on_primary_changed(reader: Reader, sid) -> None:
 
 
 def _primary_role(reader: Reader, sid) -> Language:
-    """Role of the track mpv just made primary. A real Japanese tag → the target; a real English tag →
-    the known-language secondary. An UNTAGGED track is classified by CONTENT — Japanese script (kana or
-    kanji) in the cues just indexed, else the on-screen text → target; otherwise the secondary. So a
-    drag-'n'-dropped untagged Japanese sub colors while an untagged English one stays plain, exactly
-    where a language tag can't decide (``lang_matches(None, EN_LANGS)`` is a false wildcard match)."""
-    if sid == reader.jp_sid:
-        return MAIN_LANG
-    if sid == reader.en_sid:
-        return SECOND_LANG
+    tracks = SubtitleTracks(reader.jp_sid, reader.en_sid)
     lang = next((t.get("lang") for t in sub_tracks(reader.ipc) if t.get("id") == sid), None)
-    if lang and lang_matches(lang, list(JP_LANGS)):
-        return MAIN_LANG
-    if lang and lang_matches(lang, list(EN_LANGS)):
-        return SECOND_LANG
-    sample = _sample_cue_text(reader)  # no usable tag → decide by the track's actual text
-    return MAIN_LANG if (not sample or looks_japanese(sample)) else SECOND_LANG
+    return _primary_role_for(sid, tracks, track_lang=lang, sample=_sample_cue_text(reader))
 
 
 def _sample_cue_text(reader: Reader, limit: int = 20) -> str:
@@ -289,15 +234,6 @@ def _sample_cue_text(reader: Reader, limit: int = 20) -> str:
     return reader.sub_text or ""
 
 
-def _language_name(lang: str | None) -> str:
-    low = (lang or "").lower()
-    if low in JP_LANGS:
-        return "Japanese"
-    if low in EN_LANGS:
-        return "English"
-    return lang or "unknown language"
-
-
 def announce_track(reader: Reader, sid) -> None:
     if sid == reader._last_announced_sid:
         return
@@ -305,7 +241,7 @@ def announce_track(reader: Reader, sid) -> None:
     for index, track in enumerate(tracks, 1):
         if track.get("id") == sid:
             reader._last_announced_sid = sid
-            name = _language_name(track.get("lang"))
+            name = language_name(track.get("lang"))
             # Log the same signal the toast shows: a surprising "unknown language (10/11)" here is the
             # earliest sign of a wrong-track selection, and belongs in the bundle, not just on screen.
             log.info("subtitles announced: %s (%d/%d) sid=%s", name, index, len(tracks), sid)
@@ -316,19 +252,11 @@ def announce_track(reader: Reader, sid) -> None:
 def toggle(reader: Reader) -> None:
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-    active_sid = reader._get("sid")
-    if active_sid == reader.jp_sid:
-        target: Language = SECOND_LANG
-    elif active_sid == reader.en_sid or (
-        reader.subtitle_language == MAIN_LANG and reader.jp_sid is not None
-    ):
-        target = MAIN_LANG
-    elif reader.subtitle_language == SECOND_LANG and reader.en_sid is not None:
-        target = SECOND_LANG
-    else:
-        target = MAIN_LANG if reader.jp_sid is not None else SECOND_LANG
-    sid = reader.en_sid if target == SECOND_LANG else reader.jp_sid
-    if sid is None:
+    decision = toggle_target(
+        tracks, active_sid=reader._get("sid"), language=reader.subtitle_language
+    )
+    target, sid = decision.target, decision.sid
+    if not decision.available:
         reader._toast(f"{target.upper()} subtitles unavailable", "warn")
         return
 
@@ -530,11 +458,12 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
     reader.ipc.command("sub-add", str(path), "auto", "", "jpn")
     tracks = discover_tracks(reader.ipc, reader.subtitle_slang)
     reader.jp_sid, reader.en_sid = tracks.jp_sid, tracks.en_sid
-    select_japanese = (
-        result.select_if_unchanged
-        and not had_japanese
-        and current_sid == result.initial_sid
-        and reader.jp_sid is not None
+    select_japanese = selects_background_japanese(
+        select_if_unchanged=result.select_if_unchanged,
+        had_japanese=had_japanese,
+        current_sid=current_sid,
+        initial_sid=result.initial_sid,
+        jp_sid=reader.jp_sid,
     )
     if not select_japanese:
         reader.ipc.command("set_property", "sid", current_sid if current_sid is not None else "no")
@@ -559,18 +488,22 @@ def _add_background_japanese(reader: Reader, result: SubtitleFetchResult) -> Non
 
 
 def apply_fetch_result(reader: Reader, result: SubtitleFetchResult) -> None:
-    if result.path is None:
+    action = fetch_action(
+        path_available=result.path is not None,
+        force_select=result.force_select,
+        replace=result.replace,
+        language=reader.subtitle_language,
+    )
+    if action is FetchAction.REPORT_FAILURE:
         log.warning("%s", result.status)
         reader._toast(result.status, "warn")
-    # An explicit picker choice selects the chosen source NOW, from any current language (English
-    # included) — the user picked it on purpose, so the keep-current background contract doesn't apply.
-    elif result.force_select:
+    elif action is FetchAction.REPLACE:
+        toast = "Japanese subtitles selected" if result.force_select else None
         _replace_japanese_track(
-            reader, result.path, result.status, toast="Japanese subtitles selected"
+            reader,
+            result.path,
+            result.status,
+            **({"toast": toast} if toast else {}),
         )
-    # A user retry while watching Japanese swaps the on-screen (mistimed) track for the re-synced
-    # file; from English it falls through to the non-disruptive add (fetch JP, keep EN until Alt+t).
-    elif result.replace and reader.subtitle_language == MAIN_LANG:
-        _replace_japanese_track(reader, result.path, result.status)
     else:
         _add_background_japanese(reader, result)
