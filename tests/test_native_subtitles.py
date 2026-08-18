@@ -12,6 +12,7 @@ from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
+from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.tokenize import Token
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
@@ -87,6 +88,41 @@ class FakeIPC:
         self.set_property_exception: Exception | None = None
         self.overlay_add_error: str | None = None
         self.get_property_error: str | None = None
+        self.correlate_commands = False
+        self.submitted: list[tuple] = []
+
+    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Admit a correlated command only when a test opts in, and never complete it here.
+
+        Off by default so this file's tests keep exercising the synchronous arm, which is what an
+        mpv without the gateway still takes. A test that turns it on drives the terminal itself
+        via `deliver_runtime_mpv`, which is the only way to place a late or out-of-order result.
+        """
+        if not self.correlate_commands:
+            return False
+        self.commands.append(command)
+        self.submitted.append((identity, command, on_finished))
+        return True
+
+    def deliver_runtime_mpv(self, *, outcome=None, result=None) -> bool:
+        """Complete the oldest outstanding correlated command."""
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        if not self.submitted:
+            return False
+        identity, command, on_finished = self.submitted.pop(0)
+        if result is None and command[0] == "get_property":
+            result = self.props.get(command[1])
+        on_finished(
+            EffectFinished(
+                EffectId(0),
+                Owner.SUBTITLE,
+                identity,
+                outcome or EffectOutcome.SUCCEEDED,
+                result=result,
+            )
+        )
+        return True
 
     def schedule_runtime_timer(self, *, timer, identity, due_at, on_finished, **_kwargs) -> bool:
         self.timers[timer] = (identity, due_at, on_finished)
@@ -1214,6 +1250,102 @@ def test_a_geometry_schedule_that_never_starts_names_the_missing_input(tmp_path:
 
     # The revision is what lets a dropped schedule be matched to the observation that armed it.
     assert traced == [("no-tokens", result.cue_revision)]
+    result.close()
+
+
+def _correlated_reader(tmp_path: Path):
+    """A reader whose ownership assertion goes through the gateway, so the test places the terminal.
+
+    The renderer's `use_native` answers "not yet" until the readback lands, which is the whole
+    behavioural difference from the synchronous trio every other test in this file exercises.
+    """
+    result, ipc, backend = reader(tmp_path)
+    ipc.correlate_commands = True
+    return result, ipc, backend
+
+
+def test_an_undecided_assertion_defers_publishing_instead_of_degrading(tmp_path: Path) -> None:
+    result, _ipc, _backend = _correlated_reader(tmp_path)
+    assert result.native_geometry is not None
+
+    result.set_subtitle("猫を見る")
+
+    # Mid-flight: no answer yet. Degrading here is the regression this asserts against — it would
+    # mark geometry rejected for the lack of a reply and never publish hit boxes.
+    assert result._native_ownership_undecided()
+    assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
+    assert result.boxes == []
+    result.close()
+
+
+def test_a_geometry_result_that_lands_while_ownership_is_undecided_is_not_lost(
+    tmp_path: Path,
+) -> None:
+    """The geometry worker can finish before the ownership terminal does.
+
+    `_apply` consumes the snapshot before it learns ownership is undecided, so deferring alone
+    would drop that result on the floor and no later drain would rebuild it — the confirmation has
+    to re-drive the refresh. This is the case that makes the re-drive load-bearing rather than
+    defensive.
+    """
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    assert result.native_geometry is not None
+    result.set_subtitle("猫を見る")
+
+    assert result.native_geometry.worker.wait_idle()
+    assert result.native_geometry.apply(result) is False  # deferred: no answer to publish against
+    # Deferring is not degrading — recording a rejection here is the regression.
+    assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
+
+    ipc.props["sub-visibility"] = True  # mpv now reports what the write asked for
+    assert ipc.deliver_runtime_mpv()  # the set_property terminal
+    assert ipc.deliver_runtime_mpv()  # the get_property readback
+    assert not result._native_ownership_undecided()
+
+    assert result.native_geometry.status.geometry_ready
+    assert result.native_geometry.fallback_reason is None
+    assert [box.index for box in result.boxes] == list(range(len(result.tokens)))
+    result.close()
+
+
+def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Path) -> None:
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+
+    # mpv accepted the write and still reports FALSE — the case the readback exists for, and the
+    # reason the write's own outcome cannot stand in for it.
+    ipc.props["sub-visibility"] = False
+    assert ipc.deliver_runtime_mpv()
+    assert ipc.deliver_runtime_mpv()
+
+    assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
+    assert not result._native_ownership_undecided()
+    result.close()
+
+
+def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -> None:
+    from saitenka.runtime import EffectOutcome
+
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+
+    assert ipc.deliver_runtime_mpv(outcome=EffectOutcome.REJECTED)
+
+    # No readback is issued for a write that never applied, and an unanswered boundary is UNKNOWN.
+    assert ipc.submitted == []
+    assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
+    result.close()
+
+
+def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> None:
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.set_subtitle("猫を見る")
+    assert len(ipc.submitted) == 1
+
+    result.subtitle_pipeline.renderer.reassert(result)
+
+    # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
+    assert len(ipc.submitted) == 1
     result.close()
 
 

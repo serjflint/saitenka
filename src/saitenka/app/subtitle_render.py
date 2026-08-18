@@ -52,6 +52,9 @@ class OwnershipRetryDue:
 
 NATIVE_FOCUS_ID = 1_001
 
+_VISIBILITY_ASSERT = "ownership:assert-native-visibility"
+_VISIBILITY_READBACK = "ownership:readback-visibility"
+
 
 class SubtitleRenderer:
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
@@ -170,9 +173,25 @@ class NativeVisibleRenderer:
     def ownership_state(self) -> OwnershipState:
         return self._state
 
+    @property
+    def assertion_in_flight(self) -> bool:
+        """A correlated visibility assertion is awaiting its terminal, so ownership is undecided
+        rather than refused."""
+        return self._state.active_effect_kind == ActionKind.ASSERT_NATIVE_VISIBILITY
+
     @staticmethod
     def _reply_accepted(reply: object) -> bool:
         return not isinstance(reply, dict) or reply.get("error") in {None, "success"}
+
+    @staticmethod
+    def _visibility_of(value: object) -> Visibility:
+        """Decode one mpv `sub-visibility` value. Anything that is not an explicit bool is UNKNOWN —
+        never legacy proof."""
+        if value is True:
+            return Visibility.TRUE
+        if value is False:
+            return Visibility.FALSE
+        return Visibility.UNKNOWN
 
     def _read_visibility(self, reader: Reader) -> Visibility:
         try:
@@ -181,12 +200,7 @@ class NativeVisibleRenderer:
             return Visibility.UNKNOWN
         if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
             return Visibility.UNKNOWN
-        value = reply.get("data")
-        if value is True:
-            return Visibility.TRUE
-        if value is False:
-            return Visibility.FALSE
-        return Visibility.UNKNOWN
+        return self._visibility_of(reply.get("data"))
 
     def _trace_ownership(
         self,
@@ -214,21 +228,88 @@ class NativeVisibleRenderer:
                 span.set("effect_id", effect_id)
 
     def _assert_native(self, reader: Reader, action: OwnershipAction) -> None:
+        """Assert native visibility, then read back what mpv actually holds.
+
+        Two correlated hops when the gateway admits them, the synchronous trio otherwise. The
+        readback is not redundant with the write's outcome — mpv can accept the set and still
+        report FALSE, which is the case that hands ownership to legacy.
+
+        Written as closures rather than helper methods on purpose: each would have to take the
+        `Reader`, and the host-contract gate counts those.
+        """
         owner_before = self._state.owner
         exhausted_before = self._state.retry_exhausted
+        # Must precede the write, and stays synchronous: it is the sole source of the value close
+        # replays, so issued concurrently or after it reads back our own `true` and close then
+        # restores the wrong visibility to the user's mpv. A sync read is queued ahead of a later
+        # async write on the same ordered outbound channel, so ordering holds.
         self._capture_restore_visibility(reader)
+        # True once this call has handed a "not yet" back to its caller. Only then does a settle
+        # owe a re-drive; a result that lands before the return (no gateway, or a fake completing
+        # inline) is still the caller's own answer, and refreshing there would arm a geometry
+        # deadline from inside set_subtitle that the coalescing contract forbids.
+        deferred = False
+
+        def settle(*, accepted: bool, visibility: Visibility, reply: object) -> None:
+            followups = self._apply_assertion_result(action, visibility)
+            self._record_assertion_result(
+                action,
+                reply=reply,
+                accepted=accepted,
+                visibility=visibility,
+                owner_before=owner_before,
+                exhausted_before=exhausted_before,
+            )
+            self._execute(reader, followups)
+            established = (
+                self._state.owner == PixelOwner.NATIVE and owner_before != PixelOwner.NATIVE
+            )
+            if deferred and established and reader.native_geometry is not None:
+                # Every consumer that asked `use_native` mid-flight was told "not yet" and
+                # published nothing. The refresh is the seam that rebuilds hit boxes.
+                reader.native_geometry.refresh(reader)
+
+        def confirm(write: EffectFinished) -> Callable[[EffectFinished], None]:
+            def confirmed(read: EffectFinished) -> None:
+                settle(
+                    accepted=True,
+                    visibility=self._visibility_of(read.result)
+                    if read.outcome is EffectOutcome.SUCCEEDED
+                    else Visibility.UNKNOWN,
+                    reply=write.result,
+                )
+
+            return confirmed
+
+        def read_back(write: EffectFinished) -> None:
+            if write.outcome is not EffectOutcome.SUCCEEDED:
+                settle(
+                    accepted=False,
+                    visibility=Visibility.UNKNOWN,
+                    reply={"error": str(write.outcome)},
+                )
+            elif not reader.ipc.submit_runtime_mpv(
+                owner=Owner.SUBTITLE,
+                identity=_VISIBILITY_READBACK,
+                command=("get_property", "sub-visibility"),
+                timeout_s=10.0,
+                on_finished=confirm(write),
+            ):
+                # The write landed; only the readback was refused. An unread boundary is UNKNOWN,
+                # never legacy proof — the FSM's retry decides what happens next.
+                settle(accepted=True, visibility=Visibility.UNKNOWN, reply=write.result)
+
+        if reader.ipc.submit_runtime_mpv(
+            owner=Owner.SUBTITLE,
+            identity=_VISIBILITY_ASSERT,
+            command=("set_property", "sub-visibility", True),
+            timeout_s=10.0,
+            on_finished=read_back,
+        ):
+            deferred = self._state.owner != PixelOwner.NATIVE
+            return
         reply, accepted = self._set_native_visible(reader)
-        visibility = self._read_visibility(reader)
-        followups = self._apply_assertion_result(action, visibility)
-        self._record_assertion_result(
-            action,
-            reply=reply,
-            accepted=accepted,
-            visibility=visibility,
-            owner_before=owner_before,
-            exhausted_before=exhausted_before,
-        )
-        self._execute(reader, followups)
+        settle(accepted=accepted, visibility=self._read_visibility(reader), reply=reply)
 
     def _capture_restore_visibility(self, reader: Reader) -> None:
         if self._restore_visibility is not None:

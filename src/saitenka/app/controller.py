@@ -1503,6 +1503,13 @@ class Reader:
         renderer = self.subtitle_pipeline.renderer
         return not isinstance(renderer, NativeVisibleRenderer) or renderer.use_native(self)
 
+    def _native_ownership_undecided(self) -> bool:
+        """True while a visibility assertion is in flight, so `_use_native_subtitle_renderer` said
+        no for lack of an answer rather than because mpv refused. Publishing must wait, not degrade:
+        the assertion's terminal re-drives the refresh."""
+        renderer = self.subtitle_pipeline.renderer
+        return isinstance(renderer, NativeVisibleRenderer) and renderer.assertion_in_flight
+
     # --- hover --------------------------------------------------------------------------------
     def _hit(self, mx: float, my: float) -> int:
         ox, oy = self.sub_origin

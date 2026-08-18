@@ -970,6 +970,8 @@ class NativeSubtitleGeometry:
         self._eligible_tokens = len(cached.palette)
         self.worker.mark_presented(cached)
         if not reader._use_native_subtitle_renderer():
+            if reader._native_ownership_undecided():
+                return True  # the assertion's terminal re-drives the refresh
             self._degrade_geometry(reader, "mpv-sub-visibility-rejected")
             return True
         self._set_ready(active_events=len(cached.frame_id.active_event_ids))
@@ -1020,6 +1022,8 @@ class NativeSubtitleGeometry:
                 self._published_key = inputs.observation_key
                 self._set_ready()
                 return True
+            if reader._native_ownership_undecided():
+                return False  # the assertion's terminal re-drives the refresh
             self._degrade_geometry(reader, "mpv-sub-visibility-rejected")
             return False
 
@@ -1127,6 +1131,8 @@ class NativeSubtitleGeometry:
         self._install_snapshot(reader, snapshot)
         self._record_ready_latency(snapshot.generation)
         if not reader._use_native_subtitle_renderer():
+            if reader._native_ownership_undecided():
+                return False  # the assertion's terminal re-drives the refresh
             self._set_fallback("mpv-sub-visibility-rejected")
             return False
         self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
