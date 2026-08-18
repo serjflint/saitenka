@@ -126,10 +126,6 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_focus"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_mpv_subtitles"
     ],
     [
@@ -138,27 +134,11 @@
     ],
     [
       "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.draw"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.suspend_for_overlay"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate"
     ],
     [
       "direct-mpv-command",
       "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.resume_after_overlay"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.suspend_for_overlay"
     ],
     [
       "direct-overlay-mutation",

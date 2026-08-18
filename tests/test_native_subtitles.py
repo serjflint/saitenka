@@ -104,8 +104,12 @@ class FakeIPC:
             self.deliver_runtime_mpv()
         return True
 
-    def deliver_runtime_mpv(self, *, outcome=None, result=None) -> bool:
-        """Complete the oldest outstanding correlated command.
+    def deliver_runtime_mpv(self, *, match=None, outcome=None, result=None) -> bool:
+        """Complete the oldest outstanding correlated command, or the oldest matching `match`.
+
+        `match` names the property or overlay a test means (checked against every element of the
+        command), because more than one subsystem correlates its writes and a positional "the next
+        one" would silently retarget whenever another starts.
 
         Delivery runs it through `command`, not around it: a fake whose correlated path skips its
         own mpv-state simulation reports a stale readback, which presents as a production ownership
@@ -113,9 +117,17 @@ class FakeIPC:
         """
         from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 
-        if not self.submitted:
+        index = next(
+            (
+                i
+                for i, (_identity, command, _cb) in enumerate(self.submitted)
+                if match is None or match in command
+            ),
+            None,
+        )
+        if index is None:
             return False
-        identity, command, on_finished = self.submitted.pop(0)
+        identity, command, on_finished = self.submitted.pop(index)
         outcome = outcome or EffectOutcome.SUCCEEDED
         error = None
         if outcome is EffectOutcome.SUCCEEDED:
@@ -1325,8 +1337,8 @@ def test_a_geometry_result_that_lands_while_ownership_is_undecided_is_not_lost(
     assert result.native_geometry.fallback_reason != "mpv-sub-visibility-rejected"
 
     ipc.props["sub-visibility"] = True  # mpv now reports what the write asked for
-    assert ipc.deliver_runtime_mpv()  # the set_property terminal
-    assert ipc.deliver_runtime_mpv()  # the get_property readback
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the set_property terminal
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the get_property readback
     assert not result._native_ownership_undecided()
 
     assert result.native_geometry.status.geometry_ready
@@ -1341,9 +1353,9 @@ def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Pa
 
     # mpv accepted the write and still reports FALSE — the case the readback exists for, and the
     # reason the write's own outcome cannot stand in for it.
-    assert ipc.deliver_runtime_mpv()  # the set_property terminal
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the set_property terminal
     ipc.props["sub-visibility"] = False  # ...and mpv did not honour it
-    assert ipc.deliver_runtime_mpv()  # the get_property readback
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the get_property readback
 
     assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
     assert not result._native_ownership_undecided()
@@ -1356,13 +1368,13 @@ def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -
     result, ipc, _backend = _correlated_reader(tmp_path)
     result.set_subtitle("猫を見る")
 
-    assert ipc.deliver_runtime_mpv(outcome=EffectOutcome.REJECTED)
+    assert ipc.deliver_runtime_mpv(match="sub-visibility", outcome=EffectOutcome.REJECTED)
 
     # A refused write still reads back — mpv's actual state decides ownership, not our write's
     # outcome, and the readback is what can still prove legacy.
-    assert [command for _identity, command, _cb in ipc.submitted] == [
-        ("get_property", "sub-visibility")
-    ]
+    assert [
+        command for _identity, command, _cb in ipc.submitted if "sub-visibility" in command
+    ] == [("get_property", "sub-visibility")]
     assert ipc.deliver_runtime_mpv()
     assert result.subtitle_pipeline.renderer.ownership_state.owner != PixelOwner.NATIVE
     result.close()
@@ -1371,12 +1383,13 @@ def test_a_rejected_assertion_write_never_claims_native_pixels(tmp_path: Path) -
 def test_only_one_assertion_is_in_flight_across_a_reassert(tmp_path: Path) -> None:
     result, ipc, _backend = _correlated_reader(tmp_path)
     result.set_subtitle("猫を見る")
-    assert len(ipc.submitted) == 1
+    visibility = [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c]
+    assert len(visibility) == 1
 
     result.subtitle_pipeline.renderer.reassert(result)
 
     # A second assertion would orphan the first's effect id and leave a terminal nobody retires.
-    assert len(ipc.submitted) == 1
+    assert [c for _i, c, _cb in ipc.submitted if "sub-visibility" in c] == visibility
     result.close()
 
 
@@ -1804,15 +1817,15 @@ def test_legacy_ownership_commits_only_after_the_surface_commit_lands(tmp_path: 
 
     ipc.correlate_commands = True
     renderer.reassert(result)
-    assert ipc.deliver_runtime_mpv()  # the visibility write
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # the visibility write
     ipc.props["sub-visibility"] = False  # mpv refuses to keep its subtitles visible
-    assert ipc.deliver_runtime_mpv()  # the readback: FALSE, so pixels hand off to legacy
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")  # readback FALSE: hand to legacy
 
     pending = [command for _identity, command, _cb in ipc.submitted]
     assert any(command[0] == "overlay-add" for command in pending)
     assert renderer.ownership_state.owner != PixelOwner.LEGACY  # the commit is still outstanding
 
-    assert ipc.deliver_runtime_mpv()  # the overlay commit lands
+    assert ipc.deliver_runtime_mpv(match="overlay-add")  # the overlay commit lands
 
     assert renderer.ownership_state.owner == PixelOwner.LEGACY
     result.close()

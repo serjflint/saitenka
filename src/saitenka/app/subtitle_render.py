@@ -30,7 +30,12 @@ from saitenka.app.subtitle_ownership import (
     reduce_ownership,
 )
 from saitenka.app.subtitles import box_for_token
-from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+from saitenka.runtime import EffectError, EffectFinished, EffectOutcome, Owner
+from saitenka.runtime.surfaces import (
+    SurfaceAction,
+    SurfaceRuntime,
+    SurfaceTransactionOutcome,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,8 +58,30 @@ class OwnershipRetryDue:
 
 NATIVE_FOCUS_ID = 1_001
 
+_FOCUS_SLOT = "subtitle-native-focus"
 _VISIBILITY_ASSERT = "ownership:assert-native-visibility"
 _VISIBILITY_READBACK = "ownership:readback-visibility"
+
+
+def _send_visibility(ipc, identity: str, *, visible: bool) -> None:
+    """One correlated `sub-visibility` write. Not awaited: mpv has a single ordered outbound
+    channel, so a later read still observes it — what the correlation buys is a terminal outcome
+    instead of a discarded reply."""
+
+    def finished(completion: EffectFinished) -> None:
+        if completion.outcome is not EffectOutcome.SUCCEEDED:
+            log.warning(
+                "subtitle visibility write %s did not apply: %s", identity, completion.outcome
+            )
+
+    if not ipc.submit_runtime_mpv(
+        owner=Owner.SUBTITLE,
+        identity=identity,
+        command=("set_property", "sub-visibility", visible),
+        timeout_s=10.0,
+        on_finished=finished,
+    ):
+        log.warning("subtitle visibility write %s was not admitted", identity)
 
 
 class SubtitleRenderer:
@@ -79,18 +106,10 @@ class SubtitleRenderer:
                 log.info("could not restore mpv subtitle visibility during close")
 
     def suspend_for_overlay(self, reader: Reader) -> None:
-        reader.ipc.command(
-            "set_property",
-            "sub-visibility",
-            True,  # noqa: FBT003  # mpv IPC wire value
-        )
+        _send_visibility(reader.ipc, "subtitle:suspend-for-overlay", visible=True)
 
     def resume_after_overlay(self, reader: Reader) -> None:
-        reader.ipc.command(
-            "set_property",
-            "sub-visibility",
-            False,  # noqa: FBT003  # mpv IPC wire value
-        )
+        _send_visibility(reader.ipc, "subtitle:resume-after-overlay", visible=False)
 
     def __init__(self, provider: subtitle_raster.SubtitleRasterPort | None = None) -> None:
         self.provider: subtitle_raster.SubtitleRasterPort = (
@@ -175,6 +194,9 @@ class NativeVisibleRenderer:
         self._retry_effect_id: int | None = None
         self._retry_immediate: int | None = None
         self._clock = clock
+        # The focus highlight is its own presentation slot: a hide issued while a show is still in
+        # flight must not land after it, and the revision fence is what orders them.
+        self._focus = SurfaceRuntime()
 
     @property
     def ownership_state(self) -> OwnershipState:
@@ -632,14 +654,10 @@ class NativeVisibleRenderer:
             rf"\1c&H5AD6FF&\1a&HDF&\3c&H5AD6FF&\3a&H23&\p1}}"
             f"m 0 0 l {width} 0 l {width} {height} l 0 {height}"
         )
-        reader.ipc.command(
-            "osd-overlay",
-            NATIVE_FOCUS_ID,
-            "ass-events",
-            drawing,
-            reader.osd[0],
-            reader.osd[1],
-            1,
+        self._submit_focus(
+            reader.ipc,
+            SurfaceAction.PRESENT,
+            (NATIVE_FOCUS_ID, "ass-events", drawing, reader.osd[0], reader.osd[1], 1),
         )
 
     def clear(self, reader: Reader) -> None:
@@ -659,11 +677,7 @@ class NativeVisibleRenderer:
     def suspend_for_overlay(self, reader: Reader) -> None:
         self._hide_focus(reader)
         self._fallback.clear(reader)
-        reader.ipc.command(
-            "set_property",
-            "sub-visibility",
-            True,  # noqa: FBT003  # mpv IPC wire value
-        )
+        _send_visibility(reader.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
     def resume_after_overlay(self, reader: Reader) -> None:
         if self._state.owner == PixelOwner.LEGACY:
@@ -674,6 +688,28 @@ class NativeVisibleRenderer:
             return
         self.reassert(reader)
 
-    @staticmethod
-    def _hide_focus(reader: Reader) -> None:
-        reader.ipc.command("osd-overlay", NATIVE_FOCUS_ID, "none", "")
+    def _hide_focus(self, reader: Reader) -> None:
+        self._submit_focus(reader.ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))
+
+    def _submit_focus(self, ipc, action: SurfaceAction, tail: tuple[object, ...]) -> None:
+        """One fenced write to the focus slot. A stale acknowledgement is dropped by the runtime,
+        so an overtaken highlight can never repaint over the current one."""
+        transaction = self._focus.request(_FOCUS_SLOT, action)
+
+        def finished(completion: EffectFinished) -> None:
+            self._focus.finish(
+                SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
+            )
+
+        if not ipc.submit_runtime_mpv(
+            owner=Owner.SUBTITLE,
+            identity=transaction,
+            command=("osd-overlay", *tail),
+            timeout_s=10.0,
+            on_finished=finished,
+        ):
+            self._focus.finish(
+                SurfaceTransactionOutcome(
+                    transaction, EffectOutcome.FAILED, EffectError.DISCONNECTED
+                )
+            )

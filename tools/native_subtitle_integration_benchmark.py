@@ -305,6 +305,23 @@ class _IPC:
             return {"error": "success", "data": self.props.get(args[1])}
         return {"error": "success", "data": None}
 
+    def submit_runtime_mpv(self, *, identity, command, on_finished, **_kwargs) -> bool:
+        """Correlated egress, completed inline. Delivery goes through `command` so this fake's own
+        state simulation sees the write — a fake that skips it reports a stale readback."""
+        from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+        reply = self.command(*command)
+        on_finished(
+            EffectFinished(
+                EffectId(0),
+                Owner.SUBTITLE,
+                identity,
+                EffectOutcome.SUCCEEDED,
+                result=reply.get("data"),
+            )
+        )
+        return True
+
     def close(self) -> None:
         pass
 
