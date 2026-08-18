@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -9,11 +10,11 @@ from dirty_equals import IsPartialDict
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
-from saitenka.app.cue_annotation import AnnotationPriority
 from saitenka.app.native_subtitles import AssFullCapability
 from saitenka.app.nested_popup import kanji_current
 from saitenka.app.subtitle_render import NativeVisibleRenderer
 from saitenka.app.tokenize import Token
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 from saitenka.subtitles import (
     MAX_ASS_SOURCE_BYTES,
     Cue,
@@ -761,6 +762,21 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     assert result.native_geometry is not None
     result.native_geometry.set_source(source)
     result._sub_index = CueIndex((Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬")))
+
+    def submit(**kwargs) -> bool:
+        completion = result._annotation_executor.run(kwargs["request"], threading.Event())
+        kwargs["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                kwargs["owner"],
+                kwargs["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=completion,
+            )
+        )
+        return True
+
+    result._annotation_submit = submit
     result._enable_async_annotation()
     result._dependencies_settled = True
     monkeypatch.setattr(
@@ -770,14 +786,6 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     )
 
     result.set_subtitle("猫を見る")
-    assert result._annotation is not None
-    norm = result._cue_norm(result.sub_text)
-    result._annotation.resolve(
-        result._annotation_key(norm),
-        result._annotation_inputs(norm),
-        priority=AnnotationPriority.CURRENT,
-    )
-    result._apply_annotation_results()
     assert result.native_geometry.worker.wait_idle()
 
     assert any(request.timestamp_ms == 4_001 for request in backend.requests)

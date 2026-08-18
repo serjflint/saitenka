@@ -247,9 +247,9 @@ class FakeIPC:
         self.requests.append(request)
         return request
 
-    def drain_events(self) -> list[dict]:
+    def drain_events(self, timeout: float | None = 0.0) -> list[dict]:
         if self._legacy_event_source is not None:
-            return self._legacy_event_source()
+            return self._legacy_event_source(timeout)
         evs, self.events = self.events, []
         return evs
 

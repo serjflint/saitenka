@@ -564,6 +564,10 @@ class Reader:
         # worker lazy avoids creating a thread for pure render/tests and the synchronous demo seam.
         self._annotation: cue_annotation.CueAnnotationCoordinator | None = None
         self._tokenizer_warm = tokenizer_warm
+        self._annotation_executor = cue_annotation.AnnotationExecutor(tokenizer_warm)
+        self._annotation_submit = cue_annotation.configure_runtime_job(
+            ipc, self._annotation_executor
+        )
         self._annotation_async = False
         self._dependencies_settled = True
         self._dependency_generation = 0
@@ -1027,7 +1031,9 @@ class Reader:
         if self._annotation is None:
             self._annotation = cue_annotation.CueAnnotationCoordinator(
                 cache_max=self.options.perf.token_cache_max,
-                tokenizer_warm=self._tokenizer_warm,
+                executor=self._annotation_executor,
+                submitter=self._annotation_submit,
+                on_result=self._finish_annotation,
             )
 
     def prepare_subtitle_blocking(self, text: str) -> None:
@@ -1037,16 +1043,24 @@ class Reader:
         if self._annotation is None:
             self._annotation = cue_annotation.CueAnnotationCoordinator(
                 cache_max=self.options.perf.token_cache_max,
-                tokenizer_warm=self._tokenizer_warm,
+                executor=self._annotation_executor,
+                submitter=self._annotation_submit,
+                on_result=self._finish_annotation,
             )
         norm = self._cue_norm(text)
         cue = self._annotation.resolve(
             self._annotation_key(norm),
             self._annotation_inputs(norm),
             priority=cue_annotation.AnnotationPriority.CURRENT,
+            drive=self._drive_annotation_once,
         )
         self.token_cache.put(norm, cue)
         self.set_subtitle(text)
+
+    def _drive_annotation_once(self, timeout: float | None) -> None:
+        picker_guard = LegacyPickerRepeatGuard()
+        for event in self.ipc.drain_events(timeout):
+            self._drain_event(event, picker_guard)
 
     def _annotation_identity(self, norm: str) -> cue_annotation.CueIdentity:
         return cue_annotation.CueIdentity(
@@ -1126,34 +1140,31 @@ class Reader:
         self._draw_subtitle()
         return True
 
-    def _apply_annotation_results(self) -> None:
-        if self._annotation is None:
-            return
-        for result in self._annotation.drain():
-            with otel_metrics.traced("cue_annotation", phase="publish") as span:
-                span.set("queue_wait_ms", round(result.queue_wait_ms, 3))
-                span.set("work_ms", round(result.work_ms, 3))
-                if result.error is not None or result.cue is None or result.identity is None:
-                    if (
-                        result.identity is not None
-                        and result.identity == self._current_cue_identity
-                        and result.key == self._annotation_key(result.identity.normalized_text)
-                    ):
-                        self._sub_pending = None
-                        self._annotation_degraded = True
-                        log.warning("cue annotation unavailable; keeping plain subtitles")
-                    span.set("outcome", "failed")
-                    span.set("failure", "annotation-error")
-                    continue
-                if result.key != self._annotation_key(result.identity.normalized_text):
-                    span.set("outcome", "stale-generation")
-                    continue
-                span.set(
-                    "outcome",
-                    "published"
-                    if self._publish_annotation(result.cue, result.identity)
-                    else "stale-cue",
-                )
+    def _finish_annotation(self, result: cue_annotation.AnnotationResult) -> None:
+        with otel_metrics.traced("cue_annotation", phase="publish") as span:
+            span.set("queue_wait_ms", round(result.queue_wait_ms, 3))
+            span.set("work_ms", round(result.work_ms, 3))
+            if result.error is not None or result.cue is None or result.identity is None:
+                if (
+                    result.identity is not None
+                    and result.identity == self._current_cue_identity
+                    and result.key == self._annotation_key(result.identity.normalized_text)
+                ):
+                    self._sub_pending = None
+                    self._annotation_degraded = True
+                    log.warning("cue annotation unavailable; keeping plain subtitles")
+                span.set("outcome", "failed")
+                span.set("failure", "annotation-error")
+                return
+            if result.key != self._annotation_key(result.identity.normalized_text):
+                span.set("outcome", "stale-generation")
+                return
+            span.set(
+                "outcome",
+                "published"
+                if self._publish_annotation(result.cue, result.identity)
+                else "stale-cue",
+            )
 
     @staticmethod
     def _cue_norm(text: str) -> str:
@@ -2309,7 +2320,6 @@ class Reader:
     def _apply_background_results(self) -> None:
         self._apply_pending_deps_or_spinner()
         self._apply_capabilities()
-        self._apply_annotation_results()
         tooltip.apply_engaged_results(self)
         tooltip.apply_render_ahead_failures(self)
         tooltip.apply_pending_scroll(self, self._tip_view)
@@ -2793,12 +2803,14 @@ class Reader:
         telemetry.set_gauge_provider(None)  # drop our cache-gauge closure before teardown
         self._stop.set()  # signal the workers; they do no IPC so this is race-free
         close_lane = getattr(self.ipc, "close_runtime_job_lane", None)
+        deadline = time.monotonic() + 2.0
         if close_lane is not None:
-            deadline = time.monotonic() + 2.0
             close_lane("subtitle-fetch", max(0.0, deadline - time.monotonic()))
             close_lane("subtitle-picker", max(0.0, deadline - time.monotonic()))
         if self._annotation is not None:
-            self._annotation.close(timeout=2.0)
+            self._annotation.close()
+        if close_lane is not None:
+            close_lane("cue-annotation", max(0.0, deadline - time.monotonic()))
         for th in self._prefetch_threads:
             th.join(timeout=2.0)  # daemon threads → process can exit even if one is stuck
         if self.native_geometry is not None:

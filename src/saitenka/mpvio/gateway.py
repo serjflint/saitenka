@@ -76,10 +76,14 @@ class LegacyEventRouter:
             raise RuntimeError("runtime bridge already installed")
         self._runtime_bridge = bridge
 
-    def drain_events(self) -> list[object]:
+    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
         if self._runtime_bridge is not None:
             self._runtime_bridge.publish_due()
         events: list[object] = []
+        if timeout is None or timeout > 0:
+            envelope = self._mailbox.receive(timeout=timeout)
+            if envelope is not None:
+                self._route(envelope.payload, events)
         for envelope in self._mailbox.receive_ready():
             self._route(envelope.payload, events)
         return events
