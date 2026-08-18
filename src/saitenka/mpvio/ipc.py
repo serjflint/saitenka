@@ -131,7 +131,7 @@ class MpvIPC:
         self._events_lock = threading.Lock()
         self._event_sink: Callable[[dict, int], None] | None = None
         self._connection_sink: Callable[[str, int], None] | None = None
-        self._legacy_event_source: Callable[[], list[object]] | None = None
+        self._legacy_event_source: Callable[[float | None], list[object]] | None = None
         self._runtime_gateway: RuntimeGateway | None = None
         self._pending: dict[int, tuple[int, Future[dict]]] = {}
         self._pending_lock = threading.Lock()
@@ -494,10 +494,10 @@ class MpvIPC:
             return False
         return True
 
-    def drain_events(self) -> list[object]:
+    def drain_events(self, timeout: float | None = 0.0) -> list[object]:
         """Return and clear buffered async events (collected by the reader thread)."""
         if self._legacy_event_source is not None:
-            return self._legacy_event_source()
+            return self._legacy_event_source(timeout)
         with self._events_lock:
             buffered, self._events = self._events, []
             evs: list[object] = list(buffered)
@@ -507,7 +507,7 @@ class MpvIPC:
         self,
         event_sink: Callable[[dict, int], None],
         connection_sink: Callable[[str, int], None],
-        legacy_event_source: Callable[[], list[object]],
+        legacy_event_source: Callable[[float | None], list[object]],
         gateway: RuntimeGateway,
     ) -> None:
         """Switch event ownership to a mailbox while the legacy consumer still drives policy."""

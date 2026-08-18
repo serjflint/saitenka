@@ -8,7 +8,7 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 
 from __future__ import annotations
 
-import time
+import threading
 
 import pytest
 from PIL import Image
@@ -19,6 +19,7 @@ from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
 from saitenka.app.subtitles import SubtitleRender
 from saitenka.app.token_cache import TokenCache, TokenizedCue
 from saitenka.app.tokenize import Token
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 
 def _tok(surface: str) -> Token:
@@ -181,14 +182,24 @@ def test_annotation_failure_keeps_plain_subtitle_on_later_redraw(monkeypatch):
             raise ValueError("broken tokenizer")
 
     reader.tokenizer = FailingTokenizer()
+
+    def submit(**kwargs) -> bool:
+        completion = reader._annotation_executor.run(kwargs["request"], threading.Event())
+        kwargs["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                kwargs["owner"],
+                kwargs["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=completion,
+            )
+        )
+        return True
+
+    reader._annotation_submit = submit
     reader._enable_async_annotation()
     reader._dependencies_settled = True
     reader.set_subtitle("猫")
-    deadline = time.monotonic() + 2
-    while not reader._annotation_degraded and time.monotonic() < deadline:
-        reader._apply_annotation_results()
-        time.sleep(0.001)
-
     reader._draw_subtitle()
     reader.close()
 

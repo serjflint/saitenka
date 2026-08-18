@@ -236,7 +236,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch):
         gateway.close()
 
 
-def test_reader_close_quarantines_both_subtitle_lanes_before_artifact_removal(monkeypatch):
+def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeypatch):
     ipc = FakeIPC()
     reader = Reader(ipc)
     order = []
@@ -248,7 +248,7 @@ def test_reader_close_quarantines_both_subtitle_lanes_before_artifact_removal(mo
 
     def remove_artifacts(_path, *, ignore_errors):
         assert ignore_errors
-        assert order == ["subtitle-fetch", "subtitle-picker"]
+        assert order == ["subtitle-fetch", "subtitle-picker", "cue-annotation"]
         order.append("artifacts")
 
     ipc.close_runtime_job_lane = close_lane
@@ -256,7 +256,7 @@ def test_reader_close_quarantines_both_subtitle_lanes_before_artifact_removal(mo
 
     reader.close()
 
-    assert order == ["subtitle-fetch", "subtitle-picker", "artifacts"]
+    assert order == ["subtitle-fetch", "subtitle-picker", "cue-annotation", "artifacts"]
 
 
 def test_startup_prefers_japanese_and_remembers_both_tracks():

@@ -24,6 +24,20 @@ def test_reader_starts_without_deps():
     assert r.scorer is None and r.dict_set is None and r.anki is None
 
 
+@pytest.mark.timeout(5)
+def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop() -> None:
+    ipc = FakeIPC()
+    gateway = runtime_gateway(ipc)
+    reader = Reader(ipc)
+    try:
+        reader.prepare_subtitle_blocking("猫")
+
+        assert [token.surface for token in reader.tokens] == ["猫"]
+    finally:
+        reader.close()
+        gateway.close()
+
+
 def test_apply_deps_injects_and_stops_loading():
     ipc = FakeIPC()
     r = Reader(ipc)
@@ -301,6 +315,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
 
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "猫", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
+    gateway = runtime_gateway(ipc)
     reader = Reader(ipc)
     reader.renderer = NullRenderer()
     reader.tokenizer = _Tokenizer()
@@ -312,7 +327,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
 
     reader._apply_deps({"dict_set": dictionary})
     assert dictionary.started.wait(1)
-    ipc.events.append({"event": "client-message", "args": [SUB_PICKER_MSG]})
+    ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
     assert reader.poll_once() is True
     assert dispatched == [True]
@@ -331,3 +346,4 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     finally:
         dictionary.release.set()
         reader.close()
+        gateway.close()

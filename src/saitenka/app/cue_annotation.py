@@ -1,8 +1,4 @@
-"""Single-worker cue annotation with identity-qualified publication.
-
-The worker owns tokenizer, dictionary-attestation, and scoring work. It never touches Reader,
-renderers, or mpv IPC; the Reader poll loop applies completed results.
-"""
+"""Brokered cue annotation with identity-qualified publication."""
 
 from __future__ import annotations
 
@@ -12,10 +8,12 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app.token_cache import TokenizedCue
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+from saitenka.runtime.jobs import JobLanePolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -70,6 +68,22 @@ class AnnotationResult:
     work_ms: float
 
 
+@dataclass(frozen=True, slots=True)
+class AnnotationExecution:
+    key: AnnotationWorkKey
+    inputs: AnnotationInputs
+    priority: AnnotationPriority
+    queued_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotationExecutionResult:
+    cue: TokenizedCue | None
+    failed: bool
+    queue_wait_ms: float
+    work_ms: float
+
+
 @dataclass(slots=True)
 class _Job:
     key: AnnotationWorkKey
@@ -78,6 +92,116 @@ class _Job:
     version: int
     queued_at: float
     waiter: CueIdentity | None
+
+
+def _published_result(
+    key: AnnotationWorkKey,
+    job: _Job,
+    completion: EffectFinished,
+) -> tuple[TokenizedCue | None, AnnotationResult | None]:
+    execution = (
+        completion.result if isinstance(completion.result, AnnotationExecutionResult) else None
+    )
+    if (
+        execution is not None
+        and not execution.failed
+        and completion.outcome is EffectOutcome.SUCCEEDED
+    ):
+        succeeded = True
+        cue = execution.cue
+    else:
+        succeeded = False
+        cue = None
+    if job.waiter is None:
+        return cue, None
+    return cue, AnnotationResult(
+        key,
+        job.waiter,
+        cue,
+        None if succeeded else RuntimeError("cue annotation failed"),
+        execution.queue_wait_ms if execution is not None else 0.0,
+        execution.work_ms if execution is not None else 0.0,
+    )
+
+
+class JobSubmitter(Protocol):
+    def __call__(
+        self,
+        *,
+        owner: Owner,
+        identity: object,
+        lane: str,
+        request: object,
+        on_finished: Callable[[EffectFinished], None],
+    ) -> bool: ...
+
+
+class AnnotationExecutor:
+    """Executes broker-admitted annotation work."""
+
+    def __init__(
+        self,
+        tokenizer_warm: Future[None] | None = None,
+    ) -> None:
+        self._tokenizer_warm = tokenizer_warm
+        self._closed = threading.Event()
+
+    def run(self, request: object, cancelled: threading.Event) -> object:
+        if not isinstance(request, AnnotationExecution):
+            raise TypeError("invalid cue-annotation request")
+        if self._closed.is_set() or cancelled.is_set():
+            return None
+        return self._execute(request)
+
+    def close(self) -> None:
+        self._closed.set()
+
+    def _execute(self, request: AnnotationExecution) -> AnnotationExecutionResult:
+        started = time.monotonic()
+        with otel_metrics.traced(
+            "cue_annotation",
+            phase="work",
+            priority=request.priority.name.lower(),
+            chars=str(len(request.inputs.normalized_text)),
+        ) as span:
+            try:
+                queue_wait_ms = (started - request.queued_at) * 1_000
+                span.set("queue_wait_ms", round(queue_wait_ms, 3))
+                warm = self._tokenizer_warm
+                self._tokenizer_warm = None
+                if warm is not None:
+                    warm.result()
+                cue = annotate(request.inputs)
+                finished = time.monotonic()
+                span.set("token_count", len(cue.tokens))
+                span.set("outcome", "computed")
+                return AnnotationExecutionResult(
+                    cue=cue,
+                    failed=False,
+                    queue_wait_ms=queue_wait_ms,
+                    work_ms=(finished - started) * 1_000,
+                )
+            except Exception:  # noqa: BLE001 -- annotation failure degrades to plain subtitles
+                finished = time.monotonic()
+                span.set("failure", "annotation-error")
+                span.set("outcome", "failed")
+                return AnnotationExecutionResult(
+                    cue=None,
+                    failed=True,
+                    queue_wait_ms=(started - request.queued_at) * 1_000,
+                    work_ms=(finished - started) * 1_000,
+                )
+
+
+def configure_runtime_job(ipc, executor: AnnotationExecutor) -> JobSubmitter | None:
+    register = getattr(ipc, "register_runtime_job_lane", None)
+    if register is None or not register(
+        "cue-annotation",
+        JobLanePolicy(capacity=1),
+        executor.run,
+    ):
+        return None
+    return ipc.submit_runtime_job
 
 
 def annotate(inputs: AnnotationInputs) -> TokenizedCue:
@@ -109,30 +233,29 @@ def annotate(inputs: AnnotationInputs) -> TokenizedCue:
 
 
 class CueAnnotationCoordinator:
-    """Priority/dedup scheduler with newest-current waiters and bounded close."""
+    """Event-thread priority/cache state; JobBroker owns execution and lifetime."""
 
     def __init__(
         self,
         *,
         cache_max: int = 512,
         tokenizer_warm: Future[None] | None = None,
+        executor: AnnotationExecutor | None = None,
+        submitter: JobSubmitter | None = None,
+        on_result: Callable[[AnnotationResult], None] | None = None,
     ) -> None:
         self._condition = threading.Condition()
         self._jobs: dict[AnnotationWorkKey, _Job] = {}
         self._heap: list[tuple[int, int, AnnotationWorkKey, int]] = []
-        self._results: deque[AnnotationResult] = deque()
         self._cache: dict[AnnotationWorkKey, TokenizedCue] = {}
         self._cache_order: deque[AnnotationWorkKey] = deque()
         self._cache_max = max(1, cache_max)
         self._sequence = 0
         self._closed = False
-        self._tokenizer_warm = tokenizer_warm
-        self._thread = threading.Thread(
-            target=self._run,
-            name="saitenka-cue-annotation",
-            daemon=True,
-        )
-        self._thread.start()
+        self._executor = executor or AnnotationExecutor(tokenizer_warm)
+        self._submitter = submitter
+        self._on_result = on_result
+        self._inflight: AnnotationWorkKey | None = None
 
     def cached(self, key: AnnotationWorkKey) -> TokenizedCue | None:
         with self._condition:
@@ -172,20 +295,15 @@ class CueAnnotationCoordinator:
                         self._heap,
                         (int(priority), self._sequence, key, job.version),
                     )
-                    self._condition.notify()
                 return None
             self._sequence += 1
             job = _Job(key, inputs, priority, 0, time.monotonic(), waiter)
             self._jobs[key] = job
             heapq.heappush(self._heap, (int(priority), self._sequence, key, 0))
-            self._condition.notify()
-            return None
-
-    def drain(self) -> list[AnnotationResult]:
-        with self._condition:
-            results = list(self._results)
-            self._results.clear()
-            return results
+            dispatch = self._inflight is None
+        if dispatch:
+            self._dispatch_next()
+        return None
 
     def pending_count(self) -> int:
         with self._condition:
@@ -198,31 +316,45 @@ class CueAnnotationCoordinator:
         *,
         priority: AnnotationPriority,
         timeout: float | None = None,
+        drive: Callable[[float | None], None] | None = None,
     ) -> TokenizedCue:
-        """Resolve annotation off the caller's critical thread through this worker."""
+        """Blocking adapter for demo/screenshot and geometry workers."""
         cached = self.submit(key, inputs, priority=priority)
         if cached is not None:
             return cached
         deadline = None if timeout is None else time.monotonic() + timeout
-        with self._condition:
-            while key in self._jobs and not self._closed:
+        return self._wait_for_result(key, deadline, drive)
+
+    def _wait_for_result(
+        self,
+        key: AnnotationWorkKey,
+        deadline: float | None,
+        drive: Callable[[float | None], None] | None,
+    ) -> TokenizedCue:
+        while True:
+            with self._condition:
+                if key not in self._jobs or self._closed:
+                    cached = self._cache.get(key)
+                    if cached is None:
+                        raise RuntimeError("cue annotation failed")
+                    return cached
                 remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is not None and remaining <= 0:
                     raise TimeoutError("cue annotation did not complete")
-                self._condition.wait(remaining)
-            cached = self._cache.get(key)
-            if cached is None:
-                raise RuntimeError("cue annotation failed")
-            return cached
+                if drive is None:
+                    self._condition.wait(remaining)
+                    continue
+            drive(remaining)
 
     def close(self, timeout: float = 1.0) -> None:
+        del timeout
         with self._condition:
             self._closed = True
             self._heap.clear()
             self._jobs.clear()
-            self._results.clear()
+            self._inflight = None
             self._condition.notify_all()
-        self._thread.join(timeout)
+        self._executor.close()
 
     def _next_job(self) -> _Job | None:
         while self._heap:
@@ -232,70 +364,66 @@ class CueAnnotationCoordinator:
                 return job
         return None
 
-    def _run(self) -> None:
-        while job := self._wait_for_job():
-            started = time.monotonic()
-            cue, error = self._execute(job, started)
-            finished = time.monotonic()
-            self._finish(job, cue, error, started, finished)
-
-    def _wait_for_job(self) -> _Job | None:
+    def _dispatch_next(self) -> None:
         with self._condition:
+            if self._closed or self._inflight is not None:
+                return
             job = self._next_job()
-            while job is None and not self._closed:
-                self._condition.wait()
-                job = self._next_job()
-            return None if self._closed else job
-
-    def _finish(
-        self,
-        job: _Job,
-        cue: TokenizedCue | None,
-        error: Exception | None,
-        started: float,
-        finished: float,
-    ) -> None:
+            if job is None:
+                return
+            self._inflight = job.key
+            request = AnnotationExecution(job.key, job.inputs, job.priority, job.queued_at)
+        submitter = self._submitter
+        if submitter is None:
+            self._finish(
+                EffectFinished(
+                    EffectId(0),
+                    Owner.SUBTITLE,
+                    job.key,
+                    EffectOutcome.REJECTED,
+                )
+            )
+            return
+        accepted = submitter(
+            owner=Owner.SUBTITLE,
+            identity=job.key,
+            lane="cue-annotation",
+            request=request,
+            on_finished=self._finish,
+        )
         with self._condition:
-            current = self._jobs.pop(job.key, None)
+            still_inflight = self._inflight == job.key
+        if not accepted and still_inflight:
+            self._finish(
+                EffectFinished(
+                    EffectId(0),
+                    Owner.SUBTITLE,
+                    job.key,
+                    EffectOutcome.REJECTED,
+                )
+            )
+
+    def _finish(self, completion: EffectFinished) -> None:
+        annotation_result: AnnotationResult | None = None
+        with self._condition:
+            key = completion.identity
+            if not isinstance(key, AnnotationWorkKey) or self._inflight != key:
+                return
+            self._inflight = None
+            current = self._jobs.pop(key, None)
             if self._closed or current is None:
                 return
+            cue, annotation_result = _published_result(key, current, completion)
             if cue is not None and cue.tokens:
-                self._cache[job.key] = cue
-                self._cache_order.append(job.key)
-                while len(self._cache) > self._cache_max:
-                    oldest = self._cache_order.popleft()
-                    self._cache.pop(oldest, None)
-            if current.waiter is not None:
-                self._results.append(
-                    AnnotationResult(
-                        job.key,
-                        current.waiter,
-                        cue,
-                        error,
-                        (started - job.queued_at) * 1_000,
-                        (finished - started) * 1_000,
-                    )
-                )
+                self._cache_put(key, cue)
             self._condition.notify_all()
+        if annotation_result is not None and self._on_result is not None:
+            self._on_result(annotation_result)
+        self._dispatch_next()
 
-    def _execute(self, job: _Job, started: float) -> tuple[TokenizedCue | None, Exception | None]:
-        with otel_metrics.traced(
-            "cue_annotation",
-            phase="work",
-            priority=job.priority.name.lower(),
-            chars=str(len(job.inputs.normalized_text)),
-        ) as span:
-            try:
-                span.set("queue_wait_ms", round((started - job.queued_at) * 1_000, 3))
-                warm = self._tokenizer_warm
-                if warm is not None:
-                    self._tokenizer_warm = None
-                    warm.result()
-                cue = annotate(job.inputs)
-                span.set("token_count", len(cue.tokens))
-                span.set("outcome", "computed")
-                return cue, None
-            except Exception as error:  # noqa: BLE001  # worker failures degrade to plain subtitles
-                span.set("failure", "annotation-error")
-                span.set("outcome", "failed")
-                return None, error
+    def _cache_put(self, key: AnnotationWorkKey, cue: TokenizedCue) -> None:
+        self._cache[key] = cue
+        self._cache_order.append(key)
+        while len(self._cache) > self._cache_max:
+            oldest = self._cache_order.popleft()
+            self._cache.pop(oldest, None)

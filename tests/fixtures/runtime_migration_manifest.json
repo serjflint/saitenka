@@ -1795,8 +1795,9 @@
         "call:self._stop.set",
         "call:close_lane:subtitle-fetch",
         "call:close_lane:subtitle-picker",
+        "call:close_lane:cue-annotation",
         "order:call:self._stop.set>call:close_lane:subtitle-fetch",
-        "order:call:close_lane:subtitle-picker>call:shutil.rmtree",
+        "order:call:close_lane:cue-annotation>call:shutil.rmtree",
         "call:self._annotation.close",
         "loop:self._prefetch_threads=>call:th.join"
       ],
