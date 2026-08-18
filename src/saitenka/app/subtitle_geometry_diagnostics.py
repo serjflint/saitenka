@@ -13,6 +13,23 @@ class GeometryOutcome(StrEnum):
     FAILED = "failed"
 
 
+class GeometryCacheReason(StrEnum):
+    """Why a geometry cache lookup missed.
+
+    A cache key is derived from subtitle text and a source path, so the reason a lookup missed is
+    the one diagnostic on this path with a route to that content. Closing the vocabulary at the
+    type is what keeps it out — a `str` here would let any caller widen it back open.
+    """
+
+    EVICTED = "evicted"
+    FIRST_SEEN = "first-seen"
+    PREFETCH_PENDING = "prefetch-pending"
+    PREFETCH_SUPERSEDED = "prefetch-superseded"
+    PROVENANCE_UNKNOWN = "provenance-unknown"
+    RENDER_INPUT_CHANGED = "render-input-changed"
+    SOURCE_CHANGED = "source-changed"
+
+
 class GeometryErrorCode(StrEnum):
     ACTIVE_EVENT_BUDGET = "active-event-budget-exceeded"
     ACTIVE_EVENT_MISMATCH = "active-event-mismatch"

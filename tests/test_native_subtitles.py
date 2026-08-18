@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from dirty_equals import IsPartialDict
+from util import record_spans
 
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
 from saitenka.app.controller import Reader
@@ -583,6 +584,52 @@ def test_geometry_availability_never_changes_the_pixel_owner(tmp_path: Path) -> 
     assert result.native_geometry.status.geometry_ready  # the lane terminal published it
     assert renderer.ownership_state.owner is PixelOwner.NATIVE  # recovery does not re-own either
     assert result.boxes
+    result.close()
+
+
+def test_every_geometry_cache_miss_reports_a_bounded_text_free_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """WP4.4's observability obligation, as two claims rather than one.
+
+    A miss with no reason is the silent give-up this gate exists to forbid, so each one names why —
+    and the four here are four different whys, not one repeated. A hit needs no reason and carries
+    none.
+
+    The second claim is the reason's vocabulary. A cache key is derived from cue text and a source
+    path, which makes this the one diagnostic on the path with a route to that content, so each
+    reason has to come from the closed set rather than describe what was actually looked up.
+    """
+    from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
+
+    spans = record_spans(monkeypatch)
+    result, ipc, _backend = reader(tmp_path)
+    text = "猫を見る"
+    assert result.native_geometry is not None
+
+    result.set_subtitle(text)  # the artifact was installed moments ago
+    settle_jobs(result, ipc)
+    result.native_geometry.schedule(result)  # same epoch, key never cached
+    settle_jobs(result, ipc)
+    result.native_geometry.invalidate(result)  # a render input moved
+    result.native_geometry.schedule(result)
+    settle_jobs(result, ipc)
+    second = tmp_path / "other.ass"
+    second.write_bytes(ASS)
+    result.native_geometry.set_source(second)  # a different artifact entirely
+    result.native_geometry.schedule(result)
+    settle_jobs(result, ipc)
+
+    misses = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_cache"]
+    assert {attrs["outcome"] for attrs in misses} == {"miss"}
+    assert [attrs["reason"] for attrs in misses] == [
+        GeometryCacheReason.SOURCE_CHANGED,
+        GeometryCacheReason.FIRST_SEEN,
+        GeometryCacheReason.RENDER_INPUT_CHANGED,
+        GeometryCacheReason.SOURCE_CHANGED,
+    ]
+    exported = {str(value) for attrs in misses for value in attrs.values()}
+    assert not any(text in value or str(tmp_path) in value for value in exported)
     result.close()
 
 

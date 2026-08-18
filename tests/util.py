@@ -24,6 +24,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from saitenka import otel_metrics
 from saitenka.model import Theme
 from saitenka.mpvio.gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest
@@ -657,3 +658,23 @@ class RecordingRasterProvider:
     def styles(self) -> list[str]:
         """The plain/styled decision behind each request, in order."""
         return [request.style.value for request in self.requests]
+
+
+def record_spans(monkeypatch) -> list[dict]:
+    """Capture every ``traced(...)`` span (name + static attrs + in-block ``.set`` attrs) without
+    standing up an OTel provider — ``instrumented`` composes ``traced``, so this sees the real path."""
+    spans: list[dict] = []
+
+    @contextlib.contextmanager
+    def _fake_traced(name, **attrs):
+        rec = {"name": name, "attrs": dict(attrs)}
+        spans.append(rec)
+
+        class _Setter:
+            def set(self, key, value):
+                rec["attrs"][key] = value
+
+        yield _Setter()
+
+    monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
+    return spans

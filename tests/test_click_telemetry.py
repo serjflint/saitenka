@@ -7,30 +7,11 @@ assert the span fires with its low-cardinality attribute, via the sanctioned tra
 
 from __future__ import annotations
 
-import contextlib
+from util import record_spans
 
-from saitenka import otel_metrics
 from saitenka.app import backlog, sidebar
 from saitenka.app.controller import Reader
 from saitenka.app.subtitles import SidebarHitBox
-
-
-def _record_spans(monkeypatch) -> list[dict]:
-    spans: list[dict] = []
-
-    @contextlib.contextmanager
-    def _fake_traced(name, **attrs):
-        rec = {"name": name, "attrs": dict(attrs)}
-        spans.append(rec)
-
-        class _Setter:
-            def set(self, key, value):
-                rec["attrs"][key] = value
-
-        yield _Setter()
-
-    monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
-    return spans
 
 
 class _FakeIPC:
@@ -49,7 +30,7 @@ def _named(spans: list[dict], name: str) -> list[dict]:
 
 def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
     # A sidebar click emits a sidebar_click span tagged with the action kind — the click-latency signal.
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     monkeypatch.setattr(
         sidebar, "_activate_hit", lambda *_a: None
     )  # isolate the span from the action
@@ -66,7 +47,7 @@ def test_sidebar_click_is_spanned_with_its_kind(monkeypatch):
 
 def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
     # A click inside the sidebar but on no hitbox is handled (returns True) WITHOUT a write/redraw span.
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     reader = Reader(_FakeIPC({}))
     reader.sidebar.open = True
     reader.sidebar.rect = (0, 0, 100, 100)
@@ -78,7 +59,7 @@ def test_sidebar_click_outside_a_hit_emits_no_span(monkeypatch):
 
 def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path):
     # capture_current's durable backlog write (main-thread SQLite) is spanned backlog_write[op=toggle].
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     video = tmp_path / "Show - 01.mkv"
     video.write_bytes(b"v")
     reader = Reader(
@@ -99,7 +80,7 @@ def test_mined_store_write_is_spanned(monkeypatch):
     from saitenka.app import mined_store
     from saitenka.app.miner import Miner
 
-    spans = _record_spans(monkeypatch)
+    spans = record_spans(monkeypatch)
     monkeypatch.setattr(
         mined_store, "ensure_store", lambda _r: SimpleNamespace(record=lambda **_kw: None)
     )

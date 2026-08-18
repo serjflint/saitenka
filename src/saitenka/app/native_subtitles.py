@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 from saitenka import otel_metrics
 from saitenka.app import cue_annotation
 from saitenka.app.subtitle_geometry_diagnostics import (
+    GeometryCacheReason,
     GeometryOutcome,
     geometry_error_code,
     geometry_failure_reason,
@@ -493,7 +494,7 @@ class NativeSubtitleGeometry:
         if reader is not None:
             self._consume_failure(reader)
         self._source_epoch += 1
-        self.worker.invalidate(cause="source-changed")
+        self.worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
         self.source_path = None
         self._source_bytes = None
         self._last_snapshot = None
@@ -529,7 +530,7 @@ class NativeSubtitleGeometry:
         self,
         reader: Reader | None = None,
         *,
-        cause: str = "render-input-changed",
+        cause: GeometryCacheReason = GeometryCacheReason.RENDER_INPUT_CHANGED,
     ) -> None:
         if reader is not None:
             self._consume_failure(reader)

@@ -10,7 +10,7 @@ from dataclasses import replace as dataclass_replace
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
+from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason, geometry_error_code
 from saitenka.runtime import EffectFinished, Owner
 from saitenka.runtime.jobs import JobLanePolicy, LocalJobLane
 from saitenka.subtitles.geometry import GeometrySnapshot
@@ -366,9 +366,9 @@ class SubtitleGeometryWorker:
         self._prefetched: OrderedDict[str, tuple[GeometryRequest, GeometrySnapshot]] = OrderedDict()
         self._prefetch_inflight_key: str | None = None
         self._prefetch_waiters: dict[str, GeometryReservation] = {}
-        self._provenance: OrderedDict[str, str] = OrderedDict()
+        self._provenance: OrderedDict[str, GeometryCacheReason] = OrderedDict()
         self._history_lossy = False
-        self._epoch_cause: str | None = None
+        self._epoch_cause: GeometryCacheReason | None = None
         self._inflight = False
         self._pending_settled: Callable[[], None] | None = None
         #: Settlements owed by the job now executing — a current request's own, plus any caller
@@ -455,7 +455,7 @@ class SubtitleGeometryWorker:
             while len(self._prefetch_pending) > self._cache_max:
                 dropped, _item = self._prefetch_pending.popitem(last=False)
                 self._prefetch_dropped += 1
-                self._remember_provenance(dropped, "prefetch-superseded")
+                self._remember_provenance(dropped, GeometryCacheReason.PREFETCH_SUPERSEDED)
         self._pump()
         return True
 
@@ -523,24 +523,28 @@ class SubtitleGeometryWorker:
             settle()
         self._pump()
 
-    def _remember_provenance(self, key: str, reason: str) -> None:
+    def _remember_provenance(self, key: str, reason: GeometryCacheReason) -> None:
         self._provenance.pop(key, None)
         self._provenance[key] = reason
         while len(self._provenance) > self._cache_max:
             self._provenance.popitem(last=False)
             self._history_lossy = True
 
-    def prefetch_miss_reason(self, key: str) -> str:
+    def prefetch_miss_reason(self, key: str) -> GeometryCacheReason:
         with self._condition:
             if key in self._prefetch_pending or key == self._prefetch_inflight_key:
-                return "prefetch-pending"
+                return GeometryCacheReason.PREFETCH_PENDING
             recent = self._provenance.get(key)
             if recent is not None:
                 return recent
             if self._epoch_cause is not None:
                 cause, self._epoch_cause = self._epoch_cause, None
                 return cause
-            return "provenance-unknown" if self._history_lossy else "first-seen"
+            return (
+                GeometryCacheReason.PROVENANCE_UNKNOWN
+                if self._history_lossy
+                else GeometryCacheReason.FIRST_SEEN
+            )
 
     def publish_prefetched(self, key: str, generation: int) -> GeometryRequest | None:
         reservation = self._coordinator.reserve(generation)
@@ -562,7 +566,7 @@ class SubtitleGeometryWorker:
             self._completed += 1
         return rebound_request
 
-    def invalidate_cache(self, *, cause: str | None = None) -> None:
+    def invalidate_cache(self, *, cause: GeometryCacheReason | None = None) -> None:
         with self._condition:
             self._superseded += len(self._prefetch_waiters)
             self._cache.clear()
@@ -574,7 +578,7 @@ class SubtitleGeometryWorker:
             self._history_lossy = False
             self._epoch_cause = cause
 
-    def invalidate(self, *, cause: str | None = None) -> int:
+    def invalidate(self, *, cause: GeometryCacheReason | None = None) -> int:
         generation = self._coordinator.invalidate()
         self.invalidate_cache(cause=cause)
         return generation
@@ -668,7 +672,7 @@ class SubtitleGeometryWorker:
             self._prefetched_count += 1
             while len(self._prefetched) > self._cache_max:
                 evicted, _cached = self._prefetched.popitem(last=False)
-                self._remember_provenance(evicted, "evicted")
+                self._remember_provenance(evicted, GeometryCacheReason.EVICTED)
             return waiter
 
     def _resolve_prefetch_waiter(
