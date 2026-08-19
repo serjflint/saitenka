@@ -196,6 +196,107 @@ def suspend_all(reader):
     assert closure["coordinator.py::suspend_all"] == {"renderer", "a", "b"}
 
 
+def _resolved(tool, sources: dict[str, str], bindings: dict[str, set[str]] | None = None):
+    """Scan several modules, run the cross-module dispatch pass, and return the closure."""
+    functions: list = []
+    classes: dict[str, set[str]] = {}
+    protocols: set[str] = set()
+    declaring: dict[str, str] = {}
+    attribute_types: dict[tuple[str, str], str | None] = {}
+    for module, source in sources.items():
+        visitor = tool._Visitor(module)
+        visitor.visit(ast.parse(source))
+        functions.extend(visitor.found)
+        classes.update(visitor.classes)
+        protocols |= visitor.protocols
+        declaring.update(dict.fromkeys(visitor.classes, module))
+        attribute_types.update(visitor.attribute_types)
+    tool._resolve_dispatch(
+        functions, classes, protocols, declaring, attribute_types, bindings or {}
+    )
+    return functions, tool.resolve(functions, bindings or {})
+
+
+def test_a_protocol_typed_receiver_resolves_to_what_actually_implements_it() -> None:
+    """`self._renderer.cue_changed(reader)` reaches only renderers that define `cue_changed`.
+
+    Widening to every same-named function charged the legacy renderer with the native one's whole
+    subtree — `SubtitleRenderer.deactivate` read as arity 38 while it touches one host member.
+    """
+    functions, closure = _resolved(
+        tool := _module(),
+        {
+            "pipeline.py": """
+class Renderer(Protocol):
+    def draw(self, reader): ...
+
+class Coordinator:
+    def __init__(self, renderer: Renderer):
+        self._renderer = renderer
+
+    def changed(self, reader):
+        self._renderer.cue_changed(reader)
+""",
+            "renderers.py": """
+class Native:
+    def draw(self, reader):
+        return reader.a
+
+    def cue_changed(self, reader):
+        return reader.native_only
+
+class Legacy:
+    def draw(self, reader):
+        return reader.b
+""",
+        },
+    )
+    assert tool  # the module under test, loaded once above
+    forwards = next(f.forwards for f in functions if f.key == "pipeline.py::Coordinator.changed")
+    assert forwards == {"renderers.py::Native.cue_changed"}
+    assert "native_only" in closure["pipeline.py::Coordinator.changed"]
+
+
+def test_an_unannotated_receiver_keeps_over_approximating() -> None:
+    """Narrowing is the unsafe direction, so one unannotated write forfeits the whole attribute."""
+    functions, _closure = _resolved(
+        _module(),
+        {
+            "pipeline.py": """
+class Coordinator:
+    def __init__(self, renderer):
+        self._renderer = renderer
+
+    def changed(self, reader):
+        self._renderer.cue_changed(reader)
+""",
+            "renderers.py": "class Native:\n    def cue_changed(self, reader):\n        return reader.a\n",
+        },
+    )
+    forwards = next(f.forwards for f in functions if f.key == "pipeline.py::Coordinator.changed")
+    assert forwards == {"?::cue_changed"}
+
+
+def test_a_callable_field_resolves_to_its_bound_set_not_every_same_name() -> None:
+    """`any(s.on_click(reader, x, y) for s in SURFACES)` reaches the bound hooks, and only those.
+
+    A plain function that merely shares the name is not a hook, and sweeping it in fused two
+    unrelated subtrees into one closure.
+    """
+    functions, closure = _resolved(
+        _module(),
+        {
+            "surfaces.py": "def route_click(reader, x, y):\n    return any(s.on_click(reader, x, y) for s in SURFACES)\n",
+            "hook.py": "def on_click(reader, x, y):\n    return reader.bound\n",
+            "unrelated.py": "def on_click(reader, x, y):\n    return reader.not_a_hook\n",
+        },
+        bindings={"on_click": {"hook.py::on_click"}},
+    )
+    forwards = next(f.forwards for f in functions if f.key == "surfaces.py::route_click")
+    assert forwards == {"hook.py::on_click"}
+    assert closure["surfaces.py::route_click"] == {"bound"}
+
+
 def test_the_census_matches_production() -> None:
     tool = _module()
     assert tool.check() == 0

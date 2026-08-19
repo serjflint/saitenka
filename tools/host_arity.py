@@ -10,6 +10,8 @@ caller needs sixty-eight. It is also transitive through a shared *signature*: fu
 `Callable[[Reader], ...]` field cannot diverge from each other. Read every number from `over`.
 
   uv run python tools/host_arity.py            # gate the census against the manifest
+  uv run python tools/host_arity.py explain     # which dispatches resolved rather than widened
+  uv run python tools/host_arity.py bless       # accept growth, for a deliberate design decision
   uv run python tools/host_arity.py show        # the full classification, as JSON
   uv run python tools/host_arity.py over        # what breaches the ceiling, worst first
 """
@@ -58,6 +60,9 @@ class Function:
     forwards: set[str] = field(default_factory=set)
     dynamic: int = 0
     closures: int = 0
+    #: `(class, attribute, method)` per unresolvable call whose receiver is `self.<attribute>`.
+    #: Resolved after every module is scanned, in `collect` — the declaring class may live anywhere.
+    dispatch: set[tuple[str, str, str]] = field(default_factory=set)
 
     @property
     def key(self) -> str:
@@ -87,6 +92,16 @@ class _Visitor(ast.NodeVisitor):
         #: dispatches to `suspend_for_overlay`, and the local's own name says nothing about that.
         self.aliases: dict[str, str] = {}
         self._stack: list[str] = []
+        #: Class name -> its method names, plus which classes are Protocols. A receiver's declared
+        #: type resolves against these: a concrete class exactly, a Protocol structurally.
+        self.classes: dict[str, set[str]] = {}
+        self.protocols: set[str] = set()
+        #: `(class, attribute)` -> declared type, or None when any assignment defeats it. `None`
+        #: wins: narrowing is the unsafe direction here, so one unannotated write forfeits the whole
+        #: attribute rather than resolving it from the annotated writes alone.
+        self.attribute_types: dict[tuple[str, str], str | None] = {}
+        #: Parameter annotations of the enclosing function, so `self._x = renderer` can inherit one.
+        self._params: dict[str, str] = {}
         #: The innermost enclosing host-taking function, and the local name its host is bound to.
         self._host: list[tuple[Function, str]] = []
         #: Depth of nested scopes since that function — a use below 0 is a closure capture.
@@ -116,11 +131,36 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.classes[node.name] = {
+            child.name
+            for child in node.body
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        if any("Protocol" in ast.unparse(base) for base in node.bases):
+            self.protocols.add(node.name)
+        for child in node.body:
+            if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+                self._declare(node.name, child.target.id, _annotation_name(child.annotation))
         self._stack.append(node.name)
         self.generic_visit(node)
         self._stack.pop()
 
+    def _declare(self, class_name: str, attribute: str, declared: str | None) -> None:
+        key = (class_name, attribute)
+        if declared is None or self.attribute_types.get(key, declared) != declared:
+            self.attribute_types[key] = None  # unknown, or two types: refuse to pick
+        else:
+            self.attribute_types.setdefault(key, declared)
+
     def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            if self._stack and isinstance(target, ast.Attribute) and _is_self(target.value):
+                # Only a bare annotated parameter carries a usable type. A call, a literal or an
+                # unannotated name forfeits the attribute (`_declare` stores None).
+                source = (
+                    self._params.get(node.value.id) if isinstance(node.value, ast.Name) else None
+                )
+                self._declare(self._stack[0], target.attr, source)
         method = _fetched_method(node.value)
         if method is not None:
             self.aliases.update(
@@ -132,6 +172,9 @@ class _Visitor(ast.NodeVisitor):
         # A callable field's default is the first member of its family: `scroll: ... = _no_scroll`.
         if isinstance(node.target, ast.Name) and node.value is not None:
             self._bind(node.target.id, node.value)
+        # `self._renderer: Renderer` — the declared type a dispatch through it resolves against.
+        if self._stack and isinstance(node.target, ast.Attribute) and _is_self(node.target.value):
+            self._declare(self._stack[0], node.target.attr, _annotation_name(node.annotation))
         self.generic_visit(node)
 
     def _bind(self, name: str, value: ast.expr) -> None:
@@ -159,6 +202,12 @@ class _Visitor(ast.NodeVisitor):
     def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self._stack.append(node.name)
         arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+        outer_params = self._params
+        self._params = {
+            argument.arg: name
+            for argument in arguments
+            if (name := _annotation_name(argument.annotation))
+        }
         host = _host_argument(arguments)
         if host is None:
             self._depth += 1
@@ -178,6 +227,7 @@ class _Visitor(ast.NodeVisitor):
             self.generic_visit(node)
             self._depth = depth
             self._host.pop()
+        self._params = outer_params
         self._stack.pop()
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
@@ -192,6 +242,7 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
+        self._record_dispatch(node)
         for keyword in node.keywords:
             # `SurfaceSpec(scroll=sub_picker.scroll)` — a function passed, not called. Every
             # function bound into one field shares that field's signature.
@@ -215,6 +266,33 @@ class _Visitor(ast.NodeVisitor):
                 function.forwards.add(self._target(called))
         self.generic_visit(node)
 
+    def _record_dispatch(self, node: ast.Call) -> None:
+        """Note a call whose receiver is `self.<attribute>`, so `collect` can resolve it later.
+
+        Two forms reach a renderer here and both land on `?::method` today:
+        `getattr(self._renderer, "cue_changed", None)` (the alias form, including the `a or b`
+        chain `_fetched_method` cannot see) and `self._renderer.clear(...)` (the direct form).
+        """
+        if not self._host or not self._stack:
+            return
+        function, _host = self._host[-1]
+        called = node.func
+        if isinstance(called, ast.Name) and called.id == "getattr" and len(node.args) > 1:
+            receiver, name = node.args[0], node.args[1]
+            if (
+                isinstance(receiver, ast.Attribute)
+                and _is_self(receiver.value)
+                and isinstance(name, ast.Constant)
+                and isinstance(name.value, str)
+            ):
+                function.dispatch.add((self._stack[0], receiver.attr, name.value))
+        elif (
+            isinstance(called, ast.Attribute)
+            and isinstance(called.value, ast.Attribute)
+            and _is_self(called.value.value)
+        ):
+            function.dispatch.add((self._stack[0], called.value.attr, called.attr))
+
     def _target(self, called: ast.expr) -> str:
         """Where a forward lands, as `module::symbol` when that is knowable and `?::name` when not.
 
@@ -237,6 +315,74 @@ class _Visitor(ast.NodeVisitor):
                 return f"{self.imports[called.value.id]}::{called.attr}"
             return f"?::{called.attr}"
         return "?::<dynamic>"
+
+
+def _is_self(node: ast.expr) -> bool:
+    return isinstance(node, ast.Name) and node.id in {"self", "cls"}
+
+
+def _annotation_name(node: ast.expr | None) -> str | None:
+    """The bare class name in an annotation, dropping `| None` and any module qualification."""
+    if node is None:
+        return None
+    text = ast.unparse(node).replace("'", "").replace('"', "").split("|")[0].strip()
+    return text.rsplit(".", 1)[-1] or None
+
+
+def _resolve_dispatch(
+    functions: list[Function],
+    classes: dict[str, set[str]],
+    protocols: set[str],
+    declaring: dict[str, str],
+    attribute_types: dict[tuple[str, str], str | None],
+    bindings: dict[str, set[str]],
+) -> dict[str, dict[str, set[str]]]:
+    """Replace `?::method` with the callees it can actually reach, where that is knowable.
+
+    Two rules, and both must be SOUND rather than merely narrower — `resolve`'s over-approximation
+    only ever moves a function out of the mechanical tier, so tightening it is the direction that
+    can lie.
+
+    * A receiver typed by its declaration. A concrete class resolves exactly; a Protocol resolves to
+      the corpus classes that structurally satisfy it, which is what satisfying a Protocol means.
+      An attribute with any unannotated write was already forfeited by `_declare`.
+    * A callee naming a declared callable FIELD. `route_click` does
+      `any(s.on_click(reader, x, y) for s in SURFACES)` — the receiver is a loop variable and
+      unknowable, but every function bound into `SurfaceSpec.on_click` is already collected, and
+      that set is exact. Matching by basename instead swept in `tooltip.py::on_click`, which is not
+      a hook, and fusing the sidebar and tooltip subtrees is what produced one 50-member closure.
+    """
+    keys = {function.key for function in functions}
+    record: dict[str, dict[str, set[str]]] = {}
+    for function in functions:
+        replacements: dict[str, set[str]] = {}
+        for class_name, attribute, method in function.dispatch:
+            declared = attribute_types.get((class_name, attribute))
+            if declared is None:
+                continue
+            if declared in protocols:
+                required = classes.get(declared, set())
+                targets = {
+                    f"{declaring[name]}::{name}.{method}"
+                    for name, defined in classes.items()
+                    if name != declared and method in defined and required <= defined
+                }
+            elif method in classes.get(declared, set()):
+                targets = {f"{declaring[declared]}::{declared}.{method}"}
+            else:
+                targets = set()
+            if targets & keys:
+                replacements.setdefault(f"?::{method}", set()).update(targets & keys)
+        for stale in {target for target in function.forwards if target.startswith("?::")}:
+            bound = bindings.get(stale.removeprefix("?::"), set()) & keys
+            if bound:
+                replacements.setdefault(stale, set()).update(bound)
+        for stale, fresh in replacements.items():
+            if stale in function.forwards:
+                function.forwards.discard(stale)
+                function.forwards |= fresh
+                record.setdefault(function.key, {})[stale] = fresh
+    return record
 
 
 def _host_argument(arguments: list[ast.arg]) -> str | None:
@@ -303,12 +449,30 @@ def _families(
 def collect() -> tuple[list[Function], dict[str, set[str]]]:
     found: list[Function] = []
     bindings: dict[str, set[str]] = {}
+    classes: dict[str, set[str]] = {}
+    protocols: set[str] = set()
+    declaring: dict[str, str] = {}
+    attribute_types: dict[tuple[str, str], str | None] = {}
     for path in sorted(APP.glob("**/*.py")):
-        visitor = _Visitor(path.relative_to(APP).as_posix())
+        module = path.relative_to(APP).as_posix()
+        visitor = _Visitor(module)
         visitor.visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
         found.extend(visitor.found)
         for name, targets in visitor.bindings.items():
             bindings.setdefault(name, set()).update(targets)
+        for name, methods in visitor.classes.items():
+            # A class name defined twice is ambiguous, and picking one silently would resolve a
+            # dispatch to the wrong body. Poison it so it falls back to over-approximating.
+            classes[name] = set() if name in classes else methods
+            declaring.setdefault(name, module)
+        protocols |= visitor.protocols
+        for key, declared in visitor.attribute_types.items():
+            attribute_types[key] = (
+                None if attribute_types.get(key, declared) != declared else declared
+            )
+    collect.resolved = _resolve_dispatch(  # type: ignore[attr-defined]  # explain-only breadcrumb
+        found, classes, protocols, declaring, attribute_types, bindings
+    )
     return found, bindings
 
 
@@ -441,9 +605,52 @@ def check() -> int:
     return 0
 
 
+def bless() -> int:
+    """Accept the current census, growth included. For a deliberate design decision.
+
+    `check` auto-tightens but refuses growth, because the common cause is an accidental new
+    host-taking function. The other cause is a design call that trades rows for something worth more
+    — a total Protocol replacing `getattr` probes adds mechanical Tier A rows and removes a class of
+    silent no-op. The ratchet exists to make that choice explicit, not to forbid it, and hand-editing
+    the census JSON is not "explicit", it is just undocumented.
+
+    The commit message is where the reason goes; this only records the number.
+    """
+    was = json.loads(CENSUS.read_text(encoding="utf-8")) if CENSUS.exists() else {}
+    now = census()
+    CENSUS.write_text(json.dumps(now, indent=2) + "\n", encoding="utf-8")
+    for name in sorted(now):
+        delta = now[name] - was.get(name, 0)
+        if delta:
+            print(f"host-arity: {name} {was.get(name, 0)} -> {now[name]} ({delta:+d})")
+    print(f"host-arity: blessed (total {sum(now.values())})")
+    return 0
+
+
 def show() -> int:
     tiers = {name: [asdict(row) for row in rows] for name, rows in classify(*collect()).items()}
     print(json.dumps(tiers, indent=2))
+    return 0
+
+
+def explain() -> int:
+    """Why the census reads as it does: every dispatch the tool resolved rather than widened.
+
+    The counts move for two very different reasons — the code converted, or this tool got better at
+    reading it — and the census alone cannot tell them apart. This is the second one, itemised, so a
+    number that shifts without a refactor is auditable instead of mysterious.
+    """
+    functions, bindings = collect()
+    resolved = getattr(collect, "resolved", {})
+    tiers = classify(functions, bindings)
+    print(", ".join(f"{name} {len(rows)}" for name, rows in sorted(tiers.items())))
+    widened = sum(
+        1 for function in functions for target in function.forwards if target.startswith("?::")
+    )
+    print(f"{len(resolved)} call site(s) resolved; {widened} still over-approximating\n")
+    for key, mapping in sorted(resolved.items()):
+        for stale, fresh in sorted(mapping.items()):
+            print(f"{key}\n    {stale}  ->  {', '.join(sorted(fresh))}")
     return 0
 
 
@@ -461,7 +668,13 @@ def over() -> int:
 
 if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "check"
-    commands = {"check": check, "over": over, "show": show}
+    commands = {
+        "bless": bless,
+        "check": check,
+        "explain": explain,
+        "over": over,
+        "show": show,
+    }
     if command not in commands:
         print(f"unknown command: {command}", file=sys.stderr)
         raise SystemExit(2)
