@@ -2409,3 +2409,45 @@ def test_the_bound_is_the_token_count_not_the_box_count():
     events are live — the count that matters is the cue's, not the snapshot's."""
     assert _valid(_snapshot([(0, 0), (0, 1)]), token_count=2)
     assert not _valid(_snapshot([(0, 0), (0, 1)]), token_count=1)
+
+
+def _visibility(reply):
+    """What the ownership FSM concludes from one `sub-visibility` read."""
+
+    class _Ipc:
+        def command(self, *_args):
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+    return NativeVisibleRenderer()._read_visibility(_Ipc())
+
+
+def test_mpv_reporting_its_subtitles_hidden_is_proof_native_owns_the_pixels():
+    from saitenka.app.subtitle_ownership import Visibility
+
+    assert _visibility({"error": "success", "data": False}) is Visibility.FALSE
+    assert _visibility({"error": "success", "data": True}) is Visibility.TRUE
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        OSError("socket gone"),
+        RuntimeError("gateway down"),
+        {"error": "property unavailable"},
+        # The case the error check exists for: mpv reports a failure AND still carries a data
+        # field. Reading the payload past the error would take that `False` as legacy proof.
+        {"error": "property unavailable", "data": False},
+        "not a dict",
+        None,
+    ],
+)
+def test_an_unreadable_boundary_is_unknown_and_never_legacy_proof(reply: object):
+    """The asymmetry the whole handoff rests on. FALSE means mpv confirmed it stopped drawing, so
+    legacy may take the pixels; anything we could not read must not be mistaken for that, or a dead
+    socket hands ownership away and the frame ends up with no subtitle at all.
+    """
+    from saitenka.app.subtitle_ownership import Visibility
+
+    assert _visibility(reply) is Visibility.UNKNOWN

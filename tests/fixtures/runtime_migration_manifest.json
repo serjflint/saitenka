@@ -674,27 +674,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._capture_restore_visibility"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._ensure_selection"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._execute"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_focus"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._hide_mpv_subtitles"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._read_visibility"
     ],
     [
       "reader-parameter",

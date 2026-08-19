@@ -242,9 +242,9 @@ class NativeVisibleRenderer:
             return Visibility.FALSE
         return Visibility.UNKNOWN
 
-    def _read_visibility(self, reader: Reader) -> Visibility:
+    def _read_visibility(self, ipc) -> Visibility:
         try:
-            reply = reader.ipc.command("get_property", "sub-visibility")
+            reply = ipc.command("get_property", "sub-visibility")
         except Exception:  # noqa: BLE001  # an unreadable boundary is unknown, never legacy proof
             return Visibility.UNKNOWN
         if not isinstance(reply, dict) or reply.get("error") not in {None, "success"}:
@@ -288,8 +288,9 @@ class NativeVisibleRenderer:
         readback is not redundant with the write's outcome — mpv can accept the set and still
         report FALSE, which is the case that hands ownership to legacy.
 
-        Written as closures rather than helper methods on purpose: each would have to take the
-        `Reader`, and the host-contract gate counts those.
+        Written as closures rather than helper methods because each closes over `action`,
+        `owner_before` and `deferred` — the assertion's in-flight state, which is what makes them
+        callable from a terminal that arrives later.
         """
         owner_before = self._state.owner
         exhausted_before = self._state.retry_exhausted
@@ -297,7 +298,7 @@ class NativeVisibleRenderer:
         # replays, so issued concurrently or after it reads back our own `true` and close then
         # restores the wrong visibility to the user's mpv. A sync read is queued ahead of a later
         # async write on the same ordered outbound channel, so ordering holds.
-        self._capture_restore_visibility(reader)
+        self._capture_restore_visibility(reader.ipc)
         # True once this call has handed a "not yet" back to its caller. Only then does a settle
         # owe a re-drive; a result that lands before the return (no gateway, or a fake completing
         # inline) is still the caller's own answer, and refreshing there would arm a geometry
@@ -367,10 +368,10 @@ class NativeVisibleRenderer:
         # boundary is UNKNOWN. Never legacy proof — the FSM's bounded retry decides what follows.
         settle(accepted=False, visibility=Visibility.UNKNOWN, reply={"error": "not-admitted"})
 
-    def _capture_restore_visibility(self, reader: Reader) -> None:
+    def _capture_restore_visibility(self, ipc) -> None:
         if self._restore_visibility is not None:
             return
-        initial = self._read_visibility(reader)
+        initial = self._read_visibility(ipc)
         if initial != Visibility.UNKNOWN:
             self._restore_visibility = initial == Visibility.TRUE
 
@@ -440,7 +441,7 @@ class NativeVisibleRenderer:
             if committed and self._state.visibility != Visibility.FALSE:
                 # mpv is still showing its own; hide them now that ours are acknowledged, and let
                 # that write's outcome decide whether the handoff completed.
-                self._hide_mpv_subtitles(reader, on_finished=lambda ok: finish(accepted=ok))
+                self._hide_mpv_subtitles(reader.ipc, on_finished=lambda ok: finish(accepted=ok))
             else:
                 finish(accepted=committed)
 
@@ -479,11 +480,11 @@ class NativeVisibleRenderer:
         except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
             settled(committed=False)
 
-    def _hide_mpv_subtitles(self, reader: Reader, *, on_finished) -> None:
+    def _hide_mpv_subtitles(self, ipc, *, on_finished) -> None:
         """Hide mpv's subtitles once ours are confirmed. Correlated: whether the handoff completed
         is the write's terminal outcome, not a discarded reply."""
         _send_visibility(
-            reader.ipc,
+            ipc,
             "subtitle:hide-for-legacy",
             visible=False,
             on_outcome=on_finished,
@@ -515,7 +516,7 @@ class NativeVisibleRenderer:
         elif action.kind == ActionKind.CLEAR_LEGACY:
             self._fallback.clear(reader)
         elif action.kind == ActionKind.CLEAR_INTERACTION:
-            self._hide_focus(reader)
+            self._hide_focus(reader.ipc)
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
             self._stage_legacy(reader, action)
         elif action.kind == ActionKind.SHOW_MPV:
@@ -662,12 +663,12 @@ class NativeVisibleRenderer:
         if not self.activate(reader):
             return
         if reader.hover < 0 or box_for_token(reader.boxes, reader.hover) is None:
-            self._hide_focus(reader)
+            self._hide_focus(reader.ipc)
             return
         span = reader._hover_span or (reader.hover, reader.hover + 1)
         selected = [box for box in reader.boxes if span[0] <= box.index < span[1]]
         if not selected:
-            self._hide_focus(reader)
+            self._hide_focus(reader.ipc)
             return
         left = min(box.x for box in selected)
         top = min(box.y for box in selected)
@@ -688,7 +689,7 @@ class NativeVisibleRenderer:
         )
 
     def clear(self, reader: Reader) -> None:
-        self._hide_focus(reader)
+        self._hide_focus(reader.ipc)
         self._fallback.clear(reader)
 
     def close(self) -> None:
@@ -705,7 +706,7 @@ class NativeVisibleRenderer:
         self._state, _ = reduce_ownership(self._state, OwnershipEvent(EventKind.CLOSE_FINISHED))
 
     def suspend_for_overlay(self, reader: Reader) -> None:
-        self._hide_focus(reader)
+        self._hide_focus(reader.ipc)
         self._fallback.clear(reader)
         _send_visibility(reader.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
@@ -718,8 +719,8 @@ class NativeVisibleRenderer:
             return
         self.reassert(reader)
 
-    def _hide_focus(self, reader: Reader) -> None:
-        self._submit_focus(reader.ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))
+    def _hide_focus(self, ipc) -> None:
+        self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))
 
     def _submit_focus(self, ipc, action: SurfaceAction, tail: tuple[object, ...]) -> None:
         """One fenced write to the focus slot. A stale acknowledgement is dropped by the runtime,
