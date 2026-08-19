@@ -5,7 +5,7 @@ import json
 import zipfile
 
 import dicthelp
-from util import FakeIPC, assert_golden
+from util import FakeIPC, assert_golden, keybind_registry
 
 from saitenka.app.controller import Reader
 from saitenka.app.subtitle_render import NullRenderer
@@ -199,7 +199,7 @@ def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
 def test_k_key_bound_globally():
     ipc = FakeIPC()
     Reader(ipc)._register_keybinds()
-    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert "k" in binds and binds["k"].startswith("script-message ")
 
 

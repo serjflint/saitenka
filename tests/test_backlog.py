@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import util
+from util import keybind_registry
 
 from saitenka.app.backlog import BacklogStore, Capture, normalize_match_name
 from saitenka.app.controller import Reader
@@ -269,5 +270,5 @@ def test_bookmark_key_is_configurable():
     ipc = _IPC({})
     reader = Reader(ipc, options=ReaderOptions(keys=KeyOptions(bookmark_key="Alt+q")))
     reader._register_keybinds()
-    binds = {command[1]: command[2] for command in ipc.commands if command[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"

@@ -52,6 +52,22 @@ Requirement = Literal["always", "anki", "tts"]
 # is up (controller._sync_mouse_capture) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
 MOUSE_SECTION = "saitenka-mouse"
 
+# "global"-scoped bindings live in this DEFAULT-priority section. One `define-section` rather than a
+# `keybind` per key: the batch runs before the reactor drains, and one correlated command carries one
+# terminal instead of ~24 competing for the mailbox's reservations. Default (not forced) priority is
+# what `keybind` itself gives, so a user's input.conf shadows these exactly as it did before.
+GLOBAL_SECTION = "saitenka-global"
+
+
+def section_contents(bindings) -> str:
+    """mpv input-section source for ``bindings`` — one ``KEY script-message <msg>`` line each.
+
+    The command must stay ONE string per line: split args silently kill the binding, which is the
+    same trap the per-key `keybind` form had.
+    """
+    lines = [f"{b.key} script-message {b.spec.message}" for b in bindings if b.spec.message]
+    return "\n".join(lines) + "\n" if lines else ""
+
 
 @dataclass(frozen=True)
 class BindingSpec:

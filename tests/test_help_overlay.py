@@ -1,6 +1,6 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
-from util import FakeIPC
+from util import FakeIPC, keybind_registry
 
 from saitenka.app import tooltip
 from saitenka.app.bindings import (
@@ -30,14 +30,13 @@ def _entries(reader: Reader):
 def test_default_and_configured_help_keys_are_registered():
     default_ipc = FakeIPC()
     Reader(default_ipc)._register_keybinds()
-    default_binds = {command[1]: command[2] for command in default_ipc.commands}
-    assert default_binds["F1"] == "script-message saitenka-toggle-help"
+    assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
 
     custom_ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
     Reader(custom_ipc, options=options)._register_keybinds()
-    custom_binds = {command[1]: command[2] for command in custom_ipc.commands}
-    assert custom_binds["Ctrl+h"] == "script-message saitenka-toggle-help"
+    custom_binds = keybind_registry(custom_ipc)
+    assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
     assert "F1" not in custom_binds
 
 
@@ -78,12 +77,9 @@ def test_help_document_uses_effective_catalog_and_context_labels():
         (binding.key, binding.spec.message) for binding in active_bindings(reader, "global")
     }
     reader._register_keybinds()
-    actual = {
-        (command[1], command[2].removeprefix("script-message "))
-        for command in reader.ipc.commands
-        if command[0] == "keybind"
-    }
-    assert actual == expected
+    # The registry spans the global section AND the forced mouse one, so compare against the
+    # global scope alone — this asserts the catalog, not which section a key landed in.
+    assert set(keybind_registry(reader.ipc).items()) >= expected
 
 
 def test_small_osd_pages_and_repeats_navigation_hints():

@@ -2,7 +2,7 @@
 
 import pytest
 import util
-from util import RecordingRasterProvider
+from util import RecordingRasterProvider, keybind_registry
 
 from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
@@ -179,7 +179,7 @@ def test_annotation_key_is_configurable():
 
     Reader(ipc, options=options)._register_keybinds()
 
-    binds = {command[1]: command[2] for command in ipc.commands if command[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Ctrl+a"] == "script-message saitenka-toggle-annotations"
 
 

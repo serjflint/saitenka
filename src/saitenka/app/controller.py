@@ -65,6 +65,7 @@ from saitenka.app.bindings import (
     COPY_CLICK_MSG,
     COPY_LINE_MSG,
     COPY_MSG,
+    GLOBAL_SECTION,
     HELP_CLOSE_MSG,
     HELP_NEXT_MSG,
     HELP_PREV_MSG,
@@ -96,6 +97,7 @@ from saitenka.app.bindings import (
     TIP_UP_MSG,
     TRANS_MSG,
     active_bindings,
+    section_contents,
 )
 from saitenka.app.config import ReaderOptions
 from saitenka.app.intents import Announce, DismissHover
@@ -2745,37 +2747,40 @@ class Reader:
         self._run_help_command(help_intents.HelpCommand.TOGGLE)
 
     def _register_keybinds(self) -> None:
-        # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
-        # CRITICAL: passing the command as split args silently kills the key — always one string.
-        #
-        # Deliberately NOT correlated, unlike the help/preview/mouse keybinds. This runs before the
-        # drain loop starts, and each correlated command reserves two terminal slots (command +
-        # deadline) against a 64-slot mailbox, so ~24 global binds sit at 48 with nothing draining
-        # them — and over the bound a bind is dropped with only a log line, i.e. a dead shortcut.
-        # The fake completes inline, so no test here can reproduce that. Converting this batch means
-        # one `define-section` for the lot (as the mouse scope already does), not a loop.
-        def bind(key: str, msg: str) -> None:
-            reply = self.ipc.command("keybind", key, f"script-message {msg}")
-            # Surface a REJECTED binding (bad key name, or mpv refusing it) — silently dropping mpv's
-            # reply is why a non-firing shortcut (e.g. attach-mode Ctrl+Shift+m) was undiagnosable. In
-            # attach/plugin mode another script or the user's input.conf can also shadow the key; the
-            # registration line is the ground truth for "what did we actually bind".
-            err = reply.get("error") if isinstance(reply, dict) else None
-            if err and err != "success":
-                log.warning("keybind %r -> %s rejected by mpv: %s", key, msg, err)
-            else:
-                log.debug("keybind %r -> script-message %s", key, msg)
+        """Install the "global"-scoped bindings as ONE mpv input section.
 
+        A `keybind` per key would put ~24 correlated commands in flight before the reactor drains,
+        each reserving two terminal slots against a 64-slot mailbox — over the bound a bind is
+        dropped with only a log line, i.e. a dead shortcut, and the inline-completing fake cannot
+        reproduce it. One section is one command with one outcome.
+
+        Default (not forced) priority, which is what mpv's own `keybind` gives, so a user's
+        input.conf or a rival script shadows these exactly as before. The "mouse" scope stays
+        separate and FORCED — it has to outrank other scripts, and it is enabled on demand.
+        """
         # active_bindings no longer gates on `requires` — bind the anki/tts actions even when the dep
         # isn't up YET (attach mode loads Anki async, after this runs, and we never re-register). The
         # handlers (mine_current/bulk_mine/speak) no-op with a toast when the dep is absent.
-        bound = 0
-        for binding in active_bindings(self, "global"):
-            message = binding.spec.message
-            if message is not None:
-                bind(binding.key, message)
-                bound += 1
-        log.info("registered %d global keybinds (anki=%s)", bound, self.anki is not None)
+        bindings = [b for b in active_bindings(self, "global") if b.spec.message is not None]
+        contents = section_contents(bindings)
+        if contents:
+            send_correlated(
+                self.ipc,
+                "define-global-section",
+                "define-section",
+                GLOBAL_SECTION,
+                contents,
+                "default",
+                owner=Owner.INTERACTION,
+            )
+            send_correlated(
+                self.ipc,
+                "enable-global-section",
+                "enable-section",
+                GLOBAL_SECTION,
+                owner=Owner.INTERACTION,
+            )
+        log.info("registered %d global keybinds (anki=%s)", len(bindings), self.anki is not None)
         self._define_mouse_section()  # "mouse"-scoped controls live in a forced section, enabled on demand
 
     def _navigate_previous(self) -> None:

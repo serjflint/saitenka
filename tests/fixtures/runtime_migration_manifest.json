@@ -2,10 +2,6 @@
   "debt": [
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._register_keybinds.bind"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._release_mouse_capture"
     ],
     [

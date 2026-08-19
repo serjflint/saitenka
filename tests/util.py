@@ -376,6 +376,15 @@ def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
     string — it can't fire the handler — so this is the seam :func:`press` dispatches through."""
     reg: dict[str, str] = {}
     for cmd in ipc.commands:
+        if len(cmd) >= 3 and cmd[0] == "define-section":
+            # The "global" scope installs as ONE section rather than a keybind per key. Parsed here
+            # so `press` dispatches through the same registry either way — a test asserting a
+            # shortcut works must not have to know which form registered it.
+            for line in str(cmd[2]).splitlines():
+                key, _, spec = line.partition(" ")
+                if spec.startswith("script-message "):
+                    reg[key] = spec.removeprefix("script-message ")
+            continue
         if len(cmd) >= 3 and cmd[0] == "keybind":
             key, spec = cmd[1], cmd[2]
             if isinstance(spec, str) and spec.startswith("script-message "):

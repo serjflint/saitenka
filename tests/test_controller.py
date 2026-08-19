@@ -96,16 +96,22 @@ def test_hover_view_snapshots_the_hover_stack():
     assert view.paused is True
 
 
-def test_keybinds_use_single_string_command():
-    # mpv `keybind` needs (keybind, KEY, "script-message <msg>") — one command string, not split args.
+def test_every_global_binding_reaches_mpv_as_one_command_string():
+    """The trap this pins: a binding's command must be ONE string. Split into args it registers
+    without complaint and silently never fires. That held for the per-key `keybind` form and holds
+    for the section lines that replaced it — each line is `KEY script-message <msg>`.
+    """
     ipc = FakeIPC()
     Reader(ipc, anki=object())._register_keybinds()
-    binds = [c for c in ipc.commands if c and c[0] == "keybind"]
-    assert binds, "no keybinds registered"
-    for c in binds:
-        assert len(c) == 3, f"malformed keybind (must be 3 parts): {c}"
-        assert c[2].startswith("script-message "), c
-    keys = {c[1] for c in binds}
+
+    contents = _section(ipc, C.GLOBAL_SECTION)[0]
+    assert contents, "no global bindings registered"
+    for line in contents.splitlines():
+        key, _, spec = line.partition(" ")
+        assert key and spec.startswith("script-message "), line
+        assert len(spec.split()) == 2, f"command must be one string: {line}"
+
+    keys = {line.split(" ", 1)[0] for line in contents.splitlines()}
     assert {
         "a",
         "c",
@@ -119,19 +125,46 @@ def test_keybinds_use_single_string_command():
         "F1",
         "Ctrl+Shift+T",
     } <= keys
-    # mouse controls are NOT plain keybinds — they go into a forced input section (see below)
+    # mouse controls are NOT in the global scope — they need their own FORCED section (see below)
     assert {"MBTN_LEFT", "WHEEL_UP", "WHEEL_DOWN"}.isdisjoint(keys)
+    # …but they ARE dispatchable, so the registry a press goes through spans both sections
+    assert "MBTN_LEFT" in keybind_registry(ipc)
 
 
-def test_mouse_controls_live_in_a_forced_section():
+def _section(ipc, name):
+    """(contents, flags) of the last `define-section` for ``name``."""
+    for cmd in reversed(ipc.commands):
+        if cmd and cmd[0] == "define-section" and cmd[1] == name:
+            return cmd[2], (cmd[3] if len(cmd) > 3 else None)
+    return None, None
+
+
+def test_the_global_bindings_register_as_one_section_at_default_priority():
+    """One command, not one per key: ~24 correlated commands in flight before the reactor drains
+    would compete for terminal reservations, and over the bound a bind is dropped with only a log
+    line — a dead shortcut. Default priority is what mpv's own `keybind` gives, so a user's
+    input.conf shadows these exactly as it did before; `force` would silently start overriding it.
+    """
+    ipc = FakeIPC()
+
+    Reader(ipc)._register_keybinds()
+
+    contents, flags = _section(ipc, C.GLOBAL_SECTION)
+    assert flags == "default"
+    assert ("enable-section", C.GLOBAL_SECTION) in [c[:2] for c in ipc.commands]
+    assert len([c for c in ipc.commands if c and c[0] == "keybind"]) == 0
+    assert len(contents.splitlines()) == len({ln.split(" ", 1)[0] for ln in contents.splitlines()})
+
+
+def test_mouse_controls_live_in_a_separate_forced_section():
     """Clicks/wheel go into a FORCED mpv section so they outrank other scripts' forced MBTN_LEFT
-    (uosc/inputevent); it's enabled only while a saitenka surface is up and released otherwise."""
+    (uosc/inputevent); it's enabled only while a saitenka surface is up and released otherwise.
+    Separate from the global one precisely because that must NOT be forced."""
     ipc = FakeIPC()
     r = Reader(ipc)
     r._register_keybinds()
-    defs = [c for c in ipc.commands if c and c[0] == "define-section"]
-    assert len(defs) == 1
-    _cmd, name, contents, flags = defs[0]
+    contents, flags = _section(ipc, C.MOUSE_SECTION)
+    name = C.MOUSE_SECTION
     assert flags == "force"
     assert "MBTN_LEFT script-message saitenka-click" in contents
     assert "WHEEL_UP script-message saitenka-scroll-up" in contents
@@ -213,7 +246,7 @@ def test_hover_pause_key_is_configurable():
     ipc = FakeIPC()
     options = ReaderOptions(keys=KeyOptions(hover_pause_key="Alt+q"))
     Reader(ipc, options=options)._register_keybinds()
-    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-hover-pause"
 
 
@@ -225,7 +258,7 @@ def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch):
     called = []
     monkeypatch.setattr(reader, "retry_japanese_subtitles", lambda: called.append(True))
     reader._register_keybinds()
-    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
 
     reader._handle(binds["Ctrl+r"].removeprefix("script-message "))
 
@@ -241,7 +274,7 @@ def test_sub_nav_keybinds_registered_with_single_string():
     repeatable sub-delay bindings, so we must not shadow them."""
     ipc = FakeIPC()
     Reader(ipc)._register_keybinds()
-    binds = {c[1]: c[2] for c in ipc.commands if c and c[0] == "keybind"}
+    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     for key in ("Alt+LEFT", "Alt+RIGHT", "Alt+DOWN"):
         assert key in binds, f"{key} not registered; binds={list(binds)}"
         assert binds[key].startswith("script-message "), f"{key}: not script-message: {binds[key]}"
@@ -254,9 +287,7 @@ def test_sub_seek_prev_sends_ipc_command():
     ipc = FakeIPC()
     r = Reader(ipc)
     r._register_keybinds()
-    binds = {
-        c[1]: c[2].split("script-message ", 1)[1] for c in ipc.commands if c and c[0] == "keybind"
-    }
+    binds = keybind_registry(ipc)
     sub_prev_msg = binds.get("Alt+LEFT")
     assert sub_prev_msg, "no Alt+LEFT keybind"
     # Dispatch the message and verify sub-seek -1 was sent
@@ -272,9 +303,7 @@ def test_sub_seek_next_sends_ipc_command():
     ipc = FakeIPC()
     r = Reader(ipc)
     r._register_keybinds()
-    binds = {
-        c[1]: c[2].split("script-message ", 1)[1] for c in ipc.commands if c and c[0] == "keybind"
-    }
+    binds = keybind_registry(ipc)
     r._handle(binds["Alt+RIGHT"])
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
 
@@ -311,9 +340,7 @@ def test_sub_seek_replay_sends_ipc_command():
     ipc = FakeIPC()
     r = Reader(ipc)
     r._register_keybinds()
-    binds = {
-        c[1]: c[2].split("script-message ", 1)[1] for c in ipc.commands if c and c[0] == "keybind"
-    }
+    binds = keybind_registry(ipc)
     r._handle(binds["Alt+DOWN"])
     assert ("sub-seek", "0") in [(c[0], c[1]) for c in ipc.commands]
 
@@ -323,7 +350,7 @@ def test_sub_nav_config_knobs_respected():
     ipc = FakeIPC()
     r = Reader(ipc, sub_prev_key="Alt+a", sub_next_key="Alt+d", sub_replay_key="Alt+s")
     r._register_keybinds()
-    binds = {c[1] for c in ipc.commands if c and c[0] == "keybind"}
+    binds = set(keybind_registry(ipc))
     assert "Alt+a" in binds
     assert "Alt+d" in binds
     assert "Alt+s" in binds
