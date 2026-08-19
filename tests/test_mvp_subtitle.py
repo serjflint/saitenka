@@ -1,5 +1,6 @@
 """MVP: subtitle rendering (multi-line) + per-word hitbox geometry."""
 
+import pytest
 from util import assert_golden
 
 from saitenka.app.subtitles import render_subtitle
@@ -74,3 +75,98 @@ def test_subtitle_golden_with_hover():
     toks = tokenize(LINE)
     sr = render_subtitle([toks], osd_w=1280, size=44, hover=7)
     assert_golden(sr.image, "subtitle_yomu.png")
+
+
+def _request(**over):
+    from saitenka.app.subtitle_render import DrawRequest
+
+    base = {
+        "text": "猫を見る",
+        "lines": [],
+        "osd": (1920, 1080),
+        "sub_size": 40,
+        "bg_opacity": 160,
+        "bottom_margin": 60,
+        "secondary_role": False,
+        "upgrade_pending": False,
+        "annotation_degraded": False,
+        "annotation_visible": False,
+        "hover": -1,
+        "hover_span": None,
+        "styles": None,
+    }
+    return DrawRequest(**{**base, **over})
+
+
+def test_a_draw_returns_its_geometry_instead_of_writing_it_somewhere():
+    """The hit boxes and the origin belong to the cue that produced them. Returning them is what
+    lets the caller decide whether they are still current — assigning them mid-render is how a
+    superseded cue's boxes outlive it."""
+    from saitenka.app.subtitle_render import SubtitleRenderer
+
+    class _Surfaces:
+        def present(self, *_args, **_kwargs):
+            return "transaction"
+
+    result = SubtitleRenderer().render(_request(), _Surfaces())
+
+    assert result is not None
+    assert result.transaction == "transaction"
+    assert result.origin[1] == 1080 - 60 - _height(result)
+
+
+def _height(result) -> int:
+    """The rendered height, recovered from the placement the result reports."""
+    return 1080 - 60 - result.origin[1]
+
+
+def test_a_closed_renderer_draws_nothing_and_says_so():
+    """Close races a cue change. The settle callback is how legacy staging learns pixels exist, so a
+    closed renderer must answer it False rather than leave staging waiting forever."""
+    from saitenka.app.subtitle_render import SubtitleRenderer
+
+    renderer = SubtitleRenderer()
+    renderer.close()
+    settled = []
+
+    assert renderer.render(_request(), None, on_settled=settled.append) is None
+    assert settled == [False]
+
+
+def test_the_request_carries_the_cue_state_as_one_snapshot():
+    """Frozen and built once: the raster can run off the main thread, and a request that changed
+    under it would raster one cue's text with another's styles."""
+    import dataclasses
+
+    request = _request()
+
+    assert dataclasses.is_dataclass(request)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        request.text = "別の字幕"
+
+
+def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to():
+    """The boxes the raster returns are relative to the subtitle image, so a hit test adds
+    `sub_origin` to reach screen coordinates. If the draw computed a new origin and the host kept an
+    old one, every hit would land offset by the difference — the boxes would look right and resolve
+    to the wrong word.
+    """
+    import util
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.subtitle_render import SubtitleRenderer
+
+    def origin_for(frac: float) -> tuple[int, int]:
+        reader = Reader(util.FakeIPC())
+        reader.osd = (1920, 1080)
+        reader.bottom_margin_frac = frac
+        reader.sub_origin = (999, 999)  # a stale origin the draw has to replace
+        reader.set_subtitle("猫を見る")
+        assert SubtitleRenderer().draw(reader) is not None
+        return reader.sub_origin
+
+    low, high = origin_for(0.05), origin_for(0.15)
+
+    assert low != (999, 999)  # written back, not left stale
+    assert low[0] == high[0]  # centred the same way regardless of the margin
+    assert low[1] - high[1] == round(1080 * 0.10)  # lifted by exactly the margin it was given

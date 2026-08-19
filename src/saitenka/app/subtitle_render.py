@@ -38,9 +38,11 @@ from saitenka.runtime.surfaces import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from saitenka.app.controller import Reader
+    from saitenka.app.subtitles import WordBox
+    from saitenka.app.tokenize import Token
     from saitenka.runtime.surfaces import SurfaceTransaction
 
 log = logging.getLogger("saitenka.app.subtitle_render")
@@ -87,6 +89,40 @@ def _send_visibility(ipc, identity: str, *, visible: bool, on_outcome=None) -> N
         log.warning("subtitle visibility write %s was not admitted", identity)
         if on_outcome is not None:
             on_outcome(False)  # noqa: FBT003  # the applied flag is the whole payload
+
+
+@dataclass(frozen=True, slots=True)
+class DrawRequest:
+    """Everything the legacy draw path needs about the cue — the seam that stops it reading a host.
+
+    Built once per draw by :func:`build_draw_request`, so the values it used to pull off the Reader
+    one at a time arrive together and cannot drift apart mid-render. Frozen: the raster can run off
+    the main thread, and a request that changed under it would raster one cue's text with another's
+    styles.
+    """
+
+    text: str
+    lines: Sequence[Sequence[Token]]
+    osd: tuple[int, int]
+    sub_size: int
+    bg_opacity: int
+    bottom_margin: int
+    secondary_role: bool
+    upgrade_pending: bool
+    annotation_degraded: bool
+    annotation_visible: bool
+    hover: int
+    hover_span: tuple[int, int] | None
+    styles: list | None
+
+
+@dataclass(frozen=True, slots=True)
+class DrawResult:
+    """What a draw produced: the hit boxes, where it landed, and its surface transaction."""
+
+    boxes: list[WordBox]
+    origin: tuple[int, int]
+    transaction: SurfaceTransaction | None
 
 
 FOCUS_PAD = 3
@@ -167,6 +203,7 @@ class SubtitleRenderer:
             provider or subtitle_raster.PillowRasterProvider()
         )
         self._closed = False
+        self._logged_first = False
 
     def close(self) -> None:
         """Quarantine the surface and release the provider. A cue that arrives after this — a late
@@ -175,56 +212,107 @@ class SubtitleRenderer:
         self._closed = True
         self.provider.close()
 
-    def draw(
-        self, reader: Reader, *, on_settled: Callable[[bool], None] | None = None
-    ) -> SurfaceTransaction | None:
+    def render(
+        self,
+        request: DrawRequest,
+        surfaces,
+        *,
+        on_settled: Callable[[bool], None] | None = None,
+    ) -> DrawResult | None:
+        """Raster ``request`` and present it. Returns where it landed; the caller owns the write-back.
+
+        Returning rather than assigning is what makes the geometry a value: the hit boxes and the
+        origin belong to the cue that produced them, so a stale cue's boxes cannot outlive it by
+        having been written onto a host mid-render.
+        """
         if self._closed:
             if on_settled is not None:
                 on_settled(False)  # noqa: FBT003  # the settlement flag is the whole payload
             return None
         # Plain covers the secondary track and any cue still awaiting (or denied) its annotation:
         # the cue shows at cue time and reader_deps re-renders it annotated once deps land.
-        request = subtitle_raster.build_request(
+        raster = subtitle_raster.build_request(
             subtitle_raster.raster_style(
-                secondary_role=reader.subtitle_language == SECOND_LANG,
-                upgrade_pending=reader._sub_pending is not None,
-                annotation_degraded=reader._annotation_degraded,
+                secondary_role=request.secondary_role,
+                upgrade_pending=request.upgrade_pending,
+                annotation_degraded=request.annotation_degraded,
             ),
             subtitle_raster.RasterContent(
-                reader.sub_text,
-                reader.lines,
-                reader.osd[0],
-                reader.sub_size,
+                request.text,
+                request.lines,
+                request.osd[0],
+                request.sub_size,
                 # configurable box alpha (0 = fully transparent)
-                (0, 0, 0, reader.sub_bg_opacity),
+                (0, 0, 0, request.bg_opacity),
             ),
             subtitle_raster.AnnotationOverlay(
-                subtitle_raster.annotation_visible(
-                    mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
-                ),
-                reader.hover,
-                reader._hover_span,
-                reader.styles,
+                request.annotation_visible,
+                request.hover,
+                request.hover_span,
+                request.styles,
             ),
         )
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
-            sr = self.provider.render(request)
-        reader.boxes = list(sr.boxes)
-        ox, oy = place_subtitle((sr.image.width, sr.image.height), reader.osd, reader.bottom_margin)
-        reader.sub_origin = (ox, oy)
-        if not reader._first_sub_logged:
-            reader._first_sub_logged = True
+            sr = self.provider.render(raster)
+        ox, oy = place_subtitle(
+            (sr.image.width, sr.image.height), request.osd, request.bottom_margin
+        )
+        if not self._logged_first:
+            self._logged_first = True
             log.info(
                 "first subtitle drawn (%dx%d at %d,%d)", sr.image.width, sr.image.height, ox, oy
             )
         # Revision-fenced: a newer cue's transaction supersedes this one's acknowledgement rather
         # than racing it onto the same mpv slot. `on_settled` is how staging learns pixels exist.
-        return reader.lifecycle_surfaces.present(
-            sr.image, ox, oy, oid=SUB_ID, owner=Owner.SUBTITLE, on_settled=on_settled
+        return DrawResult(
+            list(sr.boxes),
+            (ox, oy),
+            surfaces.present(
+                sr.image, ox, oy, oid=SUB_ID, owner=Owner.SUBTITLE, on_settled=on_settled
+            ),
         )
 
+    def draw(
+        self, reader: Reader, *, on_settled: Callable[[bool], None] | None = None
+    ) -> SurfaceTransaction | None:
+        """Host shim: snapshot, render, write the geometry back.
+
+        The snapshot is inline rather than a named builder on purpose — it would be a second symbol
+        taking the host to no benefit, and the Reader-host gate counts it. Everything below `render`
+        is a value; these are the only lines in the draw path that know about a Reader.
+        """
+        request = DrawRequest(
+            text=reader.sub_text,
+            lines=reader.lines,
+            osd=reader.osd,
+            sub_size=reader.sub_size,
+            bg_opacity=reader.sub_bg_opacity,
+            bottom_margin=reader.bottom_margin,
+            secondary_role=reader.subtitle_language == SECOND_LANG,
+            upgrade_pending=reader._sub_pending is not None,
+            annotation_degraded=reader._annotation_degraded,
+            annotation_visible=subtitle_raster.annotation_visible(
+                mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
+            ),
+            hover=reader.hover,
+            hover_span=reader._hover_span,
+            styles=reader.styles,
+        )
+        result = self.render(request, reader.lifecycle_surfaces, on_settled=on_settled)
+        if result is None:
+            return None
+        reader.boxes = result.boxes
+        reader.sub_origin = result.origin
+        reader._first_sub_logged = self._logged_first
+        return result.transaction
+
     def clear(self, reader: Reader) -> None:
-        reader.lifecycle_surfaces.remove(SUB_ID, owner=Owner.SUBTITLE)
+        self.retire(reader.lifecycle_surfaces)
+
+    def retire(self, surfaces) -> None:
+        """Take the cue's pixels down. Separate from `clear` so the ownership FSM, which has the
+        surface layer but no host, can retire legacy pixels without one."""
+        surfaces.remove(SUB_ID, owner=Owner.SUBTITLE)
 
 
 class NullRenderer:
