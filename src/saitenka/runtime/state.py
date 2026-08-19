@@ -43,6 +43,60 @@ class SessionState:
 
 
 @dataclass(frozen=True, slots=True)
+class OwnerSlice:
+    """The state of every feature sharing one owner slot, keyed by feature name.
+
+    An owner slot is a single object, so without this the second feature to join an owner forces a
+    rewrite of the first one's reducer — it would have to learn about a state it does not own.
+    A tuple of pairs rather than a mapping: ordered, immutable, and an owner holds a handful of
+    features, never enough for lookup cost to matter.
+    """
+
+    features: tuple[tuple[str, object], ...] = ()
+
+    def get(self, key: str) -> object:
+        for name, value in self.features:
+            if name == key:
+                return value
+        raise KeyError(key)
+
+    def replacing(self, key: str, value: object) -> OwnerSlice:
+        return OwnerSlice(
+            tuple((name, value if name == key else held) for name, held in self.features)
+        )
+
+
+class SliceReducer:
+    """Dispatch one owner slot's event to every feature in it, threading the slot's state.
+
+    Broadcast rather than lookup, because neither of the two dispatch keys available is sound.
+    By event type: several features legitimately react to the same fact (a reconnect). By effect
+    ownership: `EffectFinished` carries an `Owner`, not a feature — the issuer recognises its own
+    by `identity` and every other feature already ignores what it does not recognise.
+    """
+
+    def __init__(self, features: dict[str, FeatureReducer]) -> None:
+        self._features = dict(features)
+
+    def initial(self, states: dict[str, object]) -> OwnerSlice:
+        """The slot's starting state, ordered to match the reducers so dispatch order is fixed."""
+        if states.keys() != self._features.keys():
+            raise ValueError("every feature in the slice needs exactly one initial state")
+        return OwnerSlice(tuple((key, states[key]) for key in self._features))
+
+    def __call__(self, state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, OwnerSlice)
+        internal: list[RoutedEvent] = []
+        effects: list[Effect] = []
+        for key, reducer in self._features.items():
+            result = reducer(state.get(key), event)
+            state = state.replacing(key, result.state)
+            internal.extend(result.internal_events)
+            effects.extend(result.effects)
+        return ReduceResult(state, tuple(internal), tuple(effects))
+
+
+@dataclass(frozen=True, slots=True)
 class RouteKey:
     event_type: type[object]
     owner: Owner

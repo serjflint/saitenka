@@ -70,9 +70,13 @@ def _install(ipc):
 
 
 def _hint_state(reactor):
+    from saitenka.app.session_routes import STARTUP_HINT
     from saitenka.app.startup_hint import StartupHintState
+    from saitenka.runtime.state import OwnerSlice
 
-    state = reactor.snapshot.state.session
+    slot = reactor.snapshot.state.session
+    assert isinstance(slot, OwnerSlice)  # the owner slot is a slice, not one feature's state
+    state = slot.get(STARTUP_HINT)
     assert isinstance(state, StartupHintState)
     return state
 

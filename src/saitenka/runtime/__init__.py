@@ -62,12 +62,14 @@ from saitenka.runtime.playback import (
 )
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.state import (
+    OwnerSlice,
     ReduceResult,
     RoutedEvent,
     RouteError,
     RouteKey,
     SessionReducer,
     SessionState,
+    SliceReducer,
     TurnResult,
 )
 from saitenka.runtime.surfaces import (
@@ -118,6 +120,7 @@ __all__ = [
     "MailboxFull",
     "ObservedCue",
     "Owner",
+    "OwnerSlice",
     "PlaybackDelta",
     "PlaybackProjection",
     "PlaybackState",
@@ -139,6 +142,7 @@ __all__ = [
     "SessionReactor",
     "SessionReducer",
     "SessionState",
+    "SliceReducer",
     "SourceChanged",
     "StartupHintRequested",
     "StartupReady",

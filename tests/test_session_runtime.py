@@ -22,10 +22,12 @@ from saitenka.runtime import (
     EffectFinished,
     EffectId,
     EffectOutcome,
+    EmitDiagnostic,
     EventOrigin,
     ExpireEffect,
     MailboxFull,
     Owner,
+    OwnerSlice,
     RawMpvEvent,
     ReduceResult,
     RoutedEvent,
@@ -38,6 +40,7 @@ from saitenka.runtime import (
     SessionReactor,
     SessionReducer,
     SessionState,
+    SliceReducer,
     StopSession,
     SubmitJob,
     TimerScheduler,
@@ -778,3 +781,75 @@ def test_closing_rejection_consumes_the_effect_id() -> None:
         assert str(error) == "effect ID already used: 1"
     else:  # pragma: no cover - effect lifecycle contract
         raise AssertionError("closing rejection reused an effect ID")
+
+
+# --- one owner slot, several features -----------------------------------------------------------
+#
+# An owner slot is a single object, so the second feature to join an owner would otherwise force a
+# rewrite of the first one's reducer. `SliceReducer` broadcasts, because neither available dispatch
+# key is sound: by event type, several features legitimately react to the same fact; by effect
+# ownership, `EffectFinished` names an `Owner` and not a feature.
+
+
+def _counter(tag: str):
+    """A feature reducer that records what it saw and emits one diagnostic naming itself."""
+
+    def reduce(state: object, event: RuntimeEvent, /) -> ReduceResult:
+        assert isinstance(state, tuple)
+        return ReduceResult(
+            (*state, event), effects=(EmitDiagnostic(tag, Owner.SESSION, (("saw", tag),)),)
+        )
+
+    return reduce
+
+
+def test_every_feature_in_a_slot_sees_the_event_and_keeps_its_own_state() -> None:
+    slice_reducer = SliceReducer({"first": _counter("first"), "second": _counter("second")})
+    state = slice_reducer.initial({"first": (), "second": ()})
+    event = RawMpvEvent("stop")
+
+    result = slice_reducer(state, event)
+
+    assert isinstance(result.state, OwnerSlice)
+    # Each feature's state advanced independently — a shared slot must not merge them.
+    assert result.state.get("first") == (event,)
+    assert result.state.get("second") == (event,)
+    assert [effect.name for effect in result.effects] == ["first", "second"]
+
+
+def test_a_feature_that_ignores_an_event_does_not_lose_the_others_state() -> None:
+    """The failure this exists to catch: threading the slot wrong drops the untouched feature."""
+
+    def indifferent(state: object, _event: RuntimeEvent, /) -> ReduceResult:
+        return ReduceResult(state)
+
+    slice_reducer = SliceReducer({"active": _counter("active"), "idle": indifferent})
+    state = slice_reducer.initial({"active": (), "idle": ("untouched",)})
+
+    result = slice_reducer(state, RawMpvEvent("stop"))
+
+    assert isinstance(result.state, OwnerSlice)
+    assert result.state.get("idle") == ("untouched",)
+    assert len(result.state.get("active")) == 1
+
+
+def test_dispatch_order_follows_registration_not_the_initial_states() -> None:
+    """Effect order is observable (it is the command stream), so it must not depend on a dict
+    literal written elsewhere."""
+    slice_reducer = SliceReducer({"a": _counter("a"), "b": _counter("b")})
+
+    result = slice_reducer(slice_reducer.initial({"b": (), "a": ()}), RawMpvEvent("stop"))
+
+    assert [effect.name for effect in result.effects] == ["a", "b"]
+
+
+def test_a_feature_without_an_initial_state_is_refused_at_construction() -> None:
+    """Better here than as a `KeyError` on the first event of a session that already started."""
+    slice_reducer = SliceReducer({"a": _counter("a"), "b": _counter("b")})
+
+    try:
+        slice_reducer.initial({"a": ()})
+    except ValueError as error:
+        assert "exactly one initial state" in str(error)
+    else:  # pragma: no cover - slice construction contract
+        raise AssertionError("slice accepted a feature with no state")

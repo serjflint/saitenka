@@ -26,7 +26,7 @@ from saitenka.runtime.events import (
 )
 from saitenka.runtime.reactor import SessionReactor
 from saitenka.runtime.routing import OwnerRouter
-from saitenka.runtime.state import RouteKey, SessionReducer, SessionState
+from saitenka.runtime.state import RouteKey, SessionReducer, SessionState, SliceReducer
 
 if TYPE_CHECKING:
     from saitenka.mpvio.gateway import MpvGateway
@@ -47,6 +47,10 @@ _SESSION_EVENTS = (StartupHintRequested, StartupReady, ConnectionReplaced, Effec
 #: A duty joins this tuple only when the Reader has no remaining part in it. That is the whole
 #: migration protocol: add the route, move the state, then claim.
 _CLAIMED = (StartupHintRequested, StartupReady)
+
+#: The startup hint's key inside `Owner.SESSION`'s slice. Named once so a reader of the slot does
+#: not spell the key itself and drift from the registration.
+STARTUP_HINT = "startup-hint"
 
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
@@ -79,12 +83,15 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
         lambda: gateway.connection_epoch,
         time.monotonic,
     )
+    # One slot, several features: `Owner.SESSION` is a slice from the start, so the second session
+    # feature is a registration rather than a rewrite of the hint's reducer.
+    session = SliceReducer({STARTUP_HINT: hint})
     routes: dict[RouteKey, FeatureReducer] = {
-        RouteKey(event, Owner.SESSION): hint for event in _SESSION_EVENTS
+        RouteKey(event, Owner.SESSION): session for event in _SESSION_EVENTS
     }
     reactor = SessionReactor(
         SessionState(
-            session=StartupHintState(),
+            session=session.initial({STARTUP_HINT: StartupHintState()}),
             playback=None,
             subtitle=None,
             interaction=None,
