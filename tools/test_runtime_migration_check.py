@@ -323,3 +323,40 @@ def dynamic_verb(ipc, *command):
     # An unresolvable verb is a write until proven otherwise — the gate must not be relaxed by a
     # call site it cannot read.
     assert checker.Debt("direct-mpv-command", f"{planted}::dynamic_verb") in scanner.debt
+
+
+def test_a_synchronous_by_contract_write_is_exempt_but_its_neighbours_are_not() -> None:
+    """Four writes cannot go through the egress gateway: the caller needs the reply or the side
+    effect before returning, or the reactor is stopping and could never drain it. Counting them as
+    debt keeps WP5's exit gate permanently unreachable and hides the rows that ARE still work.
+
+    The exemption is by symbol, so it cannot silently widen: a new direct write in the same module,
+    or a second one added to an exempt function, is still counted.
+    """
+    checker = _module()
+    actual, _, _ = checker.scan()
+
+    for source in checker._SYNCHRONOUS_BY_CONTRACT:
+        assert checker.Debt("direct-mpv-command", source) not in actual
+        assert checker.Debt("direct-mpv-read", source) not in actual
+
+    # Same module as an exempt symbol, still counted.
+    assert checker.Debt("direct-mpv-read", "src/saitenka/app/media.py::current_timespan") in actual
+
+
+def test_the_only_remaining_direct_writes_are_the_driver_switch_set() -> None:
+    """WP5's exit condition for writes, stated as an assertion instead of read off by eye. These
+    three are `DRIVER_SWITCH_DEBT` — the renderer's activate/deactivate and `_apply_action`'s
+    SHOW_MPV / RESTORE_VISIBILITY — and WP6 deletes them with the driver.
+
+    If this fails because a row was CONVERTED, tighten it. If it fails because one was added, that
+    is the gate doing its job.
+    """
+    checker = _module()
+    actual, _, _ = checker.scan()
+
+    assert {d.source for d in actual if d.kind == "direct-mpv-command"} == {
+        "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",
+        "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate",
+        "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate",
+    }

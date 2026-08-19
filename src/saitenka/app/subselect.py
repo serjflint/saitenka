@@ -605,7 +605,13 @@ def remove_external_sub_tracks(ipc) -> int:
                 track["id"],
                 track.get("external-filename"),
             )
-            ipc.command("sub-remove", track["id"])
+            send_correlated(
+                ipc,
+                f"reslot-sub-remove:{track['id']}",
+                "sub-remove",
+                track["id"],
+                owner=Owner.SUBTITLE,
+            )
             removed += 1
     return removed
 

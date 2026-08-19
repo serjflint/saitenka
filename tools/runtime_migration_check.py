@@ -49,6 +49,23 @@ _PRESENTATION_ADAPTERS = {
     "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove",
 }
 _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
+#: Writes that CANNOT go through the egress gateway, with the reason each is permanent. Not debt and
+#: not deferral — a correlated command here would be wrong, so counting them keeps WP5's exit gate
+#: permanently unreachable and hides the rows that are still work.
+#:
+#: The bar for adding one: the caller needs the reply or the side effect BEFORE it returns, or the
+#: reactor is stopping and could never drain it. "It is awkward" is not on that list.
+_SYNCHRONOUS_BY_CONTRACT = {
+    # Runs from `close`: a queued command is never drained, and the forced section would outlive us
+    # still holding the mouse away from a detached mpv.
+    "src/saitenka/app/controller.py::Reader._release_mouse_capture",
+    # The caller reads the file mpv writes, so this one genuinely must be awaited.
+    "src/saitenka/app/media.py::screenshot",
+    # Same: prints the capture's reply, and the file must exist when it returns.
+    "src/saitenka/app/launch/run.py::_run_demo_actions",
+    # `quit`, issued while the reactor is stopping.
+    "src/saitenka/app/launch/run.py::run_impl",
+}
 #: mpv verbs that only READ. WP5's exit gate is phrased in terms of a direct *write* — a read has no
 #: terminal outcome to correlate, so routing one through the egress gateway buys nothing. Splitting
 #: the kind is what makes that gate answerable from the manifest instead of by eye.
@@ -198,7 +215,11 @@ class Scanner(ast.NodeVisitor):
             ordered.append(label)
         if isinstance(node.func, ast.Attribute):
             receiver = _dotted(node.func.value)
-            if node.func.attr == "command" and receiver not in _NON_MPV_COMMAND_RECEIVERS:
+            if (
+                node.func.attr == "command"
+                and receiver not in _NON_MPV_COMMAND_RECEIVERS
+                and self._source() not in _SYNCHRONOUS_BY_CONTRACT
+            ):
                 verb = node.args[0] if node.args else None
                 read = isinstance(verb, ast.Constant) and verb.value in _MPV_READ_VERBS
                 self.mpv_calls.setdefault(self._source(), []).append(read)

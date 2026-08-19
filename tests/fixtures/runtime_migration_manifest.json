@@ -2,26 +2,6 @@
   "debt": [
     [
       "direct-mpv-command",
-      "src/saitenka/app/controller.py::Reader._release_mouse_capture"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::_run_demo_actions"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/launch/run.py::run_impl"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/media.py::screenshot"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/subselect.py::remove_external_sub_tracks"
-    ],
-    [
-      "direct-mpv-command",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action"
     ],
     [
@@ -59,6 +39,10 @@
     [
       "direct-mpv-read",
       "src/saitenka/app/subselect.py::fetch_jimaku"
+    ],
+    [
+      "direct-mpv-read",
+      "src/saitenka/app/subselect.py::remove_external_sub_tracks"
     ],
     [
       "direct-mpv-read",

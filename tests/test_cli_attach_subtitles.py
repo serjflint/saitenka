@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import util
+
 from saitenka.app import subselect
 from saitenka.app.commands import attach as attach_commands
 from saitenka.app.subtitle_modes import SubtitleStartup, SubtitleTracks
@@ -84,12 +86,12 @@ def test_attach_configures_retry_even_when_startup_fetch_is_unneeded(monkeypatch
     assert ipc.commands == []
 
 
-class _TrackIPC:
+class _TrackIPC(util.FakeIPC):
     """Models mpv's current path + a track-list carrying the previous episode's external sub."""
 
     def __init__(self):
-        self.commands: list[tuple] = []
-        self.props: dict = {
+        super().__init__()
+        self.props |= {
             "path": "/videos/Show - 03.mkv",
             "track-list": [
                 {"type": "sub", "id": 1, "lang": "en", "selected": False},
@@ -104,14 +106,11 @@ class _TrackIPC:
         }
 
     def command(self, *args):
-        self.commands.append(args)
-        if args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        if args[0] == "sub-remove":
+        if args and args[0] == "sub-remove":
             self.props["track-list"] = [
                 t for t in self.props["track-list"] if t.get("id") != args[1]
             ]
-        return {"data": None}
+        return super().command(*args)
 
 
 def test_attach_reslot_resets_episode_drops_carryover_and_continues_japanese(monkeypatch):
