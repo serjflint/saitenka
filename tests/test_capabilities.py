@@ -172,12 +172,14 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
     assert submit is not None
     clock = [0.0]
     releases = {"tts": threading.Event(), "anki": threading.Event()}
+    started = {"tts": threading.Event(), "anki": threading.Event()}
     calls = {"tts": 0, "anki": 0}
 
     def make_probe(name: str):
         def probe() -> bool:
             calls[name] += 1
             if calls[name] == 1:
+                started[name].set()
                 # Self-releases, and must: the wedge has to end for the *replacement's* terminal to
                 # be accepted, so holding it for the whole assertion deadlocks the very thing being
                 # measured. Retry timing runs off the injected clock, so this cannot re-fire the
@@ -199,6 +201,15 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
     probes = tuple(make_probe(name) for name in ("tts", "anki"))
     try:
         assert all(probe.request() for probe in probes)
+        # Wait for the probes to actually be RUNNING before replacing them. Submitting is not
+        # starting: the lane admits the job, and under load a worker may not pick it up for a while.
+        # If the replacement is submitted first, a worker can run IT first — and this fake decides
+        # "am I the wedge?" from a call counter, so the replacement would take the wedge branch,
+        # return False, and the generation fence would correctly accept that False. The runtime
+        # promises no ordering between a superseded job and its replacement, so the test must not
+        # assume one. (This was a real flake: ~4 in 12 suite runs, only under load.)
+        for name, running in started.items():
+            assert running.wait(_WEDGE_TIMEOUT), f"{name} probe never started"
         clock[0] = 6.0
         assert all(probe.request() for probe in probes)
         # A deadline, not a fixed number of 1 ms sleeps: the replacement runs on a lane thread, and

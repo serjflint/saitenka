@@ -348,18 +348,16 @@ def close(state: PrefetchState) -> None:
     state.inflight.clear()
 
 
-def _candidates(reader: Reader) -> list[tuple[int, int, Token]]:
+def _candidates(tokens, styles, tokenizer) -> list[tuple[int, int, Token]]:
     """This line's content words worth warming, N+1 first (likeliest hover / mine target),
     de-duplicated by lemma. Each entry is ``(priority, token_index, token)``."""
     seen: set[str] = set()
     items: list[tuple[int, int, Token]] = []
-    for i, t in enumerate(reader.tokens):
-        if not reader.tokenizer.is_content(t) or t.lemma in seen:
+    for i, t in enumerate(tokens):
+        if not tokenizer.is_content(t) or t.lemma in seen:
             continue
         seen.add(t.lemma)
-        np1 = bool(
-            reader.styles and i < len(reader.styles) and reader.styles[i].tag.startswith("n+1")
-        )
+        np1 = bool(styles and i < len(styles) and styles[i].tag.startswith("n+1"))
         items.append((0 if np1 else 1, i, t))
     items.sort(key=lambda x: x[0])
     return items
@@ -384,7 +382,7 @@ def update_prefetch(reader: Reader) -> None:
     reader._prefetch_key = key
     state = reader.prefetch_state
     gen = state.cancel()
-    cands = _candidates(reader)
+    cands = _candidates(reader.tokens, reader.styles, reader.tokenizer)
     jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]] = []
     for _, i, t in cands:
         jobs.append(
@@ -407,7 +405,9 @@ def _lookahead_items(reader: Reader, gen: int, seen: set[str]) -> list[tuple[int
     already queued isn't warmed twice. No-op without an external sub index."""
     items: list[tuple[int, PrefetchItem]] = []
     cue_limit = min(max(0, reader.prefetch_lookahead), _MAX_WARM_PENDING)
-    for text in upcoming_cue_texts(reader, cue_limit):
+    for text in upcoming_cue_texts(
+        reader._sub_index, cue_limit, text=reader.sub_text, preferred=reader._nav_idx
+    ):
         toks = reader.tokenizer.tokenize(text)
         for i, t in enumerate(toks):
             if not reader.tokenizer.is_content(t) or t.lemma in seen:
@@ -503,7 +503,9 @@ def _head_prefetch_items(
     candidates: list[tuple[int, HeadPrefetchItem]] = []
     probe_budget = _MAX_HEAD_TOKEN_PROBES
     cue_limit = min(max(0, reader.head_prefetch_lookahead), reader.prefetch_state.head_queue_max)
-    for text in upcoming_cue_texts(reader, cue_limit):
+    for text in upcoming_cue_texts(
+        reader._sub_index, cue_limit, text=reader.sub_text, preferred=reader._nav_idx
+    ):
         found, probes = _head_candidates_for_text(
             text,
             seen,
@@ -524,17 +526,16 @@ def _head_prefetch_items(
     return [(1, item) for _priority, item in candidates[: reader.prefetch_state.head_queue_max]]
 
 
-def upcoming_cue_texts(reader: Reader, n: int) -> list[str]:
+def upcoming_cue_texts(index, n: int, *, text: str, preferred: int) -> list[str]:
     """Text of the ``n`` cues after the one on screen, from the external sub index (empty when there's
     no index, the line isn't located, or we're at the tail). Located by the displayed text alone — the
     reliable signal per :meth:`CueIndex.locate` — so it stays off the mpv IPC path."""
-    idx = reader._sub_index
-    if idx is None or not len(idx) or n <= 0:
+    if index is None or not len(index) or n <= 0:
         return []
-    current = idx.locate(text=reader.sub_text, preferred=reader._nav_idx)
+    current = index.locate(text=text, preferred=preferred)
     if current < 0:
         return []
-    return [idx.cues[i].text for i in range(current + 1, min(len(idx), current + 1 + n))]
+    return [index.cues[i].text for i in range(current + 1, min(len(index), current + 1 + n))]
 
 
 def warm_episode_tokens(reader: Reader) -> None:

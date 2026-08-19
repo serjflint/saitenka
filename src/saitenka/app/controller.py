@@ -1854,7 +1854,9 @@ class Reader:
         prefetch.finish(self.prefetch_state, completion, self._finish_speculative_prefetch)
 
     def _upcoming_cue_texts(self, n: int) -> list[str]:
-        return prefetch.upcoming_cue_texts(self, n)
+        return prefetch.upcoming_cue_texts(
+            self._sub_index, n, text=self.sub_text, preferred=self._nav_idx
+        )
 
     def _inflected_surface(self, index: int) -> str:
         return self.tokenizer.inflected_in(self.tokens, index)

@@ -1,5 +1,5 @@
 {
-  "saitenka.app.backlog": 2,
+  "saitenka.app.backlog": 1,
   "saitenka.app.bindings": 1,
   "saitenka.app.commands.attach": 3,
   "saitenka.app.embedded_subs": 1,
@@ -11,7 +11,7 @@
   "saitenka.app.miner_ui": 11,
   "saitenka.app.native_subtitles": 17,
   "saitenka.app.nested_popup": 13,
-  "saitenka.app.prefetch": 9,
+  "saitenka.app.prefetch": 7,
   "saitenka.app.reader_deps": 2,
   "saitenka.app.session_stats": 3,
   "saitenka.app.sidebar": 18,

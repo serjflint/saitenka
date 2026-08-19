@@ -49,11 +49,13 @@ def _track_metadata(tracks: list[object], sid: int | None) -> dict[str, object]:
     return {key: track[key] for key in keys if key in track}
 
 
-def _cue_languages(reader) -> tuple[str, str]:
-    secondary = reader._secondary_text()
-    if reader.subtitle_language == MAIN_LANG:
-        return reader.sub_text, secondary
-    return secondary, reader.sub_text
+def _cue_languages(primary: str, secondary: str, language: str) -> tuple[str, str]:
+    """A bookmark's (japanese, english) pair. Which side the ON-SCREEN cue is depends on which track
+    is primary — with English primary the roles swap, and storing them by position rather than by
+    language would file an English line as the Japanese one."""
+    if language == MAIN_LANG:
+        return primary, secondary
+    return secondary, primary
 
 
 @dataclass(frozen=True)
@@ -464,7 +466,9 @@ def capture_current(reader) -> BacklogEntry | None:
     if not video or start is None or end is None or not reader.sub_text.strip():
         return None  # `mine_intents` owns the eligibility decision and its announcement
 
-    jp_text, en_text = _cue_languages(reader)
+    jp_text, en_text = _cue_languages(
+        reader.sub_text, reader._secondary_text(), reader.subtitle_language
+    )
     hovered = reader.tokens[reader.hover] if 0 <= reader.hover < len(reader.tokens) else None
     tracks = reader._get("track-list") or []
     capture = Capture(

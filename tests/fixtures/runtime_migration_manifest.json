@@ -58,10 +58,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/backlog.py::_cue_languages"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/backlog.py::capture_current"
     ],
     [
@@ -302,10 +298,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/prefetch.py::_candidates"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/prefetch.py::_head_prefetch_candidate"
     ],
     [
@@ -323,10 +315,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/prefetch.py::start_prefetch"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/prefetch.py::upcoming_cue_texts"
     ],
     [
       "reader-parameter",

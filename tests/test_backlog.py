@@ -272,3 +272,22 @@ def test_bookmark_key_is_configurable():
     reader._register_keybinds()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"
+
+
+def test_a_bookmark_stores_the_cue_by_language_not_by_position():
+    """With English primary the roles swap, so filing them by position would record an English line
+    as the card's Japanese side — invisible until the card is reviewed."""
+    from saitenka.app.backlog import _cue_languages
+    from saitenka.app.languages import MAIN_LANG, SECOND_LANG
+
+    assert _cue_languages("日本語", "english", MAIN_LANG) == ("日本語", "english")
+    assert _cue_languages("english", "日本語", SECOND_LANG) == ("日本語", "english")
+
+
+def test_a_bookmark_with_no_secondary_track_still_records_the_primary():
+    """mpv answers empty for `secondary-sub-text` when no second track is loaded — the common case,
+    and it must not lose the line the user actually bookmarked."""
+    from saitenka.app.backlog import _cue_languages
+    from saitenka.app.languages import MAIN_LANG
+
+    assert _cue_languages("日本語", "", MAIN_LANG) == ("日本語", "")
