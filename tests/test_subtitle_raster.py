@@ -251,7 +251,15 @@ def test_a_draw_onto_a_closed_surface_settles_its_caller_as_uncommitted(recorder
     settled: list[bool] = []
 
     renderer.close()
-    transaction = renderer.draw(reader, on_settled=settled.append)
+    from saitenka.app.subtitle_render import build_draw_request
+
+    result = renderer.draw(
+        build_draw_request(reader),
+        reader.lifecycle_surfaces,
+        reader.ipc,
+        on_settled=settled.append,
+    )
+    transaction = None if result is None else result.transaction
 
     assert transaction is None
     assert settled == [False]

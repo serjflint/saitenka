@@ -2024,7 +2024,7 @@ def test_native_visibility_retries_without_repeating_diagnostic(tmp_path: Path, 
     with caplog.at_level(logging.WARNING, logger="saitenka.app.subtitle_render"):
         renderer.cue_changed(result, nonempty=True)
         assert renderer.ownership_state.owner.value == "unknown"
-        renderer.draw(result)
+        result.subtitle_pipeline.draw_current(result)
         # The retry is a named deadline now: nothing happens until it is due.
         assert ipc.timers["subtitle:ownership-retry"][1] == pytest.approx(0.05)
         assert ipc.commands.count(("set_property", "sub-visibility", True)) == 1
@@ -2129,9 +2129,17 @@ def test_an_overtaken_subtitle_surface_never_acknowledges_over_the_current_one(
     result.set_subtitle("猫を見る")
     ipc.correlate_commands = True
 
-    older = renderer._fallback.draw(result)
-    newer = renderer._fallback.draw(result)
+    from saitenka.app.subtitle_render import build_draw_request
+
+    def stage():
+        return renderer._fallback.draw(
+            build_draw_request(result), result.lifecycle_surfaces, result.ipc
+        )
+
+    older, newer = stage(), stage()
     assert older is not None and newer is not None  # an open surface always mints a transaction
+    older, newer = older.transaction, newer.transaction
+    assert older is not None and newer is not None
     assert newer.revision > older.revision
 
     assert ipc.deliver_runtime_mpv(match="overlay-add")  # the older commit, now overtaken

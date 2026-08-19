@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
@@ -114,6 +114,9 @@ class DrawRequest:
     hover: int
     hover_span: tuple[int, int] | None
     styles: list | None
+    #: The CURRENT cue's hit boxes. The legacy path produces them and the native focus path reads
+    #: them, so they travel in the request rather than being re-read off a host mid-draw.
+    boxes: list[WordBox] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +126,36 @@ class DrawResult:
     boxes: list[WordBox]
     origin: tuple[int, int]
     transaction: SurfaceTransaction | None
+
+
+def build_draw_request(reader: Reader) -> DrawRequest:
+    """Snapshot the host once per draw, so the values cannot drift apart mid-render.
+
+    The ONE function in the draw path that reads a `Reader`; everything downstream of it is a value.
+    It is a `reader-parameter` row and it should stay one — this is a seam, not a leak, and the gate
+    counting it is what keeps that judgement explicit instead of assumed.
+
+    Not inlined at its two callers: two copies of this snapshot that drift apart is precisely the
+    bug `DrawRequest` was introduced to prevent.
+    """
+    return DrawRequest(
+        text=reader.sub_text,
+        lines=reader.lines,
+        osd=reader.osd,
+        sub_size=reader.sub_size,
+        bg_opacity=reader.sub_bg_opacity,
+        bottom_margin=reader.bottom_margin,
+        secondary_role=reader.subtitle_language == SECOND_LANG,
+        upgrade_pending=reader._sub_pending is not None,
+        annotation_degraded=reader._annotation_degraded,
+        annotation_visible=subtitle_raster.annotation_visible(
+            mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
+        ),
+        hover=reader.hover,
+        hover_span=reader._hover_span,
+        styles=reader.styles,
+        boxes=reader.boxes,
+    )
 
 
 FOCUS_PAD = 3
@@ -273,41 +306,28 @@ class SubtitleRenderer:
         )
 
     def draw(
-        self, reader: Reader, *, on_settled: Callable[[bool], None] | None = None
-    ) -> SurfaceTransaction | None:
-        """Host shim: snapshot, render, write the geometry back.
+        self,
+        request: DrawRequest,
+        surfaces=None,
+        _ipc=None,
+        /,
+        *,
+        on_settled: Callable[[bool], None] | None = None,
+    ) -> DrawResult | None:
+        """Render the cue. No host: the request IS the snapshot, and the result IS the geometry.
 
-        The snapshot is inline rather than a named builder on purpose — it would be a second symbol
-        taking the host to no benefit, and the Reader-host gate counts it. Everything below `render`
-        is a value; these are the only lines in the draw path that know about a Reader.
+        `_ipc` is unused here and present because the protocol has one member per renderer, not one
+        per renderer's needs — the native focus path writes to mpv directly.
         """
-        request = DrawRequest(
-            text=reader.sub_text,
-            lines=reader.lines,
-            osd=reader.osd,
-            sub_size=reader.sub_size,
-            bg_opacity=reader.sub_bg_opacity,
-            bottom_margin=reader.bottom_margin,
-            secondary_role=reader.subtitle_language == SECOND_LANG,
-            upgrade_pending=reader._sub_pending is not None,
-            annotation_degraded=reader._annotation_degraded,
-            annotation_visible=subtitle_raster.annotation_visible(
-                mode=reader.annotation_mode, hover_annotation=reader._annotation_hover
-            ),
-            hover=reader.hover,
-            hover_span=reader._hover_span,
-            styles=reader.styles,
-        )
-        result = self.render(request, reader.lifecycle_surfaces, on_settled=on_settled)
-        if result is None:
-            return None
-        reader.boxes = result.boxes
-        reader.sub_origin = result.origin
-        reader._first_sub_logged = self._logged_first
-        return result.transaction
+        return self.render(request, surfaces, on_settled=on_settled)
 
-    def clear(self, reader: Reader) -> None:
-        self.retire(reader.lifecycle_surfaces)
+    @property
+    def logged_first(self) -> bool:
+        """Whether a first-subtitle line has already been logged, for the caller to carry back."""
+        return self._logged_first
+
+    def clear(self, surfaces=None, _ipc=None, /) -> None:
+        self.retire(surfaces)
 
     def retire(self, surfaces) -> None:
         """Take the cue's pixels down. Separate from `clear` so the ownership FSM, which has the
@@ -318,10 +338,15 @@ class SubtitleRenderer:
 class NullRenderer:
     """No-op draw strategy: run the reader's hover/nav/prefetch logic without rasterizing."""
 
-    def draw(self, reader: Reader) -> None:
-        pass
+    def draw(self, _request: DrawRequest, _surfaces=None, _ipc=None, /, **_ports) -> None:
+        """Nothing is rastered, so nothing settles — the caller's `on_settled` never fires.
 
-    def clear(self, reader: Reader) -> None:
+        `**_ports` rather than naming `on_settled`: it would be an unused argument the lint flags,
+        and swallowing the protocol's keyword ports is exactly what a no-op renderer does.
+        """
+        return
+
+    def clear(self, _surfaces=None, _ipc=None, /) -> None:
         pass
 
     def close(self) -> None:
@@ -581,7 +606,7 @@ class NativeVisibleRenderer:
         def finish(*, accepted: bool) -> None:
             owner_before = self._state.owner
             if not accepted:
-                self._fallback.clear(reader)
+                self._fallback.clear(reader.lifecycle_surfaces, reader.ipc)
             self._state, followups = reduce_ownership(
                 self._state,
                 OwnershipEvent(
@@ -609,7 +634,12 @@ class NativeVisibleRenderer:
             self._execute(reader, followups)
 
         try:
-            self._fallback.draw(reader, on_settled=lambda ok: settled(committed=ok))
+            self._fallback.draw(
+                build_draw_request(reader),
+                reader.lifecycle_surfaces,
+                reader.ipc,
+                on_settled=lambda ok: settled(committed=ok),
+            )
         except Exception:  # noqa: BLE001  # rollback preserves the last confirmed surface
             settled(committed=False)
 
@@ -647,7 +677,7 @@ class NativeVisibleRenderer:
         if action.kind == ActionKind.ASSERT_NATIVE_VISIBILITY:
             self._assert_native(reader, action)
         elif action.kind == ActionKind.CLEAR_LEGACY:
-            self._fallback.clear(reader)
+            self._fallback.clear(reader.lifecycle_surfaces, reader.ipc)
         elif action.kind == ActionKind.CLEAR_INTERACTION:
             self._hide_focus(reader.ipc)
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
@@ -789,35 +819,41 @@ class NativeVisibleRenderer:
         if nonempty:
             self.activate(reader)
 
-    def draw(self, reader: Reader) -> None:
+    def draw(
+        self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
+    ) -> DrawResult | None:
+        """Focus box over mpv's own pixels, or the legacy render when mpv does not own them."""
         if self._state.owner == PixelOwner.LEGACY:
-            self._fallback.draw(reader)
-            return
-        if not self.activate(reader):
-            return
-        if reader.hover < 0 or box_for_token(reader.boxes, reader.hover) is None:
-            self._hide_focus(reader.ipc)
-            return
-        rect = focus_rect(reader.boxes, reader.hover, reader._hover_span)
+            return self._fallback.draw(request, surfaces, ipc, on_settled=on_settled)
+        # `activate` drives the ownership FSM and needs the host, so the coordinator runs it just
+        # before this and we read only its outcome. Splitting them is what lets `draw` be host-free.
+        if self._state.owner != PixelOwner.NATIVE:
+            return None
+        rect = (
+            focus_rect(request.boxes, request.hover, request.hover_span)
+            if request.hover >= 0 and box_for_token(request.boxes, request.hover) is not None
+            else None
+        )
         if rect is None:
-            self._hide_focus(reader.ipc)
-            return
+            self._hide_focus(ipc)
+            return None
         self._submit_focus(
-            reader.ipc,
+            ipc,
             SurfaceAction.PRESENT,
             (
                 NATIVE_FOCUS_ID,
                 "ass-events",
                 focus_drawing(rect),
-                reader.osd[0],
-                reader.osd[1],
+                request.osd[0],
+                request.osd[1],
                 1,
             ),
         )
+        return None
 
-    def clear(self, reader: Reader) -> None:
-        self._hide_focus(reader.ipc)
-        self._fallback.clear(reader)
+    def clear(self, surfaces=None, ipc=None, /) -> None:
+        self._hide_focus(ipc)
+        self._fallback.clear(surfaces, ipc)
 
     def close(self) -> None:
         self._fallback.close()
@@ -834,7 +870,7 @@ class NativeVisibleRenderer:
 
     def suspend_for_overlay(self, reader: Reader) -> None:
         self._hide_focus(reader.ipc)
-        self._fallback.clear(reader)
+        self._fallback.clear(reader.lifecycle_surfaces, reader.ipc)
         _send_visibility(reader.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
     def resume_after_overlay(self, reader: Reader) -> None:

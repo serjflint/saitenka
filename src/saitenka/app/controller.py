@@ -373,7 +373,9 @@ class Reader:
         self._subtitle_fetch_sequence = 0
         self._subtitle_force_select_revision = 0
         self._sub_picker_submit = sub_picker.configure_runtime_job(ipc)
-        current_renderer: CurrentSubtitleRenderer = renderer or SubtitleRenderer()
+        current_renderer: CurrentSubtitleRenderer = (
+            renderer if renderer is not None else SubtitleRenderer()
+        )
         self.native_geometry: native_subtitles.NativeSubtitleGeometry | None = None
         if o.subtitle_geometry.native_visible and renderer is None:
             current_renderer = NativeVisibleRenderer()

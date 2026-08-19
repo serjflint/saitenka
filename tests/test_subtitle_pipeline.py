@@ -26,11 +26,14 @@ from saitenka.subtitles import (
 
 class FakeCurrentRenderer:
     def __init__(self) -> None:
-        self.drawn_host: object | None = None
+        self.drawn: object | None = None
         self.closed = False
 
-    def draw(self, reader: object) -> None:
-        self.drawn_host = reader
+    def draw(self, request: object, _surfaces=None, _ipc=None, *, _on_settled=None) -> None:
+        self.drawn = request
+
+    def clear(self, _surfaces=None, _ipc=None) -> None:
+        pass
 
     def close(self) -> None:
         self.closed = True
@@ -213,13 +216,26 @@ def test_geometry_values_are_immutable() -> None:
 
 
 def test_coordinator_delegates_current_renderer() -> None:
+    """The coordinator hands the renderer a request, not the host it built it from.
+
+    `object()` no longer stands in for a reader: the point of the seam is that the renderer never
+    sees one, so the double asserts on what crosses it instead.
+    """
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+
     renderer = FakeCurrentRenderer()
-    coordinator = SubtitleModeCoordinator(renderer)
-    host = object()
+    reader = Reader(FakeIPC(), prefetch=False, renderer=renderer)
+    coordinator = reader.subtitle_pipeline
+    coordinator.renderer = renderer
 
-    coordinator.draw_current(host)  # type: ignore[arg-type]
+    coordinator.draw_current(reader)
 
-    assert renderer.drawn_host is host
+    assert renderer.drawn is not None
+    assert renderer.drawn is not reader
+    assert renderer.drawn.osd == reader.osd
+    reader.close()
 
 
 def test_worker_drops_superseded_pending_request() -> None:

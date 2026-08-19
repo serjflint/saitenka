@@ -482,14 +482,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_pipeline.py::CurrentSubtitleRenderer.draw"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_pipeline.py::SubtitleModeCoordinator.activate"
     ],
     [
@@ -554,10 +546,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.clear"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.connection_replaced"
     ],
     [
@@ -571,10 +559,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.degrade_geometry"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer.draw"
     ],
     [
       "reader-parameter",
@@ -594,27 +578,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NullRenderer.clear"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::NullRenderer.draw"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::SubtitleRenderer.activate"
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.clear"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/subtitle_render.py::SubtitleRenderer.deactivate"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/subtitle_render.py::SubtitleRenderer.draw"
     ],
     [
       "reader-parameter",
@@ -623,6 +591,10 @@
     [
       "reader-parameter",
       "src/saitenka/app/subtitle_render.py::SubtitleRenderer.suspend_for_overlay"
+    ],
+    [
+      "reader-parameter",
+      "src/saitenka/app/subtitle_render.py::build_draw_request"
     ],
     [
       "reader-parameter",

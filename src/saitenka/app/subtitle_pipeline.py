@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.controller import Reader
+    from saitenka.app.subtitle_render import DrawResult
     from saitenka.subtitles.geometry import GeometryBackend, GeometryRequest
 
     GeometryRequestBuilder = Callable[[], GeometryRequest]
@@ -37,9 +38,17 @@ class JobSubmitter(Protocol):
 
 
 class CurrentSubtitleRenderer(Protocol):
-    def draw(self, reader: Reader) -> object: ...
+    """One member per renderer, so the widest of them sets the signature for all.
 
-    def clear(self, reader: Reader) -> None: ...
+    That is precisely why these take a request rather than a host: while `draw` took a `Reader`,
+    the native renderer could never be narrower than the legacy one it shares this protocol with.
+    """
+
+    def draw(
+        self, request, surfaces=None, ipc=None, /, *, on_settled=None
+    ) -> DrawResult | None: ...
+
+    def clear(self, surfaces=None, ipc=None, /) -> None: ...
 
     def close(self) -> None: ...
 
@@ -111,17 +120,36 @@ class SubtitleModeCoordinator:
         self._renderer = renderer
 
     def draw_current(self, reader: Reader) -> None:
-        self._renderer.draw(reader)
+        """The one place that turns a host into a draw request and the result back into host state.
+
+        Was spread across each renderer's `draw`. Collapsing it here is what makes the renderers
+        host-free: they share one protocol member, so the widest of them set the signature for all.
+        """
+        from saitenka.app.subtitle_render import build_draw_request
+
+        activate = getattr(self._renderer, "activate", None)
+        if activate is not None:
+            activate(reader)
+        result = self._renderer.draw(
+            build_draw_request(reader), reader.lifecycle_surfaces, reader.ipc
+        )
+        if result is None:
+            return
+        # Returned, not assigned by the renderer: the boxes and origin belong to the cue that
+        # produced them, and writing them onto a host mid-render outlives a superseded cue.
+        reader.boxes = result.boxes
+        reader.sub_origin = result.origin
+        reader._first_sub_logged = getattr(self._renderer, "logged_first", reader._first_sub_logged)
 
     def clear(self, reader: Reader) -> None:
-        self._renderer.clear(reader)
+        self._renderer.clear(reader.lifecycle_surfaces, reader.ipc)
 
     def activate(self, reader: Reader) -> None:
         activate = getattr(self._renderer, "reassert", None) or getattr(
             self._renderer, "activate", None
         )
         if activate is not None and activate(reader) is False:
-            self._renderer.draw(reader)
+            self.draw_current(reader)
 
     def geometry_degraded(self, reader: Reader) -> None:
         degrade = getattr(self._renderer, "degrade_geometry", None)

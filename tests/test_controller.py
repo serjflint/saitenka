@@ -469,7 +469,16 @@ def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
     )
 
     class PublishingRenderer:
-        def draw(self, reader: Reader) -> None:
+        """Publishes geometry at draw. Uses `activate`, which still receives the host, because the
+        cue identity it fabricates is host state rather than anything in a draw request."""
+
+        def clear(self, _surfaces=None, _ipc=None) -> None:
+            pass
+
+        def draw(self, _request=None, _surfaces=None, _ipc=None, *, _on_settled=None) -> None:
+            return None
+
+        def activate(self, reader: Reader) -> None:
             track_id = SubtitleTrackId("track-1")
             source_order = {"いち": 1, "に": 2}[reader.sub_text]
             event_id = SubtitleEventId(

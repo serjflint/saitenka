@@ -18,14 +18,20 @@ class FakeIPC(util.FakeIPC):
 
 
 class _SpyRenderer:
-    """A draw strategy that records each draw (via a callback taking the reader) instead of
-    rasterizing — the public seam for tests that assert a redraw happened or captured state at draw."""
+    """A draw strategy that records each draw request instead of rasterizing.
+
+    The callback receives the `DrawRequest`, which is what the renderer actually sees — asserting
+    against host attributes would be reaching back across the seam the request exists to close.
+    """
 
     def __init__(self, on_draw):
         self._on_draw = on_draw
 
-    def draw(self, reader):
-        self._on_draw(reader)
+    def draw(self, request, _surfaces=None, _ipc=None, *, _on_settled=None):
+        self._on_draw(request)
+
+    def clear(self, _surfaces=None, _ipc=None):
+        pass
 
 
 def test_full_annotations_remain_the_default():
@@ -119,7 +125,7 @@ def test_leaving_subtitle_restores_neutral_presentation(monkeypatch):
     reader._annotation_hover = True
     states = []
     monkeypatch.setattr(
-        reader, "renderer", _SpyRenderer(lambda rd: states.append(rd._annotation_hover))
+        reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))
     )
 
     update_hover_impl(reader)
@@ -134,7 +140,7 @@ def test_cue_change_resets_hover_only_presentation(monkeypatch):
     reader._annotation_hover = True
     states = []
     monkeypatch.setattr(
-        reader, "renderer", _SpyRenderer(lambda rd: states.append(rd._annotation_hover))
+        reader, "renderer", _SpyRenderer(lambda rq: states.append(rq.annotation_visible))
     )
 
     reader.set_subtitle("猫")
@@ -149,7 +155,7 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
     drawn = []
     toasts = []
     monkeypatch.setattr(
-        reader, "renderer", _SpyRenderer(lambda rd: drawn.append(rd.annotation_mode))
+        reader, "renderer", _SpyRenderer(lambda rq: drawn.append(rq.annotation_visible))
     )
     monkeypatch.setattr(reader, "_toast", lambda text, *_a, **_k: toasts.append(text))
 
@@ -157,7 +163,7 @@ def test_toggle_changes_presentation_without_playback_commands(monkeypatch):
 
     assert (reader.annotation_mode, drawn, toasts) == (
         "hover",
-        ["hover"],
+        [False],  # hover-only with the cursor away -> annotations not visible in the request
         ["annotations: hover-only"],
     )
     assert not any(command[0] in {"set_property", "seek", "sub-seek"} for command in ipc.commands)
