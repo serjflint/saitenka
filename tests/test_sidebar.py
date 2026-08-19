@@ -457,3 +457,61 @@ def test_ui_scale_increases_sidebar_rows_and_reduces_capacity():
 
     assert enlarged.image.width > normal.image.width
     assert enlarged.row_capacity < normal.row_capacity
+
+
+def test_row_capacity_follows_the_screen_and_the_chrome_scale() -> None:
+    """A taller panel fits more rows; a larger chrome scale fits fewer of them in the same space.
+    Both are needed, and checking it takes no session now."""
+    from saitenka.app.sidebar import _capacity
+
+    assert _capacity((1920, 1080), 1.0) > _capacity((1920, 720), 1.0)
+    assert _capacity((1920, 1080), 2.0) < _capacity((1920, 1080), 1.0)
+    assert _capacity((640, 200), 1.0) >= 1  # never zero, however small the screen
+
+
+def test_cue_colours_are_recomputed_when_the_known_set_changes() -> None:
+    """The cache key carries the scorer's identity, not just the text: the same line scores
+    differently once the known-word set does, and a text-only key would serve the old colours."""
+    from saitenka.app.sidebar import _cue_parts
+
+    class Scorer:
+        def __init__(self, colour):
+            self.colour = colour
+
+        def score_line(self, tokens):
+            return [type("S", (), {"color": self.colour})() for _ in tokens]
+
+    class Tok:
+        def tokenize(self, line):
+            return [type("T", (), {"surface": line})()]
+
+    cache: dict = {}
+    cue = Cue(0.0, 1.0, "猫")
+    first = _cue_parts(cache, 0, cue, language="jp", scorer=Scorer((1, 1, 1, 1)), tokenizer=Tok())
+    second = _cue_parts(cache, 0, cue, language="jp", scorer=Scorer((9, 9, 9, 9)), tokenizer=Tok())
+
+    assert first != second
+
+
+def test_a_bookmark_falls_back_to_the_other_language() -> None:
+    """A capture may only have one side, and showing a blank row would read as a broken bookmark."""
+    from saitenka.app.backlog import BacklogEntry
+    from saitenka.app.sidebar import _entry_text
+
+    only_jp = BacklogEntry(
+        id=1,
+        media_id=1,
+        cue_start=0.0,
+        cue_end=1.0,
+        jp_text="猫を見る",
+        en_text="",
+        subtitle_track={},
+        hovered_surface=None,
+        hovered_lemma=None,
+        status="open",
+        created_at="",
+        updated_at="",
+    )
+
+    assert _entry_text(only_jp, "en") == "猫を見る"
+    assert _entry_text(only_jp, "jp") == "猫を見る"

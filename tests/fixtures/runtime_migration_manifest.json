@@ -522,18 +522,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/sidebar.py::_analysis_status"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_capacity"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_cue_parts"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/sidebar.py::_cue_statuses"
     ],
     [
@@ -543,10 +531,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sidebar.py::_entry_row"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::_entry_text"
     ],
     [
       "reader-parameter",
@@ -571,10 +555,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/sidebar.py::_track_rows"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/sidebar.py::contains"
     ],
     [
       "reader-parameter",

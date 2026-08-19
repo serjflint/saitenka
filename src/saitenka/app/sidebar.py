@@ -48,9 +48,9 @@ def _format_time(seconds: float) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
-def _capacity(reader: Reader) -> int:
-    height = max(180, round(reader.osd[1] * 0.84))
-    scale = reader.chrome_scale
+def _capacity(osd: tuple[int, int], scale: float) -> int:
+    """How many rows fit, from the screen and the chrome scale alone."""
+    height = max(180, round(osd[1] * 0.84))
     return max(1, (height - round(52 * scale) - round(28 * scale)) // round(54 * scale))
 
 
@@ -73,17 +73,25 @@ def _ensure_store(reader: Reader) -> BacklogStore:
     return store
 
 
-def _cue_parts(reader: Reader, cue_index: int, cue: Cue) -> tuple[tuple[str, tuple], ...]:
-    if reader.subtitle_language == SECOND_LANG or reader.scorer is None:
+def _cue_parts(
+    cache: dict, cue_index: int, cue: Cue, *, language: str, scorer, tokenizer
+) -> tuple[tuple[str, tuple], ...]:
+    """Coloured spans for one cue, memoised in ``cache``.
+
+    The key carries the scorer's identity as well as the language: the same line scores differently
+    once the known-word set changes, and a cache keyed only on text would keep serving the colours
+    from before.
+    """
+    if language == SECOND_LANG or scorer is None:
         return ((cue.text.replace("\n", " "), PLAIN),)
-    key = (reader.subtitle_language, cue_index, cue.text, id(reader.scorer))
-    cached = reader.sidebar.style_cache.get(key)
+    key = (language, cue_index, cue.text, id(scorer))
+    cached = cache.get(key)
     if cached is not None:
         return cached
-    tokens = reader.tokenizer.tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
-    styles = reader.scorer.score_line(tokens)
+    tokens = tokenizer.tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
+    styles = scorer.score_line(tokens)
     parts = tuple((token.surface, style.color) for token, style in zip(tokens, styles, strict=True))
-    reader.sidebar.style_cache[key] = parts
+    cache[key] = parts
     return parts
 
 
@@ -105,8 +113,8 @@ def _cue_statuses(reader: Reader) -> dict[int, str]:
     return statuses
 
 
-def _analysis_status(reader: Reader, cue_index: int) -> str | None:
-    result = analysis_overlay.cue_result(reader.analysis.current, cue_index)
+def _analysis_status(analysis, cue_index: int) -> str | None:
+    result = analysis_overlay.cue_result(analysis, cue_index)
     if result is None:
         return None
     labels = []
@@ -133,7 +141,10 @@ def _track_rows(
                 actions += (SidebarAction("+", "mine", cue_index),)
         status = " · ".join(
             label
-            for label in (statuses.get(cue_index), _analysis_status(reader, cue_index))
+            for label in (
+                statuses.get(cue_index),
+                _analysis_status(reader.analysis.current, cue_index),
+            )
             if label
         )
         rows.append(
@@ -141,7 +152,14 @@ def _track_rows(
                 value=cue_index,
                 timestamp=_format_time(cue.start),
                 text=cue.text,
-                parts=_cue_parts(reader, cue_index, cue),
+                parts=_cue_parts(
+                    reader.sidebar.style_cache,
+                    cue_index,
+                    cue,
+                    language=reader.subtitle_language,
+                    scorer=reader.scorer,
+                    tokenizer=reader.tokenizer,
+                ),
                 status=status or None,
                 active=cue_index == active,
                 click_kind="seek",
@@ -191,8 +209,9 @@ def _media_row(record: MediaRecord, statuses: list[str]) -> SidebarRow:
     )
 
 
-def _entry_text(reader: Reader, entry: BacklogEntry) -> str:
-    if reader.subtitle_language == SECOND_LANG:
+def _entry_text(entry: BacklogEntry, language: str) -> str:
+    """The side of a bookmark the reader's current language wants, falling back to the other."""
+    if language == SECOND_LANG:
         return entry.en_text or entry.jp_text
     return entry.jp_text or entry.en_text
 
@@ -205,7 +224,7 @@ def _entry_row(reader: Reader, entry: BacklogEntry, active: int) -> SidebarRow:
         and abs(active_cue.start - entry.cue_start) < 0.05
         and abs(active_cue.end - entry.cue_end) < 0.05
     )
-    text = _entry_text(reader, entry)
+    text = _entry_text(entry, reader.subtitle_language)
     return SidebarRow(
         value=entry.id,
         timestamp=_format_time(entry.cue_start),
@@ -308,7 +327,7 @@ def redraw(reader: Reader) -> None:
     width = max(320, min(target_width, reader.osd[0] - margin * 2))
     height = max(180, round(reader.osd[1] * 0.84))
     x, y = reader.osd[0] - width - margin, round(reader.osd[1] * 0.08)
-    capacity = _capacity(reader)
+    capacity = _capacity(reader.osd, reader.chrome_scale)
     unavailable = None
     try:
         if reader.sidebar.view == "track":
@@ -351,7 +370,7 @@ def set_open(reader: Reader, *, open: bool) -> None:  # noqa: A002
     reader.sidebar.open = open
     if reader.sidebar.open:
         active = _active_index(reader)
-        reader.sidebar.scroll = max(0, active - _capacity(reader) // 2)
+        reader.sidebar.scroll = max(0, active - _capacity(reader.osd, reader.chrome_scale) // 2)
         reader.sidebar.last_active = active
         redraw(reader)
     else:
@@ -367,17 +386,19 @@ def on_index_changed(reader: Reader) -> None:
     redraw(reader)
 
 
-def contains(reader: Reader, x: float, y: float) -> bool:
-    return bool(
-        reader.sidebar.open and reader.sidebar.rect and reader._in_rect(reader.sidebar.rect, x, y)
-    )
+def contains(state: SidebarState, x: float, y: float) -> bool:
+    """Whether ``(x, y)`` is inside the shown sidebar."""
+    if not (state.open and state.rect):
+        return False
+    left, top, width, height = state.rect
+    return left <= x < left + width and top <= y < top + height
 
 
 def suppress_hover(reader: Reader) -> bool:
     if not reader.sidebar.open:
         return False
     mp = reader._prop("mouse-pos") or {}
-    if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
+    if not contains(reader.sidebar, mp.get("x", -1), mp.get("y", -1)):
         return False
     reader.set_annotation_hover(revealed=False)
     reader.set_hover(-1)
@@ -388,9 +409,9 @@ def scroll(reader: Reader, steps: int) -> bool:
     if not reader.sidebar.open:
         return False
     mp = reader._prop("mouse-pos") or {}
-    if not contains(reader, mp.get("x", -1), mp.get("y", -1)):
+    if not contains(reader.sidebar, mp.get("x", -1), mp.get("y", -1)):
         return False
-    maximum = max(0, reader.sidebar.total - _capacity(reader))
+    maximum = max(0, reader.sidebar.total - _capacity(reader.osd, reader.chrome_scale))
     reader.sidebar.scroll = max(
         0, min(maximum, reader.sidebar.scroll + steps * ROWS_PER_WHEEL_STEP)
     )
@@ -411,7 +432,7 @@ def update(reader: Reader) -> None:
     changed = active != reader.sidebar.last_active or geometry != reader.sidebar.geometry
     if not changed and reader.sidebar.manual_hold:
         return
-    capacity = _capacity(reader)
+    capacity = _capacity(reader.osd, reader.chrome_scale)
     old_scroll = reader.sidebar.scroll
     visible = reader.sidebar.scroll <= active < reader.sidebar.scroll + capacity
     if active >= 0 and (not reader.sidebar.manual_hold or visible):
@@ -458,7 +479,7 @@ def _activate_hit(reader: Reader, hit) -> None:
 
 
 def on_click(reader: Reader, x: float, y: float) -> bool:
-    if not contains(reader, x, y) or reader.sidebar.rect is None:
+    if not contains(reader.sidebar, x, y) or reader.sidebar.rect is None:
         return False
     local_x, local_y = x - reader.sidebar.rect[0], y - reader.sidebar.rect[1]
     hit = next((box for box in reader.sidebar.hits if box.contains(local_x, local_y)), None)
