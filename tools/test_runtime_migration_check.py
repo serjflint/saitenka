@@ -25,12 +25,10 @@ def test_runtime_migration_manifest_matches_production() -> None:
     # Two live rows, so the scanner is checked against production and not only against the
     # synthetic source below. They are anchors, not landmarks: as the migration converts them, point
     # these at whatever `poe runtime-status` still reports rather than weakening the assertion.
-    # `polled-deadline` is at zero, so these are `tick-stage` — the next kind WP5 empties.
+    # `tick-stage` is down to the driver itself — `poll_once` and `run`, which WP6 deletes
+    # together. When it does, point these at whatever `poe runtime-status` still reports.
     assert checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader.poll_once") in actual
-    assert (
-        checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader._update_interaction")
-        in actual
-    )
+    assert checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader.run") in actual
 
 
 def test_scanner_detects_each_debt_category() -> None:

@@ -122,7 +122,6 @@ from saitenka.app.runtime import (
     LegacyCommandExecutor,
     LegacyPickerRepeatGuard,
     TickPipeline,
-    TickStage,
 )
 from saitenka.app.subtitle_pipeline import (
     GEOMETRY_LANE,
@@ -2651,7 +2650,10 @@ class Reader:
             log.error("script-message failed (%s): %s", result.error_type, command.name)
 
     def _build_tick_pipeline(self) -> TickPipeline:
-        return TickPipeline((TickStage("update-interaction", self._update_interaction),))
+        # Empty: every feature stage has moved to the delta or deadline that drives it. The
+        # pipeline itself, with `poll_once` and `run`, is WP6's to delete — one atomic switch,
+        # not a slow dismantling that leaves the runtime half-driven.
+        return TickPipeline(())
 
     def _redraw_after_resize(self) -> None:
         """Re-lay everything the window size decides, after an `osd-dimensions` change.
@@ -2938,13 +2940,6 @@ class Reader:
         self._subtitle_force_select_revision += 1
         self.episode = EpisodeContext()
 
-    def _update_interaction(self) -> None:
-        self._feed_episode_annotation()
-        self._sync_mouse_capture()
-        self._update_prefetch()
-        if self._translation_visible() and self._secondary_text() != self._trans_text:
-            self._draw_translation()
-
     # --- run loop -----------------------------------------------------------------------------
     def current_media_path(self) -> Path | None:
         """mpv's current file as an absolute path (``path`` is verbatim what was loaded, so resolve a
@@ -3024,16 +3019,33 @@ class Reader:
             self._drain_event(ev, picker_guard)
         self._settle_cue_observation()
 
+    def _settle_interaction(self) -> None:
+        """Everything that reconciles against the turn's outcome rather than a wall clock.
+
+        These ran on a 40 Hz tick stage. They are per-*turn* concerns — a queue to top up, pixels
+        to align with the hover and cue the turn just settled — so the drain boundary is where they
+        belong, and a runtime with no ticks still runs them.
+
+        A relocation, not yet a decomposition: each has a delta that really drives it (an
+        annotation terminal, the pointer, `secondary-sub-text`), and splitting them out is the next
+        contract. Every one is guarded by a cheap early return, so asking once per turn is nothing
+        like the cost of asking forty times a second.
+        """
+        self._feed_episode_annotation()
+        self._sync_mouse_capture()
+        self._update_prefetch()
+        if self._translation_visible() and self._secondary_text() != self._trans_text:
+            self._draw_translation()
+        # The active row tracks the loaded index, language and scorer as well as the cue, and those
+        # change without a cue settling — so this is outside the early return below.
+        sidebar.update(self)
+
     def _settle_cue_observation(self) -> None:
         """Reconcile at the batch boundary, not per delta. mpv splits one cue across sub-text,
         sub-start and sub-end observations; the projection publishes each (it sees one observation
         at a time and has no batch), so reconciling per delta would build the cue three times, twice
         against a half-updated identity. The drain is where the batch exists, so it coalesces."""
-        # The sidebar's active row follows the cue, so it re-follows at the drain boundary rather
-        # than being asked 40x a second whether the cue moved. Unconditional, and outside the
-        # early return below: it also tracks the loaded index, language and scorer, and those
-        # change without a cue settling. It costs a flag check while the sidebar is shut.
-        sidebar.update(self)
+        self._settle_interaction()
         cue, self._pending_cue = self._pending_cue, None
         # A reconcile that decides to do nothing used to be as silent as a geometry schedule that
         # never started; the two together are what make a dropped cue traceable.
