@@ -157,6 +157,12 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
         gateway.close()
 
 
+#: Bounds a hang, never a race. Both are far past what the work needs; a test that only passes
+#: when the machine is idle is the defect these replace.
+_WEDGE_TIMEOUT = 30.0
+_REPLACEMENT_TIMEOUT = 10.0
+
+
 def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
     ipc = FakeIPC()
     gateway = runtime_gateway(ipc)
@@ -170,7 +176,10 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
         def probe() -> bool:
             calls[name] += 1
             if calls[name] == 1:
-                releases[name].wait(1.0)
+                # Stays wedged for the whole assertion — released only by the `finally` below. A
+                # short wait here self-releases under load, and the freed probe can be retried, so
+                # `calls` grows past two and the test fails describing the wrong thing.
+                releases[name].wait(_WEDGE_TIMEOUT)
                 return False
             return True
 
@@ -189,7 +198,11 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
         assert all(probe.request() for probe in probes)
         clock[0] = 6.0
         assert all(probe.request() for probe in probes)
-        for _ in range(200):
+        # A deadline, not a fixed number of 1 ms sleeps: the replacement runs on a lane thread, and
+        # under `-n auto` the old 200 ms budget expired before it was ever scheduled. The wait is a
+        # timeout guarding a hang, so it may be generous — what it must not be is a race.
+        deadline = time.monotonic() + _REPLACEMENT_TIMEOUT
+        while time.monotonic() < deadline:
             ipc.drain_events()
             if all(probe.value is True for probe in probes):
                 break
