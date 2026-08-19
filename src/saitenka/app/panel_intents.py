@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from saitenka.app.intents import DismissHover
+
 
 class Panel(StrEnum):
     SIDEBAR = "sidebar"
@@ -52,11 +54,6 @@ class OpenPanel:
 @dataclass(frozen=True, slots=True)
 class ClosePanel:
     panel: Panel
-
-
-@dataclass(frozen=True, slots=True)
-class DismissHover:
-    """Retire the tooltip, because a panel is about to cover the video it points at."""
 
 
 @dataclass(frozen=True, slots=True)

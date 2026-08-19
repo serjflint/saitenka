@@ -14,3 +14,8 @@ from dataclasses import dataclass
 class Announce:
     text: str
     kind: str = "ok"
+
+
+@dataclass(frozen=True, slots=True)
+class DismissHover:
+    """Retire the tooltip, because something is about to cover the video it points at."""

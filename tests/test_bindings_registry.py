@@ -98,7 +98,7 @@ def test_every_temporary_command_binding_has_one_deletion_owner():
 
 
 _COMMAND_ROUTE_CONTRACT = """\
-saitenka-toggle-overlay|session|global|modal|work-package-5
+saitenka-toggle-overlay|session|global|modal|migrated
 saitenka-cycle-profile|session|global|modal|work-package-5
 saitenka-toggle-hover-pause|session|global|modal|migrated
 saitenka-toggle-help|session|global|help|migrated

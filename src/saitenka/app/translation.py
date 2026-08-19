@@ -23,11 +23,13 @@ def setup_secondary(reader: Reader) -> int | None:
 
 
 def translation_visible(reader: Reader) -> bool:
-    """Should the EN translation be shown now? Manual toggle (`t`), OR auto-reveal while a tooltip is
-    up (auto-translate opt-in)."""
-    return reader.ov.visible and (
-        reader._translate_on or (reader.auto_translate and reader.hover >= 0)
-    )
+    """Should the EN translation be shown *now*?
+
+    Two conditions, and they are not interchangeable: whether the user wants it
+    (`Reader._translation_wanted`) and whether saitenka is drawing anything at all. Code deciding
+    what to do once the surfaces come back needs the first without the second.
+    """
+    return reader.ov.visible and reader._translation_wanted()
 
 
 def sync_auto_translation(reader: Reader) -> None:

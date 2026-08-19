@@ -40,6 +40,7 @@ from saitenka.app import (
     popups,
     prefetch,
     reader_deps,
+    session_intents,
     session_stats,
     sidebar,
     sub_picker,
@@ -95,7 +96,7 @@ from saitenka.app.bindings import (
     active_bindings,
 )
 from saitenka.app.config import ReaderOptions
-from saitenka.app.intents import Announce
+from saitenka.app.intents import Announce, DismissHover
 from saitenka.app.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.media import (
     copy_clipboard,
@@ -2116,7 +2117,7 @@ class Reader:
             miner_ui.hide_preview(self)
 
     def _apply_panel_effect(self, effect: panel_intents.PanelEffect) -> None:
-        if isinstance(effect, panel_intents.DismissHover):
+        if isinstance(effect, DismissHover):
             self.set_hover(-1)
         elif isinstance(effect, panel_intents.ReplayCardPreview):
             miner_ui.replay_preview(self)
@@ -2242,23 +2243,42 @@ class Reader:
     def _translation_visible(self) -> bool:
         return translation.translation_visible(self)
 
+    def _translation_wanted(self) -> bool:
+        """Whether the user wants the secondary line, independent of whether anything is drawn.
+
+        `toggle_overlay` decides what to do *after* the surfaces return, so it must not ask
+        `_translation_visible` — that answers False precisely because the overlay is still hidden.
+        """
+        return self._translate_on or (self.auto_translate and self.hover >= 0)
+
     def _sync_auto_translation(self) -> None:
         translation.sync_auto_translation(self)
 
     def toggle_translation(self) -> None:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_TRANSLATION)
 
+    # --- session commands: pure reducer, executed here (WP5.3) --------------------------------
     def toggle_overlay(self) -> None:
-        if self.ov.visible:
+        inputs = session_intents.SessionInputs(
+            overlay_visible=self.ov.visible,
+            translation_wanted=self._translation_wanted(),
+        )
+        for effect in session_intents.reduce(session_intents.SessionCommand.TOGGLE_OVERLAY, inputs):
+            self._apply_session_effect(effect)
+
+    def _apply_session_effect(self, effect: session_intents.SessionEffect) -> None:
+        if isinstance(effect, DismissHover):
             self.hover = -1
             self._teardown_tip()
-            self.ov.set_visible(visible=False)
+        elif isinstance(effect, session_intents.SetSurfacesVisible):
+            self.ov.set_visible(visible=effect.visible)
+        elif isinstance(effect, session_intents.ReleaseSecondarySubtitles):
             subtitle_modes.release_secondary(self)
+        elif isinstance(effect, session_intents.SuspendSubtitles):
             self.subtitle_pipeline.suspend_for_overlay(self)
-            return
-        self.ov.set_visible(visible=True)
-        self.subtitle_pipeline.resume_after_overlay(self)
-        if self._translation_visible():
+        elif isinstance(effect, session_intents.ResumeSubtitles):
+            self.subtitle_pipeline.resume_after_overlay(self)
+        elif isinstance(effect, session_intents.ShowTranslation):
             self._setup_secondary()
             self._draw_translation()
 
@@ -2530,7 +2550,6 @@ class Reader:
             return route
 
         handlers = {
-            OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
             PROFILE_CYCLE_MSG: action("cycle_profile"),
             BOOKMARK_MSG: action("toggle_bookmark"),
             SCROLL_UP_MSG: wheel(-1),
@@ -2570,6 +2589,7 @@ class Reader:
             ANALYSIS_MSG: action("toggle_analysis"),
             PREVIEW_MSG: action("replay_preview"),
             PREVIEW_CLOSE_MSG: action("_hide_preview"),
+            OVERLAY_TOGGLE_MSG: action("toggle_overlay"),
         }
         return LegacyCommandExecutor(
             {

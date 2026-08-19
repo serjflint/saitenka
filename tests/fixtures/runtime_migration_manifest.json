@@ -142,11 +142,11 @@
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
+      "src/saitenka/app/controller.py::Reader._apply_session_effect"
     ],
     [
       "direct-overlay-mutation",
-      "src/saitenka/app/controller.py::Reader.toggle_overlay"
+      "src/saitenka/app/controller.py::Reader._flush_paused_nudge"
     ],
     [
       "direct-overlay-mutation",
