@@ -5,10 +5,12 @@ transport. It ran unguarded, so the FIRST one to raise aborted every later one: 
 threw on shutdown left temp dirs, an open transport and a live overlay behind, and the traceback
 named only the thrower.
 
-The ledger is deliberately *not* a registry of callables. Each `close_lane(...)` and `.close()` call
-site is duty evidence that `tools/runtime_migration_check.py` matches by name AND by pairwise order;
-routing them through one loop erases that evidence and reads as a lost close. So participants stay
-written out in order, and the ledger only wraps them.
+Participants are a declared `CloseStep` table so the runtime can take them over one at a time. That
+was previously ruled out on the grounds that routing them through a loop would erase the duty
+evidence `tools/runtime_migration_check.py` matches by name AND pairwise order — which turned out
+not to hold: its `Scanner` opens a scope for `FunctionDef` and not for `Lambda`, so a call inside a
+step's lambda is still attributed to the enclosing method, `order:` constraints included. A nested
+`def` *would* lose it, which is why step bodies stay lambdas.
 """
 
 from __future__ import annotations
@@ -16,6 +18,10 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +30,19 @@ log = logging.getLogger(__name__)
 class CloseFailure:
     participant: str
     error: BaseException
+
+
+@dataclass(frozen=True, slots=True)
+class CloseStep:
+    """One named participant. `run` is a lambda by contract — see the module docstring."""
+
+    name: str
+    run: Callable[[], object]
+    #: Runtime assertion that `run`'s target exists; the step is skipped when it returns None.
+    #: A lambda cannot hold an `assert`, and the step body must name the attribute literally (the
+    #: migration checker matches `call:self._x.close`, and any wrapper collapses it to `call:close`)
+    #: — so the check lives here and `run` carries a `union-attr` marker pointing at it.
+    present: Callable[[], object] | None = None
 
 
 @dataclass(slots=True)
@@ -48,6 +67,17 @@ class CloseLedger:
             log.warning("close participant %s failed", name, exc_info=error)
         else:
             self.completed.append(name)
+
+    def run(self, steps: Iterable[CloseStep]) -> None:
+        """Run every step in order, isolating each. The sequence the runtime will eventually own."""
+        for step in steps:
+            if step.present is not None and step.present() is None:
+                # Completed, not skipped: an absent collaborator is a participant with nothing to
+                # do, and it read that way before the table existed.
+                self.completed.append(step.name)
+                continue
+            with self.participant(step.name):
+                step.run()
 
     def report(self) -> str | None:
         """One line naming every participant that failed, or None when close was clean."""

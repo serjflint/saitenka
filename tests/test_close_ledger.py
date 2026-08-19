@@ -116,3 +116,33 @@ def test_a_late_participant_failing_does_not_lose_the_scratch_directory(attribut
     assert ledger.report() is not None
     assert "temporary-artifacts" in ledger.completed
     assert not scratch.exists()
+
+
+def test_the_lane_budget_is_armed_after_the_capabilities_come_down() -> None:
+    """The 2s lane budget starts once the capabilities are down, not at table-build time.
+
+    Hoisting it would spend that window on capability teardown, and the only symptom is lanes
+    getting less time to drain on a slow machine — invisible until a close silently truncates.
+    """
+    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+
+    order = reader.close().completed
+
+    assert order.index("stop-workers") < order.index("lane-budget")
+    assert order.index("lane-budget") < order.index("lane:subtitle-fetch")
+
+
+def test_every_close_participant_runs_and_keeps_its_declared_order() -> None:
+    """The table is a sequence, not a set: the checker pins several pairs by order, and the
+    hazards it pins are real (a geometry job admitted after its provider closed, a lane drained
+    after the store it writes to went away)."""
+    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+
+    ledger = reader.close()
+
+    assert ledger.report() is None
+    order = ledger.completed
+    assert order.index("lane:geometry") < order.index("subtitle-close")
+    assert order.index("mask-atlas-startup") < order.index("lane:mask-atlas-startup")
+    assert order.index("lane:mask-atlas-startup") < order.index("mask-atlas-uninstall")
+    assert order[-1] == "temporary-artifacts"
