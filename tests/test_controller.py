@@ -2567,7 +2567,7 @@ def test_panel_cache_lru_eviction_not_wholesale_clear():
     # insert (the real tooltip below) triggers a single eviction of the oldest.
     sentinel = object()
     for i in range(r.panel_cache_max):
-        r._panel_cache[f"key_{i}"] = sentinel
+        r._panel_cache.setdefault(f"key_{i}", sentinel)
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     r.boxes = [WordBox(0, 100, 100, 40, 40)]
     r.tokens = [tok]

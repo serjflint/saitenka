@@ -223,24 +223,17 @@ def _cached_rows_panel(reader: Reader, key, entry, reading: str) -> Panel:
     """Fetch-or-build (and LRU-touch) the ``_panel_cache`` entry for a non-token popup (kanji / search),
     measuring its head. Idempotent — the main-thread build, the worker warm, and the tick re-show all
     land on the same cached Panel."""
-    st = reader._panel_cache.get(key)
-    if st is None:
-        st = Panel.from_rows(
+    st = reader._panel_cache.get_or_build(
+        key,
+        lambda: Panel.from_rows(
             panel_rows(entry, reader.tip_width, add_button=False, speak_button=reader._tts_ok),
             reader.tip_width,
             reading,
             band_cache_max=reader.band_cache_max,
             raw_band_ceiling=reader.raw_band_ceiling,
             layout_backend=reader.layout_backend,
-        )
-        with reader._cache_lock:
-            st = reader._panel_cache_setdefault(key, st)
-    else:
-        with reader._cache_lock:
-            try:
-                reader._panel_cache.move_to_end(key)
-            except KeyError:
-                pass
+        ),
+    )
     st.render_head(reader._tip_cap())
     return st
 

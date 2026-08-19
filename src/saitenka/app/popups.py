@@ -10,6 +10,7 @@ Reader's ``Delegated`` shims (the hover FSM and its tests stay untouched).
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -245,6 +246,87 @@ class PopupView:
         )
 
 
+class PanelCache:
+    """Bounded LRU of rendered panels, with the lock next to the data it guards.
+
+    It used to be three separate things on the Reader — the `OrderedDict`, a `panel_cache_max`, and
+    a lock shared with an unrelated cache — and the fetch-or-build-then-LRU-touch dance around them
+    was written out twice, in `tooltip` and in `nested_popup`. Two copies of a lock protocol is one
+    copy too many: the second is where the `move_to_end` outside the lock lives.
+    """
+
+    def __init__(self, limit: int, lock) -> None:
+        self._entries: OrderedDict = OrderedDict()
+        self._limit = limit
+        self._lock = lock
+
+    def __contains__(self, key) -> bool:
+        return key in self._entries
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def get(self, key):
+        """The entry without an LRU touch — for a caller only asking whether it is warm."""
+        return self._entries.get(key)
+
+    def discard(self, key) -> None:
+        """Drop one entry if present. Deliberate eviction (a benchmark forcing a cold paint), so no
+        eviction metric fires — that counter measures pressure, not a caller asking."""
+        with self._lock:
+            self._entries.pop(key, None)
+
+    def clear(self) -> None:
+        """Drop everything. A cold restart of the cache, not an eviction — no metric fires."""
+        with self._lock:
+            self._entries.clear()
+
+    def values(self):
+        return self._entries.values()
+
+    def get_or_build(self, key, build):
+        """Return the cached panel, building it OUTSIDE the lock if absent.
+
+        First-writer-wins on a race: two workers building the same panel produce equivalent results,
+        so the loser's is discarded rather than replacing a panel another view may already hold.
+        """
+        from saitenka import otel_metrics
+
+        cached = self._entries.get(key)
+        if cached is not None:
+            if otel_metrics.panel_cache_hits is not None:
+                otel_metrics.panel_cache_hits.add(1)
+            self.touch(key)
+            return cached
+        built = build()
+        with self._lock:
+            return self._setdefault(key, built)
+
+    def touch(self, key) -> None:
+        with self._lock:
+            try:
+                self._entries.move_to_end(key)
+            except KeyError:
+                pass  # evicted between the read and the touch — harmless
+
+    def setdefault(self, key, panel):
+        with self._lock:
+            return self._setdefault(key, panel)
+
+    def _setdefault(self, key, panel):
+        if key in self._entries:
+            self._entries.move_to_end(key)
+            return self._entries[key]
+        from saitenka import otel_metrics
+
+        while len(self._entries) >= self._limit:
+            self._entries.popitem(last=False)  # FIFO/LRU: oldest out
+            if otel_metrics.panel_cache_evictions is not None:
+                otel_metrics.panel_cache_evictions.add(1)
+        self._entries[key] = panel
+        return panel
+
+
 @dataclass(frozen=True, slots=True)
 class HoverMetadata:
     """What a hover lookup resolved: the phrase it found and whether it is already mined."""
@@ -268,7 +350,8 @@ class TooltipState:
     historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/``_panel_cache`` name, so
     the hover FSM woven through tooltip.py / nested_popup.py and its tests stay untouched."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, panel_cache_max: int = 64, cache_lock=None) -> None:
+        """`cache_lock` is shared with the Reader's other cache accounting, so it is injected."""
         self.paused_by_tip = False  # mpv was auto-paused by a tooltip show (resume on hide)
         self.hide_pending = False  # a linger deadline is armed to hide the tooltip
         # The base tooltip's own view state (panel/scroll/viewport/rect/crisp flags), sharing the same
@@ -300,7 +383,7 @@ class TooltipState:
         self.tip_show_cold = False  # was the last base-tooltip show a panel build (vs a cache hit)
         # LRU cache (OrderedDict keyed by PanelKey), bounded at panel_cache_max; each Panel keeps only its
         # windowed blocks (compressed) so the whole cache stays small. Evict LRU on overflow, not clear.
-        self.panel_cache: OrderedDict = OrderedDict()
+        self.panel_cache = PanelCache(panel_cache_max, cache_lock or threading.Lock())
 
     @property
     def open(self) -> bool:

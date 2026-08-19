@@ -847,9 +847,9 @@ def _panel_cache_get(
     nested: bool = False,
     extra_terms: tuple[str, ...] = (),
 ) -> Panel:
-    st = reader._panel_cache.get(key)
-    if st is None:
-        st = _build_panel(
+    return reader._panel_cache.get_or_build(
+        key,
+        lambda: _build_panel(
             reader,
             key,
             tok,
@@ -857,19 +857,8 @@ def _panel_cache_get(
             mined=mined,
             nested=nested,
             extra_terms=extra_terms,
-        )
-        with reader._cache_lock:
-            st = panel_cache_setdefault(reader._panel_cache, key, st, limit=reader.panel_cache_max)
-    else:
-        if otel_metrics.panel_cache_hits is not None:
-            otel_metrics.panel_cache_hits.add(1)
-        # Cache hit: move to end (most-recently-used) under the lock so the LRU order stays accurate.
-        with reader._cache_lock:
-            try:
-                reader._panel_cache.move_to_end(key)
-            except KeyError:
-                pass  # evicted between get() and move_to_end() — harmless
-    return st
+        ),
+    )
 
 
 def panel_for(
@@ -911,22 +900,6 @@ def panel_for(
     # panel, a full walk on a fresh one. Nests under tooltip_show / prefetch_decode.
     with otel_metrics.traced("measure"):
         st.render_head(min_h if min_h is not None else reader._tip_cap())
-    return st
-
-
-def panel_cache_setdefault(cache, key: PanelKey, st: Panel, *, limit: int) -> Panel:
-    """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over the cap.
-    Must be called under ``reader._cache_lock``. First-writer-wins: if two workers race to build
-    the same panel, the winner's result is kept and the loser is discarded (both are equivalent)."""
-    if key in cache:
-        cache.move_to_end(key)
-        return cache[key]
-    # Evict least-recently-used entries until we are at the limit.
-    while len(cache) >= limit:
-        cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
-        if otel_metrics.panel_cache_evictions is not None:
-            otel_metrics.panel_cache_evictions.add(1)
-    cache[key] = st
     return st
 
 
@@ -1358,13 +1331,14 @@ def _apply_engaged_nested(reader: Reader, tail: str) -> None:
     if sb is None or sb.text != tail:
         return  # cursor left the inner word — never flash a stale nested popup
     key, token = reader._nest.key, reader._nest.token
-    if key is None or token is None or key not in reader._panel_cache:
+    panel = None if key is None else reader._panel_cache.get(key)
+    if panel is None or token is None:
         return
     sx, sy = reader._tip_xy
     anchor = nested_popup.Anchor(sx + sb.x, sy + (sb.y - reader._tip_scroll), sb.h)
     nested_popup.place_nested(
         reader,
-        reader._panel_cache[key],
+        panel,
         key,
         token,
         token.surface,

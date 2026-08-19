@@ -2301,8 +2301,8 @@ def main() -> int:
         def nested_cold():
             reader._hide_nested()
             # drop only the inner word's cached panel so we measure a cold nested paint
-            reader._panel_cache.pop(
-                reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface), None
+            reader._panel_cache.discard(
+                reader._panel_key(tokenize(sb.text)[0], tokenize(sb.text)[0].surface)
             )
             reader._show_nested(sb)
 

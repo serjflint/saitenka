@@ -208,8 +208,8 @@ def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
         def __init__(self, n):
             self.retained_nbytes = n
 
-    r._panel_cache["a"] = _Panel(100)
-    r._panel_cache["b"] = _Panel(250)
+    r._panel_cache.setdefault("a", _Panel(100))
+    r._panel_cache.setdefault("b", _Panel(250))
     monkeypatch.setattr(r.dict_set, "decoded_entry_count", lambda: 7, raising=False)
     gauges = r._telemetry_gauges()
     assert gauges["panel_cache.size"] == 2.0

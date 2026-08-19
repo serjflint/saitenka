@@ -11,7 +11,6 @@ import logging
 import tempfile
 import threading
 import time
-from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -112,7 +111,13 @@ from saitenka.app.miner import Miner, tag_slug
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import gil_disabled
-from saitenka.app.popups import NO_HOVER_METADATA, HoverMetadata, Panel, PopupView
+from saitenka.app.popups import (
+    NO_HOVER_METADATA,
+    HoverMetadata,
+    Panel,
+    PanelCache,
+    PopupView,
+)
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile, effective_slang
 from saitenka.app.reader_context import (
     Delegated,
@@ -321,7 +326,7 @@ class Reader:
     _crisp_miss = Delegated[str]("tip.view", "crisp_miss")
     _crisp_pending = Delegated[bool]("tip.view", "crisp_pending")
     _tip_show_cold = Delegated[bool]("tip", "tip_show_cold")
-    _panel_cache = Delegated[OrderedDict]("tip", "panel_cache")
+    _panel_cache = Delegated[PanelCache]("tip", "panel_cache")
 
     def __init__(  # noqa: PLR0913, PLR0917 -- optional backend is the native boundary seam
         self,
@@ -505,7 +510,12 @@ class Reader:
         # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState). The Delegated shims below
         # keep the historical ``reader._tip_*``/``_nest``/``_scan_*``/``_hover_*``/``_flash_*``/
         # ``_panel_cache`` names so the hover FSM and its tests are untouched (#30 lifetime split).
-        self.tip = popups.TooltipState()
+        self._cache_lock = (
+            threading.Lock()
+        )  # tiny lock: only the cache dict mutation (build is lock-free)
+        self.tip = popups.TooltipState(
+            panel_cache_max=self.panel_cache_max, cache_lock=self._cache_lock
+        )
         from saitenka.render.layout_backend import backend_label, resolve_backend
 
         # Resolve the tooltip geometry backend ONCE (probes the optional taffylite wheel behind the
@@ -585,9 +595,6 @@ class Reader:
         # Active tokenizer strategy (app/tokenizer.py) — the language-dependent morphology seam, selected
         # by the profile's tokenizer name. A profile switch (#254) swaps it via use_tokenizer.
         self.tokenizer: Tokenizer = get_tokenizer(self.profile.tokenizer)
-        self._cache_lock = (
-            threading.Lock()
-        )  # tiny lock: only the cache dict mutation (build is lock-free)
         self._mouse_in = False  # cursor over the video window — an engagement signal
         self._hit_test_tick = 0  # samples the OTel hit-test histogram every _HIT_TEST_SAMPLE_EVERY
         self._scrolled_this_tick = False  # a wheel/tip-scroll ran this poll tick — for render-span
@@ -1709,9 +1716,7 @@ class Reader:
         )
 
     def _panel_cache_setdefault(self, key, st) -> Panel:
-        return tooltip.panel_cache_setdefault(
-            self._panel_cache, key, st, limit=self.panel_cache_max
-        )
+        return self._panel_cache.setdefault(key, st)
 
     # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
     def _render_cache(self) -> RenderCache | None:
