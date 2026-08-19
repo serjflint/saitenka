@@ -437,14 +437,22 @@ def test_a_pointer_move_publishes_now_that_hover_consumes_it() -> None:
     assert pointer.state.pointer.position == {"x": 1, "y": 2}
 
 
-def test_pause_deltas_are_not_published_while_legacy_owns_them() -> None:
+def test_a_pause_change_publishes_now_that_watch_time_accrues_on_it() -> None:
+    """`PAUSE` left `LEGACY_OWNED` when watch time started accruing at the transition instead of
+    being sampled by a tick — the same pairing as the pointer: publish the delta in the change that
+    gives it a consumer, never before."""
     projection = PlaybackProjection()
 
     pause = projection.observe(PlaybackState(), "pause", data=True)
 
-    assert pause.deltas == ()
-    # The fact is still projected, so composition can read it.
+    assert kinds(pause.deltas) == [PauseChanged]
     assert pause.state.paused is True
+
+
+def test_every_projected_domain_publishes() -> None:
+    """`LEGACY_OWNED` is empty, and that is the end state rather than an oversight: a domain listed
+    here is one the legacy driver still owns, and none do."""
+    assert PlaybackProjection().legacy_owned == frozenset()
 
 
 def test_a_composition_projection_publishes_pointer_and_pause() -> None:

@@ -833,6 +833,10 @@ class Reader:
                 self.native_geometry.record_clock_change(self)
         elif isinstance(delta, playback.GeometryInputChanged) and self.native_geometry is not None:
             self._arm_geometry_refresh()
+        elif isinstance(delta, playback.PauseChanged):
+            # Watch time is accrued at the transition, not sampled by a tick: the segment that
+            # just ended is exactly what the change delimits, and an idle runtime does no work.
+            session_stats.accrue(self)
         elif isinstance(delta, playback.PointerMoved):
             # Hover reacts to the pointer moving, not to a tick noticing that it did. The dwells it
             # arms are deadlines, so a cursor that stops still gets its linger — which is why this
@@ -2983,7 +2987,6 @@ class Reader:
             self._drain_events()
             if not self._connection_ready:
                 return True
-            session_stats.tick(self)
             self._maybe_advance()
             first_tick = not self._interactive_ready
             if first_tick:
@@ -3097,6 +3100,21 @@ class Reader:
         publish = getattr(self.ipc, "publish_legacy_command_outcome", None)
         if publish is not None:
             publish(event)
+
+    def arm_session_persist(self, seconds: float) -> None:
+        """Keep an uninterrupted session durable.
+
+        Watch time accrues at transitions, and a viewer who never pauses produces none — so without
+        this a long session would hold everything in memory until close and lose it all to a crash.
+        The due event re-arms, because durability is a standing obligation rather than one deadline.
+        """
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        def due() -> None:
+            session_stats.accrue(self)
+            self.arm_session_persist(seconds)
+
+        self.lifecycle_timers.schedule(LifecycleTimerKind.SESSION_PERSIST, seconds, due)
 
     def arm_hover_deadline(self, kind, seconds: float, due) -> bool:
         """Arm one hover dwell deadline, superseding any earlier one of the same kind."""

@@ -37,8 +37,8 @@ def test_recorder_aggregates_events_and_language_time():
         writer=writer,
     )
 
-    recorder.tick(paused=False, language="jp")
-    recorder.tick(paused=False, language="en")
+    recorder.accrue(paused=False, language="jp")
+    recorder.accrue(paused=False, language="en")
     recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
     recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
     recorder.record_lookup()

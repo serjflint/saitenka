@@ -582,15 +582,15 @@
     ],
     [
       "reader-parameter",
+      "src/saitenka/app/session_stats.py::accrue"
+    ],
+    [
+      "reader-parameter",
       "src/saitenka/app/session_stats.py::finish"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/session_stats.py::start"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/session_stats.py::tick"
     ],
     [
       "reader-parameter",

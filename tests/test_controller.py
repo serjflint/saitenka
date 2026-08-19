@@ -3136,3 +3136,41 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
     r.hover = 0
     r.mine_current()
     assert mined == ["本命"]
+
+
+def _accrual_reader(ipc, monkeypatch) -> tuple[Reader, list]:
+    ipc.props.update({"osd-dimensions": {"w": 1280, "h": 720}, "pause": False, "path": "/a.mkv"})
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    accrued: list = []
+    monkeypatch.setattr(C.session_stats, "accrue", accrued.append)
+    return reader, accrued
+
+
+def test_watch_time_accrues_on_the_pause_transition_not_on_a_tick(monkeypatch):
+    """WP5.4: the segment a pause delimits is exactly what should be accrued, so an idle runtime
+    does no work and a tickless one still measures correctly."""
+    ipc = RuntimeFakeIPC()
+    r, accrued = _accrual_reader(ipc, monkeypatch)
+    r.start_observing()
+    assert accrued == []  # observing alone is not a transition
+
+    ipc.emit({"event": "property-change", "name": "pause", "data": True})
+    r._drain_events()
+
+    assert len(accrued) == 1
+    r.close()
+
+
+def test_an_uninterrupted_session_still_persists_on_its_own_deadline(monkeypatch):
+    """A viewer who never pauses produces no transitions, so without a standing deadline everything
+    would sit in memory until close and be lost to a crash. The due event re-arms itself."""
+    ipc = RuntimeFakeIPC()
+    r, accrued = _accrual_reader(ipc, monkeypatch)
+    r.arm_session_persist(5.0)
+
+    assert ipc.fire_runtime_timer("lifecycle:session-persist")
+    assert len(accrued) == 1
+    assert ipc.fire_runtime_timer("lifecycle:session-persist")  # re-armed itself
+
+    assert len(accrued) == 2
+    r.close()

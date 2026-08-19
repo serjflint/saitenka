@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 _DB_PATH_OVERRIDE: Path | None = None
-_PERSIST_INTERVAL = 5.0
+PERSIST_INTERVAL = 5.0
 
 
 def db_path() -> Path:
@@ -265,7 +265,13 @@ class SessionRecorder:
         self.snapshot = replace(self.snapshot, **changes)
         self.writer.submit(self.snapshot)
 
-    def tick(self, *, paused: bool, language: str) -> None:
+    def accrue(self, *, paused: bool, language: str) -> None:
+        """Close the segment that just ended and open the next.
+
+        Called on a transition — pause, language, close — not on a tick. Elapsed time is measured
+        from the previous call either way, so what changes is only *when* the measurement is taken:
+        a runtime with no ticks still accrues correctly, and an idle one does no work at all.
+        """
         now = self._clock()
         elapsed = max(0.0, now - self._last_tick)
         watch = self.snapshot.watch_seconds
@@ -285,7 +291,7 @@ class SessionRecorder:
             self.snapshot = replace(
                 self.snapshot, watch_seconds=watch, jp_seconds=jp, en_seconds=en
             )
-            if now - self._last_persist >= _PERSIST_INTERVAL:
+            if now - self._last_persist >= PERSIST_INTERVAL:
                 self.writer.submit(self.snapshot)
                 self._last_persist = now
 
@@ -311,7 +317,7 @@ class SessionRecorder:
             self._publish(mined_count=self.snapshot.mined_count + count)
 
     def finish(self, *, analysis: EpisodeAnalysis | None = None) -> SessionSnapshot:
-        self.tick(paused=True, language=self._last_language)
+        self.accrue(paused=True, language=self._last_language)
         self._publish(
             ended_at=self._wall_clock(),
             completed=True,
@@ -328,12 +334,15 @@ def start(reader: Reader) -> None:
         reader._session_recorder = SessionRecorder(str(reader._prop("path") or ""))
     except (OSError, sqlite3.Error):
         log.warning("session history unavailable", exc_info=True)
+        return
+    reader.arm_session_persist(PERSIST_INTERVAL)
 
 
-def tick(reader: Reader) -> None:
+def accrue(reader: Reader) -> None:
+    """Accrue the watch-time segment that just ended, at a transition."""
     recorder = reader._session_recorder
     if recorder is not None:
-        recorder.tick(paused=bool(reader._prop("pause")), language=reader.subtitle_language)
+        recorder.accrue(paused=bool(reader._prop("pause")), language=reader.subtitle_language)
 
 
 def finish(reader: Reader) -> str | None:
