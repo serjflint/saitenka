@@ -32,6 +32,7 @@ from saitenka.subtitles import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
+    from typing import SupportsFloat
 
     from saitenka.app.controller import Reader
     from saitenka.app.subtitle_pipeline import SubtitleGeometryWorker
@@ -172,9 +173,13 @@ def _pixel_aspect(osd: Mapping[str, object], video: Mapping[str, object]) -> flo
     return value
 
 
-def _subtitle_clock(reader: Reader, fallback: float | None) -> tuple[float, float, float, int]:
-    raw_time = reader._prop("time-pos")
-    raw_delay = reader._prop("sub-delay")
+def _subtitle_clock(
+    raw_time: SupportsFloat | None, raw_delay: SupportsFloat | None, fallback: float | None
+) -> tuple[float, float, float, int]:
+    """Video time, `sub-delay`, and the delay-adjusted subtitle time (plus its ms key) from mpv's two
+    raw properties. Rejects a clock the geometry can't be keyed off — non-finite or negative — rather
+    than let a garbage timestamp reach the cache; `fallback` is `sub-start`, used when mpv has no
+    `time-pos` yet."""
     sub_delay = 0.0 if raw_delay is None else float(raw_delay)
     if raw_time is None:
         if fallback is None:
@@ -567,7 +572,9 @@ class NativeSubtitleGeometry:
             try:
                 raw_start = reader._prop("sub-start")
                 video_time, sub_delay, subtitle_time, _timestamp_ms = _subtitle_clock(
-                    reader, None if raw_start is None else float(raw_start)
+                    reader._prop("time-pos"),
+                    reader._prop("sub-delay"),
+                    None if raw_start is None else float(raw_start),
                 )
             except (TypeError, ValueError):
                 span.set("outcome", "invalid")
@@ -861,7 +868,9 @@ class NativeSubtitleGeometry:
             self._degrade_geometry(reader, "subtitle-ass-full-unavailable")
             return None
         try:
-            _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(reader, start)
+            _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
+                reader._prop("time-pos"), reader._prop("sub-delay"), start
+            )
         except (TypeError, ValueError):
             self._degrade_geometry(reader, "subtitle-timing-unavailable")
             return None

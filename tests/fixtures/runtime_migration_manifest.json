@@ -358,10 +358,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/native_subtitles.py::_subtitle_clock"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/nested_popup.py::_cached_rows_panel"
     ],
     [

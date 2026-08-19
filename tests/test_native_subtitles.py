@@ -2282,3 +2282,55 @@ def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> Non
         }
     )
     result.close()
+
+
+def test_the_subtitle_clock_is_the_video_time_less_the_delay():
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    video_time, sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(12.5, 0.5, None)
+
+    assert (video_time, sub_delay, subtitle_time) == (12.5, 0.5, 12.0)
+    assert timestamp_ms == 12_000  # the ms key the geometry cache is keyed on
+
+
+def test_a_missing_delay_reads_as_no_offset():
+    """mpv answers None for `sub-delay` before a track resolves; that is zero, not unavailable."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    assert _subtitle_clock(4.0, None, None) == (4.0, 0.0, 4.0, 4_000)
+
+
+def test_a_missing_time_pos_falls_back_to_the_cue_start():
+    """`sub-start` is the cue's own time, so the video time is reconstructed by re-adding the delay."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    assert _subtitle_clock(None, 0.25, 8.0) == (8.25, 0.25, 8.0, 8_000)
+
+
+def test_a_clock_with_neither_a_position_nor_a_cue_start_is_unavailable():
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    with pytest.raises(ValueError, match="unavailable"):
+        _subtitle_clock(None, 0.0, None)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_clock_is_rejected_rather_than_cached(bad: float):
+    """A NaN timestamp would key a cache entry nothing can ever match again."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    with pytest.raises(ValueError, match="finite"):
+        _subtitle_clock(bad, 0.0, None)
+    with pytest.raises(ValueError, match="finite"):
+        _subtitle_clock(1.0, bad, None)
+
+
+def test_a_delay_that_runs_the_clock_before_the_file_starts_is_rejected():
+    """A large positive `sub-delay` near the start puts the subtitle clock behind 0:00, which no cue
+    can occupy — better a raised timing error than a negative cache key."""
+    from saitenka.app.native_subtitles import _subtitle_clock
+
+    with pytest.raises(ValueError, match="non-negative"):
+        _subtitle_clock(1.0, 5.0, None)
+
+    assert _subtitle_clock(5.0, 5.0, None)[2] == 0.0  # exactly zero is fine
