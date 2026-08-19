@@ -489,15 +489,22 @@ def load_deps_async(
 
     ``prebuilt`` is a Future from a HOISTED :func:`begin_deps_build` (``run`` starts the build before
     mpv launches so it overlaps launch dead time); without it the build starts now (attach/plugin mode,
-    already well past mpv connect). The done-callback sets ``_pending_deps`` from the build thread — the
-    same cross-thread hand-off consumed by the session turn.
+    already well past mpv connect). The done-callback hands the result over from the build thread and
+    arms the deadline that injects it, so the injection still happens on the session turn.
 
     Callers should have already fired :func:`warm_tokenizer` on its own thread as early as possible."""
     reader._loading = True
     reader._enable_async_annotation()
     reader._schedule_loading_frame(delay_s=0.0)
     fut = prebuilt if prebuilt is not None else begin_deps_build(cfg, build)
-    fut.add_done_callback(lambda f: setattr(reader, "_pending_deps", f.result()))
+
+    def landed(finished: Future[dict]) -> None:
+        # Order matters and is the whole hand-off: publish the value, then say so. Arming first
+        # would let the due event fire against a `_pending_deps` that is still None.
+        reader._pending_deps = finished.result()
+        reader.arm_deps_ready()
+
+    fut.add_done_callback(landed)
 
 
 def apply_deps(reader: Reader, deps: dict) -> None:

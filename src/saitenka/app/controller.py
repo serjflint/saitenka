@@ -2672,7 +2672,6 @@ class Reader:
             analysis_overlay.redraw(self)
 
     def _apply_background_results(self) -> None:
-        self._apply_pending_deps_or_spinner()
         self._apply_capabilities()
         tooltip.apply_pending_crisp(self, self._tip_view)
         tooltip.apply_pending_crisp(self, self._nest)
@@ -3107,6 +3106,19 @@ class Reader:
         if publish is not None:
             publish(event)
 
+    def arm_deps_ready(self) -> bool:
+        """Hand a finished background dep build to the session turn.
+
+        Called from the build thread, so this must not touch reader state — arming a zero-delay
+        deadline is the hop: the due event runs where every other effect does. The tick used to
+        discover `_pending_deps` by looking; now the build says so.
+        """
+        from saitenka.app.lifecycle_timers import LifecycleTimerKind
+
+        return self.lifecycle_timers.schedule(
+            LifecycleTimerKind.DEPS_READY, 0.0, self._apply_pending_deps
+        )
+
     def arm_session_persist(self, seconds: float) -> None:
         """Keep an uninterrupted session durable.
 
@@ -3182,8 +3194,8 @@ class Reader:
             if self._startup_hint_lease is not None:
                 self._startup_hint_lease.mark_ready()
 
-    def _apply_pending_deps_or_spinner(self) -> None:
-        """Progressive startup: inject background-loaded deps (once), else animate the spinner."""
+    def _apply_pending_deps(self) -> None:
+        """Inject a finished background dep build, once, on the session turn."""
         if self._pending_deps is not None:
             deps, self._pending_deps = self._pending_deps, None
             self._apply_deps(deps)

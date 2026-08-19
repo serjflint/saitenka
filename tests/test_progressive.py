@@ -285,7 +285,53 @@ def test_load_deps_async_marks_loading(monkeypatch):
     monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
     r = Reader(FakeIPC())
     r.load_deps_async({})
-    assert r._loading is True  # spinner shows until the poll loop injects
+    assert r._loading is True  # spinner shows until the deps-ready deadline injects
+
+
+def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch):
+    """The build thread hands the value over and *arms* the injection; a tick used to discover it by
+    looking. The due event runs on the session turn, which is what makes the hand-off safe."""
+    import saitenka.app.reader_deps as rd
+
+    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    applied = []
+    monkeypatch.setattr(r, "_apply_deps", applied.append)
+
+    r.load_deps_async({})
+    for _ in range(200):  # the build runs on its own thread
+        if "lifecycle:deps-ready" in ipc.timers:
+            break
+        time.sleep(0.001)
+
+    assert applied == []  # arming is not applying
+    assert ipc.fire_runtime_timer("lifecycle:deps-ready")
+    assert len(applied) == 1
+
+    assert not ipc.fire_runtime_timer("lifecycle:deps-ready")  # one build, one injection
+    assert len(applied) == 1
+
+
+def test_the_value_is_published_before_the_injection_is_armed(monkeypatch):
+    """Ordering, and the whole hand-off: arming first would let the due event fire against a
+    `_pending_deps` that is still None, and the session would sit loading forever."""
+    import saitenka.app.reader_deps as rd
+
+    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
+    ipc = FakeIPC()
+    r = Reader(ipc)
+    seen: list[object] = []
+    original = r.arm_deps_ready
+    monkeypatch.setattr(r, "arm_deps_ready", lambda: (seen.append(r._pending_deps), original())[1])
+
+    r.load_deps_async({})
+    for _ in range(200):
+        if seen:
+            break
+        time.sleep(0.001)
+
+    assert seen and seen[0] is not None
 
 
 @pytest.mark.timeout(5)
