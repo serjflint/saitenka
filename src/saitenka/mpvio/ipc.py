@@ -135,6 +135,10 @@ class MpvIPC:
             0  # total bytes the reader thread got from mpv (0 = never read → pipe dead)
         )
         self._events: list[dict] = []  # async events (property-change, client-message, …)
+        #: Signalled whenever an event lands, so a consumer can WAIT for one instead of asking
+        #: forty times a second. The reader thread is the only producer; `drain_events` clears it
+        #: under the same lock it empties the buffer under, so a wake can never be lost.
+        self._event_arrived = threading.Event()
         self._events_lock = threading.Lock()
         self._event_sink: Callable[[dict, int], None] | None = None
         self._connection_sink: Callable[[str, int], None] | None = None
@@ -255,8 +259,10 @@ class MpvIPC:
                 sink = self._event_sink
                 if sink is not None:
                     sink(dict(msg), connection_epoch)
+                    self._event_arrived.set()
                     return
                 self._events.append(msg)
+                self._event_arrived.set()
             return
         request_id = msg.get("request_id")
         if not isinstance(request_id, int):
@@ -511,10 +517,27 @@ class MpvIPC:
         """
         if self._legacy_event_source is not None:
             return self._legacy_event_source(timeout, ordered_terminals=ordered_terminals)
+        if timeout:
+            self._await_event(timeout)
         with self._events_lock:
             buffered, self._events = self._events, []
+            self._event_arrived.clear()
             evs: list[object] = list(buffered)
         return evs
+
+    def _await_event(self, timeout: float | None) -> None:
+        """Block until an event lands, the connection drops, or the timeout passes.
+
+        Checking the buffer first is what makes this safe against a lost wake: the flag is cleared
+        only while holding the lock that empties the buffer, so "flag clear" always means "buffer
+        empty" and never "an event arrived and nobody noticed".
+        """
+        with self._events_lock:
+            if self._events:
+                return
+        if self._closed.is_set():
+            return
+        self._event_arrived.wait(timeout)
 
     def install_runtime_ingress(
         self,

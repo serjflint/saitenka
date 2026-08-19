@@ -14,7 +14,6 @@ from saitenka.app.runtime.commands import (
     LegacyCommandExecutor,
     LegacyPickerRepeatGuard,
 )
-from saitenka.app.runtime.pipeline import TickPipeline, TickStage
 
 __all__ = [
     "COMMAND_SPECS",
@@ -29,6 +28,4 @@ __all__ = [
     "LegacyCommandBinding",
     "LegacyCommandExecutor",
     "LegacyPickerRepeatGuard",
-    "TickPipeline",
-    "TickStage",
 ]

@@ -22,15 +22,10 @@ _OVERLAY_METHODS = {
     "show_bgra",
     "show_bgra_interactive",
 }
-_TICK_METHODS = {
-    "Reader._apply_background_results",
-    "Reader._expire_surfaces",
-    "Reader._reconcile_subtitles",
-    "Reader._refresh_surfaces",
-    "Reader._update_interaction",
-    "Reader.poll_once",
-    "Reader.run",
-}
+#: Emptied by WP6: the last two entries were the driver itself, and the tick pipeline they ran is
+#: deleted. Kept as an empty closed set rather than removed, so a stage reintroduced under one of
+#: these names is debt again rather than silently fine.
+_TICK_METHODS: set[str] = set()
 _AUTONOMOUS_DRAINS = {
     "src/saitenka/app/otel_export.py::CTFSpanProcessor._flush",
     "src/saitenka/app/prefetch.py::_try_head_prefetch_item",
@@ -87,12 +82,10 @@ _DRIVER_SWITCH_SYMBOLS = {
 #: Rows, not symbols. Five of these symbols carry a `reader-parameter` row as well, and that second
 #: row IS WP5's to convert — a symbol-keyed set would have quietly excused all five.
 _TERMINAL_DEBT = {
-    # WP6 deletes the driver: the tick loop, the legacy staging path it drives, and the repeat guard
-    # that exists only because the picker is polled.
+    # WP6 deleted the tick loop; what is left is the legacy staging path and the repeat guard that
+    # exists only because the picker was polled.
     "driver-switch": frozenset(
         {
-            ("tick-stage", "src/saitenka/app/controller.py::Reader.poll_once"),
-            ("tick-stage", "src/saitenka/app/controller.py::Reader.run"),
             ("driver-switch", "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard"),
             (
                 "direct-mpv-command",

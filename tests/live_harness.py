@@ -102,7 +102,7 @@ def live_reader(*, paused: bool = True):
         reader.load_sub_index(srt)
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
-            reader.poll_once()
+            reader.pump()
             if reader.tokens and reader.boxes:
                 break
             time.sleep(0.1)
@@ -126,7 +126,7 @@ def live_reader(*, paused: bool = True):
 
 def poll_until(reader, predicate, message: str) -> None:
     for _ in range(60):
-        reader.poll_once()
+        reader.pump()
         if predicate():
             return
         time.sleep(0.05)

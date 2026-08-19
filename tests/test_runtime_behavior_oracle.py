@@ -47,9 +47,9 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(monkeypatch) -> Non
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
     trace = LegacyReaderTrace(reader)
 
-    assert reader.poll_once()
+    assert reader.pump()
     trace.observe("first-input", outcome="dispatched-before-ready-clear")
-    assert reader.poll_once()
+    assert reader.pump()
     trace.observe("next-turn", outcome="clear-reply-not-required")
 
     assert dispatched == [True]

@@ -27,7 +27,7 @@ class FakeIPC(RuntimeFakeIPC):
     `command` — was a line-for-line copy of the shared fake. The copy is the hazard: it drifts, and
     a port it forgets sends production down a fallback branch production itself never takes.
 
-    The one real difference is kept: these tests drive `poll_once` directly and assert against
+    The one real difference is kept: these tests drive `pump` directly and assert against
     `commands`, so draining queued events here would fire observations they never asked for.
     """
 
@@ -916,8 +916,8 @@ def test_reader_has_subtitle_state_before_any_cue():
     assert r.sub_text == "" and r.tokens == [] and r.hover == -1
 
 
-def test_poll_once_before_subtitle_does_not_raise():
-    assert Reader(FakeIPC()).poll_once() is True
+def test_pump_before_subtitle_does_not_raise():
+    assert Reader(FakeIPC()).pump() is True
 
 
 def _count_adds(ipc):
@@ -937,7 +937,7 @@ def test_paused_draw_schedules_and_fires_an_osd_nudge():
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
     r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
-    r.poll_once()  # adopts the cue → draws SUB_ID while paused → arms the nudge
+    r.pump()  # adopts the cue → draws SUB_ID while paused → arms the nudge
     assert r._nudge_pending is True
     before = _count_adds(ipc)
 
@@ -957,9 +957,9 @@ def test_a_burst_of_paused_draws_repaints_once():
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
     r._observe_property("sub-text", "いち")
-    r.poll_once()
+    r.pump()
     r._observe_property("sub-text", "に")
-    r.poll_once()  # a second paused draw, before the first nudge was ever delivered
+    r.pump()  # a second paused draw, before the first nudge was ever delivered
     before = _count_adds(ipc)
 
     assert ipc.fire_runtime_timer("lifecycle:paused-repaint")
@@ -978,7 +978,7 @@ def test_playing_draw_does_not_nudge():
     r.refresh_osd()
     ipc.props["sub-text"] = "いち"
     r._observe_property("sub-text", "いち")
-    r.poll_once()
+    r.pump()
     assert r.sub_text == "いち"  # the cue really did draw — otherwise the nudge check is vacuous
     assert r._nudge_pending is False
 
@@ -1016,7 +1016,7 @@ def test_paused_nudge_records_otel_counters():
     try:
         ipc.props["sub-text"] = "いち"
         r._observe_property("sub-text", "いち")  # mpv reports the cue; the drain reconciles it
-        r.poll_once()  # a draw lands while paused → osd.paused_draw, arms the nudge
+        r.pump()  # a draw lands while paused → osd.paused_draw, arms the nudge
         assert ipc.fire_runtime_timer("lifecycle:paused-repaint")  # → osd.paused_nudge
         snap = otel_metrics.snapshot()
         assert snap["saitenka.osd.paused_draw"]["value"] >= 1
@@ -2783,7 +2783,7 @@ def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.start_observing()
     ipc.commands.clear()
-    r.poll_once()
+    r.pump()
     gets = [
         c
         for c in ipc.commands
@@ -2804,7 +2804,7 @@ def test_property_change_event_drives_subtitle_update(monkeypatch):
     seen = []
     monkeypatch.setattr(r, "set_subtitle", lambda t: seen.append(t))
     ipc.set_prop("sub-text", "新しい字幕")
-    r.poll_once()
+    r.pump()
     assert seen == ["新しい字幕"]  # the buffered event drove the update, no get_property
 
 
@@ -2879,7 +2879,7 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text():
     assert after.normalized_text == before.normalized_text
 
 
-def test_connection_loss_retires_cue_and_suspends_commands_and_tick(monkeypatch):
+def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(monkeypatch):
     from util import FakeIPC as EventIPC
 
     from saitenka.app.runtime import LegacyPickerRepeatGuard
@@ -2896,16 +2896,16 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_tick(monkeypatch)
     reader.set_subtitle("古い字幕")
     copied = []
     monkeypatch.setattr(reader, "copy_line", lambda: copied.append(reader.sub_text))
-    ticks = []
-    monkeypatch.setattr(reader.tick_pipeline, "run", lambda **_kwargs: ticks.append(True))
     guard = LegacyPickerRepeatGuard()
 
     reader._drain_event(ConnectionLost(0), guard)
     reader._drain_event(UserCommand(C.COPY_LINE_MSG, command_id=7), guard)
-    assert reader.poll_once()
+    assert reader.pump()
 
     assert copied == []
-    assert ticks == []
+    # A disconnected turn stops before its post-drain settlement, so readiness is never marked.
+    # (Was: the tick pipeline did not run. Same claim, now that there is no pipeline to not run.)
+    assert reader._interactive_ready is False
     assert reader._cue_retired
     assert reader.tokens == [] and reader.boxes == []
     assert ipc.runtime_outcomes == [
@@ -2930,7 +2930,7 @@ def test_same_text_with_new_timing_installs_a_new_cue_identity():
     previous = reader._current_cue_identity
 
     ipc.set_prop("sub-start", 3.0)
-    reader.poll_once()
+    reader.pump()
 
     assert reader._cue_retired is False
     assert reader._current_cue_identity != previous
@@ -3021,7 +3021,7 @@ def test_property_change_invalidates_subtitle_geometry():
     assert r.subtitle_pipeline.current is not None
 
     ipc.set_prop("sub-text", "新しい字幕")
-    r.poll_once()
+    r.pump()
 
     assert r.subtitle_pipeline.current is None
 
@@ -3037,7 +3037,7 @@ def test_property_change_event_drives_hover(monkeypatch):
     monkeypatch.setattr(r, "_hit", lambda x, y: 0 if (x < 10 and y < 10) else -1)
     r.start_observing()
     ipc.set_prop("mouse-pos", {"hover": True, "x": 5, "y": 5})
-    for ev in ipc.drain_events():  # what poll_once's drain loop does
+    for ev in ipc.drain_events():  # what pump's drain loop does
         if ev.get("event") == "property-change":
             r._on_property_change(ev)
     r._update_hover()

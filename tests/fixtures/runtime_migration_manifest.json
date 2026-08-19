@@ -899,14 +899,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::update_hover_instrumented"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader.poll_once"
-    ],
-    [
-      "tick-stage",
-      "src/saitenka/app/controller.py::Reader.run"
     ]
   ],
   "startup": [
@@ -998,7 +990,7 @@
       "source": "src/saitenka/app/controller.py::Reader._mark_interactive_ready",
       "evidence": [
         "call:self._startup_hint_lease.mark_ready",
-        "src/saitenka/app/controller.py::Reader.poll_once|call:self._mark_interactive_ready"
+        "src/saitenka/app/controller.py::Reader.pump|call:self._mark_interactive_ready"
       ],
       "target": "lifecycle-readiness",
       "work_package": "5",
@@ -1009,8 +1001,8 @@
       "id": "session-loop",
       "source": "src/saitenka/app/controller.py::Reader.run",
       "evidence": [
-        "call:self.poll_once",
-        "call:time.sleep",
+        "call:SessionRunner",
+        "src/saitenka/app/controller.py::Reader.run.step|call:self.pump",
         "ref:self.poll_interval"
       ],
       "target": "session-runner",

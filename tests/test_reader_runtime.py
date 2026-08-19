@@ -13,8 +13,6 @@ from saitenka.app.runtime import (
     LegacyCommandBinding,
     LegacyCommandExecutor,
     LegacyPickerRepeatGuard,
-    TickPipeline,
-    TickStage,
 )
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 
@@ -190,32 +188,6 @@ def test_runtime_coalesces_scroll_once_and_finishes_every_admitted_command():
     assert gateway.snapshot.command_outcomes == 2
 
 
-def test_tick_pipeline_preserves_assembly_order():
-    events: list[str] = []
-    pipeline = TickPipeline(
-        (
-            TickStage("subtitles", lambda: events.append("subtitles")),
-            TickStage("tooltip", lambda: events.append("tooltip")),
-            TickStage("prefetch", lambda: events.append("prefetch")),
-        )
-    )
-
-    pipeline.run()
-
-    assert events == ["subtitles", "tooltip", "prefetch"]
-
-
-def test_tick_pipeline_rejects_ambiguous_duplicate_phase():
-    stages = (TickStage("tooltip", lambda: None), TickStage("tooltip", lambda: None))
-
-    try:
-        TickPipeline(stages)
-    except ValueError as exc:
-        assert str(exc) == "tick stage already registered: tooltip"
-    else:  # pragma: no cover - the assertion above is the contract
-        raise AssertionError("duplicate tick stage was accepted")
-
-
 def test_composition_threads_grouped_optional_services():
     services = ReaderServices(
         scorer="score", anki="anki", mining="mine", dictionaries="dict", tts=True
@@ -279,3 +251,53 @@ def _probe_request(reader):
         storage_size=(1920, 1080),
         ass=b"[Script Info]\n",
     )
+
+
+def test_an_idle_session_blocks_instead_of_polling():
+    """WP6's whole point: with nothing happening, a turn costs a wait — not a spin.
+
+    The old loop woke `1/poll_interval` times a second to ask whether anything had happened. This
+    asserts the shape that replaced it: `pump` with a timeout returns only once the wait elapses,
+    so an idle runtime does no domain work at all.
+    """
+    import time
+
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.subtitle_render import NullRenderer
+
+    reader = Reader(FakeIPC(), prefetch=False, renderer=NullRenderer())
+    try:
+        started = time.monotonic()
+        assert reader.pump(0.05) is True
+        assert time.monotonic() - started >= 0.04  # it waited; it did not return immediately
+    finally:
+        reader.close()
+
+
+def test_an_event_wakes_the_wait_early():
+    """The negative control for the test above — a blocking wait that never wakes is a hang.
+
+    Without this, `pump` could satisfy "it blocked" by simply always sleeping the full timeout,
+    which would make every interaction feel like a 50 ms stutter.
+    """
+    import threading
+    import time
+
+    from util import FakeIPC
+
+    from saitenka.app.controller import Reader
+    from saitenka.app.subtitle_render import NullRenderer
+
+    ipc = FakeIPC()
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    try:
+        threading.Timer(
+            0.02, lambda: ipc.emit({"event": "property-change", "name": "pause", "data": True})
+        ).start()
+        started = time.monotonic()
+        assert reader.pump(2.0) is True
+        assert time.monotonic() - started < 1.0  # woken by the event, not by the timeout
+    finally:
+        reader.close()

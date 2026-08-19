@@ -128,7 +128,6 @@ from saitenka.app.runtime import (
     LegacyCommandBinding,
     LegacyCommandExecutor,
     LegacyPickerRepeatGuard,
-    TickPipeline,
 )
 from saitenka.app.subtitle_pipeline import (
     GEOMETRY_LANE,
@@ -159,6 +158,7 @@ from saitenka.runtime import (
     playback,
 )
 from saitenka.runtime.playback import PlaybackProjection, PlaybackState
+from saitenka.runtime.runner import SessionRunner
 from saitenka.subtitles import Cue, CueIndex
 
 if TYPE_CHECKING:
@@ -660,7 +660,6 @@ class Reader:
             False  # a draw happened while paused → re-flush the OSD next tick (#8172)
         )
         self.commands = self._build_command_router()
-        self.tick_pipeline = self._build_tick_pipeline()
         self.start_prefetch()
         from saitenka.app.paths import cache_dir
 
@@ -2940,12 +2939,6 @@ class Reader:
         elif result.outcome == CommandOutcome.FAILED:
             log.error("script-message failed (%s): %s", result.error_type, command.name)
 
-    def _build_tick_pipeline(self) -> TickPipeline:
-        # Empty: every feature stage has moved to the delta or deadline that drives it. The
-        # pipeline itself, with `poll_once` and `run`, is WP6's to delete — one atomic switch,
-        # not a slow dismantling that leaves the runtime half-driven.
-        return TickPipeline(())
-
     def _redraw_after_resize(self) -> None:
         """Re-lay everything the window size decides, after an `osd-dimensions` change.
 
@@ -3266,22 +3259,22 @@ class Reader:
         self._slotted_path = p
         self.reslot_hook(p)
 
-    def poll_once(self) -> bool:
-        """One tick: sync subtitle + hover, handle key events. False if mpv went away."""
+    def pump(self, timeout: float | None = 0.0) -> bool:
+        """Consume one turn of events, blocking up to ``timeout``. False if mpv went away.
+
+        Not a tick. Nothing here runs *because time passed* — the turn exists because events
+        arrived, and with no events and no timeout this does nothing at all. The stages that used
+        to run every 40th of a second each moved to the delta or deadline that actually drives
+        them, which is what left this as a drain and a pair of post-drain settlements.
+        """
         try:
             self._scrolled_this_tick = False  # set by _scroll_tip below (wheel or TIP_UP/DOWN)
             # Sampled before the drain: cue reconciliation draws from the batch boundary, so a
             # sample taken after it would miss the very draw the paused nudge exists to re-flush.
             ops_before = self.ov.ops
-            self._drain_events()
+            self._drain_events(timeout)
             if not self._connection_ready:
                 return True
-            first_tick = not self._interactive_ready
-            if first_tick:
-                with otel_metrics.traced("startup.first_tick"):
-                    self.tick_pipeline.run(traced_prefix="startup.first_tick")
-            else:
-                self.tick_pipeline.run()
             self._schedule_paused_nudge(ops_before)
             self._mark_interactive_ready()
             return True
@@ -3302,11 +3295,11 @@ class Reader:
         if otel_metrics.osd_paused_nudge is not None:
             otel_metrics.osd_paused_nudge.add(1)
 
-    def _drain_events(self) -> None:
+    def _drain_events(self, timeout: float | None = 0.0) -> None:
         picker_guard = LegacyPickerRepeatGuard()
         # This drain owns a whole turn, so completions come back in envelope sequence and are
         # dispatched below in order with the observations they followed.
-        for ev in self.ipc.drain_events(ordered_terminals=True):
+        for ev in self.ipc.drain_events(timeout, ordered_terminals=True):
             self._drain_event(ev, picker_guard)
         self._settle_cue_observation()
 
@@ -3689,8 +3682,16 @@ class Reader:
             8.0,
             self._check_startup_health,
         )
-        while self.poll_once():
-            time.sleep(interval)
+        # The session blocks on its transport instead of waking `1/interval` times a second to
+        # ask whether anything happened. `interval` survives only as the wake bound, so a runtime
+        # timer that fires without producing an event is still noticed promptly.
+        alive = True
+
+        def step(timeout: float | None) -> None:
+            nonlocal alive
+            alive = self.pump(interval if timeout is None else min(interval, timeout))
+
+        SessionRunner(step).run_until(lambda: not alive or self._stop.is_set())
 
     def _on_ipc_reconnect(self) -> None:
         self.subtitle_pipeline.connection_replaced(self)

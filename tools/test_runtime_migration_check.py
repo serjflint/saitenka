@@ -22,13 +22,18 @@ def test_runtime_migration_manifest_matches_production() -> None:
     checker = _module()
     actual, _, _ = checker.scan()
     assert checker.check() == 0
-    # Two live rows, so the scanner is checked against production and not only against the
-    # synthetic source below. They are anchors, not landmarks: as the migration converts them, point
-    # these at whatever `poe runtime-status` still reports rather than weakening the assertion.
-    # `tick-stage` is down to the driver itself — `poll_once` and `run`, which WP6 deletes
-    # together. When it does, point these at whatever `poe runtime-status` still reports.
-    assert checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader.poll_once") in actual
-    assert checker.Debt("tick-stage", "src/saitenka/app/controller.py::Reader.run") in actual
+    # Live rows, so the scanner is checked against production and not only against the synthetic
+    # source below. Anchors, not landmarks: as the migration converts them, point these at whatever
+    # `poe runtime-status` still reports rather than weakening the assertion. `tick-stage` is gone
+    # entirely — WP6 deleted the driver — so the anchor moved to the legacy staging path WP6 leaves.
+    assert (
+        checker.Debt(
+            "direct-mpv-command",
+            "src/saitenka/app/subtitle_render.py::NativeVisibleRenderer._apply_action",
+        )
+        in actual
+    )
+    assert not any(item.kind == "tick-stage" for item in actual)
 
 
 def test_wp5_owns_every_row_the_terminal_set_does_not_claim() -> None:
@@ -41,7 +46,7 @@ def test_wp5_owns_every_row_the_terminal_set_does_not_claim() -> None:
     checker = _module()
     actual, _, _ = checker.scan()
     terminal = {row for group in checker._TERMINAL_DEBT.values() for row in group}
-    assert len(terminal) == checker.TERMINAL_TOTAL == 22
+    assert len(terminal) == checker.TERMINAL_TOTAL == 20
     remaining = {item for item in actual if (item.kind, item.source) not in terminal}
     assert {item.kind for item in remaining} == {"reader-parameter"}
 
@@ -63,7 +68,8 @@ def test_scanner_detects_each_debt_category() -> None:
     checker = _module()
     source = """
 class Reader:
-    def run(self):
+    # Not `run`: WP6 emptied `_TICK_METHODS`, so no name is a tick stage any more.
+    def drive(self):
         self.ipc.command("get_property", "pause")
         self._overlay.show()
         self._queue.get_nowait()
@@ -94,7 +100,6 @@ def register(app):
         "passive-result-drain",
         "polled-deadline",
         "reader-parameter",
-        "tick-stage",
     }
     assert (
         checker.Debt("reader-parameter", "src/saitenka/app/planted.py::keyword_feature")

@@ -223,12 +223,12 @@ def test_owned_startup_hint_clears_after_the_first_completed_poll():
     r = Reader(ipc, startup_hint_lease=lease)
     assert ("show-text", "", 1) not in ipc.commands
 
-    assert r.poll_once() is True
+    assert r.pump() is True
     assert r._interactive_ready is True
     assert ("show-text", "", 1) in ipc.commands
 
     before = ipc.commands.count(("show-text", "", 1))
-    r.poll_once()
+    r.pump()
     assert ipc.commands.count(("show-text", "", 1)) == before
 
 
@@ -246,7 +246,7 @@ def test_first_batch_command_dispatches_before_readiness_clears_the_hint(monkeyp
     )
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
-    assert reader.poll_once() is True
+    assert reader.pump() is True
     assert observed == [False]
     assert clear in ipc.commands
 
@@ -272,10 +272,10 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll():
     ipc.requests[0].future.set_result({"error": "success"})
     reader = Reader(ipc, startup_hint_lease=lease)
 
-    assert reader.poll_once() is True
+    assert reader.pump() is True
     assert ("show-text", "", 1) in ipc.commands
     assert ipc.requests[-1].future.done() is False
-    assert reader.poll_once() is True
+    assert reader.pump() is True
 
 
 def test_load_deps_async_marks_loading(monkeypatch):
@@ -375,7 +375,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     assert dictionary.started.wait(1)
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
-    assert reader.poll_once() is True
+    assert reader.pump() is True
     assert dispatched == [True]
     assert reader.tokens == [] and reader._sub_pending == "猫"
     assert dictionary.thread_id != threading.get_ident()
@@ -384,7 +384,7 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(monkey
     assert dictionary.finished.wait(1)
     deadline = time.monotonic() + 1
     while not reader.tokens and time.monotonic() < deadline:
-        reader.poll_once()
+        reader.pump()
         time.sleep(0.001)
     try:
         assert [token.surface for token in reader.tokens] == ["猫"]

@@ -214,6 +214,12 @@ class FakeIPC:
 
     def __init__(self):
         self.events: list[dict] = []
+        #: The real transport lets a consumer WAIT for an event rather than ask repeatedly. A fake
+        #: that always returns instantly cannot tell a blocking loop from a spinning one, so it
+        #: mirrors the signal here — under a lock, like production, or an emit racing a drain is a
+        #: lost wake and the consumer sleeps through an event that already arrived.
+        self._event_arrived = threading.Event()
+        self._events_lock = threading.Lock()
         self.props: dict = {}
         self.commands: list[tuple] = []
         self.requests: list[IPCRequest] = []
@@ -262,10 +268,12 @@ class FakeIPC:
         self.emit({"event": "property-change", "name": name, "data": value})
 
     def emit(self, event: dict) -> None:
-        if self._event_sink is None:
-            self.events.append(event)
-        else:
-            self._event_sink(event, 0)
+        with self._events_lock:
+            if self._event_sink is None:
+                self.events.append(event)
+            else:
+                self._event_sink(event, 0)
+            self._event_arrived.set()
 
     def pump(self) -> None:
         """Real IPC reads the socket here; the fake's events are queued directly."""
@@ -292,7 +300,14 @@ class FakeIPC:
     ) -> list[dict]:
         if self._legacy_event_source is not None:
             return self._legacy_event_source(timeout, ordered_terminals=ordered_terminals)
-        evs, self.events = self.events, []
+        if timeout:
+            with self._events_lock:
+                pending = bool(self.events)
+            if not pending:
+                self._event_arrived.wait(timeout)
+        with self._events_lock:
+            evs, self.events = self.events, []
+            self._event_arrived.clear()
         return evs
 
     def install_runtime_ingress(self, event_sink, connection_sink, legacy_event_source, gateway):
