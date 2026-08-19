@@ -89,6 +89,52 @@ def _send_visibility(ipc, identity: str, *, visible: bool, on_outcome=None) -> N
             on_outcome(False)  # noqa: FBT003  # the applied flag is the whole payload
 
 
+FOCUS_PAD = 3
+
+
+def place_subtitle(
+    size: tuple[int, int], osd: tuple[int, int], bottom_margin: int
+) -> tuple[int, int]:
+    """Top-left for a rendered cue: centred horizontally, sitting ``bottom_margin`` above the bottom.
+
+    Not clamped. A cue wider than the video is a raster-side bug (the raster wraps to the OSD width),
+    and clamping here would hide it by silently shifting the line instead.
+    """
+    return (osd[0] - size[0]) // 2, osd[1] - size[1] - bottom_margin
+
+
+def focus_rect(boxes, hover: int, span: tuple[int, int] | None) -> tuple[int, int, int, int] | None:
+    """The padded rectangle to highlight under the hovered word, or None when there is nothing to
+    highlight.
+
+    ``span`` covers a multi-token dictionary term (コンサート over the over-split コン), so the
+    highlight is the UNION of its boxes — highlighting only `hover` would underline half a word the
+    tooltip is showing whole. A span whose boxes are absent yields None rather than an empty union:
+    the cue was re-rendered under the hover and the old indices no longer address anything.
+    """
+    if hover < 0 or box_for_token(boxes, hover) is None:
+        return None
+    lo, hi = span or (hover, hover + 1)
+    selected = [box for box in boxes if lo <= box.index < hi]
+    if not selected:
+        return None
+    left = min(box.x for box in selected)
+    top = min(box.y for box in selected)
+    right = max(box.x + box.w for box in selected)
+    bottom = max(box.y + box.h for box in selected)
+    return left, top, right - left + 2 * FOCUS_PAD, bottom - top + 2 * FOCUS_PAD
+
+
+def focus_drawing(rect: tuple[int, int, int, int]) -> str:
+    """``rect`` as an ASS vector drawing — the translucent highlight mpv paints natively."""
+    left, top, width, height = rect
+    return (
+        rf"{{\an7\pos({left - FOCUS_PAD},{top - FOCUS_PAD})\bord2\shad0"
+        rf"\1c&H5AD6FF&\1a&HDF&\3c&H5AD6FF&\3a&H23&\p1}}"
+        f"m 0 0 l {width} 0 l {width} {height} l 0 {height}"
+    )
+
+
 class SubtitleRenderer:
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
 
@@ -164,8 +210,7 @@ class SubtitleRenderer:
         with otel_metrics.instrumented(otel_metrics.subtitle_render_duration_ms, "subtitle_render"):
             sr = self.provider.render(request)
         reader.boxes = list(sr.boxes)
-        ox = (reader.osd[0] - sr.image.width) // 2
-        oy = reader.osd[1] - sr.image.height - reader.bottom_margin
+        ox, oy = place_subtitle((sr.image.width, sr.image.height), reader.osd, reader.bottom_margin)
         reader.sub_origin = (ox, oy)
         if not reader._first_sub_logged:
             reader._first_sub_logged = True
@@ -665,27 +710,21 @@ class NativeVisibleRenderer:
         if reader.hover < 0 or box_for_token(reader.boxes, reader.hover) is None:
             self._hide_focus(reader.ipc)
             return
-        span = reader._hover_span or (reader.hover, reader.hover + 1)
-        selected = [box for box in reader.boxes if span[0] <= box.index < span[1]]
-        if not selected:
+        rect = focus_rect(reader.boxes, reader.hover, reader._hover_span)
+        if rect is None:
             self._hide_focus(reader.ipc)
             return
-        left = min(box.x for box in selected)
-        top = min(box.y for box in selected)
-        right = max(box.x + box.w for box in selected)
-        bottom = max(box.y + box.h for box in selected)
-        pad = 3
-        width = right - left + 2 * pad
-        height = bottom - top + 2 * pad
-        drawing = (
-            rf"{{\an7\pos({left - pad},{top - pad})\bord2\shad0"
-            rf"\1c&H5AD6FF&\1a&HDF&\3c&H5AD6FF&\3a&H23&\p1}}"
-            f"m 0 0 l {width} 0 l {width} {height} l 0 {height}"
-        )
         self._submit_focus(
             reader.ipc,
             SurfaceAction.PRESENT,
-            (NATIVE_FOCUS_ID, "ass-events", drawing, reader.osd[0], reader.osd[1], 1),
+            (
+                NATIVE_FOCUS_ID,
+                "ass-events",
+                focus_drawing(rect),
+                reader.osd[0],
+                reader.osd[1],
+                1,
+            ),
         )
 
     def clear(self, reader: Reader) -> None:

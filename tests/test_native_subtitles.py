@@ -2451,3 +2451,70 @@ def test_an_unreadable_boundary_is_unknown_and_never_legacy_proof(reply: object)
     from saitenka.app.subtitle_ownership import Visibility
 
     assert _visibility(reply) is Visibility.UNKNOWN
+
+
+def _box(index, x, y, w=20, h=30):
+    from saitenka.app.subtitles import WordBox
+
+    return WordBox(index, x, y, w, h)
+
+
+def test_the_highlight_spans_a_whole_multi_token_term():
+    """コンサート over the over-split コン. The tooltip shows the whole term, so highlighting only the
+    hovered morpheme would underline half of what the user is reading."""
+    from saitenka.app.subtitle_render import FOCUS_PAD, focus_rect
+
+    boxes = [_box(0, 0, 100), _box(1, 20, 100), _box(2, 40, 100)]
+
+    assert focus_rect(boxes, 0, (0, 2)) == (0, 100, 40 + 2 * FOCUS_PAD, 30 + 2 * FOCUS_PAD)
+
+
+def test_the_highlight_covers_only_the_hovered_word_without_a_span():
+    from saitenka.app.subtitle_render import FOCUS_PAD, focus_rect
+
+    boxes = [_box(0, 0, 100), _box(1, 20, 100)]
+
+    assert focus_rect(boxes, 1, None) == (20, 100, 20 + 2 * FOCUS_PAD, 30 + 2 * FOCUS_PAD)
+
+
+def test_a_span_over_two_lines_covers_both():
+    """A term wrapped across the cue's two lines: the union is the bounding box, so the highlight
+    is one rectangle covering the gap rather than two disjoint pieces."""
+    from saitenka.app.subtitle_render import focus_rect
+
+    rect = focus_rect([_box(0, 200, 100), _box(1, 0, 140)], 0, (0, 2))
+
+    assert rect is not None
+    _left, top, _w, height = rect
+    assert top == 100
+    assert height >= 70  # spans down to the second line's bottom edge
+
+
+def test_nothing_is_hovered_means_nothing_is_highlighted():
+    from saitenka.app.subtitle_render import focus_rect
+
+    assert focus_rect([_box(0, 0, 100)], -1, None) is None
+
+
+def test_a_span_whose_boxes_are_gone_highlights_nothing():
+    """The cue was re-rendered under the hover, so the retained indices no longer address anything.
+    An empty union would be a zero-size rect at the origin — a highlight in the corner of the video.
+    """
+    from saitenka.app.subtitle_render import focus_rect
+
+    assert focus_rect([_box(0, 0, 100)], 0, (5, 9)) is None
+
+
+def test_the_subtitle_sits_centred_above_the_bottom_margin():
+    from saitenka.app.subtitle_render import place_subtitle
+
+    assert place_subtitle((400, 80), (1920, 1080), 60) == ((1920 - 400) // 2, 1080 - 80 - 60)
+
+
+def test_the_placement_tracks_the_video_size_not_a_fixed_resolution():
+    from saitenka.app.subtitle_render import place_subtitle
+
+    hd = place_subtitle((400, 80), (1920, 1080), 60)
+    retina = place_subtitle((400, 80), (3024, 1898), 60)
+
+    assert retina[0] > hd[0] and retina[1] > hd[1]
