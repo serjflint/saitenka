@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING
 from saitenka.app import telemetry
 from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
 from saitenka.app.startup_hint import StartupHintReducer, StartupHintState
-from saitenka.runtime.effects import DetachDiagnostics, Owner, RemoveSessionArtifacts
+from saitenka.runtime.effects import (
+    CloseSessionOverlay,
+    CloseSessionSurfaces,
+    DetachDiagnostics,
+    Owner,
+    RemoveSessionArtifacts,
+)
 from saitenka.runtime.events import (
     ConnectionReplaced,
     EffectFinished,
@@ -67,6 +73,11 @@ _CLAIMED = (StartupHintRequested, StartupReady, SessionClosing)
 STARTUP_HINT = "startup-hint"
 LIFECYCLE_CLOSE = "lifecycle-close"
 
+#: Names in `gateway.session_resources`. Spelled once for the same reason the feature keys are:
+#: the owner that registers and the dispatcher that closes must not drift apart.
+SURFACES_RESOURCE = "lifecycle-surfaces"
+OVERLAY_RESOURCE = "overlay-transport"
+
 
 def owner_of(event: RuntimeEvent) -> Owner | None:
     """Which owner an event belongs to, or None while nothing owns it.
@@ -92,6 +103,17 @@ def _dispatcher(gateway: MpvGateway) -> Callable[[Effect], bool]:
     def dispatch(effect: Effect) -> bool:
         if isinstance(effect, DetachDiagnostics):
             telemetry.set_gauge_provider(None)
+            return True
+        if isinstance(effect, CloseSessionSurfaces | CloseSessionOverlay):
+            name = (
+                SURFACES_RESOURCE if isinstance(effect, CloseSessionSurfaces) else OVERLAY_RESOURCE
+            )
+            resource = gateway.session_resources.get(name)
+            # False, not an exception: an unregistered resource means this session's owner never
+            # handed it over, so its own teardown still runs. The ledger records the difference.
+            if resource is None:
+                return False
+            resource.close()  # type: ignore[attr-defined]  # registered by the owner that made it
             return True
         if isinstance(effect, RemoveSessionArtifacts):
             shutil.rmtree(effect.path, ignore_errors=True)

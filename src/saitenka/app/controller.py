@@ -370,6 +370,20 @@ class Reader:
         from saitenka.app.lifecycle_timers import LifecycleTimers
 
         self.lifecycle_surfaces = LifecycleSurfaces(self.ov)
+        # Hand teardown to the runtime at the point of construction, so the lifetime belongs to
+        # whoever owns it rather than to a line in a teardown table far away. We keep *using* it;
+        # what moves is when it closes. False means no runtime owns this session, and the close
+        # table's fallback still has to run.
+        # `getattr`, like the job-lane port below: a partial IPC (the benches' fake) constructs a
+        # Reader without implementing every runtime port, and construction must not demand one.
+        from saitenka.app.session_routes import OVERLAY_RESOURCE, SURFACES_RESOURCE
+
+        register = getattr(ipc, "register_session_resource", None)
+        self._runtime_owns_surfaces = bool(
+            register
+            and register(SURFACES_RESOURCE, self.lifecycle_surfaces)
+            and register(OVERLAY_RESOURCE, self.ov)
+        )
         self.interaction_surfaces = InteractionSurfaces(self.ov)
         self.lifecycle_timers = LifecycleTimers(ipc)
         self._analysis_submit = analysis_overlay.configure_runtime_job(ipc)
@@ -3824,8 +3838,18 @@ class Reader:
                     lambda: self._mined_store,
                 ),
                 CloseStep("lifecycle-timers", lambda: self.lifecycle_timers.close()),
-                CloseStep("lifecycle-surfaces", lambda: self.lifecycle_surfaces.close()),
-                CloseStep("transport", lambda: self.ov.close()),
+                # The `SURFACES` phase, announced here rather than with the participants: every
+                # render lane above has drained, so nothing can present again. Announcing it at
+                # `PARTICIPANTS` would strip the overlays ~30 steps early, while a lane could
+                # still add one.
+                CloseStep("lifecycle-surfaces", lambda: self._retire_surfaces()),
+                # Closed by the `SURFACES` phase above when a runtime owns it — this is the
+                # fallback for a Reader that has none, and must stay after the removes it carries.
+                CloseStep(
+                    "transport",
+                    lambda: self.ov.close(),
+                    lambda: not self._runtime_owns_surfaces,
+                ),
                 # Per-session scratch dir, once nothing can still write to it.
                 CloseStep("temporary-artifacts", lambda: self._retire_artifacts()),
             )
@@ -3834,6 +3858,22 @@ class Reader:
         if report is not None:
             log.warning("%s", report)
         return ledger
+
+    def _retire_surfaces(self) -> None:
+        """Announce the `SURFACES` phase, or close them ourselves.
+
+        Same fallback shape as `_retire_artifacts`, and for the same reason: a `Reader` with no
+        runtime still built the surfaces, so somebody has to remove them.
+
+        Gated on the *registration*, not on the announcement's return: `announce` reports only that
+        a reactor saw the event, not that anything performed the effect. A session with a reactor
+        but no registered resource would take the True and leak the overlays.
+        """
+        if self._runtime_owns_surfaces and self.ipc.deliver_runtime_event(
+            SessionClosing(ClosePhase.SURFACES)
+        ):
+            return
+        self.lifecycle_surfaces.close()
 
     def _retire_artifacts(self) -> None:
         """Hand the scratch dir to the runtime's `ARTIFACTS` phase, or remove it ourselves.

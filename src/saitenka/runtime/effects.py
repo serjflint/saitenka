@@ -142,18 +142,45 @@ class DetachDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
+class CloseSessionSurfaces:
+    """Remove the session's lifecycle overlays, once no lane can present again.
+
+    Carries no handle for the same reason `DetachDiagnostics` carries no callable: the surfaces
+    are a session resource the runtime owns, so the dispatcher already knows where they are. An
+    effect that named its target would make the vocabulary depend on the Reader's field layout.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class CloseSessionOverlay:
+    """Close the session's overlay transport, after its surfaces are gone.
+
+    Ordered after `CloseSessionSurfaces` within the one phase, not split across two: the removes
+    are queued *through* this transport, so closing it first would strand them.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class RemoveSessionArtifacts:
     """Delete the session's scratch directory, once nothing can still write to it."""
 
     path: str
 
 
-type LifecycleEffect = StopSession | DetachDiagnostics | RemoveSessionArtifacts
+type LifecycleEffect = (
+    StopSession
+    | DetachDiagnostics
+    | CloseSessionSurfaces
+    | CloseSessionOverlay
+    | RemoveSessionArtifacts
+)
 
 #: Lifecycle effects the reactor hands straight to the dispatcher. No `EffectId`, so no reserved
 #: terminal and no completion: nothing correlates to them, and a reservation raised during close
 #: is one nothing would ever retire.
-type FireAndForget = DetachDiagnostics | RemoveSessionArtifacts
+type FireAndForget = (
+    DetachDiagnostics | CloseSessionSurfaces | CloseSessionOverlay | RemoveSessionArtifacts
+)
 
 #: What leaves the runtime through the effect dispatcher. `StopSession` is absent because the
 #: reactor performs it itself, and the diagnostic/control kinds have their own ports.

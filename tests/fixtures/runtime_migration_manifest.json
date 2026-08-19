@@ -1066,15 +1066,17 @@
     },
     {
       "id": "surfaces",
-      "source": "src/saitenka/app/controller.py::Reader.close",
+      "source": "src/saitenka/app/lifecycle_close.py::_effects",
       "evidence": [
-        "call:self.ov.close"
+        "call:CloseSessionSurfaces",
+        "call:CloseSessionOverlay",
+        "ref:event.phase"
       ],
       "target": "surface-runtime-close",
       "work_package": "2,4,5,6",
-      "replacement": "RemoveSurface -> SurfaceTransactionOutcome",
-      "test": "all stable surface slots are absent before gateway close",
-      "migrated": false
+      "replacement": "CloseSessionSurfaces -> CloseSessionOverlay",
+      "test": "a session that handed its surfaces over does not also close them itself",
+      "migrated": true
     },
     {
       "id": "telemetry",

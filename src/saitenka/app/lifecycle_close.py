@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.runtime.effects import DetachDiagnostics, RemoveSessionArtifacts
+from saitenka.runtime.effects import (
+    CloseSessionOverlay,
+    CloseSessionSurfaces,
+    DetachDiagnostics,
+    RemoveSessionArtifacts,
+)
 from saitenka.runtime.events import ClosePhase, SessionClosing
 from saitenka.runtime.state import ReduceResult
 
@@ -32,6 +37,10 @@ def _effects(event: SessionClosing) -> tuple[Effect, ...]:
     """What this phase retires. Empty is legitimate — a phase nobody has migrated into yet."""
     if event.phase is ClosePhase.PARTICIPANTS:
         return (DetachDiagnostics(),)
+    if event.phase is ClosePhase.SURFACES:
+        # Order is the contract here, not a tuple's incidental shape: the removes go out through
+        # the transport the second effect closes.
+        return (CloseSessionSurfaces(), CloseSessionOverlay())
     if event.scratch is not None:
         return (RemoveSessionArtifacts(event.scratch),)
     return ()

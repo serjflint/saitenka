@@ -237,3 +237,34 @@ def test_a_session_with_an_observer_issues_the_same_ipc_as_one_without() -> None
             gateway.close()
 
     assert commands_for(observing=True) == commands_for(observing=False)
+
+
+def test_every_fire_and_forget_effect_reaches_the_dispatcher() -> None:
+    """`_apply`'s fire-and-forget branch must cover exactly `FireAndForget`.
+
+    Not a style point: an effect in the alias but missing from the branch falls through to the
+    async path, which reads `.effect_id` — an attribute a lifecycle effect does not carry. That is
+    an `AttributeError` mid-close, after some participants have already run. This walks the alias
+    so adding a member without extending the branch fails here rather than during a teardown.
+    """
+    import dataclasses
+    from typing import get_args
+
+    from saitenka.runtime.effects import FireAndForget
+
+    dispatched: list[object] = []
+    reactor = SessionReactor(
+        _state(),
+        OwnerRouter(SessionReducer({}), lambda _e: None),
+        SessionMailbox(),
+        lambda effect: bool(dispatched.append(effect)) or True,
+    )
+
+    members = get_args(FireAndForget.__value__)
+    assert members  # negative control: an empty alias would make this vacuous
+    for effect_type in members:
+        # Placeholder values by field type, so a member with a payload needs no hand-written case.
+        kwargs = {f.name: "" for f in dataclasses.fields(effect_type)}
+        reactor._apply(effect_type(**kwargs))
+
+    assert [type(effect) for effect in dispatched] == list(members)

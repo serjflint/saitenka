@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Protocol
 from saitenka.runtime.effects import (
     AsyncEffect,
     CancelEffect,
+    CloseSessionOverlay,
+    CloseSessionSurfaces,
     CoreControl,
     DetachDiagnostics,
     DispatchedEffect,
@@ -175,10 +177,18 @@ class SessionReactor[StateT]:
         if isinstance(effect, StopSession):
             self.close()
             return
-        if isinstance(effect, DetachDiagnostics | RemoveSessionArtifacts):
+        if isinstance(
+            effect,
+            DetachDiagnostics | CloseSessionSurfaces | CloseSessionOverlay | RemoveSessionArtifacts,
+        ):
             # Fire-and-forget, like `StopSession`: a lifecycle effect carries no ID because there
             # is nothing to correlate a completion to. Reserving a terminal for one would leave a
             # reservation nothing ever retires, and close is when that matters least and costs most.
+            #
+            # Spelled out rather than read off `FireAndForget`, which would drift: narrowing needs
+            # a literal union here, and the alias' `__value__` defeats it. `test_reactor.py` pins
+            # the two together — an effect that misses this branch falls through to the async path
+            # and dies on the `effect_id` it does not carry.
             self._dispatch(effect)
             return
         if isinstance(effect, (CancelEffect, ExpireEffect)):

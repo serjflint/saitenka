@@ -218,6 +218,10 @@ class MpvGateway:
         self._reconnect_attempt = 0
         self._closed = False
         self._ready = False
+        #: Session resources whose *lifetime* the runtime owns, by name. Deliberately opaque:
+        #: `mpvio` must not import `app`, and only the app-side dispatcher knows what a name
+        #: means. An owner hands its resource over at construction and stops closing it itself.
+        self.session_resources: dict[str, object] = {}
         self._router = router = LegacyEventRouter(mailbox)
         ipc.install_runtime_ingress(
             self._publish_observation,

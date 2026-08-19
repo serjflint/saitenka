@@ -262,6 +262,65 @@ def test_the_artifacts_phase_is_separate_from_the_participants_phase() -> None:
     assert reduce_lifecycle_close(artifacts.state, SessionClosing()).effects == ()
 
 
+def test_the_runtime_closes_the_surfaces_it_was_handed() -> None:
+    """The `SURFACES` phase. The Reader still *uses* the surfaces; what moved is who ends them.
+
+    Asserted through the registration, which is the seam: a session that handed its surfaces over
+    must not also close them itself, or the migration is an extra call rather than a moved
+    lifetime.
+    """
+    from saitenka.app.session_routes import SURFACES_RESOURCE, install_session_runtime
+
+    ipc = FakeIPC()
+    gateway = install_session_runtime(ipc, startup_hint=False)
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    closed: list[str] = []
+    gateway.session_resources[SURFACES_RESOURCE] = _RecordingSurfaces(closed)
+    try:
+        reader.close()
+    finally:
+        gateway.close()
+
+    assert closed == ["close"]
+
+
+def test_the_surfaces_phase_closes_the_transport_after_the_removes_go_through_it() -> None:
+    """Order within the phase is the contract: the overlay removes are queued *through* the
+    transport, so closing it first would strand them. A tuple's order is easy to lose in a
+    refactor, hence an oracle rather than a comment."""
+    from saitenka.app.lifecycle_close import LifecycleCloseState, reduce_lifecycle_close
+    from saitenka.runtime.effects import CloseSessionOverlay, CloseSessionSurfaces
+    from saitenka.runtime.events import ClosePhase, SessionClosing
+
+    result = reduce_lifecycle_close(LifecycleCloseState(), SessionClosing(ClosePhase.SURFACES))
+
+    assert [type(effect) for effect in result.effects] == [
+        CloseSessionSurfaces,
+        CloseSessionOverlay,
+    ]
+
+
+def test_a_session_with_no_runtime_still_closes_its_own_surfaces() -> None:
+    """The negative control for the seam: the fallback is what makes the duty safe to migrate at
+    all, so it has to be exercised, not assumed."""
+    ipc = FakeIPC()  # no gateway, so no runtime owns anything
+    reader = Reader(ipc, prefetch=False, renderer=NullRenderer())
+    closed: list[str] = []
+    reader.lifecycle_surfaces = _RecordingSurfaces(closed)  # type: ignore[assignment]  # local fake
+
+    reader.close()
+
+    assert closed == ["close"]
+
+
+class _RecordingSurfaces:
+    def __init__(self, log: list[str]) -> None:
+        self._log = log
+
+    def close(self) -> None:
+        self._log.append("close")
+
+
 @pytest.mark.parametrize("startup_hint", [True, False])
 def test_composing_a_session_runtime_leaves_its_close_duties_reachable(
     monkeypatch, *, startup_hint: bool

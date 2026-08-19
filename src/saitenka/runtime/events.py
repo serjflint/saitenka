@@ -44,10 +44,17 @@ class ClosePhase(StrEnum):
 
     A phase is defined by what is already gone, because that is the only thing a participant can
     depend on: `PARTICIPANTS` runs while every collaborator and the transport are still live;
-    `ARTIFACTS` runs once nothing can write any more.
+    `SURFACES` once every render lane has drained, so nothing can present again; `ARTIFACTS` once
+    nothing can write any more.
+
+    Phases are what keep a migrated duty in its original position. `Reader.close` is a sequence,
+    so announcing everything at `PARTICIPANTS` would run a participant tens of steps early —
+    removing overlays while a lane can still add one, say. A duty migrates into the phase that
+    matches where its step used to sit, not into the first one that exists.
     """
 
     PARTICIPANTS = "participants"
+    SURFACES = "surfaces"
     ARTIFACTS = "artifacts"
 
 

@@ -42,6 +42,8 @@ if TYPE_CHECKING:
         def publish_session_event(self, event) -> bool: ...
         def deliver_session_event(self, event) -> bool: ...
 
+        session_resources: dict[str, object]
+
         def submit_mpv(self, **kwargs) -> bool: ...
 
         def schedule_timer(self, **kwargs) -> bool: ...
@@ -589,6 +591,19 @@ class MpvIPC:
         if gateway is None:
             return False
         return gateway.deliver_session_event(event)
+
+    def register_session_resource(self, name: str, resource: object) -> bool:
+        """Hand a resource's teardown to the runtime. False when no gateway owns this session.
+
+        The owner keeps using it; what moves is *when it closes*. A False here is what keeps the
+        caller's own fallback teardown honest — a `Reader` built without a runtime still has to
+        close what it made.
+        """
+        gateway = self._runtime_gateway
+        if gateway is None:
+            return False
+        gateway.session_resources[name] = resource
+        return True
 
     def submit_runtime_mpv(self, **kwargs) -> bool:
         gateway = self._runtime_gateway
