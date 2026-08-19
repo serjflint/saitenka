@@ -164,9 +164,8 @@ def configure(reader: Reader, startup: SubtitleStartup, *, slang: str = "ja,jpn,
     # where a stale _translation_secondary_sid would leave the EN reveal stuck off — setup_secondary's
     # `mirror == sid` guard would skip re-issuing secondary-sid. At launch the mirror is already None.
     reader._translation_secondary_sid = None
-    from saitenka.app import analysis_overlay
 
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
 
 
 def setup_secondary(reader: Reader) -> int | None:
@@ -215,9 +214,8 @@ def on_primary_changed(reader: Reader, sid) -> None:
         log.info("subtitle sid=%s adopted as %s", sid, language)
     if language != reader.subtitle_language:
         reader.subtitle_language = language
-        from saitenka.app import analysis_overlay
 
-        analysis_overlay.on_index_changed(reader)
+        reader.invalidate_analysis()
     if reader._translation_visible():
         setup_secondary(reader)
     else:
@@ -263,9 +261,8 @@ def select_track(reader: Reader, sid: int, target: Language) -> None:
     _send(reader.ipc, "select-primary", "set_property", "sid", sid)
     reader.subtitle_language = target
     reader._sub_index = None
-    from saitenka.app import analysis_overlay
 
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     reader.set_subtitle("")
     if reader._translation_visible():
         setup_secondary(reader)
@@ -286,9 +283,8 @@ def adopt_current_as_target(reader: Reader, sid) -> None:
         reader.en_sid = None
     if reader.subtitle_language != MAIN_LANG:
         reader.subtitle_language = MAIN_LANG
-        from saitenka.app import analysis_overlay
 
-        analysis_overlay.on_index_changed(reader)
+        reader.invalidate_analysis()
     reader._sub_index = None
     from saitenka.app.embedded_subs import build_sub_index_for_current_track
 

@@ -542,9 +542,8 @@ def apply_deps(reader: Reader, deps: dict) -> None:
             submit=reader._capability_submit,
         )
         reader._anki_capability.request(force=True)
-    from saitenka.app import analysis_overlay
 
-    analysis_overlay.on_vocabulary_changed(reader)
+    reader.invalidate_analysis(vocabulary_changed=True)
     reader._dependencies_changed()
     reader.start_prefetch()  # spin up prefetch now that dict_set exists (no-op if still None)
     reader.warm_episode_tokens()  # deps arrived after the index built → warm the episode's cues now

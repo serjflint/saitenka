@@ -22,7 +22,7 @@ def _toggle_analysis(reader) -> None:
     `analysis_overlay.set_open` replaced `toggle` when the open/close decision moved to
     `panel_intents`; these tests are about what opening and closing *do*, so they keep flipping.
     """
-    analysis_overlay.set_open(reader, open=not reader.analysis.open)
+    reader.set_analysis_open(open=not reader.analysis.open)
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ def test_cache_hit_does_not_start_another_worker(reader):
 
 
 def test_track_analysis_completes_while_overlay_is_closed(reader):
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     _finish(reader)
 
     assert reader.analysis.current is not None
@@ -107,11 +107,11 @@ def test_track_analysis_completes_while_overlay_is_closed(reader):
 def test_dependency_loading_defers_analysis_until_vocabulary_arrives(reader):
     reader._loading = True
 
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     assert reader.analysis.active_key is None
 
     reader._loading = False
-    analysis_overlay.on_vocabulary_changed(reader)
+    reader.invalidate_analysis(vocabulary_changed=True)
     _finish(reader)
     assert reader.analysis.current is not None
 
@@ -120,16 +120,16 @@ def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
     _toggle_analysis(reader)
     _finish(reader)
 
-    analysis_overlay.on_vocabulary_changed(reader)
+    reader.invalidate_analysis(vocabulary_changed=True)
     assert reader.analysis.status == "Analyzing…"
     assert reader.analysis.generation == 3
     _finish(reader)
 
     reader._sub_index = CueIndex([Cue(0, 1, "彼は映画を見る。")])
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     assert reader.analysis.generation == 5
     _finish(reader)
-    assert analysis_overlay.cue_result(reader, 0) is not None
+    assert analysis_overlay.cue_result(reader.analysis.current, 0) is not None
 
 
 def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
@@ -153,11 +153,11 @@ def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
     assert old_started[0].wait(1)
 
     reader._sub_index = CueIndex([Cue(0, 1, "古い二")])
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     assert old_started[1].wait(1)
 
     reader._sub_index = CueIndex([Cue(0, 1, "新しい")])
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     assert reader.analysis.status == "Analyzing…"
 
     old_release.set()

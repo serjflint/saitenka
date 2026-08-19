@@ -146,38 +146,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::_show"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::_unavailable"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::cue_result"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::on_index_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::on_vocabulary_changed"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::redraw"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::request"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/analysis_overlay.py::set_open"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/backlog.py::_cue_languages"
     ],
     [

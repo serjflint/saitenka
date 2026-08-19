@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from saitenka.app import analysis_overlay, sidebar
+from saitenka.app import sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -102,7 +102,7 @@ def _draw_stats(r: Reader) -> None:
     r.analysis.open = (
         True  # current=None → the "Analyzing…" status panel; enough to size the overlay
     )
-    analysis_overlay.redraw(r)
+    r._draw_analysis()
 
 
 CHROME = [("help", _draw_help), ("sidebar", _draw_sidebar), ("stats", _draw_stats)]

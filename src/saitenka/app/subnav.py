@@ -30,9 +30,8 @@ def load_sub_index(reader: Reader, path) -> None:
     native_geometry = getattr(reader, "native_geometry", None)
     if native_geometry is not None:
         native_geometry.set_source(Path(path), reader=reader)
-    from saitenka.app import analysis_overlay
 
-    analysis_overlay.on_index_changed(reader)
+    reader.invalidate_analysis()
     from saitenka.app import sidebar
 
     sidebar.on_index_changed(reader)

@@ -2155,7 +2155,7 @@ class Reader:
         if panel is panel_intents.Panel.SIDEBAR:
             sidebar.set_open(self, open=opening)
         elif panel is panel_intents.Panel.ANALYSIS:
-            analysis_overlay.set_open(self, open=opening)
+            self.set_analysis_open(open=opening)
         elif panel is panel_intents.Panel.SUBTITLE_PICKER:
             sub_picker.open_picker(self) if opening else sub_picker.close_picker(self)
         elif panel is panel_intents.Panel.CARD_PREVIEW:
@@ -2437,6 +2437,47 @@ class Reader:
             self._paused_by_tip = False
         elif isinstance(effect, Announce):
             self._toast(effect.text, effect.kind)
+
+    # --- episode analysis: state module, executed here ------------------------------------------
+    def _draw_analysis(self) -> None:
+        if not self.analysis.open:
+            return
+        image = analysis_overlay.panel_image(
+            self.analysis,
+            osd=self.osd,
+            close_key=self.analysis_key,
+            scale=self.chrome_scale,
+        )
+        x = (self.osd[0] - image.width) // 2
+        y = (self.osd[1] - image.height) // 2
+        self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.ANALYSIS)
+
+    def _refresh_analysis(self) -> None:
+        """Bring the analysis up to date and show it. Presenting is the host's, deciding is not."""
+        analysis_overlay.request(
+            self.analysis,
+            language=self.subtitle_language,
+            index=self._sub_index,
+            loading=self._loading,
+            scorer=self.scorer,
+            tokenizer=self.tokenizer,
+        )
+        self._draw_analysis()
+        if analysis_overlay.submit_pending(
+            self.analysis, self._analysis_submit, self._finish_analysis
+        ):
+            self._draw_analysis()
+
+    def set_analysis_open(self, *, open: bool) -> None:  # noqa: A002
+        self.analysis.open = open
+        if not open:
+            self.lifecycle_surfaces.remove(OverlayId.ANALYSIS)
+            return
+        self._refresh_analysis()
+
+    def invalidate_analysis(self, *, vocabulary_changed: bool = False) -> None:
+        analysis_overlay.invalidate(self.analysis, vocabulary_changed=vocabulary_changed)
+        self._refresh_analysis()
 
     # --- help-overlay commands: pure reducer, executed here (WP5.3) ---------------------------
     def help_page_command(self, steps: int):
@@ -2798,7 +2839,7 @@ class Reader:
             if self.sub_text.strip():
                 self._draw_subtitle()
             self._redraw_help()
-            analysis_overlay.redraw(self)
+            self._draw_analysis()
             sidebar.update(self)  # row capacity changed, so the active row may need re-centring
 
     def _apply_capabilities(self) -> None:
@@ -2875,7 +2916,7 @@ class Reader:
                 self.analysis, self._analysis_submit, self._finish_analysis
             )
         if changed:
-            analysis_overlay.redraw(self)
+            self._draw_analysis()
 
     def _request_interaction_metadata(self, request: hover_metadata.MetadataRequest) -> bool:
         return hover_metadata.submit(

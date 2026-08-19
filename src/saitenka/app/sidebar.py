@@ -106,7 +106,7 @@ def _cue_statuses(reader: Reader) -> dict[int, str]:
 
 
 def _analysis_status(reader: Reader, cue_index: int) -> str | None:
-    result = analysis_overlay.cue_result(reader, cue_index)
+    result = analysis_overlay.cue_result(reader.analysis.current, cue_index)
     if result is None:
         return None
     labels = []
