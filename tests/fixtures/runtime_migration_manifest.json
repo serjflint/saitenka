@@ -18,6 +18,10 @@
     ],
     [
       "direct-mpv-command",
+      "src/saitenka/app/controller.py::Reader._bind_help_keys"
+    ],
+    [
+      "direct-mpv-command",
       "src/saitenka/app/controller.py::Reader._build_command_router.seek"
     ],
     [
@@ -42,15 +46,11 @@
     ],
     [
       "direct-mpv-command",
+      "src/saitenka/app/controller.py::Reader._restore_help_context_keys"
+    ],
+    [
+      "direct-mpv-command",
       "src/saitenka/app/embedded_subs.py::_selected_sub_track"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/help_overlay.py::_bind_help_keys"
-    ],
-    [
-      "direct-mpv-command",
-      "src/saitenka/app/help_overlay.py::_restore_context_keys"
     ],
     [
       "direct-mpv-command",
@@ -210,43 +210,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/help_overlay.py::_bind_help_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::_restore_context_keys"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::close_help"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::document_for"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::open_help"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::redraw"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/help_overlay.py::scroll"
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/help_overlay.py::step"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/help_overlay.py::suppress_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/help_overlay.py::toggle"
     ],
     [
       "reader-parameter",

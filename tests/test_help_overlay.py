@@ -1,6 +1,6 @@
 """In-player help uses effective bindings and remains playback-neutral."""
 
-from saitenka.app import help_overlay, tooltip
+from saitenka.app import tooltip
 from saitenka.app.bindings import (
     BOOKMARK_MSG,
     HELP_CLOSE_MSG,
@@ -31,7 +31,7 @@ class FakeIPC:
 def _entries(reader: Reader):
     return [
         (section.title, entry)
-        for page in help_overlay.document_for(reader).pages
+        for page in reader._help_document().pages
         for section in page.sections
         for entry in section.entries
     ]
@@ -99,7 +99,7 @@ def test_help_document_uses_effective_catalog_and_context_labels():
 def test_small_osd_pages_and_repeats_navigation_hints():
     reader = Reader(FakeIPC(), anki=object())
     reader.osd = (480, 220)
-    document = help_overlay.document_for(reader)
+    document = reader._help_document()
 
     assert len(document.pages) > 1
     assert all(page.footer == "F1 / Esc close  ·  PgUp/PgDn or wheel" for page in document.pages)
@@ -121,8 +121,8 @@ def test_ui_scale_enlarges_help_document():
     enlarged = Reader(FakeIPC(), options=ReaderOptions(panels=PanelOptions(scale=1.5)))
     normal.osd = enlarged.osd = (1920, 1080)
 
-    normal_document = help_overlay.document_for(normal)
-    enlarged_document = help_overlay.document_for(enlarged)
+    normal_document = normal._help_document()
+    enlarged_document = enlarged._help_document()
 
     assert enlarged_document.width > normal_document.width
     assert enlarged_document.height > normal_document.height
@@ -195,3 +195,28 @@ def test_tooltip_teardown_does_not_steal_escape_while_help_is_open():
     assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-help-close")
     reader._handle(HELP_CLOSE_MSG)
     assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
+
+
+def test_the_reference_lists_only_bindings_that_opt_in() -> None:
+    """`help_entries` is a filter over bindings, checkable without a session — which is the point
+    of it no longer taking one."""
+    from types import SimpleNamespace
+
+    from saitenka.app.help_overlay import help_entries
+
+    def binding(key: str, *, shown: bool):
+        spec = SimpleNamespace(
+            section="s", label=key, context="c", source="src", show_in_help=shown
+        )
+        return SimpleNamespace(key=key, spec=spec)
+
+    entries = help_entries([binding("a", shown=True), binding("b", shown=False)])
+
+    assert [entry.key for entry in entries] == ["a"]
+
+
+def test_the_footer_names_the_configured_close_key() -> None:
+    """The reference is the only place a user learns the key, so it must not hard-code one."""
+    from saitenka.app.help_overlay import help_footer
+
+    assert help_footer("Alt+/").startswith("Alt+/")

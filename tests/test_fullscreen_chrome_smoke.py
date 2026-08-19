@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from saitenka.app import analysis_overlay, help_overlay, sidebar
+from saitenka.app import analysis_overlay, sidebar
 from saitenka.app.config import PanelOptions, ReaderOptions
 from saitenka.app.controller import Reader
 from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -90,7 +90,7 @@ def _reader(osd: tuple[int, int], *, ui_scale: float = 1.0) -> Reader:
 
 def _draw_help(r: Reader) -> None:
     r._help_open = True
-    help_overlay.redraw(r)
+    r._redraw_help()
 
 
 def _draw_sidebar(r: Reader) -> None:

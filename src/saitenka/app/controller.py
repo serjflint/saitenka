@@ -25,6 +25,7 @@ from saitenka.app import (
     card_preview,
     cue_annotation,
     geometry_refresh,
+    help_intents,
     help_overlay,
     hover_intents,
     hover_metadata,
@@ -2438,8 +2439,60 @@ class Reader:
             self._toast(effect.text, effect.kind)
 
     # --- help-overlay commands: pure reducer, executed here (WP5.3) ---------------------------
+    def help_page_command(self, steps: int):
+        from saitenka.app import help_intents
+
+        return help_intents.HelpCommand.NEXT if steps > 0 else help_intents.HelpCommand.PREVIOUS
+
+    def _help_document(self):
+        from saitenka.app import help_overlay
+        from saitenka.app.bindings import active_bindings
+
+        return help_overlay.help_document(
+            active_bindings(self, "global", "tooltip", "mpv"),
+            osd=self.osd,
+            close_key=self.help_key,
+            scale=self.chrome_scale,
+        )
+
+    def _redraw_help(self) -> None:
+        from saitenka.app import help_overlay
+
+        if not self._help_open:
+            return
+        document = self._help_document()
+        self._help_page = min(self._help_page, len(document.pages) - 1)
+        image = help_overlay.page_image(document, self._help_page)
+        x = (self.osd[0] - document.width) // 2
+        y = (self.osd[1] - document.height) // 2
+        self.lifecycle_surfaces.present(image, x, y, oid=OverlayId.HELP)
+
+    def _bind_help_keys(self) -> None:
+        from saitenka.app.bindings import active_bindings
+
+        for binding in active_bindings(self, "help"):
+            message = binding.spec.message
+            if message is not None:
+                self.ipc.command("keybind", binding.key, f"script-message {message}")
+
+    def _restore_help_context_keys(self) -> None:
+        """Give the help keys back to whatever owned them, or unbind them.
+
+        The tooltip only gets its keys back when it still has them bound — restoring blind would
+        re-point a key at a tooltip that has since gone away.
+        """
+        from saitenka.app.bindings import active_bindings
+
+        tooltip_by_key = {
+            binding.key: binding.spec.message for binding in active_bindings(self, "tooltip")
+        }
+        for binding in active_bindings(self, "help"):
+            message = tooltip_by_key.get(binding.key) if self._tip_keys_bound else None
+            command = f"script-message {message}" if message else "ignore"
+            self.ipc.command("keybind", binding.key, command)
+
     def _run_help_command(self, command) -> None:
-        from saitenka.app import help_intents, help_overlay
+        from saitenka.app import help_intents
 
         if not self._help_open:
             inputs = help_intents.HelpInputs(open=False)
@@ -2449,27 +2502,27 @@ class Reader:
             inputs = help_intents.HelpInputs(
                 open=True,
                 page=self._help_page,
-                page_count=len(help_overlay.document_for(self).pages),
+                page_count=len(self._help_document().pages),
             )
         for effect in help_intents.reduce(command, inputs):
             self._apply_help_effect(effect)
 
     def _apply_help_effect(self, effect) -> None:
-        from saitenka.app import help_intents, help_overlay
+        from saitenka.app import help_intents
 
         if isinstance(effect, help_intents.OpenHelp):
             self._help_open = True
             self._help_page = effect.page
-            help_overlay._bind_help_keys(self)
-            help_overlay.redraw(self)
+            self._bind_help_keys()
+            self._redraw_help()
         elif isinstance(effect, help_intents.CloseHelp):
             self._help_open = False
             self.lifecycle_surfaces.remove(OverlayId.HELP)
-            help_overlay._restore_context_keys(self)
+            self._restore_help_context_keys()
             self._help_page = 0
         elif isinstance(effect, help_intents.ShowHelpPage):
             self._help_page = effect.index
-            help_overlay.redraw(self)
+            self._redraw_help()
 
     def _run_subtitle_command(self, command: subtitle_intents.SubtitleCommand) -> None:
         for effect in subtitle_intents.reduce(command, self._subtitle_inputs()):
@@ -2585,7 +2638,7 @@ class Reader:
         self._run_subtitle_command(subtitle_intents.SubtitleCommand.TOGGLE_ANNOTATION_MODE)
 
     def toggle_help(self) -> None:
-        help_overlay.toggle(self)
+        self._run_help_command(help_intents.HelpCommand.TOGGLE)
 
     def _register_keybinds(self) -> None:
         # mpv `keybind` takes the command as ONE string, e.g. "script-message saitenka-speak".
@@ -2664,9 +2717,9 @@ class Reader:
             SUB_REPLAY_MSG: action("_replay_cue"),
             SUB_ANCHOR_MSG: action("_anchor_subtitles"),
             HELP_TOGGLE_MSG: action("toggle_help"),
-            HELP_PREV_MSG: lambda: help_overlay.step(self, -1),
-            HELP_NEXT_MSG: lambda: help_overlay.step(self, 1),
-            HELP_CLOSE_MSG: lambda: help_overlay.close_help(self),
+            HELP_PREV_MSG: lambda: self._run_help_command(help_intents.HelpCommand.PREVIOUS),
+            HELP_NEXT_MSG: lambda: self._run_help_command(help_intents.HelpCommand.NEXT),
+            HELP_CLOSE_MSG: lambda: self._run_help_command(help_intents.HelpCommand.CLOSE),
             SPEAK_MSG: action("speak_hovered"),
             COPY_MSG: action("copy_hovered"),
             KANJI_MSG: action("kanji_current"),
@@ -2744,7 +2797,7 @@ class Reader:
         if self.refresh_osd():
             if self.sub_text.strip():
                 self._draw_subtitle()
-            help_overlay.redraw(self)
+            self._redraw_help()
             analysis_overlay.redraw(self)
             sidebar.update(self)  # row capacity changed, so the active row may need re-centring
 

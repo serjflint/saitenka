@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from saitenka.app import help_overlay, sidebar, sub_picker, surfaces
+from saitenka.app import sidebar, sub_picker, surfaces
 from saitenka.app.bindings import SCROLL_DOWN_MSG
 from saitenka.app.controller import Reader
 from saitenka.app.subselect import SubtitleCandidate
@@ -131,11 +131,14 @@ def test_scroll_command_routes_to_open_help(monkeypatch):
     reader = Reader(_FakeIPC())
     reader._help_open = True
     steps: list[int] = []
-    monkeypatch.setattr(help_overlay, "step", lambda _reader, step: steps.append(step))
+    # The help surface routes the wheel into the help *command*; paging is `help_intents`' call.
+    monkeypatch.setattr(reader, "_run_help_command", lambda command: steps.append(command))
 
     reader._handle(UserCommand(SCROLL_DOWN_MSG))
 
-    assert steps == [1]
+    from saitenka.app.help_intents import HelpCommand
+
+    assert steps == [HelpCommand.NEXT]
 
 
 def test_scroll_command_routes_to_open_picker(monkeypatch):
