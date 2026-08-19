@@ -100,6 +100,11 @@ def load_allowlist(path: Path) -> dict[str, int]:
 
 
 def unexpected_reader_parameters(root: Path, allowlist: Path) -> set[str]:
+    """Every module whose count differs from its baseline, in either direction.
+
+    The raw comparison — used by the unit tests below against synthetic trees. The gate itself goes
+    through :func:`enforce_reader_host_contract`, which treats the two directions differently.
+    """
     limits = load_allowlist(allowlist)
     counts = reader_parameter_counts(root)
     modules = counts.keys() | limits.keys()
@@ -108,3 +113,32 @@ def unexpected_reader_parameters(root: Path, allowlist: Path) -> set[str]:
         for module in modules
         if counts.get(module, 0) != limits.get(module, 0)
     }
+
+
+def enforce_reader_host_contract(root: Path, allowlist: Path) -> set[str]:
+    """Fail on GROWTH; tighten the baseline on a decrease. Returns only the modules that grew.
+
+    The contract this file exists for is "no new `Reader` coupling", and only growth violates it. A
+    decrease is the migration working, and failing on it cost a re-bless per conversion — the same
+    ceremony the runtime-debt manifest had.
+
+    Tightening rather than merely tolerating is what keeps the "no slack" property the strict
+    comparison was protecting: a baseline left above the real count is headroom a future regression
+    could slip back into unnoticed. Rewritten here, so there is never any.
+    """
+    limits = load_allowlist(allowlist)
+    counts = reader_parameter_counts(root)
+    grew = {
+        f"{module}: current={counts.get(module, 0)} baseline={limits.get(module, 0)}"
+        for module in counts.keys() | limits.keys()
+        if counts.get(module, 0) > limits.get(module, 0)
+    }
+    if grew:
+        return grew
+    tightened = {module: count for module, count in sorted(counts.items()) if count}
+    if tightened != limits:
+        allowlist.write_text(
+            json.dumps(tightened, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return set()
