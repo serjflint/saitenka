@@ -81,11 +81,25 @@ class _Visitor(ast.NodeVisitor):
         #: Callable-field name -> the functions bound into it. `SurfaceSpec(scroll=...)` and the
         #: field's own default are one signature, so its members convert together or not at all.
         self.bindings: dict[str, set[str]] = {}
+        #: Module-level def/class names; see `visit_Module`.
+        self.defined: set[str] = set()
         self._stack: list[str] = []
         #: The innermost enclosing host-taking function, and the local name its host is bound to.
         self._host: list[tuple[Function, str]] = []
         #: Depth of nested scopes since that function — a use below 0 is a closure capture.
         self._depth = 0
+
+    def visit_Module(self, node: ast.Module) -> None:
+        # Module-level defs up front: a bare-name call is only module-scoped if one of these (or an
+        # import) defines it. Anything else is a LOCAL holding a callable, and treating that as a
+        # module symbol silently dropped `deactivate = getattr(...); deactivate(reader)` — the
+        # dispatch that hides `NativeVisibleRenderer` behind `SubtitleModeCoordinator`.
+        self.defined = {
+            statement.name
+            for statement in node.body
+            if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        }
+        self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module and node.module.startswith("saitenka.app"):
@@ -193,12 +207,15 @@ class _Visitor(ast.NodeVisitor):
     def _target(self, called: ast.expr) -> str:
         """Where a forward lands, as `module::symbol` when that is knowable and `?::name` when not.
 
-        A bare name is an import or a module-local def, both exact. `self.m` is exact within the
-        enclosing class. Anything else is a call through a value, which no AST pass can resolve —
+        A bare name is exact only when an import or a module-level def actually binds it; a bare
+        name that binds neither is a LOCAL holding a callable. `self.m` is exact within the
+        enclosing class. Everything else is a call through a value, which no AST pass can resolve —
         those fall back to the basename and over-approximate.
         """
         if isinstance(called, ast.Name):
-            return f"{self.imports.get(called.id, self.module)}::{called.id}"
+            if called.id in self.imports:
+                return f"{self.imports[called.id]}::{called.id}"
+            return f"{self.module}::{called.id}" if called.id in self.defined else f"?::{called.id}"
         if isinstance(called, ast.Attribute):
             if isinstance(called.value, ast.Name) and called.value.id in {"self", "cls"}:
                 enclosing = self._stack[0] if self._stack else ""

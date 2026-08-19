@@ -146,6 +146,30 @@ def test_functions_bound_into_one_callable_field_share_its_arity() -> None:
     assert closure["small.py::scroll"] == closure["large.py::scroll"] == {"a", "b", "c", "d"}
 
 
+def test_a_callable_held_in_a_local_is_dispatch_not_a_module_symbol() -> None:
+    """`SubtitleModeCoordinator` hides its renderer behind exactly this shape.
+
+    Reading `deactivate(reader)` as a module-level call finds no such symbol and drops the forward
+    silently — an under-approximation, which is the one direction this tool must never take. The
+    coordinator then reported as trivially convertible while the renderer behind it needs forty.
+    """
+    tool = _module()
+    caller = _collect(
+        tool,
+        "coordinator.py",
+        """
+def deactivate_all(reader):
+    deactivate = getattr(reader.renderer, "deactivate", None)
+    if deactivate is not None:
+        deactivate(reader)
+""",
+    )
+    assert caller["coordinator.py::deactivate_all"].forwards == {"?::deactivate"}
+    renderer = _collect(tool, "big.py", "def deactivate(reader):\n    return reader.a, reader.b\n")
+    closure = tool.resolve([*caller.values(), *renderer.values()], {})
+    assert closure["coordinator.py::deactivate_all"] == {"renderer", "a", "b"}
+
+
 def test_the_census_matches_production() -> None:
     tool = _module()
     assert tool.check() == 0
