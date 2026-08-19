@@ -51,7 +51,7 @@ def untyped_feature(reader):
     return reader
 
 def aliased_command(player):
-    player.command("get_property", "pause")
+    player.command("set_property", "pause", True)
 
 def register(app):
     app.command(feature)
@@ -61,6 +61,7 @@ def register(app):
     kinds = {item.kind for item in scanner.debt}
     assert kinds == {
         "direct-mpv-command",
+        "direct-mpv-read",
         "direct-overlay-mutation",
         "passive-result-drain",
         "polled-deadline",
@@ -279,3 +280,46 @@ def test_scanner_exempts_the_presentation_adapters_but_not_their_callers() -> No
         )
         in actual
     )
+
+
+def test_scanner_separates_a_direct_read_from_a_direct_write() -> None:
+    """WP5's exit gate is phrased as "no direct *write* remains", and the one kind could not answer
+    it: a `get_property` has no terminal outcome to correlate, so routing it through the egress
+    gateway buys nothing and it is not what the gate is counting.
+
+    A symbol that reads and then writes is a WRITE site. Classifying it by its first call, or by
+    whether any call is a read, would hide `remove_external_sub_tracks` — which reads the track list
+    and then removes tracks — behind the read kind.
+    """
+    checker = _module()
+    scanner = checker.Scanner("src/saitenka/app/planted.py")
+    scanner.visit(
+        ast.parse(
+            """
+def only_reads(ipc):
+    return ipc.command("get_property", "sub-text")
+
+def only_writes(ipc):
+    ipc.command("set_property", "sid", 2)
+
+def reads_then_writes(ipc):
+    for track in ipc.command("get_property", "track-list")["data"]:
+        ipc.command("sub-remove", track["id"])
+
+def dynamic_verb(ipc, *command):
+    ipc.command(*command)
+"""
+        )
+    )
+    planted = "src/saitenka/app/planted.py"
+
+    assert checker.Debt("direct-mpv-read", f"{planted}::only_reads") in scanner.debt
+    assert checker.Debt("direct-mpv-command", f"{planted}::only_reads") not in scanner.debt
+
+    assert checker.Debt("direct-mpv-command", f"{planted}::only_writes") in scanner.debt
+    assert checker.Debt("direct-mpv-command", f"{planted}::reads_then_writes") in scanner.debt
+    assert checker.Debt("direct-mpv-read", f"{planted}::reads_then_writes") not in scanner.debt
+
+    # An unresolvable verb is a write until proven otherwise — the gate must not be relaxed by a
+    # call site it cannot read.
+    assert checker.Debt("direct-mpv-command", f"{planted}::dynamic_verb") in scanner.debt

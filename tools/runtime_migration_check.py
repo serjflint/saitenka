@@ -49,6 +49,10 @@ _PRESENTATION_ADAPTERS = {
     "src/saitenka/app/interaction_surfaces.py::InteractionSurfaces.remove",
 }
 _NON_MPV_COMMAND_RECEIVERS = {"app", "profile_app"}
+#: mpv verbs that only READ. WP5's exit gate is phrased in terms of a direct *write* — a read has no
+#: terminal outcome to correlate, so routing one through the egress gateway buys nothing. Splitting
+#: the kind is what makes that gate answerable from the manifest instead of by eye.
+_MPV_READ_VERBS = {"get_property"}
 _DRIVER_SWITCH_SYMBOLS = {
     "src/saitenka/app/runtime/commands.py::LegacyPickerRepeatGuard",
 }
@@ -106,7 +110,7 @@ class Scanner(ast.NodeVisitor):
     def __init__(self, relative: str) -> None:
         self.relative = relative
         self.stack: list[str] = []
-        self.debt: set[Debt] = set()
+        self._debt: set[Debt] = set()
         self.symbols: set[str] = set()
         self.evidence: dict[str, set[str]] = {}
         self.call_order: dict[str, list[str]] = {}
@@ -114,6 +118,25 @@ class Scanner(ast.NodeVisitor):
         #: Attribute nodes that are a call's target. Keyed by identity because the AST has
         #: no parent links and `visit_Call` runs before the walk reaches its own `func`.
         self.called_attributes: set[int] = set()
+        #: Per symbol, one bool per direct `.command(...)` call: True when the verb only reads.
+        #: A symbol is a read row only if EVERY one of its calls is a read — a function that reads
+        #: and then writes is a write site, and the gate must see it as one.
+        self.mpv_calls: dict[str, list[bool]] = {}
+
+    @property
+    def debt(self) -> set[Debt]:
+        """Discovered debt, with each symbol's direct mpv calls folded in as one row.
+
+        Folded here rather than at each call site because the kind is a property of the SYMBOL, not
+        of one call: a function that reads the track list and then removes tracks is a write site,
+        and classifying per call would file it under both.
+        """
+        rows = set(self._debt)
+        rows.update(
+            Debt("direct-mpv-read" if all(reads) else "direct-mpv-command", source)
+            for source, reads in self.mpv_calls.items()
+        )
+        return rows
 
     def _symbol(self) -> str:
         return ".".join(self.stack) or "<module>"
@@ -125,7 +148,7 @@ class Scanner(ast.NodeVisitor):
         self.stack.append(node.name)
         self.symbols.add(self._source())
         if self._source() in _DRIVER_SWITCH_SYMBOLS:
-            self.debt.add(Debt("driver-switch", self._source()))
+            self._debt.add(Debt("driver-switch", self._source()))
         self.generic_visit(node)
         self.stack.pop()
 
@@ -140,7 +163,7 @@ class Scanner(ast.NodeVisitor):
         self.monotonic_locals.append(set())
         self.symbols.add(self._source())
         if ".".join(self.stack) in _TICK_METHODS:
-            self.debt.add(Debt("tick-stage", self._source()))
+            self._debt.add(Debt("tick-stage", self._source()))
         arguments = (
             *node.args.posonlyargs,
             *node.args.args,
@@ -153,7 +176,7 @@ class Scanner(ast.NodeVisitor):
             annotation is not None and "Reader" in ast.unparse(annotation)
             for annotation in annotations
         ):
-            self.debt.add(Debt("reader-parameter", self._source()))
+            self._debt.add(Debt("reader-parameter", self._source()))
         self.generic_visit(node)
         self.monotonic_locals.pop()
         self.stack.pop()
@@ -176,16 +199,18 @@ class Scanner(ast.NodeVisitor):
         if isinstance(node.func, ast.Attribute):
             receiver = _dotted(node.func.value)
             if node.func.attr == "command" and receiver not in _NON_MPV_COMMAND_RECEIVERS:
-                self.debt.add(Debt("direct-mpv-command", self._source()))
+                verb = node.args[0] if node.args else None
+                read = isinstance(verb, ast.Constant) and verb.value in _MPV_READ_VERBS
+                self.mpv_calls.setdefault(self._source(), []).append(read)
             if node.func.attr == "get_nowait" and self._source() not in _AUTONOMOUS_DRAINS:
-                self.debt.add(Debt("passive-result-drain", self._source()))
+                self._debt.add(Debt("passive-result-drain", self._source()))
             receiver_tail = receiver.rsplit(".", 1)[-1]
             if (
                 node.func.attr in _OVERLAY_METHODS
                 and (receiver_tail == "ov" or "overlay" in receiver_tail)
                 and self._source() not in _PRESENTATION_ADAPTERS
             ):
-                self.debt.add(Debt("direct-overlay-mutation", self._source()))
+                self._debt.add(Debt("direct-overlay-mutation", self._source()))
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
@@ -197,7 +222,7 @@ class Scanner(ast.NodeVisitor):
             and id(node) not in self.called_attributes
             and self._source() not in _AUTONOMOUS_DEADLINES
         ):
-            self.debt.add(Debt("polled-deadline", self._source()))
+            self._debt.add(Debt("polled-deadline", self._source()))
         self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare) -> None:
@@ -213,7 +238,7 @@ class Scanner(ast.NodeVisitor):
         ) and any(
             isinstance(child, ast.Attribute) for part in operands for child in ast.walk(part)
         ):
-            self.debt.add(Debt("polled-deadline", self._source()))
+            self._debt.add(Debt("polled-deadline", self._source()))
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
