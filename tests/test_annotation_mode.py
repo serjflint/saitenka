@@ -14,6 +14,16 @@ class FakeIPC:
     def __init__(self, props=None):
         self.props = props or {}
         self.commands = []
+        #: The runtime timer port. The hover-switch dwell is a named deadline, and it fails *open*
+        #: — a fake without the port would switch instantly and stop testing the dwell entirely.
+        self.timers: dict[str, tuple] = {}
+
+    def schedule_runtime_timer(self, *, timer, identity, on_finished, **_kwargs) -> bool:
+        self.timers[timer] = (identity, on_finished)
+        return True
+
+    def cancel_runtime_timer(self, timer: str) -> bool:
+        return self.timers.pop(timer, None) is not None
 
     def command(self, *args):
         self.commands.append(args)

@@ -221,22 +221,6 @@
       "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
     ],
     [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_linger_nested"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_linger_word_hover"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_open_scan_popup"
-    ],
-    [
-      "polled-deadline",
-      "src/saitenka/app/tooltip.py::_switch_word_hover"
-    ],
-    [
       "reader-parameter",
       "src/saitenka/app/analysis_overlay.py::_show"
     ],

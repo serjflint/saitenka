@@ -22,6 +22,22 @@ class LifecycleTimerKind(StrEnum):
     TOAST_EXPIRY = "toast-expiry"
     FLASH_EXPIRY = "flash-expiry"
     SIDEBAR_MANUAL_HOLD = "sidebar-manual-hold"
+    #: Hover dwell. Interaction-owned, but the same mechanism: one deadline per kind, latest wins.
+    #: A second implementation of revision-fenced named timers is the divergence this avoids.
+    HOVER_SWITCH = "hover-switch"
+    TOOLTIP_HIDE = "tooltip-hide"
+    NESTED_HIDE = "nested-hide"
+    SCAN_OPEN = "scan-open"
+
+
+#: Deadlines are owned by the subsystem whose work they retire, and the owner reaches the gateway
+#: on every scheduled effect — so it is a property of the kind, not of the scheduler.
+_OWNERS = {
+    LifecycleTimerKind.HOVER_SWITCH: Owner.INTERACTION,
+    LifecycleTimerKind.TOOLTIP_HIDE: Owner.INTERACTION,
+    LifecycleTimerKind.NESTED_HIDE: Owner.INTERACTION,
+    LifecycleTimerKind.SCAN_OPEN: Owner.INTERACTION,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +96,7 @@ class LifecycleTimers:
             if schedule is None:
                 return False
             return schedule(
-                owner=Owner.SESSION,
+                owner=_OWNERS.get(kind, Owner.SESSION),
                 identity=identity,
                 timer=self._name(kind),
                 due_at=self._clock() + delay_s,

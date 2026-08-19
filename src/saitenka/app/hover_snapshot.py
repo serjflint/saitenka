@@ -35,7 +35,7 @@ class TipView:
     state: Panel | None
     key: object | None
     rect: tuple[int, int, int, int] | None
-    hide_at: float
+    hide_pending: bool  # a linger deadline is armed
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ def snapshot(reader: Reader) -> HoverView:
             state=reader._tip_state,
             key=reader._tip_key,
             rect=reader._tip_rect,
-            hide_at=reader._hide_at,
+            hide_pending=reader._hide_pending,
         ),
         paused=reader._paused_by_tip,
         nav_idx=reader._nav_idx,

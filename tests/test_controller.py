@@ -981,13 +981,42 @@ def test_word_switch_needs_dwell_but_first_open_is_instant(monkeypatch):
     mouse(5, 5)  # first hover → opens INSTANTLY (no dwell)
     assert seen == [0] and r.hover == 0
     mouse(5, 50)  # transit onto word 1 en route to the tooltip
-    assert r.hover == 0  # …does NOT switch yet (dwell not elapsed)
-    clock[0] += 0.05
-    mouse(5, 50)
-    assert r.hover == 0  # still within the dwell window
-    clock[0] += r.hover_switch_delay  # rest long enough on word 1
-    mouse(5, 50)
+    assert r.hover == 0  # …does NOT switch yet: the dwell is armed, not elapsed
+    mouse(5, 50)  # still resting there — re-arming the same word must not re-fire
+    assert r.hover == 0
+    assert _fire_dwell(ipc, "hover-switch")  # rested long enough on word 1
     assert r.hover == 1  # …now it switches
+
+
+def test_a_dwell_that_lands_after_the_cursor_left_changes_nothing(monkeypatch):
+    """The state a clock-polled dwell could not reach at all.
+
+    Polling asked "has enough time passed" at a moment the cursor was already elsewhere, so a stale
+    dwell simply never fired. A deadline is a real in-flight thing: it can be delivered after the
+    cursor moved on.
+
+    Two guards stop it — the timer's revision fence and the handler's own target check — so neither
+    mutates lethally on its own and only removing both fails this. That is deliberate depth, not a
+    redundant check to tidy away.
+    """
+    ipc = FakeIPC()
+    r = _scan_reader(ipc)
+    monkeypatch.setattr(r, "renderer", NullRenderer())
+    r.scan_delay = 0.25
+    r.set_hover(0)
+    _hover_first_scan_cell(r, ipc)
+    r._update_hover()  # arms the scan dwell
+
+    from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+
+    identity, due = ipc.timers["lifecycle:scan-open"]  # the due event, captured in flight
+    ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave before it elapses
+    r._update_hover()  # retires the dwell — but the captured due event is already out there
+
+    due(EffectFinished(EffectId(0), Owner.INTERACTION, identity, EffectOutcome.SUCCEEDED))
+
+    assert r.hover_view().nested.state is None  # the revision fence rejected it
+    assert r.hover_view().scan_target is None
 
 
 def test_transit_over_word_does_not_switch(monkeypatch):
@@ -1006,11 +1035,12 @@ def test_transit_over_word_does_not_switch(monkeypatch):
         r._update_hover()
 
     mouse(5, 5)  # tooltip on word 0
-    clock[0] += 0.03
-    mouse(5, 50)  # brush word 1 briefly (transit)
-    clock[0] += 0.03
-    mouse(130, 130)  # arrive at the tooltip
-    assert r.hover == 0 and r.hover_view().tip.hide_at == 0.0  # never hijacked; tooltip alive
+    mouse(5, 50)  # brush word 1 briefly (transit) — arms the switch dwell
+    mouse(130, 130)  # arrive at the tooltip before it elapses
+
+    assert _fire_dwell(ipc, "hover-switch")  # the dwell for the brushed word lands late…
+
+    assert r.hover == 0 and not r.hover_view().tip.hide_pending  # …and is ignored
 
 
 def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
@@ -1029,18 +1059,17 @@ def test_hover_lingers_and_keeps_alive_over_tooltip(monkeypatch):
         r._update_hover()
 
     mouse(5, 5)  # on the word → hovered, no pending hide
-    assert r.hover == 0 and r.hover_view().tip.hide_at == 0.0
+    assert r.hover == 0 and not r.hover_view().tip.hide_pending
 
     mouse(300, 300)  # left the word → schedule hide, still shown
-    assert r.hover == 0 and r.hover_view().tip.hide_at == 1000.0 + r.hide_delay
+    assert r.hover == 0 and r.hover_view().tip.hide_pending
 
     mouse(120, 120)  # reached the tooltip in time → stays alive
-    assert r.hover_view().tip.hide_at == 0.0 and r.hover == 0
+    assert not r.hover_view().tip.hide_pending and r.hover == 0
 
     mouse(300, 300)  # leave everything → reschedule hide
-    assert r.hover_view().tip.hide_at > 0.0
-    clock[0] += r.hide_delay + 0.1  # …and let it elapse
-    mouse(300, 300)
+    assert r.hover_view().tip.hide_pending
+    assert _fire_dwell(ipc, "tooltip-hide")  # …and let it elapse
     assert seen[-1] == -1  # hidden only after the delay
 
 
@@ -1271,7 +1300,7 @@ def test_hover_off_window_still_lingers(monkeypatch):
     monkeypatch.setattr(r, "set_hover", lambda i: setattr(r, "hover", i))
     ipc.props["mouse-pos"] = {"hover": False, "x": -1, "y": -1}  # cursor left the window
     r._update_hover()
-    assert r.hover == 0 and r.hover_view().tip.hide_at > 0.0  # scheduled, not instant
+    assert r.hover == 0 and r.hover_view().tip.hide_pending  # scheduled, not instant
 
 
 class _TallDS:
@@ -1426,6 +1455,16 @@ def _scan_reader(ipc):
     return r
 
 
+def _fire_dwell(ipc, kind: str) -> bool:
+    """Deliver one hover dwell deadline.
+
+    These used to resolve inside `_update_hover` by comparing a monkeypatched clock. They are named
+    deadlines now, so a zero delay is still a timer and has to be delivered — and a *late* one is
+    expressible, which the clock version could not represent at all.
+    """
+    return ipc.fire_runtime_timer(f"lifecycle:{kind}")
+
+
 def _hover_first_scan_cell(r, ipc):
     """Point the cursor at the first scan cell of the base tooltip; return the ScanBox."""
     sb = r._tip_state.windowed.scan_boxes()[0]
@@ -1559,28 +1598,30 @@ def test_hover_inner_word_opens_nested_popup(monkeypatch):
     r.set_hover(0)  # base tooltip on the subtitle word
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
+    _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None  # a nested popup opened…
     assert r.hover_view().nested.rect is not None
     assert r.hover_view().nested.word.startswith("追")  # …for the inner word under the cursor
 
 
 def test_nested_scan_waits_for_dwell(monkeypatch):
+    """Arriving on a cell arms the dwell; only its due event opens the popup. Re-arriving on the
+    same cell must not re-arm, or a cursor jittering inside one cell would never settle."""
     ipc = FakeIPC()
     r = _scan_reader(ipc)
     r.scan_delay = 0.25  # require the cursor to settle before opening
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    clock = [1000.0]
-    monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
+
     r._update_hover()
     assert r.hover_view().nested.state is None  # just arrived — nothing opens yet
-    clock[0] += 0.1
     r._update_hover()
-    assert r.hover_view().nested.state is None  # still settling
-    clock[0] += 0.2  # past the dwell now
-    r._update_hover()
-    assert r.hover_view().nested.state is not None  # opened only after the cursor rested
+    assert r.hover_view().nested.state is None  # still settling on the same cell
+
+    assert _fire_dwell(ipc, "scan-open")  # the cursor rested it out
+
+    assert r.hover_view().nested.state is not None
 
 
 def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
@@ -1588,8 +1629,6 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     r = _scan_reader(ipc)
     r.scan_delay = 0.25
     monkeypatch.setattr(r, "renderer", NullRenderer())
-    clock = [1000.0]
-    monkeypatch.setattr(C.time, "monotonic", lambda: clock[0])
     r.set_hover(0)
     boxes = r._tip_state.windowed.scan_boxes()
     sx, sy = r._tip_xy
@@ -1603,14 +1642,14 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
 
     hover(boxes[0])
     r._update_hover()
-    assert r.hover_view().scan_target == boxes[0].text and r._scan_since == 1000.0
-    clock[0] += 0.2  # drift to a different cell before the dwell elapses
-    hover(boxes[1])
+    assert r.hover_view().scan_target == boxes[0].text
+    hover(boxes[1])  # drift to a different cell before the dwell elapses
     r._update_hover()
-    assert (
-        r.hover_view().scan_target == boxes[1].text and r._scan_since == 1000.2
-    )  # timer restarted
+
+    assert r.hover_view().scan_target == boxes[1].text  # the dwell restarted on the new cell
     assert r.hover_view().nested.state is None  # no popup fired mid-drift
+    assert _fire_dwell(ipc, "scan-open")  # and when it does elapse, it opens the NEW cell
+    assert r.hover_view().nested.state is not None
 
 
 def test_switch_base_word_drops_nested(monkeypatch):
@@ -1628,6 +1667,7 @@ def test_switch_base_word_drops_nested(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
+    _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
     r.set_hover(1)  # move to a different subtitle word
     assert r.hover_view().nested.state is None  # the stale scan popup is dropped
@@ -1642,12 +1682,14 @@ def test_nested_lingers_then_dismisses(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
+    _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.state is not None
     ipc.props["mouse-pos"] = {"hover": True, "x": 5, "y": 5}  # leave the whole stack
     r._update_hover()
-    assert r._nest.hide_at > 0  # scheduled, not instant
-    clock[0] += r.hide_delay + 0.1
-    r._update_hover()
+    assert r._nest.hide_pending  # scheduled, not instant
+
+    assert _fire_dwell(ipc, "nested-hide")
+
     assert r.hover_view().nested.state is None  # dismissed after the linger
 
 
@@ -1664,6 +1706,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
+    _fire_dwell(ipc, "scan-open")
     assert r.hover_view().nested.token is not None
     mined = []
     monkeypatch.setattr(r, "_mine_token", lambda tok: mined.append(tok.surface))
@@ -1906,6 +1949,7 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
     r._update_hover()
+    _fire_dwell(ipc, "scan-open")
     assert r.hover_view().scan_target is not None  # a scan target is settling
     r._tip_view_h = 20  # make the panel scrollable
     r._scroll_tip(20)  # scrolling the panel…
@@ -1968,7 +2012,8 @@ def test_right_click_on_nested_copies_inner_word(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
-    r._update_hover()  # open the nested popup
+    r._update_hover()
+    _fire_dwell(ipc, "scan-open")  # open the nested popup
     got = []
     monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
     nx, ny, nw, nh = r._nest.rect
@@ -2580,7 +2625,8 @@ def test_cue_change_nested_also_cleared(monkeypatch):
     monkeypatch.setattr(r, "renderer", NullRenderer())
     r.set_hover(0)
     _hover_first_scan_cell(r, ipc)
-    r._update_hover()  # open the nested popup
+    r._update_hover()
+    _fire_dwell(ipc, "scan-open")  # open the nested popup
     assert r.hover_view().nested.state is not None
 
     hidden = []
@@ -2952,7 +2998,7 @@ def test_popups_module_unifies_popup_view_state():
 
     pv = PopupView()
     # the unified per-popup view state (nested popup; base tip keeps its own exploded state)
-    assert pv.state is None and pv.scroll == 0 and pv.rect is None and pv.hide_at == 0.0
+    assert pv.state is None and pv.scroll == 0 and pv.rect is None and not pv.hide_pending
     assert C._Nested is PopupView
     r = Reader(FakeIPC())
     assert isinstance(r._nest, PopupView)

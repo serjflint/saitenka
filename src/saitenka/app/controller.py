@@ -280,7 +280,7 @@ class Reader:
     # Base-tooltip runtime state + hover FSM (app/popups.py TooltipState) under its historical flat
     # names — the hot interaction-scoped cluster, woven through tooltip.py / nested_popup.py / prefetch.
     _paused_by_tip = Delegated[bool]("tip", "paused_by_tip")
-    _hide_at = Delegated[float]("tip", "hide_at")
+    _hide_pending = Delegated[bool]("tip", "hide_pending")
     # The base tooltip's PopupView + its fields, delegated through the dotted "tip.view" path so the
     # historical flat names keep resolving while base and nested share one view type + blit machinery.
     _tip_view = Delegated[PopupView]("tip", "view")
@@ -293,9 +293,7 @@ class Reader:
     _tip_nav = Delegated[list]("tip", "tip_nav")
     _nest = Delegated[PopupView]("tip", "nest")
     _scan_target = Delegated[str | None]("tip", "scan_target")
-    _scan_since = Delegated[float]("tip", "scan_since")
     _word_target = Delegated[int | None]("tip", "word_target")
-    _word_since = Delegated[float]("tip", "word_since")
     _last_mouse = Delegated[tuple[float, float]]("tip", "last_mouse")
     _flash_oid = Delegated[int | None]("tip", "flash_oid")
     _hover_reading = Delegated[str]("tip", "hover_reading")
@@ -2895,6 +2893,15 @@ class Reader:
         publish = getattr(self.ipc, "publish_legacy_command_outcome", None)
         if publish is not None:
             publish(event)
+
+    def arm_hover_deadline(self, kind, seconds: float, due) -> bool:
+        """Arm one hover dwell deadline, superseding any earlier one of the same kind."""
+        return self.lifecycle_timers.schedule(kind, seconds, due)
+
+    def cancel_hover_deadline(self, kind) -> None:
+        """Retire a dwell the cursor has moved off. The revision bump is the point — a due event
+        already in flight has to be fenced, not merely unscheduled."""
+        self.lifecycle_timers.cancel(kind)
 
     def hold_sidebar_scroll(self, seconds: float) -> bool:
         """Arm the deadline that releases the sidebar's manual-scroll hold, resuming auto-follow.

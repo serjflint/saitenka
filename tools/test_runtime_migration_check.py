@@ -22,11 +22,20 @@ def test_runtime_migration_manifest_matches_production() -> None:
     checker = _module()
     actual, _, _ = checker.scan()
     assert checker.check() == 0
+    # Two live rows, so the scanner is checked against production and not only against the
+    # synthetic source below. They are anchors, not landmarks: as the migration converts them, point
+    # these at whatever `poe runtime-status` still reports rather than weakening the assertion.
     assert (
-        checker.Debt("polled-deadline", "src/saitenka/app/tooltip.py::_open_scan_popup") in actual
+        checker.Debt(
+            "polled-deadline", "src/saitenka/app/controller.py::Reader._sync_mouse_capture"
+        )
+        in actual
     )
     assert (
-        checker.Debt("polled-deadline", "src/saitenka/app/tooltip.py::_switch_word_hover") in actual
+        checker.Debt(
+            "polled-deadline", "src/saitenka/app/controller.py::Reader._request_mined_seed"
+        )
+        in actual
     )
 
 

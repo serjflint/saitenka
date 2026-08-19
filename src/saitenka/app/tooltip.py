@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from saitenka import otel_metrics
 from saitenka.app import nested_popup, tooltip_engaged
+from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.media import copy_clipboard, speak
 from saitenka.app.nested_popup import TIP_GAP
@@ -96,25 +97,45 @@ def _hover_targets(reader: Reader, mx: float, my: float, *, inside: bool):
 
 
 def _open_scan_popup(reader: Reader, scan) -> None:
-    """A scan cell is under the cursor: open its nested popup once the dwell elapses."""
-    now = time.monotonic()
-    if scan.text != reader._scan_target:
-        reader._scan_target, reader._scan_since = scan.text, now  # moved → restart the dwell
-    # open only once the cursor has rested on this cell (scan delay), and it isn't already shown
-    if now - reader._scan_since >= reader.scan_delay and reader._nest.tail != scan.text:
-        reader._show_nested(scan)
-    reader._nest.hide_at = 0.0
+    """A scan cell is under the cursor: open its nested popup once the dwell elapses.
+
+    Fails closed. The dwell exists so that dragging across the panel does not spawn a popup per
+    cell passed over; with no timer to wait on, opening instantly would produce exactly that, so
+    the popup stays shut instead.
+    """
+    reader.cancel_hover_deadline(LifecycleTimerKind.NESTED_HIDE)
+    reader._nest.hide_pending = False
+    if scan.text == reader._scan_target:
+        return  # this cell's dwell is already armed, or already resolved
+    reader._scan_target = scan.text
+    if reader._nest.tail == scan.text:
+        return  # already shown
+
+    def opened() -> None:
+        if reader._scan_target == scan.text and reader._nest.tail != scan.text:
+            reader._show_nested(scan)
+
+    reader.arm_hover_deadline(LifecycleTimerKind.SCAN_OPEN, reader.scan_delay, opened)
 
 
 def _linger_nested(reader: Reader) -> None:
-    """No scan cell under the cursor: let an already-open nested popup linger, then hide it."""
+    """No scan cell under the cursor: let an already-open nested popup linger, then hide it.
+
+    Fails closed: a hide that can never fire leaves the popup on screen for the rest of the
+    session, so with no timer it hides at once and only the linger is lost.
+    """
     reader._scan_target = None
-    if reader._nest.state is None:
+    reader.cancel_hover_deadline(LifecycleTimerKind.SCAN_OPEN)
+    if reader._nest.state is None or reader._nest.hide_pending:
         return
-    now = time.monotonic()
-    if reader._nest.hide_at == 0.0:
-        reader._nest.hide_at = now + reader.hide_delay
-    elif now >= reader._nest.hide_at:
+
+    def hidden() -> None:
+        reader._nest.hide_pending = False
+        reader._hide_nested()
+
+    if reader.arm_hover_deadline(LifecycleTimerKind.NESTED_HIDE, reader.hide_delay, hidden):
+        reader._nest.hide_pending = True
+    else:
         reader._hide_nested()
 
 
@@ -131,7 +152,8 @@ def _update_nested_hover(
         _open_scan_popup(reader, scan)
     elif over_nest:
         reader._scan_target = None
-        reader._nest.hide_at = 0.0
+        reader.cancel_hover_deadline(LifecycleTimerKind.NESTED_HIDE)
+        reader._nest.hide_pending = False
     else:
         _linger_nested(reader)
 
@@ -139,36 +161,64 @@ def _update_nested_hover(
 def _switch_word_hover(reader: Reader, over_word: int) -> None:
     """First open is instant, but SWITCHING to a different word needs a brief dwell — so dragging the
     cursor up to the tooltip across the OTHER line of a two-line sub doesn't hijack it onto every
-    word it passes over. Only resting on a new word switches."""
+    word it passes over. Only resting on a new word switches.
+
+    Fails open, unlike the hides: the dwell only refines *which* word wins, so with no timer the
+    switch happens at once. Never switching would strand the tooltip on a word the cursor left.
+    """
     if over_word == reader.hover:
         reader._word_target = None
+        reader.cancel_hover_deadline(LifecycleTimerKind.HOVER_SWITCH)
         return
-    now = time.monotonic()
-    if over_word != reader._word_target:
-        reader._word_target, reader._word_since = over_word, now
-    if reader.hover < 0 or now - reader._word_since >= reader.hover_switch_delay:
-        reader.set_hover(over_word)
+    if reader.hover < 0:
+        reader.set_hover(over_word)  # nothing open yet: no hijack to guard against
         reader._word_target = None
+        return
+    if over_word == reader._word_target:
+        return  # this word's dwell is already armed
+    reader._word_target = over_word
+
+    def switched() -> None:
+        if reader._word_target == over_word:
+            reader.set_hover(over_word)
+            reader._word_target = None
+
+    if not reader.arm_hover_deadline(
+        LifecycleTimerKind.HOVER_SWITCH, reader.hover_switch_delay, switched
+    ):
+        switched()
 
 
 def _linger_word_hover(reader: Reader) -> None:
-    """No word under the cursor: let the base tooltip linger, then hide it."""
+    """No word under the cursor: let the base tooltip linger, then hide it.
+
+    Fails closed, for the same reason as the nested popup: a tooltip whose hide can never fire
+    stays on screen for the rest of the session.
+    """
     reader._word_target = None
-    now = time.monotonic()
-    if reader._hide_at == 0.0:
-        reader._hide_at = now + reader.hide_delay
-    elif now >= reader._hide_at:
+    reader.cancel_hover_deadline(LifecycleTimerKind.HOVER_SWITCH)
+    if reader._hide_pending:
+        return
+
+    def hidden() -> None:
+        reader._hide_pending = False
         reader.set_hover(-1)
-        reader._hide_at = 0.0
+
+    if reader.arm_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE, reader.hide_delay, hidden):
+        reader._hide_pending = True
+    else:
+        reader.set_hover(-1)
 
 
 def _update_word_hover(reader: Reader, over_word: int, *, over_tip: bool, over_nest: bool) -> None:
     """Base tooltip: also kept alive while the cursor is on the nested popup."""
     if over_word >= 0:
         _switch_word_hover(reader, over_word)
-        reader._hide_at = 0.0
+        reader.cancel_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE)
+        reader._hide_pending = False
     elif over_tip or over_nest:
-        reader._hide_at = 0.0  # resting on the tooltip or its scan popup → keep it alive
+        reader.cancel_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE)  # keep it alive
+        reader._hide_pending = False
         reader._word_target = None
     elif reader.hover != -1:
         _linger_word_hover(reader)
@@ -1459,7 +1509,7 @@ def scroll_view(reader: Reader, view: PopupView, delta: int) -> bool:
     view.job_id = reader._interaction_jobs.begin("scroll")
     view.job_kind = "scroll"
     view.desired_scroll = ns
-    view.hide_at = 0.0  # scrolling counts as interacting → keep this popup up
+    view.hide_pending = False  # scrolling counts as interacting → keep this popup up
     deferred = reader._request_render_ahead(view, 1 if delta > 0 else -1)
     if not deferred:
         view.scroll = ns
@@ -1489,7 +1539,8 @@ def scroll_tip(reader: Reader, delta: int) -> None:
         scroll_view(reader, reader._nest, delta)
         return
     if scroll_view(reader, reader._tip_view, delta):
-        reader._hide_at = 0.0  # scrolling counts as interacting → keep the base tooltip up
+        reader.cancel_hover_deadline(LifecycleTimerKind.TOOLTIP_HIDE)  # scrolling keeps it up
+        reader._hide_pending = False
         reader._scan_target = None  # content moved under the cursor → restart the scan dwell
 
 
