@@ -854,10 +854,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_compose_kind"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_hover_targets"
     ],
     [
@@ -894,10 +890,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::_record_show_metrics"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::_request_hover_metadata"
     ],
     [
@@ -915,10 +907,6 @@
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::_update_word_hover"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::anki_ok"
     ],
     [
       "reader-parameter",
@@ -974,15 +962,7 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::group_mined_of"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::hit_header_add"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::hit_header_region"
     ],
     [
       "reader-parameter",
@@ -1002,14 +982,6 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::is_mined"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::jlpt_pill"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::navigate_tip"
     ],
     [
@@ -1018,23 +990,11 @@
     ],
     [
       "reader-parameter",
-      "src/saitenka/app/tooltip.py::panel_cache_setdefault"
-    ],
-    [
-      "reader-parameter",
       "src/saitenka/app/tooltip.py::panel_for"
     ],
     [
       "reader-parameter",
       "src/saitenka/app/tooltip.py::panel_key"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::place_panel"
-    ],
-    [
-      "reader-parameter",
-      "src/saitenka/app/tooltip.py::rareness_pill"
     ],
     [
       "reader-parameter",

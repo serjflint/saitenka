@@ -285,17 +285,14 @@ def test_panel_cache_evictions_counter_is_registered_and_records():
 def test_record_show_metrics_bumps_overshoot_only_for_a_cold_over_budget_show():
     """A cold show past the budget is a first-paint miss; a warm show over budget (or a cold show
     under it) is not — the counter must fire on exactly the first case so the signal isn't polluted."""
-    from types import SimpleNamespace
 
     from saitenka.app import tooltip
 
     over = otel_metrics.COLD_FIRST_PAINT_BUDGET_MS + 1
     under = otel_metrics.COLD_FIRST_PAINT_BUDGET_MS - 1
-    tooltip._record_show_metrics(SimpleNamespace(_tip_show_cold=True), over)  # counts
-    tooltip._record_show_metrics(SimpleNamespace(_tip_show_cold=False), over)  # warm → no count
-    tooltip._record_show_metrics(
-        SimpleNamespace(_tip_show_cold=True), under
-    )  # fast cold → no count
+    tooltip._record_show_metrics(over, cold=True)  # counts
+    tooltip._record_show_metrics(over, cold=False)  # warm → no count
+    tooltip._record_show_metrics(under, cold=True)  # fast cold → no count
     snap = otel_metrics.snapshot()
     assert snap["saitenka.render.cold_first_paint_overshoot"]["value"] == 1
     assert snap["saitenka.show_tooltip.duration_ms"]["count"] == 3  # every show recorded regardless

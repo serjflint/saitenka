@@ -1105,3 +1105,36 @@ def test_stale_engaged_nav_failure_skips_sync_rebuild(tmp_path, monkeypatch):
     submitter.finish(outcome=EffectOutcome.FAILED, run=False)
 
     assert rebuilt == [] and r._tip_nav == []
+
+
+def test_the_panel_cache_evicts_the_least_recently_used_entry_at_the_cap():
+    """First-writer-wins with an LRU cap, checkable without a session. A cache that evicted the
+    newest entry would thrash exactly the panel the user is looking at."""
+    from collections import OrderedDict
+
+    from saitenka.app.tooltip import panel_cache_setdefault
+
+    cache: OrderedDict = OrderedDict()
+    for key in ("a", "b", "c"):
+        panel_cache_setdefault(cache, key, f"panel-{key}", limit=3)
+    panel_cache_setdefault(cache, "a", "panel-a", limit=3)  # touch: 'a' is now newest
+
+    panel_cache_setdefault(cache, "d", "panel-d", limit=3)
+
+    assert "b" not in cache  # the least recently used went, not the oldest inserted
+    assert set(cache) == {"a", "c", "d"}
+
+
+def test_a_second_writer_for_the_same_key_loses_to_the_first():
+    """Two workers racing to build the same panel produce equivalent results, so the winner's is
+    kept — returning the loser's would hand back an object the cache does not hold."""
+    from collections import OrderedDict
+
+    from saitenka.app.tooltip import panel_cache_setdefault
+
+    cache: OrderedDict = OrderedDict()
+    first = panel_cache_setdefault(cache, "k", "winner", limit=8)
+    second = panel_cache_setdefault(cache, "k", "loser", limit=8)
+
+    assert first == second == "winner"
+    assert cache["k"] == "winner"

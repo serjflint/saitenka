@@ -121,6 +121,15 @@ class LinkBox:
     h: int
 
 
+def in_rect(rect: tuple[float, float, float, float], x: float, y: float) -> bool:
+    """Whether (x, y) falls in ``rect`` — half-open on the right and bottom, so adjacent rects tile
+    without a shared edge that hits twice. Lives here, beside the box types, because three modules
+    were reaching into the Reader for it.
+    """
+    rx, ry, rw, rh = rect
+    return rx <= x < rx + rw and ry <= y < ry + rh
+
+
 def is_ideograph(ch: str) -> bool:
     """True for a CJK ideograph (kanji) — astral-SAFE, unlike the scattered BMP-only range checks that
     miss CJK Extension B+ (#99, e.g. 𠮟 U+20B9F). Covers Unified + Ext A, the Compatibility Ideographs,

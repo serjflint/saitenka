@@ -1607,7 +1607,9 @@ class Reader:
         tooltip.copy_click(self)
 
     def _hit_header_region(self, x: float, y: float, prect, xy, scroll: int, view_h: int) -> bool:
-        return tooltip.hit_header_region(self, x, y, prect, xy, scroll, view_h)
+        return tooltip.hit_header_region(
+            x, y, prect, xy, scroll, view_h, scale=self._tip_display_scale
+        )
 
     def _hit_header_add(self, x: float, y: float) -> bool:
         return tooltip.hit_header_add(self, x, y)
@@ -1646,20 +1648,20 @@ class Reader:
         )
 
     def _is_mined(self, tok) -> bool:
-        return tooltip.is_mined(self, tok)
+        return tooltip.is_mined(tok, self._mined)
 
     def _anki_ok(self) -> bool:
-        return tooltip.anki_ok(self)
+        return tooltip.anki_ok(self.anki, self._anki_capability)
 
     @staticmethod
     def _darken(rgba, f: float = tooltip.JLPT_DARKEN):
         return tooltip._darken(rgba, f)
 
     def _jlpt_pill(self, tok) -> Freq | None:
-        return tooltip.jlpt_pill(self, tok)
+        return tooltip.jlpt_pill(tok, self.scorer)
 
     def _rareness_pill(self, tok) -> Freq | None:
-        return tooltip.rareness_pill(self, tok)
+        return tooltip.rareness_pill(tok, self.dict_set)
 
     def _entry_for(self, tok, inflected):
         return tooltip.entry_for_tok(self, tok, inflected)
@@ -1687,7 +1689,9 @@ class Reader:
         )
 
     def _panel_cache_setdefault(self, key, st) -> Panel:
-        return tooltip.panel_cache_setdefault(self, key, st)
+        return tooltip.panel_cache_setdefault(
+            self._panel_cache, key, st, limit=self.panel_cache_max
+        )
 
     # --- persistent render cache (#149): seed a cold hover's first viewport from disk ----------
     def _render_cache(self) -> RenderCache | None:
@@ -1899,7 +1903,9 @@ class Reader:
     def _place_panel(
         self, full_w: int, wx: float, wy: float, wh: float, view_h: int
     ) -> tuple[int, int]:
-        return tooltip.place_panel(self, full_w, wx, wy, wh, view_h)
+        return tooltip.place_panel(
+            full_w, wx, wy, wh, view_h, scale=self._tip_display_scale, osd=self.osd
+        )
 
     def _blit_panel(self, panel, scroll: int, view_h: int, xy, oid: int):
         return tooltip.blit_panel(self, panel, scroll, view_h, xy, oid)

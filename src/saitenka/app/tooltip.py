@@ -28,6 +28,7 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.perf import timed
 from saitenka.app.popups import Panel, PopupView
 from saitenka.app.subtitles import box_for_token
+from saitenka.model import in_rect
 from saitenka.panel import Freq, header_add_rect, header_speaker_rect, panel_rows
 from saitenka.runtime import Owner
 
@@ -84,10 +85,8 @@ def update_hover(reader: Reader) -> None:
 
 def _hover_targets(reader: Reader, mx: float, my: float, *, inside: bool):
     """Which of (subtitle word, base tooltip, nested popup) the cursor is currently over."""
-    over_tip = inside and reader._tip_rect is not None and reader._in_rect(reader._tip_rect, mx, my)
-    over_nest = (
-        inside and reader._nest.rect is not None and reader._in_rect(reader._nest.rect, mx, my)
-    )
+    over_tip = inside and reader._tip_rect is not None and in_rect(reader._tip_rect, mx, my)
+    over_nest = inside and reader._nest.rect is not None and in_rect(reader._nest.rect, mx, my)
     # The popups are drawn ON TOP of the subtitle, so a hit on a popup occludes the word beneath it:
     # keep the lease on the open tooltip instead of switching to the word it happens to cover (e.g. the
     # tooltip for the lower line, drawn up over the upper line of a two-line cue). Without this the base
@@ -294,8 +293,10 @@ def resolve_hover(reader: Reader, index: int) -> None:
             terms, span = tuple(term_list), (start, end)
     reader._hover_terms = terms
     reader._hover_span = span
-    reader._hover_mined = is_mined(reader, reader.tokens[index])
-    reader._hover_group_mined = group_mined_of(reader, reader.tokens[index], extra_terms=terms)
+    reader._hover_mined = is_mined(reader.tokens[index], reader._mined)
+    reader._hover_group_mined = group_mined_of(
+        reader.tokens[index], reader._mined, reader.dict_set, extra_terms=terms
+    )
 
 
 def _request_hover_metadata(reader: Reader, index: int) -> None:
@@ -433,12 +434,12 @@ def copy_click(reader: Reader) -> None:
     popup, else the hovered/pointed subtitle word), with a brief highlight flash."""
     mp = reader._get("mouse-pos") or {}
     x, y = mp.get("x", -1), mp.get("y", -1)
-    if reader._nest.rect is not None and reader._in_rect(reader._nest.rect, x, y):
+    if reader._nest.rect is not None and in_rect(reader._nest.rect, x, y):
         if reader._nest.token is not None:
             copy_token(reader, reader._nest.token)
             flash(reader, OverlayId.NESTED)
         return
-    if reader._tip_rect is not None and reader._in_rect(reader._tip_rect, x, y):
+    if reader._tip_rect is not None and in_rect(reader._tip_rect, x, y):
         copy_hovered(reader)
         flash(reader, OverlayId.TIP)
         return
@@ -451,7 +452,7 @@ def copy_click(reader: Reader) -> None:
 
 
 def hit_header_region(
-    reader: Reader, x: float, y: float, prect, xy, scroll: int, view_h: int
+    x: float, y: float, prect, xy, scroll: int, view_h: int, *, scale: float
 ) -> bool:
     """Is (x, y) on a header button (panel-space ``prect``)? Only while it's inside the scrolled
     viewport (the header scrolls off). Shared by the base tooltip and the nested popup."""
@@ -460,21 +461,23 @@ def hit_header_region(
     if top < 0 or top + ph > view_h:  # header scrolled out of the viewport (all in reference px)
         return False
     sx, sy = xy
-    s = reader._tip_display_scale  # panel-space rect → display px (origin is already display px)
-    return reader._in_rect((sx + px * s, sy + top * s, pw * s, ph * s), x, y)
+    s = scale  # panel-space rect → display px (origin is already display px)
+    return in_rect((sx + px * s, sy + top * s, pw * s, ph * s), x, y)
 
 
 def hit_header_add(reader: Reader, x: float, y: float) -> bool:
-    if reader._tip_state is None or not anki_ok(reader):  # ⊕ only when Anki is reachable now
+    if reader._tip_state is None or not anki_ok(
+        reader.anki, reader._anki_capability
+    ):  # ⊕ only when Anki is reachable now
         return False
     return hit_header_region(
-        reader,
         x,
         y,
         header_add_rect(reader.tip_width, speak_button=reader._tts_ok),
         reader._tip_xy,
         reader._tip_scroll,
         reader._tip_view_h,
+        scale=reader._tip_display_scale,
     )
 
 
@@ -482,27 +485,27 @@ def hit_header_speaker(reader: Reader, x: float, y: float) -> bool:
     if reader._tip_state is None or not reader._tts_ok:  # 🔊 hidden when no JA TTS voice
         return False
     return hit_header_region(
-        reader,
         x,
         y,
         header_speaker_rect(reader.tip_width),
         reader._tip_xy,
         reader._tip_scroll,
         reader._tip_view_h,
+        scale=reader._tip_display_scale,
     )
 
 
 def hit_nested_add(reader: Reader, x: float, y: float) -> bool:
-    if reader._nest.state is None or not anki_ok(reader):
+    if reader._nest.state is None or not anki_ok(reader.anki, reader._anki_capability):
         return False
     return hit_header_region(
-        reader,
         x,
         y,
         header_add_rect(reader.tip_width, speak_button=reader._tts_ok),
         reader._nest.xy,
         reader._nest.scroll,
         reader._nest.view_h,
+        scale=reader._tip_display_scale,
     )
 
 
@@ -510,13 +513,13 @@ def hit_nested_speaker(reader: Reader, x: float, y: float) -> bool:
     if reader._nest.state is None or not reader._tts_ok:  # 🔊 hidden when no JA TTS voice
         return False
     return hit_header_region(
-        reader,
         x,
         y,
         header_speaker_rect(reader.tip_width),
         reader._nest.xy,
         reader._nest.scroll,
         reader._nest.view_h,
+        scale=reader._tip_display_scale,
     )
 
 
@@ -547,7 +550,7 @@ def _mine_link(reader: Reader, lb, tok) -> bool:
 def _click_nested(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the nested popup. Returns True if it did (regardless of what, if
     anything, it hit) so the caller doesn't fall through to the base tooltip underneath."""
-    if reader._nest.rect is None or not reader._in_rect(reader._nest.rect, x, y):
+    if reader._nest.rect is None or not in_rect(reader._nest.rect, x, y):
         return False
     if hit_nested_add(reader, x, y) and reader._nest.token is not None:
         reader._mine_token(reader._nest.token)  # ⊕ → mine the *inner* (scanned) word
@@ -562,7 +565,7 @@ def _click_nested(reader: Reader, x: float, y: float) -> bool:
 
 def _click_tip(reader: Reader, x: float, y: float) -> bool:
     """Handle a click landing on the base tooltip. Returns True if it did."""
-    if reader._tip_rect is None or not reader._in_rect(reader._tip_rect, x, y):
+    if reader._tip_rect is None or not in_rect(reader._tip_rect, x, y):
         return False
     if hit_header_add(reader, x, y):
         reader.mine_current()  # ⊕ → mine the hovered word into Anki
@@ -594,7 +597,7 @@ def on_click(reader: Reader) -> None:
     # Clicking an empty area does NOTHING: audio must not fire on a stray body click.
     mp = reader._get("mouse-pos") or {}
     x, y = mp.get("x", -1), mp.get("y", -1)
-    in_tip = reader._tip_rect is not None and reader._in_rect(reader._tip_rect, x, y)
+    in_tip = reader._tip_rect is not None and in_rect(reader._tip_rect, x, y)
     if reader._click_preview(x, y):
         captured = "preview"
     elif _click_nested(reader, x, y):  # the nested popup sits on top → test it first
@@ -639,10 +642,10 @@ def panel_key(
         tok.reading,
         inflected,
         reader.tip_width,
-        anki_ok(reader),
+        anki_ok(reader.anki, reader._anki_capability),
         mined,
         reader._tts_ok,
-        group_mined_of(reader=reader, tok=tok, extra_terms=phrase)
+        group_mined_of(tok, reader._mined, reader.dict_set, extra_terms=phrase)
         if group_mined is None
         else group_mined,
         # the stacked phrase terms are part of the base panel's identity (数 alone vs 数 under 数ある)
@@ -650,42 +653,39 @@ def panel_key(
     )
 
 
-def is_mined(reader: Reader, tok) -> bool:
+def is_mined(tok, mined: frozenset[str] | set[str]) -> bool:
     """Is this token's word already in the deck? (its ⊕ shows ✓ instead). Cheap short-circuit
     while nothing has been mined; else a card_for lookup (lru-cached)."""
-    if not reader._mined:
+    if not mined:
         return False
     try:
-        return card_for(tok).expression in reader._mined
+        return card_for(tok).expression in mined
     except Exception:  # noqa: BLE001  # render hot path - any lookup hiccup just hides the mined mark
         return False
 
 
-def group_mined_of(reader: Reader, tok, *, extra_terms: tuple[str, ...] = ()) -> tuple[bool, ...]:
+def group_mined_of(tok, mined, dict_set, *, extra_terms: tuple[str, ...] = ()) -> tuple[bool, ...]:
     """Per-stacked-entry mined flags (aligned to ``cards_for`` order) for a multi-reading word — each
     entry's ⊕ shows ✓ when that exact (expression, reading) is already in the deck. () when nothing is
     mined yet (cheap short-circuit) or the word has fewer than two entries (no stacking).
     ``extra_terms`` must match the panel's phrase stacking so the flags align with the shown groups."""
-    if not reader._mined or reader.dict_set is None:
+    if not mined or dict_set is None:
         return ()
     try:
-        cards = reader.dict_set.cards_for(tok, extra_terms=extra_terms)
+        cards = dict_set.cards_for(tok, extra_terms=extra_terms)
     except Exception:  # noqa: BLE001  # render hot path - a lookup hiccup just hides the mined marks
         return ()
     if len(cards) < 2:
         return ()
-    return tuple(c.expression in reader._mined for c in cards)
+    return tuple(c.expression in mined for c in cards)
 
 
-def anki_ok(reader: Reader) -> bool:
+def anki_ok(anki, capability) -> bool:
     """Is AnkiConnect reachable RIGHT NOW? Gates the ⊕ button per card show, so it appears/hides as
     the user opens/closes Anki mid-session (not frozen at startup). Kept fast: a short timeout with
     0 retries fails immediately when Anki is closed, and the result is cached ``anki_ok_ttl``
     seconds so rapid hovers don't ping repeatedly. False when mining isn't configured at all."""
-    if reader.anki is None:
-        return False
-    capability = reader._anki_capability
-    if capability is None:
+    if anki is None or capability is None:
         return False
     capability.request()
     return bool(capability.value)
@@ -696,14 +696,14 @@ def _darken(rgba, f: float = JLPT_DARKEN):
     return (round(r * f), round(g * f), round(b * f), a)
 
 
-def jlpt_pill(reader: Reader, tok) -> Freq | None:
+def jlpt_pill(tok, scorer) -> Freq | None:
     """A ``JLPT | Nx`` pill for the tooltip's frequency row, shown only when the word has a JLPT
     level — the same signal the subtitle draws as an underline (``Scorer._style``). The pill's hue
     is the level's underline color (darkened for legible white text), so the tooltip and the
     underline read as the same thing."""
     from saitenka.app.scoring import _is_content
 
-    sc = reader.scorer
+    sc = scorer
     if sc is None or not getattr(sc, "enable_jlpt", False) or sc.jlpt is None:
         return None
     # Gate on content POS exactly like the subtitle underline (Scorer._style). Without this a
@@ -718,13 +718,13 @@ def jlpt_pill(reader: Reader, tok) -> Freq | None:
     return Freq("JLPT", level, _darken(base))
 
 
-def rareness_pill(reader: Reader, tok) -> Freq | None:
+def rareness_pill(tok, dict_set) -> Freq | None:
     """The blended-rareness "diff" pill: harmonic mean of the word's rank across every loaded freq
     dict, colored by band (:func:`fsrs.rareness_color`). Summarizes the row of 7+ per-dict pills into
     one rareness read. ``None`` when no freq dict has the word, so the caller skips it cleanly."""
     from saitenka.app.fsrs import diff_pill, harmonic_of
 
-    ds = reader.dict_set
+    ds = dict_set
     sources = getattr(ds, "freqs", None)
     if not sources:
         return None
@@ -755,7 +755,11 @@ def entry_for_tok(reader: Reader, tok, inflected, *, extra_terms: tuple[str, ...
         entry = reader.dict_set.entry_for(tok, inflected=inflected, extra_terms=extra_terms)
     else:
         entry = reader.dict_set.entry_for(tok, inflected)
-    extra = [p for p in (rareness_pill(reader, tok), jlpt_pill(reader, tok)) if p is not None]
+    extra = [
+        p
+        for p in (rareness_pill(tok, reader.dict_set), jlpt_pill(tok, reader.scorer))
+        if p is not None
+    ]
     if extra and hasattr(entry, "freqs"):
         # Build the pill list into a shallow copy — never mutate the cached original.
         entry = _dc.replace(entry, freqs=[*extra, *entry.freqs])
@@ -791,7 +795,7 @@ def _build_panel(
             panel_rows(
                 entry,
                 reader.tip_width,
-                add_button=anki_ok(reader),
+                add_button=anki_ok(reader.anki, reader._anki_capability),
                 mined=mined,
                 speak_button=reader._tts_ok,
                 group_mined=_key.group_mined,
@@ -826,7 +830,7 @@ def _panel_cache_get(
             extra_terms=extra_terms,
         )
         with reader._cache_lock:
-            st = panel_cache_setdefault(reader, key, st)
+            st = panel_cache_setdefault(reader._panel_cache, key, st, limit=reader.panel_cache_max)
     else:
         if otel_metrics.panel_cache_hits is not None:
             otel_metrics.panel_cache_hits.add(1)
@@ -861,7 +865,7 @@ def panel_for(
     OrderedDict.get() is NOT atomic, so cache hits also acquire the lock briefly to move_to_end.
     Hovers remain snappy because the lock is held for only a few microseconds (no rendering inside)."""
     if mined is None:
-        mined = is_mined(reader, tok)
+        mined = is_mined(tok, reader._mined)
     key = panel_key(
         reader,
         tok,
@@ -881,19 +885,19 @@ def panel_for(
     return st
 
 
-def panel_cache_setdefault(reader: Reader, key: PanelKey, st: Panel) -> Panel:
+def panel_cache_setdefault(cache, key: PanelKey, st: Panel, *, limit: int) -> Panel:
     """Insert ``st`` for ``key`` if not already present; evict the LRU entry when over the cap.
     Must be called under ``reader._cache_lock``. First-writer-wins: if two workers race to build
     the same panel, the winner's result is kept and the loser is discarded (both are equivalent)."""
-    if key in reader._panel_cache:
-        reader._panel_cache.move_to_end(key)
-        return reader._panel_cache[key]
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
     # Evict least-recently-used entries until we are at the limit.
-    while len(reader._panel_cache) >= reader.panel_cache_max:
-        reader._panel_cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
+    while len(cache) >= limit:
+        cache.popitem(last=False)  # FIFO/LRU: oldest (first) entry out
         if otel_metrics.panel_cache_evictions is not None:
             otel_metrics.panel_cache_evictions.add(1)
-    reader._panel_cache[key] = st
+    cache[key] = st
     return st
 
 
@@ -932,15 +936,14 @@ def show_tooltip(reader: Reader, index: int) -> bool:
                 span.set("full_h", st.full_height)
                 span.set("bands", st.last_frame_rasters)
     if shown:
-        _record_show_metrics(reader, (time.perf_counter() - start) * 1000.0)
+        _record_show_metrics((time.perf_counter() - start) * 1000.0, cold=reader._tip_show_cold)
     return shown
 
 
-def _record_show_metrics(reader: Reader, elapsed_ms: float) -> None:
+def _record_show_metrics(elapsed_ms: float, *, cold: bool) -> None:
     """Live percentiles + the cold-first-paint overshoot count for one base-tooltip show. The
     overshoot counter fires only on a COLD show past the budget — a warm cache-hit show over budget
     isn't a first-paint miss, so it must not pollute the signal viewport-first rendering is judged by."""
-    cold = reader._tip_show_cold
     if otel_metrics.show_tooltip_duration_ms is not None:
         otel_metrics.show_tooltip_duration_ms.record(
             elapsed_ms, {"kind": "cold" if cold else "warm"}
@@ -1056,7 +1059,15 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
         # than trying to fit the whole (very tall) entry. full_height is the windowed engine's estimate,
         # exact once the head measured the whole panel (short entry), converging otherwise.
         reader._tip_view_h = min(st.full_height, cap)
-        reader._tip_xy = place_panel(reader, st.width, wx, wy, b.h, reader._tip_view_h)
+        reader._tip_xy = place_panel(
+            st.width,
+            wx,
+            wy,
+            b.h,
+            reader._tip_view_h,
+            scale=reader._tip_display_scale,
+            osd=reader.osd,
+        )
         render_tip_view(reader)
     reader._bind_tip_keys()  # UP/DOWN/ESC live only while the tip shows
     # One panel: the blit above painted soft (instant) if the native viewport wasn't warm yet — the
@@ -1070,34 +1081,34 @@ def show_tooltip_impl(reader: Reader, index: int) -> bool:
 
 
 def place_panel(
-    reader: Reader, full_w: int, wx: float, wy: float, wh: float, view_h: int
+    full_w: int, wx: float, wy: float, wh: float, view_h: int, *, scale: float, osd: tuple[int, int]
 ) -> tuple[int, int]:
     """Choose a top-left (tx, ty) for a panel of REFERENCE size ``full_w`` × ``view_h`` anchored to an
     on-screen word box (wx, wy, wh): above it if there's room, else below, clamped to the safe area. The
     panel is composited at reference size then upscaled by ``_tip_display_scale`` at upload, so placement
     uses the DISPLAYED size. Shared by the base tooltip and nested popups."""
-    s = reader._tip_display_scale
+    s = scale
     disp_w, disp_h = full_w * s, view_h * s
-    margin = max(16, round(reader.osd[1] * 0.05))
+    margin = max(16, round(osd[1] * 0.05))
     above_room = wy - TIP_GAP - margin
-    below_room = (reader.osd[1] - margin) - (wy + wh + TIP_GAP)
+    below_room = (osd[1] - margin) - (wy + wh + TIP_GAP)
     if above_room >= disp_h or above_room >= below_room:
         ty = wy - TIP_GAP - disp_h  # above the word
     else:
         ty = wy + wh + TIP_GAP  # below the word
-    tx = max(margin, min(wx, reader.osd[0] - disp_w - margin))
-    ty = max(margin, min(ty, reader.osd[1] - margin - disp_h))
+    tx = max(margin, min(wx, osd[0] - disp_w - margin))
+    ty = max(margin, min(ty, osd[1] - margin - disp_h))
     return int(tx), int(ty)
 
 
-def _compose_kind(reader: Reader, oid: int) -> str:
+def _compose_kind(oid: int, *, navigated: bool) -> str:
     """Classify a ``tip_compose`` for telemetry so a report can separate the paints the user perceives
     as distinct: a ``nested`` scan popup, a ``clicked`` link-navigation of the base tooltip (nav stack
     non-empty), or a plain ``base`` hover. The blit already knows its ``oid``; navigation is the only
     state not in it."""
     if oid == OverlayId.NESTED:
         return "nested"
-    return "clicked" if reader._tip_nav else "base"
+    return "clicked" if navigated else "base"
 
 
 def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: float) -> bool:
@@ -1121,9 +1132,21 @@ def _paint_from_cache(reader: Reader, key, cap: int, wx: float, wy: float, wh: f
     reader._tip_scroll = 0
     reader._tip_view.desired_scroll = 0
     reader._tip_view_h = min(full_h, cap)
-    xy = place_panel(reader, loaded.array.shape[1], wx, wy, wh, reader._tip_view_h)
+    xy = place_panel(
+        loaded.array.shape[1],
+        wx,
+        wy,
+        wh,
+        reader._tip_view_h,
+        scale=reader._tip_display_scale,
+        osd=reader.osd,
+    )
     reader._tip_xy = xy
-    with otel_metrics.traced("tip_compose", cached="1", kind=_compose_kind(reader, OverlayId.TIP)):
+    with otel_metrics.traced(
+        "tip_compose",
+        cached="1",
+        kind=_compose_kind(OverlayId.TIP, navigated=bool(reader._tip_nav)),
+    ):
         view = loaded.array.copy()
     reader._tip_rect = decorate_and_upload(reader, view, 0, full_h, xy, OverlayId.TIP)
     return True
@@ -1157,7 +1180,7 @@ def blit_panel(
         "tip_compose",
         soft_reason=soft_reason or "n/a",
         scale=f"{reader._tip_display_scale:.4f}",
-        kind=_compose_kind(reader, oid),
+        kind=_compose_kind(oid, navigated=bool(reader._tip_nav)),
     ):
         view = panel.viewport(y0, vh, overscan=vh)  # exact BGRA viewport + one screen look-ahead
     return decorate_and_upload(reader, view, y0, full_h, xy, oid)
@@ -1365,7 +1388,10 @@ def _blit_native(reader: Reader, view: PopupView, st: Panel):
         # main thread NEVER rasters — the bands are warm (gated above); a raced eviction shows bg, not a
         # synchronous raster. All rasterisation is a worker job (structural, not a thread check).
         with otel_metrics.traced(
-            "tip_compose", soft_reason="", scale=f"{scale:.4f}", kind=_compose_kind(reader, oid)
+            "tip_compose",
+            soft_reason="",
+            scale=f"{scale:.4f}",
+            kind=_compose_kind(oid, navigated=bool(reader._tip_nav)),
         ):
             arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
@@ -1547,7 +1573,7 @@ def apply_pending_scroll(reader: Reader, view: PopupView) -> None:
 
 def scroll_tip(reader: Reader, delta: int) -> None:
     # route the wheel to whichever popup the cursor is over (nested sits on top)
-    if reader._nest.rect is not None and reader._in_rect(reader._nest.rect, *reader._last_mouse):
+    if reader._nest.rect is not None and in_rect(reader._nest.rect, *reader._last_mouse):
         scroll_view(reader, reader._nest, delta)
         return
     if scroll_view(reader, reader._tip_view, delta):

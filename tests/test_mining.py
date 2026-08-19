@@ -856,9 +856,14 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path):
     ds = dicthelp.load_set([d])
     r = Reader(FakeIPC(), dict_set=ds)
     tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    assert tooltip.group_mined_of(r, tok) == ()  # nothing mined yet → no per-group flags
+    assert (
+        tooltip.group_mined_of(tok, r._mined, r.dict_set) == ()
+    )  # nothing mined yet → no per-group flags
     r._mined.add("退く")
-    assert tooltip.group_mined_of(r, tok) == (True, True)  # both entries share expression 退く
+    assert tooltip.group_mined_of(tok, r._mined, r.dict_set) == (
+        True,
+        True,
+    )  # both entries share expression 退く
 
 
 def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path):

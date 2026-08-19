@@ -24,6 +24,7 @@ from saitenka.app.media import audio_duration, play_audio
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.procutil import kill_process_tree
+from saitenka.model import in_rect
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
@@ -249,18 +250,18 @@ def hide_preview(reader: Reader) -> None:
 def click_preview(reader: Reader, x: float, y: float) -> bool:
     """Handle a click on the card preview: ✕ dismiss, screenshot → toggle enlarge, ▶ → play audio.
     An empty click does nothing. Returns True if the click landed on the preview."""
-    if reader.preview.rect is None or not reader._in_rect(reader.preview.rect, x, y):
+    if reader.preview.rect is None or not in_rect(reader.preview.rect, x, y):
         return False
-    if reader.preview.close_rect and reader._in_rect(reader.preview.close_rect, x, y):
+    if reader.preview.close_rect and in_rect(reader.preview.close_rect, x, y):
         hide_preview(reader)
-    elif reader.preview.dup_rect and reader._in_rect(reader.preview.dup_rect, x, y):
+    elif reader.preview.dup_rect and in_rect(reader.preview.dup_rect, x, y):
         reader._add_duplicate()  # ＋ add anyway → mine a second card for this scene
-    elif reader.preview.image_rect and reader._in_rect(reader.preview.image_rect, x, y):
+    elif reader.preview.image_rect and in_rect(reader.preview.image_rect, x, y):
         reader.preview.zoom = not reader.preview.zoom
         render_preview(reader)  # enlarge to verify the frame / shrink back
     elif (
         reader.preview.audio_rect
-        and reader._in_rect(reader.preview.audio_rect, x, y)
+        and in_rect(reader.preview.audio_rect, x, y)
         and reader.play_audio
         and reader.preview.last_audio
     ):

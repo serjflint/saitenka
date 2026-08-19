@@ -69,3 +69,66 @@ def test_the_nested_cap_bounds_the_viewport_before_the_room_above_does():
     from saitenka.app.prefetch import cap_for
 
     assert nested_view_h(10_000, 10_000, osd_h=REF_H, max_frac=0.5) == cap_for(0.5)
+
+
+def test_a_panel_prefers_the_space_above_the_word():
+    """Above by default: the tooltip covers the cue's own line if it drops below, and the word being
+    read is the one thing that must stay visible."""
+    from saitenka.app.tooltip import TIP_GAP, place_panel
+
+    _tx, ty = place_panel(300, 100, 600, 40, 200, scale=1.0, osd=(1920, REF_H))
+
+    assert ty + 200 <= 600 - TIP_GAP + 1  # sits above the word box
+
+
+def test_a_panel_with_no_room_above_drops_below_the_word():
+    from saitenka.app.tooltip import place_panel
+
+    _tx, ty = place_panel(300, 100, 40, 40, 400, scale=1.0, osd=(1920, REF_H))
+
+    assert ty >= 40
+
+
+def test_a_panel_is_clamped_into_the_safe_area_on_every_side():
+    """A word near a corner would anchor the panel off-screen, and mpv clips rather than scrolls —
+    the part that ran off would simply never be readable."""
+    from saitenka.app.tooltip import place_panel
+
+    osd = (1920, REF_H)
+    margin = max(16, round(REF_H * 0.05))
+
+    for wx, wy in ((0, 0), (1919, REF_H - 1), (0, REF_H - 1), (1919, 0)):
+        tx, ty = place_panel(300, wx, wy, 40, 200, scale=1.0, osd=osd)
+        assert margin <= tx and tx + 300 <= osd[0] - margin + 1
+        assert margin <= ty and ty + 200 <= osd[1] - margin + 1
+
+
+def test_placement_uses_the_displayed_size_not_the_reference_size():
+    """The panel is composited at reference size and upscaled at upload, so placing it by the
+    reference size puts a 2x panel half off the bottom of a Retina panel."""
+    from saitenka.app.tooltip import place_panel
+
+    osd = (1920, REF_H)
+    _tx, one = place_panel(300, 900, 900, 40, 300, scale=1.0, osd=osd)
+    _tx, two = place_panel(300, 900, 900, 40, 300, scale=2.0, osd=osd)
+
+    assert two < one  # the taller displayed panel is pushed further up to still fit
+    assert two + 2 * 300 <= osd[1]
+
+
+def test_a_panel_too_tall_for_either_side_takes_the_roomier_one():
+    """A long entry near the bottom fits neither above nor below. Above still wins because there is
+    more of it there, and the clamp then trims what is left — dropping it below would put the
+    definition into the few pixels under the word.
+    """
+    from saitenka.app.tooltip import place_panel
+
+    osd = (1920, REF_H)
+    word_y, word_h, height = 560, 40, 520  # taller than the room above, but roomier there anyway
+
+    _tx, ty = place_panel(300, 900, word_y, word_h, height, scale=1.0, osd=osd)
+
+    # The panel ends at or above the word's own bottom edge, i.e. it went up. Asserting merely
+    # `ty < word_y` would not discriminate: the safe-area clamp pulls the below-branch back far
+    # enough to satisfy that too, which is why a taller panel cannot show this.
+    assert ty + height <= word_y + word_h
